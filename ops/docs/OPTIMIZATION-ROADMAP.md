@@ -7784,3 +7784,18 @@ Move 670 status:
   typecheck, frontend utility suite, frontend production build, Phase 29 audit,
   focused Products desktop/mobile live control audit, and post-live hygiene
   passed.
+
+Move 671 status:
+- Move 671 extracts notification summary transport helpers from the large
+  frontend API registry. `frontend/src/api/notificationSummary.ts` now owns
+  missing-notification cooldown fallback, transient gateway handling, and shared
+  in-flight request state for `/api/notifications/summary`. `methods.ts` keeps
+  only the public `getNotificationSummary` wrapper, no longer imports
+  notification cooldown helpers, and no longer carries notification-specific
+  request promise state. The API guide documents the boundary, focused API HTTP
+  tests verify source placement, the source guard parsed 207 frontend source
+  files, and the production build shows the `app-api-methods` chunk at about
+  51.38 kB. Proof: focused API HTTP tests, frontend source guard, frontend
+  typecheck, frontend utility suite, frontend production build, Phase 29 audit,
+  focused Products desktop/mobile live control audit, and post-live hygiene
+  passed.

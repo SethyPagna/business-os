@@ -41,19 +41,13 @@ import {
   getSettingsRefreshChannels,
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
-import { isCooldownActive } from '../platform/storage/storagePolicy.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
 import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import { appendActorQuery, getCurrentUserContext } from './actorQuery.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
-import {
-  clearNotificationSummaryMissing,
-  getNotificationSummaryFallback,
-  markNotificationSummaryMissing,
-  readNotificationSummaryMissingUntil,
-} from './cooldownFallbacks.ts'
+import { getNotificationSummary as getNotificationSummaryRequest } from './notificationSummary.ts'
 import {
   disconnectGoogleDriveSync as disconnectGoogleDriveSyncRequest,
   forgetGoogleDriveSyncCredentials as forgetGoogleDriveSyncCredentialsRequest,
@@ -269,7 +263,6 @@ if (typeof window !== 'undefined') {
   })
 }
 
-let notificationSummaryRequestPromise = null
 const lastImportJobsByQuery = new Map()
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -307,46 +300,7 @@ export async function getSystemConfig() {
   return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
 }
 export async function getNotificationSummary() {
-  return route('notifications:summary', async () => {
-    const missingUntil = readNotificationSummaryMissingUntil()
-    if (isCooldownActive(missingUntil)) {
-      return getNotificationSummaryFallback({
-        unavailable: true,
-        cooldownUntil: missingUntil,
-      })
-    }
-    if (notificationSummaryRequestPromise) return await notificationSummaryRequestPromise
-    notificationSummaryRequestPromise = (async () => {
-      try {
-        const result = await apiFetch('GET', '/api/notifications/summary')
-        clearNotificationSummaryMissing()
-        return result
-      } catch (error) {
-        const transientGateway = isTransientGatewayError(error?.status)
-        if (Number(error?.status) === 404) {
-          markNotificationSummaryMissing()
-          return getNotificationSummaryFallback({
-            unavailable: true,
-            cooldownUntil: readNotificationSummaryMissingUntil(),
-          })
-        }
-        if (transientGateway) {
-          markNotificationSummaryMissing()
-        }
-        throw error
-      } finally {
-        notificationSummaryRequestPromise = null
-      }
-    })()
-    return await notificationSummaryRequestPromise
-  }, () => {
-    const cooldownUntil = readNotificationSummaryMissingUntil()
-    return getNotificationSummaryFallback({
-      unavailable: isCooldownActive(cooldownUntil),
-      transient: isCooldownActive(cooldownUntil),
-      cooldownUntil: cooldownUntil || undefined,
-    })
-  })
+  return getNotificationSummaryRequest()
 }
 export async function getSystemDebugLog() {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))

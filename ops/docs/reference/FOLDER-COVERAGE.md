@@ -33,7 +33,7 @@ Total folders documented: **82**
 | 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
 | 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
 | 23 | `frontend/src` | Project folder | 6 | 10 |
-| 24 | `frontend/src/api` | Frontend API and sync transport | 20 | 0 |
+| 24 | `frontend/src/api` | Frontend API and sync transport | 21 | 0 |
 | 25 | `frontend/src/app` | Project folder | 2 | 0 |
 | 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
 | 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
@@ -634,7 +634,7 @@ Total folders documented: **82**
 ### 3.24 Folder: `frontend/src/api`
 
 - Purpose: Frontend API and sync transport
-- Direct files: **20**
+- Direct files: **21**
 - Direct subfolders: **0**
 
 #### 3.24.2 Files
@@ -652,15 +652,16 @@ Total folders documented: **82**
 | 9 | `localDb.ts` | Frontend API/sync helper |
 | 10 | `localMirrors.ts` | Frontend API/sync helper |
 | 11 | `methods.ts` | Frontend API/sync helper |
-| 12 | `portalHttp.ts` | Frontend API/sync helper |
-| 13 | `query.ts` | Frontend API/sync helper |
-| 14 | `queryCache.ts` | Frontend API/sync helper |
-| 15 | `README.md` | Frontend API/sync helper |
-| 16 | `requestIds.ts` | Frontend API/sync helper |
-| 17 | `syncPreview.ts` | Frontend API/sync helper |
-| 18 | `syncRuntime.ts` | Frontend API/sync helper |
-| 19 | `systemJobs.ts` | Frontend API/sync helper |
-| 20 | `websocket.ts` | Frontend API/sync helper |
+| 12 | `notificationSummary.ts` | Frontend API/sync helper |
+| 13 | `portalHttp.ts` | Frontend API/sync helper |
+| 14 | `query.ts` | Frontend API/sync helper |
+| 15 | `queryCache.ts` | Frontend API/sync helper |
+| 16 | `README.md` | Frontend API/sync helper |
+| 17 | `requestIds.ts` | Frontend API/sync helper |
+| 18 | `syncPreview.ts` | Frontend API/sync helper |
+| 19 | `syncRuntime.ts` | Frontend API/sync helper |
+| 20 | `systemJobs.ts` | Frontend API/sync helper |
+| 21 | `websocket.ts` | Frontend API/sync helper |
 
 
 ### 3.25 Folder: `frontend/src/app`

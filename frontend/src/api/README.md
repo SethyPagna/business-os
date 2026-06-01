@@ -42,6 +42,10 @@ This folder is the browser-side transport layer for Business OS.
   - Google Drive sync status, cooldown-aware fallback, preferences, OAuth, and job queue transport
   - keeps Drive sync polling/action mechanics outside the large domain registry
 
+- `notificationSummary.ts`
+  - notification summary polling, cooldown-aware fallback, and request sharing
+  - keeps transient notification availability mechanics outside the large domain registry
+
 - `expectedUpdatedAt.ts`
   - optimistic-update payload helpers for row and settings writes
   - keeps updated-at conflict metadata lookup outside the large domain registry
