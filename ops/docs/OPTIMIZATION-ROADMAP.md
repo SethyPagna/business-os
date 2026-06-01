@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 673.
+- Latest completed implementation move in this roadmap: Move 674.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7830,3 +7830,17 @@ Move 673 status:
   Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
   frontend utility suite, frontend production build, Phase 29 audit, focused
   Products desktop/mobile live control audit, and post-live hygiene passed.
+
+Move 674 status:
+- Move 674 folds OTP/2FA auth transport into the typed auth boundary.
+  `frontend/src/api/authTransport.ts` now owns OTP setup, confirm, disable,
+  verify, and status calls with URL-encoded user ids for status reads.
+  `methods.ts` preserves the public OTP wrapper names while no longer carrying
+  direct `/api/auth/otp/*` endpoint calls inside the large registry. The API
+  guide documents OTP/2FA in the auth transport boundary, focused API HTTP
+  tests verify source placement, the source guard parsed 209 frontend source
+  files, and the production build shows the `app-api-methods` chunk at about
+  48.85 kB with no circular chunk warning. Proof: focused API HTTP tests,
+  frontend source guard, frontend typecheck, frontend utility suite, frontend
+  production build, Phase 29 audit, focused Products desktop/mobile live
+  control audit, and post-live hygiene passed.

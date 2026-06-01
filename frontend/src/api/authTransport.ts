@@ -58,6 +58,26 @@ export function getVerificationCapabilities(): Promise<unknown> {
   return apiFetch('GET', '/api/auth/verification-capabilities')
 }
 
+export function otpSetup(payload: AuthPayload = {}): Promise<unknown> {
+  return apiFetch('POST', '/api/auth/otp/setup', payload || {})
+}
+
+export function otpConfirm(payload: AuthPayload = {}): Promise<unknown> {
+  return apiFetch('POST', '/api/auth/otp/confirm', payload || {})
+}
+
+export function otpDisable(payload: AuthPayload = {}): Promise<unknown> {
+  return apiFetch('POST', '/api/auth/otp/disable', payload || {})
+}
+
+export function otpVerify(payload: AuthPayload = {}): Promise<unknown> {
+  return apiFetch('POST', '/api/auth/otp/verify', payload || {})
+}
+
+export function otpStatus(userId: string | number): Promise<unknown> {
+  return apiFetch('GET', `/api/auth/otp/status/${encodeURIComponent(String(userId))}`)
+}
+
 export function startGoogleOauth(payload: AuthPayload = {}): Promise<unknown> {
   return apiFetch('POST', '/api/auth/oauth/start', payload || {})
 }

@@ -157,7 +157,7 @@ Code files documented: **497**
 | 145 | `frontend/public/sw.js` | 0 | 0 | 0 | 0 |
 | 146 | `frontend/public/theme-bootstrap.js` | 0 | 0 | 0 | 0 |
 | 147 | `frontend/src/api/actorQuery.ts` | 1 | 2 | 1 | 2 |
-| 148 | `frontend/src/api/authTransport.ts` | 2 | 13 | 2 | 0 |
+| 148 | `frontend/src/api/authTransport.ts` | 2 | 18 | 2 | 0 |
 | 149 | `frontend/src/api/browserDialogs.ts` | 1 | 3 | 1 | 1 |
 | 150 | `frontend/src/api/conflicts.ts` | 0 | 3 | 0 | 2 |
 | 151 | `frontend/src/api/cooldownFallbacks.ts` | 0 | 8 | 0 | 0 |
@@ -3149,7 +3149,7 @@ Code files documented: **497**
 
 ### 3.148 `frontend/src/api/authTransport.ts`
 
-- Declared exports: `completeGoogleOauth`, `completePasswordReset`, `getCurrentOrganization`, `getOrganizationBootstrap`, `getVerificationCapabilities`, `login`, `logout`, `requestPasswordResetEmail`, `resetPasswordWithOtp`, `searchOrganizations`, `startGoogleOauth`, `unlinkGoogleOauth`, `updateSessionDuration`
+- Declared exports: `completeGoogleOauth`, `completePasswordReset`, `getCurrentOrganization`, `getOrganizationBootstrap`, `getVerificationCapabilities`, `login`, `logout`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `requestPasswordResetEmail`, `resetPasswordWithOtp`, `searchOrganizations`, `startGoogleOauth`, `unlinkGoogleOauth`, `updateSessionDuration`
 - Imports (2)
   - `../utils/deviceInfo.ts`
   - `./http.ts`

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 673 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 674 in this file.
 
 ## Goal
 
@@ -6090,6 +6090,22 @@ Decision rule:
     Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
     frontend utility suite, frontend production build, Phase 29 audit, focused
     Products desktop/mobile live control audit, and post-live hygiene passed.
+
+674. Extract typed OTP transport into the auth boundary.
+    Done: `frontend/src/api/authTransport.ts` now owns OTP setup, confirm,
+    disable, verify, and status transport alongside the other auth calls.
+    `methods.ts` keeps the public `otpSetup`, `otpConfirm`, `otpDisable`,
+    `otpVerify`, and `otpStatus` wrappers for existing `window.api` callers,
+    while direct `/api/auth/otp/*` endpoint strings are no longer embedded in
+    the large domain registry. OTP status now URL-encodes the user id at the
+    transport boundary. The API guide documents OTP/2FA under the auth
+    transport split, and focused API HTTP tests verify the source placement.
+    The source guard parsed 209 frontend files and the production build now
+    reports the `app-api-methods` chunk around 48.85 kB with no circular chunk
+    warning. Proof: focused API HTTP tests, frontend source guard, frontend
+    typecheck, frontend utility suite, frontend production build, Phase 29
+    audit, focused Products desktop/mobile live control audit, and post-live
+    hygiene passed.
 
 ## Safety Gates
 

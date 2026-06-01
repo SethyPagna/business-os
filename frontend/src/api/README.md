@@ -43,7 +43,7 @@ This folder is the browser-side transport layer for Business OS.
   - keeps filesystem-facing system calls and long-timeout system transport outside the large domain registry
 
 - `authTransport.ts`
-  - login/logout, password reset, session-duration, owned Google OAuth, and organization lookup transport
+  - login/logout, password reset, OTP/2FA, session-duration, owned Google OAuth, and organization lookup transport
   - keeps direct auth and organization HTTP calls outside the large domain registry
 
 - `driveSync.ts`

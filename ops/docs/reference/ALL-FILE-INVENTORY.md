@@ -179,7 +179,7 @@ Total files documented: **562**
 | 167 | `frontend/public/theme-bootstrap.js` | frontend-root | 218 | 9.2 | Project source/support file |
 | 168 | `frontend/README.md` | frontend-root | 13 | 0.5 | Documentation |
 | 169 | `frontend/src/api/actorQuery.ts` | frontend-api | 39 | 1.3 | Frontend API/sync helper |
-| 170 | `frontend/src/api/authTransport.ts` | frontend-api | 85 | 2.6 | Frontend API/sync helper |
+| 170 | `frontend/src/api/authTransport.ts` | frontend-api | 105 | 3.3 | Frontend API/sync helper |
 | 171 | `frontend/src/api/browserDialogs.ts` | frontend-api | 35 | 0.9 | Frontend API/sync helper |
 | 172 | `frontend/src/api/conflicts.ts` | frontend-api | 43 | 1.2 | Frontend API/sync helper |
 | 173 | `frontend/src/api/cooldownFallbacks.ts` | frontend-api | 106 | 3.1 | Frontend API/sync helper |
@@ -189,7 +189,7 @@ Total files documented: **562**
 | 177 | `frontend/src/api/importTransport.ts` | frontend-api | 51 | 1.6 | Frontend API/sync helper |
 | 178 | `frontend/src/api/localDb.ts` | frontend-api | 287 | 11.0 | Frontend API/sync helper |
 | 179 | `frontend/src/api/localMirrors.ts` | frontend-api | 47 | 1.6 | Frontend API/sync helper |
-| 180 | `frontend/src/api/methods.ts` | frontend-api | 1804 | 84.0 | Frontend API/sync helper |
+| 180 | `frontend/src/api/methods.ts` | frontend-api | 1814 | 84.1 | Frontend API/sync helper |
 | 181 | `frontend/src/api/notificationSummary.ts` | frontend-api | 61 | 2.0 | Frontend API/sync helper |
 | 182 | `frontend/src/api/portalHttp.ts` | frontend-api | 29 | 0.8 | Frontend API/sync helper |
 | 183 | `frontend/src/api/query.ts` | frontend-api | 54 | 1.5 | Frontend API/sync helper |
@@ -398,7 +398,7 @@ Total files documented: **562**
 | 386 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
 | 387 | `frontend/tests/actionStability.test.ts` | frontend-root | 740 | 60.4 | Project source/support file |
 | 388 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
-| 389 | `frontend/tests/apiHttp.test.ts` | frontend-root | 783 | 36.0 | Project source/support file |
+| 389 | `frontend/tests/apiHttp.test.ts` | frontend-root | 786 | 36.2 | Project source/support file |
 | 390 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
 | 391 | `frontend/tests/appShellUtils.test.ts` | frontend-root | 116 | 5.1 | Project source/support file |
 | 392 | `frontend/tests/assetCompression.test.ts` | frontend-root | 36 | 1.5 | Project source/support file |

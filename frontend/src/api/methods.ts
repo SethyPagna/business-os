@@ -55,6 +55,11 @@ import {
   getVerificationCapabilities as getVerificationCapabilitiesRequest,
   login as loginRequest,
   logout as logoutRequest,
+  otpConfirm as otpConfirmRequest,
+  otpDisable as otpDisableRequest,
+  otpSetup as otpSetupRequest,
+  otpStatus as otpStatusRequest,
+  otpVerify as otpVerifyRequest,
   requestPasswordResetEmail as requestPasswordResetEmailRequest,
   resetPasswordWithOtp as resetPasswordWithOtpRequest,
   searchOrganizations as searchOrganizationsRequest,
@@ -740,11 +745,16 @@ export const deleteProduct = async (id) => {
 }
 
 // ─── OTP / 2FA ────────────────────────────────────────────────────────────────
-export const otpSetup   = d  => apiFetch('POST', '/api/auth/otp/setup', d)
-export const otpConfirm = d  => apiFetch('POST', '/api/auth/otp/confirm', d)
-export const otpDisable = d  => apiFetch('POST', '/api/auth/otp/disable', d)
-export const otpVerify  = d  => apiFetch('POST', '/api/auth/otp/verify', d)
-export const otpStatus  = id => apiFetch('GET', `/api/auth/otp/status/${id}`)
+export const otpSetup = (payload) =>
+  otpSetupRequest(payload)
+export const otpConfirm = (payload) =>
+  otpConfirmRequest(payload)
+export const otpDisable = (payload) =>
+  otpDisableRequest(payload)
+export const otpVerify = (payload) =>
+  otpVerifyRequest(payload)
+export const otpStatus = (id) =>
+  otpStatusRequest(id)
 
 // ─── Product Variants ─────────────────────────────────────────────────────────
 export const createProductVariant = d => route('products:create', () => apiFetch('POST', '/api/products/variant', d), null, true)
