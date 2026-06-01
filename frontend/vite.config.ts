@@ -110,6 +110,8 @@ const deferredModulePreloadPrefixes = [
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
+  'assets/app-bootstrap-',
+  'assets/app-auth-',
   'assets/catalog-',
   'assets/catalog-preview-',
   'assets/catalog-editor-',
@@ -132,6 +134,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
+    if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
+    if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
     if (normalized.endsWith('/src/api/localDb.ts')) return 'app-local-db'
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')

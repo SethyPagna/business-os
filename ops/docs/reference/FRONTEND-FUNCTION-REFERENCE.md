@@ -14,7 +14,7 @@ Total files documented: **233**
 | 2 | `frontend/src/api/actionHistoryTransport.ts` | 1 |
 | 3 | `frontend/src/api/actorQuery.ts` | 0 |
 | 4 | `frontend/src/api/aiTransport.ts` | 0 |
-| 5 | `frontend/src/api/appBootstrapTransport.ts` | 3 |
+| 5 | `frontend/src/api/appBootstrapTransport.ts` | 9 |
 | 6 | `frontend/src/api/auditLogTransport.ts` | 1 |
 | 7 | `frontend/src/api/authTransport.ts` | 0 |
 | 8 | `frontend/src/api/branchTransport.ts` | 2 |
@@ -236,7 +236,7 @@ Total files documented: **233**
 | 224 | `frontend/src/utils/scriptTypography.ts` | 0 |
 | 225 | `frontend/src/utils/settingsRefresh.ts` | 1 |
 | 226 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
-| 227 | `frontend/src/web-api.ts` | 38 |
+| 227 | `frontend/src/web-api.ts` | 43 |
 | 228 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
 | 229 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 230 | `ops/scripts/frontend/verify-performance.ts` | 4 |
@@ -270,9 +270,15 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `readStoredUser` | function | 26 |
-| 2 | `readErrorField` | function | 36 |
-| 3 | `buildLocalBootstrap` | function | 41 |
+| 1 | `loadLocalDbModule` | function | 32 |
+| 2 | `loadLocalMirrorsModule` | function | 37 |
+| 3 | `emptyBootstrap` | function | 42 |
+| 4 | `scheduleDeferredSensitiveMirrorPurge` | function | 54 |
+| 5 | `run` | const arrow | 60 |
+| 6 | `purge` | const arrow | 62 |
+| 7 | `readStoredUser` | function | 81 |
+| 8 | `readErrorField` | function | 91 |
+| 9 | `buildLocalBootstrap` | function | 96 |
 
 ### 3.6 `frontend/src/api/auditLogTransport.ts`
 
@@ -433,152 +439,152 @@ Total files documented: **233**
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getDeviceInfo` | function | 6 |
-| 2 | `canRefreshOfflineDeviceSnapshot` | function | 331 |
-| 3 | `readOfflineDeviceSnapshotMeta` | function | 338 |
-| 4 | `writeOfflineDeviceSnapshotMeta` | function | 346 |
-| 5 | `runOfflineSnapshotStep` | function | 363 |
-| 6 | `previousMeta` | const arrow | 383 |
-| 7 | `invalidateClientRuntimeState` | function | 428 |
-| 8 | `login` | const arrow | 459 |
-| 9 | `logout` | const arrow | 461 |
-| 10 | `resetPasswordWithOtp` | const arrow | 463 |
-| 11 | `requestPasswordResetEmail` | const arrow | 465 |
-| 12 | `completePasswordReset` | const arrow | 467 |
-| 13 | `updateSessionDuration` | const arrow | 469 |
-| 14 | `getVerificationCapabilities` | const arrow | 471 |
-| 15 | `getSystemConfig` | const arrow | 473 |
-| 16 | `getSystemDebugLog` | const arrow | 478 |
-| 17 | `startGoogleOauth` | const arrow | 480 |
-| 18 | `completeGoogleOauth` | const arrow | 482 |
-| 19 | `unlinkGoogleOauth` | const arrow | 484 |
-| 20 | `getAppBootstrap` | const arrow | 486 |
-| 21 | `getOrganizationBootstrap` | const arrow | 488 |
-| 22 | `searchOrganizations` | const arrow | 490 |
-| 23 | `getCurrentOrganization` | const arrow | 492 |
-| 24 | `runSave` | const arrow | 518 |
-| 25 | `getCategories` | const arrow | 581 |
-| 26 | `updateCategory` | const arrow | 588 |
-| 27 | `deleteCategory` | const arrow | 593 |
-| 28 | `getUnits` | const arrow | 600 |
-| 29 | `updateUnit` | const arrow | 607 |
-| 30 | `deleteUnit` | const arrow | 612 |
-| 31 | `getBranches` | const arrow | 619 |
-| 32 | `getBranchSummary` | const arrow | 621 |
-| 33 | `updateBranch` | const arrow | 625 |
-| 34 | `deleteBranch` | const arrow | 627 |
-| 35 | `getBranchStock` | const arrow | 629 |
-| 36 | `getTransfers` | const arrow | 631 |
-| 37 | `getBranchStockIntegrity` | const arrow | 635 |
-| 38 | `getProducts` | const arrow | 641 |
-| 39 | `searchProducts` | const arrow | 643 |
-| 40 | `getProductsByIds` | const arrow | 645 |
-| 41 | `getProductFilters` | const arrow | 647 |
-| 42 | `getProductLookupUsage` | const arrow | 649 |
-| 43 | `replaceProductLookupValues` | const arrow | 651 |
-| 44 | `getPortalSubmissionsForReview` | const arrow | 686 |
-| 45 | `reviewPortalSubmission` | const arrow | 688 |
-| 46 | `getAiProviders` | const arrow | 691 |
-| 47 | `createAiProvider` | const arrow | 693 |
-| 48 | `updateAiProvider` | const arrow | 695 |
-| 49 | `deleteAiProvider` | const arrow | 697 |
-| 50 | `testAiProvider` | const arrow | 699 |
-| 51 | `getAiResponses` | const arrow | 701 |
-| 52 | `createProduct` | const arrow | 703 |
-| 53 | `updateProduct` | const arrow | 705 |
-| 54 | `deleteProduct` | const arrow | 707 |
-| 55 | `otpSetup` | const arrow | 711 |
-| 56 | `otpConfirm` | const arrow | 713 |
-| 57 | `otpDisable` | const arrow | 715 |
-| 58 | `otpVerify` | const arrow | 717 |
-| 59 | `otpStatus` | const arrow | 719 |
-| 60 | `listImportJobs` | const arrow | 731 |
-| 61 | `getImportJobReview` | const arrow | 735 |
-| 62 | `updateImportJobDecisions` | const arrow | 737 |
-| 63 | `startImportJob` | const arrow | 741 |
-| 64 | `approveImportJob` | const arrow | 743 |
-| 65 | `cancelImportJob` | const arrow | 745 |
-| 66 | `retryImportJob` | const arrow | 747 |
-| 67 | `deleteImportJob` | const arrow | 749 |
-| 68 | `getImportQueueStatus` | const arrow | 751 |
-| 69 | `getFiles` | const arrow | 762 |
-| 70 | `deleteFileAsset` | const arrow | 768 |
-| 71 | `getActionHistory` | const arrow | 806 |
-| 72 | `updateActionHistory` | const arrow | 811 |
-| 73 | `getInventorySummary` | const arrow | 817 |
-| 74 | `getInventoryStats` | const arrow | 819 |
-| 75 | `searchInventoryProducts` | const arrow | 821 |
-| 76 | `getInventoryMovements` | const arrow | 823 |
-| 77 | `getInventoryReasons` | const arrow | 825 |
-| 78 | `saveInventoryReasons` | const arrow | 827 |
-| 79 | `buildOfflineSaleReceiptNumber` | function | 830 |
-| 80 | `isRetryableOfflineSaleError` | function | 836 |
-| 81 | `findQueuedSale` | function | 845 |
-| 82 | `putOfflineSaleMirror` | function | 852 |
-| 83 | `queueOfflineSale` | function | 877 |
-| 84 | `queuedSaleBackoffMs` | function | 935 |
-| 85 | `updateQueuedRow` | function | 940 |
-| 86 | `completeQueuedSale` | function | 949 |
-| 87 | `failQueuedSale` | function | 972 |
-| 88 | `markQueuedSaleConflict` | function | 985 |
-| 89 | `syncPendingSalesQueue` | function | 1007 |
-| 90 | `getRfidStatus` | const arrow | 1050 |
-| 91 | `searchRfidTags` | const arrow | 1055 |
-| 92 | `recordRfidSessionEvents` | const arrow | 1060 |
-| 93 | `applyRfidSession` | const arrow | 1064 |
-| 94 | `getSales` | const arrow | 1080 |
-| 95 | `getDashboard` | const arrow | 1085 |
-| 96 | `getAnalytics` | const arrow | 1086 |
-| 97 | `getCustomers` | const arrow | 1089 |
-| 98 | `getCustomerPointSummaries` | const arrow | 1092 |
-| 99 | `updateCustomer` | const arrow | 1098 |
-| 100 | `deleteCustomer` | const arrow | 1101 |
-| 101 | `downloadCustomerTemplate` | const arrow | 1106 |
-| 102 | `getSuppliers` | const arrow | 1110 |
-| 103 | `updateSupplier` | const arrow | 1116 |
-| 104 | `deleteSupplier` | const arrow | 1119 |
-| 105 | `downloadSupplierTemplate` | const arrow | 1124 |
-| 106 | `getDeliveryContacts` | const arrow | 1128 |
-| 107 | `updateDeliveryContact` | const arrow | 1134 |
-| 108 | `deleteDeliveryContact` | const arrow | 1137 |
-| 109 | `getUsers` | const arrow | 1144 |
-| 110 | `updateUser` | const arrow | 1146 |
-| 111 | `getUserProfile` | const arrow | 1147 |
-| 112 | `getUserAuthMethods` | const arrow | 1148 |
-| 113 | `updateUserProfile` | const arrow | 1150 |
-| 114 | `disconnectUserAuthProvider` | const arrow | 1152 |
-| 115 | `changeUserPassword` | const arrow | 1154 |
-| 116 | `resetPassword` | const arrow | 1156 |
-| 117 | `getRoles` | const arrow | 1159 |
-| 118 | `updateRole` | const arrow | 1161 |
-| 119 | `deleteRole` | const arrow | 1162 |
-| 120 | `getCustomTables` | const arrow | 1165 |
-| 121 | `getCustomTableData` | const arrow | 1167 |
-| 122 | `insertCustomRow` | const arrow | 1168 |
-| 123 | `updateCustomRow` | const arrow | 1169 |
-| 124 | `deleteCustomRow` | const arrow | 1170 |
-| 125 | `getAuditLogs` | const arrow | 1173 |
-| 126 | `deleteAuditLogsRetention` | const arrow | 1176 |
-| 127 | `getIntegrationDoctor` | const arrow | 1192 |
-| 128 | `getGoogleDriveSyncStatus` | const arrow | 1215 |
-| 129 | `saveGoogleDriveSyncPreferences` | const arrow | 1218 |
-| 130 | `startGoogleDriveSyncOauth` | const arrow | 1221 |
-| 131 | `disconnectGoogleDriveSync` | const arrow | 1224 |
-| 132 | `forgetGoogleDriveSyncCredentials` | const arrow | 1227 |
-| 133 | `queueGoogleDriveSyncNow` | const arrow | 1230 |
-| 134 | `syncGoogleDriveNow` | const arrow | 1233 |
-| 135 | `openPath` | const arrow | 1298 |
-| 136 | `getReturns` | const arrow | 1302 |
-| 137 | `updateSaleStatus` | const arrow | 1323 |
-| 138 | `attachSaleCustomer` | const arrow | 1339 |
-| 139 | `getSalesExport` | const arrow | 1363 |
-| 140 | `updateReturn` | const arrow | 1367 |
-| 141 | `testSyncServer` | const arrow | 1391 |
-| 142 | `openFolderDialog` | const arrow | 1396 |
-| 143 | `getDataPath` | const arrow | 1400 |
-| 144 | `getScaleMigrationStatus` | const arrow | 1402 |
-| 145 | `prepareScaleMigration` | const arrow | 1404 |
-| 146 | `runScaleMigration` | const arrow | 1406 |
-| 147 | `browseDir` | const arrow | 1418 |
+| 2 | `canRefreshOfflineDeviceSnapshot` | function | 330 |
+| 3 | `readOfflineDeviceSnapshotMeta` | function | 337 |
+| 4 | `writeOfflineDeviceSnapshotMeta` | function | 345 |
+| 5 | `runOfflineSnapshotStep` | function | 362 |
+| 6 | `previousMeta` | const arrow | 382 |
+| 7 | `invalidateClientRuntimeState` | function | 427 |
+| 8 | `login` | const arrow | 458 |
+| 9 | `logout` | const arrow | 460 |
+| 10 | `resetPasswordWithOtp` | const arrow | 462 |
+| 11 | `requestPasswordResetEmail` | const arrow | 464 |
+| 12 | `completePasswordReset` | const arrow | 466 |
+| 13 | `updateSessionDuration` | const arrow | 468 |
+| 14 | `getVerificationCapabilities` | const arrow | 470 |
+| 15 | `getSystemConfig` | const arrow | 472 |
+| 16 | `getSystemDebugLog` | const arrow | 477 |
+| 17 | `startGoogleOauth` | const arrow | 479 |
+| 18 | `completeGoogleOauth` | const arrow | 481 |
+| 19 | `unlinkGoogleOauth` | const arrow | 483 |
+| 20 | `getAppBootstrap` | const arrow | 485 |
+| 21 | `getOrganizationBootstrap` | const arrow | 489 |
+| 22 | `searchOrganizations` | const arrow | 491 |
+| 23 | `getCurrentOrganization` | const arrow | 493 |
+| 24 | `runSave` | const arrow | 519 |
+| 25 | `getCategories` | const arrow | 582 |
+| 26 | `updateCategory` | const arrow | 589 |
+| 27 | `deleteCategory` | const arrow | 594 |
+| 28 | `getUnits` | const arrow | 601 |
+| 29 | `updateUnit` | const arrow | 608 |
+| 30 | `deleteUnit` | const arrow | 613 |
+| 31 | `getBranches` | const arrow | 620 |
+| 32 | `getBranchSummary` | const arrow | 622 |
+| 33 | `updateBranch` | const arrow | 626 |
+| 34 | `deleteBranch` | const arrow | 628 |
+| 35 | `getBranchStock` | const arrow | 630 |
+| 36 | `getTransfers` | const arrow | 632 |
+| 37 | `getBranchStockIntegrity` | const arrow | 636 |
+| 38 | `getProducts` | const arrow | 642 |
+| 39 | `searchProducts` | const arrow | 644 |
+| 40 | `getProductsByIds` | const arrow | 646 |
+| 41 | `getProductFilters` | const arrow | 648 |
+| 42 | `getProductLookupUsage` | const arrow | 650 |
+| 43 | `replaceProductLookupValues` | const arrow | 652 |
+| 44 | `getPortalSubmissionsForReview` | const arrow | 687 |
+| 45 | `reviewPortalSubmission` | const arrow | 689 |
+| 46 | `getAiProviders` | const arrow | 692 |
+| 47 | `createAiProvider` | const arrow | 694 |
+| 48 | `updateAiProvider` | const arrow | 696 |
+| 49 | `deleteAiProvider` | const arrow | 698 |
+| 50 | `testAiProvider` | const arrow | 700 |
+| 51 | `getAiResponses` | const arrow | 702 |
+| 52 | `createProduct` | const arrow | 704 |
+| 53 | `updateProduct` | const arrow | 706 |
+| 54 | `deleteProduct` | const arrow | 708 |
+| 55 | `otpSetup` | const arrow | 712 |
+| 56 | `otpConfirm` | const arrow | 714 |
+| 57 | `otpDisable` | const arrow | 716 |
+| 58 | `otpVerify` | const arrow | 718 |
+| 59 | `otpStatus` | const arrow | 720 |
+| 60 | `listImportJobs` | const arrow | 732 |
+| 61 | `getImportJobReview` | const arrow | 736 |
+| 62 | `updateImportJobDecisions` | const arrow | 738 |
+| 63 | `startImportJob` | const arrow | 742 |
+| 64 | `approveImportJob` | const arrow | 744 |
+| 65 | `cancelImportJob` | const arrow | 746 |
+| 66 | `retryImportJob` | const arrow | 748 |
+| 67 | `deleteImportJob` | const arrow | 750 |
+| 68 | `getImportQueueStatus` | const arrow | 752 |
+| 69 | `getFiles` | const arrow | 763 |
+| 70 | `deleteFileAsset` | const arrow | 769 |
+| 71 | `getActionHistory` | const arrow | 807 |
+| 72 | `updateActionHistory` | const arrow | 812 |
+| 73 | `getInventorySummary` | const arrow | 818 |
+| 74 | `getInventoryStats` | const arrow | 820 |
+| 75 | `searchInventoryProducts` | const arrow | 822 |
+| 76 | `getInventoryMovements` | const arrow | 824 |
+| 77 | `getInventoryReasons` | const arrow | 826 |
+| 78 | `saveInventoryReasons` | const arrow | 828 |
+| 79 | `buildOfflineSaleReceiptNumber` | function | 831 |
+| 80 | `isRetryableOfflineSaleError` | function | 837 |
+| 81 | `findQueuedSale` | function | 846 |
+| 82 | `putOfflineSaleMirror` | function | 853 |
+| 83 | `queueOfflineSale` | function | 878 |
+| 84 | `queuedSaleBackoffMs` | function | 936 |
+| 85 | `updateQueuedRow` | function | 941 |
+| 86 | `completeQueuedSale` | function | 950 |
+| 87 | `failQueuedSale` | function | 973 |
+| 88 | `markQueuedSaleConflict` | function | 986 |
+| 89 | `syncPendingSalesQueue` | function | 1008 |
+| 90 | `getRfidStatus` | const arrow | 1051 |
+| 91 | `searchRfidTags` | const arrow | 1056 |
+| 92 | `recordRfidSessionEvents` | const arrow | 1061 |
+| 93 | `applyRfidSession` | const arrow | 1065 |
+| 94 | `getSales` | const arrow | 1081 |
+| 95 | `getDashboard` | const arrow | 1086 |
+| 96 | `getAnalytics` | const arrow | 1087 |
+| 97 | `getCustomers` | const arrow | 1090 |
+| 98 | `getCustomerPointSummaries` | const arrow | 1093 |
+| 99 | `updateCustomer` | const arrow | 1099 |
+| 100 | `deleteCustomer` | const arrow | 1102 |
+| 101 | `downloadCustomerTemplate` | const arrow | 1107 |
+| 102 | `getSuppliers` | const arrow | 1111 |
+| 103 | `updateSupplier` | const arrow | 1117 |
+| 104 | `deleteSupplier` | const arrow | 1120 |
+| 105 | `downloadSupplierTemplate` | const arrow | 1125 |
+| 106 | `getDeliveryContacts` | const arrow | 1129 |
+| 107 | `updateDeliveryContact` | const arrow | 1135 |
+| 108 | `deleteDeliveryContact` | const arrow | 1138 |
+| 109 | `getUsers` | const arrow | 1145 |
+| 110 | `updateUser` | const arrow | 1147 |
+| 111 | `getUserProfile` | const arrow | 1148 |
+| 112 | `getUserAuthMethods` | const arrow | 1149 |
+| 113 | `updateUserProfile` | const arrow | 1151 |
+| 114 | `disconnectUserAuthProvider` | const arrow | 1153 |
+| 115 | `changeUserPassword` | const arrow | 1155 |
+| 116 | `resetPassword` | const arrow | 1157 |
+| 117 | `getRoles` | const arrow | 1160 |
+| 118 | `updateRole` | const arrow | 1162 |
+| 119 | `deleteRole` | const arrow | 1163 |
+| 120 | `getCustomTables` | const arrow | 1166 |
+| 121 | `getCustomTableData` | const arrow | 1168 |
+| 122 | `insertCustomRow` | const arrow | 1169 |
+| 123 | `updateCustomRow` | const arrow | 1170 |
+| 124 | `deleteCustomRow` | const arrow | 1171 |
+| 125 | `getAuditLogs` | const arrow | 1174 |
+| 126 | `deleteAuditLogsRetention` | const arrow | 1177 |
+| 127 | `getIntegrationDoctor` | const arrow | 1193 |
+| 128 | `getGoogleDriveSyncStatus` | const arrow | 1216 |
+| 129 | `saveGoogleDriveSyncPreferences` | const arrow | 1219 |
+| 130 | `startGoogleDriveSyncOauth` | const arrow | 1222 |
+| 131 | `disconnectGoogleDriveSync` | const arrow | 1225 |
+| 132 | `forgetGoogleDriveSyncCredentials` | const arrow | 1228 |
+| 133 | `queueGoogleDriveSyncNow` | const arrow | 1231 |
+| 134 | `syncGoogleDriveNow` | const arrow | 1234 |
+| 135 | `openPath` | const arrow | 1299 |
+| 136 | `getReturns` | const arrow | 1303 |
+| 137 | `updateSaleStatus` | const arrow | 1324 |
+| 138 | `attachSaleCustomer` | const arrow | 1340 |
+| 139 | `getSalesExport` | const arrow | 1364 |
+| 140 | `updateReturn` | const arrow | 1368 |
+| 141 | `testSyncServer` | const arrow | 1392 |
+| 142 | `openFolderDialog` | const arrow | 1397 |
+| 143 | `getDataPath` | const arrow | 1401 |
+| 144 | `getScaleMigrationStatus` | const arrow | 1403 |
+| 145 | `prepareScaleMigration` | const arrow | 1405 |
+| 146 | `runScaleMigration` | const arrow | 1407 |
+| 147 | `browseDir` | const arrow | 1419 |
 
 ### 3.26 `frontend/src/api/notificationSummary.ts`
 
@@ -710,50 +716,50 @@ Total files documented: **233**
 | 38 | `syncProfile` | const arrow | 668 |
 | 39 | `useSyncErrorBanner` | function | 697 |
 | 40 | `refreshPendingSync` | const arrow | 707 |
-| 41 | `onSyncError` | const arrow | 712 |
-| 42 | `onTransientOutage` | const arrow | 718 |
-| 43 | `onSyncRecovered` | const arrow | 726 |
-| 44 | `onQueueChanged` | const arrow | 734 |
-| 45 | `onVaultLocked` | const arrow | 735 |
-| 46 | `onAppUpdate` | const arrow | 736 |
-| 47 | `onConflictReview` | const arrow | 737 |
-| 48 | `useDeferredImportTrackerMount` | function | 785 |
-| 49 | `enable` | const arrow | 798 |
-| 50 | `enableWhenVisible` | const arrow | 802 |
-| 51 | `onSyncUpdate` | const arrow | 807 |
-| 52 | `onVisible` | const arrow | 810 |
-| 53 | `useDeferredNotificationCenterMount` | function | 839 |
-| 54 | `enable` | const arrow | 855 |
-| 55 | `enableWhenVisible` | const arrow | 859 |
-| 56 | `onSyncUpdate` | const arrow | 863 |
-| 57 | `useVisibilityRecovery` | function | 892 |
-| 58 | `onVisible` | const arrow | 896 |
-| 59 | `onFocus` | const arrow | 906 |
-| 60 | `useChunkWarmup` | function | 924 |
-| 61 | `runWarmup` | const arrow | 935 |
-| 62 | `useIntentChunkWarmup` | function | 977 |
-| 63 | `warmIntentPage` | const arrow | 984 |
-| 64 | `useDataWarmup` | function | 1004 |
-| 65 | `runWarmup` | const arrow | 1016 |
-| 66 | `usePageEntryWarmup` | function | 1041 |
-| 67 | `run` | const arrow | 1070 |
-| 68 | `PageErrorBoundary` | class | 1099 |
-| 69 | `Notification` | function | 1152 |
-| 70 | `SyncErrorBanner` | function | 1165 |
-| 71 | `GlobalScrollControls` | function | 1187 |
-| 72 | `scrollTo` | const arrow | 1188 |
-| 73 | `formatSyncTimestamp` | function | 1225 |
-| 74 | `OfflineModeBanner` | function | 1240 |
-| 75 | `PageLoader` | function | 1389 |
-| 76 | `NotificationCenterFallback` | function | 1432 |
-| 77 | `PageSlot` | function | 1447 |
-| 78 | `PublicCatalogView` | function | 1473 |
-| 79 | `App` | component/function | 1483 |
-| 80 | `cleanupRecoveryStorageMarkers` | const arrow | 1559 |
-| 81 | `onQueued` | const arrow | 1588 |
-| 82 | `onSynced` | const arrow | 1601 |
-| 83 | `handleLocationChange` | const arrow | 1626 |
-| 84 | `processFavicon` | function | 1674 |
+| 41 | `onSyncError` | const arrow | 716 |
+| 42 | `onTransientOutage` | const arrow | 722 |
+| 43 | `onSyncRecovered` | const arrow | 730 |
+| 44 | `onQueueChanged` | const arrow | 738 |
+| 45 | `onVaultLocked` | const arrow | 739 |
+| 46 | `onAppUpdate` | const arrow | 740 |
+| 47 | `onConflictReview` | const arrow | 741 |
+| 48 | `useDeferredImportTrackerMount` | function | 791 |
+| 49 | `enable` | const arrow | 804 |
+| 50 | `enableWhenVisible` | const arrow | 808 |
+| 51 | `onSyncUpdate` | const arrow | 813 |
+| 52 | `onVisible` | const arrow | 816 |
+| 53 | `useDeferredNotificationCenterMount` | function | 845 |
+| 54 | `enable` | const arrow | 861 |
+| 55 | `enableWhenVisible` | const arrow | 865 |
+| 56 | `onSyncUpdate` | const arrow | 869 |
+| 57 | `useVisibilityRecovery` | function | 898 |
+| 58 | `onVisible` | const arrow | 902 |
+| 59 | `onFocus` | const arrow | 912 |
+| 60 | `useChunkWarmup` | function | 930 |
+| 61 | `runWarmup` | const arrow | 941 |
+| 62 | `useIntentChunkWarmup` | function | 983 |
+| 63 | `warmIntentPage` | const arrow | 990 |
+| 64 | `useDataWarmup` | function | 1010 |
+| 65 | `runWarmup` | const arrow | 1022 |
+| 66 | `usePageEntryWarmup` | function | 1047 |
+| 67 | `run` | const arrow | 1076 |
+| 68 | `PageErrorBoundary` | class | 1105 |
+| 69 | `Notification` | function | 1158 |
+| 70 | `SyncErrorBanner` | function | 1171 |
+| 71 | `GlobalScrollControls` | function | 1193 |
+| 72 | `scrollTo` | const arrow | 1194 |
+| 73 | `formatSyncTimestamp` | function | 1231 |
+| 74 | `OfflineModeBanner` | function | 1246 |
+| 75 | `PageLoader` | function | 1395 |
+| 76 | `NotificationCenterFallback` | function | 1438 |
+| 77 | `PageSlot` | function | 1453 |
+| 78 | `PublicCatalogView` | function | 1479 |
+| 79 | `App` | component/function | 1489 |
+| 80 | `cleanupRecoveryStorageMarkers` | const arrow | 1565 |
+| 81 | `onQueued` | const arrow | 1594 |
+| 82 | `onSynced` | const arrow | 1607 |
+| 83 | `handleLocationChange` | const arrow | 1632 |
+| 84 | `processFavicon` | function | 1680 |
 
 ### 3.42 `frontend/src/app/appShellUtils.ts`
 
@@ -792,21 +798,21 @@ Total files documented: **233**
 | 21 | `buildRuntimeDescriptorFromBootstrap` | function | 428 |
 | 22 | `LoadingScreen` | function | 457 |
 | 23 | `AccessDenied` | function | 470 |
-| 24 | `persistAutoSyncUrl` | const arrow | 558 |
-| 25 | `onUpdate` | const arrow | 749 |
-| 26 | `onStatus` | const arrow | 781 |
-| 27 | `poll` | const arrow | 790 |
-| 28 | `onError` | const arrow | 810 |
-| 29 | `onWriteBlocked` | const arrow | 832 |
-| 30 | `onRuntimeMismatch` | const arrow | 842 |
-| 31 | `onConflict` | const arrow | 862 |
-| 32 | `onUnauthorized` | const arrow | 931 |
-| 33 | `handleOtpLogin` | const arrow | 990 |
-| 34 | `handleUserUpdated` | const arrow | 1032 |
-| 35 | `discoverSyncUrl` | const arrow | 1069 |
-| 36 | `clearCallbackUrl` | const arrow | 1458 |
-| 37 | `clearPendingLink` | const arrow | 1462 |
-| 38 | `run` | const arrow | 1466 |
+| 24 | `persistAutoSyncUrl` | const arrow | 559 |
+| 25 | `onUpdate` | const arrow | 750 |
+| 26 | `onStatus` | const arrow | 782 |
+| 27 | `poll` | const arrow | 791 |
+| 28 | `onError` | const arrow | 811 |
+| 29 | `onWriteBlocked` | const arrow | 833 |
+| 30 | `onRuntimeMismatch` | const arrow | 843 |
+| 31 | `onConflict` | const arrow | 863 |
+| 32 | `onUnauthorized` | const arrow | 932 |
+| 33 | `handleOtpLogin` | const arrow | 991 |
+| 34 | `handleUserUpdated` | const arrow | 1033 |
+| 35 | `discoverSyncUrl` | const arrow | 1070 |
+| 36 | `clearCallbackUrl` | const arrow | 1459 |
+| 37 | `clearPendingLink` | const arrow | 1463 |
+| 38 | `run` | const arrow | 1467 |
 
 ### 3.45 `frontend/src/components/auth/Login.tsx`
 
@@ -2917,44 +2923,49 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `sanitizeBaseUrl` | function | 85 |
-| 2 | `getOfflineDb` | function | 89 |
-| 3 | `loadMethodsModule` | function | 94 |
-| 4 | `getLazyApiMethod` | function | 99 |
-| 5 | `mapOfflineFileChunkStatusUpdates` | function | 113 |
-| 6 | `asArrayBuffer` | function | 129 |
-| 7 | `bytesToBase64` | function | 133 |
-| 8 | `base64ToBytes` | function | 144 |
-| 9 | `stableStringify` | function | 151 |
-| 10 | `sha256Hex` | function | 157 |
-| 11 | `deriveOfflineVaultKey` | function | 165 |
-| 12 | `encryptOfflineVaultValue` | function | 182 |
-| 13 | `decryptOfflineVaultValue` | function | 190 |
-| 14 | `requestOfflinePersistentStorage` | function | 200 |
-| 15 | `dispatchVaultLocked` | function | 207 |
-| 16 | `scheduleOfflineVaultIdleLock` | function | 212 |
-| 17 | `lockOfflineVault` | function | 218 |
-| 18 | `unlockOfflineVault` | function | 226 |
-| 19 | `queueBusinessOutboxOperation` | function | 252 |
-| 20 | `queueOfflineFileChunks` | function | 289 |
-| 21 | `dispatchOutboxProgress` | function | 343 |
-| 22 | `dispatchOutboxFileProgress` | function | 350 |
-| 23 | `dispatchOutboxConflict` | function | 357 |
-| 24 | `getSyncOutboxKey` | function | 364 |
-| 25 | `syncUnlockedOfflineOutbox` | function | 368 |
-| 26 | `syncUnlockedOfflineFileChunks` | function | 478 |
-| 27 | `refreshOfflineSnapshotSoon` | function | 540 |
-| 28 | `run` | const arrow | 550 |
-| 29 | `refreshServiceWorkerSoon` | function | 569 |
-| 30 | `runOfflineMaintenance` | function | 579 |
-| 31 | `startOfflineMaintenanceLoop` | function | 591 |
-| 32 | `scheduleInitialOfflineMaintenance` | function | 599 |
-| 33 | `run` | const arrow | 603 |
-| 34 | `scheduleIdle` | const arrow | 607 |
-| 35 | `scheduleBootstrapStorageMaintenance` | function | 624 |
-| 36 | `run` | const arrow | 630 |
-| 37 | `forwardServiceWorkerOutboxEvent` | function | 647 |
-| 38 | `forwardServiceWorkerAppEvent` | function | 735 |
+| 1 | `sanitizeBaseUrl` | function | 92 |
+| 2 | `getOfflineDb` | function | 96 |
+| 3 | `loadMethodsModule` | function | 101 |
+| 4 | `loadAppBootstrapModule` | function | 106 |
+| 5 | `loadAuthTransportModule` | function | 111 |
+| 6 | `getLazyApiMethod` | function | 127 |
+| 7 | `mapOfflineFileChunkStatusUpdates` | function | 141 |
+| 8 | `asArrayBuffer` | function | 157 |
+| 9 | `bytesToBase64` | function | 161 |
+| 10 | `base64ToBytes` | function | 172 |
+| 11 | `stableStringify` | function | 179 |
+| 12 | `sha256Hex` | function | 185 |
+| 13 | `deriveOfflineVaultKey` | function | 193 |
+| 14 | `encryptOfflineVaultValue` | function | 210 |
+| 15 | `decryptOfflineVaultValue` | function | 218 |
+| 16 | `requestOfflinePersistentStorage` | function | 228 |
+| 17 | `dispatchVaultLocked` | function | 235 |
+| 18 | `scheduleOfflineVaultIdleLock` | function | 240 |
+| 19 | `lockOfflineVault` | function | 246 |
+| 20 | `unlockOfflineVault` | function | 254 |
+| 21 | `queueBusinessOutboxOperation` | function | 280 |
+| 22 | `queueOfflineFileChunks` | function | 317 |
+| 23 | `dispatchOutboxProgress` | function | 371 |
+| 24 | `dispatchOutboxFileProgress` | function | 378 |
+| 25 | `dispatchOutboxConflict` | function | 385 |
+| 26 | `getSyncOutboxKey` | function | 392 |
+| 27 | `syncUnlockedOfflineOutbox` | function | 396 |
+| 28 | `syncUnlockedOfflineFileChunks` | function | 506 |
+| 29 | `refreshOfflineSnapshotSoon` | function | 568 |
+| 30 | `run` | const arrow | 578 |
+| 31 | `refreshServiceWorkerSoon` | function | 597 |
+| 32 | `runOfflineMaintenance` | function | 607 |
+| 33 | `startOfflineMaintenanceLoop` | function | 620 |
+| 34 | `scheduleInitialOfflineMaintenance` | function | 628 |
+| 35 | `run` | const arrow | 632 |
+| 36 | `scheduleIdle` | const arrow | 636 |
+| 37 | `scheduleBootstrapStorageMaintenance` | function | 653 |
+| 38 | `run` | const arrow | 659 |
+| 39 | `scheduleBootstrapOfflineDbWrite` | function | 676 |
+| 40 | `run` | const arrow | 682 |
+| 41 | `write` | const arrow | 684 |
+| 42 | `forwardServiceWorkerOutboxEvent` | function | 703 |
+| 43 | `forwardServiceWorkerAppEvent` | function | 791 |
 
 ### 3.228 `ops/scripts/frontend/build-public-runtime-scripts.ts`
 
@@ -3009,8 +3020,8 @@ Total files documented: **233**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 122 |
-| 5 | `manualChunks` | function | 126 |
+| 4 | `shouldDeferModulePreload` | function | 124 |
+| 5 | `manualChunks` | function | 128 |
 
 ### 3.233 `frontend/tailwind.config.ts`
 

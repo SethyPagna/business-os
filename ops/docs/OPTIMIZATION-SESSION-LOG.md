@@ -1223,3 +1223,38 @@ Use this shape for future entries:
   `756d985623fba5b1`. Live-suite rerun is pending for this move; the previous
   broad Phase 8.4 UI suite passed, and the public Cloudflare portal remains a
   known tunnel/public follow-up until remote rendering is repaired.
+
+- change: split logged-out sign-in and bootstrap startup away from the heavy
+  legacy API registry and offline database graph
+- affected files:
+  `frontend/src/web-api.ts`,
+  `frontend/src/api/appBootstrapTransport.ts`,
+  `frontend/src/api/methods.ts`,
+  `frontend/src/AppContext.tsx`,
+  `frontend/src/App.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/apiHttp.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: logged-out app shell, invalid-session bootstrap,
+  sign-in verification capabilities, organization bootstrap/search, login,
+  OTP, Google OAuth, session duration, and pending-sync/offline maintenance
+  startup gates
+- keeper or rollback: keeper; real Docker-served Playwright first-12-seconds
+  network trace showed only `app-bootstrap-EfLFgo7i.js` and
+  `app-auth-DD-QfBFn.js` among auth startup lazy chunks, with zero
+  `app-api-methods`, `app-local-db`, `vendor-dexie`, `vendor-zxing`, catalog,
+  file-picker, or profile-modal requests; relevant console count was zero and
+  failed response count was zero
+- warm whole-app result: frontend utility suite, backend utility suite,
+  production build, built graph check, broad Phase 8.4 live suite, public
+  Cloudflare portal check, post-live hygiene, exhaustive all-pages control
+  audit, Phase 29 audit, generated references, and organization audit passed.
+  Production build hash: `1a5804d05a4e008e`. Broad live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T15-57-09-334Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T16-00-02-450Z/report.json`.
+  Exhaustive all-pages report:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T16-00-36-623Z/summary.json`.

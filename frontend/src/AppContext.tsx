@@ -517,6 +517,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (publicMode) return true
     const hasStoredSession = !!getStoredUserPayload()
     const canProbeServerSession = typeof window !== 'undefined' && typeof getAppApi().getAppBootstrap === 'function'
+    if (hasStoredSession && canProbeServerSession) return false
     if (hasStoredSession) return true
     if (canProbeServerSession) return false
     return true

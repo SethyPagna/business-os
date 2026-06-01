@@ -694,7 +694,7 @@ function useMountedPages(activePage: AdminPageId): AdminPageId[] {
   return mountedPages
 }
 
-function useSyncErrorBanner() {
+function useSyncErrorBanner(user: AppUser | null) {
   // Central listener for sync write/read failures that should surface globally.
   const [syncError, setSyncError] = useState<SyncProblemDetail | null>(null)
   const [transientOutage, setTransientOutage] = useState<SyncProblemDetail | null>(null)
@@ -705,6 +705,10 @@ function useSyncErrorBanner() {
 
   useEffect(() => {
     const refreshPendingSync = () => {
+      if (!user) {
+        setPendingSync(null)
+        return
+      }
       getAppShellApi().getPendingSyncState?.()
         .then((state) => setPendingSync(state || null))
         .catch(() => {})
@@ -749,11 +753,13 @@ function useSyncErrorBanner() {
     window.addEventListener('offline:vault-locked', onVaultLocked)
     window.addEventListener('sync:app-update-available', onAppUpdate)
     window.addEventListener('sync:write-conflict', onConflictReview)
-    const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
-    const timer = window.setInterval(refreshPendingSync, 20_000)
+    const cancelInitialPendingSyncRefresh = user
+      ? scheduleInitialPendingSyncRefresh(refreshPendingSync)
+      : () => {}
+    const timer = user ? window.setInterval(refreshPendingSync, 20_000) : 0
     return () => {
       cancelInitialPendingSyncRefresh()
-      window.clearInterval(timer)
+      if (timer) window.clearInterval(timer)
       window.removeEventListener('sync:error', onSyncError)
       window.removeEventListener('sync:write-blocked', onSyncError)
       window.removeEventListener('sync:transient-outage', onTransientOutage)
@@ -766,7 +772,7 @@ function useSyncErrorBanner() {
       window.removeEventListener('sync:app-update-available', onAppUpdate)
       window.removeEventListener('sync:write-conflict', onConflictReview)
     }
-  }, [])
+  }, [user])
 
   return {
     syncError,
@@ -1512,7 +1518,7 @@ export default function App() {
     conflictsNeedReview,
     clearAppUpdate,
     clearSyncError,
-  } = useSyncErrorBanner()
+  } = useSyncErrorBanner(authReady ? user : null)
   const mountedPages = useMountedPages(page)
   const shouldMountImportTracker = useDeferredImportTrackerMount(authReady ? user : null)
   const {

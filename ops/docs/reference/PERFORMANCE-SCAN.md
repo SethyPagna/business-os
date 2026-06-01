@@ -28,15 +28,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/utils-settings/Settings.tsx` | 85.1 | 1846 |
 | `backend/src/routes/inventory.ts` | 83.8 | 1881 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 78.5 | 1732 |
-| `frontend/src/AppContext.tsx` | 74.6 | 1853 |
+| `frontend/src/AppContext.tsx` | 74.6 | 1854 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
-| `frontend/src/App.tsx` | 68.9 | 1837 |
+| `frontend/src/App.tsx` | 69.0 | 1843 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 67.7 | 1311 |
 | `backend/src/routes/system/index.ts` | 65.3 | 1659 |
 | `backend/src/routes/sales.ts` | 64.6 | 1573 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
 | `frontend/src/components/utils-settings/AuditLog.tsx` | 59.1 | 1292 |
-| `frontend/src/api/methods.ts` | 58.1 | 1420 |
+| `frontend/src/api/methods.ts` | 58.1 | 1421 |
 | `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 56.8 | 865 |
 
@@ -55,9 +55,9 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/products.ts` | 2218 | 99.1 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2144 | 101.0 |
 | `backend/src/routes/inventory.ts` | 1881 | 83.8 |
-| `frontend/src/AppContext.tsx` | 1853 | 74.6 |
+| `frontend/src/AppContext.tsx` | 1854 | 74.6 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1846 | 85.1 |
-| `frontend/src/App.tsx` | 1837 | 68.9 |
+| `frontend/src/App.tsx` | 1843 | 69.0 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1732 | 78.5 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
 | `backend/src/routes/system/index.ts` | 1659 | 65.3 |
@@ -65,7 +65,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1479 | 102.5 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
-| `frontend/src/api/methods.ts` | 1420 | 58.1 |
+| `frontend/src/api/methods.ts` | 1421 | 58.1 |
 | `backend/src/routes/portal.ts` | 1407 | 51.5 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 1311 | 67.7 |
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-CdhZgL50.js` | 184.0 |
+| `frontend/dist/assets/catalog-DcUhrnFM.js` | 184.0 |
 | `frontend/dist/assets/index-DQztsXP7.css` | 151.6 |
-| `frontend/dist/assets/Inventory-DZU63hoj.js` | 143.7 |
+| `frontend/dist/assets/Inventory-CMkxtr4a.js` | 143.7 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-Cruf1ODl.js` | 92.6 |
-| `frontend/dist/assets/app-shared-SUYVj5B_.js` | 89.5 |
-| `frontend/dist/assets/index-sOwFDnkY.js` | 78.5 |
-| `frontend/dist/assets/POS-CMqFl6c1.js` | 76.5 |
+| `frontend/dist/assets/Products-GWhEPvAn.js` | 92.6 |
+| `frontend/dist/assets/app-shared-CEPLlOT-.js` | 91.0 |
+| `frontend/dist/assets/index-CxYaCr_e.js` | 78.6 |
+| `frontend/dist/assets/POS-D_221HPj.js` | 76.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-Coxy0M5w.js` | 70.7 |
-| `frontend/dist/assets/catalog-editor-DB3xbGGY.js` | 70.5 |
-| `frontend/dist/assets/BulkImportModal-zO41ZxgR.js` | 68.3 |
-| `frontend/dist/assets/catalog-preview-B5HMxtf1.js` | 64.2 |
-| `frontend/dist/assets/app-api-methods-JRQowEQl.js` | 63.1 |
-| `frontend/dist/assets/Backup-BA-Vm8rY.js` | 57.8 |
+| `frontend/dist/assets/Dashboard-D-jNsB77.js` | 70.7 |
+| `frontend/dist/assets/catalog-editor-DuBEYFOB.js` | 70.5 |
+| `frontend/dist/assets/BulkImportModal-C3Pp0voK.js` | 68.3 |
+| `frontend/dist/assets/catalog-preview-C-FDRFZ6.js` | 64.2 |
+| `frontend/dist/assets/app-api-methods-DGwxKEEJ.js` | 61.3 |
+| `frontend/dist/assets/Backup-6rFWAaaP.js` | 57.8 |
 | `frontend/dist/assets/vendor-lucide-CFbbW5Yl.js` | 52.5 |
-| `frontend/dist/assets/Settings-Dt9uNmwz.js` | 52.1 |
-| `frontend/dist/assets/UserProfileModal-D5P-GNHw.js` | 43.3 |
-| `frontend/dist/assets/Users-Wj122Uw-.js` | 40.3 |
-| `frontend/dist/assets/Branches-D6dyawiF.js` | 37.9 |
-| `frontend/dist/assets/ReceiptSettings-hsZyCuEL.js` | 37.3 |
-| `frontend/dist/assets/Sales-BrnJ4O_z.js` | 35.0 |
+| `frontend/dist/assets/Settings-DuF-XAl7.js` | 52.1 |
+| `frontend/dist/assets/UserProfileModal-BxXszQBH.js` | 43.3 |
+| `frontend/dist/assets/Users-CS3zqDJ2.js` | 40.3 |
+| `frontend/dist/assets/Branches-8-ecPmDF.js` | 37.9 |
+| `frontend/dist/assets/ReceiptSettings-B4WGpE4X.js` | 37.3 |
+| `frontend/dist/assets/Sales-4S6U08tf.js` | 35.0 |
 
 ## 5. Notes
 

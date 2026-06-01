@@ -18,6 +18,7 @@ import { connectWS, disconnectWS, reconnectWS } from './api/websocket.ts'
 import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,
+  hasStoredUserSession,
   registerOutboxBackgroundSync,
 } from './api/syncRuntime.ts'
 import { STORAGE_KEYS }            from './constants.ts'
@@ -30,6 +31,8 @@ import {
 type AnyRecord = Record<string, any>
 type LazyApiMethod = (...args: any[]) => Promise<any>
 type MethodsModule = Record<string, (...args: any[]) => any>
+type AppBootstrapModule = typeof import('./api/appBootstrapTransport.ts')
+type AuthTransportModule = typeof import('./api/authTransport.ts')
 type OfflineVaultKey = CryptoKey | null
 type OfflineRow = AnyRecord & {
   _seq?: number
@@ -66,6 +69,8 @@ const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 3500
 const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 10_000
 const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200
 const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000
+const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000
+const BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS = 60_000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
@@ -79,6 +84,8 @@ let offlineVaultKey: OfflineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer: number | null = null
 let methodsModulePromise: Promise<MethodsModule> | null = null
+let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
+let authTransportModulePromise: Promise<AuthTransportModule> | null = null
 let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
 
@@ -94,6 +101,27 @@ function getOfflineDb(): Promise<any> {
 function loadMethodsModule(): Promise<MethodsModule> {
   if (!methodsModulePromise) methodsModulePromise = import('./api/methods.ts')
   return methodsModulePromise
+}
+
+function loadAppBootstrapModule(): Promise<AppBootstrapModule> {
+  if (!appBootstrapModulePromise) appBootstrapModulePromise = import('./api/appBootstrapTransport.ts')
+  return appBootstrapModulePromise
+}
+
+function loadAuthTransportModule(): Promise<AuthTransportModule> {
+  if (!authTransportModulePromise) authTransportModulePromise = import('./api/authTransport.ts')
+  return authTransportModulePromise
+}
+
+function getAuthTransportMethod<T extends keyof AuthTransportModule>(name: T): (...args: any[]) => Promise<any> {
+  return (...args) =>
+    loadAuthTransportModule().then((module) => {
+      const fn = module?.[name]
+      if (typeof fn !== 'function') {
+        throw new Error(`window.api.${String(name)} is not available.`)
+      }
+      return (fn as (...methodArgs: any[]) => Promise<any>)(...args)
+    })
 }
 
 function getLazyApiMethod(name: string): LazyApiMethod {
@@ -578,6 +606,7 @@ function refreshServiceWorkerSoon(force = false): void {
 
 function runOfflineMaintenance(force = false): void {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
+  if (!hasStoredUserSession()) return
   getLazyApiMethod('retryPendingSyncNow')().catch(() => {})
   if (offlineVaultKey) {
     syncUnlockedOfflineOutbox({ force }).catch(() => {})
@@ -635,6 +664,33 @@ function scheduleBootstrapStorageMaintenance(task: () => void): void {
       }
       task()
     }, BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS)
+  }
+
+  if (document.readyState === 'complete') {
+    run()
+    return
+  }
+  window.addEventListener('load', run, { once: true })
+}
+
+function scheduleBootstrapOfflineDbWrite(task: (db: any) => void | Promise<void>): void {
+  if (typeof window === 'undefined') {
+    getOfflineDb().then(task).catch(() => {})
+    return
+  }
+
+  const run = () => {
+    window.setTimeout(() => {
+      const write = () => {
+        if (document.visibilityState === 'hidden') return
+        getOfflineDb().then(task).catch(() => {})
+      }
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(write, { timeout: BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS })
+        return
+      }
+      write()
+    }, BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS)
   }
 
   if (document.readyState === 'complete') {
@@ -741,6 +797,24 @@ function forwardServiceWorkerAppEvent(event: MessageEvent): void {
 }
 
 const staticApi = {
+  login: getAuthTransportMethod('login'),
+  logout: getAuthTransportMethod('logout'),
+  resetPasswordWithOtp: getAuthTransportMethod('resetPasswordWithOtp'),
+  requestPasswordResetEmail: getAuthTransportMethod('requestPasswordResetEmail'),
+  completePasswordReset: getAuthTransportMethod('completePasswordReset'),
+  updateSessionDuration: getAuthTransportMethod('updateSessionDuration'),
+  getVerificationCapabilities: getAuthTransportMethod('getVerificationCapabilities'),
+  otpSetup: getAuthTransportMethod('otpSetup'),
+  otpConfirm: getAuthTransportMethod('otpConfirm'),
+  otpDisable: getAuthTransportMethod('otpDisable'),
+  otpVerify: getAuthTransportMethod('otpVerify'),
+  otpStatus: getAuthTransportMethod('otpStatus'),
+  startGoogleOauth: getAuthTransportMethod('startGoogleOauth'),
+  completeGoogleOauth: getAuthTransportMethod('completeGoogleOauth'),
+  unlinkGoogleOauth: getAuthTransportMethod('unlinkGoogleOauth'),
+  getOrganizationBootstrap: getAuthTransportMethod('getOrganizationBootstrap'),
+  searchOrganizations: getAuthTransportMethod('searchOrganizations'),
+  getCurrentOrganization: getAuthTransportMethod('getCurrentOrganization'),
 
   setSyncServerUrl(url: unknown) {
     const clean = sanitizeSyncServerUrl(url)
@@ -784,6 +858,11 @@ const staticApi = {
     } catch (_) {
       return ''
     }
+  },
+
+  async getAppBootstrap() {
+    const module = await loadAppBootstrapModule()
+    return module.getAppBootstrap()
   },
 
   setSyncToken(token: unknown) {
@@ -871,8 +950,8 @@ if (typeof window !== 'undefined') {
         localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
         sessionStorage.removeItem('businessos_sync_token_session')
       } catch (_) {}
-      getOfflineDb().then((db) => db.settings.delete('sync_token')).catch(() => {})
     })
+    scheduleBootstrapOfflineDbWrite((db) => db.settings.delete('sync_token'))
 
     // Determine the correct sync server URL
     let url = ''
@@ -881,8 +960,8 @@ if (typeof window !== 'undefined') {
       url = sanitizeSyncServerUrl(location.origin)
       scheduleBootstrapStorageMaintenance(() => {
         try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, url) } catch (_) {}
-        getOfflineDb().then((db) => db.settings.put({ key: 'sync_server_url', value: url })).catch(() => {})
       })
+      scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: url }))
     } else {
       // Vite dev ??use stored value (normally points to localhost:4000 backend)
       url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')

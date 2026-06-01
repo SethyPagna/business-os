@@ -8,27 +8,27 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 707, remove Dexie/local DB from startup static imports
+- Latest completed move: Move 708, split login/auth bootstrap out of the heavy API registry
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `1d2c42ce528647f9`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `1a5804d05a4e008e`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `1d2c42ce528647f9`
+  `1a5804d05a4e008e`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T14-32-55-858Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T16-00-36-623Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T14-47-03-773Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T15-57-09-334Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T14-49-57-643Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T16-00-02-450Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -36,10 +36,11 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the 2026-06-01 Move 707
-  verification pass removed three old all-pages report folders for 10,273,165
-  bytes, kept the latest local backups, kept the newest R2 backup object, and
-  found no stopped containers or Docker builder cache to reclaim.
+- `npm.cmd --prefix ops run prune-storage` in the 2026-06-01 Move 708
+  verification pass removed three old live/audit report folders for 9,728,509
+  bytes, kept the latest local backups, kept the newest R2 backup object
+  `datasync-2026-06-01T14-12-08-430Z`, and found no stopped containers or
+  Docker builder cache to reclaim.
 
 Current honest pockets:
 
@@ -47,7 +48,7 @@ Current honest pockets:
   34 routes, with 518 visible controls discovered, 392 controls exercised, 126
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `1d2c42ce528647f9`
+- broad Phase 8.4 UI live check passed on frontend hash `1a5804d05a4e008e`
   with 72 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -56,6 +57,27 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Frontend logged-out and invalid-session startup now avoids the heavy legacy
+  API registry and offline database chunks during the first shell render. The
+  sign-in page's verification and organization bootstrap calls use a narrow
+  lazy `app-auth` chunk from `frontend/src/api/authTransport.ts`, while
+  `frontend/src/web-api.ts` keeps `getAppBootstrap()` on a direct lazy
+  `app-bootstrap` path. `frontend/src/AppContext.tsx` no longer treats a
+  stored user as fully ready until server bootstrap validates it, and invalid
+  sessions return an empty sign-in bootstrap instead of reading IndexedDB.
+  Real Docker-served Playwright network proof against
+  `http://127.0.0.1:4000/` on build hash `1a5804d05a4e008e` showed only
+  `app-bootstrap-EfLFgo7i.js` and `app-auth-DD-QfBFn.js` among auth startup
+  lazy chunks in the first 12 seconds, with zero `app-api-methods`,
+  `app-local-db`, `vendor-dexie`, `vendor-zxing`, catalog, file-picker, or
+  profile-modal requests, zero failed responses, and zero relevant console
+  messages. The built graph check also found no bad startup preloads or static
+  entry imports. Verification: focused loading guard, frontend typecheck,
+  source guard, frontend utility suite, backend utility suite, production
+  build, broad Phase 8.4 live suite, public Cloudflare portal check,
+  post-live hygiene, exhaustive all-pages control audit, Phase 29 audit,
+  generated references, and organization audit all passed.
 
 - Frontend startup now removes Dexie/local IndexedDB from the initial static
   import graph entirely. The remaining blocker was

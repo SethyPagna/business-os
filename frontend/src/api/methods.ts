@@ -228,7 +228,6 @@ import {
   unlinkGoogleOauth as unlinkGoogleOauthRequest,
   updateSessionDuration as updateSessionDurationRequest,
 } from './authTransport.ts'
-import { getAppBootstrap as getAppBootstrapRequest } from './appBootstrapTransport.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from './notificationSummary.ts'
 import {
   disconnectGoogleDriveSync as disconnectGoogleDriveSyncRequest,
@@ -483,8 +482,10 @@ export const completeGoogleOauth = (payload) =>
   completeGoogleOauthRequest(payload)
 export const unlinkGoogleOauth = (payload) =>
   unlinkGoogleOauthRequest(payload)
-export const getAppBootstrap = () =>
-  getAppBootstrapRequest()
+export const getAppBootstrap = async () => {
+  const { getAppBootstrap: getAppBootstrapRequest } = await import('./appBootstrapTransport.ts')
+  return getAppBootstrapRequest()
+}
 export const getOrganizationBootstrap = () =>
   getOrganizationBootstrapRequest()
 export const searchOrganizations = (query) =>

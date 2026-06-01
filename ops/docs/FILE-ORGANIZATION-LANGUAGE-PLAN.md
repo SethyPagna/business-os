@@ -6690,6 +6690,32 @@ Decision rule:
     20 rendered products, zero failed responses, zero page errors, and
     enforced CSP; post-live hygiene passed.
 
+708. Split login/auth bootstrap out of the heavy API registry.
+    Done: `frontend/src/web-api.ts` now exposes login, logout, OTP, Google
+    OAuth, verification-capability, and organization bootstrap/search calls
+    through a narrow lazy `authTransport` boundary instead of falling through
+    to the full `app-api-methods` registry. `frontend/vite.config.ts` emits
+    that boundary as `app-auth` and excludes it from eager modulepreload.
+    `frontend/src/AppContext.tsx` now waits for server bootstrap validation
+    before treating a stored user as authenticated for startup warmups, and
+    `frontend/src/api/appBootstrapTransport.ts` returns an empty sign-in
+    bootstrap for invalid sessions instead of reading IndexedDB. Proof:
+    focused performance loading UX guard, updated API registry guard,
+    TypeScript check, source guard, frontend utility suite, backend utility
+    suite, production build hash `1a5804d05a4e008e`, Docker live build sync,
+    built graph check showing no bad startup preloads/static entry imports,
+    and a real Playwright first-12-seconds network trace showing only
+    `app-bootstrap-EfLFgo7i.js` and `app-auth-DD-QfBFn.js` among auth startup
+    lazy chunks, with zero `app-api-methods`, `app-local-db`, `vendor-dexie`,
+    `vendor-zxing`, catalog, file-picker, or profile-modal requests. Broad
+    Phase 8.4 live suite passed with 72 checked signals and no relevant
+    console messages; public Cloudflare portal check passed with 20 rendered
+    products, zero failed responses, and enforced CSP; post-live hygiene
+    passed; exhaustive all-pages control audit passed across 34 desktop/mobile
+    routes with 518 visible controls, 392 exercised controls, 68 screenshots,
+    zero failed controls, and zero findings; Phase 29 and organization audits
+    passed after generated references were refreshed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
