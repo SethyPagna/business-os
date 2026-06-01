@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-01T10:20:30.082Z
+Generated: 2026-06-01T12:51:32.891Z
 
 ## Summary
 
@@ -64,14 +64,14 @@ Generated: 2026-06-01T10:20:30.082Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8931 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8302 | ops/docs |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7619 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6594 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 8321 | ops/docs |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7622 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 6611 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3396 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3013 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3016 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
@@ -80,8 +80,8 @@ Generated: 2026-06-01T10:20:30.082Z
 | frontend/src/components/pos/POS.tsx | 2218 | frontend/components/pos |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
+| frontend/tests/performanceLoadingUx.test.ts | 2148 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2144 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2141 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/AppContext.tsx | 1853 | frontend/src/AppContext.tsx |

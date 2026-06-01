@@ -8299,3 +8299,22 @@ Move 701 status:
   `5bb3317e6301aad9`; focused Dashboard desktop/mobile live control audit
   passed with 36/46 controls tested, 10 long-label controls skipped, and zero
   findings; Phase 29 and live hygiene checks are rerun after reference refresh.
+
+Move 702 status:
+- Move 702 defers web API bootstrap storage maintenance and avoids duplicate
+  same-URL maintenance. `frontend/src/web-api.ts` still installs `window.api`
+  synchronously, sets the active sync server URL immediately, connects the
+  websocket, starts health checks, and schedules offline maintenance, but
+  retired-token cleanup plus backend-origin `localStorage`/Dexie sync URL
+  persistence now run through `scheduleBootstrapStorageMaintenance()` after
+  page load, a short delay, and browser idle time. The `setSyncServerUrl()`
+  bridge now compares the previous and next URLs before clearing caches,
+  writing Dexie settings, or forcing offline maintenance, so AppContext no
+  longer duplicates the bootstrap's same-URL maintenance pass. The focused
+  loading UX guard verifies the deferred storage scheduler, deferred
+  token/sync URL persistence, no awaited Dexie maintenance in bootstrap, and
+  same-URL dedupe; source guard, typecheck, frontend utility suite, and
+  production build passed. Production build hash: `95565c2fbe120c41`; focused
+  Dashboard desktop/mobile live control audit passed with 36/46 controls
+  tested, 10 long-label controls skipped, and zero findings; Phase 29 and live
+  hygiene checks are rerun after reference refresh.

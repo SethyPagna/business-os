@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 701, defer auto sync URL persistence
+- Latest completed move: Move 702, defer bootstrap storage maintenance
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `5bb3317e6301aad9`
+  `95565c2fbe120c41`
 
 Latest verified reports:
 
@@ -26,7 +26,7 @@ Latest verified reports:
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T05-45-21-656Z/summary.json`
 - latest focused Dashboard desktop/mobile control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T10-17-12-496Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T12-49-12-762Z/summary.json`
 - latest focused Sales desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T08-13-56-531Z/summary.json`
 - latest focused POS desktop/mobile control audit:
@@ -64,6 +64,20 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent runtime/load win:
+
+- Frontend API bootstrap now defers retired-token cleanup and backend-origin
+  sync URL persistence in `frontend/src/web-api.ts`. The API proxy,
+  `syncServerUrl`, websocket connection, health check, and scheduled offline
+  maintenance still start immediately, but `localStorage` cleanup,
+  `localStorage` sync URL writes, and Dexie settings writes now wait until
+  page load plus a short delay and browser idle time. `setSyncServerUrl()` also
+  avoids duplicate cache clears and forced offline maintenance when AppContext
+  sets the same URL the bootstrap already installed. This removes storage and
+  IndexedDB maintenance from the startup path without delaying connection
+  readiness. The source guard parsed 227 frontend TypeScript files, the
+  production build hash is `95565c2fbe120c41`, and the focused Dashboard
+  desktop/mobile live audit passed with 36/46 controls tested, 10 long-label
+  controls skipped by stable broad-audit guardrails, and zero findings.
 
 - Frontend `AppProvider` now avoids writing the backend-origin sync URL to
   `localStorage` during state initialization in `frontend/src/AppContext.tsx`.

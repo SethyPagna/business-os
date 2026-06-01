@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 701 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 702 in this file.
 
 ## Goal
 
@@ -6572,6 +6572,23 @@ Decision rule:
     audit passed with 36/46 controls tested, 10 long-label controls skipped,
     and zero findings; Phase 29 and live hygiene checks are rerun after
     reference refresh.
+
+702. Defer web API bootstrap storage maintenance and same-URL duplicate work.
+    Done: `frontend/src/web-api.ts` still installs `window.api`
+    synchronously and keeps the active sync server URL, websocket connection,
+    health checks, and scheduled offline maintenance immediate. Retired auth
+    token cleanup plus backend-origin `localStorage` and Dexie sync URL
+    persistence now run through `scheduleBootstrapStorageMaintenance()` after
+    page load, a short delay, and browser idle time. The public
+    `setSyncServerUrl()` bridge now compares the previous URL with the next
+    clean URL before clearing caches, writing Dexie settings, or forcing
+    offline maintenance, so AppContext does not duplicate bootstrap work when
+    both install the same URL. Proof: focused performance loading UX test,
+    frontend source guard, frontend typecheck, frontend utility suite,
+    frontend production build with hash `95565c2fbe120c41`, and focused
+    Dashboard desktop/mobile live control audit passed with 36/46 controls
+    tested, 10 long-label controls skipped, and zero findings; Phase 29 and
+    live hygiene checks are rerun after reference refresh.
 
 ## Safety Gates
 

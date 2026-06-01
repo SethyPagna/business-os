@@ -65,6 +65,8 @@ const OFFLINE_SNAPSHOT_IDLE_DELAY_MS = 30_000
 const OFFLINE_SNAPSHOT_FORCE_DELAY_MS = 12_000
 const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 3500
 const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 10_000
+const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200
+const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000
 const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
@@ -610,6 +612,29 @@ function scheduleInitialOfflineMaintenance(): void {
   window.addEventListener('load', scheduleIdle, { once: true })
 }
 
+function scheduleBootstrapStorageMaintenance(task: () => void): void {
+  if (typeof window === 'undefined') {
+    task()
+    return
+  }
+
+  const run = () => {
+    window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(task, { timeout: BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS })
+        return
+      }
+      task()
+    }, BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS)
+  }
+
+  if (document.readyState === 'complete') {
+    run()
+    return
+  }
+  window.addEventListener('load', run, { once: true })
+}
+
 function forwardServiceWorkerOutboxEvent(event: MessageEvent): void {
   if (typeof window === 'undefined') return
   const type = event?.data?.type
@@ -710,16 +735,24 @@ const staticApi = {
 
   setSyncServerUrl(url: unknown) {
     const clean = sanitizeSyncServerUrl(url)
+    const previousSyncServerUrl = getSyncServerUrl()
+    const syncServerChanged = previousSyncServerUrl !== clean
     setSyncServerUrl(clean)
     if (clean) {
-      dexieDb.settings.put({ key: 'sync_server_url', value: clean }).catch(() => {})
-      cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
+      if (syncServerChanged) {
+        dexieDb.settings.put({ key: 'sync_server_url', value: clean }).catch(() => {})
+        cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
+      }
       connectWS()
       startHealthCheck()
-      runOfflineMaintenance(true)
+      if (syncServerChanged) {
+        runOfflineMaintenance(true)
+      }
     } else {
-      dexieDb.settings.delete('sync_server_url').catch(() => {})
-      disconnectWS()
+      if (syncServerChanged) {
+        dexieDb.settings.delete('sync_server_url').catch(() => {})
+        disconnectWS()
+      }
     }
   },
 
@@ -815,30 +848,35 @@ if (typeof window !== 'undefined') {
 // current origin is always the correct API/WS server ??regardless of any stale
 // URL that may be saved in localStorage from a previous session or a different
 // device (e.g. localhost saved when first run locally, but accessed via Cloudflare
-// on another device).  We always overwrite the stored URL with the current origin.
+// on another device). We use the current origin immediately, then persist it
+// after first paint so storage writes do not compete with startup.
 ;(async () => {
   try {
     const isViteDev = location.hostname === 'localhost' &&
       (location.port === '5173' || location.port === '5174')
 
-    try {
-      localStorage.removeItem('businessos_auth_token')
-      sessionStorage.removeItem('businessos_auth_token')
-      localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
-      sessionStorage.removeItem('businessos_sync_token_session')
-      await dexieDb.settings.delete('sync_token')
-    } catch (_) {}
+    scheduleBootstrapStorageMaintenance(() => {
+      try {
+        localStorage.removeItem('businessos_auth_token')
+        sessionStorage.removeItem('businessos_auth_token')
+        localStorage.removeItem(STORAGE_KEYS.SYNC_TOKEN)
+        sessionStorage.removeItem('businessos_sync_token_session')
+      } catch (_) {}
+      dexieDb.settings.delete('sync_token').catch(() => {})
+    })
 
     // Determine the correct sync server URL
-    let url
+    let url = ''
     if (!isViteDev) {
       // Served by the Node backend ??current origin IS the server. Always use it.
       url = sanitizeSyncServerUrl(location.origin)
-      try { localStorage.setItem('businessos_sync_server', url) } catch (_) {}
-      try { await dexieDb.settings.put({ key: 'sync_server_url', value: url }) } catch (_) {}
+      scheduleBootstrapStorageMaintenance(() => {
+        try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, url) } catch (_) {}
+        dexieDb.settings.put({ key: 'sync_server_url', value: url }).catch(() => {})
+      })
     } else {
       // Vite dev ??use stored value (normally points to localhost:4000 backend)
-      url = sanitizeSyncServerUrl(localStorage.getItem('businessos_sync_server') || '')
+      url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')
       try {
         const stored = await dexieDb.settings.bulkGet(['sync_server_url'])
         if (!url && stored[0]?.value) url = sanitizeSyncServerUrl(stored[0].value)
