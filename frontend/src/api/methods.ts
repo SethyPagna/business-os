@@ -27,8 +27,6 @@ import {
   isNetErr,
   isServerOnline,
   isTransientGatewayError,
-  getApiVersionMismatchCooldown,
-  markApiVersionMismatch,
 } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from './query.ts'
 import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate } from './localDb.ts'
@@ -53,7 +51,21 @@ import {
   testAiProvider as testAiProviderRequest,
   updateAiProvider as updateAiProviderRequest,
 } from './aiTransport.ts'
-import { fetchJsonWithTimeout, getPortalBaseUrl } from './portalHttp.ts'
+import {
+  askPortalAi as askPortalAiRequest,
+  createPortalSubmission as createPortalSubmissionRequest,
+  getCatalogMeta as getCatalogMetaRequest,
+  getCatalogProducts as getCatalogProductsRequest,
+  getPortalAiStatus as getPortalAiStatusRequest,
+  getPortalBootstrap as getPortalBootstrapRequest,
+  getPortalCatalogMeta as getPortalCatalogMetaRequest,
+  getPortalCatalogProducts as getPortalCatalogProductsRequest,
+  getPortalConfig as getPortalConfigRequest,
+  getPortalSubmissionsForReview as getPortalSubmissionsForReviewRequest,
+  lookupPortalMembership as lookupPortalMembershipRequest,
+  reviewPortalSubmission as reviewPortalSubmissionRequest,
+  searchPortalCatalogProducts as searchPortalCatalogProductsRequest,
+} from './portalTransport.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from './importTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
@@ -599,115 +611,42 @@ export const replaceProductLookupValues = async ({ type, from = [], to = null, u
   )
 }
 export async function getCatalogMeta() {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/catalog/meta`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (!res.ok) throw new Error(`Catalog meta failed: ${res.status}`)
-  return res.json()
+  return getCatalogMetaRequest()
 }
 export async function getCatalogProducts() {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/catalog/products`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (!res.ok) throw new Error(`Catalog products failed: ${res.status}`)
-  return res.json()
+  return getCatalogProductsRequest()
 }
 export async function getPortalConfig() {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/config`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (!res.ok) throw new Error(`Portal config failed: ${res.status}`)
-  return res.json()
+  return getPortalConfigRequest()
 }
 export async function getPortalBootstrap() {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/bootstrap`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (!res.ok) throw new Error(`Portal bootstrap failed: ${res.status}`)
-  return res.json()
+  return getPortalBootstrapRequest()
 }
 export async function getPortalCatalogMeta() {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/meta`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (!res.ok) throw new Error(`Portal catalog meta failed: ${res.status}`)
-  return res.json()
+  return getPortalCatalogMetaRequest()
 }
 export async function getPortalCatalogProducts() {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/catalog/products`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (!res.ok) throw new Error(`Portal catalog products failed: ${res.status}`)
-  return res.json()
+  return getPortalCatalogProductsRequest()
 }
 export async function searchPortalCatalogProducts(params = {}) {
-  const base = getPortalBaseUrl()
-  const q = buildQueryString(params)
-  const mismatchError = getApiVersionMismatchCooldown('/api/portal/catalog/products/search')
-  if (mismatchError) throw mismatchError
-  const res = await fetchJsonWithTimeout(`${base}${appendQuery('/api/portal/catalog/products/search', q)}`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (res.status === 404) throw markApiVersionMismatch('/api/portal/catalog/products/search', res.status)
-  if (!res.ok) throw new Error(`Portal catalog search failed: ${res.status}`)
-  return res.json()
+  return searchPortalCatalogProductsRequest(params)
 }
 export async function lookupPortalMembership(membershipNumber) {
-  const base = getPortalBaseUrl()
-  const value = encodeURIComponent(String(membershipNumber || '').trim())
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/membership/${value}`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (res.status === 404) return null
-  if (!res.ok) throw new Error(`Membership lookup failed: ${res.status}`)
-  return res.json()
+  return lookupPortalMembershipRequest(membershipNumber)
 }
 export async function createPortalSubmission(payload) {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/submissions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'bypass-tunnel-reminder': 'true',
-    },
-    body: JSON.stringify(payload || {}),
-  })
-  const json = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(json.error || `Submission failed: ${res.status}`)
-  return json
+  return createPortalSubmissionRequest(payload)
 }
 export async function getPortalAiStatus() {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/ai/status`, {
-    headers: { 'bypass-tunnel-reminder': 'true' },
-  })
-  if (!res.ok) throw new Error(`Portal AI status failed: ${res.status}`)
-  return res.json()
+  return getPortalAiStatusRequest()
 }
 export async function askPortalAi(payload) {
-  const base = getPortalBaseUrl()
-  const res = await fetchJsonWithTimeout(`${base}/api/portal/ai/chat`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'bypass-tunnel-reminder': 'true',
-    },
-    body: JSON.stringify(payload || {}),
-  })
-  const json = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(json.error || `Portal AI failed: ${res.status}`)
-  return json
+  return askPortalAiRequest(payload)
 }
 export const getPortalSubmissionsForReview = () =>
-  route('portalSubmissions:get', () => apiFetch('GET', '/api/portal/submissions/review'), () => [])
+  getPortalSubmissionsForReviewRequest()
 export const reviewPortalSubmission = (id, payload) =>
-  route('portalSubmissions:review', () => apiFetch('PATCH', `/api/portal/submissions/${id}/review`, payload), null, true)
+  reviewPortalSubmissionRequest(id, payload)
 
 export const getAiProviders = () =>
   getAiProvidersRequest()

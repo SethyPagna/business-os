@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 676.
+- Latest completed implementation move in this roadmap: Move 677.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7874,3 +7874,20 @@ Move 676 status:
   frontend typecheck, frontend utility suite, frontend production build, Phase
   29 audit, focused Products desktop/mobile live control audit, and post-live
   hygiene passed.
+
+Move 677 status:
+- Move 677 extracts customer portal transport from the large frontend API
+  registry. `frontend/src/api/portalTransport.ts` now owns public catalog and
+  portal config reads, portal catalog search, membership lookup, customer portal
+  submissions, portal AI status/chat calls, and admin portal-submission review
+  actions. Timeout headers and API-version mismatch handling now sit beside the
+  portal fetch helper instead of inside `methods.ts`, while `methods.ts` keeps
+  public `window.api` wrapper names for compatibility. The API guide documents
+  the new boundary, focused API HTTP tests verify source placement and mismatch
+  handling, the source guard parsed 211 frontend source files, and the
+  production build shows the `app-api-methods` chunk at about 45.75 kB with no
+  circular chunk warning. Proof: focused API HTTP tests, frontend source guard,
+  frontend typecheck, frontend utility suite, and frontend production build
+  passed; Phase 29 audit and post-live hygiene passed; the focused public
+  catalog desktop/mobile live control audit passed with 42/42 controls tested
+  and zero findings.

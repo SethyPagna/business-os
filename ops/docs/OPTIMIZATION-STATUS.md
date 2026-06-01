@@ -8,7 +8,7 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 676, typed AI transport extraction
+- Latest completed move: Move 677, typed portal transport extraction
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `70c81f2c7e942c2c`
+  `6517456519e8f078`
 
 Latest verified reports:
 
@@ -25,6 +25,8 @@ Latest verified reports:
   `ops/runtime/reports/phase84-ui-live-check-2026-05-30T04-15-34-032Z/report.json`
 - latest focused Products desktop/mobile control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-28-28-590Z/summary.json`
+- latest focused public catalog desktop/mobile control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T03-48-20-747Z/summary.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -42,6 +44,15 @@ Current honest pockets:
   it into local TypeScript migration work
 
 Recent route-level win:
+
+- Frontend customer portal transport is now
+  `frontend/src/api/portalTransport.ts` with typed catalog/config reads,
+  submission writes, AI chat/status calls, membership lookup, review actions,
+  timeout headers, and API-version mismatch handling outside the large API
+  registry. The source guard now parses 211 frontend TypeScript files, and the
+  production build reports the `app-api-methods` chunk around 45.75 kB. The
+  focused public catalog live audit passed on desktop and mobile with 42/42
+  controls tested and zero findings.
 
 - Frontend AI provider transport is now `frontend/src/api/aiTransport.ts` with
   typed provider CRUD/test calls and AI response reads using the shared actor

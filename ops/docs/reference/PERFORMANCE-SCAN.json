@@ -1,10 +1,10 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 382,
+  "sourceFiles": 383,
   "distAssets": 86,
-  "totalSourceBytes": 6594773,
-  "totalSourceLines": 150289,
+  "totalSourceBytes": 6596419,
+  "totalSourceLines": 150353,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -35,7 +35,7 @@
     "ops/scripts/architecture/language-runtime-audit.ts"
   ],
   "oversizedBuiltChunks": [
-    "frontend/dist/assets/catalog-BnhkUpEj.js",
+    "frontend/dist/assets/catalog-CyuVDawD.js",
     "frontend/dist/assets/index-DQztsXP7.css",
     "frontend/dist/assets/lang-km-c87vG7oG.js",
     "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
@@ -109,8 +109,8 @@
     },
     {
       "file": "frontend/src/api/methods.ts",
-      "size": 85594,
-      "lines": 1815
+      "size": 82803,
+      "lines": 1754
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.tsx",
@@ -236,8 +236,8 @@
     },
     {
       "file": "frontend/src/api/methods.ts",
-      "size": 85594,
-      "lines": 1815
+      "size": 82803,
+      "lines": 1754
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.tsx",
@@ -312,7 +312,7 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-BnhkUpEj.js",
+      "file": "frontend/dist/assets/catalog-CyuVDawD.js",
       "size": 188606,
       "lines": 0
     },
@@ -322,12 +322,12 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Inventory-DT7GIyPx.js",
+      "file": "frontend/dist/assets/Inventory-CezEvrxx.js",
       "size": 147421,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/index-Dif1U0ee.js",
+      "file": "frontend/dist/assets/index-kwMZhQVK.js",
       "size": 131790,
       "lines": 0
     },
@@ -337,17 +337,17 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Products-f_UbK9ou.js",
+      "file": "frontend/dist/assets/Products-eizVSPYQ.js",
       "size": 95216,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-shared-DJBeGtQc.js",
+      "file": "frontend/dist/assets/app-shared-CPoSWKkV.js",
       "size": 84384,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/POS-zkfn8SAp.js",
+      "file": "frontend/dist/assets/POS-DpEjTXDd.js",
       "size": 78456,
       "lines": 0
     },
@@ -357,33 +357,33 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Dashboard-CN6xr_em.js",
+      "file": "frontend/dist/assets/Dashboard-CwYtbfLJ.js",
       "size": 72480,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-editor-5BGDU3zh.js",
+      "file": "frontend/dist/assets/catalog-editor-DPJ6UAGo.js",
       "size": 72216,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/BulkImportModal-Dn9WXp2N.js",
+      "file": "frontend/dist/assets/BulkImportModal-BhkZaGGz.js",
       "size": 69960,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-preview-BRG1HXYA.js",
+      "file": "frontend/dist/assets/catalog-preview-Cs_FgDF6.js",
       "size": 65828,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Backup-WN7P0rdq.js",
+      "file": "frontend/dist/assets/Backup-BmS6F6gy.js",
       "size": 59311,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-api-CW37P5Fx.js",
-      "size": 54179,
+      "file": "frontend/dist/assets/app-api-CQf8PB-L.js",
+      "size": 56229,
       "lines": 0
     },
     {
@@ -392,32 +392,32 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Settings-gl0wSBmA.js",
+      "file": "frontend/dist/assets/Settings-DLDvFyxk.js",
       "size": 53507,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-api-methods-DTD5dewZ.js",
-      "size": 48101,
+      "file": "frontend/dist/assets/app-api-methods-CmD9GIs_.js",
+      "size": 45746,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Users-Bm_Y4GmT.js",
+      "file": "frontend/dist/assets/Users-DwII_E9w.js",
       "size": 41328,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Branches-xp8gY_Ij.js",
+      "file": "frontend/dist/assets/Branches-BBYMz77O.js",
       "size": 38987,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ReceiptSettings-CUhmHGOu.js",
+      "file": "frontend/dist/assets/ReceiptSettings-xetoFoNK.js",
       "size": 38382,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Sales-D1EJZ_F3.js",
+      "file": "frontend/dist/assets/Sales-xzJoWBgf.js",
       "size": 36046,
       "lines": 0
     }

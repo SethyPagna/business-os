@@ -50,6 +50,10 @@ This folder is the browser-side transport layer for Business OS.
   - AI provider CRUD/test transport and AI response reads with actor attribution
   - keeps AI provider route keys and direct `/api/ai/*` calls outside the large domain registry
 
+- `portalTransport.ts`
+  - customer portal catalog/config/submission/AI transport plus review actions
+  - keeps portal timeout headers and API-version mismatch handling outside the large domain registry
+
 - `driveSync.ts`
   - Google Drive sync status, cooldown-aware fallback, preferences, OAuth, and job queue transport
   - keeps Drive sync polling/action mechanics outside the large domain registry

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 676 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 677 in this file.
 
 ## Goal
 
@@ -6138,6 +6138,23 @@ Decision rule:
     source guard, frontend typecheck, frontend utility suite, frontend
     production build, Phase 29 audit, focused Products desktop/mobile live
     control audit, and post-live hygiene passed.
+
+677. Extract typed customer portal transport from the large domain registry.
+    Done: `frontend/src/api/portalTransport.ts` now owns customer portal
+    catalog/config reads, portal catalog search, membership lookup, customer
+    portal submissions, portal AI status/chat calls, and admin portal
+    submission review actions previously embedded in
+    `frontend/src/api/methods.ts`. Timeout headers and API-version mismatch
+    handling moved beside the portal fetch helper, while `methods.ts` keeps
+    public `window.api` wrapper names for compatibility. The API guide
+    documents the new portal transport split, and focused API HTTP tests verify
+    source placement plus mismatch handling. The source guard parsed 211
+    frontend files and the production build now reports the `app-api-methods`
+    chunk around 45.75 kB with no circular chunk warning. Proof: focused API
+    HTTP tests, frontend source guard, frontend typecheck, frontend utility
+    suite, and frontend production build passed; Phase 29 audit and post-live
+    hygiene passed; the focused public catalog desktop/mobile live control
+    audit passed with 42/42 controls tested and zero findings.
 
 ## Safety Gates
 
