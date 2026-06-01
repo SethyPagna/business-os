@@ -15,6 +15,7 @@ import {
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.ts'
+import { appendActorQuery, getCurrentUserContext } from '../src/api/actorQuery.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from '../src/api/conflicts.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds } from '../src/api/query.ts'
 import { createClientRequestId, ensureClientRequestId } from '../src/api/requestIds.ts'
@@ -412,11 +413,39 @@ await runTest('pending sync preview serializes only the compact visible queue sl
   assert.equal(preview.at(-1)?._seq, PENDING_SYNC_PREVIEW_LIMIT)
 })
 
+await runTest('actor query helper appends current user context and extra parameters without empty values', () => {
+  const originalWindow = globalThis.window
+  const sessionValues = new Map<string, string>([
+    ['businessos_user', JSON.stringify({ id: 42, name: ' Admin User ' })],
+  ])
+  const storage = {
+    getItem: (key: string) => sessionValues.get(key) || null,
+    setItem: (key: string, value: string) => sessionValues.set(key, value),
+    removeItem: (key: string) => sessionValues.delete(key),
+  }
+  globalThis.window = {
+    sessionStorage: storage,
+    localStorage: storage,
+  } as unknown as Window & typeof globalThis
+
+  try {
+    assert.deepEqual(getCurrentUserContext(), { userId: 42, userName: 'Admin User' })
+    assert.equal(
+      appendActorQuery('/api/users?limit=10', { page: 2, search: '', enabled: false }),
+      '/api/users?limit=10&userId=42&userName=Admin+User&page=2&enabled=false',
+    )
+  } finally {
+    globalThis.window = originalWindow
+  }
+})
+
 await runTest('actor query and query cache cleanup avoid chained entry/filter allocations', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const actorQuerySource = fs.readFileSync(new URL('../src/api/actorQuery.ts', import.meta.url), 'utf8')
+  assert.match(source, /import \{ appendActorQuery, getCurrentUserContext \} from '\.\/actorQuery\.ts'/)
   assert.match(
-    source,
-    /function appendActorQuery\(path, extra = \{\}\)[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
+    actorQuerySource,
+    /export function appendActorQuery\(path: string, extra: ActorQueryParams = \{\}\): string[\s\S]*for \(const key of Object\.keys\(extra \|\| \{\}\)\)[\s\S]*const queryString = query\.toString\(\)[\s\S]*return `\$\{path\}\$\{path\.includes\('\?'\) \? '&' : '\?'\}\$\{queryString\}`/,
   )
   assert.match(
     source,

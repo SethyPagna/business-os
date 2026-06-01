@@ -30,6 +30,10 @@ This folder is the browser-side transport layer for Business OS.
   - bounded pending-sync queue preview serializer
   - keeps queue popovers light while preserving enough metadata for status and retry review
 
+- `actorQuery.ts`
+  - current-user context reader and actor query-string helper
+  - keeps user attribution parameters consistent for AI, user, role, upload, and delete calls
+
 - `localDb.ts`
   - Dexie-based browser storage for offline queues and local cache helpers
 

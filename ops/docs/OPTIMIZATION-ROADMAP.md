@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 659.
+- Latest completed implementation move in this roadmap: Move 660.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -7618,3 +7618,17 @@ Move 659 status:
   HTTP tests, frontend source guard, frontend typecheck, frontend utility
   suite, frontend production build, Phase 29 audit, and focused Products
   desktop/mobile live control audit passed.
+
+Move 660 status:
+- Move 660 extracts the typed actor/user query boundary from the large
+  frontend API registry. `frontend/src/api/actorQuery.ts` now owns
+  `getCurrentUserContext` and `appendActorQuery`, preserving the same
+  `businessos_user` session/local storage lookup and empty-extra-value
+  filtering while giving AI, users, roles, upload, and delete calls a shared
+  typed attribution helper. `methods.ts` imports that module instead of
+  defining actor query logic inside the remaining `ts-nocheck` registry. The
+  focused API HTTP test now exercises stored user attribution directly, and
+  the production build shows the `app-api-methods` chunk at about 59.54 kB.
+  Proof: focused API HTTP tests, frontend source guard, frontend typecheck,
+  frontend utility suite, frontend production build, Phase 29 audit, and
+  focused Products desktop/mobile live control audit passed.

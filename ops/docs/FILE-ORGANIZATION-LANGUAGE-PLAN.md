@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 659 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 660 in this file.
 
 ## Goal
 
@@ -5878,6 +5878,20 @@ Decision rule:
     HTTP tests exercise all three helpers directly. Proof: focused API HTTP
     tests, frontend source guard, frontend typecheck, frontend utility suite,
     frontend production build, Phase 29 audit, and focused Products
+    desktop/mobile live control audit passed.
+
+660. Extract typed API actor query helpers from the large domain registry.
+    Done: `frontend/src/api/actorQuery.ts` now owns the current-user context
+    reader and actor query-string appender previously embedded in
+    `frontend/src/api/methods.ts`. The helper keeps the existing
+    `businessos_user` storage contract, adds explicit `CurrentUserContext` and
+    `ActorQueryParams` types, and preserves the low-allocation
+    `Object.keys`/`URLSearchParams` loop for extra query values. The API guide
+    documents the new boundary and the focused API HTTP test covers stored
+    user attribution and existing-query append behavior. The production build
+    now reports the `app-api-methods` chunk around 59.54 kB. Proof: focused
+    API HTTP tests, frontend source guard, frontend typecheck, frontend utility
+    suite, frontend production build, Phase 29 audit, and focused Products
     desktop/mobile live control audit passed.
 
 ## Safety Gates

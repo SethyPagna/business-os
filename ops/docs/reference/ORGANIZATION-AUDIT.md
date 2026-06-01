@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-01T00:41:43.709Z
+Generated: 2026-06-01T00:49:18.906Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 565
+- Files scanned: 566
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-01T00:41:43.709Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 366 |
+| .ts | 367 |
 | .tsx | 107 |
 | .md | 45 |
 | .json | 17 |
@@ -37,8 +37,8 @@ Generated: 2026-06-01T00:41:43.709Z
 | ops/docs | 14 |
 | frontend/components/catalog | 13 |
 | backend/services | 12 |
+| frontend/api | 10 |
 | frontend/components/contacts | 10 |
-| frontend/api | 9 |
 | frontend/components/inventory | 9 |
 | run | 9 |
 | run/docker | 9 |
@@ -64,9 +64,9 @@ Generated: 2026-06-01T00:41:43.709Z
 | File | Lines | Area |
 | --- | --- | --- |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8334 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 7621 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 7635 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7191 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5901 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 5915 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4281 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | ops/docs/reference/PHASE29-AUDIT.json | 3399 | ops/docs/reference |
@@ -76,7 +76,7 @@ Generated: 2026-06-01T00:41:43.709Z
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2344 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2304 | frontend/components/dashboard |
-| frontend/src/api/methods.ts | 2270 | frontend/api |
+| frontend/src/api/methods.ts | 2241 | frontend/api |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | frontend/src/components/pos/POS.tsx | 2218 | frontend/components/pos |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
@@ -113,9 +113,9 @@ Generated: 2026-06-01T00:41:43.709Z
 | frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
 | backend/test/routeContracts.test.ts | 15 | backend/test/routeContracts.test.ts |
 | backend/src/services/importJobs.ts | 14 | backend/services |
+| frontend/src/api/methods.ts | 14 | frontend/api |
 | frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
 | backend/src/routes/auth.ts | 13 | backend/routes |
-| frontend/src/api/methods.ts | 13 | frontend/api |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
 | backend/src/routes/portal.ts | 12 | backend/routes |
