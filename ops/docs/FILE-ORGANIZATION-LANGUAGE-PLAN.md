@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 704 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 705 in this file.
 
 ## Goal
 
@@ -6621,6 +6621,25 @@ Decision rule:
     audit passed with 36/46 controls tested, 10 long-label controls skipped,
     and zero findings; Phase 29 and live hygiene checks are rerun after
     reference refresh.
+
+705. Defer catalog and public portal preloads from startup.
+    Done: `frontend/vite.config.ts` now excludes `catalog`, `catalog-preview`,
+    `catalog-editor`, and `portal-tools` chunk prefixes from eager
+    modulepreload while keeping `CatalogPage` route-lazy in
+    `frontend/src/App.tsx`. The catalog and public portal code still loads
+    when staff navigate there or when the public route is opened, but it no
+    longer competes with the first authenticated shell/dashboard paint. The
+    focused loading UX guard verifies the preload exclusion and lazy route
+    import. Proof: production `frontend/dist/index.html` and the live
+    Docker-served `http://127.0.0.1:4000/` HTML no longer preload
+    `catalog-*`, `catalog-preview-*`, `catalog-editor-*`, `portal-tools-*`,
+    `app-local-db-*`, or `vendor-dexie-*`; source guard, typecheck, frontend
+    utility suite, production build, exhaustive Playwright all-pages control
+    audit, broad Phase 8.4 UI live check, public Cloudflare portal check, and
+    post-live hygiene passed. Production build hash: `035370df0dd56898`;
+    all-pages audit covered 34 desktop/mobile routes, 518 visible controls,
+    391 exercised controls, 68 screenshots, zero failed controls, and zero
+    findings.
 
 ## Safety Gates
 

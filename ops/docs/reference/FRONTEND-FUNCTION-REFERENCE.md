@@ -3009,8 +3009,8 @@ Total files documented: **233**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 117 |
-| 5 | `manualChunks` | function | 121 |
+| 4 | `shouldDeferModulePreload` | function | 121 |
+| 5 | `manualChunks` | function | 125 |
 
 ### 3.233 `frontend/tailwind.config.ts`
 

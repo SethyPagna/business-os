@@ -8,23 +8,27 @@ Last updated: 2026-06-01
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 704, lazy-load local DB/Dexie out of startup
+- Latest completed move: Move 705, defer catalog and public portal preloads from startup
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `55cf7b8ef08a4b8d`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `035370df0dd56898`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `4ee9559e01210d68`
+  `035370df0dd56898`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
-- latest focused Dashboard desktop/mobile control audit retained after prune:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T13-11-44-170Z/summary.json`
+- latest exhaustive desktop/mobile all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-01T13-27-57-468Z/summary.json`
+- latest broad Phase 8.4 UI live check:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T13-42-12-482Z/report.json`
+- latest public Cloudflare portal check:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T13-45-04-827Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -37,16 +41,34 @@ Latest cleanup run:
 
 Current honest pockets:
 
-- broad Phase 8.4 UI live check passed with 72 checked signals, no relevant
-  console messages, and no framework overlay
-- post-live hygiene passed after elevated Docker access, with loaded dataset
-  status and zero generated integrity matches
-- the public Cloudflare portal check still failed because
-  `https://leangcosmetics.dpdns.org/public` did not render expected customer
-  content; keep that as the next public tunnel/runtime issue instead of mixing
-  it into local TypeScript migration work
+- exhaustive desktop/mobile all-pages Playwright control audit passed across
+  34 routes, with 518 visible controls discovered, 391 controls exercised, 127
+  intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
+  failed controls, and zero findings
+- broad Phase 8.4 UI live check passed on frontend hash `035370df0dd56898`
+  with 72 checked signals, no relevant console messages, and no framework
+  overlay
+- public Cloudflare portal check passed with 20 rendered products, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced CSP
+- post-live hygiene passed with loaded dataset status and zero generated
+  integrity matches
 
 Recent runtime/load win:
+
+- Frontend startup now defers catalog and public portal route chunks from
+  eager modulepreload. `frontend/vite.config.ts` excludes `catalog`,
+  `catalog-preview`, `catalog-editor`, and `portal-tools` chunk prefixes from
+  startup preload while keeping the route-lazy `CatalogPage` import intact, so
+  the public catalog and admin catalog still load when navigated but no longer
+  compete with the first shell/dashboard paint. The running Docker app was
+  clean-synced with the rebuilt `frontend/dist`, and the live
+  `http://127.0.0.1:4000/` HTML now preloads only the startup set: entry,
+  React/vendor/lucide, English translations, API startup, shell/shared, media
+  upload helpers, initials, and CSS. The production build hash is
+  `035370df0dd56898`; the exhaustive Playwright all-pages control audit passed
+  across 34 desktop/mobile routes with zero failed controls and zero findings;
+  the broad Phase 8.4 UI live check, public Cloudflare portal check, and
+  post-live hygiene gate also passed.
 
 - Frontend startup now keeps Dexie and the local IndexedDB schema out of the
   critical browser load path. `frontend/src/web-api.ts` no longer statically

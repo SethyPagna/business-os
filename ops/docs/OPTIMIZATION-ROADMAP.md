@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 704.
+- Latest completed implementation move in this roadmap: Move 705.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8352,3 +8352,26 @@ Move 704 status:
   focused Dashboard desktop/mobile live control audit passed with 36/46
   controls tested, 10 long-label controls skipped, and zero findings; Phase 29
   and live hygiene checks are rerun after reference refresh.
+
+Move 705 status:
+- Move 705 defers catalog and public portal route chunks out of the initial
+  modulepreload set. `frontend/vite.config.ts` now excludes `catalog`,
+  `catalog-preview`, `catalog-editor`, and `portal-tools` chunk prefixes from
+  eager preload while keeping the `CatalogPage` route import lazy in
+  `frontend/src/App.tsx`. The catalog/admin portal code still loads when staff
+  navigate to that page and the public catalog still renders from the public
+  route, but those chunks no longer compete with the first shell/dashboard
+  paint. Production `frontend/dist/index.html` and the live Docker-served
+  `http://127.0.0.1:4000/` HTML no longer preload `catalog-*`,
+  `catalog-preview-*`, `catalog-editor-*`, `portal-tools-*`, `app-local-db-*`,
+  or `vendor-dexie-*`. The running Docker app was clean-synced with the
+  rebuilt `frontend/dist` before browser verification. Proof: performance
+  loading UX guard, source syntax check, typecheck, frontend utility suite,
+  production build hash `035370df0dd56898`, exhaustive Playwright all-pages
+  control audit across 34 desktop/mobile routes with 518 visible controls, 391
+  exercised controls, 68 screenshots, zero failed controls, and zero findings;
+  broad Phase 8.4 UI live check passed with 72 checked signals and no relevant
+  console messages; public Cloudflare portal check passed with 20 rendered
+  products, zero failed responses, zero page errors, and enforced CSP; post-live
+  hygiene passed with loaded dataset status and zero generated integrity
+  matches.
