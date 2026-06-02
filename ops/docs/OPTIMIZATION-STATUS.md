@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 712, prime startup health from authenticated bootstrap
+- Latest completed move: Move 713, defer inactive Dashboard bar-chart code
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `09107596d6229a5a`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `9ee8a8bbcfeb8deb`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `09107596d6229a5a`
+  `9ee8a8bbcfeb8deb`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-49-30-643Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-06-07-357Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-50-10-063Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-06-48-825Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `09107596d6229a5a`
+- broad Phase 8.4 UI live check passed on frontend hash `9ee8a8bbcfeb8deb`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,21 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Dashboard first-paint chart code is now narrower. `frontend/src/components/dashboard/Dashboard.tsx`
+  imports the visible line and payment donut charts directly, while the
+  inactive volume/transactions `BarChart` path lazy-loads only when that chart
+  branch renders. `frontend/tests/performanceLoadingUx.test.ts` now guards
+  against reintroducing the eager chart barrel import. Production build proof
+  split `BarChart` into a 3.33 kB lazy chunk and reduced the first-paint
+  `DonutChart` chunk from the previous 10.58 kB chart bundle to 7.56 kB.
+  Real Docker-served Playwright proof against `http://127.0.0.1:4000/dashboard`
+  on build hash `9ee8a8bbcfeb8deb` kept startup at two app API responses,
+  confirmed `BarChart` was neither requested nor modulepreloaded, confirmed
+  the visible donut chart still loaded, and had zero relevant console messages.
+  Broad Phase 8.4 UI live check, public Cloudflare portal check, and post-live
+  hygiene passed after restarting the Cloudflare tunnel from a transient 530
+  edge-connectivity failure.
 
 - Authenticated startup now primes the shared health and runtime-version cache
   from `/api/auth/bootstrap`, so Dashboard first paint no longer pays a

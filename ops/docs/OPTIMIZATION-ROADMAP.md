@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 712.
+- Latest completed implementation move in this roadmap: Move 713.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8526,3 +8526,22 @@ Move 712 status:
   summary refetches after pressing `7 Days`. A transient public Cloudflare 530
   was traced to tunnel edge connectivity and recovered by restarting only
   `business-os-cloudflared-1` before the final green live suite.
+
+Move 713 status:
+- Move 713 narrows Dashboard first-paint chart code by keeping visible line
+  and payment donut charts available while lazy-loading the inactive
+  volume/transactions `BarChart` branch. `frontend/src/components/dashboard/Dashboard.tsx`
+  now imports `LineChart` and `DonutChart` directly instead of the eager chart
+  barrel, and `frontend/tests/performanceLoadingUx.test.ts` guards the lazy
+  bar-chart path. Proof: performance loading guard, frontend typecheck, source
+  guard, frontend utility suite, production build hash `9ee8a8bbcfeb8deb`,
+  Docker live sync, authenticated Playwright startup chunk trace, broad Phase
+  8.4 UI live check, public Cloudflare portal check, and post-live hygiene
+  passed. Production output split `BarChart` into a 3.33 kB lazy chunk and
+  reduced the first-paint `DonutChart` chart chunk from the earlier 10.58 kB
+  bundle to 7.56 kB. The focused live trace confirmed startup still uses two
+  app API responses, `BarChart` is neither requested nor modulepreloaded, the
+  visible donut chart still loads, and relevant console messages remain zero.
+  A transient public Cloudflare 530 was again traced to tunnel edge
+  connectivity and recovered by restarting only `business-os-cloudflared-1`
+  before the final green live suite.

@@ -1109,4 +1109,13 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   zero startup `/health`, zero initial legacy dashboard/analytics split calls,
   and zero relevant console messages. Pressing `7 Days` still made exactly one
   analytics request and no summary refetch.
+- Move 444 defers inactive Dashboard bar-chart code. Dashboard now imports
+  visible line and payment donut charts directly while lazy-loading the
+  inactive volume/transactions `BarChart` branch. Production output split
+  `BarChart` into a 3.33 kB lazy chunk and reduced the first-paint chart chunk
+  from the earlier 10.58 kB bundle to a 7.56 kB `DonutChart` chunk.
+  Docker-served Playwright proof on hash `9ee8a8bbcfeb8deb` confirmed
+  `BarChart` was neither requested nor modulepreloaded during default
+  Dashboard startup, the visible donut chart still loaded, startup stayed at
+  two app API responses, and relevant console messages stayed at zero.
 <!-- phase29-manual-notes:end -->

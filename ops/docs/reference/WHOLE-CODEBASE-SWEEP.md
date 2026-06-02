@@ -712,3 +712,12 @@ responses, `/api/auth/bootstrap` and `/api/dashboard/startup`, with zero
 startup `/health`, zero initial legacy dashboard/analytics split calls, and a
 `7 Days` range interaction that still makes exactly one analytics request and
 no summary refetch.
+
+Move 184 records the Dashboard chart-code split. The accepted rewire stays in
+React/TypeScript, replaces the eager dashboard chart barrel import with direct
+visible chart imports, and moves the inactive volume/transactions `BarChart`
+branch behind `React.lazy`/`Suspense`. The Docker-served Playwright proof on
+hash `9ee8a8bbcfeb8deb` shows the first Dashboard render still loads the
+visible payment donut, but does not request or modulepreload `BarChart`; build
+output split `BarChart` into a 3.33 kB lazy chunk and reduced the first-paint
+chart chunk to 7.56 kB.

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 712 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 713 in this file.
 
 ## Goal
 
@@ -6799,6 +6799,21 @@ Decision rule:
     startup `/health`, zero initial legacy dashboard/analytics split calls,
     and a `7 Days` interaction that made exactly one analytics call and no
     summary refetch.
+
+713. Defer inactive Dashboard bar-chart code.
+    Done: Dashboard now imports the visible line and donut chart components
+    directly and lazy-loads the inactive volume/transactions `BarChart` branch
+    behind `React.lazy`/`Suspense`. The performance loading guard rejects the
+    old eager chart-barrel import and requires the lazy bar-chart path. Proof:
+    performance loading guard, frontend typecheck, source guard, frontend
+    utility suite, production build hash `9ee8a8bbcfeb8deb`, Docker live sync,
+    authenticated Playwright startup chunk trace, broad Phase 8.4 UI live
+    check, public Cloudflare portal check, and post-live hygiene. Production
+    output split `BarChart` into a 3.33 kB lazy chunk and reduced the
+    first-paint chart chunk from the earlier 10.58 kB bundle to a 7.56 kB
+    `DonutChart` chunk. The live trace confirmed `BarChart` was not requested
+    or modulepreloaded during default Dashboard startup, while the visible
+    donut chart still loaded and the console stayed clean.
 
 ## Safety Gates
 

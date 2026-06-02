@@ -1401,3 +1401,34 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-49-30-643Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-50-10-063Z/report.json`.
+
+- change: defer inactive Dashboard bar-chart code
+- affected files:
+  `frontend/src/components/dashboard/Dashboard.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: Dashboard first-paint chart chunk graph and
+  volume/transactions chart branch
+- keeper or rollback: keeper; it removes inactive chart code from default
+  startup while keeping the visible line and payment donut charts available
+  and preserving the bar chart behind a stable lazy fallback
+- route-scoped result: real Docker-served authenticated Playwright trace
+  against `http://127.0.0.1:4000/dashboard` on frontend hash
+  `9ee8a8bbcfeb8deb` kept startup at two app API responses, confirmed
+  `BarChart` was neither requested nor modulepreloaded, confirmed the visible
+  `DonutChart` still loaded, and had zero relevant console messages. The
+  production build split `BarChart` into a 3.33 kB lazy chunk and reduced the
+  first-paint chart chunk from the previous 10.58 kB bundle to 7.56 kB.
+- warm whole-app result: performance loading guard, frontend typecheck, source
+  guard, frontend utility suite, production build, Docker live sync,
+  authenticated Playwright startup chunk trace, broad Phase 8.4 UI live check,
+  public Cloudflare portal check, and post-live hygiene passed. The first
+  public Cloudflare check hit 530 while cloudflared logged edge
+  `connect: network is unreachable`; restarting only `business-os-cloudflared-1`
+  restored HTTP 200 and the final live suite passed. Broad Phase 8.4 live
+  report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-06-07-357Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-06-48-825Z/report.json`.
