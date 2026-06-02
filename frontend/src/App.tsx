@@ -282,6 +282,7 @@ const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
 const INTENT_CHUNK_WARMUP_DELAY_MS = 80
 const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 30000
 const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000
+const PENDING_SYNC_POLL_INTERVAL_MS = 20_000
 const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000
 const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000
 const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 45000
@@ -582,6 +583,20 @@ function scheduleInitialPendingSyncRefresh(refresh: () => void): CancelWarmup {
   }
 }
 
+function scheduleDeferredPendingSyncPolling(refresh: () => void): CancelWarmup {
+  if (typeof window === 'undefined') return () => {}
+
+  let intervalId: number | null = null
+  const timerId = window.setTimeout(() => {
+    intervalId = window.setInterval(refresh, PENDING_SYNC_POLL_INTERVAL_MS)
+  }, PENDING_SYNC_INITIAL_REFRESH_DELAY_MS)
+
+  return () => {
+    window.clearTimeout(timerId)
+    if (intervalId != null) window.clearInterval(intervalId)
+  }
+}
+
 function isImportTrackerWakeEvent(event: Event): boolean {
   if (!(event instanceof CustomEvent)) return false
   const detail = event.detail as SyncUpdateDetail | null
@@ -758,10 +773,10 @@ function useSyncErrorBanner(user: AppUser | null) {
     window.addEventListener('sync:app-update-available', onAppUpdate)
     window.addEventListener('sync:write-conflict', onConflictReview)
     const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
-    const timer = window.setInterval(refreshPendingSync, 20_000)
+    const cancelPendingSyncPolling = scheduleDeferredPendingSyncPolling(refreshPendingSync)
     return () => {
       cancelInitialPendingSyncRefresh()
-      if (timer) window.clearInterval(timer)
+      cancelPendingSyncPolling()
       window.removeEventListener('sync:error', onSyncError)
       window.removeEventListener('sync:write-blocked', onSyncError)
       window.removeEventListener('sync:transient-outage', onTransientOutage)
