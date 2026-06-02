@@ -183,6 +183,12 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/NotificationCenter.tsx')) return 'notification-center'
     if (normalized.includes('/src/components/shared/BackgroundImportTracker.tsx')) return 'background-import-tracker'
     if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
+    if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-pagination'
+    if (normalized.includes('/src/components/shared/ActionHistoryBar.tsx')) return 'shared-action-history'
+    if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-filter-menu'
+    if (normalized.includes('/src/components/shared/SectionSwitcher.tsx')) return 'shared-section-switcher'
+    if (normalized.includes('/src/components/shared/PageHeader.tsx')) return 'shared-page-header'
+    if (normalized.includes('/src/components/shared/Modal.tsx')) return 'shared-modal'
     if (
       normalized.endsWith('/src/api/http.ts')
       || normalized.endsWith('/src/api/websocket.ts')
