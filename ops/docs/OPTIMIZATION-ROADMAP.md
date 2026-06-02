@@ -8841,3 +8841,41 @@ Move 725 status:
   rendered 20 products with zero failed responses, zero relevant console
   messages, zero page errors, enforced CSP, and no first-load `auth-login`,
   `app-api-methods`, `vendor-dexie`, `app-auth`, or `app-local-db` requests.
+
+Move 726 status:
+- Move 726 lazy-loads public portal transport from the legacy API registry.
+  The repeated chunk sweep found one remaining dependency edge: even after the
+  public portal stopped calling `api/methods.ts` directly, the admin/legacy API
+  registry still statically imported `portalTransport.ts`, keeping portal
+  endpoint strings and review/submission helpers in the default registry
+  chunk. The accepted rewire changes only that dependency edge.
+- `frontend/src/api/methods.ts` now uses a memoized dynamic
+  `loadPortalTransport()` helper for legacy/admin portal fallback methods.
+  `frontend/tests/apiHttp.test.ts` rejects a static `portalTransport.ts`
+  import and verifies the dynamic boundary. This stays in TypeScript/Vite
+  because the load problem is chunk ownership, not a native-runtime bottleneck.
+- Production build hash `73fbae6ef77ff4b8` was deployed into
+  `business-os-app-1` and verified through local `/health`,
+  `/business-os-build.json`, and `/public`. Public Cloudflare briefly returned
+  HTTP 530 after the app restart while local `/public` stayed HTTP 200;
+  restarting only `business-os-cloudflared-1` restored public HTTP 200, which
+  keeps the issue in the existing tunnel/Docker DNS follow-up.
+- Proof: `node frontend/tests/apiHttp.test.ts`, `node
+  frontend/tests/performanceLoadingUx.test.ts`, `npm.cmd --prefix frontend run
+  typecheck`, `npm.cmd --prefix frontend run check:jsx`, `npm.cmd --prefix
+  frontend run build`, Docker live sync, emitted chunk scans, public
+  Cloudflare Playwright, and broad Phase 8.4 UI Playwright passed.
+- Emitted chunk proof: `app-api-methods-DGc6nbrI.js` is 60,808 bytes and has
+  no portal endpoint strings; `app-portal-DTjuMQBz.js` owns the portal
+  endpoints at 2,747 bytes.
+- Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T19-48-47-456Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, enforced CSP, and the focused
+  `app-portal-DTjuMQBz.js` request.
+- Broad UI report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-49-20-982Z/report.json`
+  passed on frontend hash `73fbae6ef77ff4b8`, exercised dashboard, branches,
+  sales, products, returns, files/library, catalog/public portal, receipt
+  settings, POS, inventory, contacts, loyalty, users, audit, settings, server,
+  and backup helper paths, and recorded zero relevant console messages.

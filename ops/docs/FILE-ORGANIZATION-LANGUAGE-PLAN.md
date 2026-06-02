@@ -7031,6 +7031,21 @@ Decision rule:
     restarting only `business-os-cloudflared-1` restored HTTP 200, with logs
     pointing to edge/Docker DNS connectivity rather than app code.
 
+726. Lazy-load public portal transport from the legacy API registry.
+    Done: `frontend/src/api/methods.ts` now keeps legacy/admin portal fallback
+    methods behind a memoized dynamic `loadPortalTransport()` boundary instead
+    of statically importing `portalTransport.ts`. `frontend/tests/apiHttp.test.ts`
+    guards the split by rejecting a static portal transport import and
+    verifying the dynamic import. This is an organization and Vite chunk-graph
+    move: the public portal already has the focused `app-portal` owner, and
+    the remaining registry should not own portal endpoint implementation by
+    default. Proof: API HTTP source test, performance loading guard, frontend
+    typecheck, source guard, production build hash `73fbae6ef77ff4b8`, emitted
+    chunk scans, Docker live sync, public Cloudflare Playwright, and broad
+    Phase 8.4 UI Playwright passed. The built `app-api-methods-DGc6nbrI.js`
+    chunk is 60,808 bytes and contains no portal endpoint strings; the
+    `app-portal-DTjuMQBz.js` chunk owns those endpoints at 2,747 bytes.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

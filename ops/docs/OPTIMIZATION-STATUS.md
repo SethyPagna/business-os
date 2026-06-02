@@ -930,7 +930,10 @@ Recent route-level win:
   inputs and CSV decoding out of the remaining domain registry. System job
   polling, cancellation, and backup folder queue helpers now live in
   `frontend/src/api/systemJobs.ts`, keeping long-running Backup transport
-  mechanics out of the remaining domain registry.
+  mechanics out of the remaining domain registry. Public portal fallback
+  methods inside the legacy registry now lazy-load `portalTransport.ts`
+  through a memoized dynamic boundary, so `app-api-methods` no longer carries
+  portal endpoint strings by default.
 
 ## Recently Rejected Candidates
 
@@ -951,10 +954,13 @@ Recent route-level win:
 
 ## Next Best Moves
 
-1. Split `frontend/src/api/methods.ts` into typed sections, starting with
-   bounded helpers and low-risk domain clusters, then remove its temporary
-   `ts-nocheck` marker when request payloads, retries, cache invalidation,
-   import jobs, and offline mirrors are covered by explicit types.
+1. Continue splitting `frontend/src/api/methods.ts` into typed sections,
+   starting with bounded domain clusters that still have static imports in
+   the registry. Next candidates: settings/system transport, customer/contact
+   helpers, and write-conflict/offline mirror paths. Remove the temporary
+   `ts-nocheck` marker only after request payloads, retries, cache
+   invalidation, import jobs, and offline mirrors are covered by explicit
+   types.
 2. Keep backend TypeScript packaging and generated runtime wrappers guarded by
    the runtime JavaScript inventory, Docker release guardrail, and backend
    package staging checks before deleting any generated startup file.

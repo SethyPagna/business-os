@@ -1257,4 +1257,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
   kept the admin app helper loaders at HTTP 200 with zero relevant console
   messages.
+- Move 457 records roadmap Move 726: lazy-load public portal transport from
+  the legacy API registry. The remaining `api/methods.ts` registry no longer
+  statically imports `portalTransport.ts`; legacy/admin fallback methods use a
+  memoized dynamic boundary. Docker-served build hash `73fbae6ef77ff4b8`
+  passed API HTTP source coverage, the performance loading guard, frontend
+  typecheck, source checks, production build, emitted chunk scans, Docker live
+  sync, public Cloudflare Playwright, and broad Phase 8.4 UI Playwright. The
+  emitted `app-api-methods-DGc6nbrI.js` chunk is 60,808 bytes and contains no
+  portal endpoint strings, while `app-portal-DTjuMQBz.js` owns the portal
+  endpoints at 2,747 bytes. The public report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T19-48-47-456Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, enforced CSP, and the expected focused portal
+  chunk request. The broad report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-49-20-982Z/report.json`
+  kept all checked admin/helper paths at HTTP 200 with zero relevant console
+  messages.
 <!-- phase29-manual-notes:end -->

@@ -1864,3 +1864,38 @@ Use this shape for future entries:
   `business-os-cloudflared-1` restored public HTTP 200; cloudflared logs
   showed Cloudflare edge/Docker DNS connectivity failures rather than app
   render failures.
+
+- change: lazy-load public portal transport from legacy API registry
+- affected files:
+  `frontend/src/api/methods.ts`,
+  `frontend/tests/apiHttp.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`,
+  `ops/docs/reference/WHOLE-CODEBASE-SWEEP.md`
+- route or API target: legacy/admin portal fallback methods and public portal
+  first-load chunk ownership
+- keeper or rollback: keeper; `api/methods.ts` no longer statically imports
+  `portalTransport.ts`, while fallback portal methods still work by awaiting a
+  memoized dynamic transport module
+- route-scoped result: Cloudflare-served public Playwright on frontend hash
+  `73fbae6ef77ff4b8` rendered 20 products, returned HTTP 200 for public
+  config/meta/search/AI endpoints, enforced CSP, recorded zero failed
+  responses, zero relevant console messages, zero page errors, and loaded the
+  focused `app-portal-DTjuMQBz.js` chunk:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T19-48-47-456Z/report.json`.
+- warm whole-app result: API HTTP source test, performance loading guard,
+  frontend typecheck, JSX/source check, production build, Docker live sync,
+  emitted chunk scans, public Cloudflare Playwright, and broad Phase 8.4 UI
+  Playwright passed. `app-api-methods-DGc6nbrI.js` is 60,808 bytes and has no
+  portal endpoint strings; `app-portal-DTjuMQBz.js` owns portal endpoints at
+  2,747 bytes. The broad report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-49-20-982Z/report.json`
+  exercised the admin app helper loaders with all checked endpoints at HTTP
+  200 and zero relevant console messages.
+- infrastructure note: public Cloudflare briefly returned HTTP 530 after app
+  restart while local `/public` stayed HTTP 200. Restarting only
+  `business-os-cloudflared-1` restored public HTTP 200, matching the existing
+  tunnel/Docker DNS follow-up rather than an app rendering regression.

@@ -890,3 +890,20 @@ repeated Cloudflare 530 after app restarts is tracked separately as
 tunnel/Docker DNS instability because local `/public` stayed HTTP 200 and
 cloudflared logs showed `network is unreachable` plus `127.0.0.11:53
 connection refused`.
+
+Move 197 records roadmap Move 726: legacy API registry portal transport
+lazy-loading. The repeated sweep found a smaller but still real dependency
+edge after Move 725: `frontend/src/api/methods.ts` still statically imported
+`portalTransport.ts`, so the default legacy registry chunk owned portal
+endpoint strings and review/submission helpers even though the public portal
+now calls the focused transport directly. The accepted rewire keeps the
+existing TypeScript/Vite stack and moves that edge behind a memoized dynamic
+`loadPortalTransport()` helper. `frontend/tests/apiHttp.test.ts` now rejects a
+static import and verifies the dynamic import. Docker-served hash
+`73fbae6ef77ff4b8` passed focused API/performance guards, frontend typecheck,
+source checks, production build, emitted chunk scans, public Cloudflare
+Playwright, and broad Phase 8.4 UI Playwright. `app-api-methods-DGc6nbrI.js`
+is 60,808 bytes and contains no portal endpoint strings; `app-portal-DTjuMQBz.js`
+owns the portal endpoints at 2,747 bytes. The public report rendered 20
+products with enforced CSP and zero relevant console/page errors, while the
+broad report kept all checked admin/helper routes at HTTP 200.

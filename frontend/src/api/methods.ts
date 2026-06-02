@@ -7,6 +7,13 @@ function getDeviceInfo() {
   return getClientDeviceInfo()
 }
 
+let portalTransportPromise = null
+
+function loadPortalTransport() {
+  if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
+  return portalTransportPromise
+}
+
 /**
  * api/methods.ts — All window.api domain methods.
  *
@@ -112,21 +119,6 @@ import {
   recordRfidSessionEvents as recordRfidSessionEventsRequest,
   searchRfidTags as searchRfidTagsRequest,
 } from './rfidTransport.ts'
-import {
-  askPortalAi as askPortalAiRequest,
-  createPortalSubmission as createPortalSubmissionRequest,
-  getCatalogMeta as getCatalogMetaRequest,
-  getCatalogProducts as getCatalogProductsRequest,
-  getPortalAiStatus as getPortalAiStatusRequest,
-  getPortalBootstrap as getPortalBootstrapRequest,
-  getPortalCatalogMeta as getPortalCatalogMetaRequest,
-  getPortalCatalogProducts as getPortalCatalogProductsRequest,
-  getPortalConfig as getPortalConfigRequest,
-  getPortalSubmissionsForReview as getPortalSubmissionsForReviewRequest,
-  lookupPortalMembership as lookupPortalMembershipRequest,
-  reviewPortalSubmission as reviewPortalSubmissionRequest,
-  searchPortalCatalogProducts as searchPortalCatalogProductsRequest,
-} from './portalTransport.ts'
 import {
   approveImportJob as approveImportJobRequest,
   cancelImportJob as cancelImportJobRequest,
@@ -652,42 +644,57 @@ export const getProductLookupUsage = () =>
 export const replaceProductLookupValues = (payload = {}) =>
   replaceProductLookupValuesRequest(payload)
 export async function getCatalogMeta() {
-  return getCatalogMetaRequest()
+  const module = await loadPortalTransport()
+  return module.getCatalogMeta()
 }
 export async function getCatalogProducts() {
-  return getCatalogProductsRequest()
+  const module = await loadPortalTransport()
+  return module.getCatalogProducts()
 }
 export async function getPortalConfig() {
-  return getPortalConfigRequest()
+  const module = await loadPortalTransport()
+  return module.getPortalConfig()
 }
 export async function getPortalBootstrap() {
-  return getPortalBootstrapRequest()
+  const module = await loadPortalTransport()
+  return module.getPortalBootstrap()
 }
 export async function getPortalCatalogMeta() {
-  return getPortalCatalogMetaRequest()
+  const module = await loadPortalTransport()
+  return module.getPortalCatalogMeta()
 }
 export async function getPortalCatalogProducts() {
-  return getPortalCatalogProductsRequest()
+  const module = await loadPortalTransport()
+  return module.getPortalCatalogProducts()
 }
 export async function searchPortalCatalogProducts(params = {}) {
-  return searchPortalCatalogProductsRequest(params)
+  const module = await loadPortalTransport()
+  return module.searchPortalCatalogProducts(params)
 }
 export async function lookupPortalMembership(membershipNumber) {
-  return lookupPortalMembershipRequest(membershipNumber)
+  const module = await loadPortalTransport()
+  return module.lookupPortalMembership(membershipNumber)
 }
 export async function createPortalSubmission(payload) {
-  return createPortalSubmissionRequest(payload)
+  const module = await loadPortalTransport()
+  return module.createPortalSubmission(payload)
 }
 export async function getPortalAiStatus() {
-  return getPortalAiStatusRequest()
+  const module = await loadPortalTransport()
+  return module.getPortalAiStatus()
 }
 export async function askPortalAi(payload) {
-  return askPortalAiRequest(payload)
+  const module = await loadPortalTransport()
+  return module.askPortalAi(payload)
 }
-export const getPortalSubmissionsForReview = () =>
-  getPortalSubmissionsForReviewRequest()
-export const reviewPortalSubmission = (id, payload) =>
-  reviewPortalSubmissionRequest(id, payload)
+export const getPortalSubmissionsForReview = async () => {
+  const module = await loadPortalTransport()
+  return module.getPortalSubmissionsForReview()
+}
+export const reviewPortalSubmission = async (id, payload) => {
+  const module = await loadPortalTransport()
+  return module.reviewPortalSubmission(id, payload)
+}
 
 export const getAiProviders = () =>
   getAiProvidersRequest()
