@@ -413,44 +413,50 @@ export default function CatalogPreviewSurface({
         </div>
       ) : null}
       <Suspense fallback={null}>
-        <ImageGalleryLightbox
-          open={productGalleryView.open && !!productGalleryView.items.length}
-          title={productGalleryView.title}
-          images={productGalleryView.items}
-          index={productGalleryView.index}
-          onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
-          onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
-          labels={{
-            prev: copy('prevImage', 'Prev'),
-            next: copy('nextImage', 'Next'),
-            imageCount: copy('imageCount', '{current}/{total}'),
-            dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-          }}
-          renderImage={(src, alt, className) => (
-            <ProductImg src={src} alt={alt} className={className} />
-          )}
-        />
-        <FilePickerModal
-          open={filePicker.open}
-          title={filePicker.title}
-          mediaType={filePicker.mediaType}
-          onClose={() => setFilePicker({ open: false, target: null, mediaType: 'image', title: 'Choose file' })}
-          onSelect={handleFilePickerSelect}
-        />
-        <ImageGalleryLightbox
-          open={portalImageView.open && !!portalImageView.images.length}
-          title={portalImageView.title}
-          images={portalImageView.images}
-          index={portalImageView.index}
-          onClose={() => setPortalImageView({ open: false, title: '', images: [], index: 0 })}
-          onIndexChange={(index: number) => setPortalImageView((current) => ({ ...current, index }))}
-          labels={{
-            prev: copy('prevImage', 'Prev'),
-            next: copy('nextImage', 'Next'),
-            imageCount: copy('imageCount', '{current}/{total}'),
-            dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-          }}
-        />
+        {productGalleryView.open && productGalleryView.items.length ? (
+          <ImageGalleryLightbox
+            open
+            title={productGalleryView.title}
+            images={productGalleryView.items}
+            index={productGalleryView.index}
+            onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
+            onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
+            labels={{
+              prev: copy('prevImage', 'Prev'),
+              next: copy('nextImage', 'Next'),
+              imageCount: copy('imageCount', '{current}/{total}'),
+              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+            }}
+            renderImage={(src, alt, className) => (
+              <ProductImg src={src} alt={alt} className={className} />
+            )}
+          />
+        ) : null}
+        {!publicView && filePicker.open ? (
+          <FilePickerModal
+            open={filePicker.open}
+            title={filePicker.title}
+            mediaType={filePicker.mediaType}
+            onClose={() => setFilePicker({ open: false, target: null, mediaType: 'image', title: 'Choose file' })}
+            onSelect={handleFilePickerSelect}
+          />
+        ) : null}
+        {portalImageView.open && portalImageView.images.length ? (
+          <ImageGalleryLightbox
+            open
+            title={portalImageView.title}
+            images={portalImageView.images}
+            index={portalImageView.index}
+            onClose={() => setPortalImageView({ open: false, title: '', images: [], index: 0 })}
+            onIndexChange={(index: number) => setPortalImageView((current) => ({ ...current, index }))}
+            labels={{
+              prev: copy('prevImage', 'Prev'),
+              next: copy('nextImage', 'Next'),
+              imageCount: copy('imageCount', '{current}/{total}'),
+              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+            }}
+          />
+        ) : null}
       </Suspense>
     </div>
   )

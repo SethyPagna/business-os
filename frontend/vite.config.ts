@@ -107,6 +107,8 @@ const deferredModulePreloadPrefixes = [
   'assets/file-picker-modal-',
   'assets/image-lightbox-',
   'assets/media-upload-utils-',
+  'assets/favicon-utils-',
+  'assets/public-asset-urls-',
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
@@ -187,6 +189,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
+      || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
     ) {
       return 'catalog-editor'
     }
@@ -200,11 +203,14 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/utils/initials.ts')) {
       return 'initials-utils'
     }
+    if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
+      return 'public-asset-urls'
+    }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
-    if (
-      normalized.includes('/src/utils/mediaUpload.ts')
-      || normalized.includes('/src/utils/favicon')
-    ) {
+    if (normalized.includes('/src/utils/favicon')) {
+      return 'favicon-utils'
+    }
+    if (normalized.includes('/src/utils/mediaUpload.ts')) {
       return 'media-upload-utils'
     }
     if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
