@@ -365,32 +365,32 @@ Total files documented: **234**
 | 3 | `normalizeApiPath` | function | 113 |
 | 4 | `getApiMismatchKey` | function | 130 |
 | 5 | `dispatchApiVersionMismatch` | function | 145 |
-| 6 | `logCall` | function | 220 |
-| 7 | `getClientMetaHeaders` | function | 228 |
-| 8 | `createApiError` | function | 232 |
-| 9 | `createCloudflareAccessError` | function | 261 |
-| 10 | `dispatchUnauthorized` | function | 271 |
-| 11 | `dispatchRuntimeVersionMismatch` | function | 299 |
-| 12 | `checkRuntimeVersionFromHealth` | function | 311 |
-| 13 | `createWriteBlockedError` | function | 318 |
-| 14 | `dispatchWriteBlocked` | function | 329 |
-| 15 | `dispatchTransientGatewayOutage` | function | 344 |
-| 16 | `getConflictRefreshChannels` | function | 409 |
-| 17 | `dispatchGlobalDataRefresh` | function | 418 |
-| 18 | `sleep` | function | 427 |
-| 19 | `hasUsableLocalData` | function | 431 |
-| 20 | `noteReadFailure` | function | 457 |
-| 21 | `stableStringifyForDedupe` | function | 478 |
-| 22 | `clampDedupeBody` | function | 488 |
-| 23 | `methodAllowsRequestBody` | function | 500 |
-| 24 | `parsed` | const arrow | 578 |
-| 25 | `shouldDispatchUnauthorized` | function | 639 |
-| 26 | `isConnectivityError` | function | 652 |
-| 27 | `setServerHealth` | function | 679 |
-| 28 | `getChannelRefreshKey` | function | 829 |
-| 29 | `emitCacheRefresh` | function | 834 |
-| 30 | `clearInflight` | function | 848 |
-| 31 | `hasReusableInflight` | function | 853 |
+| 6 | `logCall` | function | 224 |
+| 7 | `getClientMetaHeaders` | function | 232 |
+| 8 | `createApiError` | function | 236 |
+| 9 | `createCloudflareAccessError` | function | 265 |
+| 10 | `dispatchUnauthorized` | function | 275 |
+| 11 | `dispatchRuntimeVersionMismatch` | function | 303 |
+| 12 | `checkRuntimeVersionFromHealth` | function | 315 |
+| 13 | `createWriteBlockedError` | function | 322 |
+| 14 | `dispatchWriteBlocked` | function | 333 |
+| 15 | `dispatchTransientGatewayOutage` | function | 348 |
+| 16 | `getConflictRefreshChannels` | function | 413 |
+| 17 | `dispatchGlobalDataRefresh` | function | 422 |
+| 18 | `sleep` | function | 431 |
+| 19 | `hasUsableLocalData` | function | 435 |
+| 20 | `noteReadFailure` | function | 461 |
+| 21 | `stableStringifyForDedupe` | function | 482 |
+| 22 | `clampDedupeBody` | function | 492 |
+| 23 | `methodAllowsRequestBody` | function | 504 |
+| 24 | `parsed` | const arrow | 582 |
+| 25 | `shouldDispatchUnauthorized` | function | 643 |
+| 26 | `isConnectivityError` | function | 656 |
+| 27 | `setServerHealth` | function | 683 |
+| 28 | `getChannelRefreshKey` | function | 833 |
+| 29 | `emitCacheRefresh` | function | 838 |
+| 30 | `clearInflight` | function | 852 |
+| 31 | `hasReusableInflight` | function | 857 |
 
 ### 3.19 `frontend/src/api/importJobsTransport.ts`
 
@@ -796,21 +796,21 @@ Total files documented: **234**
 | 22 | `LoadingScreen` | function | 457 |
 | 23 | `AccessDenied` | function | 470 |
 | 24 | `persistAutoSyncUrl` | const arrow | 559 |
-| 25 | `onUpdate` | const arrow | 756 |
-| 26 | `onStatus` | const arrow | 788 |
-| 27 | `poll` | const arrow | 797 |
-| 28 | `onError` | const arrow | 817 |
-| 29 | `onWriteBlocked` | const arrow | 839 |
-| 30 | `onRuntimeMismatch` | const arrow | 849 |
-| 31 | `onConflict` | const arrow | 869 |
-| 32 | `onUnauthorized` | const arrow | 938 |
-| 33 | `handleOtpLogin` | const arrow | 997 |
-| 34 | `handleUserUpdated` | const arrow | 1039 |
-| 35 | `discoverSyncUrl` | const arrow | 1076 |
-| 36 | `runStartupHealthProbe` | const arrow | 1099 |
-| 37 | `clearCallbackUrl` | const arrow | 1469 |
-| 38 | `clearPendingLink` | const arrow | 1473 |
-| 39 | `run` | const arrow | 1477 |
+| 25 | `onUpdate` | const arrow | 757 |
+| 26 | `onStatus` | const arrow | 789 |
+| 27 | `poll` | const arrow | 798 |
+| 28 | `onError` | const arrow | 818 |
+| 29 | `onWriteBlocked` | const arrow | 840 |
+| 30 | `onRuntimeMismatch` | const arrow | 850 |
+| 31 | `onConflict` | const arrow | 870 |
+| 32 | `onUnauthorized` | const arrow | 939 |
+| 33 | `handleOtpLogin` | const arrow | 998 |
+| 34 | `handleUserUpdated` | const arrow | 1040 |
+| 35 | `discoverSyncUrl` | const arrow | 1077 |
+| 36 | `runStartupHealthProbe` | const arrow | 1100 |
+| 37 | `clearCallbackUrl` | const arrow | 1470 |
+| 38 | `clearPendingLink` | const arrow | 1474 |
+| 39 | `run` | const arrow | 1478 |
 
 ### 3.45 `frontend/src/components/auth/Login.tsx`
 

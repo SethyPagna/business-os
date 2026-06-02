@@ -785,3 +785,13 @@ relevant console noise after the expected unauthenticated bootstrap 401; the
 authenticated Dashboard still registers live sync listeners, starts websocket
 polling, and returns `/api/dashboard/startup` HTTP 200 with zero failed
 requests.
+
+Move 190 records the final signed-out sync-listener cleanup. The accepted
+rewire keeps HTTP cache invalidation in TypeScript but makes it an explicit
+one-shot session-time installer instead of a module-load side effect. This
+removes the final `sync:update` listener from signed-out startup while keeping
+authenticated websocket and cache invalidation behavior intact. Docker-served
+Playwright proof on hash `81223d01f14bfad9` shows signed-out `/login` with
+empty listener, interval, and timeout probes; the authenticated Dashboard still
+installs `sync:update`, starts live sync polling, and returns
+`/api/dashboard/startup` HTTP 200 with zero console or failed-request noise.

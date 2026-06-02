@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 718 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 719 in this file.
 
 ## Goal
 
@@ -6900,6 +6900,22 @@ Decision rule:
     console noise after filtering the expected unauthenticated bootstrap 401.
     The authenticated Dashboard still registered sync/auth listeners and live
     websocket polling.
+
+719. Lazy-install HTTP sync cache invalidation after session recovery.
+    Done: `frontend/src/api/http.ts` now keeps cache invalidation as an
+    exported one-shot installer, `ensureSyncUpdateCacheListener()`, instead of
+    registering `sync:update` at module load. `frontend/src/AppContext.tsx`
+    calls that installer only after the recoverable-session gate passes. This
+    is a small TypeScript runtime-flow cleanup: it removes the final
+    signed-out sync listener without changing the cache invalidation strategy
+    for authenticated sessions. Proof: focused app-shell and performance
+    guards, frontend typecheck, frontend utility suite, production build hash
+    `81223d01f14bfad9`, Docker live sync, instrumented Login/Dashboard
+    Playwright probe, broad Phase 8.4 UI live check, public Cloudflare portal
+    check, and post-live hygiene passed. The signed-out `/login` probe
+    observed `listeners: []`, `intervals: []`, and `timeouts: []`, while the
+    authenticated Dashboard still registered `sync:update` and live sync
+    polling.
 
 ## Safety Gates
 

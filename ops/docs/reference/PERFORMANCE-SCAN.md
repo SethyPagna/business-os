@@ -1170,4 +1170,12 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   still registered sync/auth listeners, started websocket polling, returned
   `/api/dashboard/startup` HTTP 200, and had zero console or failed-request
   noise.
+- Move 450 lazy-installs HTTP sync cache invalidation after session recovery.
+  The HTTP module no longer registers `sync:update` when signed-out startup
+  imports it; AppContext installs the one-shot cache listener only after the
+  recoverable-session gate passes. Docker-served Playwright proof on hash
+  `81223d01f14bfad9` observed signed-out `/login` with `listeners: []`,
+  `intervals: []`, and `timeouts: []`, while authenticated Dashboard still
+  registered `sync:update`, sync/auth listeners, websocket polling, and
+  `/api/dashboard/startup` HTTP 200 with zero console or failed-request noise.
 <!-- phase29-manual-notes:end -->

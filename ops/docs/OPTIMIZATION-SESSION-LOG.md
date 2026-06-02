@@ -1604,3 +1604,35 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T03-11-44-760Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T03-12-21-734Z/report.json`.
+
+- change: lazy-install HTTP sync cache invalidation after session recovery
+- affected files:
+  `frontend/src/AppContext.tsx`,
+  `frontend/src/api/http.ts`,
+  `frontend/tests/appShellUtils.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: signed-out Login first render and authenticated
+  Dashboard sync cache invalidation
+- keeper or rollback: keeper; it removes the final signed-out sync listener
+  while keeping cache invalidation installed for authenticated sync sessions
+- route-scoped result: real Docker-served instrumented Playwright trace
+  against `http://127.0.0.1:4000/login` and `/dashboard` on frontend hash
+  `81223d01f14bfad9` observed signed-out `/login` with `listeners: []`,
+  `intervals: []`, `timeouts: []`, expected unauthenticated bootstrap 401,
+  and zero relevant console messages. The authenticated Dashboard returned
+  `/api/dashboard/startup` HTTP 200, registered `sync:update`, sync/auth
+  listeners, 500 ms websocket polling, the 100 ms quick check, and had zero
+  console or failed-request noise.
+- warm whole-app result: focused app-shell guard, performance loading guard,
+  frontend typecheck, frontend utility suite, production build, Docker live
+  sync, instrumented Login/Dashboard Playwright probe, broad Phase 8.4 UI live
+  check, public Cloudflare portal check, and post-live hygiene passed. The
+  first public Cloudflare check failed while the tunnel was stale; restarting
+  only `business-os-cloudflared-1` restored public HTTP 200 and the final
+  live suite passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T03-23-20-716Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T03-24-03-733Z/report.json`.

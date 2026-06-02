@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 718.
+- Latest completed implementation move in this roadmap: Move 719.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8656,3 +8656,21 @@ Move 718 status:
   `/api/dashboard/startup` HTTP 200, and had zero console or failed-request
   noise. A stale public Cloudflare portal failure was recovered by restarting
   only `business-os-cloudflared-1` before the final green live suite.
+
+Move 719 status:
+- Move 719 removes the final signed-out sync listener by lazy-installing HTTP
+  cache invalidation after session recovery. `frontend/src/api/http.ts` now
+  exports `ensureSyncUpdateCacheListener()` instead of registering
+  `sync:update` at module load, and `frontend/src/AppContext.tsx` calls that
+  installer only after the active/stored user gate passes. Proof: focused
+  app-shell and performance guards, frontend typecheck, frontend utility
+  suite, production build hash `81223d01f14bfad9`, Docker live sync,
+  instrumented Playwright login/dashboard probe, broad Phase 8.4 UI live
+  check, public Cloudflare portal check, and post-live hygiene passed. The
+  focused live trace saw signed-out `/login` with `listeners: []`,
+  `intervals: []`, and `timeouts: []`; the authenticated Dashboard still
+  registered `sync:update`, sync/auth listeners, 500 ms websocket polling,
+  the 100 ms quick check, and `/api/dashboard/startup` HTTP 200 with zero
+  console or failed-request noise. A stale public Cloudflare portal failure
+  was recovered by restarting only `business-os-cloudflared-1` before the
+  final green live suite.
