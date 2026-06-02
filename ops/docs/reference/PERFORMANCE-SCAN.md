@@ -1208,4 +1208,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   Dashboard with one online listener, two focus listeners, three visibility
   listeners, one WebSocket, `/api/dashboard/startup` HTTP 200, and zero
   relevant console noise.
+- Move 454 records roadmap Move 723: gate the background import tracker to
+  real import activity. `App.tsx` now keeps the tracker out of normal
+  navigation until a 180 second idle window or an explicit
+  `import-job:activity` event, and `importJobsTransport.ts` emits that event
+  only for real import job create/start/upload/cancel/retry/delete work.
+  `BackgroundImportTracker` no longer imports the shared Settings `Trash2`
+  icon, so Vite does not make Settings/Backup navigation fetch the tracker
+  chunk as a shared icon carrier. Docker-served Playwright proof on hash
+  `cb6332a2ac6f7165` shows the broad Phase 8.4 UI live check produced zero
+  `background-import-tracker` and zero `/api/import-jobs` requests during
+  normal route exercise. A focused probe confirmed generic product,
+  inventory, and bare imports sync events kept the tracker dark, while
+  explicit `import-job:activity` loaded `background-import-tracker-C6QiW-VT.js`
+  and `/api/import-jobs?limit=8` at HTTP 200.
 <!-- phase29-manual-notes:end -->

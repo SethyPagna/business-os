@@ -832,3 +832,19 @@ Playwright proof on hash `254ace63c1c99efe` shows signed-out `/login` still
 has no recovery listener, WebSocket, or interval work, while authenticated
 Dashboard has one online listener, two focus listeners, three visibility
 listeners, one WebSocket, and clean startup API/console behavior.
+
+Move 194 records roadmap Move 723: background import tracker activity gating.
+The repeated sweep found a route-load performance issue in the frontend chunk
+graph, not a case for Rust, Go, Python, or WASM. The accepted rewire stays in
+React/TypeScript/Vite: `App.tsx` gates tracker mounting behind a 180 second
+idle timer or explicit `import-job:activity`; `importJobsTransport.ts` emits
+that event from real import job mutations/uploads; and
+`BackgroundImportTracker` no longer imports the shared Settings `Trash2` icon,
+which had let Vite use the tracker chunk as an icon carrier for Settings.
+Verification on Docker-served hash `cb6332a2ac6f7165` showed normal broad UI
+navigation made zero tracker/import-jobs requests, while a focused Playwright
+probe confirmed explicit import activity still loads the tracker and
+`/api/import-jobs?limit=8` at HTTP 200. Cleanup in the same verification pass
+removed 60,810,012 bytes of old runtime reports while preserving current
+evidence, latest local backups, uploads, secrets, env files, and newest R2
+backup coverage.

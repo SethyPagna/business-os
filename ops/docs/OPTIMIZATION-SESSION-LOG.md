@@ -1742,3 +1742,47 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T15-59-00-742Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T15-59-50-621Z/report.json`.
+
+- change: gate background import tracker to real import activity
+- affected files:
+  `frontend/src/App.tsx`,
+  `frontend/src/api/importJobsTransport.ts`,
+  `frontend/src/components/shared/BackgroundImportTracker.tsx`,
+  `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`,
+  `ops/docs/reference/WHOLE-CODEBASE-SWEEP.md`
+- route or API target: authenticated normal navigation and global import job
+  progress tracker
+- keeper or rollback: keeper; it removes normal-route tracker chunk/API work
+  while preserving immediate tracker wakeup for actual import actions
+- route-scoped result: Docker-served broad Phase 8.4 UI live check on
+  frontend hash `cb6332a2ac6f7165` exercised dashboard, branches, sales,
+  products, returns, library, catalog/public portal, receipt settings, POS,
+  inventory, contacts, loyalty, users, audit, settings, server, and backup
+  loaders. The report contains zero `background-import-tracker` and zero
+  `/api/import-jobs` requests during normal navigation:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T16-53-31-646Z/report.json`.
+- focused tracker proof: `ops/runtime/reports/move723-import-tracker-probe-2026-06-02T16-53-06-381Z.json`
+  observed no tracker/import-jobs requests after generic product, inventory,
+  and bare imports `sync:update` events; explicit `import-job:activity`
+  loaded `background-import-tracker-C6QiW-VT.js` and
+  `/api/import-jobs?limit=8`, both HTTP 200, with no browser failures.
+- warm whole-app result: performance loading guard, import transport API
+  test, frontend typecheck, JSX/source check, frontend utility suite,
+  production build, Docker live sync, focused tracker probe, broad Phase 8.4
+  UI live check, public Cloudflare portal check, post-live hygiene, and
+  storage prune passed. The first full live suite public step failed with
+  Cloudflare HTTP 530 while the tunnel was stale; restarting only
+  `business-os-cloudflared-1` restored public HTTP 200 and the rerun public
+  check passed with 20 products, zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-05-26-223Z/report.json`.
+- cleanup result: `npm.cmd --prefix ops run prune-storage` removed
+  60,810,012 bytes of old runtime reports/probe output, kept latest local
+  backups, kept newest R2 backup `datasync-2026-06-02T14-23-51-966Z`, and
+  found no stopped containers or Docker builder cache to reclaim.

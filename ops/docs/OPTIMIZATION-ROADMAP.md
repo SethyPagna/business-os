@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 722.
+- Latest completed implementation move in this roadmap: Move 723.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8737,3 +8737,32 @@ Move 722 status:
   `/api/dashboard/startup` HTTP 200, and zero console or failed-request noise.
   A stale public Cloudflare portal HTTP 530 was recovered by restarting only
   `business-os-cloudflared-1` before the final green live suite.
+
+Move 723 status:
+- Move 723 gates the background import tracker to real import activity instead
+  of normal navigation. `frontend/src/App.tsx` now mounts the tracker only
+  after the long idle timer or an explicit `import-job:activity` event, and
+  no longer treats generic `sync:update` or visibility changes as tracker
+  wakeups. `frontend/src/api/importJobsTransport.ts` emits
+  `import-job:activity` for real import job create/start/upload/cancel/retry/
+  delete paths so active import workflows still wake the progress tracker
+  immediately. `frontend/src/components/shared/BackgroundImportTracker.tsx`
+  stopped importing the shared Settings `Trash2` icon, which prevents Vite
+  from making Settings fetch the tracker chunk just to render an icon. Proof:
+  performance loading guard, import transport API test, frontend typecheck,
+  frontend utility suite, JSX/source check, production build hash
+  `cb6332a2ac6f7165`, Docker live sync, focused import-tracker Playwright
+  probe, broad Phase 8.4 UI live check, public Cloudflare portal check, post
+  live hygiene, and storage prune passed. The broad live report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T16-53-31-646Z/report.json`
+  has zero `background-import-tracker` and zero `/api/import-jobs` requests
+  during normal route exercise. The focused probe
+  `ops/runtime/reports/move723-import-tracker-probe-2026-06-02T16-53-06-381Z.json`
+  shows generic product/inventory/imports sync events kept the tracker dark,
+  then explicit `import-job:activity` loaded the tracker chunk and
+  `/api/import-jobs?limit=8` at HTTP 200. A stale public Cloudflare portal
+  HTTP 530 was recovered by restarting only `business-os-cloudflared-1`; the
+  final public check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-05-26-223Z/report.json`
+  passed with 20 products, zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP.

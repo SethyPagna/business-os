@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 722, consolidate authenticated browser lifecycle recovery listeners
+- Latest completed move: Move 723, gate the background import tracker to real import activity
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `254ace63c1c99efe`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `cb6332a2ac6f7165`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `254ace63c1c99efe`
+  `cb6332a2ac6f7165`
 
 Latest verified reports:
 
@@ -26,9 +26,11 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T15-59-00-742Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T16-53-31-646Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T15-59-50-621Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-05-26-223Z/report.json`
+- latest import-tracker focused proof:
+  `ops/runtime/reports/move723-import-tracker-probe-2026-06-02T16-53-06-381Z.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -36,11 +38,11 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the 2026-06-01 Move 708
-  verification pass removed three old live/audit report folders for 9,728,509
-  bytes, kept the latest local backups, kept the newest R2 backup object
-  `datasync-2026-06-01T14-12-08-430Z`, and found no stopped containers or
-  Docker builder cache to reclaim.
+- `npm.cmd --prefix ops run prune-storage` in the 2026-06-02 Move 723
+  verification pass removed old live/audit report folders and stale probe
+  output for 60,810,012 bytes, kept the latest local backups, kept the newest
+  R2 backup object `datasync-2026-06-02T14-23-51-966Z`, and found no stopped
+  containers or Docker builder cache to reclaim.
 
 Current honest pockets:
 
@@ -48,7 +50,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `254ace63c1c99efe`
+- broad Phase 8.4 UI live check passed on frontend hash `cb6332a2ac6f7165`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +59,25 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- The global background import tracker no longer loads during normal
+  dashboard, sales, products, returns, library, catalog, POS, inventory,
+  contacts, loyalty, users, audit, settings, server, or backup navigation.
+  `frontend/src/App.tsx` now gates tracker mounting behind a 180 second idle
+  delay or an explicit `import-job:activity` event, and
+  `frontend/src/api/importJobsTransport.ts` emits that event only for real
+  import job create/start/upload/cancel/retry/delete actions. The tracker also
+  stopped owning the shared Settings `Trash2` icon, preventing Vite from using
+  the tracker chunk as a shared icon carrier. Broad Docker-served Phase 8.4 UI
+  proof on hash `cb6332a2ac6f7165` found zero `background-import-tracker` and
+  zero `/api/import-jobs` requests during normal live checks. The focused
+  Playwright probe confirmed generic product/inventory/imports `sync:update`
+  events do not load the tracker, while explicit `import-job:activity` loads
+  `background-import-tracker-C6QiW-VT.js` and `/api/import-jobs?limit=8` at
+  HTTP 200. Public Cloudflare initially returned HTTP 530 from a stale tunnel;
+  restarting `business-os-cloudflared-1` restored public HTTP 200 and the
+  final public portal check passed with 20 products, zero failed responses,
+  zero relevant console messages, zero page errors, and enforced CSP.
 
 - Authenticated browser lifecycle recovery is now coordinated through one
   owner instead of three overlapping modules. `frontend/src/web-api.ts` is the

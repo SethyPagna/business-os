@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 722 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 723 in this file.
 
 ## Goal
 
@@ -6967,6 +6967,25 @@ Decision rule:
     showed one online listener, two focus listeners, three visibility
     listeners, one WebSocket, and the expected health/ping/websocket
     intervals while signed-out Login stayed at zero recovery listeners.
+
+723. Gate the background import tracker to import activity.
+    Done: `App.tsx` now defers the tracker for 180 seconds or wakes it only
+    from explicit `import-job:activity`; `importJobsTransport.ts` emits that
+    event for real import job create/start/upload/cancel/retry/delete paths;
+    `BackgroundImportTracker.tsx` no longer imports the shared Settings
+    `Trash2` icon, so Vite does not make Settings own or fetch the tracker
+    chunk as an icon carrier. This is a small TypeScript/React chunk-graph
+    rewire rather than a language conversion: the measurable win is removing
+    an unnecessary background chunk and `/api/import-jobs` poll from normal
+    route navigation while keeping import progress immediate when import work
+    begins. Proof: performance loading guard, import transport API test,
+    frontend typecheck, frontend utility suite, JSX/source check, production
+    build hash `cb6332a2ac6f7165`, Docker live sync, focused
+    import-tracker Playwright probe, broad Phase 8.4 UI live check, public
+    Cloudflare portal check, post-live hygiene, and storage prune passed. The
+    broad live check saw zero tracker/import-jobs requests during normal
+    navigation; the focused probe confirmed explicit import activity still
+    loads the tracker and `/api/import-jobs?limit=8` at HTTP 200.
 
 ## Safety Gates
 
