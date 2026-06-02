@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 711 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 712 in this file.
 
 ## Goal
 
@@ -6781,6 +6781,24 @@ Decision rule:
     `/api/dashboard/startup`), zero initial legacy dashboard/analytics split
     calls, and a `7 Days` interaction that made exactly one analytics call and
     no summary refetch.
+
+712. Prime startup health from authenticated bootstrap.
+    Done: `backend/src/routes/auth.ts` now carries served frontend runtime
+    metadata in the authenticated bootstrap system payload.
+    `frontend/src/api/http.ts` adds `primeServerHealthFromRuntime()` and
+    delays the first scheduled health probe so bootstrap can seed the shared
+    health result before a network `/health` call. `frontend/src/AppContext.tsx`
+    uses the bootstrap runtime proof and keeps the shared health probe as a
+    fallback for offline, missing, or failed bootstrap data. Proof: API HTTP
+    guard, performance loading guard, frontend typecheck, backend utility
+    suite, frontend utility suite, source guard, production build hash
+    `09107596d6229a5a`, generated release route sync, authenticated Playwright
+    startup trace, broad Phase 8.4 UI live check, public Cloudflare portal
+    check, and post-live hygiene. The live trace showed two initial app
+    responses (`/api/auth/bootstrap` and `/api/dashboard/startup`), zero
+    startup `/health`, zero initial legacy dashboard/analytics split calls,
+    and a `7 Days` interaction that made exactly one analytics call and no
+    summary refetch.
 
 ## Safety Gates
 

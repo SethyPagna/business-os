@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 711.
+- Latest completed implementation move in this roadmap: Move 712.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8505,3 +8505,24 @@ Move 711 status:
   A transient Cloudflare 1033/530 public check failure was traced to
   cloudflared edge connectivity and fixed by restarting only the tunnel
   container before the final green live suite.
+
+Move 712 status:
+- Move 712 primes startup health from authenticated bootstrap so successful
+  admin startup no longer needs an extra `/health` request before Dashboard
+  first paint. `backend/src/routes/auth.ts` now includes served frontend
+  runtime metadata in bootstrap `system.runtime`; `frontend/src/api/http.ts`
+  adds `primeServerHealthFromRuntime()` and delays the first automatic health
+  loop probe long enough for bootstrap to seed the shared result; and
+  `frontend/src/AppContext.tsx` uses that bootstrap runtime proof while keeping
+  the shared `/health` fallback for missing, offline, or failed bootstrap data.
+  Proof: API HTTP guard, performance loading guard, frontend typecheck,
+  backend utility suite, frontend utility suite, source guard, production build
+  hash `09107596d6229a5a`, generated runtime route sync, authenticated
+  Playwright startup trace, broad Phase 8.4 UI live check, public Cloudflare
+  portal check, and post-live hygiene passed. The focused trace observed
+  exactly `/api/auth/bootstrap` and `/api/dashboard/startup` on initial
+  Dashboard load, zero startup `/health`, zero initial legacy dashboard/
+  analytics split calls, then exactly one `/api/analytics` call and zero
+  summary refetches after pressing `7 Days`. A transient public Cloudflare 530
+  was traced to tunnel edge connectivity and recovered by restarting only
+  `business-os-cloudflared-1` before the final green live suite.

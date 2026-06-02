@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 711, combine Dashboard startup summary and analytics read
+- Latest completed move: Move 712, prime startup health from authenticated bootstrap
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `435e572a3d2acfaf`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `09107596d6229a5a`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `435e572a3d2acfaf`
+  `09107596d6229a5a`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-30-32-189Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-49-30-643Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-31-12-927Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-50-10-063Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `435e572a3d2acfaf`
+- broad Phase 8.4 UI live check passed on frontend hash `09107596d6229a5a`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,23 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Authenticated startup now primes the shared health and runtime-version cache
+  from `/api/auth/bootstrap`, so Dashboard first paint no longer pays a
+  separate `/health` request when bootstrap succeeds. `backend/src/routes/auth.ts`
+  includes served frontend build metadata in `system.runtime`;
+  `frontend/src/api/http.ts` exposes `primeServerHealthFromRuntime()` and delays
+  the first automatic health-loop probe by 2.5 seconds; `frontend/src/AppContext.tsx`
+  primes reachability from bootstrap and keeps `/health` as the fallback for
+  missing/failed bootstrap data. Real Docker-served authenticated Playwright
+  proof against `http://127.0.0.1:4000/dashboard` on build hash
+  `09107596d6229a5a` showed exactly two initial app responses:
+  `/api/auth/bootstrap` and `/api/dashboard/startup`, both HTTP 200. Initial
+  `/health`, `/api/dashboard`, and `/api/analytics` calls were zero; pressing
+  `7 Days` produced exactly one `/api/analytics` response and no summary
+  refetch. Broad Phase 8.4 UI live check, public Cloudflare portal check, and
+  post-live hygiene passed after restarting the Cloudflare tunnel from a
+  transient 530 edge-connectivity failure.
 
 - Dashboard startup now combines summary and initial analytics into one
   protected backend read. `backend/src/routes/sales.ts` shares

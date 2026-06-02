@@ -700,3 +700,15 @@ endpoints. The Docker-served Playwright proof on hash `435e572a3d2acfaf`
 shows one startup data call instead of separate summary and analytics calls;
 the `7 Days` interaction then makes exactly one analytics request and no
 summary refetch.
+
+Move 183 records the bootstrap health-prime slice. The accepted rewire keeps
+health/version awareness in the TypeScript HTTP runtime and extends the
+authenticated bootstrap payload with served frontend runtime metadata, allowing
+the browser to seed the shared health result without an immediate `/health`
+request. The delayed scheduled health probe remains as the recovery path for
+offline, focus, visibility, or failed-bootstrap cases. The Docker-served
+Playwright proof on hash `09107596d6229a5a` shows two initial Dashboard app
+responses, `/api/auth/bootstrap` and `/api/dashboard/startup`, with zero
+startup `/health`, zero initial legacy dashboard/analytics split calls, and a
+`7 Days` range interaction that still makes exactly one analytics request and
+no summary refetch.
