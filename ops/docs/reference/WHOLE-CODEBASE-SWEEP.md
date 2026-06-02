@@ -721,3 +721,14 @@ hash `9ee8a8bbcfeb8deb` shows the first Dashboard render still loads the
 visible payment donut, but does not request or modulepreload `BarChart`; build
 output split `BarChart` into a 3.33 kB lazy chunk and reduced the first-paint
 chart chunk to 7.56 kB.
+
+Move 185 records the shared-control startup split. The accepted rewire keeps
+React/TypeScript and Vite, but narrows the fallback `app-shared` ownership by
+splitting route-demand shared controls (`PaginationControls`,
+`ActionHistoryBar`, `FilterMenu`, `SectionSwitcher`, `PageHeader`, and
+`Modal`) into focused chunks before the generic shared fallback. The
+Docker-served Playwright proof on hash `453778909dc40f11` shows `app-shared`
+at 73,051 decoded bytes, with none of the split shared-control chunks
+requested or modulepreloaded on Dashboard first paint. Startup app API traffic
+remained `/api/auth/bootstrap` and `/api/dashboard/startup`, and the `7 Days`
+interaction still made exactly one analytics request.

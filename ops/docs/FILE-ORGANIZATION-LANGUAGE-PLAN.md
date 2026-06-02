@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 713 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 714 in this file.
 
 ## Goal
 
@@ -6814,6 +6814,23 @@ Decision rule:
     `DonutChart` chunk. The live trace confirmed `BarChart` was not requested
     or modulepreloaded during default Dashboard startup, while the visible
     donut chart still loaded and the console stayed clean.
+
+714. Split later-route shared controls from Dashboard startup.
+    Done: `frontend/vite.config.ts` now chunks `PaginationControls`,
+    `ActionHistoryBar`, `FilterMenu`, `SectionSwitcher`, `PageHeader`, and
+    `Modal` before the generic `app-shared` fallback, leaving only true
+    startup shared helpers in the first-paint shared chunk. The performance
+    loading guard locks this ordering. Proof: performance loading guard,
+    frontend typecheck, source guard, frontend utility suite, production build
+    hash `453778909dc40f11`, Docker live sync, authenticated Playwright
+    startup resource trace, broad Phase 8.4 UI live check, public Cloudflare
+    portal check, and post-live hygiene. Production output reduced
+    `app-shared` from the previous 92.97 kB chunk to 73.03 kB. The focused
+    live trace confirmed the split shared chunks and inactive `BarChart` were
+    neither requested nor modulepreloaded on Dashboard startup, while initial
+    app API traffic stayed at `/api/auth/bootstrap` and
+    `/api/dashboard/startup` and the `7 Days` button still made exactly one
+    analytics request.
 
 ## Safety Gates
 

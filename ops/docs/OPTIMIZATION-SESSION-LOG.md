@@ -1432,3 +1432,36 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-06-07-357Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-06-48-825Z/report.json`.
+
+- change: split later-route shared controls from Dashboard startup
+- affected files:
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: Dashboard first-paint shared chunk graph, route-demand
+  shared controls, and default Dashboard startup resource trace
+- keeper or rollback: keeper; it reduces first-paint shared JavaScript while
+  preserving focused route chunks for controls used by products, inventory,
+  POS, contacts, returns, settings, audit, backup, and library pages
+- route-scoped result: real Docker-served authenticated Playwright trace
+  against `http://127.0.0.1:4000/dashboard` on frontend hash
+  `453778909dc40f11` observed only `/api/auth/bootstrap` and
+  `/api/dashboard/startup` during initial Dashboard load, both HTTP 200.
+  Pressing `7 Days` produced exactly one `/api/analytics` response. The
+  startup resource list contained `app-shared-DbVyBb2V.js` with 73,051 decoded
+  bytes and no requested or modulepreloaded `shared-pagination`,
+  `shared-action-history`, `shared-filter-menu`, `shared-section-switcher`,
+  `shared-page-header`, `shared-modal`, or inactive `BarChart` chunks. Failed
+  requests and relevant console messages stayed at zero.
+- warm whole-app result: performance loading guard, frontend typecheck, source
+  guard, frontend utility suite, production build, Docker live sync,
+  authenticated Playwright startup resource trace, broad Phase 8.4 UI live
+  check, public Cloudflare portal check, and post-live hygiene passed. The
+  first public Cloudflare check hit 530; restarting only
+  `business-os-cloudflared-1` restored public HTTP 200 and the final live suite
+  passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-20-30-348Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-21-12-550Z/report.json`.

@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 713, defer inactive Dashboard bar-chart code
+- Latest completed move: Move 714, split later-route shared controls from Dashboard startup
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `9ee8a8bbcfeb8deb`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `453778909dc40f11`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `9ee8a8bbcfeb8deb`
+  `453778909dc40f11`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-06-07-357Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-20-30-348Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-06-48-825Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-21-12-550Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `9ee8a8bbcfeb8deb`
+- broad Phase 8.4 UI live check passed on frontend hash `453778909dc40f11`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,23 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Dashboard startup now keeps later-route shared controls out of the generic
+  first-paint shared chunk. `frontend/vite.config.ts` assigns
+  `PaginationControls`, `ActionHistoryBar`, `FilterMenu`, `SectionSwitcher`,
+  `PageHeader`, and `Modal` to their own route-demand chunks before the
+  fallback `app-shared` rule, and `frontend/tests/performanceLoadingUx.test.ts`
+  guards that ordering. Production build proof reduced `app-shared` from the
+  previous 92.97 kB chunk to 73.03 kB. Real Docker-served Playwright proof
+  against `http://127.0.0.1:4000/dashboard` on build hash
+  `453778909dc40f11` observed only `/api/auth/bootstrap` and
+  `/api/dashboard/startup` during initial Dashboard load, then exactly one
+  `/api/analytics` after pressing `7 Days`; none of the newly split shared
+  control chunks or inactive `BarChart` were requested or modulepreloaded, and
+  failed requests plus relevant console messages stayed at zero. Broad Phase
+  8.4 UI live check, public Cloudflare portal check, and post-live hygiene
+  passed after restarting the Cloudflare tunnel from a transient 530
+  edge-connectivity failure.
 
 - Dashboard first-paint chart code is now narrower. `frontend/src/components/dashboard/Dashboard.tsx`
   imports the visible line and payment donut charts directly, while the

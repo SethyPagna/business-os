@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 713.
+- Latest completed implementation move in this roadmap: Move 714.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8545,3 +8545,26 @@ Move 713 status:
   A transient public Cloudflare 530 was again traced to tunnel edge
   connectivity and recovered by restarting only `business-os-cloudflared-1`
   before the final green live suite.
+
+Move 714 status:
+- Move 714 splits later-route shared controls out of the generic Dashboard
+  startup shared chunk. `frontend/vite.config.ts` now assigns
+  `PaginationControls`, `ActionHistoryBar`, `FilterMenu`, `SectionSwitcher`,
+  `PageHeader`, and `Modal` to focused chunks before the fallback
+  `app-shared` rule, while keeping true startup helpers in `app-shared`.
+  `frontend/tests/performanceLoadingUx.test.ts` guards that ordering so the
+  first-paint shared chunk cannot silently absorb those route controls again.
+  Proof: performance loading guard, frontend typecheck, source guard,
+  frontend utility suite, production build hash `453778909dc40f11`, Docker
+  live sync, authenticated Playwright startup resource trace, broad Phase 8.4
+  UI live check, public Cloudflare portal check, and post-live hygiene passed.
+  Production output reduced `app-shared` from the previous 92.97 kB chunk to
+  73.03 kB and produced small on-demand shared-control chunks. The focused
+  live trace observed only `/api/auth/bootstrap` and `/api/dashboard/startup`
+  during initial Dashboard load; pressing `7 Days` still produced exactly one
+  `/api/analytics` response. None of the newly split shared-control chunks or
+  inactive `BarChart` were requested or modulepreloaded during startup, and
+  failed requests plus relevant console messages stayed at zero. A transient
+  public Cloudflare 530 was traced to tunnel edge connectivity and recovered
+  by restarting only `business-os-cloudflared-1` before the final green live
+  suite.

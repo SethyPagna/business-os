@@ -1118,4 +1118,14 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `BarChart` was neither requested nor modulepreloaded during default
   Dashboard startup, the visible donut chart still loaded, startup stayed at
   two app API responses, and relevant console messages stayed at zero.
+- Move 445 splits later-route shared controls from the Dashboard startup
+  shared chunk. Vite now emits focused chunks for `PaginationControls`,
+  `ActionHistoryBar`, `FilterMenu`, `SectionSwitcher`, `PageHeader`, and
+  `Modal` before the fallback `app-shared` rule. Production output reduced
+  `app-shared` from the prior 92.97 kB chunk to 73.03 kB. Docker-served
+  Playwright proof on hash `453778909dc40f11` confirmed none of those split
+  shared-control chunks or inactive `BarChart` were requested or
+  modulepreloaded during default Dashboard startup; initial app API traffic
+  stayed at `/api/auth/bootstrap` plus `/api/dashboard/startup`, and the
+  `7 Days` interaction still made exactly one analytics request.
 <!-- phase29-manual-notes:end -->
