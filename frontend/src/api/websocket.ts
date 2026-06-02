@@ -17,6 +17,7 @@ let reconnectAttempts = 0
 let wsFailureStreak = 0
 let wsSuppressReconnectUntil = 0
 let wsIntentionalClose = false
+let wsLifecycleListenersRegistered = false
 
 function clearReconnectTimer(): void {
   if (!wsReconnectTimer) return
@@ -37,10 +38,6 @@ function hasStoredAuthSession(): boolean {
   } catch (_) {
     return false
   }
-}
-
-function shouldRegisterSessionLifecycleListeners(): boolean {
-  return hasStoredAuthSession()
 }
 
 function isProtectedAdminHost(): boolean {
@@ -70,6 +67,7 @@ function logWs(level: 'debug' | 'warn', ...args: unknown[]): void {
 }
 
 export function connectWS(): void {
+  ensureWebSocketLifecycleListeners()
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) return
   if (isProtectedAdminHost() && !hasStoredAuthSession()) return
@@ -207,7 +205,9 @@ export function isWSConnected(): boolean {
   return !!(ws && ws.readyState === WebSocket.OPEN)
 }
 
-if (typeof window !== 'undefined' && shouldRegisterSessionLifecycleListeners()) {
+export function ensureWebSocketLifecycleListeners(): void {
+  if (typeof window === 'undefined' || wsLifecycleListenersRegistered || !hasStoredAuthSession()) return
+  wsLifecycleListenersRegistered = true
   window.addEventListener('auth:unauthorized', () => {
     wsSuppressReconnectUntil = Date.now() + 60_000
     reconnectAttempts = 0

@@ -83,6 +83,7 @@ let offlineSnapshotIdleId: number = 0
 let offlineVaultKey: OfflineVaultKey = null
 let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer: number | null = null
+let sessionRecoveryListenersRegistered = false
 let methodsModulePromise: Promise<MethodsModule> | null = null
 let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
 let authTransportModulePromise: Promise<AuthTransportModule> | null = null
@@ -650,6 +651,28 @@ function scheduleInitialOfflineMaintenance(): void {
   window.addEventListener('load', scheduleIdle, { once: true })
 }
 
+function ensureSessionRecoveryListeners(): void {
+  if (typeof window === 'undefined' || sessionRecoveryListenersRegistered) return
+  sessionRecoveryListenersRegistered = true
+  window.addEventListener('online', () => {
+    reconnectWS()
+    startHealthCheck()
+    runOfflineMaintenance(true)
+  })
+  window.addEventListener('focus', () => {
+    connectWS()
+    runOfflineMaintenance()
+  })
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return
+    connectWS()
+    runOfflineMaintenance()
+  })
+  window.addEventListener('sync:reconnected', () => {
+    runOfflineMaintenance(true)
+  })
+}
+
 function scheduleBootstrapStorageMaintenance(task: () => void): void {
   if (typeof window === 'undefined') {
     task()
@@ -826,9 +849,12 @@ const staticApi = {
         scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: clean }))
         cacheClearAll()   // flush stale in-memory cache whenever the server URL changes
       }
-      connectWS()
-      startHealthCheck()
-      if (syncServerChanged) {
+      if (hasStoredUserSession()) {
+        ensureSessionRecoveryListeners()
+        connectWS()
+        startHealthCheck()
+      }
+      if (syncServerChanged && hasStoredUserSession()) {
         scheduleInitialOfflineMaintenance()
       }
     } else {
@@ -882,6 +908,8 @@ const staticApi = {
     staticApi.setSyncToken(token)
   },
 
+  ensureSessionRecoveryListeners,
+
   unlockOfflineVault,
   lockOfflineVault,
   getOfflineVaultState() {
@@ -912,23 +940,6 @@ if (typeof window !== 'undefined') {
   navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerOutboxEvent)
   navigator.serviceWorker?.addEventListener?.('message', forwardServiceWorkerAppEvent)
   window.addEventListener('beforeunload', () => lockOfflineVault('tab_close'))
-  window.addEventListener('online', () => {
-    reconnectWS()
-    startHealthCheck()
-    runOfflineMaintenance(true)
-  })
-  window.addEventListener('focus', () => {
-    connectWS()
-    runOfflineMaintenance()
-  })
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return
-    connectWS()
-    runOfflineMaintenance()
-  })
-  window.addEventListener('sync:reconnected', () => {
-    runOfflineMaintenance(true)
-  })
 }
 
 // ?€?€ Bootstrap: read stored token, auto-detect server URL from page origin ?€?€?€?€?€
@@ -974,9 +985,12 @@ if (typeof window !== 'undefined') {
 
     if (url) {
       setSyncServerUrl(url)
-      connectWS()
-      startHealthCheck()  // ping every 12 s so offline?nline recovery works
-      scheduleInitialOfflineMaintenance()
+      if (hasStoredUserSession()) {
+        ensureSessionRecoveryListeners()
+        connectWS()
+        startHealthCheck()
+        scheduleInitialOfflineMaintenance()
+      }
     }
   } catch (e: any) {
     console.warn('[web-api] Bootstrap error:', e.message)

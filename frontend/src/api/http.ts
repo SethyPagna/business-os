@@ -677,6 +677,7 @@ let _healthInitialTimer: ReturnType<typeof setTimeout> | null = null
 let _healthProbeInFlight: Promise<ServerHealthProbeResult> | null = null
 let _lastHealthProbeResult: ServerHealthProbeResult | null = null
 let _lastHealthProbeAt = 0
+let healthLifecycleListenersRegistered = false
 
 export function isServerOnline(): boolean { return _serverOnline }
 
@@ -788,6 +789,7 @@ export function primeServerHealthFromRuntime(serverRuntime: LooseRecord = {}): S
 // Also re-attempts the server for reads when it was previously marked offline,
 // ensuring recovery after a server restart without requiring a user login.
 export function startHealthCheck(): void {
+  ensureHealthLifecycleListeners()
   if (_healthTimer) return
   _healthTimer = setInterval(async () => {
     await pingServerHealth()
@@ -798,7 +800,9 @@ export function startHealthCheck(): void {
   }, HEALTH_CHECK_INITIAL_DELAY_MS)
 }
 
-if (typeof window !== 'undefined') {
+export function ensureHealthLifecycleListeners(): void {
+  if (typeof window === 'undefined' || healthLifecycleListenersRegistered) return
+  healthLifecycleListenersRegistered = true
   window.addEventListener('online',  () => {
     if (syncServerUrl) {
       setServerHealth(true)

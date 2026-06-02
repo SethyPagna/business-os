@@ -143,6 +143,7 @@ type AppRuntimeApi = {
   login?: (payload: AppRecord) => Promise<AuthResult>
   logout?: () => Promise<unknown>
   saveSettings?: (settings: AppSettings, options: Required<SettingsWriteOptions>) => Promise<WriteConflictDetail | { success?: boolean }>
+  ensureSessionRecoveryListeners?: () => unknown
   setPublicAssetBaseUrl?: (url: string) => unknown
   setSyncServerUrl?: (url: string | null) => unknown
   updateSessionDuration?: (payload: AppRecord) => Promise<AuthResult>
@@ -1341,6 +1342,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
     setAuthReady(false)
     cacheClearAll()
+    getAppApi().ensureSessionRecoveryListeners?.()
     reconnectWS()
     startHealthCheck()
     authEstablishedAtRef.current = Date.now()

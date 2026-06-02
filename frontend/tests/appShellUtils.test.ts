@@ -99,7 +99,7 @@ runTest('service worker serves cached app shell for offline navigations only', (
 
 runTest('successful login reconnects websocket writes immediately', () => {
   assert.match(appContextSource, /import \{ isWSConnected, reconnectWS \} from '\.\/api\/websocket\.ts'/)
-  assert.match(appContextSource, /cacheClearAll\(\)\s+reconnectWS\(\)\s+startHealthCheck\(\)/)
+  assert.match(appContextSource, /cacheClearAll\(\)\s+getAppApi\(\)\.ensureSessionRecoveryListeners\?\.\(\)\s+reconnectWS\(\)\s+startHealthCheck\(\)/)
 })
 
 runTest('guest startup ignores expected unauthorized websocket probes', () => {
@@ -109,7 +109,8 @@ runTest('guest startup ignores expected unauthorized websocket probes', () => {
   assert.match(httpSource, /export function ensureSyncUpdateCacheListener\(\): void/)
   assert.doesNotMatch(httpSource, /if \(typeof window !== 'undefined'\) \{\s*window\.addEventListener\('sync:update'/)
   assert.match(appContextSource, /const quickCheck = window\.setTimeout\(poll, 100\)[\s\S]*pollTimer = window\.setInterval\(poll, pollRate\)/)
-  assert.match(websocketSource, /if \(typeof window !== 'undefined' && shouldRegisterSessionLifecycleListeners\(\)\) \{[\s\S]*window\.addEventListener\('auth:unauthorized'/)
+  assert.match(websocketSource, /export function ensureWebSocketLifecycleListeners\(\): void \{[\s\S]*!hasStoredAuthSession\(\)[\s\S]*window\.addEventListener\('auth:unauthorized'/)
+  assert.doesNotMatch(websocketSource, /if \(typeof window !== 'undefined'[\s\S]{0,120}\) \{\s*window\.addEventListener\('auth:unauthorized'/)
 })
 
 runTest('Khmer buttons use a stronger but not extra-bold weight', () => {

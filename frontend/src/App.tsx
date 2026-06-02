@@ -919,10 +919,11 @@ function useDeferredNotificationCenterMount(user: AppUser | null): {
   }
 }
 
-function useVisibilityRecovery() {
+function useVisibilityRecovery(enabled: boolean) {
   // Some kiosk/tablet browsers lose focus after backgrounding; these small
   // nudges help input/hover state recover without a manual refresh.
   useEffect(() => {
+    if (!enabled) return undefined
     const onVisible = () => {
       if (document.visibilityState !== 'visible') return
       setTimeout(() => {
@@ -948,7 +949,7 @@ function useVisibilityRecovery() {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onFocus)
     }
-  }, [])
+  }, [enabled])
 }
 
 function useChunkWarmup(user: AppUser | null, activePageId: AdminPageId): void {
@@ -1565,7 +1566,7 @@ export default function App() {
     <NotificationCenterFallback compact onClick={requestNotificationCenterMount} />
   )
 
-  useVisibilityRecovery()
+  useVisibilityRecovery(authReady && !!user)
   useChunkWarmup(authReady ? user : null, page)
   useIntentChunkWarmup(authReady ? user : null, page, canAccessPage)
   useDataWarmup(authReady ? user : null, canAccessPage)
