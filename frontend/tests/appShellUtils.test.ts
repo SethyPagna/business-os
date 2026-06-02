@@ -4,6 +4,7 @@ import { getAdminPageFromPath, getMountedPageLimit, isAdminAppPath, isPublicCata
 
 let failed = 0
 const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+const websocketSource = readFileSync(new URL('../src/api/websocket.ts', import.meta.url), 'utf8')
 
 type TestCallback = () => void
 
@@ -101,7 +102,10 @@ runTest('successful login reconnects websocket writes immediately', () => {
 })
 
 runTest('guest startup ignores expected unauthorized websocket probes', () => {
-  assert.match(appContextSource, /if \(!hasRecoverableSession\) \{\s+return\s+\}/)
+  assert.match(appContextSource, /const hasRecoverableSession = !!\(user\?\.id \|\| getStoredUserPayload\(\)\)/)
+  assert.match(appContextSource, /if \(!hasRecoverableSession\) \{\s+setSyncConnected\(false\)\s+setSyncServerUnreachable\(false\)\s+return undefined\s+\}/)
+  assert.match(appContextSource, /const quickCheck = window\.setTimeout\(poll, 100\)[\s\S]*pollTimer = window\.setInterval\(poll, pollRate\)/)
+  assert.match(websocketSource, /if \(typeof window !== 'undefined' && shouldRegisterSessionLifecycleListeners\(\)\) \{[\s\S]*window\.addEventListener\('auth:unauthorized'/)
 })
 
 runTest('Khmer buttons use a stronger but not extra-bold weight', () => {

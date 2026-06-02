@@ -702,11 +702,17 @@ function useSyncErrorBanner(user: AppUser | null) {
   const [conflictsNeedReview, setConflictsNeedReview] = useState<WriteConflictDetail | null>(null)
 
   useEffect(() => {
+    if (!user || typeof window === 'undefined') {
+      setSyncError(null)
+      setTransientOutage(null)
+      setPendingSync(null)
+      setVaultLocked(null)
+      setAppUpdate(null)
+      setConflictsNeedReview(null)
+      return undefined
+    }
+
     const refreshPendingSync = () => {
-      if (!user) {
-        setPendingSync(null)
-        return
-      }
       getAppShellApi().getPendingSyncState?.()
         .then((state) => setPendingSync(state || null))
         .catch(() => {})
@@ -751,10 +757,8 @@ function useSyncErrorBanner(user: AppUser | null) {
     window.addEventListener('offline:vault-locked', onVaultLocked)
     window.addEventListener('sync:app-update-available', onAppUpdate)
     window.addEventListener('sync:write-conflict', onConflictReview)
-    const cancelInitialPendingSyncRefresh = user
-      ? scheduleInitialPendingSyncRefresh(refreshPendingSync)
-      : () => {}
-    const timer = user ? window.setInterval(refreshPendingSync, 20_000) : 0
+    const cancelInitialPendingSyncRefresh = scheduleInitialPendingSyncRefresh(refreshPendingSync)
+    const timer = window.setInterval(refreshPendingSync, 20_000)
     return () => {
       cancelInitialPendingSyncRefresh()
       if (timer) window.clearInterval(timer)

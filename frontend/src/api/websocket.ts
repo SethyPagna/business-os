@@ -39,6 +39,10 @@ function hasStoredAuthSession(): boolean {
   }
 }
 
+function shouldRegisterSessionLifecycleListeners(): boolean {
+  return hasStoredAuthSession()
+}
+
 function isProtectedAdminHost(): boolean {
   if (typeof window === 'undefined') return false
   try {
@@ -203,7 +207,7 @@ export function isWSConnected(): boolean {
   return !!(ws && ws.readyState === WebSocket.OPEN)
 }
 
-if (typeof window !== 'undefined') {
+if (typeof window !== 'undefined' && shouldRegisterSessionLifecycleListeners()) {
   window.addEventListener('auth:unauthorized', () => {
     wsSuppressReconnectUntil = Date.now() + 60_000
     reconnectAttempts = 0

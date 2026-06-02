@@ -746,6 +746,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const debounceRef = useRef<Record<string, number>>({})
   useEffect(() => {
     if (publicMode) return undefined
+    const hasRecoverableSession = !!(user?.id || getStoredUserPayload())
+    if (!hasRecoverableSession) {
+      setSyncConnected(false)
+      setSyncServerUnreachable(false)
+      return undefined
+    }
 
     const onUpdate = (e: Event) => {
       const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null }>(e)
