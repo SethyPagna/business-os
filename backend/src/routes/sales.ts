@@ -1102,10 +1102,9 @@ router.get('/sales/export', authToken, requirePermission('sales'), (req, res) =>
   res.json(result)
 })
 
-// GET /api/dashboard
-router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
+function buildDashboardSummary() {
   const cached = readCachedDashboardSummary()
-  if (cached) return res.json(cached)
+  if (cached) return cached
   const todayStr = new Date().toISOString().split('T')[0]
   const todayBounds = toDayBounds(todayStr)
   const stockMetrics = getStockMetrics()
@@ -1178,7 +1177,7 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
     WHERE COALESCE(sale_status,'completed') NOT IN ('cancelled')
   `).get()
 
-  return res.json(writeCachedDashboardSummary({
+  return writeCachedDashboardSummary({
     today_count:          todaySales.count,
     today_total:          todaySales.subtotal - todaySales.discount_usd - todayReturns.total_refund_usd,
     today_total_khr:      todaySales.subtotal_khr - todaySales.discount_khr - todayReturns.total_refund_khr,
@@ -1222,16 +1221,18 @@ router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
       ORDER BY s.created_at DESC
       LIMIT 10
     `).all(),
-  }))
+  })
+}
+
+// GET /api/dashboard
+router.get('/dashboard', authToken, requirePermission('sales'), (req, res) => {
+  return res.json(buildDashboardSummary())
 })
 
-// GET /api/analytics
-router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
-  const { startDate, endDate, granularity = 'day' } = req.query
-  if (!startDate || !endDate) return err(res, 'startDate and endDate required')
+function buildDashboardAnalytics(startDate, endDate, granularity = 'day') {
   const cacheKey = `${startDate}|${endDate}|${granularity}`
   const cached = readCachedDashboardAnalytics(cacheKey)
-  if (cached) return res.json(cached)
+  if (cached) return cached
 
   const saleGroupExpr = periodExpression('s', granularity)
   const returnGroupExpr = periodExpression('r', granularity)
@@ -1394,7 +1395,7 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
     CROSS JOIN returns_prev r
   `).get(prevStart, prevEnd, prevStart, prevEnd)
 
-  return res.json(writeCachedDashboardAnalytics(cacheKey, {
+  return writeCachedDashboardAnalytics(cacheKey, {
     periodData,
     totals,
     prevTotals,
@@ -1566,7 +1567,24 @@ router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
       GROUP BY hour
       ORDER BY hour
     `).all(startDate, endDate),
-  }))
+  })
+}
+
+// GET /api/analytics
+router.get('/analytics', authToken, requirePermission('sales'), (req, res) => {
+  const { startDate, endDate, granularity = 'day' } = req.query
+  if (!startDate || !endDate) return err(res, 'startDate and endDate required')
+  return res.json(buildDashboardAnalytics(startDate, endDate, granularity))
+})
+
+// GET /api/dashboard/startup
+router.get('/dashboard/startup', authToken, requirePermission('sales'), (req, res) => {
+  const { startDate, endDate, granularity = 'day' } = req.query
+  if (!startDate || !endDate) return err(res, 'startDate and endDate required')
+  return res.json({
+    summary: buildDashboardSummary(),
+    analytics: buildDashboardAnalytics(startDate, endDate, granularity),
+  })
 })
 
 module.exports = router

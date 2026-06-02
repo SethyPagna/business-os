@@ -487,7 +487,7 @@ assert.match(
 )
 assert.match(
   dashboard,
-  /import \{ getAnalytics, getDashboard \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
+  /import \{ getAnalytics, getDashboard, getDashboardStartup \} from '\.\.\/\.\.\/api\/dashboardTransport\.ts'/,
   'dashboard should use its narrow transport instead of the full app-api-methods registry',
 )
 assert.doesNotMatch(
@@ -504,6 +504,26 @@ assert.match(
   dashboard,
   /withLoaderTimeout\(\(\) => getDashboardApi\(\)\.getDashboard\(\), label, DASHBOARD_SUMMARY_TIMEOUT_MS\)/,
   'dashboard summary should timeout slow summary reads',
+)
+assert.match(
+  dashboard,
+  /const DASHBOARD_STARTUP_TIMEOUT_MS = 30000/,
+  'dashboard combined startup read should use an explicit timeout',
+)
+assert.match(
+  dashboard,
+  /getDashboardApi\(\)\.getDashboardStartup\(\{ startDate: start, endDate: end, granularity: gran \}\)/,
+  'dashboard initial startup should use the combined summary and analytics transport',
+)
+assert.match(
+  dashboard,
+  /summary == null && analytics == null && !startupAttemptedRef\.current[\s\S]*loadDashboardStartup\(\)/,
+  'dashboard should route the first empty load through the combined startup loader',
+)
+assert.match(
+  dashboard,
+  /\}, \[isActive, loadSummary\]\) \/\/ eslint-disable-line/,
+  'dashboard summary effect should not depend on range-bound startup or analytics loaders',
 )
 assert.match(
   dashboard,

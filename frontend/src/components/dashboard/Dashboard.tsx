@@ -14,7 +14,7 @@ import { useIsPageActive } from '../shared/pageActivity'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
-import { getAnalytics, getDashboard } from '../../api/dashboardTransport.ts'
+import { getAnalytics, getDashboard, getDashboardStartup } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 
 type TranslateFn = (key: string) => string
@@ -220,6 +220,7 @@ interface KpiDetail {
 interface DashboardApi {
   getDashboard: () => Promise<unknown>
   getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
+  getDashboardStartup: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
 }
 
 type DashboardExportDeps = typeof import('../../utils/csv') &
@@ -231,7 +232,7 @@ const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
 function getDashboardApi(): DashboardApi {
-  return { getDashboard, getAnalytics }
+  return { getDashboard, getAnalytics, getDashboardStartup }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -243,6 +244,7 @@ const DASHBOARD_FILTER_STORAGE_FALLBACK_KEY = `${DASHBOARD_FILTER_STORAGE_PREFIX
 const DASHBOARD_CHART_POINT_LIMIT = 180
 const DASHBOARD_SUMMARY_TIMEOUT_MS = 30000
 const DASHBOARD_ANALYTICS_TIMEOUT_MS = 30000
+const DASHBOARD_STARTUP_TIMEOUT_MS = 30000
 const EMPTY_DASHBOARD_SUMMARY: DashboardSummary = {
   today_count: 0,
   today_total: 0,
@@ -472,8 +474,11 @@ export default function Dashboard() {
   const [kpiDetail, setKpiDetail]               = useState<KpiDetail | null>(null)
   const summaryRequestRef = useRef(0)
   const analyticsRequestRef = useRef(0)
+  const startupRequestRef = useRef(0)
   const refreshRequestRef = useRef(0)
   const analyticsLoadingRef = useRef(true)
+  const startupLoadingRef = useRef(false)
+  const startupAttemptedRef = useRef(false)
   const filterStorageKeyRef = useRef(dashboardFilterStorageKey)
   const dashboardExportDepsPromiseRef = useRef<Promise<DashboardExportDeps> | null>(null)
 
@@ -508,6 +513,63 @@ export default function Dashboard() {
     setProductDetail(null)
     navigateTo('inventory')
   }, [navigateTo])
+
+  const getCurrentDashboardRange = useCallback(() => {
+    const preset = RANGE_PRESETS.find(r => r.id === rangeId)
+    if (preset?.getRange) {
+      const range = preset.getRange()
+      return { start: range.start, end: range.end, granularity: range.gran }
+    }
+    return { start: customStart, end: customEnd, granularity }
+  }, [customEnd, customStart, granularity, rangeId]) // eslint-disable-line
+
+  const loadDashboardStartup = useCallback(async () => {
+    const requestId = beginTrackedRequest(startupRequestRef)
+    startupLoadingRef.current = true
+    startupAttemptedRef.current = true
+    setLoading(true)
+    setAnalyticsLoading(true)
+    const { start, end, granularity: gran } = getCurrentDashboardRange()
+    try {
+      const data = await withLoaderTimeout(
+        () => getDashboardApi().getDashboardStartup({ startDate: start, endDate: end, granularity: gran }),
+        'Dashboard startup',
+        DASHBOARD_STARTUP_TIMEOUT_MS,
+      )
+      if (!isTrackedRequestCurrent(startupRequestRef, requestId)) return null
+      const payload = data && typeof data === 'object' ? data as { summary?: unknown; analytics?: unknown } : {}
+      const normalizedSummary = normalizeDashboardSummaryPayload(payload.summary)
+      const normalizedAnalytics = normalizeDashboardAnalyticsPayload(payload.analytics)
+      if (!normalizedSummary || !isDashboardSummaryPayload(normalizedSummary)) {
+        throw new Error('Dashboard startup returned incomplete summary data.')
+      }
+      if (!normalizedAnalytics || !isDashboardAnalyticsPayload(normalizedAnalytics)) {
+        throw new Error('Dashboard startup returned incomplete analytics data.')
+      }
+      setSummary(normalizedSummary)
+      setAnalytics(normalizedAnalytics)
+      setSummaryError('')
+      setAnalyticsError('')
+      return data
+    } catch (error) {
+      if (!isTrackedRequestCurrent(startupRequestRef, requestId)) return null
+      const message = isInvalidSessionError(error)
+        ? 'Please sign in again to continue.'
+        : getErrorMessage(error, 'Dashboard startup failed to load.')
+      if (!isInvalidSessionError(error)) {
+        console.error('[Dashboard] startup failed:', message)
+      }
+      setSummaryError(message)
+      setAnalyticsError(message)
+      return null
+    } finally {
+      startupLoadingRef.current = false
+      if (isTrackedRequestCurrent(startupRequestRef, requestId)) {
+        setLoading(false)
+        setAnalyticsLoading(false)
+      }
+    }
+  }, [getCurrentDashboardRange, setAnalyticsLoading])
 
   const loadSummary = useCallback(async ({
     label = 'Dashboard summary',
@@ -545,12 +607,7 @@ export default function Dashboard() {
     const requestId = beginTrackedRequest(analyticsRequestRef)
     const shouldClearLoading = !silent || analyticsLoadingRef.current
     if (!silent) setAnalyticsLoading(true)
-    let start: string
-    let end: string
-    let gran: DashboardGranularity
-    const preset = RANGE_PRESETS.find(r => r.id === rangeId)
-    if (preset?.getRange) { const r = preset.getRange(); start = r.start; end = r.end; gran = r.gran }
-    else { start = customStart; end = customEnd; gran = granularity }
+    const { start, end, granularity: gran } = getCurrentDashboardRange()
     try {
       const data = await withLoaderTimeout(
         () => getDashboardApi().getAnalytics({ startDate: start, endDate: end, granularity: gran }),
@@ -579,7 +636,7 @@ export default function Dashboard() {
         setAnalyticsLoading(false)
       }
     }
-  }, [customEnd, customStart, granularity, rangeId, setAnalyticsLoading]) // eslint-disable-line
+  }, [getCurrentDashboardRange, setAnalyticsLoading])
 
   useEffect(() => {
     if (filterStorageKeyRef.current === dashboardFilterStorageKey) return
@@ -609,17 +666,25 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!isActive) {
+      invalidateTrackedRequest(startupRequestRef)
       invalidateTrackedRequest(summaryRequestRef)
       invalidateTrackedRequest(refreshRequestRef)
+      startupLoadingRef.current = false
       setLoading(false)
       setSilentRefresh(false)
       return
     }
 
+    if (summary == null && analytics == null && !startupAttemptedRef.current) {
+      void loadDashboardStartup()
+      return
+    }
+    if (startupLoadingRef.current) return
+
     void loadSummary({
       markLoading: summary == null,
     })
-  }, [isActive, loadSummary])
+  }, [isActive, loadSummary]) // eslint-disable-line
 
   useEffect(() => {
     if (!isActive) {
@@ -627,6 +692,9 @@ export default function Dashboard() {
       setAnalyticsLoading(false)
       return
     }
+
+    if (startupLoadingRef.current) return
+    if (summary == null && analytics == null && !startupAttemptedRef.current) return
 
     void loadAnalytics({
       silent: summary != null,

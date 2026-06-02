@@ -102,6 +102,19 @@ runTest('notifications router registers summary route', () => {
   assert.ok(paths.includes('/summary'), 'missing /api/notifications/summary')
 })
 
+runTest('sales router registers combined dashboard startup route', () => {
+  const router = require('../src/routes/sales.ts')
+  const source = require('fs').readFileSync(require('path').join(__dirname, '../src/routes/sales.ts'), 'utf8')
+  const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/dashboard'), 'missing /api/dashboard summary route')
+  assert.ok(paths.includes('/analytics'), 'missing /api/analytics route')
+  assert.ok(paths.includes('/dashboard/startup'), 'missing /api/dashboard/startup route')
+  assert.match(source, /function buildDashboardSummary\(\)/)
+  assert.match(source, /function buildDashboardAnalytics\(startDate, endDate, granularity = 'day'\)/)
+  assert.match(source, /summary: buildDashboardSummary\(\)/)
+  assert.match(source, /analytics: buildDashboardAnalytics\(startDate, endDate, granularity\)/)
+})
+
 runTest('files router registers list, upload, and delete routes', () => {
   const router = require('../src/routes/files.ts')
   const paths = getRoutePaths(router)

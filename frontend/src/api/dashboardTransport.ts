@@ -15,3 +15,11 @@ export function getAnalytics(params: QueryParams = {}): Promise<unknown> {
     () => apiFetch('GET', appendQuery('/api/analytics', query)),
   )
 }
+
+export function getDashboardStartup(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `dashboard:startup:${query}`,
+    () => apiFetch('GET', appendQuery('/api/dashboard/startup', query)),
+  )
+}
