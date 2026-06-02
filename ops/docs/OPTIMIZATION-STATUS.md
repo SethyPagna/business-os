@@ -15,9 +15,9 @@ Last updated: 2026-06-02
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `3048c3ea2830a60f`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `f29e8401e596bf6c`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `3048c3ea2830a60f`
+  `f29e8401e596bf6c`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-00-03-568Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-04-26-857Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-00-47-545Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-05-06-334Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -66,7 +66,7 @@ Recent runtime/load win:
   probe. `frontend/src/AppContext.tsx` consumes that shared result instead of
   raw-fetching `/health` after it sets the sync URL. Real Docker-served
   authenticated Playwright proof against `http://127.0.0.1:4000/` on build
-  hash `3048c3ea2830a60f` kept Dashboard startup at 12 JavaScript chunks,
+  hash `f29e8401e596bf6c` kept Dashboard startup at 12 JavaScript chunks,
   dropped `/health` from 3 probes to 1 in the first 12 seconds, kept
   `/api/auth/bootstrap`, `/api/analytics`, and `/api/dashboard` at HTTP 200,
   and still had zero unrelated route/local-DB chunks, zero failed responses,

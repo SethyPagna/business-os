@@ -8478,7 +8478,7 @@ Move 710 status:
   longer race separate probes during first paint. Proof: API HTTP unit tests
   now cover in-flight and fresh health-probe reuse; performance loading guards
   verify the shared probe and forbid the AppContext raw health fetch; source
-  check, typecheck, production build hash `3048c3ea2830a60f`, Docker live
+  check, typecheck, production build hash `f29e8401e596bf6c`, Docker live
   sync, authenticated Playwright first-12-seconds trace, broad Phase 8.4 live
   suite, public Cloudflare portal check, and post-live hygiene passed. The
   live trace still loaded 12 JavaScript chunks with zero unrelated

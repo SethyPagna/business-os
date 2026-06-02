@@ -1314,7 +1314,7 @@ Use this shape for future entries:
 - keeper or rollback: keeper; this shares the same health result across
   startup callers instead of deleting the connection check
 - route-scoped result: real Docker-served authenticated Playwright trace
-  against `http://127.0.0.1:4000/` on frontend hash `3048c3ea2830a60f`
+  against `http://127.0.0.1:4000/` on frontend hash `f29e8401e596bf6c`
   kept Dashboard startup at 12 JavaScript chunks with zero unwanted
   product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
   notification-center requests. `/health` dropped from 3 probes to 1 in the
@@ -1326,6 +1326,6 @@ Use this shape for future entries:
   build, Docker live build sync, authenticated Playwright startup trace, broad
   Phase 8.4 live suite, public Cloudflare portal check, and post-live hygiene
   passed. Broad Phase 8.4 live report:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-00-03-568Z/report.json`.
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-04-26-857Z/report.json`.
   Public portal report:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-00-47-545Z/report.json`.
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-05-06-334Z/report.json`.

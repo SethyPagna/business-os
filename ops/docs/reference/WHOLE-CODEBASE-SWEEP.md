@@ -688,6 +688,6 @@ Move 181 records the health-probe dedupe slice. The accepted rewire keeps
 health awareness in the TypeScript HTTP runtime, adds in-flight/fresh result
 reuse, and has AppContext consume the shared result instead of raw-fetching
 `/health` during sync URL discovery. The Docker-served Playwright proof on hash
-`3048c3ea2830a60f` shows one health probe in the first 12 seconds instead of
+`f29e8401e596bf6c` shows one health probe in the first 12 seconds instead of
 three, while preserving the same Dashboard data/API success and clean console
 profile.

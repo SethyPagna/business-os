@@ -1088,7 +1088,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   while AppContext consumes that result instead of launching a parallel raw
   `/health` fetch. The active background cadence now waits 30 seconds after
   the first shared probe. Docker-served authenticated Playwright proof on hash
-  `3048c3ea2830a60f` kept the Dashboard startup at 12 JavaScript chunks but
+  `f29e8401e596bf6c` kept the Dashboard startup at 12 JavaScript chunks but
   reduced `/health` from 3 probes to 1 in the first 12 seconds; auth bootstrap,
   analytics, and dashboard data stayed HTTP 200 with zero failed responses and
   zero relevant console messages.

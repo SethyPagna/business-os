@@ -6754,7 +6754,7 @@ Decision rule:
     `fetch('/health')` after sync URL discovery. Proof: API HTTP tests cover
     in-flight and fresh health-probe reuse; performance loading guards verify
     the shared probe constants and forbid the AppContext raw health fetch;
-    source check, typecheck, production build hash `3048c3ea2830a60f`, Docker
+    source check, typecheck, production build hash `f29e8401e596bf6c`, Docker
     live build sync, and authenticated Playwright first-12-seconds trace
     passed. Broad Phase 8.4 live suite also passed on the same hash with 72
     checked signals, zero relevant console messages, no framework overlay, a
