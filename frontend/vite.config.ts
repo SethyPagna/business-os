@@ -110,6 +110,7 @@ const deferredModulePreloadPrefixes = [
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
+  'assets/shared-portal-menu-',
   'assets/app-bootstrap-',
   'assets/app-auth-',
   'assets/catalog-',
@@ -162,6 +163,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
       return 'image-lightbox'
     }
+    if (normalized.includes('/src/components/shared/PortalMenu.tsx')) return 'shared-portal-menu'
     if (normalized.includes('/src/components/files/FilePickerModal')) {
       return 'file-picker-modal'
     }

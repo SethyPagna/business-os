@@ -24,6 +24,7 @@ export type PortalMenuProps = {
   content?: ReactNode | ((helpers: PortalContentHelpers) => ReactNode) | null
   menuClassName?: string
   closeOnContentClick?: boolean
+  defaultOpen?: boolean
   triggerWrapperClassName?: string
   onOpenChange?: ((open: boolean) => void) | null
 }
@@ -63,10 +64,11 @@ export default function PortalMenu({
   content = null,
   menuClassName = '',
   closeOnContentClick = false,
+  defaultOpen = false,
   triggerWrapperClassName = '',
   onOpenChange = null,
 }: PortalMenuProps) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(defaultOpen)
   const [position, setPosition] = useState({ top: 0, left: 0 })
   const triggerRef = useRef<HTMLDivElement | null>(null)
   const menuRef = useRef<HTMLDivElement | null>(null)
