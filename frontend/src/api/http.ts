@@ -76,6 +76,7 @@ const API_MISMATCH_COOLDOWN_MS = 30_000
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504])
 const CLOUDFLARE_ACCESS_LOGIN_RE = /(?:^|\/\/)[^/]*cloudflareaccess\.com\/cdn-cgi\/access\/login|\/cdn-cgi\/access\/login/i
 const HEALTH_CHECK_INTERVAL_MS = 30_000
+const HEALTH_CHECK_INITIAL_DELAY_MS = 2_500
 const HEALTH_PROBE_TIMEOUT_MS = 4_000
 const HEALTH_PROBE_REUSE_MS = 8_000
 export const FRONTEND_BUILD_INFO = {
@@ -507,7 +508,9 @@ export function __resetApiWriteDedupeForTests(): void {
 
 export function __resetApiHealthForTests(): void {
   if (_healthTimer) clearInterval(_healthTimer)
+  if (_healthInitialTimer) clearTimeout(_healthInitialTimer)
   _healthTimer = null
+  _healthInitialTimer = null
   _healthProbeInFlight = null
   _lastHealthProbeResult = null
   _lastHealthProbeAt = 0
@@ -666,6 +669,7 @@ function isConnectivityError(error: any): boolean {
 // ?€?€?€ Server health state ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 let _serverOnline = true          // optimistic until proven otherwise
 let _healthTimer: ReturnType<typeof setInterval> | null = null
+let _healthInitialTimer: ReturnType<typeof setTimeout> | null = null
 let _healthProbeInFlight: Promise<ServerHealthProbeResult> | null = null
 let _lastHealthProbeResult: ServerHealthProbeResult | null = null
 let _lastHealthProbeAt = 0
@@ -758,6 +762,24 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
   }
 }
 
+export function primeServerHealthFromRuntime(serverRuntime: LooseRecord = {}): ServerHealthProbeResult {
+  const runtime = serverRuntime && typeof serverRuntime === 'object' ? serverRuntime : {}
+  checkRuntimeVersionFromHealth({ runtime })
+  const result: ServerHealthProbeResult = {
+    online: true,
+    status: 200,
+    cloudflareAccessRequired: false,
+    payload: {
+      status: 'ok',
+      runtime,
+    },
+  }
+  setServerHealth(true)
+  _lastHealthProbeResult = result
+  _lastHealthProbeAt = Date.now()
+  return result
+}
+
 // Active health check runs on a slower cadence after the first shared probe.
 // Also re-attempts the server for reads when it was previously marked offline,
 // ensuring recovery after a server restart without requiring a user login.
@@ -766,7 +788,10 @@ export function startHealthCheck(): void {
   _healthTimer = setInterval(async () => {
     await pingServerHealth()
   }, HEALTH_CHECK_INTERVAL_MS)
-  pingServerHealth().catch(() => {})
+  _healthInitialTimer = setTimeout(() => {
+    _healthInitialTimer = null
+    pingServerHealth().catch(() => {})
+  }, HEALTH_CHECK_INITIAL_DELAY_MS)
 }
 
 if (typeof window !== 'undefined') {

@@ -65,6 +65,7 @@ const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot.ts')
 const { classifyRequestAccess } = require('../accessControl.ts')
 const { PUBLIC_BASE_URL, CLOUDFLARE_PUBLIC_URL, CLOUDFLARE_ADMIN_URL, R2_PUBLIC_BASE_URL } = require('../config/index.ts')
 const { buildRuntimeDescriptor } = require('../runtimeState/index.ts')
+const { getRuntimeVersion } = require('../runtimeVersion.ts')
 const { canManageOtpTarget, requiresSelfOtpDisablePassword } = require('../authOtpGuards.ts')
 
 const router = express.Router()
@@ -383,8 +384,15 @@ async function getSettingsSnapshot() {
 function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
   const access = classifyRequestAccess(req)
   const hostUiAvailable = process.platform === 'win32' && !!req?.user?.id
+  const runtimeVersion = getRuntimeVersion()
   const runtime = {
     ...buildRuntimeDescriptor(organizationPublicId),
+    app: runtimeVersion.app,
+    packageVersion: runtimeVersion.packageVersion,
+    revision: runtimeVersion.revision,
+    sourceHash: runtimeVersion.sourceHash,
+    frontend: runtimeVersion.frontend,
+    bootedAt: runtimeVersion.bootedAt,
     serverStartTime: String(SERVER_START_TIME),
   }
   return {

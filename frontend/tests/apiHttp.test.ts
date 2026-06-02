@@ -14,6 +14,7 @@ import {
   isApiVersionMismatchError,
   isRequiredRuntimeApiPath,
   pingServerHealth,
+  primeServerHealthFromRuntime,
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.ts'
@@ -236,6 +237,30 @@ await runTest('health probes reuse in-flight and fresh startup checks', async ()
     const thirdResult = await pingServerHealth()
     assert.equal(thirdResult.online, true)
     assert.equal(calls.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
+await runTest('bootstrap runtime primes fresh health state without fetching health', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const calls: FetchCall[] = []
+  globalThis.fetch = ((...args: FetchCall) => {
+    calls.push(args)
+    return Promise.resolve(new Response(JSON.stringify({ status: 'ok' }), { status: 200 }))
+  }) as typeof fetch
+
+  try {
+    const primed = primeServerHealthFromRuntime({ frontend: { revision: 'dev', hash: 'dev' } })
+    assert.equal(primed.online, true)
+    assert.equal(primed.status, 200)
+
+    const reused = await pingServerHealth()
+    assert.equal(reused.online, true)
+    assert.equal(calls.length, 0)
   } finally {
     globalThis.fetch = originalFetch
     resetApiState()

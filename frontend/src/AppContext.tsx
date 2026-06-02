@@ -6,7 +6,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
 import './web-api.ts'
-import { cacheClearAll, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, startHealthCheck } from './api/http.ts'
+import { cacheClearAll, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -1090,6 +1090,14 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         if (effectiveUrl) {
           getAppApi().setSyncServerUrl?.(effectiveUrl)
 
+          const runStartupHealthProbe = () => {
+            pingServerHealth()
+              .then((result) => {
+                setSyncServerUnreachable(result.cloudflareAccessRequired ? false : !result.online)
+              })
+              .catch(() => setSyncServerUnreachable(true))
+          }
+
           if (canProbeServerSession) {
             if (!hasStoredSession) {
               setAuthReady(false)
@@ -1103,26 +1111,39 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
             }, 10_000)
             readAppBootstrap('App bootstrap')
               .then(async (bootstrap) => {
-                if (!bootstrap) return
+                if (!bootstrap) {
+                  runStartupHealthProbe()
+                  return
+                }
+                if (bootstrap?.offline) {
+                  setSyncServerUnreachable(true)
+                  return
+                }
                 if (bootstrap?.unauthorized) {
                   await handleUnauthorizedSession(bootstrap.authError || 'Please sign in again to continue.')
+                  setSyncServerUnreachable(false)
                   return
                 }
                 await applyBootstrapPayload(bootstrap)
+                const runtime = bootstrap?.system?.runtime
+                if (runtime && typeof runtime === 'object') {
+                  primeServerHealthFromRuntime(runtime as AppRecord)
+                  setSyncServerUnreachable(false)
+                } else {
+                  runStartupHealthProbe()
+                }
               })
-              .catch(() => {})
+              .catch(() => {
+                runStartupHealthProbe()
+              })
               .finally(() => {
                 settled = true
                 window.clearTimeout(authReadyWatchdog)
                 setAuthReady(true)
               })
+          } else {
+            runStartupHealthProbe()
           }
-
-          pingServerHealth()
-            .then((result) => {
-              setSyncServerUnreachable(result.cloudflareAccessRequired ? false : !result.online)
-            })
-            .catch(() => setSyncServerUnreachable(true))
         } else {
           setAuthReady(true)
         }
