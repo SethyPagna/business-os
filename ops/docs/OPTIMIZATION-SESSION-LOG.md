@@ -1786,3 +1786,42 @@ Use this shape for future entries:
   60,810,012 bytes of old runtime reports/probe output, kept latest local
   backups, kept newest R2 backup `datasync-2026-06-02T14-23-51-966Z`, and
   found no stopped containers or Docker builder cache to reclaim.
+
+- change: trim public portal editor-only chunks from first load
+- affected files:
+  `frontend/src/components/catalog/CatalogPage.tsx`,
+  `frontend/src/components/catalog/CatalogPreviewSurface.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`,
+  `ops/docs/reference/WHOLE-CODEBASE-SWEEP.md`
+- route or API target: public customer portal first load and admin catalog
+  editor upload/file-picker behavior
+- keeper or rollback: keeper; it removes public first-load editor chunks by
+  changing conditional mounting and Vite chunk ownership while preserving
+  admin upload, file picker, and gallery behavior on interaction
+- route-scoped result: Cloudflare-served public Playwright on frontend hash
+  `e37146866b299666` rendered 20 products, returned HTTP 200 for public
+  config/meta/search/AI endpoints, enforced CSP, recorded zero failed
+  responses, zero relevant console messages, zero page errors, and no
+  first-load `file-picker-modal`, `media-upload-utils`, or `image-lightbox`
+  requests:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-37-37-400Z/report.json`.
+- warm whole-app result: performance loading guard, frontend typecheck,
+  JSX/source check, frontend utility suite, production build, Docker live
+  sync, local `/health` and `/business-os-build.json`, public Cloudflare
+  Playwright, broad Phase 8.4 UI live check, and `git diff --check` passed.
+  The broad report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T17-38-20-661Z/report.json`
+  exercised dashboard, branches, sales, products, returns, files/library,
+  catalog/public portal, receipt settings, POS, inventory, contacts, loyalty,
+  users, audit, settings, server, and backup helper loaders with zero relevant
+  console messages.
+- infrastructure note: the first public curl after app restart returned
+  Cloudflare HTTP 502 while local `/public` was HTTP 200. Restarting only
+  `business-os-cloudflared-1` restored public HTTP 200 before the final public
+  Playwright pass.

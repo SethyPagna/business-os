@@ -1222,4 +1222,20 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   inventory, and bare imports sync events kept the tracker dark, while
   explicit `import-job:activity` loaded `background-import-tracker-C6QiW-VT.js`
   and `/api/import-jobs?limit=8` at HTTP 200.
+- Move 455 records roadmap Move 724: trim public portal editor-only chunks
+  from first load. The public catalog route now keeps editor-only upload and
+  file-picker behavior behind admin/editor interaction gates, and Vite assigns
+  `public-asset-urls`, `favicon-utils`, and editor-only `CatalogImageField`
+  to explicit chunks so the public chunk graph is honest. Docker-served build
+  hash `e37146866b299666` passed TypeScript, JSX/source checks, the frontend
+  utility suite, production build, local Docker health/build metadata checks,
+  public Cloudflare Playwright, and broad Phase 8.4 UI Playwright. The public
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-37-37-400Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, enforced CSP, and no first-load
+  `file-picker-modal`, `media-upload-utils`, or `image-lightbox` requests.
+  The broad report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T17-38-20-661Z/report.json`
+  kept the admin app loaders healthy with zero relevant console messages.
 <!-- phase29-manual-notes:end -->

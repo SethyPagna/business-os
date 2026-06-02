@@ -60,7 +60,7 @@ Total files documented: **234**
 | 48 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
 | 49 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1 |
 | 50 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
-| 51 | `frontend/src/components/catalog/CatalogPage.tsx` | 117 |
+| 51 | `frontend/src/components/catalog/CatalogPage.tsx` | 122 |
 | 52 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
 | 53 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
 | 54 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
@@ -894,123 +894,128 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `loadCatalogEditorSurface` | const arrow | 91 |
-| 2 | `loadCatalogSecondaryTabs` | const arrow | 92 |
-| 3 | `loadCatalogProductsSection` | const arrow | 93 |
-| 4 | `loadCatalogPreviewSurface` | const arrow | 94 |
-| 5 | `getCatalogApi` | function | 238 |
-| 6 | `getCatalogErrorMessage` | function | 242 |
-| 7 | `normalizePortalInitialOptions` | function | 246 |
-| 8 | `normalizeCatalogOptions` | function | 255 |
-| 9 | `normalizeBrandOptions` | function | 266 |
-| 10 | `getAboutBlockLabel` | function | 271 |
-| 11 | `withAssetVersion` | function | 277 |
-| 12 | `sanitizePortalMediaValue` | function | 287 |
-| 13 | `tt` | function | 297 |
-| 14 | `toBoolean` | function | 305 |
-| 15 | `toNumber` | function | 312 |
-| 16 | `normalizePriceDisplay` | function | 319 |
-| 17 | `normalizeHexColor` | function | 325 |
-| 18 | `normalizeExternalUrl` | function | 331 |
-| 19 | `createFaqId` | function | 347 |
-| 20 | `normalizeFaqItems` | function | 351 |
-| 21 | `translatedPortalText` | function | 407 |
-| 22 | `translateConfiguredFaqText` | function | 413 |
-| 23 | `localizeConfiguredFaqItems` | function | 420 |
-| 24 | `buildFaqStarterItems` | function | 428 |
-| 25 | `buildAiFaqStarterItems` | function | 437 |
-| 26 | `hexToRgba` | function | 447 |
-| 27 | `readPortalCache` | function | 458 |
-| 28 | `writePortalCache` | function | 481 |
-| 29 | `normalizePortalPath` | function | 500 |
-| 30 | `isReservedPortalPath` | function | 513 |
-| 31 | `getPortalTabs` | function | 517 |
-| 32 | `resolvePortalActiveTab` | function | 528 |
-| 33 | `buildDraft` | function | 536 |
-| 34 | `applyDraft` | function | 636 |
-| 35 | `getBranchQty` | function | 760 |
-| 36 | `getStockStatus` | function | 767 |
-| 37 | `normalizeProductGallery` | function | 778 |
-| 38 | `normalizePortalProductSearch` | function | 795 |
-| 39 | `buildRecommendedProductOption` | function | 799 |
-| 40 | `productMatchesRecommendedSearch` | function | 809 |
-| 41 | `formatDateTime` | function | 824 |
-| 42 | `formatPortalPrice` | function | 832 |
-| 43 | `ImageField` | function | 845 |
-| 44 | `readImageFileAsDataUrl` | function | 934 |
-| 45 | `readImageFilesAsDataUrls` | function | 943 |
-| 46 | `pickImageAsDataUrl` | function | 966 |
-| 47 | `pickMultipleImagesAsDataUrls` | function | 979 |
-| 48 | `replaceVars` | function | 992 |
-| 49 | `getPortalResourceText` | function | 996 |
-| 50 | `isFirstPartyTranslateTarget` | function | 1034 |
-| 51 | `normalizePortalTranslateChoice` | function | 1041 |
-| 52 | `isDocumentVisible` | function | 1049 |
-| 53 | `sleep` | function | 1054 |
-| 54 | `CatalogPage` | component/function | 1160 |
-| 55 | `warmPublicProductsPanel` | const arrow | 1274 |
-| 56 | `warmPublicSecondaryTabs` | const arrow | 1278 |
-| 57 | `updateMediaUploadState` | const arrow | 1430 |
-| 58 | `forgetMediaUploadState` | const arrow | 1437 |
-| 59 | `loadAssistantStatus` | function | 1484 |
-| 60 | `openProductGallery` | function | 1506 |
-| 61 | `changeTranslateTarget` | function | 1519 |
-| 62 | `isPortalLoadCurrent` | function | 1567 |
-| 63 | `loadPortalEditorData` | function | 1571 |
-| 64 | `refreshPortalView` | function | 1613 |
-| 65 | `loadPortal` | function | 1642 |
-| 66 | `ensureLink` | const arrow | 1898 |
-| 67 | `updateVisibility` | const arrow | 1991 |
-| 68 | `handleScroll` | const arrow | 2021 |
-| 69 | `initWidget` | const arrow | 2066 |
-| 70 | `waitForWidget` | const arrow | 2084 |
-| 71 | `toggleFilterValue` | function | 2208 |
-| 72 | `clearPortalFilters` | function | 2216 |
-| 73 | `setDraft` | function | 2224 |
-| 74 | `toggleRecommendedProduct` | function | 2229 |
-| 75 | `openPortalImage` | function | 2238 |
-| 76 | `setAboutBlocksDraft` | function | 2249 |
-| 77 | `setPromoItemsDraft` | function | 2253 |
-| 78 | `getPortalMediaValue` | function | 2257 |
-| 79 | `setPortalMediaValue` | function | 2271 |
-| 80 | `clearPortalUploadPreview` | function | 2285 |
-| 81 | `clearPortalMediaTarget` | function | 2291 |
-| 82 | `uploadPortalMedia` | function | 2302 |
-| 83 | `cancelPortalMediaUpload` | function | 2373 |
-| 84 | `updateAboutBlock` | function | 2379 |
-| 85 | `updatePromoItem` | function | 2385 |
-| 86 | `addAboutBlock` | function | 2391 |
-| 87 | `addPromoItem` | function | 2395 |
-| 88 | `moveAboutBlockBefore` | function | 2399 |
-| 89 | `removeAboutBlock` | function | 2411 |
-| 90 | `movePromoItemBefore` | function | 2422 |
-| 91 | `removePromoItem` | function | 2434 |
-| 92 | `setFaqDraft` | function | 2445 |
-| 93 | `addFaqItem` | function | 2449 |
-| 94 | `mergeFaqStarterItems` | function | 2460 |
-| 95 | `addFaqStarterSet` | function | 2473 |
-| 96 | `addAiFaqStarterSet` | function | 2477 |
-| 97 | `updateFaqItem` | function | 2481 |
-| 98 | `removeFaqItem` | function | 2487 |
-| 99 | `clearAssistantState` | function | 2491 |
-| 100 | `uploadDraftImage` | function | 2506 |
-| 101 | `uploadAboutBlockMedia` | function | 2510 |
-| 102 | `uploadPromoItemMedia` | function | 2516 |
-| 103 | `openFilePicker` | function | 2520 |
-| 104 | `handleFilePickerSelect` | function | 2524 |
-| 105 | `savePortalDraft` | function | 2552 |
-| 106 | `askAssistant` | function | 2744 |
-| 107 | `refreshMembershipData` | function | 2790 |
-| 108 | `handleMembershipLookup` | function | 2832 |
-| 109 | `addSubmissionImages` | function | 2845 |
-| 110 | `handleSubmissionPaste` | function | 2855 |
-| 111 | `handleSubmitShareProof` | function | 2871 |
-| 112 | `handleReviewSubmission` | function | 2918 |
-| 113 | `renderCatalogSection` | function | 3081 |
-| 114 | `handleUploadSubmissionImages` | const arrow | 3107 |
-| 115 | `renderSecondaryTabPanel` | function | 3163 |
-| 116 | `renderSecondaryTabSection` | function | 3175 |
-| 117 | `scrollPublicPortal` | const arrow | 3304 |
+| 1 | `loadCatalogEditorSurface` | const arrow | 86 |
+| 2 | `loadCatalogSecondaryTabs` | const arrow | 87 |
+| 3 | `loadCatalogProductsSection` | const arrow | 88 |
+| 4 | `loadCatalogPreviewSurface` | const arrow | 89 |
+| 5 | `getCatalogApi` | function | 256 |
+| 6 | `getCatalogErrorMessage` | function | 260 |
+| 7 | `createInitialUploadState` | function | 264 |
+| 8 | `isTemporaryPreviewUrl` | function | 278 |
+| 9 | `sanitizePersistedMediaPath` | function | 283 |
+| 10 | `buildCacheBustedMediaPath` | function | 290 |
+| 11 | `reduceUploadState` | function | 308 |
+| 12 | `normalizePortalInitialOptions` | function | 375 |
+| 13 | `normalizeCatalogOptions` | function | 384 |
+| 14 | `normalizeBrandOptions` | function | 395 |
+| 15 | `getAboutBlockLabel` | function | 400 |
+| 16 | `withAssetVersion` | function | 406 |
+| 17 | `sanitizePortalMediaValue` | function | 416 |
+| 18 | `tt` | function | 426 |
+| 19 | `toBoolean` | function | 434 |
+| 20 | `toNumber` | function | 441 |
+| 21 | `normalizePriceDisplay` | function | 448 |
+| 22 | `normalizeHexColor` | function | 454 |
+| 23 | `normalizeExternalUrl` | function | 460 |
+| 24 | `createFaqId` | function | 476 |
+| 25 | `normalizeFaqItems` | function | 480 |
+| 26 | `translatedPortalText` | function | 536 |
+| 27 | `translateConfiguredFaqText` | function | 542 |
+| 28 | `localizeConfiguredFaqItems` | function | 549 |
+| 29 | `buildFaqStarterItems` | function | 557 |
+| 30 | `buildAiFaqStarterItems` | function | 566 |
+| 31 | `hexToRgba` | function | 576 |
+| 32 | `readPortalCache` | function | 587 |
+| 33 | `writePortalCache` | function | 610 |
+| 34 | `normalizePortalPath` | function | 629 |
+| 35 | `isReservedPortalPath` | function | 642 |
+| 36 | `getPortalTabs` | function | 646 |
+| 37 | `resolvePortalActiveTab` | function | 657 |
+| 38 | `buildDraft` | function | 665 |
+| 39 | `applyDraft` | function | 765 |
+| 40 | `getBranchQty` | function | 889 |
+| 41 | `getStockStatus` | function | 896 |
+| 42 | `normalizeProductGallery` | function | 907 |
+| 43 | `normalizePortalProductSearch` | function | 924 |
+| 44 | `buildRecommendedProductOption` | function | 928 |
+| 45 | `productMatchesRecommendedSearch` | function | 938 |
+| 46 | `formatDateTime` | function | 953 |
+| 47 | `formatPortalPrice` | function | 961 |
+| 48 | `ImageField` | function | 974 |
+| 49 | `readImageFileAsDataUrl` | function | 1063 |
+| 50 | `readImageFilesAsDataUrls` | function | 1072 |
+| 51 | `pickImageAsDataUrl` | function | 1095 |
+| 52 | `pickMultipleImagesAsDataUrls` | function | 1108 |
+| 53 | `replaceVars` | function | 1121 |
+| 54 | `getPortalResourceText` | function | 1125 |
+| 55 | `isFirstPartyTranslateTarget` | function | 1163 |
+| 56 | `normalizePortalTranslateChoice` | function | 1170 |
+| 57 | `isDocumentVisible` | function | 1178 |
+| 58 | `sleep` | function | 1183 |
+| 59 | `CatalogPage` | component/function | 1289 |
+| 60 | `warmPublicProductsPanel` | const arrow | 1403 |
+| 61 | `warmPublicSecondaryTabs` | const arrow | 1407 |
+| 62 | `updateMediaUploadState` | const arrow | 1559 |
+| 63 | `forgetMediaUploadState` | const arrow | 1566 |
+| 64 | `loadAssistantStatus` | function | 1613 |
+| 65 | `openProductGallery` | function | 1635 |
+| 66 | `changeTranslateTarget` | function | 1648 |
+| 67 | `isPortalLoadCurrent` | function | 1696 |
+| 68 | `loadPortalEditorData` | function | 1700 |
+| 69 | `refreshPortalView` | function | 1742 |
+| 70 | `loadPortal` | function | 1771 |
+| 71 | `ensureLink` | const arrow | 2027 |
+| 72 | `updateVisibility` | const arrow | 2120 |
+| 73 | `handleScroll` | const arrow | 2150 |
+| 74 | `initWidget` | const arrow | 2195 |
+| 75 | `waitForWidget` | const arrow | 2213 |
+| 76 | `toggleFilterValue` | function | 2337 |
+| 77 | `clearPortalFilters` | function | 2345 |
+| 78 | `setDraft` | function | 2353 |
+| 79 | `toggleRecommendedProduct` | function | 2358 |
+| 80 | `openPortalImage` | function | 2367 |
+| 81 | `setAboutBlocksDraft` | function | 2378 |
+| 82 | `setPromoItemsDraft` | function | 2382 |
+| 83 | `getPortalMediaValue` | function | 2386 |
+| 84 | `setPortalMediaValue` | function | 2400 |
+| 85 | `clearPortalUploadPreview` | function | 2414 |
+| 86 | `clearPortalMediaTarget` | function | 2420 |
+| 87 | `uploadPortalMedia` | function | 2431 |
+| 88 | `cancelPortalMediaUpload` | function | 2502 |
+| 89 | `updateAboutBlock` | function | 2508 |
+| 90 | `updatePromoItem` | function | 2514 |
+| 91 | `addAboutBlock` | function | 2520 |
+| 92 | `addPromoItem` | function | 2524 |
+| 93 | `moveAboutBlockBefore` | function | 2528 |
+| 94 | `removeAboutBlock` | function | 2540 |
+| 95 | `movePromoItemBefore` | function | 2551 |
+| 96 | `removePromoItem` | function | 2563 |
+| 97 | `setFaqDraft` | function | 2574 |
+| 98 | `addFaqItem` | function | 2578 |
+| 99 | `mergeFaqStarterItems` | function | 2589 |
+| 100 | `addFaqStarterSet` | function | 2602 |
+| 101 | `addAiFaqStarterSet` | function | 2606 |
+| 102 | `updateFaqItem` | function | 2610 |
+| 103 | `removeFaqItem` | function | 2616 |
+| 104 | `clearAssistantState` | function | 2620 |
+| 105 | `uploadDraftImage` | function | 2635 |
+| 106 | `uploadAboutBlockMedia` | function | 2639 |
+| 107 | `uploadPromoItemMedia` | function | 2645 |
+| 108 | `openFilePicker` | function | 2649 |
+| 109 | `handleFilePickerSelect` | function | 2653 |
+| 110 | `savePortalDraft` | function | 2681 |
+| 111 | `askAssistant` | function | 2873 |
+| 112 | `refreshMembershipData` | function | 2919 |
+| 113 | `handleMembershipLookup` | function | 2961 |
+| 114 | `addSubmissionImages` | function | 2974 |
+| 115 | `handleSubmissionPaste` | function | 2984 |
+| 116 | `handleSubmitShareProof` | function | 3000 |
+| 117 | `handleReviewSubmission` | function | 3047 |
+| 118 | `renderCatalogSection` | function | 3210 |
+| 119 | `handleUploadSubmissionImages` | const arrow | 3236 |
+| 120 | `renderSecondaryTabPanel` | function | 3292 |
+| 121 | `renderSecondaryTabSection` | function | 3304 |
+| 122 | `scrollPublicPortal` | const arrow | 3433 |
 
 ### 3.52 `frontend/src/components/catalog/CatalogPageContext.tsx`
 
@@ -3023,8 +3028,8 @@ Total files documented: **234**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 166 |
-| 5 | `manualChunks` | function | 170 |
+| 4 | `shouldDeferModulePreload` | function | 168 |
+| 5 | `manualChunks` | function | 172 |
 
 ### 3.234 `frontend/tailwind.config.ts`
 

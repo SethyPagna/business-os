@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 723.
+- Latest completed implementation move in this roadmap: Move 724.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8766,3 +8766,39 @@ Move 723 status:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-05-26-223Z/report.json`
   passed with 20 products, zero failed responses, zero relevant console
   messages, zero page errors, and enforced CSP.
+
+Move 724 status:
+- Move 724 trims public portal editor-only chunks from first load. The
+  repeated performance sweep found that the read-only public portal still
+  downloaded admin editor helpers on initial render: file picker, media upload
+  helpers, and image lightbox code. The accepted rewire stays in
+  React/TypeScript/Vite because the measurable win is chunk ownership and
+  conditional mounting, not a Rust/Go/Python/WASM rewrite.
+- `CatalogPreviewSurface` now mounts `FilePickerModal` only when
+  `!publicView && filePicker.open`, and mounts the image lightbox only after a
+  gallery or portal image view is open with images. `CatalogPage` keeps the
+  upload-state reducer/path helpers local and imports only the small public
+  asset URL helper for catalog image paths. `vite.config.ts` splits
+  `public-asset-urls`, `favicon-utils`, and editor-only `CatalogImageField`
+  into explicit chunks, and `performanceLoadingUx.test.ts` now guards those
+  boundaries.
+- Production build hash `e37146866b299666` was deployed into
+  `business-os-app-1` and verified through `/health` plus
+  `/business-os-build.json`. Public Cloudflare initially returned HTTP 502
+  while the tunnel was stale after app restart; restarting only
+  `business-os-cloudflared-1` restored public HTTP 200.
+- Proof: `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix
+  frontend run check:jsx`, `npm.cmd --prefix frontend run test:utils`,
+  `npm.cmd --prefix frontend run build`, Docker live sync, public Cloudflare
+  Playwright, broad Phase 8.4 UI Playwright, and `git diff --check` passed.
+- Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-37-37-400Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, enforced CSP, and no first-load
+  `file-picker-modal`, `media-upload-utils`, or `image-lightbox` requests.
+- Broad UI report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T17-38-20-661Z/report.json`
+  passed on frontend hash `e37146866b299666`, exercised dashboard, branches,
+  sales, products, returns, library/files, catalog/public portal, receipt
+  settings, POS, inventory, contacts, loyalty, users, audit, settings, server,
+  and backup helper loaders, and recorded zero relevant console messages.

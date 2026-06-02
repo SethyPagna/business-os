@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-02
+Last updated: 2026-06-03
 
 ## Phase Board
 
@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 723, gate the background import tracker to real import activity
+- Latest completed move: Move 724, trim public portal editor-only chunks from first load
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `cb6332a2ac6f7165`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `e37146866b299666`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `cb6332a2ac6f7165`
+  `e37146866b299666`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T16-53-31-646Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T17-38-20-661Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-05-26-223Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-37-37-400Z/report.json`
 - latest import-tracker focused proof:
   `ops/runtime/reports/move723-import-tracker-probe-2026-06-02T16-53-06-381Z.json`
 - post-live hygiene:
@@ -59,6 +59,23 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Public portal first load no longer fetches editor-only file picker, media
+  upload, or image lightbox chunks. `CatalogPreviewSurface` now mounts the
+  file picker only in admin/editor mode and mounts image lightboxes only after
+  a gallery is actually open. `CatalogPage` keeps upload-state helpers local
+  so public/catalog boot no longer statically imports the editor upload helper.
+  `vite.config.ts` splits `public-asset-urls`, `favicon-utils`, and the
+  editor-only `CatalogImageField` into explicit chunks, and
+  `frontend/tests/performanceLoadingUx.test.ts` guards those chunk boundaries.
+  Docker-served build `e37146866b299666` passed TypeScript, JSX/source checks,
+  the frontend utility suite, production build, Cloudflare public Playwright,
+  and broad Phase 8.4 UI Playwright. The public report showed 20 rendered
+  products, zero failed responses, zero relevant console messages, zero page
+  errors, enforced CSP, and no first-load `file-picker-modal`,
+  `media-upload-utils`, or `image-lightbox` requests. The first public curl
+  after app restart briefly returned Cloudflare HTTP 502 while the tunnel was
+  stale; restarting only `business-os-cloudflared-1` restored public HTTP 200.
 
 - The global background import tracker no longer loads during normal
   dashboard, sales, products, returns, library, catalog, POS, inventory,

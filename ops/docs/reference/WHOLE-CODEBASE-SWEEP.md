@@ -848,3 +848,23 @@ probe confirmed explicit import activity still loads the tracker and
 removed 60,810,012 bytes of old runtime reports while preserving current
 evidence, latest local backups, uploads, secrets, env files, and newest R2
 backup coverage.
+
+Move 195 records roadmap Move 724: public portal editor-only chunk trimming.
+The repeated sweep found a frontend chunk graph issue rather than a schema or
+language-runtime rewrite target: the read-only public portal first load still
+had reachable admin editor helpers for file selection, media upload state, and
+image lightbox surfaces. The accepted rewire keeps React/TypeScript/Vite and
+changes ownership/timing instead. `CatalogPreviewSurface` only mounts the file
+picker in non-public editor mode and only mounts lightboxes after image views
+are open. `CatalogPage` keeps upload-state helpers local and imports only the
+public asset URL helper needed by public image paths. `vite.config.ts` creates
+dedicated `public-asset-urls`, `favicon-utils`, and editor-only
+`catalog-editor` boundaries, with the performance loading guard covering those
+rules. Docker-served hash `e37146866b299666` passed focused and broad live
+verification. The Cloudflare public Playwright report showed no first-load
+`file-picker-modal`, `media-upload-utils`, or `image-lightbox` requests while
+preserving 20 rendered products, enforced CSP, and zero relevant console/page
+errors. The broad Phase 8.4 live report kept the authenticated app loaders
+healthy across dashboard, branches, sales, products, returns, files, catalog,
+receipt settings, POS, inventory, contacts, loyalty, users, audit, settings,
+server, and backup helper paths.

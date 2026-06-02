@@ -6987,6 +6987,26 @@ Decision rule:
     navigation; the focused probe confirmed explicit import activity still
     loads the tracker and `/api/import-jobs?limit=8` at HTTP 200.
 
+724. Trim public portal editor-only chunks from first load.
+    Done: `CatalogPreviewSurface` now conditionally mounts the file picker
+    only for admin/editor mode and mounts image lightboxes only when a gallery
+    is open. `CatalogPage` keeps the upload reducer/cache-busted media helpers
+    local so public catalog startup no longer statically imports the editor
+    upload helper. `vite.config.ts` now splits `public-asset-urls`,
+    `favicon-utils`, and editor-only `CatalogImageField` into explicit
+    chunks, with `performanceLoadingUx.test.ts` guarding those boundaries.
+    This is a TypeScript/React/Vite chunk-graph rewire rather than a language
+    conversion: the measurable gain is fewer public first-load modules while
+    preserving admin upload behavior. Proof: performance guard, frontend
+    typecheck, source guard, frontend utility suite, production build hash
+    `e37146866b299666`, Docker live sync, public Cloudflare Playwright check,
+    broad Phase 8.4 UI live check, and `git diff --check` passed. The public
+    report showed 20 rendered products, zero failed responses, zero relevant
+    console messages, zero page errors, enforced CSP, and no first-load
+    `file-picker-modal`, `media-upload-utils`, or `image-lightbox` requests.
+    A stale Cloudflare tunnel briefly returned HTTP 502 after app restart;
+    restarting only `business-os-cloudflared-1` restored public HTTP 200.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
