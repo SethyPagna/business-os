@@ -1499,3 +1499,37 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-35-09-312Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-35-50-511Z/report.json`.
+
+- change: focus startup Lucide icons into an explicit shell chunk
+- affected files:
+  `frontend/src/**/*.tsx`,
+  `frontend/src/types/lucide-react-icons.d.ts`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: Dashboard first-paint icon chunk graph, Login/sidebar
+  shell icon ownership, and route chunk cold-start discipline
+- keeper or rollback: keeper; it removes the broad Lucide vendor bucket while
+  preventing shell-needed icons from being parked inside catalog,
+  notification, import-tracker, media, file-picker, or portal menu chunks
+- route-scoped result: real Docker-served authenticated Playwright trace
+  against `http://127.0.0.1:4000/dashboard` on frontend hash
+  `ab7ff057cc20cdd9` observed 13 startup JavaScript files, 620,625 decoded
+  bytes, 189,316 transfer bytes, no `vendor-lucide`, no forbidden startup
+  route chunks, `/api/auth/bootstrap` and `/api/dashboard/startup` at HTTP
+  200, exactly one `/api/analytics` after pressing `7 Days`, and a direct
+  `Export` click that loaded `shared-portal-menu-DlZ9M2na.js` on demand and
+  opened the menu. Failed requests and relevant console messages stayed at
+  zero.
+- warm whole-app result: performance loading guard, frontend typecheck,
+  source guard, frontend utility suite, production build, Docker live sync,
+  authenticated Playwright startup plus Export-click resource trace, broad
+  Phase 8.4 UI live check, public Cloudflare portal check, and post-live
+  hygiene passed. The first public Cloudflare check failed while the tunnel
+  was stale; restarting only `business-os-cloudflared-1` restored public HTTP
+  200 and the final live suite passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-20-07-473Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-20-47-048Z/report.json`.

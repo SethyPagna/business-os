@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 715, intent-load Dashboard export portal menu
+- Latest completed move: Move 716, focus Lucide shell icons without waking route chunks
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `23fd366cede8b3c4`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `ab7ff057cc20cdd9`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `23fd366cede8b3c4`
+  `ab7ff057cc20cdd9`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-35-09-312Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-20-07-473Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-35-50-511Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-20-47-048Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `23fd366cede8b3c4`
+- broad Phase 8.4 UI live check passed on frontend hash `ab7ff057cc20cdd9`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,27 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Startup Lucide icons now belong to one focused shell chunk instead of a
+  broad `vendor-lucide` bucket or accidental route chunks. Runtime imports in
+  `frontend/src` now use direct `lucide-react/dist/esm/icons/*` modules,
+  `frontend/src/types/lucide-react-icons.d.ts` types those icon modules, and
+  `frontend/vite.config.ts` explicitly assigns only true shell/Login/sidebar
+  icons to `app-shell-icons`. This avoids waking catalog, notification,
+  background import tracker, file-picker, media upload, or portal-menu chunks
+  during Dashboard first paint. Production output removed `vendor-lucide`,
+  emitted `app-shell-icons-Cb4aT_3T.js` at 15.53 kB, and kept later route
+  chunks dynamic. Real Docker-served Playwright proof against
+  `http://127.0.0.1:4000/dashboard` on build hash `ab7ff057cc20cdd9`
+  observed 13 startup JavaScript files, 620,625 decoded bytes, 189,316
+  transfer bytes, no forbidden route chunks, no `vendor-lucide`, clean
+  console, clean failed-request list, `/api/auth/bootstrap` plus
+  `/api/dashboard/startup` at HTTP 200, exactly one `/api/analytics` after
+  pressing `7 Days`, and a direct `Export` click that still loaded
+  `shared-portal-menu-DlZ9M2na.js` on demand and opened the menu. Broad Phase
+  8.4 UI live check, public Cloudflare portal check, and post-live hygiene
+  passed after restarting the Cloudflare tunnel from a transient public check
+  failure.
 
 - Dashboard export menu now loads its portal-positioning menu code only on
   user intent. `frontend/src/components/shared/ExportMenu.tsx` keeps the

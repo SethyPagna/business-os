@@ -742,3 +742,17 @@ chunk. The Docker-served Playwright proof on hash `23fd366cede8b3c4` shows
 `app-shared` at 69,332 decoded bytes, no `shared-portal-menu` startup request
 or modulepreload, and a direct `Export` click that loads the portal chunk at
 HTTP 200 and opens the menu.
+
+Move 187 records the focused Lucide shell-icon chunk split. The accepted
+rewire keeps React/TypeScript and Vite, converts runtime Lucide imports to
+direct icon-module imports, and documents those modules through
+`frontend/src/types/lucide-react-icons.d.ts`. Vite now assigns only
+shell/Login/sidebar icons to `app-shell-icons`, avoiding a broad Lucide vendor
+chunk and avoiding route-chunk ownership of startup icons. The Docker-served
+Playwright proof on hash `ab7ff057cc20cdd9` shows startup at 13 JavaScript
+files, 620,625 decoded bytes, and 189,316 transfer bytes, with no catalog,
+notification-center, background-import-tracker, file-picker, media-upload,
+portal-menu, vendor-zxing, or `vendor-lucide` startup chunks. The same proof
+kept `/api/auth/bootstrap`, `/api/dashboard/startup`, and the `7 Days`
+analytics refresh healthy, and still loaded `shared-portal-menu` on demand
+after clicking `Export`.

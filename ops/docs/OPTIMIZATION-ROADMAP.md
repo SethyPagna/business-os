@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 715.
+- Latest completed implementation move in this roadmap: Move 716.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8592,3 +8592,23 @@ Move 715 status:
   stayed at zero. A transient public Cloudflare 530 was traced to tunnel edge
   connectivity and recovered by restarting only `business-os-cloudflared-1`
   before the final green live suite.
+
+Move 716 status:
+- Move 716 focuses startup Lucide icons into a narrow shell-owned chunk while
+  keeping later-route chunks cold. Frontend runtime imports now use direct
+  `lucide-react/dist/esm/icons/*` modules, `frontend/src/types/lucide-react-icons.d.ts`
+  types those modules, and `frontend/vite.config.ts` assigns only true
+  shell/Login/sidebar icons to `app-shell-icons`. Proof: performance loading
+  guard, frontend typecheck, source guard, frontend utility suite, production
+  build hash `ab7ff057cc20cdd9`, Docker live sync, authenticated Playwright
+  startup plus Export-click resource trace, broad Phase 8.4 UI live check,
+  public Cloudflare portal check, and post-live hygiene passed. Production
+  output removed `vendor-lucide` and emitted `app-shell-icons-Cb4aT_3T.js` at
+  15.53 kB. The focused live trace measured 13 startup JavaScript files,
+  620,625 decoded bytes, and 189,316 transfer bytes, with no catalog,
+  notification-center, background-import-tracker, file-picker, media-upload,
+  portal-menu, `vendor-zxing`, or `vendor-lucide` startup chunks. Pressing
+  `7 Days` still made exactly one analytics request, and clicking `Export`
+  still loaded `shared-portal-menu-DlZ9M2na.js` on demand and opened the menu.
+  A transient public Cloudflare check failure was recovered by restarting only
+  `business-os-cloudflared-1` before the final green live suite.

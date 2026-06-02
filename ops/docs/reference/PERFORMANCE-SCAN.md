@@ -1137,4 +1137,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   proof on hash `23fd366cede8b3c4` confirmed the portal chunk was neither
   requested nor modulepreloaded on Dashboard startup, then a direct `Export`
   click fetched the portal chunk at HTTP 200 and opened the menu.
+- Move 447 focuses startup Lucide icon ownership. Runtime icon imports now use
+  direct `lucide-react/dist/esm/icons/*` modules, and Vite assigns only
+  shell/Login/sidebar icons to `app-shell-icons` instead of emitting a broad
+  `vendor-lucide` chunk or letting route chunks own shell-needed icons.
+  Production output removed `vendor-lucide` and emitted
+  `app-shell-icons-Cb4aT_3T.js` at 15.53 kB. Docker-served Playwright proof on
+  hash `ab7ff057cc20cdd9` measured 13 startup JavaScript files, 620,625
+  decoded bytes, 189,316 transfer bytes, no catalog/notification/import
+  tracker/file-picker/media/portal-menu/vendor-zxing startup chunks, no
+  `vendor-lucide`, clean console, clean failed-request list, and preserved
+  on-demand `shared-portal-menu` loading after clicking `Export`.
 <!-- phase29-manual-notes:end -->

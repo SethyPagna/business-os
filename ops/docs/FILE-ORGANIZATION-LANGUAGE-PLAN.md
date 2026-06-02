@@ -6849,6 +6849,22 @@ Decision rule:
     modulepreloaded on Dashboard startup, then a direct `Export` click fetched
     it at HTTP 200 and opened the menu.
 
+716. Focus startup Lucide icons into a shell-owned chunk.
+    Done: frontend source now imports Lucide icons through direct
+    `lucide-react/dist/esm/icons/*` module paths with a local declaration file,
+    and `vite.config.ts` explicitly keeps only shell/Login/sidebar icons in
+    `app-shell-icons`. This is a language/runtime organization move rather
+    than a folder move: it preserves React/TypeScript, removes the broad
+    Lucide vendor bucket, and prevents shell icons from making route chunks
+    startup dependencies. Proof: performance loading guard, frontend
+    typecheck, source guard, frontend utility suite, production build hash
+    `ab7ff057cc20cdd9`, Docker live sync, authenticated Playwright startup
+    plus Export-click trace, broad Phase 8.4 UI live check, public Cloudflare
+    portal check, and post-live hygiene passed. The focused live trace
+    measured 13 startup JavaScript files, 620,625 decoded bytes, no forbidden
+    route chunks, no `vendor-lucide`, and preserved on-demand
+    `shared-portal-menu` loading after clicking `Export`.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
