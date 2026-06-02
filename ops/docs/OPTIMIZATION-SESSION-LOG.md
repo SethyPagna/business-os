@@ -1298,3 +1298,34 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T18-03-40-430Z/report.json`.
   Exhaustive all-pages report:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`.
+
+- change: deduplicate startup health probes
+- affected files:
+  `frontend/src/api/http.ts`,
+  `frontend/src/AppContext.tsx`,
+  `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: app-shell startup health, AppContext sync URL
+  discovery, runtime version health payload checks, Cloudflare Access health
+  redirects, and active background server health cadence
+- keeper or rollback: keeper; this shares the same health result across
+  startup callers instead of deleting the connection check
+- route-scoped result: real Docker-served authenticated Playwright trace
+  against `http://127.0.0.1:4000/` on frontend hash `3048c3ea2830a60f`
+  kept Dashboard startup at 12 JavaScript chunks with zero unwanted
+  product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
+  notification-center requests. `/health` dropped from 3 probes to 1 in the
+  first 12 seconds, while `/api/auth/bootstrap`, `/api/analytics`, and
+  `/api/dashboard` remained HTTP 200. Failed responses and relevant console
+  messages stayed at zero.
+- warm whole-app result: API HTTP unit tests, performance loading guard,
+  frontend typecheck, source guard, full frontend utility suite, production
+  build, Docker live build sync, authenticated Playwright startup trace, broad
+  Phase 8.4 live suite, public Cloudflare portal check, and post-live hygiene
+  passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-00-03-568Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-00-47-545Z/report.json`.

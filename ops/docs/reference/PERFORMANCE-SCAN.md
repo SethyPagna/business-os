@@ -1083,4 +1083,13 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   unrelated product/POS/inventory/catalog/file-picker/local-DB/import-tracker/
   notification-center requests and no relevant console or failed-response
   noise.
+- Move 441 deduplicates startup health probes. The HTTP layer now owns a
+  shared `pingServerHealth()` with in-flight and short fresh-result reuse,
+  while AppContext consumes that result instead of launching a parallel raw
+  `/health` fetch. The active background cadence now waits 30 seconds after
+  the first shared probe. Docker-served authenticated Playwright proof on hash
+  `3048c3ea2830a60f` kept the Dashboard startup at 12 JavaScript chunks but
+  reduced `/health` from 3 probes to 1 in the first 12 seconds; auth bootstrap,
+  analytics, and dashboard data stayed HTTP 200 with zero failed responses and
+  zero relevant console messages.
 <!-- phase29-manual-notes:end -->

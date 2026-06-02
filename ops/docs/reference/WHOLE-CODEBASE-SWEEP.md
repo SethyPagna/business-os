@@ -683,3 +683,11 @@ gate: 12 JavaScript chunks and 3 app data/auth API calls in the first 12
 seconds, plus 3 expected health probes, down from the earlier 34 chunks and 5
 app data/auth API calls, with no failed responses or relevant console
 messages.
+
+Move 181 records the health-probe dedupe slice. The accepted rewire keeps
+health awareness in the TypeScript HTTP runtime, adds in-flight/fresh result
+reuse, and has AppContext consume the shared result instead of raw-fetching
+`/health` during sync URL discovery. The Docker-served Playwright proof on hash
+`3048c3ea2830a60f` shows one health probe in the first 12 seconds instead of
+three, while preserving the same Dashboard data/API success and clean console
+profile.

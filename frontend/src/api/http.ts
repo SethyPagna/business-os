@@ -29,6 +29,12 @@ type RefreshEventDetail = { reason?: string; channel?: string }
 type CallLogEntry = { ts: string; channel: string; source: string; ms: number; ok: boolean }
 type RaceReadResult = { source: 'server' | 'local'; data: any }
 type RuntimeBuildInfo = { hash?: string; revision?: string; builtAt?: string }
+type ServerHealthProbeResult = {
+  online: boolean
+  status: number
+  cloudflareAccessRequired: boolean
+  payload: LooseRecord | null
+}
 
 // ?€?€?€ Mutable connection state (module-level, intentionally not React state) ?€?€?€
 let syncServerUrl = ''
@@ -69,6 +75,9 @@ const WRITE_INFLIGHT_REUSE_WINDOW_MS = Math.max(SYNC.REQUEST_TIMEOUT_MS || 15_00
 const API_MISMATCH_COOLDOWN_MS = 30_000
 const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504])
 const CLOUDFLARE_ACCESS_LOGIN_RE = /(?:^|\/\/)[^/]*cloudflareaccess\.com\/cdn-cgi\/access\/login|\/cdn-cgi\/access\/login/i
+const HEALTH_CHECK_INTERVAL_MS = 30_000
+const HEALTH_PROBE_TIMEOUT_MS = 4_000
+const HEALTH_PROBE_REUSE_MS = 8_000
 export const FRONTEND_BUILD_INFO = {
   hash: typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev',
   revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
@@ -496,6 +505,15 @@ export function __resetApiWriteDedupeForTests(): void {
   _writeInflight.clear()
 }
 
+export function __resetApiHealthForTests(): void {
+  if (_healthTimer) clearInterval(_healthTimer)
+  _healthTimer = null
+  _healthProbeInFlight = null
+  _lastHealthProbeResult = null
+  _lastHealthProbeAt = 0
+  _serverOnline = true
+}
+
 // HTTP helpers ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 export async function apiFetch(method: unknown, path: string, body?: unknown, timeoutMs: number = SYNC.REQUEST_TIMEOUT_MS, options: ApiFetchOptions = {}): Promise<any> {
   const normalizedMethod = String(method || 'GET').toUpperCase()
@@ -648,14 +666,19 @@ function isConnectivityError(error: any): boolean {
 // ?€?€?€ Server health state ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 let _serverOnline = true          // optimistic until proven otherwise
 let _healthTimer: ReturnType<typeof setInterval> | null = null
+let _healthProbeInFlight: Promise<ServerHealthProbeResult> | null = null
+let _lastHealthProbeResult: ServerHealthProbeResult | null = null
+let _lastHealthProbeAt = 0
 
 export function isServerOnline(): boolean { return _serverOnline }
 
 function setServerHealth(online: boolean): void {
   if (online === _serverOnline) return
   _serverOnline = online
-  window.dispatchEvent(new CustomEvent('server:health', { detail: { online } }))
-  if (online) {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('server:health', { detail: { online } }))
+  }
+  if (online && typeof window !== 'undefined') {
     dispatchTransientGatewayOutage('server:health', null, false)
     // Server just came back ??clear all caches so fresh data is fetched
     cacheClearAll()
@@ -664,43 +687,85 @@ function setServerHealth(online: boolean): void {
   }
 }
 
-async function pingServerHealth(): Promise<void> {
-  if (!syncServerUrl) return
-  if (isProtectedAdminHost() && !hasStoredAuthSession()) return
-  try {
-    const res = await fetch(`${syncServerUrl}/health`, {
-      signal: AbortSignal.timeout(4000),
-      headers: { 'bypass-tunnel-reminder': 'true' },
-      credentials: 'include',
-      redirect: 'manual',
-    })
-    if (isCloudflareAccessRedirectResponse(res)) {
-      dispatchUnauthorized({
-        code: 'cloudflare_access_required',
-        error: 'Please sign in again to continue.',
-        reason: 'cloudflare_access_redirect',
-        path: '/health',
+export async function pingServerHealth(force = false): Promise<ServerHealthProbeResult> {
+  const skippedResult: ServerHealthProbeResult = {
+    online: _serverOnline,
+    status: 0,
+    cloudflareAccessRequired: false,
+    payload: null,
+  }
+  if (!syncServerUrl) return skippedResult
+  if (isProtectedAdminHost() && !hasStoredAuthSession()) return skippedResult
+
+  const now = Date.now()
+  if (!force && _lastHealthProbeResult && now - _lastHealthProbeAt < HEALTH_PROBE_REUSE_MS) {
+    return _lastHealthProbeResult
+  }
+  if (!force && _healthProbeInFlight) return _healthProbeInFlight
+
+  _healthProbeInFlight = (async () => {
+    let result: ServerHealthProbeResult
+    try {
+      const res = await fetch(`${syncServerUrl}/health`, {
+        signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+        headers: { 'bypass-tunnel-reminder': 'true' },
+        credentials: 'include',
+        redirect: 'manual',
       })
-      return
+      const cloudflareAccessRequired = isCloudflareAccessRedirectResponse(res)
+      if (cloudflareAccessRequired) {
+        dispatchUnauthorized({
+          code: 'cloudflare_access_required',
+          error: 'Please sign in again to continue.',
+          reason: 'cloudflare_access_redirect',
+          path: '/health',
+        })
+        result = {
+          online: true,
+          status: res.status,
+          cloudflareAccessRequired,
+          payload: null,
+        }
+      } else {
+        const payload = res.ok ? await res.clone().json().catch(() => null) : null
+        if (payload) checkRuntimeVersionFromHealth(payload)
+        result = {
+          online: isReachableServerResponseStatus(res),
+          status: res.status,
+          cloudflareAccessRequired: false,
+          payload,
+        }
+      }
+    } catch {
+      result = {
+        online: false,
+        status: 0,
+        cloudflareAccessRequired: false,
+        payload: null,
+      }
     }
-    if (res.ok) {
-      const payload = await res.clone().json().catch(() => null)
-      if (payload) checkRuntimeVersionFromHealth(payload)
-    }
-    setServerHealth(isReachableServerResponseStatus(res))
-  } catch {
-    setServerHealth(false)
+
+    setServerHealth(result.online)
+    _lastHealthProbeResult = result
+    _lastHealthProbeAt = Date.now()
+    return result
+  })()
+
+  try {
+    return await _healthProbeInFlight
+  } finally {
+    _healthProbeInFlight = null
   }
 }
 
-// Active health check ??runs every 12 s when a server is configured.
+// Active health check runs on a slower cadence after the first shared probe.
 // Also re-attempts the server for reads when it was previously marked offline,
 // ensuring recovery after a server restart without requiring a user login.
 export function startHealthCheck(): void {
   if (_healthTimer) return
   _healthTimer = setInterval(async () => {
     await pingServerHealth()
-  }, 12_000)
+  }, HEALTH_CHECK_INTERVAL_MS)
   pingServerHealth().catch(() => {})
 }
 

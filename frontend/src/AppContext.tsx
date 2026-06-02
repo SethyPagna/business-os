@@ -6,7 +6,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
 import './web-api.ts'
-import { cacheClearAll, FRONTEND_BUILD_INFO, isCloudflareAccessRedirectResponse, isReachableServerResponseStatus, isTransientGatewayError, startHealthCheck } from './api/http.ts'
+import { cacheClearAll, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, startHealthCheck } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -1118,26 +1118,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
               })
           }
 
-          fetch(`${effectiveUrl}/health`, {
-            signal: AbortSignal.timeout?.(6000),
-            credentials: 'include',
-            redirect: 'manual',
-          })
-            .then((r) => {
-              if (isCloudflareAccessRedirectResponse(r)) {
-                setSyncServerUnreachable(false)
-                if (hasStoredSession) {
-                  window.dispatchEvent(new CustomEvent('auth:unauthorized', {
-                    detail: {
-                      code: 'cloudflare_access_required',
-                      error: 'Please sign in again to continue.',
-                      reason: 'cloudflare_access_redirect',
-                    },
-                  }))
-                }
-                return
-              }
-              setSyncServerUnreachable(!isReachableServerResponseStatus(r))
+          pingServerHealth()
+            .then((result) => {
+              setSyncServerUnreachable(result.cloudflareAccessRequired ? false : !result.online)
             })
             .catch(() => setSyncServerUnreachable(true))
         } else {

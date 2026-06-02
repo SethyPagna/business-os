@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 709.
+- Latest completed implementation move in this roadmap: Move 710.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8429,7 +8429,7 @@ Move 708 status:
   OTP, Google OAuth, verification-capability, and organization
   bootstrap/search calls through the narrow lazy `authTransport` boundary,
   while `frontend/src/api/appBootstrapTransport.ts` returns an empty sign-in
-  bootstrap for invalid sessions instead of reading IndexedDB. `frontend/src/
+  bootstrap for invalid sessions instead of reading IndexedDB.
   `frontend/src/AppContext.tsx` waits for server bootstrap validation before treating a
   stored user as authenticated for startup warmups. Proof: focused loading
   guard, API HTTP guard, TypeScript check, source guard, frontend utility
@@ -8466,3 +8466,22 @@ Move 709 status:
   source guard, frontend utility suite, backend utility suite, broad Phase 8.4
   live suite, public Cloudflare portal check, exhaustive all-pages control
   audit, and exhaustive browser-action smoke passed.
+
+Move 710 status:
+- Move 710 deduplicates startup health probes while preserving immediate
+  connection awareness. `frontend/src/api/http.ts` now exports a shared
+  `pingServerHealth()` probe with an in-flight promise and short fresh-result
+  reuse window, records runtime-version health payloads in one place, and uses
+  a 30-second active health cadence after the first shared probe.
+  `frontend/src/AppContext.tsx` consumes that shared result instead of launching a parallel
+  raw `fetch('/health')`, so bootstrap, AppContext, and the health loop no
+  longer race separate probes during first paint. Proof: API HTTP unit tests
+  now cover in-flight and fresh health-probe reuse; performance loading guards
+  verify the shared probe and forbid the AppContext raw health fetch; source
+  check, typecheck, production build hash `3048c3ea2830a60f`, Docker live
+  sync, authenticated Playwright first-12-seconds trace, broad Phase 8.4 live
+  suite, public Cloudflare portal check, and post-live hygiene passed. The
+  live trace still loaded 12 JavaScript chunks with zero unrelated
+  route/local-DB chunks, but `/health` dropped from 3 probes to 1 while
+  `/api/auth/bootstrap`, `/api/analytics`, and `/api/dashboard` remained HTTP
+  200. Failed responses and relevant console messages stayed at zero.

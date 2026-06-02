@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 709 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 710 in this file.
 
 ## Goal
 
@@ -6744,6 +6744,26 @@ Decision rule:
     34 desktop/mobile routes with 519 visible controls, 392 exercised controls,
     68 screenshots, zero failed controls, and zero findings; browser-action
     smoke covered 34 routes and 28 actions with zero findings.
+
+710. Deduplicate startup health probes.
+    Done: `frontend/src/api/http.ts` now owns a shared `pingServerHealth()`
+    result with in-flight reuse, a short fresh-result reuse window, centralized
+    Cloudflare Access/runtime-version handling, and a 30-second active health
+    cadence after the first shared probe. `frontend/src/AppContext.tsx` now
+    reads that shared health result instead of making its own raw
+    `fetch('/health')` after sync URL discovery. Proof: API HTTP tests cover
+    in-flight and fresh health-probe reuse; performance loading guards verify
+    the shared probe constants and forbid the AppContext raw health fetch;
+    source check, typecheck, production build hash `3048c3ea2830a60f`, Docker
+    live build sync, and authenticated Playwright first-12-seconds trace
+    passed. Broad Phase 8.4 live suite also passed on the same hash with 72
+    checked signals, zero relevant console messages, no framework overlay, a
+    public portal check with 20 rendered products and zero failed responses,
+    and post-live hygiene green. The live startup trace kept startup at 12
+    JavaScript chunks with zero unrelated route/local-DB chunks, dropped
+    `/health` from 3 probes to 1, kept `/api/auth/bootstrap`,
+    `/api/analytics`, and `/api/dashboard` at HTTP 200, and had zero failed
+    responses or relevant console messages.
 
 ## Safety Gates
 

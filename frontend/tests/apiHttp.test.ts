@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import {
+  __resetApiHealthForTests,
   __resetApiWriteDedupeForTests,
   apiFetch,
   buildApiRequestDedupeKey,
@@ -12,6 +13,7 @@ import {
   shouldCompareRuntimeVersions,
   isApiVersionMismatchError,
   isRequiredRuntimeApiPath,
+  pingServerHealth,
   setSyncServerUrl,
   setSyncToken,
 } from '../src/api/http.ts'
@@ -67,6 +69,7 @@ function createDeferredResponse(payload: unknown = { ok: true }): { promise: Pro
 
 function resetApiState() {
   __resetApiWriteDedupeForTests()
+  __resetApiHealthForTests()
   setSyncServerUrl('')
   setSyncToken('')
 }
@@ -205,6 +208,38 @@ await runTest('health connectivity check treats auth failures as reachable but g
   assert.equal(isReachableServerResponseStatus(500), true)
   assert.equal(isReachableServerResponseStatus(530), false)
   assert.equal(isReachableServerResponseStatus(0), false)
+})
+
+await runTest('health probes reuse in-flight and fresh startup checks', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const calls: FetchCall[] = []
+  const deferred = createDeferredResponse({ status: 'ok', runtime: { frontend: { hash: 'dev' } } })
+  globalThis.fetch = ((...args: FetchCall) => {
+    calls.push(args)
+    return calls.length === 1
+      ? deferred.promise
+      : Promise.resolve(new Response(JSON.stringify({ status: 'ok' }), { status: 200 }))
+  }) as typeof fetch
+
+  try {
+    const first = pingServerHealth()
+    const second = pingServerHealth()
+    assert.equal(calls.length, 1)
+    deferred.resolve()
+    const firstResult = await first
+    const secondResult = await second
+    assert.equal(firstResult.online, true)
+    assert.equal(secondResult.online, true)
+
+    const thirdResult = await pingServerHealth()
+    assert.equal(thirdResult.online, true)
+    assert.equal(calls.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
 })
 
 await runTest('api requests detect Cloudflare Access redirects without following them cross-origin', async () => {

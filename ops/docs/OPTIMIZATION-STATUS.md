@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 709, shrink authenticated Dashboard startup network and chunk load
+- Latest completed move: Move 710, deduplicate startup health probes
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `9b132859aa24909c`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `3048c3ea2830a60f`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `9b132859aa24909c`
+  `3048c3ea2830a60f`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-01T18-01-08-129Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-00-03-568Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-01T18-03-40-430Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-00-47-545Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -57,6 +57,24 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Frontend startup now shares health probes instead of launching parallel
+  `/health` checks during first paint. `frontend/src/api/http.ts` exports a
+  shared `pingServerHealth()` with in-flight and fresh-result reuse, keeps
+  Cloudflare Access handling and runtime-version checks centralized, and moves
+  the active background health cadence to 30 seconds after the first shared
+  probe. `frontend/src/AppContext.tsx` consumes that shared result instead of
+  raw-fetching `/health` after it sets the sync URL. Real Docker-served
+  authenticated Playwright proof against `http://127.0.0.1:4000/` on build
+  hash `3048c3ea2830a60f` kept Dashboard startup at 12 JavaScript chunks,
+  dropped `/health` from 3 probes to 1 in the first 12 seconds, kept
+  `/api/auth/bootstrap`, `/api/analytics`, and `/api/dashboard` at HTTP 200,
+  and still had zero unrelated route/local-DB chunks, zero failed responses,
+  and zero relevant console messages. Verification: API HTTP unit tests,
+  performance loading guard, frontend typecheck, source guard, production
+  build, Docker live sync, authenticated Playwright startup trace, broad Phase
+  8.4 live suite, public Cloudflare portal check, and post-live hygiene
+  passed.
 
 - Frontend authenticated Dashboard startup now avoids speculative page chunks,
   local IndexedDB bootstrap reads, notification/import-tracker work, and export
