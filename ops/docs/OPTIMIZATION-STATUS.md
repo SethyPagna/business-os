@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 719, lazy-install sync cache listener after session recovery
+- Latest completed move: Move 720, defer pending-sync polling interval after startup
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `81223d01f14bfad9`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `e473ce0cdd641ad7`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `81223d01f14bfad9`
+  `e473ce0cdd641ad7`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T03-23-20-716Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T15-02-21-650Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T03-24-03-733Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T15-03-06-801Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `81223d01f14bfad9`
+- broad Phase 8.4 UI live check passed on frontend hash `e473ce0cdd641ad7`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,20 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Authenticated startup no longer allocates the 20 second pending-sync polling
+  interval during first paint. `frontend/src/App.tsx` now keeps the existing
+  event-driven pending-sync refreshes, but moves periodic polling behind
+  `scheduleDeferredPendingSyncPolling()`, which starts the interval only after
+  the existing 30 second startup window. Real Docker-served Playwright proof
+  against `http://127.0.0.1:4000/login` and `/dashboard` on build hash
+  `e473ce0cdd641ad7` observed signed-out `/login` with empty sync listener,
+  interval, and timeout probes, and authenticated Dashboard with websocket
+  polling intervals `500` and `3000` only: no startup `20000` pending-sync
+  interval, deferred `30000` timers scheduled, `/api/dashboard/startup` HTTP
+  200, zero console noise, and zero failed requests. Broad Phase 8.4 UI live
+  check, public Cloudflare portal check, and post-live hygiene passed after
+  restarting the Cloudflare tunnel from a stale public portal failure.
 
 - Signed-out startup now reaches zero sync-related listener registrations and
   zero sync timers. `frontend/src/api/http.ts` no longer registers its

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 719 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 720 in this file.
 
 ## Goal
 
@@ -6916,6 +6916,22 @@ Decision rule:
     observed `listeners: []`, `intervals: []`, and `timeouts: []`, while the
     authenticated Dashboard still registered `sync:update` and live sync
     polling.
+
+720. Defer pending-sync polling after startup.
+    Done: `frontend/src/App.tsx` now uses
+    `scheduleDeferredPendingSyncPolling()` so the 20 second pending-sync
+    interval is not allocated during authenticated first paint. Event-driven
+    refreshes still fire immediately for sync errors, reconnects, queue
+    changes, offline sale events, and conflicts. This keeps the existing
+    TypeScript/React strategy and removes a first-paint timer instead of
+    adding another runtime. Proof: performance loading guard, frontend
+    typecheck, frontend utility suite, production build hash
+    `e473ce0cdd641ad7`, Docker live sync, instrumented Login/Dashboard
+    Playwright probe, broad Phase 8.4 UI live check, public Cloudflare portal
+    check, and post-live hygiene passed. The authenticated Dashboard probe
+    saw websocket intervals `500` and `3000` only, no startup `20000`
+    pending-sync interval, and deferred `30000` timers scheduled for later
+    maintenance.
 
 ## Safety Gates
 

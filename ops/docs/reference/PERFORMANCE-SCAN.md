@@ -1178,4 +1178,12 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `intervals: []`, and `timeouts: []`, while authenticated Dashboard still
   registered `sync:update`, sync/auth listeners, websocket polling, and
   `/api/dashboard/startup` HTTP 200 with zero console or failed-request noise.
+- Move 451 defers the pending-sync polling interval after startup. The app
+  keeps immediate event-driven pending-sync refreshes, but starts the periodic
+  20 second poll only after the 30 second startup window. Docker-served
+  Playwright proof on hash `e473ce0cdd641ad7` observed signed-out `/login`
+  with empty listener/interval/timeout probes, and authenticated Dashboard
+  with websocket intervals `500` and `3000` only, no startup `20000`
+  pending-sync interval, deferred `30000` timers scheduled, and
+  `/api/dashboard/startup` HTTP 200 with zero console or failed-request noise.
 <!-- phase29-manual-notes:end -->

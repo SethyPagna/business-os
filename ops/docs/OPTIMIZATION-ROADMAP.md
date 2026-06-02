@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 719.
+- Latest completed implementation move in this roadmap: Move 720.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8674,3 +8674,22 @@ Move 719 status:
   console or failed-request noise. A stale public Cloudflare portal failure
   was recovered by restarting only `business-os-cloudflared-1` before the
   final green live suite.
+
+Move 720 status:
+- Move 720 defers the pending-sync polling interval out of authenticated first
+  paint. `frontend/src/App.tsx` keeps event-driven pending-sync refreshes for
+  sync errors, reconnects, queue changes, offline sales, and conflicts, but
+  replaces the immediate `window.setInterval(..., 20_000)` allocation with
+  `scheduleDeferredPendingSyncPolling()`, which starts periodic polling only
+  after the 30 second startup window. Proof: performance loading guard,
+  frontend typecheck, frontend utility suite, production build hash
+  `e473ce0cdd641ad7`, Docker live sync, instrumented Playwright
+  login/dashboard probe, broad Phase 8.4 UI live check, public Cloudflare
+  portal check, and post-live hygiene passed. The focused live trace saw
+  signed-out `/login` with empty sync listener, interval, and timeout probes;
+  authenticated Dashboard kept websocket polling at `500` and `3000`, had no
+  startup `20000` pending-sync interval, scheduled deferred `30000` timers,
+  returned `/api/dashboard/startup` HTTP 200, and had zero console or
+  failed-request noise. A stale public Cloudflare portal failure was recovered
+  by restarting only `business-os-cloudflared-1` before the final green live
+  suite.

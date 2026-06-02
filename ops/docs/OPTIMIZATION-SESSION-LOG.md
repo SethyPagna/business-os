@@ -1636,3 +1636,33 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T03-23-20-716Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T03-24-03-733Z/report.json`.
+
+- change: defer pending-sync polling interval after startup
+- affected files:
+  `frontend/src/App.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: authenticated Dashboard first paint and global
+  pending-sync maintenance
+- keeper or rollback: keeper; it removes a first-paint interval while keeping
+  event-driven pending-sync refreshes and delayed polling for long sessions
+- route-scoped result: real Docker-served instrumented Playwright trace
+  against `http://127.0.0.1:4000/login` and `/dashboard` on frontend hash
+  `e473ce0cdd641ad7` observed signed-out `/login` with empty sync listener,
+  interval, and timeout probes. The authenticated Dashboard returned
+  `/api/dashboard/startup` HTTP 200, registered live sync listeners, started
+  websocket intervals `500` and `3000`, did not allocate the startup `20000`
+  pending-sync interval, scheduled deferred `30000` timers, and had zero
+  console or failed-request noise.
+- warm whole-app result: performance loading guard, frontend typecheck,
+  frontend utility suite, production build, Docker live sync, instrumented
+  Login/Dashboard Playwright probe, broad Phase 8.4 UI live check, public
+  Cloudflare portal check, and post-live hygiene passed. The first public
+  Cloudflare check failed while the tunnel was stale; restarting only
+  `business-os-cloudflared-1` restored public HTTP 200 and the final live
+  suite passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T15-02-21-650Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T15-03-06-801Z/report.json`.

@@ -795,3 +795,13 @@ Playwright proof on hash `81223d01f14bfad9` shows signed-out `/login` with
 empty listener, interval, and timeout probes; the authenticated Dashboard still
 installs `sync:update`, starts live sync polling, and returns
 `/api/dashboard/startup` HTTP 200 with zero console or failed-request noise.
+
+Move 191 records the deferred pending-sync polling interval. The accepted
+rewire keeps pending-sync maintenance in the existing React/TypeScript shell
+but moves periodic polling out of first paint. Event-driven refreshes still
+run immediately when sync errors, reconnects, queue changes, offline sale
+events, or conflicts happen; the 20 second periodic loop starts only after
+the 30 second startup window. Docker-served Playwright proof on hash
+`e473ce0cdd641ad7` shows no signed-out sync activity and authenticated
+Dashboard websocket intervals `500` and `3000` only during first paint, with
+no startup `20000` pending-sync interval.
