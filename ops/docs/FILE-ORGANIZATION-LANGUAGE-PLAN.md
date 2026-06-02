@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 715 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 717 in this file.
 
 ## Goal
 
@@ -6864,6 +6864,23 @@ Decision rule:
     measured 13 startup JavaScript files, 620,625 decoded bytes, no forbidden
     route chunks, no `vendor-lucide`, and preserved on-demand
     `shared-portal-menu` loading after clicking `Export`.
+
+717. Defer signed-out Login UI and auth-only icons.
+    Done: `frontend/src/App.tsx` now lazy-loads `Login` only in the
+    unauthenticated branch, and `frontend/vite.config.ts` keeps the signed-out
+    screen in a deferred `auth-login` chunk. Auth-only Lucide icons are listed
+    in `authLoginIconNames`, so they do not enlarge the authenticated
+    `app-shell-icons` chunk and do not fall into catalog. This preserves the
+    TypeScript/React runtime while tightening ownership of signed-out-only
+    code. Proof: performance loading guard, frontend typecheck, source guard,
+    frontend utility suite, production build hash `80aceec796128140`, Docker
+    live sync, authenticated Dashboard plus signed-out Login Playwright
+    resource trace, broad Phase 8.4 UI live check, public Cloudflare portal
+    check, and post-live hygiene passed. The focused live trace measured
+    587,317 decoded startup bytes, no forbidden authenticated startup chunks
+    or modulepreloads, `auth-login-SHSYT-QZ.js` loaded only on signed-out
+    `/login`, and the signed-out screen no longer loaded catalog/file-picker/
+    media/ZXing extras.
 
 ## Safety Gates
 

@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 716, focus Lucide shell icons without waking route chunks
+- Latest completed move: Move 717, defer signed-out Login UI and auth-only icons
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `ab7ff057cc20cdd9`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `80aceec796128140`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `ab7ff057cc20cdd9`
+  `80aceec796128140`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-20-07-473Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-44-49-687Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-20-47-048Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-45-32-669Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `ab7ff057cc20cdd9`
+- broad Phase 8.4 UI live check passed on frontend hash `80aceec796128140`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,25 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Authenticated startup no longer imports the signed-out Login UI or auth-only
+  Lucide icons. `frontend/src/App.tsx` now lazy-loads `Login` only in the
+  unauthenticated branch, `frontend/vite.config.ts` emits `auth-login` as a
+  deferred chunk, and auth-only icons are assigned to that chunk instead of
+  `app-shell-icons` or catalog. Real Docker-served Playwright proof against
+  `http://127.0.0.1:4000/dashboard` on build hash `80aceec796128140`
+  observed 13 startup JavaScript files, 587,317 decoded bytes, 181,800
+  transfer bytes, no forbidden startup chunks, no forbidden modulepreloads,
+  no `vendor-lucide`, clean console, clean failed-request list,
+  `/api/auth/bootstrap` plus `/api/dashboard/startup` at HTTP 200, exactly
+  one `/api/analytics` after pressing `7 Days`, and a direct `Export` click
+  that still loaded `shared-portal-menu-CoNiqTbJ.js` on demand and opened the
+  menu. A separate signed-out `/login` proof loaded
+  `auth-login-SHSYT-QZ.js`, did not load catalog/file-picker/media/ZXing
+  extras, and filtered only the expected unauthenticated bootstrap 401. Broad
+  Phase 8.4 UI live check, public Cloudflare portal check, and post-live
+  hygiene passed after restarting the Cloudflare tunnel from a stale public
+  portal failure.
 
 - Startup Lucide icons now belong to one focused shell chunk instead of a
   broad `vendor-lucide` bucket or accidental route chunks. Runtime imports in

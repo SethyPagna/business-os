@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 716.
+- Latest completed implementation move in this roadmap: Move 717.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8611,4 +8611,26 @@ Move 716 status:
   `7 Days` still made exactly one analytics request, and clicking `Export`
   still loaded `shared-portal-menu-DlZ9M2na.js` on demand and opened the menu.
   A transient public Cloudflare check failure was recovered by restarting only
+  `business-os-cloudflared-1` before the final green live suite.
+
+Move 717 status:
+- Move 717 defers the signed-out Login UI and auth-only Lucide icons from the
+  authenticated Dashboard startup graph. `frontend/src/App.tsx` now lazy-loads
+  `Login` only inside the unauthenticated branch, `frontend/vite.config.ts`
+  emits a deferred `auth-login` chunk, and auth-only icons are explicitly
+  assigned to that chunk instead of `app-shell-icons` or catalog. Proof:
+  performance loading guard, frontend typecheck, source guard, frontend
+  utility suite, production build hash `80aceec796128140`, Docker live sync,
+  authenticated Dashboard plus signed-out Login Playwright resource trace,
+  broad Phase 8.4 UI live check, public Cloudflare portal check, and
+  post-live hygiene passed. Production output kept the authenticated entry at
+  `index-CReLl3_q.js` / 51.11 kB, kept `app-shell-icons-D6zIF57-.js` at
+  12.51 kB, and emitted `auth-login-SHSYT-QZ.js` at 33.58 kB. The focused
+  live trace measured 13 authenticated startup JavaScript files, 587,317
+  decoded bytes, and 181,800 transfer bytes, with no `auth-login`, catalog,
+  notification-center, background-import-tracker, file-picker, media-upload,
+  portal-menu, `vendor-zxing`, or `vendor-lucide` startup chunks or
+  modulepreloads. The signed-out `/login` proof loaded `auth-login` on demand
+  and did not load catalog/file-picker/media/ZXing extras. A stale public
+  Cloudflare portal failure was recovered by restarting only
   `business-os-cloudflared-1` before the final green live suite.

@@ -756,3 +756,17 @@ portal-menu, vendor-zxing, or `vendor-lucide` startup chunks. The same proof
 kept `/api/auth/bootstrap`, `/api/dashboard/startup`, and the `7 Days`
 analytics refresh healthy, and still loaded `shared-portal-menu` on demand
 after clicking `Export`.
+
+Move 188 records the signed-out Login/auth-icon boundary split. The accepted
+rewire keeps React/TypeScript and Vite, but moves `Login` behind a lazy
+unauthenticated branch and adds an explicit `auth-login` chunk for Login plus
+auth-only Lucide icons. This reduces authenticated startup without changing
+the login contract, and it avoids the earlier accidental catalog ownership for
+some auth icons. The Docker-served Playwright proof on hash
+`80aceec796128140` shows authenticated Dashboard startup at 13 JavaScript
+files, 587,317 decoded bytes, and 181,800 transfer bytes, with no
+`auth-login`, catalog, notification-center, background-import-tracker,
+file-picker, media-upload, portal-menu, vendor-zxing, or vendor-lucide
+startup chunks or modulepreloads. The signed-out `/login` proof loads
+`auth-login-SHSYT-QZ.js` on demand and no longer loads catalog/file-picker/
+media/ZXing extras.

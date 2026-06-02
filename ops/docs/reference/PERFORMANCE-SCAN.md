@@ -1148,4 +1148,14 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   tracker/file-picker/media/portal-menu/vendor-zxing startup chunks, no
   `vendor-lucide`, clean console, clean failed-request list, and preserved
   on-demand `shared-portal-menu` loading after clicking `Export`.
+- Move 448 defers signed-out Login UI and auth-only icon ownership. `App.tsx`
+  now lazy-loads `Login` only in the unauthenticated branch, and Vite emits a
+  deferred `auth-login` chunk with auth-only Lucide icons assigned before the
+  shell-icon rule. Docker-served Playwright proof on hash `80aceec796128140`
+  measured 13 authenticated startup JavaScript files, 587,317 decoded bytes,
+  181,800 transfer bytes, no `auth-login`, catalog, notification/import
+  tracker, file-picker, media upload, portal-menu, vendor-zxing, or
+  vendor-lucide startup chunks or modulepreloads. The signed-out `/login`
+  proof loaded `auth-login-SHSYT-QZ.js` on demand and did not load catalog/
+  file-picker/media/ZXing extras.
 <!-- phase29-manual-notes:end -->

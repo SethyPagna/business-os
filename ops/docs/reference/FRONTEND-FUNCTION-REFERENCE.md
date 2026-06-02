@@ -672,26 +672,26 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `asPageModule` | function | 180 |
-| 2 | `getAppShellApi` | function | 184 |
-| 3 | `getConnection` | function | 188 |
-| 4 | `isPageId` | function | 194 |
-| 5 | `normalizePageId` | function | 198 |
-| 6 | `getErrorMessage` | function | 202 |
-| 7 | `getChunkErrorMessage` | function | 298 |
-| 8 | `isChunkLoadError` | function | 303 |
-| 9 | `createChunkTimeoutError` | function | 312 |
-| 10 | `isRetryableImportError` | function | 318 |
-| 11 | `importWithTimeout` | function | 326 |
-| 12 | `clearRetryMarker` | function | 342 |
-| 13 | `buildChunkRecoveryUrl` | function | 349 |
-| 14 | `deleteStaleShellCaches` | function | 360 |
-| 15 | `clearStaleShellCaches` | function | 373 |
-| 16 | `triggerChunkRecoveryReload` | function | 383 |
-| 17 | `reload` | const arrow | 390 |
-| 18 | `createChunkReloadStallError` | function | 400 |
-| 19 | `shouldRetryChunk` | function | 406 |
-| 20 | `lazyWithRetry` | function | 416 |
+| 1 | `asPageModule` | function | 179 |
+| 2 | `getAppShellApi` | function | 183 |
+| 3 | `getConnection` | function | 187 |
+| 4 | `isPageId` | function | 193 |
+| 5 | `normalizePageId` | function | 197 |
+| 6 | `getErrorMessage` | function | 201 |
+| 7 | `getChunkErrorMessage` | function | 297 |
+| 8 | `isChunkLoadError` | function | 302 |
+| 9 | `createChunkTimeoutError` | function | 311 |
+| 10 | `isRetryableImportError` | function | 317 |
+| 11 | `importWithTimeout` | function | 325 |
+| 12 | `clearRetryMarker` | function | 341 |
+| 13 | `buildChunkRecoveryUrl` | function | 348 |
+| 14 | `deleteStaleShellCaches` | function | 359 |
+| 15 | `clearStaleShellCaches` | function | 372 |
+| 16 | `triggerChunkRecoveryReload` | function | 382 |
+| 17 | `reload` | const arrow | 389 |
+| 18 | `createChunkReloadStallError` | function | 399 |
+| 19 | `shouldRetryChunk` | function | 405 |
+| 20 | `lazyWithRetry` | function | 415 |
 | 21 | `getWarmupImporters` | function | 491 |
 | 22 | `shouldSkipBackgroundWarmup` | function | 502 |
 | 23 | `shouldSkipIntentWarmup` | function | 511 |
@@ -3021,8 +3021,8 @@ Total files documented: **234**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 162 |
-| 5 | `manualChunks` | function | 166 |
+| 4 | `shouldDeferModulePreload` | function | 166 |
+| 5 | `manualChunks` | function | 170 |
 
 ### 3.234 `frontend/tailwind.config.ts`
 

@@ -1533,3 +1533,40 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-20-07-473Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-20-47-048Z/report.json`.
+
+- change: defer signed-out Login UI and auth-only icons
+- affected files:
+  `frontend/src/App.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: authenticated Dashboard startup graph, signed-out
+  Login chunk ownership, and auth-only icon chunking
+- keeper or rollback: keeper; it removes signed-out-only React/UI/icon code
+  from authenticated startup and prevents those auth icons from falling into
+  catalog while preserving signed-out Login behavior
+- route-scoped result: real Docker-served Playwright trace against
+  `http://127.0.0.1:4000/dashboard` on frontend hash `80aceec796128140`
+  observed 13 startup JavaScript files, 587,317 decoded bytes, 181,800
+  transfer bytes, no `auth-login`, catalog, notification-center,
+  background-import-tracker, file-picker, media-upload, portal-menu,
+  `vendor-zxing`, or `vendor-lucide` startup chunks or modulepreloads,
+  `/api/auth/bootstrap` and `/api/dashboard/startup` at HTTP 200, exactly one
+  `/api/analytics` after pressing `7 Days`, and a direct `Export` click that
+  loaded `shared-portal-menu-CoNiqTbJ.js` on demand and opened the menu. A
+  separate signed-out `/login` proof loaded `auth-login-SHSYT-QZ.js`, did not
+  load catalog/file-picker/media/ZXing extras, and had no relevant console or
+  failed-request noise after filtering the expected unauthenticated bootstrap
+  401.
+- warm whole-app result: performance loading guard, frontend typecheck,
+  source guard, frontend utility suite, production build, Docker live sync,
+  authenticated Dashboard plus signed-out Login resource trace, broad Phase
+  8.4 UI live check, public Cloudflare portal check, and post-live hygiene
+  passed. The first public Cloudflare check failed while the tunnel was stale;
+  restarting only `business-os-cloudflared-1` restored public HTTP 200 and the
+  final live suite passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-44-49-687Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-45-32-669Z/report.json`.
