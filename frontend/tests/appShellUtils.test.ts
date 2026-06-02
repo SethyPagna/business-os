@@ -110,6 +110,8 @@ runTest('guest startup ignores expected unauthorized websocket probes', () => {
   assert.doesNotMatch(httpSource, /if \(typeof window !== 'undefined'\) \{\s*window\.addEventListener\('sync:update'/)
   assert.match(appContextSource, /const quickCheck = window\.setTimeout\(poll, 100\)[\s\S]*pollTimer = window\.setInterval\(poll, pollRate\)/)
   assert.match(websocketSource, /export function ensureWebSocketLifecycleListeners\(\): void \{[\s\S]*!hasStoredAuthSession\(\)[\s\S]*window\.addEventListener\('auth:unauthorized'/)
+  assert.match(websocketSource, /export function resumeWS\(\): void \{[\s\S]*wsSuppressReconnectUntil = 0[\s\S]*reconnectAttempts = 0[\s\S]*reconnectWS\(\)/)
+  assert.doesNotMatch(websocketSource, /window\.addEventListener\('online'[\s\S]{0,160}connectWS/)
   assert.doesNotMatch(websocketSource, /if \(typeof window !== 'undefined'[\s\S]{0,120}\) \{\s*window\.addEventListener\('auth:unauthorized'/)
 })
 

@@ -13,8 +13,8 @@
  *   api/methods.ts   - all domain API methods
  */
 
-import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll } from './api/http.ts'
-import { connectWS, disconnectWS, reconnectWS } from './api/websocket.ts'
+import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll, pingServerHealth } from './api/http.ts'
+import { connectWS, disconnectWS, reconnectWS, resumeWS } from './api/websocket.ts'
 import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,
@@ -655,17 +655,20 @@ function ensureSessionRecoveryListeners(): void {
   if (typeof window === 'undefined' || sessionRecoveryListenersRegistered) return
   sessionRecoveryListenersRegistered = true
   window.addEventListener('online', () => {
-    reconnectWS()
+    resumeWS()
     startHealthCheck()
+    pingServerHealth(true).catch(() => {})
     runOfflineMaintenance(true)
   })
   window.addEventListener('focus', () => {
-    connectWS()
+    resumeWS()
+    pingServerHealth().catch(() => {})
     runOfflineMaintenance()
   })
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return
-    connectWS()
+    resumeWS()
+    pingServerHealth().catch(() => {})
     runOfflineMaintenance()
   })
   window.addEventListener('sync:reconnected', () => {

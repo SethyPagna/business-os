@@ -803,21 +803,7 @@ export function startHealthCheck(): void {
 export function ensureHealthLifecycleListeners(): void {
   if (typeof window === 'undefined' || healthLifecycleListenersRegistered) return
   healthLifecycleListenersRegistered = true
-  window.addEventListener('online',  () => {
-    if (syncServerUrl) {
-      setServerHealth(true)
-      pingServerHealth().catch(() => {})
-    }
-  })
   window.addEventListener('offline', () => setServerHealth(false))
-  window.addEventListener('focus', () => {
-    if (syncServerUrl) pingServerHealth().catch(() => {})
-  })
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible' && syncServerUrl) {
-      pingServerHealth().catch(() => {})
-    }
-  })
 }
 
 // ?€?€?€ Stale-while-revalidate cache (extended TTL for offline resilience) ?€?€?€?€

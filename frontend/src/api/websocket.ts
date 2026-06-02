@@ -182,6 +182,12 @@ export function reconnectWS(): void {
   connectWS()
 }
 
+export function resumeWS(): void {
+  wsSuppressReconnectUntil = 0
+  reconnectAttempts = 0
+  reconnectWS()
+}
+
 function scheduleReconnect(): void {
   clearReconnectTimer()
   if (Date.now() < wsSuppressReconnectUntil) return
@@ -214,20 +220,6 @@ export function ensureWebSocketLifecycleListeners(): void {
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       wsIntentionalClose = true
       try { ws.close(1000, 'auth-required') } catch (_) {}
-    }
-  })
-  window.addEventListener('online', () => {
-    wsSuppressReconnectUntil = 0
-    if (getSyncServerUrl()) connectWS()
-  })
-  window.addEventListener('focus', () => {
-    wsSuppressReconnectUntil = 0
-    if (getSyncServerUrl()) connectWS()
-  })
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      wsSuppressReconnectUntil = 0
-      if (getSyncServerUrl()) connectWS()
     }
   })
 }
