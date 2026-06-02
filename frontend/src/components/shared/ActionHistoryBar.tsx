@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { CornerDownLeft, CornerDownRight, History } from 'lucide-react'
+import CornerDownLeft from 'lucide-react/dist/esm/icons/corner-down-left.js'
+import CornerDownRight from 'lucide-react/dist/esm/icons/corner-down-right.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
 import { useApp as useAppFromContext } from '../../AppContext.tsx'
 
 type Translate = (key: string, fallback: string) => string

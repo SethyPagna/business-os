@@ -1,32 +1,30 @@
 import { Suspense, lazy, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
-import {
-  BadgeDollarSign,
-  Bot,
-  ChevronDown,
-  ChevronUp,
-  Eye,
-  EyeOff,
-  ExternalLink,
-  Facebook,
-  Globe,
-  HelpCircle,
-  Images,
-  Instagram,
-  Mail,
-  MapPin,
-  Phone,
-  Plus,
-  RotateCcw,
-  Save,
-  Search,
-  Send,
-  ShoppingBag,
-  Sparkles,
-  Store,
-  Ticket,
-  Upload,
-} from 'lucide-react'
+import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
+import Bot from 'lucide-react/dist/esm/icons/bot.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
+import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
+import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
+import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
+import Globe from 'lucide-react/dist/esm/icons/globe.js'
+import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
+import Images from 'lucide-react/dist/esm/icons/images.js'
+import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
+import Mail from 'lucide-react/dist/esm/icons/mail.js'
+import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
+import Phone from 'lucide-react/dist/esm/icons/phone.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import Save from 'lucide-react/dist/esm/icons/save.js'
+import Search from 'lucide-react/dist/esm/icons/search.js'
+import Send from 'lucide-react/dist/esm/icons/send.js'
+import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
+import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
+import Store from 'lucide-react/dist/esm/icons/store.js'
+import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import type { LucideIcon } from 'lucide-react'
 import { useIsPageActive } from '../shared/pageActivity'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'

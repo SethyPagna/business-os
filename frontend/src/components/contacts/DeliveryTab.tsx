@@ -1,7 +1,11 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
-import { ChevronDown, ChevronRight, Download, Plus, Upload } from 'lucide-react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'

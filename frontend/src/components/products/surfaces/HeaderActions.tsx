@@ -1,4 +1,7 @@
-import { Download, PackagePlus, Settings2, Upload } from 'lucide-react'
+import Download from 'lucide-react/dist/esm/icons/download.js'
+import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import PortalMenu from '../../shared/PortalMenu'
 import type { PortalMenuItem } from '../../shared/PortalMenu'
 import ExportMenu from '../../shared/ExportMenu'

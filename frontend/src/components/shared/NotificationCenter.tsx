@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
-import { AlertCircle, AlertTriangle, Bell, CheckCircle2, ChevronDown, ExternalLink, Info, Search, Settings2, X } from 'lucide-react'
+import AlertCircle from 'lucide-react/dist/esm/icons/alert-circle.js'
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import Bell from 'lucide-react/dist/esm/icons/bell.js'
+import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
+import Info from 'lucide-react/dist/esm/icons/info.js'
+import Search from 'lucide-react/dist/esm/icons/search.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import {
   beginTrackedRequest,

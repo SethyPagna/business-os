@@ -1,7 +1,7 @@
 import { cloneElement, isValidElement, useState, useEffect, useRef, useCallback } from 'react'
 import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { MoreHorizontal } from 'lucide-react'
+import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 
 type MenuColor = 'red' | 'blue' | 'purple' | 'green' | 'orange' | 'gray'
 

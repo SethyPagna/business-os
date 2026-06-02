@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronLeft, ChevronRight, X } from 'lucide-react'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 
 /**
  * Reusable gallery lightbox with arrows, dot navigation, and thumbnail rail.

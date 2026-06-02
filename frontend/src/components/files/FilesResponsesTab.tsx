@@ -1,12 +1,10 @@
-import {
-  Brain,
-  ChevronDown,
-  ChevronUp,
-  History,
-  Image as ImageIcon,
-  RefreshCcw,
-  Sparkles,
-} from 'lucide-react'
+import Brain from 'lucide-react/dist/esm/icons/brain.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
+import ImageIcon from 'lucide-react/dist/esm/icons/image.js'
+import RefreshCcw from 'lucide-react/dist/esm/icons/refresh-ccw.js'
+import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 
 type TranslateFunction = (key: string, fallback: string, fallbackKm?: string) => string
 

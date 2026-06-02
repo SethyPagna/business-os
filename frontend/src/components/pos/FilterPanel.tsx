@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Boxes, Building2, Package, Tags, Truck, X } from 'lucide-react'
+import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
+import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
+import Package from 'lucide-react/dist/esm/icons/package.js'
+import Tags from 'lucide-react/dist/esm/icons/tags.js'
+import Truck from 'lucide-react/dist/esm/icons/truck.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 
 type Translate = (key: string) => string | undefined
 type FilterSetter = (value: string) => void

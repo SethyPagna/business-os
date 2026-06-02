@@ -1,6 +1,9 @@
 import { useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
-import { ChevronDown, ChevronRight, Info, Undo2 } from 'lucide-react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Info from 'lucide-react/dist/esm/icons/info.js'
+import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Modal from '../../shared/Modal'
 import FilePickerModalBase from '../../files/FilePickerModal'
 import {

@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import type { ReactNode } from 'react'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
 import { getContrastingTextColor } from '../../../utils/color.ts'

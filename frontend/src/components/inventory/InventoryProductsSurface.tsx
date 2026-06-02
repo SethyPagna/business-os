@@ -1,6 +1,7 @@
 import { Fragment } from 'react'
 import type { ComponentType } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import DualMoney from './DualMoney'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 

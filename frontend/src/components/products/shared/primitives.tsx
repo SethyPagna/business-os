@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MouseEventHandler } from 'react'
-import { AlertTriangle, ImageOff } from 'lucide-react'
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000

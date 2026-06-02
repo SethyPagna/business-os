@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, RefObject } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Download, Printer, Ruler, Scaling, TestTube2 } from 'lucide-react'
+import Download from 'lucide-react/dist/esm/icons/download.js'
+import Printer from 'lucide-react/dist/esm/icons/printer.js'
+import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
+import Scaling from 'lucide-react/dist/esm/icons/scaling.js'
+import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
 import { downloadReceiptPdf, getPrintSettings, openReceiptPdf, savePrintSettings, PRINT_DEFAULTS } from '../../utils/printReceipt'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
 

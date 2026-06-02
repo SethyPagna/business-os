@@ -122,6 +122,43 @@ const deferredModulePreloadPrefixes = [
   'assets/vendor-zxing-',
 ]
 
+const appShellIconNames = new Set([
+  'arrow-down',
+  'arrow-left',
+  'arrow-up',
+  'badge-dollar-sign',
+  'bell',
+  'book-user',
+  'boxes',
+  'building-2',
+  'chevron-down',
+  'chevron-up',
+  'chrome',
+  'clipboard-list',
+  'database-backup',
+  'folder-open',
+  'key-round',
+  'languages',
+  'layout-dashboard',
+  'loader-2',
+  'log-out',
+  'lock-keyhole',
+  'mail',
+  'moon',
+  'more-horizontal',
+  'package',
+  'receipt',
+  'rotate-ccw',
+  'server',
+  'settings',
+  'shield-check',
+  'shopping-bag',
+  'shopping-cart',
+  'sun',
+  'ticket',
+  'users',
+])
+
 function shouldDeferModulePreload(dep: string): boolean {
   return deferredModulePreloadPrefixes.some((prefix) => dep.includes(prefix))
 }
@@ -130,8 +167,12 @@ function manualChunks(id: string): string | undefined {
   // Keep the shared vendor graph stable while still letting route chunks stay
   // small enough that first-open admin pages do not drag the whole app shell
   // over the wire up front.
+  const normalized = id.replace(/\\/g, '/')
+  if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
+    const iconName = path.basename(normalized, '.js')
+    return appShellIconNames.has(iconName) ? 'app-shell-icons' : undefined
+  }
   if (!id.includes('node_modules')) {
-    const normalized = id.replace(/\\/g, '/')
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
@@ -208,7 +249,7 @@ function manualChunks(id: string): string | undefined {
   if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
   if (/[\\/]node_modules[\\/]dexie[\\/]/.test(id)) return 'vendor-dexie'
   if (/[\\/]node_modules[\\/]@zxing[\\/]/.test(id)) return 'vendor-zxing'
-  if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return 'vendor-lucide'
+  if (/[\\/]node_modules[\\/]lucide-react[\\/]/.test(id)) return undefined
   if (/[\\/]node_modules[\\/]@capacitor[\\/]/.test(id)) return 'vendor-capacitor'
   return 'vendor'
 }

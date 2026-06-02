@@ -1,26 +1,24 @@
 import { Suspense, lazy, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import {
-  BadgeDollarSign,
-  BookUser,
-  Boxes,
-  Building2,
-  ClipboardList,
-  DatabaseBackup,
-  FolderOpen,
-  LayoutDashboard,
-  LogOut,
-  MoreHorizontal,
-  Package,
-  Receipt,
-  RotateCcw,
-  Server,
-  Settings,
-  ShoppingBag,
-  ShoppingCart,
-  Ticket,
-  Users,
-} from 'lucide-react'
+import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
+import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
+import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
+import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
+import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
+import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
+import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
+import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
+import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
+import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
+import Package from 'lucide-react/dist/esm/icons/package.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import Server from 'lucide-react/dist/esm/icons/server.js'
+import Settings from 'lucide-react/dist/esm/icons/settings.js'
+import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
+import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
+import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
+import Users from 'lucide-react/dist/esm/icons/users.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'

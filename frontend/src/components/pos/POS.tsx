@@ -17,7 +17,9 @@
 
 import { Suspense, lazy, useState, useEffect, useRef, useCallback, useDeferredValue, useMemo } from 'react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
-import { ImageOff, Info, X } from 'lucide-react'
+import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
+import Info from 'lucide-react/dist/esm/icons/info.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, useSync } from '../../AppContext'
 import {
   PAYMENT_METHODS,

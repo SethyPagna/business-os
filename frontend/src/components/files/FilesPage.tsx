@@ -1,17 +1,15 @@
 import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  CheckSquare,
-  Copy,
-  Download,
-  FolderOpen,
-  History,
-  KeyRound,
-  RefreshCcw,
-  Square,
-  Trash2,
-  Upload,
-} from 'lucide-react'
+import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
+import Copy from 'lucide-react/dist/esm/icons/copy.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
+import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
+import History from 'lucide-react/dist/esm/icons/history.js'
+import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import RefreshCcw from 'lucide-react/dist/esm/icons/refresh-ccw.js'
+import Square from 'lucide-react/dist/esm/icons/square.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'

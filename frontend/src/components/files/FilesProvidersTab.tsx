@@ -1,11 +1,9 @@
-import {
-  KeyRound,
-  RefreshCcw,
-  Save,
-  ShieldCheck,
-  TestTube2,
-  Trash2,
-} from 'lucide-react'
+import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import RefreshCcw from 'lucide-react/dist/esm/icons/refresh-ccw.js'
+import Save from 'lucide-react/dist/esm/icons/save.js'
+import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
+import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import type { Dispatch, SetStateAction } from 'react'
 
 type TranslateFn = (key: string, fallbackEn?: string, fallbackKm?: string) => string

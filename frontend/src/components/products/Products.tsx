@@ -2,7 +2,10 @@
 // Main Products page; all sub-modals are imported from sibling files.
 
 import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, PackageSearch } from 'lucide-react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { downloadCSV } from '../../utils/csv'
 import Modal from '../shared/Modal'

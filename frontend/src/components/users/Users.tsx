@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
-import { CircleUserRound, UserPlus } from 'lucide-react'
+import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round.js'
+import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
 import Modal from '../shared/Modal'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'

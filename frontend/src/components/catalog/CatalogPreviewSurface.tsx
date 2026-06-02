@@ -1,6 +1,10 @@
 import { Suspense, lazy } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
-import { ArrowDown, ArrowUp, Globe, Moon, Sun } from 'lucide-react'
+import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
+import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
+import Globe from 'lucide-react/dist/esm/icons/globe.js'
+import Moon from 'lucide-react/dist/esm/icons/moon.js'
+import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import { ProductImg } from '../products/shared/primitives'
 
 const PortalMenu = lazy(() => import('../shared/PortalMenu'))

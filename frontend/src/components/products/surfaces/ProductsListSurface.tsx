@@ -1,6 +1,7 @@
 import { Fragment } from 'react'
 import type { ReactNode, RefObject } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 
 type Translate = (key: string) => string | undefined
 type TranslateWithFallback = (key: string, fallback: string, khmerFallback?: string) => string

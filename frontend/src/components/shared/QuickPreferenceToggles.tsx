@@ -1,4 +1,6 @@
-import { Languages, Moon, Sun } from 'lucide-react'
+import Languages from 'lucide-react/dist/esm/icons/languages.js'
+import Moon from 'lucide-react/dist/esm/icons/moon.js'
+import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import type { MouseEventHandler, ReactNode } from 'react'
 import { useApp as useAppFromContext } from '../../AppContext.tsx'
 

@@ -1,4 +1,5 @@
-import { Filter, X } from 'lucide-react'
+import Filter from 'lucide-react/dist/esm/icons/filter.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import type { ReactNode } from 'react'
 import PortalMenu from './PortalMenu'
 

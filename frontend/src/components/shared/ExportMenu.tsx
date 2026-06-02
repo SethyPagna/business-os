@@ -1,4 +1,4 @@
-import { Download } from 'lucide-react'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import { useCallback, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { PortalMenuItem } from './PortalMenu'

@@ -1,17 +1,15 @@
 import type { ComponentType, FormEvent } from 'react'
 import { useEffect, useRef, useState } from 'react'
-import {
-  ArrowLeft,
-  Building2,
-  ChevronDown,
-  ChevronUp,
-  Chrome,
-  KeyRound,
-  Loader2,
-  LockKeyhole,
-  Mail,
-  ShieldCheck,
-} from 'lucide-react'
+import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
+import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
+import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
+import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole.js'
+import Mail from 'lucide-react/dist/esm/icons/mail.js'
+import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { STORAGE_KEYS } from '../../constants'

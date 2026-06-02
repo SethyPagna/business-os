@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, ReactNode, SetStateAction } from 'react'
-import { MoreHorizontal, X } from 'lucide-react'
+import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import Modal from '../shared/Modal'
 import PortalMenu from '../shared/PortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'

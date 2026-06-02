@@ -1,6 +1,11 @@
 import { useState } from 'react'
 import type { DragEvent } from 'react'
-import { ChevronDown, ChevronUp, GripVertical, Minus, Plus, Trash2 } from 'lucide-react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical.js'
+import Minus from 'lucide-react/dist/esm/icons/minus.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 
 type Translate = (key: string, fallback?: string) => string
 

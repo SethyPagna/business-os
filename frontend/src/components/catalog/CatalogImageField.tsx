@@ -1,4 +1,5 @@
-import { Eye, Upload } from 'lucide-react'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
+import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { createInitialUploadState } from '../../utils/mediaUpload.ts'
 
 type CatalogUploadState = ReturnType<typeof createInitialUploadState>

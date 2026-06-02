@@ -1,15 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  RefreshCw,
-  Server,
-  Wifi,
-  WifiOff,
-} from 'lucide-react'
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
+import Server from 'lucide-react/dist/esm/icons/server.js'
+import Wifi from 'lucide-react/dist/esm/icons/wifi.js'
+import WifiOff from 'lucide-react/dist/esm/icons/wifi-off.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'

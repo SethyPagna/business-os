@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
-import { ScanLine } from 'lucide-react'
+import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import Modal from '../../shared/Modal'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import BranchStockAdjuster from './BranchStockAdjuster'

@@ -180,6 +180,9 @@ assert.match(viteConfig, /'assets\/media-upload-utils-',[\s\S]*'assets\/notifica
 assert.doesNotMatch(viteConfig, /PortalMenu\.tsx'\)\) return 'portal-tools'/, 'shared PortalMenu should not be grouped with catalog portal tools')
 assert.match(viteConfig, /'assets\/shared-portal-menu-',/, 'PortalMenu should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /PortalMenu\.tsx'\)\) return 'shared-portal-menu'[\s\S]*if \(normalized\.includes\('\/src\/components\/files\/FilePickerModal'\)/, 'PortalMenu should have a focused intent-loaded chunk before generic shared handling')
+assert.doesNotMatch(viteConfig, /lucide-react[\\\/]\)\.test\(id\)\) return 'vendor-lucide'/, 'Lucide icons should not be forced into one app-wide startup vendor chunk')
+assert.match(viteConfig, /const appShellIconNames = new Set\([\s\S]*'layout-dashboard'[\s\S]*'shopping-cart'[\s\S]*'users'/, 'startup shell Lucide icons should be listed explicitly instead of falling into route chunks')
+assert.match(viteConfig, /lucide-react\/dist\/esm\/icons\/[\s\S]*return appShellIconNames\.has\(iconName\) \? 'app-shell-icons' : undefined/, 'direct Lucide icon modules should keep shell icons focused and route icons outside the generic startup vendor bucket')
 assert.match(viteConfig, /'assets\/catalog-',[\s\S]*'assets\/portal-tools-',/, 'catalog and public portal chunks should be excluded from eager modulepreload')
 assert.match(viteConfig, /PaginationControls\.tsx'\)\) return 'shared-pagination'[\s\S]*ActionHistoryBar\.tsx'\)\) return 'shared-action-history'[\s\S]*FilterMenu\.tsx'\)\) return 'shared-filter-menu'[\s\S]*SectionSwitcher\.tsx'\)\) return 'shared-section-switcher'[\s\S]*PageHeader\.tsx'\)\) return 'shared-page-header'[\s\S]*Modal\.tsx'\)\) return 'shared-modal'[\s\S]*if \(normalized\.includes\('\/src\/components\/shared\/'\)\) return 'app-shared'/, 'later-route shared controls should be split before the generic app-shared startup chunk')
 assert.doesNotMatch(exportMenu, /import PortalMenu from '\.\/PortalMenu'/, 'ExportMenu should not statically import the portal menu positioning code during startup')
@@ -211,6 +214,8 @@ assert.match(appContext, /const runStartupHealthProbe = \(\) => \{[\s\S]*pingSer
 assert.doesNotMatch(appContext, /fetch\(`\$\{effectiveUrl\}\/health`/, 'AppContext startup should not issue a separate raw health fetch')
 assert.doesNotMatch(dashboard, /import \{ BarChart, LineChart, DonutChart \} from '\.\/charts'/, 'Dashboard should not eagerly import every chart through the barrel')
 assert.match(dashboard, /const BarChart = lazy\(\(\) => import\('\.\/charts\/BarChart'\)\)/, 'inactive Dashboard volume chart should lazy-load instead of joining first-paint chart code')
+assert.match(dashboard, /lucide-react\/dist\/esm\/icons\/layout-dashboard\.js/, 'Dashboard should use direct Lucide icon modules instead of the app-wide barrel')
+assert.doesNotMatch(dashboard, /Upload \} from 'lucide-react'/, 'Dashboard should not keep unused startup icon imports')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')

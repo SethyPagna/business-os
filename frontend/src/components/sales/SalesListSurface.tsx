@@ -1,5 +1,6 @@
 import { Fragment, type RefObject } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import StatusBadge from './StatusBadge.tsx'
 
 type TranslateFn = (key: string) => string
