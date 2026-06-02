@@ -200,6 +200,8 @@ assert.match(httpApi, /export function primeServerHealthFromRuntime\(serverRunti
 assert.match(appContext, /primeServerHealthFromRuntime\(runtime as AppRecord\)[\s\S]*setSyncServerUnreachable\(false\)/, 'AppContext startup should prime health from authenticated bootstrap runtime metadata')
 assert.match(appContext, /const runStartupHealthProbe = \(\) => \{[\s\S]*pingServerHealth\(\)[\s\S]*setSyncServerUnreachable\(result\.cloudflareAccessRequired \? false : !result\.online\)/, 'AppContext startup should keep a shared health fallback for missing or failed bootstrap data')
 assert.doesNotMatch(appContext, /fetch\(`\$\{effectiveUrl\}\/health`/, 'AppContext startup should not issue a separate raw health fetch')
+assert.doesNotMatch(dashboard, /import \{ BarChart, LineChart, DonutChart \} from '\.\/charts'/, 'Dashboard should not eagerly import every chart through the barrel')
+assert.match(dashboard, /const BarChart = lazy\(\(\) => import\('\.\/charts\/BarChart'\)\)/, 'inactive Dashboard volume chart should lazy-load instead of joining first-paint chart code')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')

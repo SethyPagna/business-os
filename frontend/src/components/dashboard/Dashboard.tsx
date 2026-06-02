@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { Suspense, lazy, useState, useEffect, useCallback } from 'react'
 import type { ReactNode } from 'react'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import { LayoutDashboard, RefreshCw, Upload } from 'lucide-react'
-import { BarChart, LineChart, DonutChart } from './charts'
+import LineChart from './charts/LineChart'
+import DonutChart from './charts/DonutChart'
 import MiniStat from './MiniStat'
 import { fmtTime } from '../../utils/formatters'
 import { formatPriceNumber } from '../../utils/pricing.ts'
@@ -16,6 +17,8 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { getAnalytics, getDashboard, getDashboardStartup } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
+
+const BarChart = lazy(() => import('./charts/BarChart'))
 
 type TranslateFn = (key: string) => string
 type FormatMoneyFn = (value: unknown) => string
@@ -1705,7 +1708,9 @@ export default function Dashboard() {
             </>
           ) : (
             <>
-              <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
+              <Suspense fallback={<div className="h-48 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />}>
+                <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
+              </Suspense>
               <div className="mt-1.5 flex items-center gap-1.5"><div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-3.5 w-3.5 rounded bg-purple-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{salesCountLabel}</span></div></div>
             </>
           )}
