@@ -387,10 +387,10 @@ Total files documented: **234**
 | 25 | `shouldDispatchUnauthorized` | function | 643 |
 | 26 | `isConnectivityError` | function | 656 |
 | 27 | `setServerHealth` | function | 684 |
-| 28 | `getChannelRefreshKey` | function | 837 |
-| 29 | `emitCacheRefresh` | function | 842 |
-| 30 | `clearInflight` | function | 856 |
-| 31 | `hasReusableInflight` | function | 861 |
+| 28 | `getChannelRefreshKey` | function | 823 |
+| 29 | `emitCacheRefresh` | function | 828 |
+| 30 | `clearInflight` | function | 842 |
+| 31 | `hasReusableInflight` | function | 847 |
 
 ### 3.19 `frontend/src/api/importJobsTransport.ts`
 
@@ -666,7 +666,7 @@ Total files documented: **234**
 | 4 | `isProtectedAdminHost` | function | 43 |
 | 5 | `shouldDebugWs` | function | 53 |
 | 6 | `logWs` | function | 63 |
-| 7 | `scheduleReconnect` | function | 185 |
+| 7 | `scheduleReconnect` | function | 191 |
 
 ### 3.41 `frontend/src/App.tsx`
 
@@ -2962,13 +2962,13 @@ Total files documented: **234**
 | 35 | `run` | const arrow | 633 |
 | 36 | `scheduleIdle` | const arrow | 637 |
 | 37 | `ensureSessionRecoveryListeners` | function | 654 |
-| 38 | `scheduleBootstrapStorageMaintenance` | function | 676 |
-| 39 | `run` | const arrow | 682 |
-| 40 | `scheduleBootstrapOfflineDbWrite` | function | 699 |
-| 41 | `run` | const arrow | 705 |
-| 42 | `write` | const arrow | 707 |
-| 43 | `forwardServiceWorkerOutboxEvent` | function | 726 |
-| 44 | `forwardServiceWorkerAppEvent` | function | 814 |
+| 38 | `scheduleBootstrapStorageMaintenance` | function | 679 |
+| 39 | `run` | const arrow | 685 |
+| 40 | `scheduleBootstrapOfflineDbWrite` | function | 702 |
+| 41 | `run` | const arrow | 708 |
+| 42 | `write` | const arrow | 710 |
+| 43 | `forwardServiceWorkerOutboxEvent` | function | 729 |
+| 44 | `forwardServiceWorkerAppEvent` | function | 817 |
 
 ### 3.229 `ops/scripts/frontend/build-public-runtime-scripts.ts`
 

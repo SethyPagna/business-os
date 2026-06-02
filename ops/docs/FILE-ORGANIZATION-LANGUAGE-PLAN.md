@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 721 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 722 in this file.
 
 ## Goal
 
@@ -6950,6 +6950,23 @@ Decision rule:
     `/login` probe observed no recovery listeners, no visibility listener, no
     WebSocket, and no intervals; authenticated Dashboard still opened one
     WebSocket and kept recovery/health polling active.
+
+722. Consolidate authenticated lifecycle recovery listeners.
+    Done: `web-api.ts` is now the browser lifecycle recovery owner for
+    online/focus/visible events, calling `resumeWS()`, `startHealthCheck()`,
+    `pingServerHealth()`, and offline maintenance from one listener set.
+    `api/http.ts` keeps only the offline health-state listener, and
+    `api/websocket.ts` keeps auth suppression plus the `resumeWS()` helper
+    instead of registering its own online/focus/visibility listeners. This
+    stays in TypeScript because the measurable win is cleaner ownership and
+    fewer browser side effects, not a language rewrite. Proof: app-shell and
+    performance loading guards, frontend typecheck, frontend utility suite,
+    production build hash `254ace63c1c99efe`, Docker live sync, instrumented
+    lifecycle Playwright probe, broad Phase 8.4 UI live check, public
+    Cloudflare portal check, and post-live hygiene passed. The Dashboard probe
+    showed one online listener, two focus listeners, three visibility
+    listeners, one WebSocket, and the expected health/ping/websocket
+    intervals while signed-out Login stayed at zero recovery listeners.
 
 ## Safety Gates
 

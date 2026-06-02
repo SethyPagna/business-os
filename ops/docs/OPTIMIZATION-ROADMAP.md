@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 721.
+- Latest completed implementation move in this roadmap: Move 722.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8715,4 +8715,25 @@ Move 721 status:
   recovery listeners, opened one WebSocket, returned `/api/dashboard/startup`
   HTTP 200, and had zero console or failed-request noise. A stale public
   Cloudflare portal HTTP 530 was recovered by restarting only
+  `business-os-cloudflared-1` before the final green live suite.
+
+Move 722 status:
+- Move 722 consolidates authenticated online/focus/visibility recovery into
+  one runtime owner. `frontend/src/web-api.ts` now coordinates browser
+  lifecycle recovery by calling `resumeWS()`, `startHealthCheck()`,
+  `pingServerHealth()`, and offline maintenance from the same one-shot
+  listener set. `frontend/src/api/http.ts` no longer duplicates online/focus/
+  visibility health listeners and keeps only the immediate offline health
+  flip. `frontend/src/api/websocket.ts` no longer duplicates online/focus/
+  visibility reconnect listeners and instead exposes `resumeWS()` to clear
+  reconnect suppression before reconnecting. Proof: app-shell guard,
+  performance loading guard, frontend typecheck, frontend utility suite,
+  production build hash `254ace63c1c99efe`, Docker live sync, instrumented
+  Playwright lifecycle probe, broad Phase 8.4 UI live check, public
+  Cloudflare portal check, and post-live hygiene passed. The focused live
+  trace kept signed-out `/login` at zero recovery listeners/WebSockets/
+  intervals, while authenticated Dashboard stayed connected with one online
+  listener, two focus listeners, three visibility listeners, one WebSocket,
+  `/api/dashboard/startup` HTTP 200, and zero console or failed-request noise.
+  A stale public Cloudflare portal HTTP 530 was recovered by restarting only
   `business-os-cloudflared-1` before the final green live suite.

@@ -1197,4 +1197,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   one WebSocket, started intervals `30000`, `25000`, `500`, and `3000`,
   returned `/api/dashboard/startup` HTTP 200, and had zero failed requests or
   relevant console messages.
+- Move 453 consolidates authenticated browser lifecycle recovery listeners.
+  `web-api.ts` now owns online/focus/visible recovery and calls
+  `resumeWS()`, `startHealthCheck()`, `pingServerHealth()`, and offline
+  maintenance from one listener set. `api/http.ts` keeps only the offline
+  health flip, and `api/websocket.ts` keeps auth suppression plus `resumeWS()`
+  instead of duplicating online/focus/visibility listeners. Docker-served
+  Playwright proof on hash `254ace63c1c99efe` observed signed-out `/login`
+  with zero recovery listeners/WebSocket/intervals, and authenticated
+  Dashboard with one online listener, two focus listeners, three visibility
+  listeners, one WebSocket, `/api/dashboard/startup` HTTP 200, and zero
+  relevant console noise.
 <!-- phase29-manual-notes:end -->

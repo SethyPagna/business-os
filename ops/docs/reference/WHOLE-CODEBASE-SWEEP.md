@@ -820,3 +820,15 @@ intervals, and zero relevant console noise after the expected bootstrap 401.
 Authenticated Dashboard still opens one WebSocket, installs recovery
 listeners, and returns `/api/dashboard/startup` HTTP 200 with zero failed
 requests.
+
+Move 193 records authenticated lifecycle listener consolidation. The accepted
+rewire keeps the existing TypeScript modules but clarifies ownership:
+`web-api.ts` owns browser online/focus/visible recovery, `api/http.ts` owns
+offline health-state flips and health probing, and `api/websocket.ts` owns
+WebSocket connection state plus `resumeWS()` for clearing reconnect
+suppression. This removes duplicated online/focus/visibility listeners from
+HTTP and WebSocket modules while preserving recovery behavior. Docker-served
+Playwright proof on hash `254ace63c1c99efe` shows signed-out `/login` still
+has no recovery listener, WebSocket, or interval work, while authenticated
+Dashboard has one online listener, two focus listeners, three visibility
+listeners, one WebSocket, and clean startup API/console behavior.
