@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 714 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 715 in this file.
 
 ## Goal
 
@@ -6831,6 +6831,23 @@ Decision rule:
     app API traffic stayed at `/api/auth/bootstrap` and
     `/api/dashboard/startup` and the `7 Days` button still made exactly one
     analytics request.
+
+715. Intent-load Dashboard export portal menu.
+    Done: `ExportMenu` now keeps the visible export button in the startup
+    render but loads `PortalMenu` on pointer/focus/click intent, with
+    `PortalMenu.defaultOpen` preserving direct first-click menu opening.
+    `vite.config.ts` emits the portal menu as the focused deferred
+    `shared-portal-menu` chunk, and the performance loading guard verifies the
+    dynamic import, chunk rule, deferred preload, and first-click open handoff.
+    Proof: performance loading guard, frontend typecheck, source guard,
+    frontend utility suite, production build hash `23fd366cede8b3c4`, Docker
+    live sync, authenticated Playwright startup plus Export-click resource
+    trace, broad Phase 8.4 UI live check, public Cloudflare portal check, and
+    post-live hygiene. Production output reduced `app-shared` from 73.03 kB to
+    69.31 kB and emitted `shared-portal-menu` as a 4.10 kB on-demand chunk.
+    The focused live trace confirmed the portal chunk was not requested or
+    modulepreloaded on Dashboard startup, then a direct `Export` click fetched
+    it at HTTP 200 and opened the menu.
 
 ## Safety Gates
 

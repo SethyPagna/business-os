@@ -732,3 +732,13 @@ at 73,051 decoded bytes, with none of the split shared-control chunks
 requested or modulepreloaded on Dashboard first paint. Startup app API traffic
 remained `/api/auth/bootstrap` and `/api/dashboard/startup`, and the `7 Days`
 interaction still made exactly one analytics request.
+
+Move 186 records the Dashboard export menu intent-load split. The accepted
+rewire keeps React/TypeScript and avoids a second-click UX by rendering the
+button immediately, preloading `PortalMenu` on pointer/focus intent, and using
+`defaultOpen` when the first click triggers the dynamic import. Vite emits the
+portal positioning/menu code as `shared-portal-menu`, a 4.10 kB deferred
+chunk. The Docker-served Playwright proof on hash `23fd366cede8b3c4` shows
+`app-shared` at 69,332 decoded bytes, no `shared-portal-menu` startup request
+or modulepreload, and a direct `Export` click that loads the portal chunk at
+HTTP 200 and opens the menu.

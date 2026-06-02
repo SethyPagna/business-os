@@ -2238,7 +2238,7 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ExportMenu` | component/function | 15 |
+| 1 | `ExportMenu` | component/function | 17 |
 
 ### 3.159 `frontend/src/components/shared/FilterMenu.tsx`
 
@@ -2317,12 +2317,12 @@ Total files documented: **233**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `isPortalMenuItem` | function | 49 |
-| 2 | `PortalMenu` | component/function | 59 |
-| 3 | `closeIfClickedOutside` | const arrow | 117 |
-| 4 | `closeMenu` | const arrow | 125 |
-| 5 | `scheduleReposition` | const arrow | 126 |
-| 6 | `closeIfEscape` | const arrow | 133 |
+| 1 | `isPortalMenuItem` | function | 50 |
+| 2 | `PortalMenu` | component/function | 60 |
+| 3 | `closeIfClickedOutside` | const arrow | 119 |
+| 4 | `closeMenu` | const arrow | 127 |
+| 5 | `scheduleReposition` | const arrow | 128 |
+| 6 | `closeIfEscape` | const arrow | 135 |
 
 ### 3.170 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
 
@@ -3016,8 +3016,8 @@ Total files documented: **233**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 124 |
-| 5 | `manualChunks` | function | 128 |
+| 4 | `shouldDeferModulePreload` | function | 125 |
+| 5 | `manualChunks` | function | 129 |
 
 ### 3.233 `frontend/tailwind.config.ts`
 

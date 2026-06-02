@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 714.
+- Latest completed implementation move in this roadmap: Move 715.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8568,3 +8568,27 @@ Move 714 status:
   public Cloudflare 530 was traced to tunnel edge connectivity and recovered
   by restarting only `business-os-cloudflared-1` before the final green live
   suite.
+
+Move 715 status:
+- Move 715 moves Dashboard export portal positioning code behind user intent
+  while keeping the visible Export button available on first paint.
+  `frontend/src/components/shared/ExportMenu.tsx` now preloads `PortalMenu`
+  on pointer/focus intent and dynamically imports it on first click with a
+  `defaultOpen` handoff, while `frontend/src/components/shared/PortalMenu.tsx`
+  supports that mount-open path. `frontend/vite.config.ts` emits
+  `shared-portal-menu` as a focused deferred chunk, and
+  `frontend/tests/performanceLoadingUx.test.ts` guards the dynamic import,
+  chunking, and first-click open behavior. Proof: performance loading guard,
+  frontend typecheck, source guard, frontend utility suite, production build
+  hash `23fd366cede8b3c4`, Docker live sync, authenticated Playwright startup
+  plus Export-click resource trace, broad Phase 8.4 UI live check, public
+  Cloudflare portal check, and post-live hygiene passed. Production output
+  reduced `app-shared` from 73.03 kB to 69.31 kB and emitted
+  `shared-portal-menu` as a 4.10 kB on-demand chunk. The focused live trace
+  confirmed no `shared-portal-menu` startup request or modulepreload, then a
+  direct `Export` click fetched the portal chunk at HTTP 200 and opened the
+  menu. Startup app API traffic stayed at `/api/auth/bootstrap` and
+  `/api/dashboard/startup`, and failed requests plus relevant console messages
+  stayed at zero. A transient public Cloudflare 530 was traced to tunnel edge
+  connectivity and recovered by restarting only `business-os-cloudflared-1`
+  before the final green live suite.

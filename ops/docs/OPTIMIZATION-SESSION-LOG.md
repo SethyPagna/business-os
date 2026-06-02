@@ -1465,3 +1465,37 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-20-30-348Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-21-12-550Z/report.json`.
+
+- change: intent-load Dashboard export portal menu
+- affected files:
+  `frontend/src/components/shared/ExportMenu.tsx`,
+  `frontend/src/components/shared/PortalMenu.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: Dashboard first-paint shared chunk graph and Export
+  menu first-click behavior
+- keeper or rollback: keeper; it removes portal positioning/menu code from
+  startup while preserving the visible Export button and direct first-click
+  open behavior
+- route-scoped result: real Docker-served authenticated Playwright trace
+  against `http://127.0.0.1:4000/dashboard` on frontend hash
+  `23fd366cede8b3c4` observed only `/api/auth/bootstrap` and
+  `/api/dashboard/startup` during initial Dashboard load, both HTTP 200. The
+  startup resource list contained `app-shared-ViL7Y8Tc.js` with 69,332 decoded
+  bytes and no requested or modulepreloaded `shared-portal-menu` chunk. A
+  direct `Export` click then fetched `shared-portal-menu-CJonXxAs.js` at HTTP
+  200 and opened the menu. Failed requests and relevant console messages
+  stayed at zero.
+- warm whole-app result: performance loading guard, frontend typecheck, source
+  guard, frontend utility suite, production build, Docker live sync,
+  authenticated Playwright startup plus Export-click resource trace, broad
+  Phase 8.4 UI live check, public Cloudflare portal check, and post-live
+  hygiene passed. The first public Cloudflare check hit 530; restarting only
+  `business-os-cloudflared-1` restored public HTTP 200 and the final live suite
+  passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T01-35-09-312Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T01-35-50-511Z/report.json`.

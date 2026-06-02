@@ -1128,4 +1128,13 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   modulepreloaded during default Dashboard startup; initial app API traffic
   stayed at `/api/auth/bootstrap` plus `/api/dashboard/startup`, and the
   `7 Days` interaction still made exactly one analytics request.
+- Move 446 intent-loads the Dashboard export portal menu. `ExportMenu` now
+  renders the visible export button without statically importing `PortalMenu`,
+  preloads the portal menu on pointer/focus intent, and opens it after a
+  direct first-click dynamic import using `PortalMenu.defaultOpen`. Vite emits
+  `shared-portal-menu` as a 4.10 kB deferred chunk, and production output
+  reduced `app-shared` from 73.03 kB to 69.31 kB. Docker-served Playwright
+  proof on hash `23fd366cede8b3c4` confirmed the portal chunk was neither
+  requested nor modulepreloaded on Dashboard startup, then a direct `Export`
+  click fetched the portal chunk at HTTP 200 and opened the menu.
 <!-- phase29-manual-notes:end -->
