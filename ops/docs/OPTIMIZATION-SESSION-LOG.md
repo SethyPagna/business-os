@@ -1570,3 +1570,37 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-44-49-687Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-45-32-669Z/report.json`.
+
+- change: gate signed-out sync/runtime listeners and polling
+- affected files:
+  `frontend/src/App.tsx`,
+  `frontend/src/AppContext.tsx`,
+  `frontend/src/api/websocket.ts`,
+  `frontend/tests/appShellUtils.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: signed-out Login first render, authenticated Dashboard
+  sync loop, and module-level WebSocket lifecycle listener ownership
+- keeper or rollback: keeper; it removes unnecessary signed-out listener and
+  timer work without weakening authenticated websocket recovery or changing
+  the login/auth bootstrap contract
+- route-scoped result: real Docker-served instrumented Playwright trace
+  against `http://127.0.0.1:4000/login` and `/dashboard` on frontend hash
+  `6eb9420d6daf9353` observed signed-out `/login` with only `sync:update`
+  registered, no sync intervals, no 100 ms websocket quick check, expected
+  unauthenticated bootstrap 401, and zero relevant console messages. The
+  authenticated Dashboard path returned `/api/dashboard/startup` HTTP 200,
+  registered sync/auth listeners, started 500 ms websocket polling plus the
+  100 ms quick check, and had zero console or failed-request noise.
+- warm whole-app result: focused app-shell guard, performance loading guard,
+  frontend typecheck, frontend utility suite, production build, Docker live
+  sync, instrumented Login/Dashboard Playwright probe, broad Phase 8.4 UI live
+  check, public Cloudflare portal check, and post-live hygiene passed. The
+  first public Cloudflare check failed while the tunnel was stale; restarting
+  only `business-os-cloudflared-1` restored public HTTP 200 and the final
+  live suite passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T03-11-44-760Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T03-12-21-734Z/report.json`.

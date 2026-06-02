@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 717, defer signed-out Login UI and auth-only icons
+- Latest completed move: Move 718, gate signed-out sync/runtime listeners
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `80aceec796128140`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `6eb9420d6daf9353`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `80aceec796128140`
+  `6eb9420d6daf9353`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T02-44-49-687Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T03-11-44-760Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T02-45-32-669Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T03-12-21-734Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,7 +48,7 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `80aceec796128140`
+- broad Phase 8.4 UI live check passed on frontend hash `6eb9420d6daf9353`
   with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
@@ -57,6 +57,24 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Signed-out startup no longer registers operational sync listeners or starts
+  websocket/pending-sync polling timers before a user or stored session exists.
+  `frontend/src/AppContext.tsx` skips its sync listener effect and 100 ms/500
+  ms websocket checks without a recoverable session, `frontend/src/App.tsx`
+  skips sync-banner listeners and the 20 second pending-sync poll while
+  signed out, and `frontend/src/api/websocket.ts` gates module-level
+  auth/network/focus lifecycle listeners behind stored-session evidence. Real
+  Docker-served Playwright proof against `http://127.0.0.1:4000/login` and
+  `/dashboard` on build hash `6eb9420d6daf9353` observed signed-out `/login`
+  with only the lightweight `sync:update` cache listener, no sync intervals,
+  no 100 ms websocket quick check, no relevant console noise after filtering
+  the expected unauthenticated bootstrap 401, and authenticated Dashboard still
+  registering sync/auth listeners, 500 ms websocket polling, 100 ms quick
+  check, `/api/dashboard/startup` HTTP 200, zero console noise, and zero
+  failed requests. Broad Phase 8.4 UI live check, public Cloudflare portal
+  check, and post-live hygiene passed after restarting the Cloudflare tunnel
+  from a stale public portal failure.
 
 - Authenticated startup no longer imports the signed-out Login UI or auth-only
   Lucide icons. `frontend/src/App.tsx` now lazy-loads `Login` only in the

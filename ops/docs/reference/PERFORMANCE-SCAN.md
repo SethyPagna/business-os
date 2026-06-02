@@ -1158,4 +1158,16 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   vendor-lucide startup chunks or modulepreloads. The signed-out `/login`
   proof loaded `auth-login-SHSYT-QZ.js` on demand and did not load catalog/
   file-picker/media/ZXing extras.
+- Move 449 gates signed-out sync/runtime listeners and polling. AppContext
+  skips operational sync listeners and websocket polling without an active or
+  stored user, the sync banner skips pending-sync listeners and its 20 second
+  poll while signed out, and the websocket module gates auth/network/focus
+  lifecycle listeners behind stored-session evidence. Docker-served
+  Playwright proof on hash `6eb9420d6daf9353` observed signed-out `/login`
+  with only `sync:update`, no 500/3000/20000 ms sync intervals, no 100 ms
+  websocket quick check, and zero relevant console messages after filtering
+  the expected unauthenticated bootstrap 401. The authenticated Dashboard
+  still registered sync/auth listeners, started websocket polling, returned
+  `/api/dashboard/startup` HTTP 200, and had zero console or failed-request
+  noise.
 <!-- phase29-manual-notes:end -->

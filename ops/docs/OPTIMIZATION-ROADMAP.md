@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 717.
+- Latest completed implementation move in this roadmap: Move 718.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8634,3 +8634,25 @@ Move 717 status:
   and did not load catalog/file-picker/media/ZXing extras. A stale public
   Cloudflare portal failure was recovered by restarting only
   `business-os-cloudflared-1` before the final green live suite.
+
+Move 718 status:
+- Move 718 gates signed-out sync/runtime listeners and polling until a user or
+  stored session exists. `frontend/src/AppContext.tsx` now exits its sync
+  listener effect before registering operational listeners or 100 ms/500 ms
+  websocket polling when there is no recoverable session,
+  `frontend/src/App.tsx` exits the sync-error-banner hook before registering
+  pending-sync listeners or the 20 second poll while signed out, and
+  `frontend/src/api/websocket.ts` gates module-level auth/network/focus
+  lifecycle listeners behind stored-session evidence. Proof: focused app-shell
+  and performance guards, frontend typecheck, frontend utility suite,
+  production build hash `6eb9420d6daf9353`, Docker live sync, instrumented
+  Playwright login/dashboard probe, broad Phase 8.4 UI live check, public
+  Cloudflare portal check, and post-live hygiene passed. The focused live
+  trace saw signed-out `/login` register only `sync:update`, start no sync
+  intervals, start no 100 ms websocket quick checks, and produce no relevant
+  console noise after filtering the expected unauthenticated bootstrap 401.
+  The authenticated Dashboard trace still registered sync/auth listeners,
+  started 500 ms websocket polling and the 100 ms quick check, returned
+  `/api/dashboard/startup` HTTP 200, and had zero console or failed-request
+  noise. A stale public Cloudflare portal failure was recovered by restarting
+  only `business-os-cloudflared-1` before the final green live suite.

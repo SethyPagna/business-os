@@ -770,3 +770,18 @@ file-picker, media-upload, portal-menu, vendor-zxing, or vendor-lucide
 startup chunks or modulepreloads. The signed-out `/login` proof loads
 `auth-login-SHSYT-QZ.js` on demand and no longer loads catalog/file-picker/
 media/ZXing extras.
+
+Move 189 records the signed-out sync/runtime listener gate. The accepted
+rewire stays in React/TypeScript/WebSocket instead of adding another runtime:
+the gain came from removing unnecessary work, not from language conversion.
+`AppContext` no longer registers operational sync listeners or websocket
+polling without an active/stored user, the app-level sync banner no longer
+registers pending-sync listeners or its 20 second poll while signed out, and
+the websocket module no longer registers auth/network/focus lifecycle
+listeners at module load without stored-session evidence. Docker-served
+Playwright proof on hash `6eb9420d6daf9353` shows signed-out `/login` with
+only `sync:update`, no sync polling intervals, no 100 ms quick check, and zero
+relevant console noise after the expected unauthenticated bootstrap 401; the
+authenticated Dashboard still registers live sync listeners, starts websocket
+polling, and returns `/api/dashboard/startup` HTTP 200 with zero failed
+requests.

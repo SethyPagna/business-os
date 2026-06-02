@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 717 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 718 in this file.
 
 ## Goal
 
@@ -6881,6 +6881,25 @@ Decision rule:
     or modulepreloads, `auth-login-SHSYT-QZ.js` loaded only on signed-out
     `/login`, and the signed-out screen no longer loaded catalog/file-picker/
     media/ZXing extras.
+
+718. Gate signed-out sync/runtime listeners.
+    Done: `frontend/src/AppContext.tsx` now skips operational sync listeners
+    and websocket polling unless an active user or stored user payload exists,
+    `frontend/src/App.tsx` skips the sync-banner listener set plus pending-sync
+    poll while signed out, and `frontend/src/api/websocket.ts` keeps
+    auth/network/focus lifecycle listeners behind stored-session evidence.
+    This preserves the existing TypeScript/React/WebSocket runtime instead of
+    adding another language, because the measurable gain is from removing
+    unnecessary signed-out work. Proof: focused app-shell and performance
+    guards, frontend typecheck, frontend utility suite, production build hash
+    `6eb9420d6daf9353`, Docker live sync, instrumented Playwright
+    login/dashboard probe, broad Phase 8.4 UI live check, public Cloudflare
+    portal check, and post-live hygiene passed. The signed-out `/login` probe
+    registered only `sync:update`, started no 500/3000/20000 ms sync
+    intervals, started no 100 ms websocket quick check, and had no relevant
+    console noise after filtering the expected unauthenticated bootstrap 401.
+    The authenticated Dashboard still registered sync/auth listeners and live
+    websocket polling.
 
 ## Safety Gates
 
