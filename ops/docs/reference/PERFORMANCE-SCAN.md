@@ -1092,4 +1092,12 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   reduced `/health` from 3 probes to 1 in the first 12 seconds; auth bootstrap,
   analytics, and dashboard data stayed HTTP 200 with zero failed responses and
   zero relevant console messages.
+- Move 442 combines Dashboard startup summary and analytics reads. The backend
+  now shares cached summary and analytics builders across `/api/dashboard`,
+  `/api/analytics`, and `/api/dashboard/startup`; the frontend first empty
+  Dashboard load calls the combined route once, while range changes call only
+  `/api/analytics`. Docker-served Playwright proof on hash
+  `435e572a3d2acfaf` observed exactly `/health`, `/api/auth/bootstrap`, and
+  `/api/dashboard/startup` on initial load, with zero initial legacy
+  dashboard/analytics split calls and zero relevant console messages.
 <!-- phase29-manual-notes:end -->

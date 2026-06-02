@@ -1329,3 +1329,40 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-04-26-857Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-05-06-334Z/report.json`.
+
+- change: combine Dashboard startup summary and analytics reads
+- affected files:
+  `backend/src/routes/sales.ts`,
+  `backend/test/routeContracts.test.ts`,
+  `frontend/src/api/dashboardTransport.ts`,
+  `frontend/src/components/dashboard/Dashboard.tsx`,
+  `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: Dashboard first-load summary and analytics,
+  Dashboard range analytics refresh, backend sales/dashboard route contracts,
+  and Phase 8.4 live dashboard loader proof
+- keeper or rollback: keeper; old `/api/dashboard` and `/api/analytics`
+  remain available, while the first empty Dashboard render uses one combined
+  protected read
+- route-scoped result: real Docker-served authenticated Playwright trace
+  against `http://127.0.0.1:4000/dashboard` on frontend hash
+  `435e572a3d2acfaf` observed three initial API/health responses total:
+  `/health`, `/api/auth/bootstrap`, and one `/api/dashboard/startup`, all HTTP
+  200. Initial `/api/dashboard` and `/api/analytics` calls were zero. Pressing
+  `7 Days` produced exactly one `/api/analytics` response and zero summary
+  refetches. Failed responses and relevant console messages stayed at zero.
+- warm whole-app result: backend route contract test, API HTTP guard,
+  performance loading guard, frontend typecheck, backend utility suite,
+  frontend utility suite, production build, generated runtime route sync,
+  broad Phase 8.4 UI live check, public Cloudflare portal check, and
+  post-live hygiene passed. The first public Cloudflare check hit 1033/530
+  while cloudflared logged edge network failures; restarting only
+  `business-os-cloudflared-1` restored HTTP 200 and the final live suite
+  passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-30-32-189Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-31-12-927Z/report.json`.

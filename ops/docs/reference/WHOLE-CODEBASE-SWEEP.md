@@ -691,3 +691,12 @@ reuse, and has AppContext consume the shared result instead of raw-fetching
 `f29e8401e596bf6c` shows one health probe in the first 12 seconds instead of
 three, while preserving the same Dashboard data/API success and clean console
 profile.
+
+Move 182 records the Dashboard startup data-combination slice. The accepted
+rewire keeps Node/Express as the runtime, reuses the existing cached Dashboard
+summary and analytics builders, adds `/api/dashboard/startup` for first paint,
+and leaves `/api/dashboard` plus `/api/analytics` as compatible refresh
+endpoints. The Docker-served Playwright proof on hash `435e572a3d2acfaf`
+shows one startup data call instead of separate summary and analytics calls;
+the `7 Days` interaction then makes exactly one analytics request and no
+summary refetch.

@@ -8,16 +8,16 @@ Last updated: 2026-06-02
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 710, deduplicate startup health probes
+- Latest completed move: Move 711, combine Dashboard startup summary and analytics read
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `f29e8401e596bf6c`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `435e572a3d2acfaf`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `f29e8401e596bf6c`
+  `435e572a3d2acfaf`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-04-26-857Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T00-30-32-189Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-05-06-334Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T00-31-12-927Z/report.json`
 - post-live hygiene:
   `ops/runtime/reports/post-live-hygiene-latest.json`
 - Phase 29 repeated audit:
@@ -48,8 +48,8 @@ Current honest pockets:
   34 routes, with 519 visible controls discovered, 392 controls exercised, 127
   intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
   failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `9b132859aa24909c`
-  with 72 checked signals, no relevant console messages, and no framework
+- broad Phase 8.4 UI live check passed on frontend hash `435e572a3d2acfaf`
+  with 71 checked signals, no relevant console messages, and no framework
   overlay
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
@@ -57,6 +57,24 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Dashboard startup now combines summary and initial analytics into one
+  protected backend read. `backend/src/routes/sales.ts` shares
+  `buildDashboardSummary()` and `buildDashboardAnalytics()` between the old
+  `/api/dashboard`, old `/api/analytics`, and new `/api/dashboard/startup`
+  route, preserving existing refresh/range APIs while avoiding the initial
+  client waterfall. `frontend/src/components/dashboard/Dashboard.tsx` uses the
+  combined startup transport for the first empty Dashboard load, and range
+  buttons now refresh only `/api/analytics` without rereading the all-time
+  summary. Real Docker-served authenticated Playwright proof against
+  `http://127.0.0.1:4000/dashboard` on build hash `435e572a3d2acfaf` showed
+  three initial API/health responses total: `/health`,
+  `/api/auth/bootstrap`, and one `/api/dashboard/startup` at HTTP 200. Initial
+  `/api/dashboard` and `/api/analytics` calls were zero; pressing `7 Days`
+  produced exactly one `/api/analytics` response and no summary refetch. Broad
+  Phase 8.4 UI live check, public Cloudflare portal check, and post-live
+  hygiene passed after restarting the Cloudflare tunnel from a transient
+  1033/530 edge connectivity failure.
 
 - Frontend startup now shares health probes instead of launching parallel
   `/health` checks during first paint. `frontend/src/api/http.ts` exports a

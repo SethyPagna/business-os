@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 710 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 711 in this file.
 
 ## Goal
 
@@ -6764,6 +6764,23 @@ Decision rule:
     `/health` from 3 probes to 1, kept `/api/auth/bootstrap`,
     `/api/analytics`, and `/api/dashboard` at HTTP 200, and had zero failed
     responses or relevant console messages.
+
+711. Combine Dashboard startup summary and analytics reads.
+    Done: `backend/src/routes/sales.ts` now exposes
+    `/api/dashboard/startup` by reusing the existing cached summary and
+    analytics builders, so the old `/api/dashboard` and `/api/analytics`
+    endpoints remain available for refresh and range changes. The Dashboard
+    first-load path uses `getDashboardStartup()` once, validates both payloads,
+    and keeps range changes on the analytics-only path. Proof: backend route
+    contracts, API HTTP guard, performance loading guard, frontend typecheck,
+    backend utility suite, frontend utility suite, production build hash
+    `435e572a3d2acfaf`, generated release route sync, authenticated Playwright
+    startup trace, broad Phase 8.4 UI live check, public Cloudflare portal
+    check, and post-live hygiene. The live trace showed three initial
+    API/health responses total (`/health`, `/api/auth/bootstrap`, and
+    `/api/dashboard/startup`), zero initial legacy dashboard/analytics split
+    calls, and a `7 Days` interaction that made exactly one analytics call and
+    no summary refetch.
 
 ## Safety Gates
 

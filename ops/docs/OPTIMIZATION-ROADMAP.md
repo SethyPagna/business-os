@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 710.
+- Latest completed implementation move in this roadmap: Move 711.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8485,3 +8485,23 @@ Move 710 status:
   route/local-DB chunks, but `/health` dropped from 3 probes to 1 while
   `/api/auth/bootstrap`, `/api/analytics`, and `/api/dashboard` remained HTTP
   200. Failed responses and relevant console messages stayed at zero.
+
+Move 711 status:
+- Move 711 combines Dashboard summary and initial analytics into one startup
+  read while preserving the existing refresh APIs. `backend/src/routes/sales.ts`
+  now shares the cached summary and analytics builders across `/api/dashboard`,
+  `/api/analytics`, and `/api/dashboard/startup`. The Dashboard first empty
+  load calls the new narrow transport once, validates both payloads, and then
+  range buttons refresh only `/api/analytics` without triggering an all-time
+  summary refetch. Proof: backend route contract test, API HTTP guard,
+  performance loading guard, frontend typecheck, backend utility suite,
+  frontend utility suite, production build hash `435e572a3d2acfaf`, generated
+  runtime route sync, authenticated Playwright startup trace, broad Phase 8.4
+  UI live check, public Cloudflare portal check, and post-live hygiene passed.
+  The focused trace observed `/health`, `/api/auth/bootstrap`, and one
+  `/api/dashboard/startup` on initial Dashboard load; it observed zero initial
+  `/api/dashboard` and `/api/analytics` calls, then exactly one
+  `/api/analytics` call and zero summary refetches after pressing `7 Days`.
+  A transient Cloudflare 1033/530 public check failure was traced to
+  cloudflared edge connectivity and fixed by restarting only the tunnel
+  container before the final green live suite.

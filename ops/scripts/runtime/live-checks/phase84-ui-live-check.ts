@@ -64,25 +64,18 @@ async function main(): Promise<void> {
       }
     })
 
-    console.log('[phase84] exercising dashboard summary and analytics loaders')
-    const dashboardSummaryResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/dashboard') && response.status() < 500,
-      { timeout: 20_000 },
-    ).catch(() => null)
-    const dashboardAnalyticsResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/analytics') && response.status() < 500,
+    console.log('[phase84] exercising dashboard startup and analytics loaders')
+    const dashboardStartupResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/dashboard/startup') && response.status() < 500,
       { timeout: 20_000 },
     ).catch(() => null)
     await page.goto('/dashboard', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await hydratePlaywrightPage(page, storageState)
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await page.getByText('Dashboard', { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
-    const dashboardSummary = await dashboardSummaryResponse
-    const dashboardAnalytics = await dashboardAnalyticsResponse
-    const dashboardSummaryStatus = dashboardSummary?.status?.() || latestObservedStatus(chunkRequests, /\/api\/dashboard/i)
-    const dashboardAnalyticsStatus = dashboardAnalytics?.status?.() || latestObservedStatus(chunkRequests, /\/api\/analytics/i)
-    assert(dashboardSummaryStatus === 200, `Dashboard summary read returned HTTP ${dashboardSummaryStatus}`)
-    assert(dashboardAnalyticsStatus === 200, `Dashboard analytics read returned HTTP ${dashboardAnalyticsStatus}`)
+    const dashboardStartup = await dashboardStartupResponse
+    const dashboardStartupStatus = dashboardStartup?.status?.() || latestObservedStatus(chunkRequests, /\/api\/dashboard\/startup/i)
+    assert(dashboardStartupStatus === 200, `Dashboard startup read returned HTTP ${dashboardStartupStatus}`)
     const dashboardRangeAnalyticsResponse = page.waitForResponse(
       (response) => response.url().includes('/api/analytics') && response.status() < 500,
       { timeout: 20_000 },
@@ -777,8 +770,7 @@ async function main(): Promise<void> {
         appBootstrapStatus,
         appSettingsStatus,
         appSettingsMetaStatus,
-        dashboardSummaryStatus,
-        dashboardAnalyticsStatus,
+        dashboardStartupStatus,
         dashboardRangeAnalyticsStatus,
         notificationSummaryStatus,
         notificationPanelVisible,
