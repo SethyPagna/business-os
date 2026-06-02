@@ -7007,6 +7007,30 @@ Decision rule:
     A stale Cloudflare tunnel briefly returned HTTP 502 after app restart;
     restarting only `business-os-cloudflared-1` restored public HTTP 200.
 
+725. Split public portal API bootstrap from the legacy API/Dexie registry.
+    Done: `web-api.ts` now has a focused lazy `PortalTransportModule`
+    boundary and wires public portal config, bootstrap, catalog, search,
+    membership, submission, and AI methods directly to `portalTransport.ts`
+    instead of falling through the generic `api/methods.ts` registry.
+    `vite.config.ts` places `portalTransport.ts` and `portalHttp.ts` in a
+    small `app-portal` chunk and keeps shared catalog icons out of
+    `auth-login`. This is the correct TypeScript/Vite rewire, not a
+    Rust/Go/Python/WASM conversion: the hot path was a browser chunk graph
+    and API-boundary problem. Proof: performance guard, frontend typecheck,
+    source guard, frontend utility suite, production build hash
+    `cbfed31b11f3c265`, Docker live sync, local `/public`, emitted chunk
+    scans, public Cloudflare Playwright, and broad Phase 8.4 UI Playwright
+    passed. The public report showed 20 rendered products, zero failed
+    responses, zero relevant console
+    messages, zero page errors, enforced CSP, and no first-load `auth-login`,
+    `app-api-methods`, `vendor-dexie`, `app-auth`, or `app-local-db`
+    requests. The broad report
+    `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
+    kept admin helper loaders at HTTP 200 with zero relevant console
+    messages. A stale Cloudflare tunnel returned HTTP 530 after app restart;
+    restarting only `business-os-cloudflared-1` restored HTTP 200, with logs
+    pointing to edge/Docker DNS connectivity rather than app code.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

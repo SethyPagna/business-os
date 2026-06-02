@@ -8802,3 +8802,42 @@ Move 724 status:
   sales, products, returns, library/files, catalog/public portal, receipt
   settings, POS, inventory, contacts, loyalty, users, audit, settings, server,
   and backup helper loaders, and recorded zero relevant console messages.
+
+Move 725 status:
+- Move 725 splits public portal API bootstrap away from the legacy API/Dexie
+  registry. The repeated public-load sweep found that `/public` no longer
+  pulled editor-only chunks after Move 724, but still loaded
+  `app-api-methods`, `vendor-dexie`, `app-auth`, and `app-local-db` because
+  public portal calls were falling through `window.api` to the legacy
+  `api/methods.ts` registry, which statically imports Dexie and many admin
+  transports.
+- `frontend/src/web-api.ts` now has a narrow lazy `PortalTransportModule`
+  boundary and wires public portal config/bootstrap/catalog/search/
+  membership/submission/AI methods directly to `portalTransport.ts`. The
+  bootstrap code also skips public IndexedDB mirror writes. `vite.config.ts`
+  moves `portalTransport.ts` and `portalHttp.ts` into a focused
+  `app-portal` chunk and keeps shared catalog icons (`mail`, `chevron-down`,
+  `chevron-up`) out of `auth-login`. `performanceLoadingUx.test.ts` guards
+  the portal transport boundary, public DB skip, and shared-icon ownership.
+- Production build hash `cbfed31b11f3c265` was deployed into
+  `business-os-app-1` and verified through local `/public` plus
+  `/business-os-build.json`. Public Cloudflare returned HTTP 530 after app
+  restart while local `/public` stayed HTTP 200; restarting only
+  `business-os-cloudflared-1` restored public HTTP 200. Cloudflared logs
+  showed edge/Docker DNS connectivity failures (`network is unreachable` and
+  `127.0.0.11:53 connection refused`), confirming this was tunnel
+  infrastructure rather than app rendering.
+- Proof: `node frontend/tests/performanceLoadingUx.test.ts`, `npm.cmd
+  --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  check:jsx`, `npm.cmd --prefix frontend run test:utils`, `npm.cmd --prefix
+  frontend run build`, Docker live sync, local `/public`, public Cloudflare
+  Playwright, broad Phase 8.4 UI Playwright, and emitted chunk-reference
+  scans passed. The broad report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
+  exercised the admin app helper loaders with all checked endpoints at HTTP
+  200 and zero relevant console messages.
+- Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T18-58-27-864Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, enforced CSP, and no first-load `auth-login`,
+  `app-api-methods`, `vendor-dexie`, `app-auth`, or `app-local-db` requests.

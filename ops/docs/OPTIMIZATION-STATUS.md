@@ -8,16 +8,16 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 724, trim public portal editor-only chunks from first load
+- Latest completed move: Move 725, split public portal API bootstrap from the legacy API/Dexie registry
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `e37146866b299666`
+- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `cbfed31b11f3c265`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `e37146866b299666`
+  `cbfed31b11f3c265`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T17-38-20-661Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T17-37-37-400Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T18-58-27-864Z/report.json`
 - latest import-tracker focused proof:
   `ops/runtime/reports/move723-import-tracker-probe-2026-06-02T16-53-06-381Z.json`
 - post-live hygiene:
@@ -59,6 +59,29 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Public portal first load now avoids the legacy API registry and offline DB
+  chunks. `frontend/src/web-api.ts` lazy-loads `portalTransport.ts` directly
+  for public portal config, catalog, membership, submission, and AI calls, and
+  skips public IndexedDB bootstrap mirror writes. `frontend/vite.config.ts`
+  assigns `portalTransport.ts` plus `portalHttp.ts` to a focused
+  `app-portal` chunk, and keeps shared catalog icons out of `auth-login`.
+  Docker-served build `cbfed31b11f3c265` passed performance guards,
+  typecheck, JSX/source check, frontend utility suite, production build,
+  Docker live sync, local `/public`, public Cloudflare Playwright, and broad
+  Phase 8.4 UI Playwright. The live public report rendered 20 products with
+  zero failed responses, zero relevant console messages, zero page errors,
+  enforced CSP, and no first-load `auth-login`, `app-api-methods`,
+  `vendor-dexie`, `app-auth`, or `app-local-db` requests. The broad report
+  exercised dashboard, branches, sales, products, returns, files/library,
+  catalog/public portal, receipt settings, POS, inventory, contacts, loyalty,
+  users, audit, settings, server, and backup helper loaders with all checked
+  endpoints at HTTP 200 and zero relevant console messages. Public Cloudflare
+  returned HTTP 530 after app restart while local `/public` stayed HTTP 200;
+  restarting only
+  `business-os-cloudflared-1` restored public HTTP 200, and the cloudflared
+  logs showed edge/Docker DNS failures (`network is unreachable`,
+  `127.0.0.11:53 connection refused`), not an app render failure.
 
 - Public portal first load no longer fetches editor-only file picker, media
   upload, or image lightbox chunks. `CatalogPreviewSurface` now mounts the

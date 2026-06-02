@@ -1238,4 +1238,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   The broad report
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T17-38-20-661Z/report.json`
   kept the admin app loaders healthy with zero relevant console messages.
+- Move 456 records roadmap Move 725: split public portal API bootstrap from
+  the legacy API/Dexie registry. The public portal now lazy-loads
+  `portalTransport.ts` through a focused `app-portal` chunk, while admin-only
+  methods continue to fall through the legacy registry. `web-api.ts` skips
+  public IndexedDB bootstrap mirror writes, `vite.config.ts` assigns
+  `portalTransport.ts` plus `portalHttp.ts` to `app-portal`, and shared
+  catalog icons no longer live in `auth-login`. Docker-served build hash
+  `cbfed31b11f3c265` passed focused guards, typecheck, source checks,
+  frontend utility tests, production build, local `/public`, Docker live sync,
+  public Cloudflare Playwright, and broad Phase 8.4 UI Playwright. The public
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T18-58-27-864Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, enforced CSP, and no first-load `auth-login`,
+  `app-api-methods`, `vendor-dexie`, `app-auth`, or `app-local-db` requests.
+  The broad report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
+  kept the admin app helper loaders at HTTP 200 with zero relevant console
+  messages.
 <!-- phase29-manual-notes:end -->

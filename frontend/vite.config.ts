@@ -116,6 +116,7 @@ const deferredModulePreloadPrefixes = [
   'assets/auth-login-',
   'assets/app-bootstrap-',
   'assets/app-auth-',
+  'assets/app-portal-',
   'assets/catalog-',
   'assets/catalog-preview-',
   'assets/catalog-editor-',
@@ -155,13 +156,10 @@ const appShellIconNames = new Set([
 
 const authLoginIconNames = new Set([
   'arrow-left',
-  'chevron-down',
-  'chevron-up',
   'chrome',
   'key-round',
   'loader-2',
   'lock-keyhole',
-  'mail',
   'shield-check',
 ])
 
@@ -185,6 +183,10 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
     if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
+    if (
+      normalized.endsWith('/src/api/portalTransport.ts')
+      || normalized.endsWith('/src/api/portalHttp.ts')
+    ) return 'app-portal'
     if (normalized.endsWith('/src/api/localDb.ts')) return 'app-local-db'
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (

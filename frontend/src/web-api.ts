@@ -33,6 +33,7 @@ type LazyApiMethod = (...args: any[]) => Promise<any>
 type MethodsModule = Record<string, (...args: any[]) => any>
 type AppBootstrapModule = typeof import('./api/appBootstrapTransport.ts')
 type AuthTransportModule = typeof import('./api/authTransport.ts')
+type PortalTransportModule = typeof import('./api/portalTransport.ts')
 type OfflineVaultKey = CryptoKey | null
 type OfflineRow = AnyRecord & {
   _seq?: number
@@ -87,11 +88,18 @@ let sessionRecoveryListenersRegistered = false
 let methodsModulePromise: Promise<MethodsModule> | null = null
 let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
 let authTransportModulePromise: Promise<AuthTransportModule> | null = null
+let portalTransportModulePromise: Promise<PortalTransportModule> | null = null
 let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
 
 function sanitizeBaseUrl(value: unknown): string {
   return String(value || '').trim().replace(/\/$/, '')
+}
+
+function isPublicRuntimePath(): boolean {
+  if (typeof location === 'undefined') return false
+  const pathname = String(location.pathname || '').toLowerCase()
+  return pathname === '/public' || pathname.startsWith('/public/')
 }
 
 function getOfflineDb(): Promise<any> {
@@ -114,9 +122,25 @@ function loadAuthTransportModule(): Promise<AuthTransportModule> {
   return authTransportModulePromise
 }
 
+function loadPortalTransportModule(): Promise<PortalTransportModule> {
+  if (!portalTransportModulePromise) portalTransportModulePromise = import('./api/portalTransport.ts')
+  return portalTransportModulePromise
+}
+
 function getAuthTransportMethod<T extends keyof AuthTransportModule>(name: T): (...args: any[]) => Promise<any> {
   return (...args) =>
     loadAuthTransportModule().then((module) => {
+      const fn = module?.[name]
+      if (typeof fn !== 'function') {
+        throw new Error(`window.api.${String(name)} is not available.`)
+      }
+      return (fn as (...methodArgs: any[]) => Promise<any>)(...args)
+    })
+}
+
+function getPortalTransportMethod<T extends keyof PortalTransportModule>(name: T): (...args: any[]) => Promise<any> {
+  return (...args) =>
+    loadPortalTransportModule().then((module) => {
       const fn = module?.[name]
       if (typeof fn !== 'function') {
         throw new Error(`window.api.${String(name)} is not available.`)
@@ -841,6 +865,17 @@ const staticApi = {
   getOrganizationBootstrap: getAuthTransportMethod('getOrganizationBootstrap'),
   searchOrganizations: getAuthTransportMethod('searchOrganizations'),
   getCurrentOrganization: getAuthTransportMethod('getCurrentOrganization'),
+  getPortalConfig: getPortalTransportMethod('getPortalConfig'),
+  getPortalBootstrap: getPortalTransportMethod('getPortalBootstrap'),
+  getPortalCatalogMeta: getPortalTransportMethod('getPortalCatalogMeta'),
+  getPortalCatalogProducts: getPortalTransportMethod('getPortalCatalogProducts'),
+  searchPortalCatalogProducts: getPortalTransportMethod('searchPortalCatalogProducts'),
+  lookupPortalMembership: getPortalTransportMethod('lookupPortalMembership'),
+  createPortalSubmission: getPortalTransportMethod('createPortalSubmission'),
+  getPortalAiStatus: getPortalTransportMethod('getPortalAiStatus'),
+  askPortalAi: getPortalTransportMethod('askPortalAi'),
+  getPortalSubmissionsForReview: getPortalTransportMethod('getPortalSubmissionsForReview'),
+  reviewPortalSubmission: getPortalTransportMethod('reviewPortalSubmission'),
 
   setSyncServerUrl(url: unknown) {
     const clean = sanitizeSyncServerUrl(url)
@@ -956,6 +991,7 @@ if (typeof window !== 'undefined') {
   try {
     const isViteDev = location.hostname === 'localhost' &&
       (location.port === '5173' || location.port === '5174')
+    const skipOfflineBootstrapDb = isPublicRuntimePath()
 
     scheduleBootstrapStorageMaintenance(() => {
       try {
@@ -965,7 +1001,9 @@ if (typeof window !== 'undefined') {
         sessionStorage.removeItem('businessos_sync_token_session')
       } catch (_) {}
     })
-    scheduleBootstrapOfflineDbWrite((db) => db.settings.delete('sync_token'))
+    if (!skipOfflineBootstrapDb) {
+      scheduleBootstrapOfflineDbWrite((db) => db.settings.delete('sync_token'))
+    }
 
     // Determine the correct sync server URL
     let url = ''
@@ -975,15 +1013,19 @@ if (typeof window !== 'undefined') {
       scheduleBootstrapStorageMaintenance(() => {
         try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, url) } catch (_) {}
       })
-      scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: url }))
+      if (!skipOfflineBootstrapDb) {
+        scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: url }))
+      }
     } else {
       // Vite dev ??use stored value (normally points to localhost:4000 backend)
       url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')
-      try {
-        const db = await getOfflineDb()
-        const stored = await db.settings.bulkGet(['sync_server_url'])
-        if (!url && stored[0]?.value) url = sanitizeSyncServerUrl(stored[0].value)
-      } catch (_) {}
+      if (!skipOfflineBootstrapDb) {
+        try {
+          const db = await getOfflineDb()
+          const stored = await db.settings.bulkGet(['sync_server_url'])
+          if (!url && stored[0]?.value) url = sanitizeSyncServerUrl(stored[0].value)
+        } catch (_) {}
+      }
     }
 
     if (url) {

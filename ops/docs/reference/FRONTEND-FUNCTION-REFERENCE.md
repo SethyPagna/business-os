@@ -237,7 +237,7 @@ Total files documented: **234**
 | 225 | `frontend/src/utils/scriptTypography.ts` | 0 |
 | 226 | `frontend/src/utils/settingsRefresh.ts` | 1 |
 | 227 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
-| 228 | `frontend/src/web-api.ts` | 44 |
+| 228 | `frontend/src/web-api.ts` | 46 |
 | 229 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
 | 230 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 231 | `ops/scripts/frontend/verify-performance.ts` | 4 |
@@ -2930,50 +2930,52 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `sanitizeBaseUrl` | function | 93 |
-| 2 | `getOfflineDb` | function | 97 |
-| 3 | `loadMethodsModule` | function | 102 |
-| 4 | `loadAppBootstrapModule` | function | 107 |
-| 5 | `loadAuthTransportModule` | function | 112 |
-| 6 | `getLazyApiMethod` | function | 128 |
-| 7 | `mapOfflineFileChunkStatusUpdates` | function | 142 |
-| 8 | `asArrayBuffer` | function | 158 |
-| 9 | `bytesToBase64` | function | 162 |
-| 10 | `base64ToBytes` | function | 173 |
-| 11 | `stableStringify` | function | 180 |
-| 12 | `sha256Hex` | function | 186 |
-| 13 | `deriveOfflineVaultKey` | function | 194 |
-| 14 | `encryptOfflineVaultValue` | function | 211 |
-| 15 | `decryptOfflineVaultValue` | function | 219 |
-| 16 | `requestOfflinePersistentStorage` | function | 229 |
-| 17 | `dispatchVaultLocked` | function | 236 |
-| 18 | `scheduleOfflineVaultIdleLock` | function | 241 |
-| 19 | `lockOfflineVault` | function | 247 |
-| 20 | `unlockOfflineVault` | function | 255 |
-| 21 | `queueBusinessOutboxOperation` | function | 281 |
-| 22 | `queueOfflineFileChunks` | function | 318 |
-| 23 | `dispatchOutboxProgress` | function | 372 |
-| 24 | `dispatchOutboxFileProgress` | function | 379 |
-| 25 | `dispatchOutboxConflict` | function | 386 |
-| 26 | `getSyncOutboxKey` | function | 393 |
-| 27 | `syncUnlockedOfflineOutbox` | function | 397 |
-| 28 | `syncUnlockedOfflineFileChunks` | function | 507 |
-| 29 | `refreshOfflineSnapshotSoon` | function | 569 |
-| 30 | `run` | const arrow | 579 |
-| 31 | `refreshServiceWorkerSoon` | function | 598 |
-| 32 | `runOfflineMaintenance` | function | 608 |
-| 33 | `startOfflineMaintenanceLoop` | function | 621 |
-| 34 | `scheduleInitialOfflineMaintenance` | function | 629 |
-| 35 | `run` | const arrow | 633 |
-| 36 | `scheduleIdle` | const arrow | 637 |
-| 37 | `ensureSessionRecoveryListeners` | function | 654 |
-| 38 | `scheduleBootstrapStorageMaintenance` | function | 679 |
-| 39 | `run` | const arrow | 685 |
-| 40 | `scheduleBootstrapOfflineDbWrite` | function | 702 |
-| 41 | `run` | const arrow | 708 |
-| 42 | `write` | const arrow | 710 |
-| 43 | `forwardServiceWorkerOutboxEvent` | function | 729 |
-| 44 | `forwardServiceWorkerAppEvent` | function | 817 |
+| 1 | `sanitizeBaseUrl` | function | 95 |
+| 2 | `isPublicRuntimePath` | function | 99 |
+| 3 | `getOfflineDb` | function | 105 |
+| 4 | `loadMethodsModule` | function | 110 |
+| 5 | `loadAppBootstrapModule` | function | 115 |
+| 6 | `loadAuthTransportModule` | function | 120 |
+| 7 | `loadPortalTransportModule` | function | 125 |
+| 8 | `getLazyApiMethod` | function | 152 |
+| 9 | `mapOfflineFileChunkStatusUpdates` | function | 166 |
+| 10 | `asArrayBuffer` | function | 182 |
+| 11 | `bytesToBase64` | function | 186 |
+| 12 | `base64ToBytes` | function | 197 |
+| 13 | `stableStringify` | function | 204 |
+| 14 | `sha256Hex` | function | 210 |
+| 15 | `deriveOfflineVaultKey` | function | 218 |
+| 16 | `encryptOfflineVaultValue` | function | 235 |
+| 17 | `decryptOfflineVaultValue` | function | 243 |
+| 18 | `requestOfflinePersistentStorage` | function | 253 |
+| 19 | `dispatchVaultLocked` | function | 260 |
+| 20 | `scheduleOfflineVaultIdleLock` | function | 265 |
+| 21 | `lockOfflineVault` | function | 271 |
+| 22 | `unlockOfflineVault` | function | 279 |
+| 23 | `queueBusinessOutboxOperation` | function | 305 |
+| 24 | `queueOfflineFileChunks` | function | 342 |
+| 25 | `dispatchOutboxProgress` | function | 396 |
+| 26 | `dispatchOutboxFileProgress` | function | 403 |
+| 27 | `dispatchOutboxConflict` | function | 410 |
+| 28 | `getSyncOutboxKey` | function | 417 |
+| 29 | `syncUnlockedOfflineOutbox` | function | 421 |
+| 30 | `syncUnlockedOfflineFileChunks` | function | 531 |
+| 31 | `refreshOfflineSnapshotSoon` | function | 593 |
+| 32 | `run` | const arrow | 603 |
+| 33 | `refreshServiceWorkerSoon` | function | 622 |
+| 34 | `runOfflineMaintenance` | function | 632 |
+| 35 | `startOfflineMaintenanceLoop` | function | 645 |
+| 36 | `scheduleInitialOfflineMaintenance` | function | 653 |
+| 37 | `run` | const arrow | 657 |
+| 38 | `scheduleIdle` | const arrow | 661 |
+| 39 | `ensureSessionRecoveryListeners` | function | 678 |
+| 40 | `scheduleBootstrapStorageMaintenance` | function | 703 |
+| 41 | `run` | const arrow | 709 |
+| 42 | `scheduleBootstrapOfflineDbWrite` | function | 726 |
+| 43 | `run` | const arrow | 732 |
+| 44 | `write` | const arrow | 734 |
+| 45 | `forwardServiceWorkerOutboxEvent` | function | 753 |
+| 46 | `forwardServiceWorkerAppEvent` | function | 841 |
 
 ### 3.229 `ops/scripts/frontend/build-public-runtime-scripts.ts`
 
@@ -3028,8 +3030,8 @@ Total files documented: **234**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 168 |
-| 5 | `manualChunks` | function | 172 |
+| 4 | `shouldDeferModulePreload` | function | 166 |
+| 5 | `manualChunks` | function | 170 |
 
 ### 3.234 `frontend/tailwind.config.ts`
 

@@ -868,3 +868,25 @@ errors. The broad Phase 8.4 live report kept the authenticated app loaders
 healthy across dashboard, branches, sales, products, returns, files, catalog,
 receipt settings, POS, inventory, contacts, loyalty, users, audit, settings,
 server, and backup helper paths.
+
+Move 196 records roadmap Move 725: public portal API registry split. The
+repeated sweep found that the public portal first load no longer reached
+editor-only chunks after Move 724, but the customer-facing API calls still
+fell through `window.api` to the generic `api/methods.ts` registry. Because
+that registry statically imports Dexie/local DB and admin/auth transports, the
+live public page fetched `app-api-methods`, `vendor-dexie`, `app-auth`, and
+`app-local-db` even though those resources are not needed for read-only public
+catalog rendering. The accepted rewire keeps the stack in
+React/TypeScript/Vite: `web-api.ts` adds a lazy `PortalTransportModule`
+boundary, public portal method names call `portalTransport.ts` directly,
+public bootstrap skips IndexedDB mirror writes, and Vite emits a small
+`app-portal` chunk for `portalTransport.ts` plus `portalHttp.ts`. The public
+Cloudflare Playwright report on Docker-served hash `cbfed31b11f3c265` showed
+20 rendered products, enforced CSP, zero relevant console/page errors, and no
+first-load `auth-login`, `app-api-methods`, `vendor-dexie`, `app-auth`, or
+`app-local-db` requests. The broad Phase 8.4 UI report on the same hash kept
+admin helper loaders at HTTP 200 with zero relevant console messages. The
+repeated Cloudflare 530 after app restarts is tracked separately as
+tunnel/Docker DNS instability because local `/public` stayed HTTP 200 and
+cloudflared logs showed `network is unreachable` plus `127.0.0.11:53
+connection refused`.

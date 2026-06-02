@@ -1825,3 +1825,42 @@ Use this shape for future entries:
   Cloudflare HTTP 502 while local `/public` was HTTP 200. Restarting only
   `business-os-cloudflared-1` restored public HTTP 200 before the final public
   Playwright pass.
+
+- change: split public portal API bootstrap from legacy API/Dexie registry
+- affected files:
+  `frontend/src/web-api.ts`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`,
+  `ops/docs/reference/WHOLE-CODEBASE-SWEEP.md`
+- route or API target: public customer portal first load and portal
+  config/catalog/membership/submission/AI API calls
+- keeper or rollback: keeper; it replaces public fallback through the legacy
+  `api/methods.ts` registry with a focused portal transport chunk while
+  preserving admin-only registry behavior behind lazy method fallback
+- route-scoped result: Cloudflare-served public Playwright on frontend hash
+  `cbfed31b11f3c265` rendered 20 products, returned HTTP 200 for public
+  config/meta/search/AI endpoints, enforced CSP, recorded zero failed
+  responses, zero relevant console messages, zero page errors, and no
+  first-load `auth-login`, `app-api-methods`, `vendor-dexie`, `app-auth`, or
+  `app-local-db` requests:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T18-58-27-864Z/report.json`.
+- warm whole-app result: performance loading guard, frontend typecheck,
+  JSX/source check, frontend utility suite, production build, Docker live
+  sync, local `/public`, public Cloudflare Playwright, broad Phase 8.4 UI
+  Playwright, emitted chunk-reference scans, and local build metadata checks
+  passed. The app now loads a focused `app-portal-CThiOzAf.js` chunk for
+  portal API work instead of the legacy registry plus Dexie/auth/local DB
+  chunks. The broad report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
+  exercised the admin app helper loaders with all checked endpoints at HTTP
+  200 and zero relevant console messages.
+- infrastructure note: public Cloudflare returned HTTP 530 after app restart
+  while local `/public` was HTTP 200. Restarting only
+  `business-os-cloudflared-1` restored public HTTP 200; cloudflared logs
+  showed Cloudflare edge/Docker DNS connectivity failures rather than app
+  render failures.
