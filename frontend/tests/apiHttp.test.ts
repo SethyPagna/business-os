@@ -32,6 +32,7 @@ import {
   readNotificationSummaryMissingUntil,
 } from '../src/api/cooldownFallbacks.ts'
 import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from '../src/api/expectedUpdatedAt.ts'
+import { createImportJob, startImportJob, uploadImportJobCsv } from '../src/api/importJobsTransport.ts'
 import { apiFormPost, buildMultipartHeaders, withImportDeviceInfo } from '../src/api/importTransport.ts'
 import { mirrorReadResult } from '../src/api/localMirrors.ts'
 import { fetchJsonWithTimeout, getPortalBaseUrl } from '../src/api/portalHttp.ts'
@@ -599,6 +600,54 @@ await runTest('import transport helper posts multipart forms through the live se
     assert.equal(calls[0][1]?.body, form)
   } finally {
     globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
+await runTest('import job transport emits explicit activity events for lazy tracker wakeup', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test/')
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const events: Array<{ type: string; detail: Record<string, unknown> }> = []
+  const listeners = new Map<string, Set<(event: Event) => void>>()
+  globalThis.window = {
+    dispatchEvent: (event: Event) => {
+      events.push({
+        type: event.type,
+        detail: event instanceof CustomEvent ? event.detail as Record<string, unknown> : {},
+      })
+      for (const listener of listeners.get(event.type) || []) listener(event)
+      return true
+    },
+    addEventListener: (type: string, listener: (event: Event) => void) => {
+      if (!listeners.has(type)) listeners.set(type, new Set())
+      listeners.get(type)?.add(listener)
+    },
+    removeEventListener: (type: string, listener: (event: Event) => void) => {
+      listeners.get(type)?.delete(listener)
+    },
+  } as unknown as Window & typeof globalThis
+  globalThis.fetch = (() => Promise.resolve(new Response(JSON.stringify({ data: { ok: true } }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  }))) as typeof fetch
+
+  try {
+    await createImportJob({ type: 'products' })
+    await startImportJob(7)
+    await uploadImportJobCsv({ jobId: 7, text: 'sku\nA1\n', fileName: 'products.csv' })
+    assert.deepEqual(events.map((event) => event.type), [
+      'import-job:activity',
+      'import-job:activity',
+      'import-job:activity',
+    ])
+    assert.deepEqual(events.map((event) => event.detail.action), ['create', 'start', 'upload-csv'])
+    assert.equal(events[1].detail.jobId, '7')
+    assert.equal(events[2].detail.jobId, '7')
+  } finally {
+    globalThis.fetch = originalFetch
+    globalThis.window = originalWindow
     resetApiState()
   }
 })

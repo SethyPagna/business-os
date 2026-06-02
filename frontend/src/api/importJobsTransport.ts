@@ -27,6 +27,11 @@ type ImportJobImagePayload = {
   onProgress?: (progress: { progress: number; label: string }) => void
   batchSize?: number
 }
+type ImportJobActivityDetail = {
+  action: string
+  jobId?: string
+  ts: number
+}
 
 const lastImportJobsByQuery = new Map<string, unknown>()
 
@@ -45,7 +50,18 @@ function appendDeviceFields(form: FormData): void {
   if (device.clientTime) form.append('clientTime', String(device.clientTime))
 }
 
+function notifyImportJobActivity(action: string, jobId?: string | number): void {
+  if (typeof window === 'undefined') return
+  const detail: ImportJobActivityDetail = {
+    action,
+    jobId: jobId == null ? undefined : String(jobId),
+    ts: Date.now(),
+  }
+  window.dispatchEvent(new CustomEvent('import-job:activity', { detail }))
+}
+
 export function createImportJob(payload: ImportJobPayload = {}): Promise<unknown> {
+  notifyImportJobActivity('create')
   return route(
     'importJobs:create',
     () => apiFetch('POST', '/api/import-jobs', withImportDeviceInfo(payload)),
@@ -103,6 +119,7 @@ export function preflightImportJob(id: string | number): Promise<unknown> {
 }
 
 function runImportJobAction(id: string | number, action: string, options: ImportJobOptions = {}): Promise<unknown> {
+  notifyImportJobActivity(action, id)
   return route(
     `importJobs:${action}:${id}`,
     () => apiFetch('POST', `/api/import-jobs/${encodeId(id)}/${action}`, withImportDeviceInfo({ source: getSource(options) })),
@@ -128,6 +145,7 @@ export function retryImportJob(id: string | number, options: ImportJobOptions = 
 }
 
 export function deleteImportJob(id: string | number, options: ImportJobOptions = {}): Promise<unknown> {
+  notifyImportJobActivity('delete', id)
   return route(
     `importJobs:delete:${id}`,
     async () => {
@@ -185,6 +203,7 @@ export async function downloadImportJobErrors(jobId: string | number): Promise<u
 }
 
 export function uploadImportJobCsv({ jobId, text, fileName = 'products.csv' }: ImportJobCsvPayload): Promise<unknown> {
+  notifyImportJobActivity('upload-csv', jobId)
   const form = new FormData()
   const source = String(text || '')
   form.append('file', new Blob([source.startsWith('\uFEFF') ? '' : '\uFEFF', source], { type: 'text/csv;charset=utf-8' }), fileName)
@@ -193,6 +212,7 @@ export function uploadImportJobCsv({ jobId, text, fileName = 'products.csv' }: I
 }
 
 export function uploadImportJobZip({ jobId, file }: ImportJobZipPayload): Promise<unknown> {
+  notifyImportJobActivity('upload-zip', jobId)
   if (!(file instanceof File)) throw new Error('Choose a ZIP file first')
   const form = new FormData()
   form.append('file', file, file.name || 'images.zip')
@@ -206,6 +226,7 @@ export async function uploadImportJobImages({
   onProgress,
   batchSize = 100,
 }: ImportJobImagePayload): Promise<unknown[]> {
+  notifyImportJobActivity('upload-images', jobId)
   const browserFiles: BrowserImageEntry[] = []
   for (const entry of Array.isArray(files) ? files : []) {
     if (entry?.file instanceof File) browserFiles.push(entry)

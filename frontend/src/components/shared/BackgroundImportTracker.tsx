@@ -5,7 +5,6 @@ import FileDown from 'lucide-react/dist/esm/icons/file-down.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import PlayCircle from 'lucide-react/dist/esm/icons/play-circle.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import XCircle from 'lucide-react/dist/esm/icons/x-circle.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { isTransientGatewayError } from '../../api/http.ts'
@@ -642,7 +641,7 @@ export default function BackgroundImportTracker() {
                     ) : null}
                     {isJobRemovable ? (
                       <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${removeLabel} ${getJobLabel(job)}`} onClick={() => handleRemove(job)}>
-                        <Trash2 className="mr-1 inline h-3.5 w-3.5" /> {removeLabel}
+                        <XCircle className="mr-1 inline h-3.5 w-3.5" /> {removeLabel}
                       </button>
                     ) : null}
                   </div>

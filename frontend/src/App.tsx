@@ -101,6 +101,11 @@ interface WriteConflictDetail {
 
 interface SyncUpdateDetail {
   channel?: string
+  reason?: string
+  source?: string
+  importJobId?: string | number
+  importJobStatus?: string
+  importJobType?: string
   ts?: number | string
 }
 
@@ -285,7 +290,7 @@ const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000
 const PENDING_SYNC_POLL_INTERVAL_MS = 20_000
 const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000
 const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000
-const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 45000
+const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 180000
 const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000
 const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
 const CHUNK_IMPORT_MAX_ATTEMPTS = 3
@@ -598,10 +603,18 @@ function scheduleDeferredPendingSyncPolling(refresh: () => void): CancelWarmup {
 }
 
 function isImportTrackerWakeEvent(event: Event): boolean {
+  if (event.type === 'import-job:activity') return true
   if (!(event instanceof CustomEvent)) return false
   const detail = event.detail as SyncUpdateDetail | null
   const channel = String(detail?.channel || '').trim().toLowerCase()
-  return channel === 'importjobs' || channel === 'import_jobs' || channel === 'imports'
+  if (!(channel === 'importjobs' || channel === 'import_jobs' || channel === 'imports')) return false
+  const reason = String(detail?.reason || '').trim().toLowerCase()
+  const source = String(detail?.source || '').trim().toLowerCase()
+  return !!detail?.importJobId
+    || !!detail?.importJobStatus
+    || !!detail?.importJobType
+    || reason.includes('import')
+    || source.includes('import')
 }
 
 function isNotificationCenterWakeEvent(event: Event): boolean {
@@ -827,16 +840,10 @@ function useDeferredImportTrackerMount(user: AppUser | null): boolean {
       if (document.visibilityState === 'hidden') return
       enable()
     }
-    const onSyncUpdate = (event: Event) => {
+    const onImportJobActivity = (event: Event) => {
       if (isImportTrackerWakeEvent(event)) enable()
     }
-    const onVisible = () => {
-      if (document.visibilityState !== 'visible') return
-      enable()
-    }
-
-    window.addEventListener('sync:update', onSyncUpdate)
-    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('import-job:activity', onImportJobActivity)
     timerId = window.setTimeout(() => {
       if (typeof window.requestIdleCallback === 'function') {
         idleId = window.requestIdleCallback(enableWhenVisible, { timeout: IMPORT_TRACKER_IDLE_TIMEOUT_MS })
@@ -847,8 +854,7 @@ function useDeferredImportTrackerMount(user: AppUser | null): boolean {
 
     return () => {
       cancelled = true
-      window.removeEventListener('sync:update', onSyncUpdate)
-      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('import-job:activity', onImportJobActivity)
       if (timerId != null) window.clearTimeout(timerId)
       if (idleId != null && typeof window.cancelIdleCallback === 'function') {
         window.cancelIdleCallback(idleId)
