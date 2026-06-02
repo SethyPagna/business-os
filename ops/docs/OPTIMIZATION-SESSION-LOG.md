@@ -1666,3 +1666,42 @@ Use this shape for future entries:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T15-02-21-650Z/report.json`.
   Public portal report:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T15-03-06-801Z/report.json`.
+
+- change: gate session recovery, health, websocket, and UI focus listeners
+  after session recovery
+- affected files:
+  `frontend/src/App.tsx`,
+  `frontend/src/AppContext.tsx`,
+  `frontend/src/api/http.ts`,
+  `frontend/src/api/websocket.ts`,
+  `frontend/src/web-api.ts`,
+  `frontend/tests/appShellUtils.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`
+- route or API target: signed-out Login first render and authenticated
+  Dashboard recovery lifecycle
+- keeper or rollback: keeper; it removes public-route listener/timer side
+  effects while preserving authenticated reconnect, health, and offline
+  maintenance behavior through explicit installers
+- route-scoped result: real Docker-served instrumented Playwright trace
+  against `http://127.0.0.1:4000/login` and `/dashboard` on frontend hash
+  `cb858c5ce1c60aa4` observed signed-out `/login` with no recovery
+  listeners, no `visibilitychange` listener, no WebSocket, no intervals,
+  expected unauthenticated bootstrap 401, and zero relevant console messages.
+  The authenticated Dashboard returned `/api/dashboard/startup` HTTP 200,
+  registered `online`, `focus`, and `sync:reconnected` recovery listeners,
+  kept authenticated visibility listeners, opened one WebSocket, started
+  intervals `30000`, `25000`, `500`, and `3000`, and had zero console or
+  failed-request noise.
+- warm whole-app result: app-shell guard, performance loading guard,
+  frontend typecheck, frontend utility suite, production build, Docker live
+  sync, instrumented Login/Dashboard Playwright probe, broad Phase 8.4 UI live
+  check, public Cloudflare portal check, and post-live hygiene passed. The
+  first public Cloudflare check failed with HTTP 530 while the tunnel was
+  stale; restarting only `business-os-cloudflared-1` restored public HTTP 200
+  and the final live suite passed. Broad Phase 8.4 live report:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-02T15-39-31-396Z/report.json`.
+  Public portal report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T15-40-13-584Z/report.json`.

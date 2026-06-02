@@ -49,7 +49,7 @@ Total files documented: **234**
 | 37 | `frontend/src/api/syncRuntime.ts` | 0 |
 | 38 | `frontend/src/api/systemJobs.ts` | 3 |
 | 39 | `frontend/src/api/systemRuntime.ts` | 0 |
-| 40 | `frontend/src/api/websocket.ts` | 8 |
+| 40 | `frontend/src/api/websocket.ts` | 7 |
 | 41 | `frontend/src/App.tsx` | 85 |
 | 42 | `frontend/src/app/appShellUtils.ts` | 0 |
 | 43 | `frontend/src/app/publicErrorRecovery.ts` | 1 |
@@ -237,7 +237,7 @@ Total files documented: **234**
 | 225 | `frontend/src/utils/scriptTypography.ts` | 0 |
 | 226 | `frontend/src/utils/settingsRefresh.ts` | 1 |
 | 227 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
-| 228 | `frontend/src/web-api.ts` | 43 |
+| 228 | `frontend/src/web-api.ts` | 44 |
 | 229 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
 | 230 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 231 | `ops/scripts/frontend/verify-performance.ts` | 4 |
@@ -386,11 +386,11 @@ Total files documented: **234**
 | 24 | `parsed` | const arrow | 582 |
 | 25 | `shouldDispatchUnauthorized` | function | 643 |
 | 26 | `isConnectivityError` | function | 656 |
-| 27 | `setServerHealth` | function | 683 |
-| 28 | `getChannelRefreshKey` | function | 833 |
-| 29 | `emitCacheRefresh` | function | 838 |
-| 30 | `clearInflight` | function | 852 |
-| 31 | `hasReusableInflight` | function | 857 |
+| 27 | `setServerHealth` | function | 684 |
+| 28 | `getChannelRefreshKey` | function | 837 |
+| 29 | `emitCacheRefresh` | function | 842 |
+| 30 | `clearInflight` | function | 856 |
+| 31 | `hasReusableInflight` | function | 861 |
 
 ### 3.19 `frontend/src/api/importJobsTransport.ts`
 
@@ -660,14 +660,13 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `clearReconnectTimer` | function | 21 |
-| 2 | `clearPingTimer` | function | 27 |
-| 3 | `hasStoredAuthSession` | function | 33 |
-| 4 | `shouldRegisterSessionLifecycleListeners` | function | 42 |
-| 5 | `isProtectedAdminHost` | function | 46 |
-| 6 | `shouldDebugWs` | function | 56 |
-| 7 | `logWs` | function | 66 |
-| 8 | `scheduleReconnect` | function | 187 |
+| 1 | `clearReconnectTimer` | function | 22 |
+| 2 | `clearPingTimer` | function | 28 |
+| 3 | `hasStoredAuthSession` | function | 34 |
+| 4 | `isProtectedAdminHost` | function | 43 |
+| 5 | `shouldDebugWs` | function | 53 |
+| 6 | `logWs` | function | 63 |
+| 7 | `scheduleReconnect` | function | 185 |
 
 ### 3.41 `frontend/src/App.tsx`
 
@@ -731,33 +730,33 @@ Total files documented: **234**
 | 56 | `enableWhenVisible` | const arrow | 885 |
 | 57 | `onSyncUpdate` | const arrow | 889 |
 | 58 | `useVisibilityRecovery` | function | 922 |
-| 59 | `onVisible` | const arrow | 926 |
-| 60 | `onFocus` | const arrow | 936 |
-| 61 | `useChunkWarmup` | function | 954 |
-| 62 | `runWarmup` | const arrow | 965 |
-| 63 | `useIntentChunkWarmup` | function | 1007 |
-| 64 | `warmIntentPage` | const arrow | 1014 |
-| 65 | `useDataWarmup` | function | 1034 |
-| 66 | `runWarmup` | const arrow | 1046 |
-| 67 | `usePageEntryWarmup` | function | 1071 |
-| 68 | `run` | const arrow | 1100 |
-| 69 | `PageErrorBoundary` | class | 1129 |
-| 70 | `Notification` | function | 1182 |
-| 71 | `SyncErrorBanner` | function | 1195 |
-| 72 | `GlobalScrollControls` | function | 1217 |
-| 73 | `scrollTo` | const arrow | 1218 |
-| 74 | `formatSyncTimestamp` | function | 1255 |
-| 75 | `OfflineModeBanner` | function | 1270 |
-| 76 | `PageLoader` | function | 1419 |
-| 77 | `NotificationCenterFallback` | function | 1462 |
-| 78 | `PageSlot` | function | 1477 |
-| 79 | `PublicCatalogView` | function | 1503 |
-| 80 | `App` | component/function | 1513 |
-| 81 | `cleanupRecoveryStorageMarkers` | const arrow | 1590 |
-| 82 | `onQueued` | const arrow | 1619 |
-| 83 | `onSynced` | const arrow | 1632 |
-| 84 | `handleLocationChange` | const arrow | 1657 |
-| 85 | `processFavicon` | function | 1705 |
+| 59 | `onVisible` | const arrow | 927 |
+| 60 | `onFocus` | const arrow | 937 |
+| 61 | `useChunkWarmup` | function | 955 |
+| 62 | `runWarmup` | const arrow | 966 |
+| 63 | `useIntentChunkWarmup` | function | 1008 |
+| 64 | `warmIntentPage` | const arrow | 1015 |
+| 65 | `useDataWarmup` | function | 1035 |
+| 66 | `runWarmup` | const arrow | 1047 |
+| 67 | `usePageEntryWarmup` | function | 1072 |
+| 68 | `run` | const arrow | 1101 |
+| 69 | `PageErrorBoundary` | class | 1130 |
+| 70 | `Notification` | function | 1183 |
+| 71 | `SyncErrorBanner` | function | 1196 |
+| 72 | `GlobalScrollControls` | function | 1218 |
+| 73 | `scrollTo` | const arrow | 1219 |
+| 74 | `formatSyncTimestamp` | function | 1256 |
+| 75 | `OfflineModeBanner` | function | 1271 |
+| 76 | `PageLoader` | function | 1420 |
+| 77 | `NotificationCenterFallback` | function | 1463 |
+| 78 | `PageSlot` | function | 1478 |
+| 79 | `PublicCatalogView` | function | 1504 |
+| 80 | `App` | component/function | 1514 |
+| 81 | `cleanupRecoveryStorageMarkers` | const arrow | 1591 |
+| 82 | `onQueued` | const arrow | 1620 |
+| 83 | `onSynced` | const arrow | 1633 |
+| 84 | `handleLocationChange` | const arrow | 1658 |
+| 85 | `processFavicon` | function | 1706 |
 
 ### 3.42 `frontend/src/app/appShellUtils.ts`
 
@@ -773,45 +772,45 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getAppApi` | function | 197 |
-| 2 | `getErrorMessage` | function | 207 |
-| 3 | `flattenTranslationTree` | function | 211 |
-| 4 | `safeStorageGet` | function | 267 |
-| 5 | `safeStorageSet` | function | 275 |
-| 6 | `safeStorageRemove` | function | 281 |
-| 7 | `getStoredUserPayload` | function | 287 |
-| 8 | `getStoredUserExpiry` | function | 291 |
-| 9 | `clearPersistedAuthState` | function | 295 |
-| 10 | `persistAuthState` | function | 308 |
-| 11 | `computeSessionExpiryMs` | function | 330 |
-| 12 | `readDeviceSettings` | function | 346 |
-| 13 | `writeDeviceSettings` | function | 355 |
-| 14 | `writeStoredSessionDuration` | function | 361 |
-| 15 | `readPendingOauthLink` | function | 369 |
-| 16 | `clearPendingOauthLink` | function | 383 |
-| 17 | `readOauthCallbackResult` | function | 389 |
-| 18 | `clearOauthCallbackResult` | function | 400 |
-| 19 | `mergeSettingsWithDeviceOverrides` | function | 406 |
-| 20 | `normalizeDateInput` | function | 410 |
-| 21 | `buildRuntimeDescriptorFromBootstrap` | function | 428 |
-| 22 | `LoadingScreen` | function | 457 |
-| 23 | `AccessDenied` | function | 470 |
-| 24 | `persistAutoSyncUrl` | const arrow | 559 |
-| 25 | `onUpdate` | const arrow | 757 |
-| 26 | `onStatus` | const arrow | 789 |
-| 27 | `poll` | const arrow | 798 |
-| 28 | `onError` | const arrow | 818 |
-| 29 | `onWriteBlocked` | const arrow | 840 |
-| 30 | `onRuntimeMismatch` | const arrow | 850 |
-| 31 | `onConflict` | const arrow | 870 |
-| 32 | `onUnauthorized` | const arrow | 939 |
-| 33 | `handleOtpLogin` | const arrow | 998 |
-| 34 | `handleUserUpdated` | const arrow | 1040 |
-| 35 | `discoverSyncUrl` | const arrow | 1077 |
-| 36 | `runStartupHealthProbe` | const arrow | 1100 |
-| 37 | `clearCallbackUrl` | const arrow | 1470 |
-| 38 | `clearPendingLink` | const arrow | 1474 |
-| 39 | `run` | const arrow | 1478 |
+| 1 | `getAppApi` | function | 198 |
+| 2 | `getErrorMessage` | function | 208 |
+| 3 | `flattenTranslationTree` | function | 212 |
+| 4 | `safeStorageGet` | function | 268 |
+| 5 | `safeStorageSet` | function | 276 |
+| 6 | `safeStorageRemove` | function | 282 |
+| 7 | `getStoredUserPayload` | function | 288 |
+| 8 | `getStoredUserExpiry` | function | 292 |
+| 9 | `clearPersistedAuthState` | function | 296 |
+| 10 | `persistAuthState` | function | 309 |
+| 11 | `computeSessionExpiryMs` | function | 331 |
+| 12 | `readDeviceSettings` | function | 347 |
+| 13 | `writeDeviceSettings` | function | 356 |
+| 14 | `writeStoredSessionDuration` | function | 362 |
+| 15 | `readPendingOauthLink` | function | 370 |
+| 16 | `clearPendingOauthLink` | function | 384 |
+| 17 | `readOauthCallbackResult` | function | 390 |
+| 18 | `clearOauthCallbackResult` | function | 401 |
+| 19 | `mergeSettingsWithDeviceOverrides` | function | 407 |
+| 20 | `normalizeDateInput` | function | 411 |
+| 21 | `buildRuntimeDescriptorFromBootstrap` | function | 429 |
+| 22 | `LoadingScreen` | function | 458 |
+| 23 | `AccessDenied` | function | 471 |
+| 24 | `persistAutoSyncUrl` | const arrow | 560 |
+| 25 | `onUpdate` | const arrow | 758 |
+| 26 | `onStatus` | const arrow | 790 |
+| 27 | `poll` | const arrow | 799 |
+| 28 | `onError` | const arrow | 819 |
+| 29 | `onWriteBlocked` | const arrow | 841 |
+| 30 | `onRuntimeMismatch` | const arrow | 851 |
+| 31 | `onConflict` | const arrow | 871 |
+| 32 | `onUnauthorized` | const arrow | 940 |
+| 33 | `handleOtpLogin` | const arrow | 999 |
+| 34 | `handleUserUpdated` | const arrow | 1041 |
+| 35 | `discoverSyncUrl` | const arrow | 1078 |
+| 36 | `runStartupHealthProbe` | const arrow | 1101 |
+| 37 | `clearCallbackUrl` | const arrow | 1472 |
+| 38 | `clearPendingLink` | const arrow | 1476 |
+| 39 | `run` | const arrow | 1480 |
 
 ### 3.45 `frontend/src/components/auth/Login.tsx`
 
@@ -2926,49 +2925,50 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `sanitizeBaseUrl` | function | 92 |
-| 2 | `getOfflineDb` | function | 96 |
-| 3 | `loadMethodsModule` | function | 101 |
-| 4 | `loadAppBootstrapModule` | function | 106 |
-| 5 | `loadAuthTransportModule` | function | 111 |
-| 6 | `getLazyApiMethod` | function | 127 |
-| 7 | `mapOfflineFileChunkStatusUpdates` | function | 141 |
-| 8 | `asArrayBuffer` | function | 157 |
-| 9 | `bytesToBase64` | function | 161 |
-| 10 | `base64ToBytes` | function | 172 |
-| 11 | `stableStringify` | function | 179 |
-| 12 | `sha256Hex` | function | 185 |
-| 13 | `deriveOfflineVaultKey` | function | 193 |
-| 14 | `encryptOfflineVaultValue` | function | 210 |
-| 15 | `decryptOfflineVaultValue` | function | 218 |
-| 16 | `requestOfflinePersistentStorage` | function | 228 |
-| 17 | `dispatchVaultLocked` | function | 235 |
-| 18 | `scheduleOfflineVaultIdleLock` | function | 240 |
-| 19 | `lockOfflineVault` | function | 246 |
-| 20 | `unlockOfflineVault` | function | 254 |
-| 21 | `queueBusinessOutboxOperation` | function | 280 |
-| 22 | `queueOfflineFileChunks` | function | 317 |
-| 23 | `dispatchOutboxProgress` | function | 371 |
-| 24 | `dispatchOutboxFileProgress` | function | 378 |
-| 25 | `dispatchOutboxConflict` | function | 385 |
-| 26 | `getSyncOutboxKey` | function | 392 |
-| 27 | `syncUnlockedOfflineOutbox` | function | 396 |
-| 28 | `syncUnlockedOfflineFileChunks` | function | 506 |
-| 29 | `refreshOfflineSnapshotSoon` | function | 568 |
-| 30 | `run` | const arrow | 578 |
-| 31 | `refreshServiceWorkerSoon` | function | 597 |
-| 32 | `runOfflineMaintenance` | function | 607 |
-| 33 | `startOfflineMaintenanceLoop` | function | 620 |
-| 34 | `scheduleInitialOfflineMaintenance` | function | 628 |
-| 35 | `run` | const arrow | 632 |
-| 36 | `scheduleIdle` | const arrow | 636 |
-| 37 | `scheduleBootstrapStorageMaintenance` | function | 653 |
-| 38 | `run` | const arrow | 659 |
-| 39 | `scheduleBootstrapOfflineDbWrite` | function | 676 |
-| 40 | `run` | const arrow | 682 |
-| 41 | `write` | const arrow | 684 |
-| 42 | `forwardServiceWorkerOutboxEvent` | function | 703 |
-| 43 | `forwardServiceWorkerAppEvent` | function | 791 |
+| 1 | `sanitizeBaseUrl` | function | 93 |
+| 2 | `getOfflineDb` | function | 97 |
+| 3 | `loadMethodsModule` | function | 102 |
+| 4 | `loadAppBootstrapModule` | function | 107 |
+| 5 | `loadAuthTransportModule` | function | 112 |
+| 6 | `getLazyApiMethod` | function | 128 |
+| 7 | `mapOfflineFileChunkStatusUpdates` | function | 142 |
+| 8 | `asArrayBuffer` | function | 158 |
+| 9 | `bytesToBase64` | function | 162 |
+| 10 | `base64ToBytes` | function | 173 |
+| 11 | `stableStringify` | function | 180 |
+| 12 | `sha256Hex` | function | 186 |
+| 13 | `deriveOfflineVaultKey` | function | 194 |
+| 14 | `encryptOfflineVaultValue` | function | 211 |
+| 15 | `decryptOfflineVaultValue` | function | 219 |
+| 16 | `requestOfflinePersistentStorage` | function | 229 |
+| 17 | `dispatchVaultLocked` | function | 236 |
+| 18 | `scheduleOfflineVaultIdleLock` | function | 241 |
+| 19 | `lockOfflineVault` | function | 247 |
+| 20 | `unlockOfflineVault` | function | 255 |
+| 21 | `queueBusinessOutboxOperation` | function | 281 |
+| 22 | `queueOfflineFileChunks` | function | 318 |
+| 23 | `dispatchOutboxProgress` | function | 372 |
+| 24 | `dispatchOutboxFileProgress` | function | 379 |
+| 25 | `dispatchOutboxConflict` | function | 386 |
+| 26 | `getSyncOutboxKey` | function | 393 |
+| 27 | `syncUnlockedOfflineOutbox` | function | 397 |
+| 28 | `syncUnlockedOfflineFileChunks` | function | 507 |
+| 29 | `refreshOfflineSnapshotSoon` | function | 569 |
+| 30 | `run` | const arrow | 579 |
+| 31 | `refreshServiceWorkerSoon` | function | 598 |
+| 32 | `runOfflineMaintenance` | function | 608 |
+| 33 | `startOfflineMaintenanceLoop` | function | 621 |
+| 34 | `scheduleInitialOfflineMaintenance` | function | 629 |
+| 35 | `run` | const arrow | 633 |
+| 36 | `scheduleIdle` | const arrow | 637 |
+| 37 | `ensureSessionRecoveryListeners` | function | 654 |
+| 38 | `scheduleBootstrapStorageMaintenance` | function | 676 |
+| 39 | `run` | const arrow | 682 |
+| 40 | `scheduleBootstrapOfflineDbWrite` | function | 699 |
+| 41 | `run` | const arrow | 705 |
+| 42 | `write` | const arrow | 707 |
+| 43 | `forwardServiceWorkerOutboxEvent` | function | 726 |
+| 44 | `forwardServiceWorkerAppEvent` | function | 814 |
 
 ### 3.229 `ops/scripts/frontend/build-public-runtime-scripts.ts`
 

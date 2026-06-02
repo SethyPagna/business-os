@@ -1186,4 +1186,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   with websocket intervals `500` and `3000` only, no startup `20000`
   pending-sync interval, deferred `30000` timers scheduled, and
   `/api/dashboard/startup` HTTP 200 with zero console or failed-request noise.
+- Move 452 gates session recovery, active health, websocket lifecycle, and UI
+  focus-recovery listeners after session recovery. `web-api.ts`,
+  `api/http.ts`, `api/websocket.ts`, and `App.tsx` now keep those public-route
+  side effects behind explicit authenticated installers. Docker-served
+  Playwright proof on hash `cb858c5ce1c60aa4` observed signed-out `/login`
+  with no recovery listeners, no visibility listener, no WebSocket, no
+  intervals, expected unauthenticated bootstrap 401, and zero relevant console
+  noise. Authenticated Dashboard still registered recovery listeners, opened
+  one WebSocket, started intervals `30000`, `25000`, `500`, and `3000`,
+  returned `/api/dashboard/startup` HTTP 200, and had zero failed requests or
+  relevant console messages.
 <!-- phase29-manual-notes:end -->

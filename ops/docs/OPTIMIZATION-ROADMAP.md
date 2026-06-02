@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 720.
+- Latest completed implementation move in this roadmap: Move 721.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8693,3 +8693,26 @@ Move 720 status:
   failed-request noise. A stale public Cloudflare portal failure was recovered
   by restarting only `business-os-cloudflared-1` before the final green live
   suite.
+
+Move 721 status:
+- Move 721 gates session recovery, active health, websocket lifecycle, and UI
+  focus-recovery listeners behind session evidence. `frontend/src/web-api.ts`
+  now exposes `ensureSessionRecoveryListeners()` as a one-shot installer and
+  calls it only after a stored session exists or successful login persists a
+  user. `frontend/src/api/http.ts` installs online/focus/visibility health
+  listeners only when `startHealthCheck()` begins authenticated health
+  polling, `frontend/src/api/websocket.ts` installs auth/network lifecycle
+  listeners only when `connectWS()` runs with stored-session evidence, and
+  `frontend/src/App.tsx` avoids the kiosk focus-recovery hook while signed
+  out. Proof: performance loading guard, app-shell guard, frontend
+  typecheck, frontend utility suite, production build hash
+  `cb858c5ce1c60aa4`, Docker live sync, instrumented Playwright
+  login/dashboard probe, broad Phase 8.4 UI live check, public Cloudflare
+  portal check, and post-live hygiene passed. The focused live trace saw
+  signed-out `/login` with no recovery listeners, no visibility listener, no
+  WebSocket, no intervals, expected unauthenticated bootstrap 401, and zero
+  relevant console noise; the authenticated Dashboard still registered
+  recovery listeners, opened one WebSocket, returned `/api/dashboard/startup`
+  HTTP 200, and had zero console or failed-request noise. A stale public
+  Cloudflare portal HTTP 530 was recovered by restarting only
+  `business-os-cloudflared-1` before the final green live suite.

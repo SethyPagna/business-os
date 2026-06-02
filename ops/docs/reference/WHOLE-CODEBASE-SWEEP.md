@@ -805,3 +805,18 @@ the 30 second startup window. Docker-served Playwright proof on hash
 `e473ce0cdd641ad7` shows no signed-out sync activity and authenticated
 Dashboard websocket intervals `500` and `3000` only during first paint, with
 no startup `20000` pending-sync interval.
+
+Move 192 records the session recovery listener gate. The accepted rewire keeps
+the existing React/TypeScript, HTTP, WebSocket, and offline-maintenance
+architecture, but changes the install timing: session recovery listeners,
+active health lifecycle listeners, WebSocket lifecycle listeners, and kiosk
+focus recovery no longer load on public/signed-out startup. `web-api.ts`,
+`api/http.ts`, and `api/websocket.ts` now expose explicit one-shot installers
+that are reached only after stored-session evidence or successful login, and
+`App.tsx` gates the focus-recovery hook behind an authenticated user.
+Docker-served Playwright proof on hash `cb858c5ce1c60aa4` shows signed-out
+`/login` with no recovery listeners, no visibility listener, no WebSocket, no
+intervals, and zero relevant console noise after the expected bootstrap 401.
+Authenticated Dashboard still opens one WebSocket, installs recovery
+listeners, and returns `/api/dashboard/startup` HTTP 200 with zero failed
+requests.

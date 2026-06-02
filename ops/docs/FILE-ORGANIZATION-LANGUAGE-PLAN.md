@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 720 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 721 in this file.
 
 ## Goal
 
@@ -6932,6 +6932,24 @@ Decision rule:
     saw websocket intervals `500` and `3000` only, no startup `20000`
     pending-sync interval, and deferred `30000` timers scheduled for later
     maintenance.
+
+721. Gate session recovery listeners after session recovery.
+    Done: `web-api.ts` now keeps online/focus/visibility/reconnected offline
+    maintenance behind `ensureSessionRecoveryListeners()`, `api/http.ts`
+    installs active health lifecycle listeners only from `startHealthCheck()`,
+    `api/websocket.ts` installs auth/network lifecycle listeners only from
+    `connectWS()` when a stored session exists, and `App.tsx` keeps kiosk
+    focus recovery out of signed-out startup. This is a TypeScript runtime
+    flow cleanup rather than a language conversion: the faster path comes
+    from removing public-route side effects and preserving authenticated
+    behavior through explicit installers. Proof: app-shell and performance
+    loading guards, frontend typecheck, frontend utility suite, production
+    build hash `cb858c5ce1c60aa4`, Docker live sync, instrumented
+    Login/Dashboard Playwright probe, broad Phase 8.4 UI live check, public
+    Cloudflare portal check, and post-live hygiene passed. The signed-out
+    `/login` probe observed no recovery listeners, no visibility listener, no
+    WebSocket, and no intervals; authenticated Dashboard still opened one
+    WebSocket and kept recovery/health polling active.
 
 ## Safety Gates
 
