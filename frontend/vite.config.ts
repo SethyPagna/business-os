@@ -111,6 +111,7 @@ const deferredModulePreloadPrefixes = [
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
   'assets/shared-portal-menu-',
+  'assets/auth-login-',
   'assets/app-bootstrap-',
   'assets/app-auth-',
   'assets/catalog-',
@@ -124,26 +125,18 @@ const deferredModulePreloadPrefixes = [
 
 const appShellIconNames = new Set([
   'arrow-down',
-  'arrow-left',
   'arrow-up',
   'badge-dollar-sign',
   'bell',
   'book-user',
   'boxes',
   'building-2',
-  'chevron-down',
-  'chevron-up',
-  'chrome',
   'clipboard-list',
   'database-backup',
   'folder-open',
-  'key-round',
   'languages',
   'layout-dashboard',
-  'loader-2',
   'log-out',
-  'lock-keyhole',
-  'mail',
   'moon',
   'more-horizontal',
   'package',
@@ -151,12 +144,23 @@ const appShellIconNames = new Set([
   'rotate-ccw',
   'server',
   'settings',
-  'shield-check',
   'shopping-bag',
   'shopping-cart',
   'sun',
   'ticket',
   'users',
+])
+
+const authLoginIconNames = new Set([
+  'arrow-left',
+  'chevron-down',
+  'chevron-up',
+  'chrome',
+  'key-round',
+  'loader-2',
+  'lock-keyhole',
+  'mail',
+  'shield-check',
 ])
 
 function shouldDeferModulePreload(dep: string): boolean {
@@ -170,6 +174,7 @@ function manualChunks(id: string): string | undefined {
   const normalized = id.replace(/\\/g, '/')
   if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
     const iconName = path.basename(normalized, '.js')
+    if (authLoginIconNames.has(iconName)) return 'auth-login'
     return appShellIconNames.has(iconName) ? 'app-shell-icons' : undefined
   }
   if (!id.includes('node_modules')) {
@@ -179,6 +184,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
     if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
     if (normalized.endsWith('/src/api/localDb.ts')) return 'app-local-db'
+    if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
     ) {

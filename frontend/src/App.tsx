@@ -7,7 +7,6 @@ import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import { useApp as useAppHook } from './AppContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
-import Login from './components/auth/Login'
 import Sidebar from './components/navigation/Sidebar'
 import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
@@ -465,6 +464,7 @@ const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
 const Settings = lazyWithRetry(PAGE_IMPORTERS.settings, 'settings')
 const FilesPage = lazyWithRetry(PAGE_IMPORTERS.files, 'files')
 const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
+const Login = lazyWithRetry(asPageModule(() => import('./components/auth/Login')), 'auth-login')
 const NotificationCenter = lazyWithRetry(asPageModule(() => import('./components/shared/NotificationCenter')), 'notification-center')
 const BackgroundImportTracker = lazyWithRetry(asPageModule(() => import('./components/shared/BackgroundImportTracker')), 'background-import-tracker')
 const WriteConflictModal = lazyWithRetry(asPageModule(() => import('./components/shared/WriteConflictModal')), 'write-conflict-modal')
@@ -1744,7 +1744,11 @@ export default function App() {
   }
 
   if (!user) {
-    return <Login />
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <Login />
+      </Suspense>
+    )
   }
 
   return (
