@@ -197,10 +197,14 @@ export function cacheClearAll(): void {
   _apiMismatchCooldown.clear()
 }
 
+let syncUpdateCacheListenerRegistered = false
+
 // Invalidate only the affected cache group on real sync updates. Cache-refresh
 // events are emitted after a background read has already stored fresh data; if
 // we clear that cache immediately, pages can fall into refresh churn.
-if (typeof window !== 'undefined') {
+export function ensureSyncUpdateCacheListener(): void {
+  if (typeof window === 'undefined' || syncUpdateCacheListenerRegistered) return
+  syncUpdateCacheListenerRegistered = true
   window.addEventListener('sync:update', (event) => {
     const detail = ((event as CustomEvent<RefreshEventDetail>)?.detail || {}) as RefreshEventDetail
     if (detail.reason === 'cache-refresh') return

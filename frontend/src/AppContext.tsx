@@ -6,7 +6,7 @@ import { STORAGE_KEYS, SYNC } from './constants'
 // Importing it here (rather than dynamic import) ensures window.api
 // is available before any React render cycle runs.
 import './web-api.ts'
-import { cacheClearAll, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
+import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
   readStoredRuntimeDescriptor,
@@ -752,6 +752,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       setSyncServerUnreachable(false)
       return undefined
     }
+    ensureSyncUpdateCacheListener()
 
     const onUpdate = (e: Event) => {
       const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null }>(e)

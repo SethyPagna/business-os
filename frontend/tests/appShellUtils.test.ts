@@ -4,6 +4,7 @@ import { getAdminPageFromPath, getMountedPageLimit, isAdminAppPath, isPublicCata
 
 let failed = 0
 const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+const httpSource = readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8')
 const websocketSource = readFileSync(new URL('../src/api/websocket.ts', import.meta.url), 'utf8')
 
 type TestCallback = () => void
@@ -104,6 +105,9 @@ runTest('successful login reconnects websocket writes immediately', () => {
 runTest('guest startup ignores expected unauthorized websocket probes', () => {
   assert.match(appContextSource, /const hasRecoverableSession = !!\(user\?\.id \|\| getStoredUserPayload\(\)\)/)
   assert.match(appContextSource, /if \(!hasRecoverableSession\) \{\s+setSyncConnected\(false\)\s+setSyncServerUnreachable\(false\)\s+return undefined\s+\}/)
+  assert.match(appContextSource, /ensureSyncUpdateCacheListener\(\)[\s\S]*const onUpdate = \(e: Event\) =>/)
+  assert.match(httpSource, /export function ensureSyncUpdateCacheListener\(\): void/)
+  assert.doesNotMatch(httpSource, /if \(typeof window !== 'undefined'\) \{\s*window\.addEventListener\('sync:update'/)
   assert.match(appContextSource, /const quickCheck = window\.setTimeout\(poll, 100\)[\s\S]*pollTimer = window\.setInterval\(poll, pollRate\)/)
   assert.match(websocketSource, /if \(typeof window !== 'undefined' && shouldRegisterSessionLifecycleListeners\(\)\) \{[\s\S]*window\.addEventListener\('auth:unauthorized'/)
 })
