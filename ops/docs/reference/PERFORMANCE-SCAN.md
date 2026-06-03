@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-Dtl5TGNq.js` | 191.1 |
+| `frontend/dist/assets/catalog-DWEi05uB.js` | 191.1 |
 | `frontend/dist/assets/index-Cw6aCC7m.css` | 152.6 |
-| `frontend/dist/assets/Inventory-BbENjE_X.js` | 144.3 |
+| `frontend/dist/assets/Inventory-OLUanSSL.js` | 144.3 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-CIcWPYHF.js` | 95.7 |
-| `frontend/dist/assets/POS-CFCFYJPQ.js` | 79.6 |
-| `frontend/dist/assets/catalog-editor-BsS86oHG.js` | 73.5 |
+| `frontend/dist/assets/Products-xd_WNDOf.js` | 95.7 |
+| `frontend/dist/assets/POS-D80dIMiz.js` | 79.6 |
+| `frontend/dist/assets/catalog-editor-C5iYQrU0.js` | 73.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-BO7L_WjF.js` | 72.0 |
-| `frontend/dist/assets/app-shared-4eBg3zZI.js` | 69.4 |
-| `frontend/dist/assets/BulkImportModal-C32T-hGy.js` | 68.6 |
-| `frontend/dist/assets/catalog-preview-DJKdskwG.js` | 67.5 |
-| `frontend/dist/assets/Backup-DdrQqSKw.js` | 60.5 |
-| `frontend/dist/assets/app-api-methods-DeihmG0n.js` | 59.4 |
-| `frontend/dist/assets/Settings-CU1DabKz.js` | 53.7 |
-| `frontend/dist/assets/index-C_fYHHtN.js` | 50.3 |
-| `frontend/dist/assets/UserProfileModal-ClWYJORH.js` | 43.5 |
-| `frontend/dist/assets/Users-0tCFhGTD.js` | 41.3 |
-| `frontend/dist/assets/ReceiptSettings-tyG9wr74.js` | 40.3 |
-| `frontend/dist/assets/Branches-CWmNQbjQ.js` | 38.8 |
-| `frontend/dist/assets/Sales-Z7YByPhM.js` | 35.4 |
-| `frontend/dist/assets/AuditLog-C5wFN5wZ.js` | 34.8 |
+| `frontend/dist/assets/Dashboard-CjWb4-cQ.js` | 72.0 |
+| `frontend/dist/assets/app-shared-DHBCiZAz.js` | 69.4 |
+| `frontend/dist/assets/BulkImportModal-CB31aV6J.js` | 68.6 |
+| `frontend/dist/assets/catalog-preview-BjX6yKcU.js` | 67.5 |
+| `frontend/dist/assets/Backup-Ck3RI4kM.js` | 60.5 |
+| `frontend/dist/assets/app-api-methods-Bg0DHqv8.js` | 59.4 |
+| `frontend/dist/assets/Settings-BCGGhAhy.js` | 53.7 |
+| `frontend/dist/assets/index-BIv6w8_B.js` | 50.3 |
+| `frontend/dist/assets/UserProfileModal-CODBF4w0.js` | 43.5 |
+| `frontend/dist/assets/Users-Dahv4utB.js` | 41.3 |
+| `frontend/dist/assets/ReceiptSettings-BOh-20Lo.js` | 40.3 |
+| `frontend/dist/assets/Branches-1UrIiuQ7.js` | 39.0 |
+| `frontend/dist/assets/Sales-CdzVoyOW.js` | 35.4 |
+| `frontend/dist/assets/AuditLog-DOwyJKjy.js` | 34.8 |
 
 ## 5. Notes
 
@@ -1516,6 +1516,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `/api/categories` wakes around 2.3 s beside contact options and full product
   filters. The full report
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-58-08-520Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 377, skipped 141 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
+- Move 472 records roadmap Move 742: defer Branches server action-history
+  and admin user-option reads out of the first route window. `Branches` now
+  waits for the branch list and summary to settle, then enables
+  `useActionHistory` behind `BRANCHES_HISTORY_READY_DELAY_MS`, keeping local
+  undo/redo action pushes intact while moving `/api/users` and
+  `/api/action-history...` after route-ready. Docker-served build hash
+  `ab34fc8688353364` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, delayed
+  Branches wake trace, focused Branches/Products/POS/Inventory/Server
+  route-control audit, public Cloudflare Playwright, and full desktop/mobile
+  all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-latest.json` reduced Branches
+  first-window API requests from 5 to 3 and total requests from 36 to 34, with
+  zero failed requests and zero console/page errors. The delayed trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T10-18-05-277Z.json` proved
+  `/api/users` and `/api/action-history...` wake around 2.3 s. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-21-23-872Z/summary.json`
   covered 34 routes, discovered 518 controls, exercised 377, skipped 141 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.

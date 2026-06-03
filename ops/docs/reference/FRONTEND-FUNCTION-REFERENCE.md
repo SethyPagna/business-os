@@ -846,21 +846,21 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getBranchApi` | function | 184 |
-| 2 | `getErrorMessage` | function | 188 |
-| 3 | `isBranchRecord` | function | 192 |
-| 4 | `isTransferRecord` | function | 196 |
-| 5 | `BranchStatTile` | function | 200 |
-| 6 | `formatTransferDate` | function | 217 |
-| 7 | `Branches` | component/function | 234 |
-| 8 | `promise` | const arrow | 281 |
-| 9 | `loadBranchStock` | const arrow | 418 |
-| 10 | `loadMoreBranchStock` | const arrow | 439 |
-| 11 | `handleSaveBranch` | const arrow | 470 |
-| 12 | `handleDelete` | const arrow | 538 |
-| 13 | `handleBulkDelete` | const arrow | 586 |
-| 14 | `toggleSelect` | const arrow | 672 |
-| 15 | `toggleSelectAll` | const arrow | 681 |
+| 1 | `getBranchApi` | function | 185 |
+| 2 | `getErrorMessage` | function | 189 |
+| 3 | `isBranchRecord` | function | 193 |
+| 4 | `isTransferRecord` | function | 197 |
+| 5 | `BranchStatTile` | function | 201 |
+| 6 | `formatTransferDate` | function | 218 |
+| 7 | `Branches` | component/function | 235 |
+| 8 | `promise` | const arrow | 283 |
+| 9 | `loadBranchStock` | const arrow | 433 |
+| 10 | `loadMoreBranchStock` | const arrow | 454 |
+| 11 | `handleSaveBranch` | const arrow | 485 |
+| 12 | `handleDelete` | const arrow | 553 |
+| 13 | `handleBulkDelete` | const arrow | 601 |
+| 14 | `toggleSelect` | const arrow | 687 |
+| 15 | `toggleSelectAll` | const arrow | 696 |
 
 ### 3.47 `frontend/src/components/branches/BranchForm.tsx`
 

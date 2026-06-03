@@ -17,12 +17,23 @@ This is a concise running log of what actually happened in recent sessions.
     zero failed requests, and zero console/page errors, while a longer trace
     proves categories wake around 2.3 s with other non-critical metadata
 
+- Branches action-history deferral
+  - route: `branches`
+  - result: kept
+  - note: moved `/api/users` and `/api/action-history...` out of the Branches
+    route-ready batch by enabling server history only after the branch list and
+    summary settle; Docker-served route trace shows Branches at 34 total
+    requests, 3 API requests, zero failed requests, and zero console/page
+    errors, while a longer trace proves history wakes around 2.3 s
+
 ### Verification
 
 - Frontend `test:utils`, `check:jsx`, and production build passed.
-- Docker release image `business-os:v6.0.0-202606031752` is healthy on
-  `http://127.0.0.1:4000/health` with frontend hash `bfa5413c3b822243`.
-- Focused Products/POS/Inventory/Server control audit passed with 123 tested
+- Docker release image `business-os:v6.0.0-202606031814` is healthy on
+  `http://127.0.0.1:4000/health` with frontend hash `ab34fc8688353364`.
+- Focused Branches/Products/POS/Inventory/Server control audit passed with 144
+  tested controls and zero failures.
+- Prior focused Products/POS/Inventory/Server control audit passed with 123 tested
   controls and zero failures.
 - Exhaustive desktop/mobile all-pages control audit passed with 377 tested
   controls and zero failures.

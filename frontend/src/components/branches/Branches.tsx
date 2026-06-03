@@ -38,6 +38,7 @@ const BRANCHES_LIST_TIMEOUT_MS = 10000
 const BRANCHES_SUMMARY_TIMEOUT_MS = 10000
 const BRANCH_TRANSFERS_TIMEOUT_MS = 12000
 const BRANCH_MUTATION_TIMEOUT_MS = 12000
+const BRANCHES_HISTORY_READY_DELAY_MS = 1800
 
 type TranslateFunction = (key: string) => string | undefined
 type NotifyFunction = (message: string, type?: string) => void
@@ -255,6 +256,7 @@ export default function Branches() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false)
+  const [historyReady, setHistoryReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
@@ -263,7 +265,7 @@ export default function Branches() {
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
 
   /**
    * 3. Data Loading
@@ -354,6 +356,7 @@ export default function Branches() {
 
   useEffect(() => {
     if (!isActive) {
+      setHistoryReady(false)
       if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
@@ -364,6 +367,18 @@ export default function Branches() {
     const shouldSilentLoad = loadedOnceRef.current && !(tab === 'transfers' && !transfers.length)
     void load(shouldSilentLoad)
   }, [isActive, load, tab, transfers.length])
+
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, BRANCHES_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
 
   /**
    * 3.2 Sync refresh hooks.

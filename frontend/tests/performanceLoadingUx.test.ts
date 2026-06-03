@@ -641,6 +641,26 @@ assert.match(
 )
 assert.match(
   branches,
+  /const BRANCHES_HISTORY_READY_DELAY_MS = 1800/,
+  'Branches background history should wait until after first route-ready work',
+)
+assert.match(
+  branches,
+  /const \[historyReady, setHistoryReady\] = useState\(false\)/,
+  'Branches should have an explicit post-ready action-history gate',
+)
+assert.match(
+  branches,
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/,
+  'Branches should not fetch server action history during first route load',
+)
+assert.match(
+  branches,
+  /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*BRANCHES_HISTORY_READY_DELAY_MS/,
+  'Branches should enable history only after the first branch data load settles',
+)
+assert.match(
+  branches,
   /withLoaderTimeout\(\s*\(\) => branchApi\.getBranches\(\),\s*'Branches list',\s*BRANCHES_LIST_TIMEOUT_MS,\s*\)/,
   'branches list should timeout slow reads',
 )
