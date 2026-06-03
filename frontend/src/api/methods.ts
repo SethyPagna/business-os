@@ -71,6 +71,7 @@ import {
 } from './branchTransport.ts'
 import {
   getProductFilters as getProductFiltersRequest,
+  getProductBootstrap as getProductBootstrapRequest,
   getProductLookupUsage as getProductLookupUsageRequest,
   getProducts as getProductsRequest,
   getProductsByIds as getProductsByIdsRequest,
@@ -638,6 +639,8 @@ export const getProducts = () =>
   getProductsRequest()
 export const searchProducts = (params = {}) =>
   searchProductsRequest(params)
+export const getProductBootstrap = (params = {}) =>
+  getProductBootstrapRequest(params)
 export const getProductsByIds = (ids = [], params = {}) =>
   getProductsByIdsRequest(ids, params)
 export const getProductFilters = (params = {}) =>

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 723 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 727 in this file.
 
 ## Goal
 
@@ -7045,6 +7045,30 @@ Decision rule:
     Phase 8.4 UI Playwright passed. The built `app-api-methods-DGc6nbrI.js`
     chunk is 60,808 bytes and contains no portal endpoint strings; the
     `app-portal-DTjuMQBz.js` chunk owns those endpoints at 2,747 bytes.
+
+727. Collapse POS startup branch/product reads.
+    Done: `backend/src/routes/products.ts` now shares one product search
+    payload builder between `/api/products/search` and a new authenticated
+    `/api/products/bootstrap` route, which adds the branch list POS needs for
+    first paint. `frontend/src/api/productReadTransport.ts` and
+    `frontend/src/api/methods.ts` expose `getProductBootstrap`, and
+    `frontend/src/components/pos/POS.tsx` uses it only for the first metadata
+    load before falling back to the existing search plus branch reads when the
+    bootstrap method is unavailable. The broad Phase 8.4 live check now asserts
+    `posProductBootstrapStatus`, keeping the old route behavior covered through
+    Products and later POS refresh paths. Proof: frontend utility tests,
+    frontend JSX/source check, backend utility tests, production build hash
+    `b85f244d833cbb62`, Docker release/update image
+    `business-os:v6.0.0-202606032013`, route-load trace
+    `ops/runtime/reports/route-load-trace-2026-06-03T12-16-06-540Z.json`,
+    broad Phase 8.4 UI Playwright, public Cloudflare Playwright, and
+    `git diff --check` passed. The Docker-served trace reduced POS from 45
+    total requests and 3 API requests to 44 total requests and 2 API requests,
+    with first-window APIs `/api/auth/bootstrap` and
+    `/api/products/bootstrap?...include=branch_stock,images,family`. Storage
+    pruning removed 238,110,370 bytes of old reports, 100,882,733 bytes of old
+    Docker-release backups, and 38.06 MB of Docker builder cache while keeping
+    the newest backup set and leaving Docker images/volumes intact.
 
 ## Safety Gates
 

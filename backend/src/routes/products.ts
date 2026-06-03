@@ -54,6 +54,10 @@ function getActiveBranches() {
   return db.prepare('SELECT id, name, is_default FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all()
 }
 
+function getBranchListForBootstrap() {
+  return db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all()
+}
+
 function settingsHasUpdatedAt() {
   return hasColumn('settings', 'updated_at')
 }
@@ -819,83 +823,99 @@ function expandProductFamilyRows(rows = []) {
   return uniqueProducts
 }
 
+function buildProductSearchPayload(query = {}) {
+  const page = normalizePositiveInt(query.page, 1, { min: 1, max: 100000 })
+  const pageSize = normalizePositiveInt(query.pageSize || query.page_size, 20, { min: 1, max: 100 })
+  const offset = (page - 1) * pageSize
+  const include = parseInclude(query.include)
+  const { where, joins, params, stockExpr } = appendProductSearchFilters(query)
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
+  const joinSql = joins.join('\n')
+  const sort = String(query.sort || 'name_asc').toLowerCase()
+  const orderSql = sort === 'created_desc'
+    ? 'p.created_at DESC, p.id DESC'
+    : sort === 'created_asc'
+      ? 'p.created_at ASC, p.id ASC'
+      : sort === 'stock_desc'
+        ? `${stockExpr} DESC, p.name COLLATE NOCASE ASC, p.id ASC`
+        : 'p.name COLLATE NOCASE ASC, p.id ASC'
+
+  const total = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+  `).get(params)?.count || 0
+  const rawRows = db.prepare(`
+    SELECT p.*, ${stockExpr} AS selected_branch_quantity
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+    ORDER BY ${orderSql}
+    LIMIT @pageSize OFFSET @offset
+  `).all({ ...params, pageSize, offset })
+  const rows = []
+  for (const product of rawRows) {
+    rows.push({
+      ...product,
+      custom_fields: tryParse(product.custom_fields, {}),
+    })
+  }
+  let items = include.has('family') ? expandProductFamilyRows(rows) : rows
+  if (include.has('branch_stock')) items = attachBranchStock(items)
+  if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
+  if (include.has('batches') || include.has('family')) {
+    const itemIds = []
+    for (const product of items) {
+      itemIds.push(product.id)
+    }
+    const batchMap = listProductBatches(itemIds, {
+      branchId: Number.isFinite(Number(params.branchId)) ? Number(params.branchId) : null,
+    })
+    const withBatches = []
+    for (const product of items) {
+      withBatches.push({
+        ...product,
+        batches: batchMap.get(product.id) || [],
+      })
+    }
+    items = withBatches
+  }
+  const filters = getProductSearchMetadata(query)
+  return {
+    items,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    snapshotVersion: getProductCatalogSnapshotVersion(),
+    filters,
+    initials: filters.initials,
+    summary: {
+      total,
+      returned: items.length,
+      page,
+      pageSize,
+    },
+  }
+}
+
+// GET /api/products/bootstrap - first POS/catalog route read with branch metadata
+router.get('/bootstrap', authToken, (req, res) => {
+  try {
+    ok(res, {
+      branches: getBranchListForBootstrap(),
+      products: buildProductSearchPayload(req.query),
+    })
+  } catch (error) {
+    err(res, error?.message || 'Failed to bootstrap products')
+  }
+})
+
 // GET /api/products/search - paged catalog read for large datasets
 router.get('/search', authToken, (req, res) => {
   try {
-    const page = normalizePositiveInt(req.query.page, 1, { min: 1, max: 100000 })
-    const pageSize = normalizePositiveInt(req.query.pageSize || req.query.page_size, 20, { min: 1, max: 100 })
-    const offset = (page - 1) * pageSize
-    const include = parseInclude(req.query.include)
-    const { where, joins, params, stockExpr } = appendProductSearchFilters(req.query)
-    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
-    const joinSql = joins.join('\n')
-    const sort = String(req.query.sort || 'name_asc').toLowerCase()
-    const orderSql = sort === 'created_desc'
-      ? 'p.created_at DESC, p.id DESC'
-      : sort === 'created_asc'
-        ? 'p.created_at ASC, p.id ASC'
-        : sort === 'stock_desc'
-          ? `${stockExpr} DESC, p.name COLLATE NOCASE ASC, p.id ASC`
-          : 'p.name COLLATE NOCASE ASC, p.id ASC'
-
-    const total = db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM products p
-      ${joinSql}
-      ${whereSql}
-    `).get(params)?.count || 0
-    const rawRows = db.prepare(`
-      SELECT p.*, ${stockExpr} AS selected_branch_quantity
-      FROM products p
-      ${joinSql}
-      ${whereSql}
-      ORDER BY ${orderSql}
-      LIMIT @pageSize OFFSET @offset
-    `).all({ ...params, pageSize, offset })
-    const rows = []
-    for (const product of rawRows) {
-      rows.push({
-        ...product,
-        custom_fields: tryParse(product.custom_fields, {}),
-      })
-    }
-    let items = include.has('family') ? expandProductFamilyRows(rows) : rows
-    if (include.has('branch_stock')) items = attachBranchStock(items)
-    if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
-    if (include.has('batches') || include.has('family')) {
-      const itemIds = []
-      for (const product of items) {
-        itemIds.push(product.id)
-      }
-      const batchMap = listProductBatches(itemIds, {
-        branchId: Number.isFinite(Number(params.branchId)) ? Number(params.branchId) : null,
-      })
-      const withBatches = []
-      for (const product of items) {
-        withBatches.push({
-          ...product,
-          batches: batchMap.get(product.id) || [],
-        })
-      }
-      items = withBatches
-    }
-    const filters = getProductSearchMetadata(req.query)
-    ok(res, {
-      items,
-      total,
-      page,
-      pageSize,
-      totalPages: Math.max(1, Math.ceil(total / pageSize)),
-      snapshotVersion: getProductCatalogSnapshotVersion(),
-      filters,
-      initials: filters.initials,
-      summary: {
-        total,
-        returned: items.length,
-        page,
-        pageSize,
-      },
-    })
+    ok(res, buildProductSearchPayload(req.query))
   } catch (error) {
     err(res, error?.message || 'Failed to search products')
   }

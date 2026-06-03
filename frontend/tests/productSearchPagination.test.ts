@@ -98,8 +98,8 @@ assert.match(
 )
 assert.match(
   posPage,
-  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
-  'POS catalog bootstrap should apply the named timeout to first-window product and branch reads',
+  /withLoaderTimeout\(\s*\(\) => shouldLoadMetadata && api\.getProductBootstrap[\s\S]*api\.getProductBootstrap\(productQuery\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  'POS catalog bootstrap should apply the named timeout to the combined first-window product and branch read',
 )
 assert.doesNotMatch(
   posPage,

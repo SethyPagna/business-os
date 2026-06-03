@@ -9568,3 +9568,56 @@ Move 747 status:
   public catalog, and Server are now at two-or-fewer first-window API reads;
   POS and Inventory remain the clearest measured candidates for future
   bootstrap/deferral slices.
+
+Move 748 status:
+- Move 748 collapses the POS first-window branch metadata and product catalog
+  read into one authenticated `/api/products/bootstrap` response. The backend
+  now shares the existing product search payload builder between
+  `/api/products/search` and `/api/products/bootstrap`, while the bootstrap
+  adds the same branch list shape POS previously read from `/api/branches`.
+  The old search and branch routes remain available for normal refreshes,
+  filters, manual reads, and fallback behavior.
+- `POS.tsx` uses `getProductBootstrap(productQuery)` only while first catalog
+  metadata is needed; later filter, search, and pagination loops keep using the
+  existing product search path. This preserves cart/checkout behavior while
+  reducing the first visible POS route window by one API request.
+- Docker release image `business-os:v6.0.0-202606032013` is serving frontend
+  hash `19487bd8a970df74`; update backup:
+  `ops/runtime/docker-release/backups/20260603-201522`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `b85f244d833cbb62`.
+- Proof: frontend utility tests, frontend JSX/source check, backend utility
+  tests, production build, Docker release build/update, local health metadata,
+  focused multi-route Playwright route-load trace, broad Phase 8.4 UI
+  Playwright, public Cloudflare portal Playwright, and `git diff --check`
+  passed. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T12-16-06-540Z.json` shows
+  POS at 44 total requests and 2 API requests, down from 45 total requests and
+  3 API requests before the move, with zero failed requests and zero
+  console/page errors. The first-window API list is `/api/auth/bootstrap` and
+  `/api/products/bootstrap?...include=branch_stock,images,family`.
+- Runtime cleanup proof: `npm.cmd --prefix ops run prune-storage` removed
+  238,110,370 bytes of old reports and 100,882,733 bytes of old local
+  Docker-release backup packages while keeping backups `20260603-201522`,
+  `20260603-195615`, and `20260603-193942`. Docker safe prune also reclaimed
+  38.06 MB of builder cache and did not prune images or volumes.
+- The broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T12-16-31-802Z/report.json`
+  covered dashboard, branch stock, sales, products, files, public editor,
+  receipt settings, POS, inventory, contacts, loyalty, users, audit, backup,
+  and server helper loaders. It passed with `posProductBootstrapStatus: 200`,
+  `serverBootstrapStatus: 200`, `publicPortalBootstrapStatus: 200`, no
+  framework overlay, and zero relevant console messages. Public Cloudflare
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T12-16-32-334Z/report.json`
+  rendered 20 products and passed with bootstrap/AI HTTP 200 after Assistant
+  interaction.
+- Current plan position after Move 748: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Dashboard, Products, POS,
+  Returns, public catalog, and Server are now at two-or-fewer first-window API
+  reads. Inventory is the clearest remaining measured bootstrap candidate
+  because it still loads `/api/branches` beside
+  `/api/inventory/products/search` in the first route window.

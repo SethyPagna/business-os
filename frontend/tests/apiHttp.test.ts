@@ -822,6 +822,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(branchTransportSource, /export function getBranchStockIntegrity/)
   assert.match(branchTransportSource, /encodeURIComponent\(String\(id\)\)/)
   assert.match(productReadTransportSource, /export function searchProducts/)
+  assert.match(productReadTransportSource, /export function getProductBootstrap/)
+  assert.match(productReadTransportSource, /\/api\/products\/bootstrap/)
   assert.match(productReadTransportSource, /normalizePositiveUniqueIds\(ids, 100\)/)
   assert.match(productReadTransportSource, /readCachedQueryResult\(cacheKey\)/)
   assert.match(productReadTransportSource, /requireLiveServerWrite\('products:lookup:replace'\)/)

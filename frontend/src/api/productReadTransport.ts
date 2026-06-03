@@ -32,6 +32,17 @@ export function searchProducts(params: QueryParams = {}): Promise<unknown> {
   )
 }
 
+export function getProductBootstrap(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params)
+  const cacheKey = `products:bootstrap:${query}`
+  return routeMirrored(
+    cacheKey,
+    () => apiFetch('GET', appendQuery('/api/products/bootstrap', query)),
+    () => readCachedQueryResult(cacheKey),
+    (result: unknown) => writeCachedQueryResult(cacheKey, result),
+  )
+}
+
 export function getProductsByIds(ids: unknown[] = [], params: QueryParams = {}): Promise<unknown> {
   const uniqueIds = normalizePositiveUniqueIds(ids, 100)
   if (!uniqueIds.length) return Promise.resolve({ items: [], total: 0, page: 1, pageSize: 0 })

@@ -268,6 +268,11 @@ type ProductPayload = {
   total?: number
 }
 
+type ProductBootstrapPayload = {
+  branches?: BranchRecord[]
+  products?: ProductPayload | ProductRecord[]
+}
+
 type SaleResult = {
   error?: string
   id?: string | number
@@ -284,6 +289,7 @@ type PosApi = {
   getCategories?: () => Promise<string[]>
   getCustomers?: () => Promise<CustomerRecord[]>
   getDeliveryContacts?: () => Promise<DeliveryContactRecord[]>
+  getProductBootstrap?: (query: Record<string, unknown>) => Promise<ProductBootstrapPayload>
   getProductFilters?: (filters: Record<string, unknown>) => Promise<Partial<ProductFilterMeta>>
   lookupPortalMembership?: (membershipNumber: string) => Promise<MembershipInfo | null>
   searchProducts?: (query: Record<string, unknown>) => Promise<ProductPayload | ProductRecord[]>
@@ -652,12 +658,18 @@ export default function POS() {
         const api = getPosApi()
         const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current)
         const [productPayload, metadataPayload] = await withLoaderTimeout(
-          () => Promise.all([
-            api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
-            shouldLoadMetadata
-              ? api.getBranches?.() || missingPosApiMethod('getBranches')
-              : Promise.resolve(null),
-          ]),
+          () => shouldLoadMetadata && api.getProductBootstrap
+            ? api.getProductBootstrap(productQuery)
+              .then((bootstrapPayload) => [
+                bootstrapPayload?.products || [],
+                Array.isArray(bootstrapPayload?.branches) ? bootstrapPayload.branches : null,
+              ] as [ProductPayload | ProductRecord[], BranchRecord[] | null])
+            : Promise.all([
+              api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
+              shouldLoadMetadata
+                ? api.getBranches?.() || missingPosApiMethod('getBranches')
+                : Promise.resolve(null),
+            ]),
           label,
           POS_CATALOG_LOAD_TIMEOUT_MS,
         )

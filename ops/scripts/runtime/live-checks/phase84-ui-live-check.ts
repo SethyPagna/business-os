@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     attachConsoleCollector(page, consoleMessages)
     page.on('response', (response) => {
       const url = response.url()
-      if (/background-import-tracker|\/api\/import-jobs|\/api\/action-history|\/api\/auth\/bootstrap|\/api\/settings|\/api\/notifications\/summary|\/api\/branches|\/api\/branch-stock|\/api\/branches\/\d+\/stock|\/api\/transfers|\/api\/suppliers|\/api\/inventory\/summary|\/api\/inventory\/reasons|\/api\/inventory\/stats|\/api\/inventory\/products\/search|\/api\/inventory\/movements|\/api\/returns|\/api\/dashboard|\/api\/analytics|\/api\/sales|\/api\/files|\/api\/ai\/providers|\/api\/ai\/responses|\/api\/customers|\/api\/delivery-contacts|\/api\/users|\/api\/roles|\/api\/system\/audit-logs|\/api\/system\/config|\/api\/system\/debug\/log|\/api\/system\/integration-doctor|\/api\/auth\/otp\/status|\/api\/auth\/verification-capabilities|\/api\/portal\/config|\/api\/portal\/submissions\/review|\/api\/portal\/membership|\/api\/portal\/ai\/status|\/api\/portal\/bootstrap|\/api\/portal\/catalog|\/api\/categories|\/api\/units|\/api\/products\/search|\/api\/products\/filters|\/api\/products\/lookups\/usage/i.test(url)) {
+      if (/background-import-tracker|\/api\/import-jobs|\/api\/action-history|\/api\/auth\/bootstrap|\/api\/settings|\/api\/notifications\/summary|\/api\/branches|\/api\/branch-stock|\/api\/branches\/\d+\/stock|\/api\/transfers|\/api\/suppliers|\/api\/inventory\/summary|\/api\/inventory\/reasons|\/api\/inventory\/stats|\/api\/inventory\/products\/search|\/api\/inventory\/movements|\/api\/returns|\/api\/dashboard|\/api\/analytics|\/api\/sales|\/api\/files|\/api\/ai\/providers|\/api\/ai\/responses|\/api\/customers|\/api\/delivery-contacts|\/api\/users|\/api\/roles|\/api\/system\/audit-logs|\/api\/system\/config|\/api\/system\/debug\/log|\/api\/system\/integration-doctor|\/api\/auth\/otp\/status|\/api\/auth\/verification-capabilities|\/api\/portal\/config|\/api\/portal\/submissions\/review|\/api\/portal\/membership|\/api\/portal\/ai\/status|\/api\/portal\/bootstrap|\/api\/portal\/catalog|\/api\/categories|\/api\/units|\/api\/products\/bootstrap|\/api\/products\/search|\/api\/products\/filters|\/api\/products\/lookups\/usage/i.test(url)) {
         chunkRequests.push({ status: response.status(), url })
       }
     })
@@ -364,18 +364,14 @@ async function main(): Promise<void> {
     assert(receiptPreviewVisible, 'Receipt settings preview did not render')
 
     console.log('[phase84] exercising POS catalog, customer, and delivery option loaders')
-    const posProductSearchResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/products/search')
+    const posProductBootstrapResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/products/bootstrap')
         && response.url().includes('sort=name_asc')
         && response.status() < 500,
       { timeout: 20_000 },
     )
     const posCategoriesResponse = page.waitForResponse(
       (response) => /\/api\/categories(?:\?|$)/.test(response.url()) && response.status() < 500,
-      { timeout: 20_000 },
-    )
-    const posBranchesResponse = page.waitForResponse(
-      (response) => /\/api\/branches(?:\?|$)/.test(response.url()) && response.status() < 500,
       { timeout: 20_000 },
     )
     const posProductFiltersResponse = page.waitForResponse(
@@ -393,15 +389,13 @@ async function main(): Promise<void> {
     await page.goto('/pos', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await page.getByText('Point of Sale', { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
-    const posProductSearchStatus = (await posProductSearchResponse).status()
+    const posProductBootstrapStatus = (await posProductBootstrapResponse).status()
     const posCategoriesStatus = (await posCategoriesResponse).status()
-    const posBranchesStatus = (await posBranchesResponse).status()
     const posProductFiltersStatus = (await posProductFiltersResponse).status()
     const posCustomersStatus = (await posCustomersResponse).status()
     const posDeliveryStatus = (await posDeliveryResponse).status()
-    assert(posProductSearchStatus === 200, `POS product search read returned HTTP ${posProductSearchStatus}`)
+    assert(posProductBootstrapStatus === 200, `POS product bootstrap read returned HTTP ${posProductBootstrapStatus}`)
     assert(posCategoriesStatus === 200, `POS categories read returned HTTP ${posCategoriesStatus}`)
-    assert(posBranchesStatus === 200, `POS branches read returned HTTP ${posBranchesStatus}`)
     assert(posProductFiltersStatus === 200, `POS product filters read returned HTTP ${posProductFiltersStatus}`)
     assert(posCustomersStatus === 200, `POS customers read returned HTTP ${posCustomersStatus}`)
     assert(posDeliveryStatus === 200, `POS delivery contacts read returned HTTP ${posDeliveryStatus}`)
@@ -773,9 +767,8 @@ async function main(): Promise<void> {
         catalogReviewItemsStatus,
         publicPortalBootstrapStatus,
         receiptPreviewVisible,
-        posProductSearchStatus,
+        posProductBootstrapStatus,
         posCategoriesStatus,
-        posBranchesStatus,
         posProductFiltersStatus,
         posCustomersStatus,
         posDeliveryStatus,

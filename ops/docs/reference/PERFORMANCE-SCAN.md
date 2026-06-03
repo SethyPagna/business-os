@@ -1629,4 +1629,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-58-20-197Z/report.json`
   passed with `serverBootstrapStatus: 200`, no framework overlay, and zero
   relevant console messages.
+- Move 478 records roadmap Move 748: collapse POS first-window branch metadata
+  and product catalog reads into `/api/products/bootstrap`. The backend now
+  shares the product search payload builder between the old search route and
+  bootstrap, and POS uses the combined route only while first metadata is
+  needed. Docker-served build hash `19487bd8a970df74` passed frontend utility
+  tests, JSX/source check, backend utility tests, production build, Docker
+  release/update, focused multi-route Playwright trace, broad Phase 8.4 UI
+  Playwright, and public Cloudflare Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T12-16-06-540Z.json` reduced
+  POS first-window work from 45 total requests and 3 API requests to 44 total
+  requests and 2 API requests, with zero failed requests and zero console/page
+  errors. The first-window POS APIs are now `/api/auth/bootstrap` and
+  `/api/products/bootstrap?...include=branch_stock,images,family`. The same
+  pass pruned 238,110,370 bytes of old reports, 100,882,733 bytes of old
+  Docker-release backups, and 38.06 MB of Docker builder cache.
 <!-- phase29-manual-notes:end -->
