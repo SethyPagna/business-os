@@ -9292,3 +9292,50 @@ Move 736 status:
   delivery contacts, and product filters alongside bootstrap. Continue by
   proving which POS reads can move after cart-first usability without breaking
   customer, delivery, discount, and checkout flows.
+
+Move 737 status:
+- Move 737 defers POS customer and delivery option list reads until after the
+  first catalog route load is useful. POS still loads authenticated bootstrap,
+  branches, categories, the first product search, and product filter metadata
+  immediately; `/api/customers` and `/api/delivery-contacts` now wake behind a
+  short post-catalog readiness gate instead of competing with first paint.
+- `frontend/src/components/pos/POS.tsx` now tracks whether the first catalog
+  load has completed with `catalogLoadedOnceRef`, then enables
+  `contactOptionsReady` after `POS_CONTACT_OPTIONS_READY_DELAY_MS`. The
+  initial customer and delivery contact loaders are gated by that flag, while
+  quick-add customer/delivery writes, membership lookup, customer selection,
+  delivery toggles, discounts, and checkout remain intent-driven and
+  unchanged.
+- Docker release image `business-os:v6.0.0-202606031558` is serving frontend
+  hash `45a502aeada4c721`; update backup:
+  `ops/runtime/docker-release/backups/20260603-160045`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `66e47424178b8f60`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, local health/build metadata, focused route-load trace,
+  focused POS/Inventory/Products/Server route-control audit, public
+  Cloudflare portal Playwright, and full desktop/mobile all-pages Playwright
+  passed. The focused route-load trace
+  `ops/runtime/reports/route-load-trace-latest.json` shows POS reduced from 49
+  to 47 total requests and from 7 to 5 first-window API requests, with zero
+  failed requests and zero console/page errors. The post-change first-window
+  API list is `/api/auth/bootstrap`, `/api/branches`, `/api/categories`,
+  `/api/products/search...`, and `/api/products/filters`.
+- The focused route-control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-02-31-805Z/summary.json`
+  exercised 122 controls across desktop/mobile POS, Inventory, Products, and
+  Server with zero failures and zero findings. The exhaustive all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-05-09-969Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 378, skipped 140 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T08-05-10-948Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Next candidates from the latest measured trace: POS still has 5 first-window
+  API calls because branches, categories, product search, and product filters
+  are still part of first catalog usability; any deeper POS metadata deferral
+  needs a cart/filter-specific proof. Products still has 6 API calls, and the
+  remaining metadata reads should be approached one at a time with route-load
+  trace proof.

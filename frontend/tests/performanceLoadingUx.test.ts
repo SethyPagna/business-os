@@ -2039,6 +2039,11 @@ assert.match(
 )
 assert.match(
   pos,
+  /const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800/,
+  'POS customer and delivery option reads should wait until after first catalog route-ready work',
+)
+assert.match(
+  pos,
   /const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000/,
   'POS membership lookup should use an explicit timeout',
 )
@@ -2096,6 +2101,16 @@ assert.match(
   pos,
   /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.getDeliveryContacts(?:\?\.)?\(\)[\s\S]*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
   'POS delivery option reads should timeout slow delivery contact requests',
+)
+assert.match(
+  pos,
+  /if \(!catalogLoadedOnceRef\.current \|\| catalogRefreshing\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setContactOptionsReady\(true\)[\s\S]*POS_CONTACT_OPTIONS_READY_DELAY_MS/,
+  'POS should enable contact option reads only after the first catalog load settles',
+)
+assert.match(
+  pos,
+  /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*loadCustomers\('POS initial customers'\)[\s\S]*loadDeliveryContacts\('POS initial delivery contacts'\)/,
+  'POS should keep customer and delivery option reads out of the first route load',
 )
 assert.match(
   pos,

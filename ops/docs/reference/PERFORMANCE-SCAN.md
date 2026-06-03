@@ -1433,4 +1433,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 519 controls, exercised 378, skipped 141 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 467 records roadmap Move 737: defer POS customer and delivery option
+  reads out of the first route window. `POS` now waits for the first catalog
+  load to settle and then enables contact option loading behind
+  `POS_CONTACT_OPTIONS_READY_DELAY_MS`, preserving immediate bootstrap,
+  branches, categories, product search, product filters, quick-add
+  customer/delivery writes, membership lookup, discounts, and checkout.
+  Docker-served build hash `45a502aeada4c721` passed frontend utility tests,
+  JSX/source check, production build, Docker release/update, focused
+  route-load trace, focused POS/Inventory/Products/Server route-control audit,
+  public Cloudflare Playwright, and full desktop/mobile all-pages Playwright.
+  The focused trace `ops/runtime/reports/route-load-trace-latest.json`
+  reduced POS first-window API requests from 7 to 5 and total requests from 49
+  to 47, with zero failed requests and zero console/page errors. The full
+  report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-05-09-969Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 378, skipped 140 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

@@ -65,6 +65,7 @@ const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
 const POS_CHECKOUT_TIMEOUT_MS = 20000
+const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800
 
 // Customer contact-option helpers (mirrors CustomersTab)
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -534,6 +535,7 @@ export default function POS() {
   const [mobileView,       setMobileView]       = useState<'products' | 'cart'>('products')
   const [detailProduct,    setDetailProduct]    = useState<ProductRecord | null>(null)
   const [loading,          setLoading]          = useState(false)
+  const [contactOptionsReady, setContactOptionsReady] = useState(false)
   const [showStatusPicker, setShowStatusPicker] = useState(false)
   const [membershipInfo,   setMembershipInfo]   = useState<MembershipInfo | null>(null)
   const [membershipLoading, setMembershipLoading] = useState(false)
@@ -549,6 +551,7 @@ export default function POS() {
   const pendingCatalogLoadRef = useRef<{ label: string, options?: CatalogLoadOptions } | null>(null)
   const latestLoadCatalogRef = useRef<((label?: string, options?: CatalogLoadOptions) => Promise<{ prods: ProductRecord[] } | null>) | null>(null)
   const catalogMetadataLoadedRef = useRef(false)
+  const catalogLoadedOnceRef = useRef(false)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
@@ -656,6 +659,7 @@ export default function POS() {
           : (Array.isArray(productPayload) ? productPayload : [])
         applyCatalogProducts(prods)
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
+        catalogLoadedOnceRef.current = true
         if (Array.isArray(metadataPayload)) {
           const [cats, brs, filterPayload] = metadataPayload
           applyCatalogMetadata(cats as unknown[], brs as BranchRecord[])
@@ -767,6 +771,7 @@ export default function POS() {
 // Initial data load
   useEffect(() => {
     if (!isActive) {
+      setContactOptionsReady(false)
       invalidateTrackedRequest(catalogRequestRef)
       catalogLoadPromiseRef.current = null
       pendingCatalogLoadRef.current = null
@@ -782,12 +787,24 @@ export default function POS() {
   }, [isActive, loadCatalogData])
 
   useEffect(() => {
-    if (!isActive) return
+    if (!isActive) {
+      setContactOptionsReady(false)
+      return undefined
+    }
+    if (!catalogLoadedOnceRef.current || catalogRefreshing) return undefined
+    const timer = window.setTimeout(() => {
+      setContactOptionsReady(true)
+    }, POS_CONTACT_OPTIONS_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [catalogRefreshing, isActive])
+
+  useEffect(() => {
+    if (!isActive || !contactOptionsReady) return
     void Promise.allSettled([
       loadCustomers('POS initial customers'),
       loadDeliveryContacts('POS initial delivery contacts'),
     ])
-  }, [isActive, loadCustomers, loadDeliveryContacts])
+  }, [contactOptionsReady, isActive, loadCustomers, loadDeliveryContacts])
 
 // Sync-push reload when another device changes data
   useEffect(() => {
