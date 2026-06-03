@@ -291,6 +291,42 @@ assert.doesNotMatch(productRowParts, /import \{ ThreeDotPortal \} from '\.\.\/\.
 assert.match(productRowParts, /import LazyPortalMenu from '\.\.\/\.\.\/shared\/LazyPortalMenu'/, 'Product row actions should load PortalMenu only when a row action menu is requested')
 assert.doesNotMatch(contactsShared, /import PortalMenu from '\.\.\/shared\/PortalMenu'/, 'Contacts row actions should not statically load PortalMenu for first route paint')
 assert.match(contactsShared, /import LazyPortalMenu from '\.\.\/shared\/LazyPortalMenu'/, 'Contacts row actions should load PortalMenu only after row action intent')
+assert.match(
+  contacts,
+  /function loadContactReadTransportModule\(\): Promise<ContactReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)[\s\S]*getCustomers: async \(query = \{\}\) => \(await loadContactReadTransportModule\(\)\)\.getCustomers\(query\)[\s\S]*getSuppliers: async \(query = \{\}\) => \(await loadContactReadTransportModule\(\)\)\.getSuppliers\(query\)[\s\S]*getDeliveryContacts: async \(query = \{\}\) => \(await loadContactReadTransportModule\(\)\)\.getDeliveryContacts\(query\)/,
+  'Contacts export should use the focused contact read transport instead of window.api or the mixed contacts transport',
+)
+assert.match(
+  contacts,
+  /function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*const \{ downloadZipFilesAsync \} = await loadCsvUtilsModule\(\)/,
+  'Contacts export should load ZIP/CSV helpers only after the export action',
+)
+assert.doesNotMatch(
+  contacts,
+  /window\.api|\(window as Window & \{ api\?:|contactsTransport\.ts/,
+  'Contacts route shell should not wake broad or mixed contact transports for contact export',
+)
+for (const [name, source] of [
+  ['Customers', customers],
+  ['Suppliers', suppliers],
+  ['Delivery', delivery],
+] as const) {
+  assert.match(
+    source,
+    /function loadContactReadTransportModule\(\): Promise<ContactReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)/,
+    `${name} tab should lazy-load the focused contact read transport`,
+  )
+  assert.match(
+    source,
+    /function loadContactWriteTransportModule\(\): Promise<ContactWriteTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)/,
+    `${name} tab should lazy-load the focused contact write transport only for mutations`,
+  )
+  assert.doesNotMatch(
+    source,
+    /window\.api|\(window as Window & \{ api\?:|contactsTransport\.ts/,
+    `${name} tab should not wake broad or mixed transports for contact CRUD`,
+  )
+}
 assert.doesNotMatch(catalogPreviewSurface, /const PortalMenu = lazy\(\(\) => import\('\.\.\/shared\/PortalMenu'\)\)/, 'public catalog preview should not render PortalMenu through React.lazy during first route load')
 assert.match(catalogPreviewSurface, /import LazyPortalMenu from '\.\.\/shared\/LazyPortalMenu'/, 'public catalog translation menu should load PortalMenu only after language-menu intent')
 assert.doesNotMatch(pos, /from '\.\.\/contacts\/CustomersTab'/, 'POS should not import the whole CustomersTab chunk just to parse customer contact options')

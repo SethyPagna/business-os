@@ -6,6 +6,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import type { QueryParams } from '../../api/query.ts'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
@@ -106,7 +107,7 @@ interface SectionRow extends Record<string, unknown> {
 type SupplierDisplayRow = SupplierRow | SectionRow
 
 interface SupplierApi {
-  getSuppliers: (query?: Record<string, unknown>) => Promise<unknown>
+  getSuppliers: (query?: QueryParams) => Promise<unknown>
   createSupplier: (payload: SupplierPayload) => Promise<SupplierMutationResult | unknown>
   updateSupplier: (id: number | string, payload: SupplierPayload) => Promise<SupplierMutationResult | unknown>
   deleteSupplier: (id: number | string) => Promise<SupplierMutationResult | unknown>
@@ -117,9 +118,29 @@ type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history'
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 
+type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
+type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
+
+let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
+let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
+
+function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
+  if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
+  return contactReadTransportModulePromise
+}
+
+function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
+  if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
+  return contactWriteTransportModulePromise
+}
+
 function getSupplierApi(): SupplierApi {
-  if (typeof window === 'undefined' || !window.api) throw new Error('Supplier API is not available.')
-  return window.api as SupplierApi
+  return {
+    getSuppliers: async (query = {}) => (await loadContactReadTransportModule()).getSuppliers(query),
+    createSupplier: async (payload) => (await loadContactWriteTransportModule()).createSupplier(payload as Record<string, unknown>),
+    updateSupplier: async (id, payload) => (await loadContactWriteTransportModule()).updateSupplier(id, payload as Record<string, unknown>),
+    deleteSupplier: async (id) => (await loadContactWriteTransportModule()).deleteSupplier(id),
+  }
 }
 
 function normalizeSupplierRows(value: unknown): SupplierRow[] {

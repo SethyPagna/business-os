@@ -7,7 +7,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import { downloadZipFilesAsync } from '../../utils/csv'
+import type { QueryParams } from '../../api/query.ts'
 import { CustomersTab as CustomersTabBase } from './CustomersTab'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
@@ -52,9 +52,9 @@ interface ApiListResponse {
 }
 
 interface ContactApi {
-  getCustomers: () => Promise<unknown>
-  getSuppliers: () => Promise<unknown>
-  getDeliveryContacts: () => Promise<unknown>
+  getCustomers: (query?: QueryParams) => Promise<unknown>
+  getSuppliers: (query?: QueryParams) => Promise<unknown>
+  getDeliveryContacts: (query?: QueryParams) => Promise<unknown>
 }
 
 interface ContactTabProps {
@@ -87,9 +87,28 @@ interface ExportZipFile {
 
 const useApp = useAppHook as () => AppContextValue
 
+type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
+type CsvUtilsModule = typeof import('../../utils/csv')
+
+let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
+let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
+
+function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
+  if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
+  return contactReadTransportModulePromise
+}
+
+function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
+  if (!csvUtilsModulePromise) csvUtilsModulePromise = import('../../utils/csv')
+  return csvUtilsModulePromise
+}
+
 function getContactApi(): ContactApi {
-  if (!window.api) throw new Error('Contacts API is not available.')
-  return window.api as ContactApi
+  return {
+    getCustomers: async (query = {}) => (await loadContactReadTransportModule()).getCustomers(query),
+    getSuppliers: async (query = {}) => (await loadContactReadTransportModule()).getSuppliers(query),
+    getDeliveryContacts: async (query = {}) => (await loadContactReadTransportModule()).getDeliveryContacts(query),
+  }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -305,6 +324,7 @@ export default function Contacts() {
       }
 
       if (files.length) {
+        const { downloadZipFilesAsync } = await loadCsvUtilsModule()
         await downloadZipFilesAsync(`contacts-export-${today}.zip`, files)
       }
 

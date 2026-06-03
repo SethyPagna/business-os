@@ -8,18 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 766, keep Products write, ProductForm supplier,
-  product image-upload, action-history, and idle offline-snapshot paths out of
-  the broad API methods registry
+- Latest completed move: Move 767, keep Contacts first-load reads on focused
+  contact read/write transports and lazy-load CSV/ZIP export helpers only on
+  export intent
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `30cbc69ea051e0fd`
+- latest verified frontend hash from the most recent Docker-served live check: `8680fae2ea641ed8`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `fd93172581ef3574`
+  `661b8dd7afe4c47c`
 
 Latest verified reports:
 
@@ -28,13 +28,13 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T15-29-38-481Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T21-26-13-600Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T22-45-03-158Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T21-25-11-474Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-40-29-536Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T21-27-00-948Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-41-27-698Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -105,11 +105,31 @@ Current honest pockets:
   Move 763 is served by Docker release image `business-os:v6.0.0-202606040328`;
   Move 764 is served by Docker release image `business-os:v6.0.0-202606040354`;
   Move 765 is served by Docker release image `business-os:v6.0.0-202606040412`;
-  Move 766 is served by Docker release image `business-os:v6.0.0-202606040522`.
+  Move 766 is served by Docker release image `business-os:v6.0.0-202606040522`;
+  Move 767 is served by Docker release image `business-os:v6.0.0-202606040638`.
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Contacts first-load now avoids the broad API methods registry and the mixed
+  contacts transport. Proof: Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-40-29-536Z.json`
+  measured Contacts at 269 ms route-ready with 35 requests, 2 API requests,
+  and 30 scripts, zero failed requests, and zero console/page errors. The
+  17-route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-41-45-113Z.json`
+  passed every route with zero failed requests and zero console/page errors.
+  The fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T22-41-45-201Z/summary.json`
+  exercised 183 of 254 visible stable controls across 17 routes with zero
+  failed controls. Remote admin Contacts trace against
+  `https://admin.leangcosmetics.dpdns.org` passed with 17 requests, 1 API
+  request, 12 scripts, zero failures, and zero console/page errors. Remote
+  public portal check rendered 20 products, confirmed portal bootstrap 200,
+  AI status 200 after interaction, and zero failed responses. Docker release
+  image `business-os:v6.0.0-202606040638` serves frontend hash
+  `8680fae2ea641ed8`.
 
 - Products create/delete now avoids the broad API methods registry. Proof:
   Docker-served route trace

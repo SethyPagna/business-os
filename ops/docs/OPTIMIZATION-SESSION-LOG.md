@@ -3140,3 +3140,64 @@ Use this shape for future entries:
   `npm.cmd --prefix ops run cleanup-test-data -- --prefix "QA Product Move766" --apply --output ops/runtime/reports/move766-product-write-cleanup-latest.json`
   removed 20 QA action-history rows and 10 QA audit-log rows from repeated
   product write proof runs.
+
+- change: narrow Contacts first-load read/write/export transport paths
+- affected files:
+  `frontend/src/api/contactReadTransport.ts`,
+  `frontend/src/api/contactWriteTransport.ts`,
+  `frontend/src/components/contacts/Contacts.tsx`,
+  `frontend/src/components/contacts/CustomersTab.tsx`,
+  `frontend/src/components/contacts/SuppliersTab.tsx`,
+  `frontend/src/components/contacts/DeliveryTab.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Contacts route first paint, Customers/Suppliers/Delivery
+  reads and CRUD intents, all-contacts export, actual admin/public Cloudflare
+  links, all-page local route and control sweeps
+- keeper or rollback: keeper; contact reads now use `contactReadTransport.ts`,
+  mutations use `contactWriteTransport.ts`, and ZIP/CSV helpers load only after
+  the Export action. The older mixed `contactsTransport.ts` remains available
+  for existing import/template/offline-snapshot paths while first-load tabs
+  avoid broad `window.api` and mixed transport wakeups.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `Contacts-Dg4T67Dm.js`,
+  `contact-read-api-mA4znrvJ.js`, `contact-write-api-DjXNP-nz.js`, and
+  `csv-utils-Cx1V6C4j.js`. The Contacts route chunk has no direct
+  `app-api-methods` or `contacts-api` reference, and the source guard now
+  rejects `window.api`, `contactsTransport.ts`, and static CSV/ZIP loading in
+  the Contacts shell and tabs.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-40-29-536Z.json`
+  measured local Docker Contacts at 269 ms route-ready with 35 requests, 2 API
+  requests, and 30 scripts, with zero failed requests and zero console/page
+  errors. The broader local 17-route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-41-45-113Z.json`
+  passed every route with zero failed requests and zero console/page errors.
+- interaction/control proof:
+  fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T22-41-45-201Z/summary.json`
+  discovered 254 controls across 17 routes, safely exercised 183 controls,
+  intentionally skipped 71 guarded controls, captured 34 screenshots, and
+  found zero failed controls. Phase 8.4 live suite
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
+  checked 66 live UI/API signals with zero relevant console messages and no
+  framework overlay.
+- actual link proof:
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned HTTP 200. Remote admin
+  Contacts trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-41-27-698Z.json`
+  passed with 17 requests, 1 API request, 12 scripts, zero failed requests,
+  and zero console/page errors. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T22-45-03-158Z/report.json`
+  rendered 20 products, confirmed portal bootstrap HTTP 200, confirmed AI
+  status HTTP 200 after interaction, and recorded zero failed responses, zero
+  relevant console messages, and zero page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset
+  status, zero broad QA cleanup matches, zero smoke/action-history cleanup
+  matches, zero generated integrity matches, and relationship orphan checks
+  passing for 49 FK candidates.

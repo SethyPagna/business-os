@@ -1916,4 +1916,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T21-26-13-600Z/report.json`
   rendered 20 products with portal bootstrap 200, AI status 200 after
   interaction, and zero failed responses.
+- Move 497 records roadmap Move 767: keep Contacts first-load reads,
+  mutations, and all-contacts export out of broad or mixed transports.
+  `Contacts.tsx` and the Customers/Suppliers/Delivery tabs now lazy-load
+  `contactReadTransport.ts` for reads and `contactWriteTransport.ts` for
+  mutations; ZIP/CSV helpers load only after the Export action. The focused
+  guard rejects `window.api`, `contactsTransport.ts`, and static CSV/ZIP
+  loading in the Contacts route shell and tabs. Docker image
+  `business-os:v6.0.0-202606040638` served local Contacts trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-40-29-536Z.json`:
+  Contacts was ready in 269 ms with 35 requests, 2 API requests, and 30
+  scripts, with zero failed requests and zero console/page errors. The 17-route
+  local trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-41-45-113Z.json`
+  passed every route with zero failed requests and zero console/page errors.
+  Fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T22-41-45-201Z/summary.json`
+  exercised 183 stable controls across 17 routes with zero failed controls.
+  Remote admin Contacts trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-41-27-698Z.json`
+  passed with 17 requests, 1 API request, 12 scripts, zero failures, and zero
+  console/page errors. Public Cloudflare portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T22-45-03-158Z/report.json`
+  rendered 20 products with portal bootstrap 200, AI status 200 after
+  interaction, and zero failed responses.
 <!-- phase29-manual-notes:end -->

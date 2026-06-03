@@ -7,6 +7,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import type { QueryParams } from '../../api/query.ts'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
@@ -103,7 +104,7 @@ interface SectionRow extends Record<string, unknown> {
 type DeliveryDisplayRow = DeliveryContact | SectionRow
 
 interface DeliveryApi {
-  getDeliveryContacts: (query?: Record<string, unknown>) => Promise<unknown>
+  getDeliveryContacts: (query?: QueryParams) => Promise<unknown>
   createDeliveryContact: (payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
   updateDeliveryContact: (id: number | string, payload: DeliveryPayload) => Promise<DeliveryMutationResult | unknown>
   deleteDeliveryContact: (id: number | string) => Promise<DeliveryMutationResult | unknown>
@@ -114,9 +115,29 @@ type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history'
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 
+type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
+type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
+
+let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
+let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
+
+function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
+  if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
+  return contactReadTransportModulePromise
+}
+
+function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
+  if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
+  return contactWriteTransportModulePromise
+}
+
 function getDeliveryApi(): DeliveryApi {
-  if (typeof window === 'undefined' || !window.api) throw new Error('Delivery contact API is not available.')
-  return window.api as DeliveryApi
+  return {
+    getDeliveryContacts: async (query = {}) => (await loadContactReadTransportModule()).getDeliveryContacts(query),
+    createDeliveryContact: async (payload) => (await loadContactWriteTransportModule()).createDeliveryContact(payload as Record<string, unknown>),
+    updateDeliveryContact: async (id, payload) => (await loadContactWriteTransportModule()).updateDeliveryContact(id, payload as Record<string, unknown>),
+    deleteDeliveryContact: async (id) => (await loadContactWriteTransportModule()).deleteDeliveryContact(id),
+  }
 }
 
 function normalizeDeliveryRows(value: unknown): DeliveryContact[] {

@@ -6,6 +6,7 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
+import type { QueryParams } from '../../api/query.ts'
 import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
@@ -101,7 +102,7 @@ interface SectionRow extends Record<string, unknown> {
 type CustomerDisplayRow = CustomerRow | SectionRow
 
 interface CustomerApi {
-  getCustomers: (query: Record<string, unknown>) => Promise<unknown>
+  getCustomers: (query: QueryParams) => Promise<unknown>
   createCustomer: (payload: CustomerPayload) => Promise<unknown>
   updateCustomer: (id: number | string, payload: CustomerPayload | CustomerRow) => Promise<unknown>
   deleteCustomer: (id: number | string) => Promise<unknown>
@@ -120,9 +121,29 @@ const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
 
+type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
+type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
+
+let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
+let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
+
+function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
+  if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
+  return contactReadTransportModulePromise
+}
+
+function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
+  if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
+  return contactWriteTransportModulePromise
+}
+
 function getCustomerApi(): CustomerApi {
-  if (typeof window === 'undefined' || !window.api) throw new Error('Customer API is not available.')
-  return window.api as CustomerApi
+  return {
+    getCustomers: async (query) => (await loadContactReadTransportModule()).getCustomers(query),
+    createCustomer: async (payload) => (await loadContactWriteTransportModule()).createCustomer(payload),
+    updateCustomer: async (id, payload) => (await loadContactWriteTransportModule()).updateCustomer(id, payload),
+    deleteCustomer: async (id) => (await loadContactWriteTransportModule()).deleteCustomer(id),
+  }
 }
 
 function isSectionRow(row: CustomerDisplayRow | null | undefined): row is SectionRow {

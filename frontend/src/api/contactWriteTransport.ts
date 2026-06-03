@@ -2,6 +2,7 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { apiFetch, route } from './http.ts'
 
 type ContactWritePayload = Record<string, unknown>
+type ContactTableName = 'customers' | 'suppliers' | 'delivery_contacts'
 
 function createContactClientRequestId(prefix = 'contact'): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -47,10 +48,71 @@ function createContact(
   )
 }
 
+async function updateContact(
+  routeKey: string,
+  endpoint: string,
+  tableName: ContactTableName,
+  id: number | string,
+  payload: ContactWritePayload = {},
+): Promise<unknown> {
+  const { withExpectedUpdatedAt } = await import('./expectedUpdatedAt.ts')
+  const body = await withExpectedUpdatedAt(tableName, id, payload)
+  return route(
+    `${routeKey}:update`,
+    () => apiFetch('PUT', `${endpoint}/${encodeURIComponent(String(id))}`, body),
+    null,
+    true,
+  )
+}
+
+async function deleteContact(
+  routeKey: string,
+  endpoint: string,
+  tableName: ContactTableName,
+  id: number | string,
+): Promise<unknown> {
+  const { withExpectedUpdatedAt } = await import('./expectedUpdatedAt.ts')
+  const body = await withExpectedUpdatedAt(tableName, id, {})
+  return route(
+    `${routeKey}:delete`,
+    () => apiFetch('DELETE', `${endpoint}/${encodeURIComponent(String(id))}`, body),
+    null,
+    true,
+  )
+}
+
 export function createCustomer(payload: ContactWritePayload = {}): Promise<unknown> {
   return createContact('customers', '/api/customers', 'customer', payload)
 }
 
+export function updateCustomer(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
+  return updateContact('customers', '/api/customers', 'customers', id, payload)
+}
+
+export function deleteCustomer(id: number | string): Promise<unknown> {
+  return deleteContact('customers', '/api/customers', 'customers', id)
+}
+
+export function createSupplier(payload: ContactWritePayload = {}): Promise<unknown> {
+  return createContact('suppliers', '/api/suppliers', 'supplier', payload)
+}
+
+export function updateSupplier(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
+  return updateContact('suppliers', '/api/suppliers', 'suppliers', id, payload)
+}
+
+export function deleteSupplier(id: number | string): Promise<unknown> {
+  return deleteContact('suppliers', '/api/suppliers', 'suppliers', id)
+}
+
 export function createDeliveryContact(payload: ContactWritePayload = {}): Promise<unknown> {
   return createContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contact', payload)
+}
+
+export function updateDeliveryContact(id: number | string, payload: ContactWritePayload = {}): Promise<unknown> {
+  return updateContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contacts', id, payload)
+}
+
+export function deleteDeliveryContact(id: number | string): Promise<unknown> {
+  return deleteContact('deliveryContacts', '/api/delivery-contacts', 'delivery_contacts', id)
 }
