@@ -159,6 +159,7 @@ const DISMISS_SETTLE_MS = Number(process.env.BOS_ALL_PAGES_DISMISS_SETTLE_MS || 
 const CONTROL_SETTLE_MS = Number(process.env.BOS_ALL_PAGES_CONTROL_SETTLE_MS || 90)
 const FILE_CHOOSER_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_FILE_CHOOSER_TIMEOUT_MS || 350)
 const TIME_BUDGET_MS = Number(process.env.BOS_ALL_PAGES_TIME_BUDGET_MS || 0)
+const WAIT_FOR_NETWORK_IDLE = process.env.BOS_ALL_PAGES_WAIT_NETWORK_IDLE === '1'
 const SCRIPT_STARTED_AT = performance.now()
 
 const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b/i
@@ -708,7 +709,9 @@ async function navigateRoute(page: Page, route: AuditRoute, storageState: Browse
   const started = performance.now()
   await page.goto(route.path, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   if (storageState) await hydratePlaywrightPage(page, storageState)
-  await page.waitForLoadState('networkidle', { timeout: 7_500 }).catch(() => {})
+  if (WAIT_FOR_NETWORK_IDLE) {
+    await page.waitForLoadState('networkidle', { timeout: 7_500 }).catch(() => {})
+  }
   const readyMs = await waitForRouteReady(page, route)
   return {
     navMs: Math.round(performance.now() - started),

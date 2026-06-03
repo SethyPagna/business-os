@@ -2011,3 +2011,42 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: dedupe public portal status and route-ready live audit timing
+- affected files:
+  `frontend/src/components/catalog/CatalogPage.tsx`,
+  `ops/scripts/runtime/live-checks/all-pages-control-audit.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: public catalog first load, `/api/portal/ai/status`, and
+  the broad all-pages live Playwright audit harness
+- keeper or rollback: keeper; it removes a duplicate same-provider status
+  request while keeping retry behavior after a status failure, and makes the
+  audit timing match first useful route readiness by default
+- route-scoped result: `ops/runtime/reports/public-load-trace-latest.json`
+  measured local `/public` root attached at 192 ms, first visible
+  product/search text at 248 ms, network idle at 3.8 s, one
+  `/api/portal/ai/status` request, and zero console/page errors.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-39-06-029Z/summary.json`
+  covered desktop/mobile Public Catalog, discovered 42 controls, exercised 42
+  controls, captured 4 screenshots, and recorded zero failed controls.
+- warm whole-app result: frontend source check, frontend typecheck,
+  production build, Docker release build/update, local `/health`, local
+  `/business-os-build.json`, public Cloudflare Playwright, and full all-pages
+  desktop/mobile Playwright passed. Docker image
+  `business-os:v6.0.0-202606031036` is serving build hash
+  `ca7fbc36b3f8c914`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-103722`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-41-33-682Z/summary.json`
+  covered 34 routes, discovered 518 visible controls, exercised 380 controls,
+  intentionally skipped 138 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-41-03-398Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.

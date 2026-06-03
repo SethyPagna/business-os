@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T02:24:41.922Z
+Generated: 2026-06-03T02:49:27.782Z
 
 ## Summary
 
@@ -63,13 +63,13 @@ Generated: 2026-06-03T02:24:41.922Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8982 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9023 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4289 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| frontend/src/components/catalog/CatalogPage.tsx | 3523 | frontend/components/catalog |
+| frontend/src/components/catalog/CatalogPage.tsx | 3529 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3042 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
@@ -82,7 +82,7 @@ Generated: 2026-06-03T02:24:41.922Z
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2147 | frontend/components/products |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2014 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2053 | ops/docs |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/App.tsx | 1879 | frontend/src/App.tsx |

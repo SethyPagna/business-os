@@ -1310,4 +1310,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 518 controls, exercised 384, skipped 134 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 460 records roadmap Move 730: dedupe public portal AI status and make
+  all-pages audit route timing route-ready by default. `CatalogPage` now keeps
+  one public AI status request per provider key unless the request fails or
+  public AI is disabled, removing the duplicate `/api/portal/ai/status` call
+  seen during the default-config/fetched-config render sequence. The all-pages
+  audit now skips network-idle waits unless
+  `BOS_ALL_PAGES_WAIT_NETWORK_IDLE=1`, so route timings reflect first useful
+  UI readiness instead of background quiet. Docker-served build hash
+  `ca7fbc36b3f8c914` passed source checks, typecheck, production build, Docker
+  release/update, local public Playwright load trace, focused Public Catalog
+  route-control sweep, public Cloudflare Playwright, and full desktop/mobile
+  all-pages Playwright. The load trace
+  `ops/runtime/reports/public-load-trace-latest.json` measured root attached
+  at 192 ms, first visible product/search text at 248 ms, network idle at
+  3.8 s, one AI status request, and zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-41-33-682Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 380, skipped 138 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

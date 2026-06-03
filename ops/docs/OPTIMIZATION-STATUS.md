@@ -8,27 +8,29 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 729, cache POS catalog metadata during filter reloads
+- Latest completed move: Move 730, dedupe public portal AI status and measure route-ready audit timing
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `25a697370460f92b`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `ca7fbc36b3f8c914`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `25a697370460f92b`
+  `98cfca7a1d31bbbe`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-16-24-667Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-41-33-682Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-14-58-954Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-41-03-398Z/report.json`
+- latest public portal load trace:
+  `ops/runtime/reports/public-load-trace-latest.json`
 - latest Products/POS filter burst proof:
   `ops/runtime/reports/filter-burst-check-latest.json`
 - latest import-tracker focused proof:
@@ -49,23 +51,39 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `25a697370460f92b` across 34 routes, with 518 visible controls
-  discovered, 384 controls exercised, 134 intentionally skipped by stable
+  build hash `ca7fbc36b3f8c914` across 34 routes, with 518 visible controls
+  discovered, 380 controls exercised, 138 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
+- public catalog route-ready timing is now measured without waiting for
+  background network idle by default. The latest broad audit measured
+  public_catalog at about 231 ms desktop and 201 ms mobile, down from the prior
+  audit's 7.6 s desktop and 4.0 s mobile network-idle-biased route timings.
 - Products and POS desktop/mobile filter burst proof passed with three rapid
   filter/search clicks per route and only one `/api/products/search` response
   per burst, zero category/branch/filter metadata responses after page-ready,
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606031003` is serving the
+- Docker release image `business-os:v6.0.0-202606031036` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-100513`
+  `ops/runtime/docker-release/backups/20260603-103722`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Public portal first-load status checks now dedupe by AI provider key. The
+  local Playwright load trace on `/public` showed root attached at 192 ms,
+  first visible product/search text at 248 ms, network idle at 3.8 s, zero
+  console/page errors, and one `/api/portal/ai/status` request instead of the
+  previous duplicate pair. The all-pages control audit now treats route-ready
+  content as the default timing target and keeps the old network-idle wait
+  available behind `BOS_ALL_PAGES_WAIT_NETWORK_IDLE=1`. Proof:
+  `ops/runtime/reports/public-load-trace-latest.json`,
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-41-33-682Z/summary.json`,
+  and
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-41-03-398Z/report.json`.
 
 - POS catalog reloads now cache categories, branches, and filter metadata
   after the first route-ready load. Normal POS search/filter/page changes fetch

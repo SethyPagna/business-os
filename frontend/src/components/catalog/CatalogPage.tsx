@@ -1378,6 +1378,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const reviewSavingRef = useRef(false)
   const assistantRequestRef = useRef(0)
   const assistantStatusRequestRef = useRef(0)
+  const assistantStatusKeyRef = useRef('')
   const assistantInFlightRef = useRef(false)
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
@@ -1602,6 +1603,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (!publicView || !previewConfig.aiEnabled) {
       invalidateTrackedRequest(assistantRequestRef)
       invalidateTrackedRequest(assistantStatusRequestRef)
+      assistantStatusKeyRef.current = ''
       assistantInFlightRef.current = false
       setAssistantLoading(false)
       setAssistantUsage(null)
@@ -1609,6 +1611,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       return
     }
 
+    const statusKey = String(previewConfig.aiProviderId || 'default')
+    if (assistantStatusKeyRef.current === statusKey) return undefined
+    assistantStatusKeyRef.current = statusKey
     const requestId = beginTrackedRequest(assistantStatusRequestRef)
     async function loadAssistantStatus() {
       try {
@@ -1622,6 +1627,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         setAssistantRequestPolicy(result?.requestPolicy || null)
       } catch {
         if (!aliveRef.current || !isTrackedRequestCurrent(assistantStatusRequestRef, requestId)) return
+        assistantStatusKeyRef.current = ''
       }
     }
     loadAssistantStatus()

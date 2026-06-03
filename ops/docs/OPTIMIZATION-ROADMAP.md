@@ -8979,3 +8979,44 @@ Move 729 status:
   skipped 134 by stable broad-audit guardrails, captured 68 screenshots, and
   recorded zero failed controls and zero findings. Public and admin Cloudflare
   `/health` both returned HTTP 200 after the update.
+
+Move 730 status:
+- Move 730 removes a remaining public portal first-load duplicate and makes
+  the broad Phase 8.4 all-pages audit measure route-ready UI timing by default
+  instead of waiting for background network idle. The repeated browser trace
+  found that public catalog content was already visible in roughly a quarter
+  second while network-idle timing waited several extra seconds for background
+  quiet; it also found two `/api/portal/ai/status` calls caused by the default
+  config render followed by the fetched config render.
+- `frontend/src/components/catalog/CatalogPage.tsx` now memoizes the public AI
+  status load by provider key and clears the key only when public AI is
+  disabled or the status request fails. This keeps the first status check real
+  while preventing the duplicate same-provider request.
+- `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now skips
+  `networkidle` by default after `domcontentloaded` and the route-ready
+  assertion. The previous network-idle wait remains available with
+  `BOS_ALL_PAGES_WAIT_NETWORK_IDLE=1` for investigations that explicitly need
+  background quiet.
+- Docker release image `business-os:v6.0.0-202606031036` is serving frontend
+  hash `ca7fbc36b3f8c914`; update backup:
+  `ops/runtime/docker-release/backups/20260603-103722`.
+- Proof: frontend JSX/source check, frontend typecheck, production build,
+  Docker release build/update, local health/build metadata, local public
+  Playwright load trace, focused public_catalog all-pages control audit, public
+  Cloudflare portal Playwright, and full desktop/mobile all-pages Playwright
+  passed. The local load trace
+  `ops/runtime/reports/public-load-trace-latest.json` measured root attached
+  at 192 ms, first visible product/search text at 248 ms, network idle at
+  3.8 s, one `/api/portal/ai/status` request, and zero console/page errors.
+- The focused public_catalog audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-39-06-029Z/summary.json`
+  passed desktop/mobile with 42 controls tested and zero failures; route-ready
+  nav timings were about 220 ms and 240 ms. The full all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-41-33-682Z/summary.json`
+  covered 34 routes, discovered 518 visible controls, exercised 380 controls,
+  skipped 138 by stable broad-audit guardrails, captured 68 screenshots, and
+  recorded zero failed controls and zero findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-41-03-398Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
