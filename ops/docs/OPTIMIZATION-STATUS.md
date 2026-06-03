@@ -8,17 +8,17 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 757, remove POS's accidental dependency on
-  customer-management route code by using the lean contact-option utility
+- Latest completed move: Move 758, intent-load the POS filter panel so closed
+  filter UI code stays out of POS first route paint
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `586f2e7f02c612bf`
+- latest verified frontend hash from the most recent Docker-served live check: `2a554c3c40e34b1e`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `de0734a0ea4c9d1d`
+  `4702746e8570d644`
 
 Latest verified reports:
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T17-40-43-530Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-51-33-389Z.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
@@ -91,11 +91,24 @@ Current honest pockets:
   Move 754 is served by Docker release image `business-os:v6.0.0-202606040046`;
   Move 755 is served by Docker release image `business-os:v6.0.0-202606040111`;
   Move 756 is served by Docker release image `business-os:v6.0.0-202606040128`;
-  Move 757 is served by Docker release image `business-os:v6.0.0-202606040138`
+  Move 757 is served by Docker release image `business-os:v6.0.0-202606040138`;
+  Move 758 is served by Docker release image `business-os:v6.0.0-202606040149`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- POS now lazy-loads the filter panel only after the cashier opens Filters.
+  Proof: Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-51-33-389Z.json`
+  measured POS at 302 ms route-ready with 32 requests and 24 scripts, down
+  from 33 requests and 25 scripts in the prior focused trace, with zero failed
+  requests and zero console/page errors. The first-window script parse had no
+  `FilterPanel` chunk, and the live Filters click loaded
+  `FilterPanel-BSgPp0Gy.js`, rendered Stock Status and Groups controls, and
+  recorded zero relevant console/page errors. Docker release image
+  `business-os:v6.0.0-202606040149` serves frontend hash
+  `2a554c3c40e34b1e`.
 
 - POS no longer imports customer-management route code just to parse customer
   contact options. `POS.tsx` uses `parseStoredContactOptions` from the lean

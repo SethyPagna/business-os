@@ -274,6 +274,8 @@ assert.doesNotMatch(catalogPreviewSurface, /const PortalMenu = lazy\(\(\) => imp
 assert.match(catalogPreviewSurface, /import LazyPortalMenu from '\.\.\/shared\/LazyPortalMenu'/, 'public catalog translation menu should load PortalMenu only after language-menu intent')
 assert.doesNotMatch(pos, /from '\.\.\/contacts\/CustomersTab'/, 'POS should not import the whole CustomersTab chunk just to parse customer contact options')
 assert.match(pos, /parseStoredContactOptions\(raw, \{ legacyField: 'address' \}\)/, 'POS should parse customer contact options through the lean shared utility')
+assert.doesNotMatch(pos, /import FilterPanel from '\.\/FilterPanel'/, 'POS should not load the filter panel before the Filters button is opened')
+assert.match(pos, /const FilterPanel = lazy\(\(\) => import\('\.\/FilterPanel'\)\)/, 'POS filter panel should load only on filter-button intent')
 assert.match(lazyPortalMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module\.default\)/, 'LazyPortalMenu should dynamically import PortalMenu')
 assert.match(lazyPortalMenu, /onClickCapture=\{\(event\) => \{[\s\S]*loadPortalMenu\(true\)/, 'LazyPortalMenu should open the menu from the first click after the chunk loads')
 assert.match(portalMenu, /defaultOpen\?: boolean[\s\S]*const \[open, setOpen\] = useState\(defaultOpen\)/, 'PortalMenu should support first-click lazy mount opening')

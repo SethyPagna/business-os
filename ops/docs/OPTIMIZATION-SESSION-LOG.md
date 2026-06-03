@@ -2762,3 +2762,33 @@ Use this shape for future entries:
   `contactOptionUtils`, and no `CustomersTab`, `Contacts`, or
   `CustomerFormModal`. Docker image `business-os:v6.0.0-202606040138` is
   serving frontend hash `586f2e7f02c612bf`.
+
+- change: intent-load POS filter panel
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS first-route script window and the Filters button
+- keeper or rollback: keeper; the Filters button remains visible immediately,
+  while the closed filter panel's section UI and icons load only after filter
+  intent
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted
+  `FilterPanel-BSgPp0Gy.js` at 5.83 kB and reduced the POS route chunk to
+  75.69 kB from the prior 81.25 kB chunk.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-51-33-389Z.json`
+  measured POS at 302 ms route-ready with 32 requests and 24 scripts, down
+  from 33 requests and 25 scripts in the prior focused trace. The first-window
+  parse confirmed no `FilterPanel` or `shared-filter-menu` chunk before intent,
+  with zero failed requests and zero console/page errors.
+- interaction proof:
+  a Docker-served Playwright check opened POS, dismissed the update toast,
+  clicked Filters, loaded `FilterPanel-BSgPp0Gy.js` only after the click,
+  rendered Stock Status and Groups controls, and recorded zero failed requests
+  and zero relevant console/page errors. Docker image
+  `business-os:v6.0.0-202606040149` is serving frontend hash
+  `2a554c3c40e34b1e`.

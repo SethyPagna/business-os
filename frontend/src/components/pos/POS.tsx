@@ -32,7 +32,6 @@ import {
 import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
 import QuickAddModal from './QuickAddModal'
-import FilterPanel from './FilterPanel'
 import PaginationControls from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -58,6 +57,7 @@ import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
+const FilterPanel = lazy(() => import('./FilterPanel'))
 
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
 const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
@@ -1713,25 +1713,29 @@ export default function POS() {
               <div className="flex gap-1 flex-wrap">{searchTerms.map((term, i) => <span key={i} className="badge-blue text-xs">{term}</span>)}</div>
             )}
 
-            <div className="relative z-20">
-              <div className="pointer-events-none absolute inset-x-0 top-0 pt-2">
-                <FilterPanel
-                  open={filterOpen}
-                  t={t}
-                  onClose={() => setFilterOpen(false)}
-                  categories={categories}
-                  brands={posBrands}
-                  branches={branches}
-                  suppliers={posSuppliers}
-                  categoryFilter={categoryFilter}   setCategoryFilter={setPersistedCat}
-                  brandFilter={brandFilter}         setBrandFilter={setPersistedBrand}
-                  branchFilter={branchFilter}       setBranchFilter={setPersistedBranch}
-                  stockFilter={stockFilter}         setStockFilter={setPersistedStock}
-                  groupFilter={groupFilter}         setGroupFilter={setPersistedGroup}
-                  supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
-                />
+            {filterOpen ? (
+              <div className="relative z-20">
+                <div className="pointer-events-none absolute inset-x-0 top-0 pt-2">
+                  <Suspense fallback={null}>
+                    <FilterPanel
+                      open={filterOpen}
+                      t={t}
+                      onClose={() => setFilterOpen(false)}
+                      categories={categories}
+                      brands={posBrands}
+                      branches={branches}
+                      suppliers={posSuppliers}
+                      categoryFilter={categoryFilter}   setCategoryFilter={setPersistedCat}
+                      brandFilter={brandFilter}         setBrandFilter={setPersistedBrand}
+                      branchFilter={branchFilter}       setBranchFilter={setPersistedBranch}
+                      stockFilter={stockFilter}         setStockFilter={setPersistedStock}
+                      groupFilter={groupFilter}         setGroupFilter={setPersistedGroup}
+                      supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
+                    />
+                  </Suspense>
+                </div>
               </div>
-            </div>
+            ) : null}
 
           </div>
 

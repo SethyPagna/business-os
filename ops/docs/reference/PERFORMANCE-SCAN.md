@@ -1773,4 +1773,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   and 34 scripts in the prior focused trace, with zero failed requests and zero
   console/page errors. POS loaded `contactOptionUtils-BSXveFTP.js` and no
   `CustomersTab`, `Contacts`, or `CustomerFormModal` chunks.
+- Move 488 records roadmap Move 758: intent-load POS filter panel. `POS.tsx`
+  now lazy-loads `FilterPanel` only while `filterOpen` is true, and the
+  performance-loading guard prevents a static `FilterPanel` import from
+  returning. Docker image `business-os:v6.0.0-202606040149` served the focused
+  trace `ops/runtime/reports/route-load-trace-2026-06-03T17-51-33-389Z.json`:
+  POS was ready in 302 ms with 32 requests and 24 scripts, down from 33
+  requests and 25 scripts in the prior focused trace, with zero failed requests
+  and zero console/page errors. The first-window script parse had no
+  `FilterPanel` chunk, and a live Filters click loaded
+  `FilterPanel-BSgPp0Gy.js` only after intent and rendered Stock Status and
+  Groups controls.
 <!-- phase29-manual-notes:end -->

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 757.
+- Latest completed implementation move in this roadmap: Move 758.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9945,4 +9945,35 @@ Move 757 status:
   TypeScript, runtime, and performance sweeps. Next executable targets should
   continue using measured traces and real interactions to remove accidental
   cross-route imports, delayed wakes, and repeated render loops without moving
+  live business data or weakening offline fallback behavior.
+
+Move 758 status:
+- Move 758 intent-loads the POS filter panel. POS now keeps the Filters button
+  in the first route paint but lazy-loads `FilterPanel` only after the cashier
+  opens it, keeping the closed panel's option sections and icon code out of the
+  default POS route chunk.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, production build, Docker release image
+  `business-os:v6.0.0-202606040149`, compiled POS chunk inspection, focused
+  POS route-load Playwright trace, and a live POS Filters click check.
+- Build proof: local production build emitted `FilterPanel-BSgPp0Gy.js` as a
+  separate 5.83 kB chunk and reduced the POS chunk to 75.69 kB from the prior
+  81.25 kB POS chunk.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-51-33-389Z.json`
+  measured POS at 302 ms route-ready with 32 requests and 24 scripts, down
+  from the prior focused trace's 33 requests and 25 scripts, with zero failed
+  requests and zero console/page errors. The first-window parse confirmed no
+  `FilterPanel` chunk before intent.
+- Interaction proof: a Docker-served Playwright check opened POS, dismissed the
+  update toast, clicked Filters, loaded `FilterPanel-BSgPp0Gy.js` only after
+  the click, rendered Stock Status and Groups controls, and recorded zero
+  failed requests and zero relevant console/page errors.
+- Current plan position after Move 758: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  keep using focused route traces and interaction checks to remove accidental
+  first-window chunks, delayed wakes, and repeated render loops without moving
   live business data or weakening offline fallback behavior.
