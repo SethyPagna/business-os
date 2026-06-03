@@ -166,12 +166,29 @@ const authLoginIconNames = new Set([
 const routeSharedIconNames = new Set([
   'alert-circle',
   'alert-triangle',
+  'bot',
   'check-circle-2',
   'chevron-down',
+  'chevron-up',
+  'eye',
   'external-link',
+  'facebook',
+  'globe',
+  'help-circle',
+  'images',
   'info',
+  'instagram',
+  'mail',
+  'map-pin',
+  'phone',
+  'plus',
+  'save',
   'search',
+  'send',
   'settings-2',
+  'sparkles',
+  'store',
+  'upload',
   'x',
 ])
 
@@ -203,6 +220,15 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/localDb.ts')) return 'app-local-db'
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
+      normalized.includes('/src/components/products/shared/')
+      || normalized.includes('/src/components/products/helpers/productGalleryHelpers.ts')
+    ) {
+      return 'product-shared'
+    }
+    if (normalized.endsWith('/src/utils/actionGuards.ts')) {
+      return 'action-guards'
+    }
+    if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
       || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
     ) {
@@ -220,6 +246,15 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
       return 'public-asset-urls'
+    }
+    if (normalized.includes('/src/components/catalog/catalogUi.tsx')) {
+      return 'catalog-ui'
+    }
+    if (normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')) {
+      return 'catalog-display'
+    }
+    if (normalized.includes('/src/components/catalog/CatalogPageContext.tsx')) {
+      return 'catalog-context'
     }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (normalized.includes('/src/utils/favicon')) {

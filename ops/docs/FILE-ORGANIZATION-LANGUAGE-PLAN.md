@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 729 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 730 in this file.
 
 ## Goal
 
@@ -7112,6 +7112,25 @@ Decision rule:
     script requests, while icon-using routes now fetch the 2.99 KB / 0.74 KB
     gzip `shared-icons-1LAsiUVr.js` chunk instead of pulling the notification
     panel.
+
+730. Split reusable catalog-adjacent code out of the Catalog route chunk.
+    Done: `frontend/vite.config.ts` now assigns reusable product image
+    primitives, product gallery helpers, action guards, small catalog
+    UI/display/context helpers, and Catalog/admin-shared Lucide icons before
+    the generic catalog route rule. The new ownership is `product-shared`,
+    `action-guards`, `catalog-ui`, `catalog-display`, `catalog-context`, and
+    the existing `shared-icons` chunk. This keeps the public Catalog route
+    lazy while preventing Products, Inventory, POS, Sales, Returns, Contacts,
+    Backup, and Server from fetching the heavy `catalog-*` route chunk just to
+    reuse icons or small helpers.
+    Proof: frontend utility tests, production build, no-write Vite chunk
+    module audit, Docker release/update image
+    `business-os:v6.0.0-202606032143`, route-load trace
+    `ops/runtime/reports/route-load-trace-2026-06-03T13-53-46-619Z.json`,
+    broad Phase 8.4 UI Playwright, public Cloudflare Playwright, storage
+    pruning, and `git diff --check` passed. Every traced admin route reports
+    `catalog=none`; the public catalog still loads the Catalog route by
+    design. Backup and Server each dropped three first-window script requests.
 
 ## Safety Gates
 

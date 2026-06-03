@@ -1679,4 +1679,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   console/page errors. Broad Phase 8.4 UI Playwright verified
   `notificationPanelVisible: true`, and public Cloudflare Playwright rendered
   20 products with zero relevant console/page errors.
+- Move 481 records roadmap Move 751: split reusable product primitives,
+  action guards, small catalog helper modules, and Catalog/admin-shared Lucide
+  icons out of the heavy Catalog route chunk. The Docker-served trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-53-46-619Z.json` shows
+  `catalog=none` for dashboard, products, inventory, POS, sales, returns,
+  backup, contacts, and server, while public_catalog still loads Catalog by
+  design. Backup fell 29->26 requests and 25->22 scripts, Server fell 28->25
+  requests and 23->20 scripts, and Sales/Returns/Contacts each dropped two
+  first-window scripts with zero failed requests and zero console/page errors.
+  Broad Phase 8.4 UI Playwright and public Cloudflare Playwright passed on
+  Docker image `business-os:v6.0.0-202606032143`.
 <!-- phase29-manual-notes:end -->

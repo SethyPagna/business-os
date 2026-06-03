@@ -8,17 +8,17 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 750, split cross-route notification icons out of
-  the notification-center startup path
+- Latest completed move: Move 751, split reusable catalog-adjacent code out of
+  the Catalog route startup path
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `952d8c4fc27e5146`
+- latest verified frontend hash from the most recent Docker-served live check: `48c34f2b25dcf911`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `0a6b7bd9bc3acd7c`
+  `a19f449e216dbd7b`
 
 Latest verified reports:
 
@@ -27,11 +27,11 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T13-24-40-995Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T13-54-32-703Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T13-24-41-519Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T13-54-32-706Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T13-23-37-802Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-53-46-619Z.json`
 - latest public portal load trace:
   `ops/runtime/reports/public-load-trace-latest.json`
 - latest top-route load trace:
@@ -47,8 +47,8 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the Move 750 verification pass
-  removed 615,296 bytes of old reports and 38.06 MB of Docker builder cache,
+- `npm.cmd --prefix ops run prune-storage` in the Move 751 verification pass
+  removed 72,185 bytes of old reports and 38.06 MB of Docker builder cache,
   kept uploads, secrets, env files, newest local backup packages, Docker
   images, and Docker volumes, and retained the newest R2 backup object.
 
@@ -86,6 +86,19 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Non-catalog admin routes no longer fetch the heavy Catalog route chunk for
+  shared icons and helpers. Reusable product primitives, action guards, small
+  catalog helpers, and Catalog/admin-shared Lucide icons now live in focused
+  chunks before the generic catalog rule. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-53-46-619Z.json` shows
+  `catalog=none` for dashboard, products, inventory, POS, sales, returns,
+  backup, contacts, and server. Backup dropped from 29 to 26 requests and 25
+  to 22 scripts, Server dropped from 28 to 25 requests and 23 to 20 scripts,
+  and Sales/Returns/Contacts each dropped two first-window scripts. Public
+  catalog still loads Catalog by design, rendered 20 products through
+  Cloudflare, and recorded zero failed responses or relevant console/page
+  errors.
 
 - Route startup no longer pulls the notification-center chunk just because a
   feature page shares an icon with NotificationCenter. Shared Lucide icons now

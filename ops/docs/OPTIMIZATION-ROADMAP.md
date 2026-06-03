@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 750.
+- Latest completed implementation move in this roadmap: Move 751.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9714,3 +9714,48 @@ Move 750 status:
   two-or-fewer first-window API reads, and the next executable target is
   route-specific chunk ownership for catalog, app-local-db, and
   app-api-methods without moving live business data.
+
+Move 751 status:
+- Move 751 removes the heavy Catalog route chunk from non-catalog admin route
+  startup. The measured source was Rollup false-sharing: reusable product
+  image primitives, action guards, small catalog UI/display/context helpers,
+  and Catalog/admin-shared Lucide icons were being owned by the generic
+  `catalog-*` route chunk. `vite.config.ts` now routes those pieces into
+  `product-shared`, `action-guards`, `catalog-ui`, `catalog-display`,
+  `catalog-context`, and the existing `shared-icons` chunk before the generic
+  `/components/catalog/` rule. This is a bundle ownership rewire only; no live
+  business data, schema, or runtime behavior was moved.
+- Proof: frontend utility tests, production build, no-write Vite chunk-module
+  audit, Docker release/update image `business-os:v6.0.0-202606032143`, focused
+  route-load Playwright trace, broad Phase 8.4 UI Playwright, public
+  Cloudflare portal Playwright, storage pruning, and `git diff --check`
+  passed.
+- The Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-53-46-619Z.json` shows
+  `catalog=none` for dashboard, products, inventory, POS, sales, returns,
+  backup, contacts, and server. Public catalog still loads the Catalog route,
+  as expected. Backup fell 29->26 requests and 25->22 scripts; Server fell
+  28->25 requests and 23->20 scripts; Sales, Returns, and Contacts each
+  dropped two first-window scripts. Products, Inventory, and POS now trade the
+  old heavy Catalog route dependency for small focused chunks such as
+  `product-shared`, `action-guards`, and `shared-icons`, with zero failed
+  requests and zero console/page errors.
+- Broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T13-54-32-703Z/report.json`
+  passed on frontend hash `48c34f2b25dcf911` with `notificationPanelVisible:
+  true`, `inventoryBootstrapStatus: 200`, `serverBootstrapStatus: 200`, no
+  framework overlay, and zero relevant console messages. Public Cloudflare
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T13-54-32-706Z/report.json`
+  rendered 20 products, observed portal bootstrap and AI HTTP 200, and
+  recorded zero failed responses, console messages, or page errors. Storage
+  pruning removed 72,185 bytes of old reports and 38.06 MB of Docker builder
+  cache.
+- Current plan position after Move 751: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target:
+  `catalog-preview` and `app-local-db` first-window ownership on Products,
+  Inventory, POS, Sales, Returns, Contacts, and Server without weakening
+  offline safety.
