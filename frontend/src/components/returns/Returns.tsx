@@ -37,6 +37,7 @@ const RETURNS_LOAD_TIMEOUT_MS = 20000
 const RETURNS_DETAIL_TIMEOUT_MS = 10000
 const RETURNS_SNAPSHOT_TIMEOUT_MS = 10000
 const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000
+const RETURNS_HISTORY_READY_DELAY_MS = 1800
 
 type ReturnScope = typeof CUSTOMER_SCOPE | typeof SUPPLIER_SCOPE
 type ReturnGroupMode = 'time' | 'time+action'
@@ -261,6 +262,7 @@ export default function Returns() {
   const [returnPageSize, setReturnPageSize] = useState(() => getInitialReturnPageSize())
   const [collapsedReturnSections, setCollapsedReturnSections] = useState<Set<string>>(() => new Set())
   const [isReturnsFilterMenuOpen, setIsReturnsFilterMenuOpen] = useState(false)
+  const [historyReady, setHistoryReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const returnsRequestRef = useRef(0)
   const editRequestRef = useRef(0)
@@ -268,7 +270,7 @@ export default function Returns() {
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const loadWatchdogRef = useRef<number | null>(null)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
-  const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns' })
+  const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady })
   const deferredSearch = useDeferredValue(search)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const returnsDateRange = useMemo(() => {
@@ -357,6 +359,7 @@ export default function Returns() {
 
   useEffect(() => {
     if (!isActive) {
+      setHistoryReady(false)
       clearLoadWatchdog()
       invalidateTrackedRequest(returnsRequestRef)
       loadPromiseRef.current = null
@@ -370,6 +373,18 @@ export default function Returns() {
       loadPromiseRef.current = null
     }
   }, [clearLoadWatchdog, isActive, loadReturns])
+
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, RETURNS_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return

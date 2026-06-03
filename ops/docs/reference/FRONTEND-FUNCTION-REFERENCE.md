@@ -2089,18 +2089,18 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getReturnApi` | function | 151 |
-| 2 | `normalizeScope` | function | 156 |
-| 3 | `getReturnTypeKey` | function | 160 |
-| 4 | `getReturnTypeLabel` | function | 166 |
-| 5 | `normalizeFiniteIds` | function | 182 |
-| 6 | `countSelectedIds` | function | 186 |
-| 7 | `countActiveFlags` | function | 194 |
-| 8 | `toNumericAmount` | function | 202 |
-| 9 | `exportReturnRows` | function | 207 |
-| 10 | `getInitialReturnPageSize` | function | 225 |
-| 11 | `Returns` | component/function | 230 |
-| 12 | `promise` | const arrow | 303 |
+| 1 | `getReturnApi` | function | 152 |
+| 2 | `normalizeScope` | function | 157 |
+| 3 | `getReturnTypeKey` | function | 161 |
+| 4 | `getReturnTypeLabel` | function | 167 |
+| 5 | `normalizeFiniteIds` | function | 183 |
+| 6 | `countSelectedIds` | function | 187 |
+| 7 | `countActiveFlags` | function | 195 |
+| 8 | `toNumericAmount` | function | 203 |
+| 9 | `exportReturnRows` | function | 208 |
+| 10 | `getInitialReturnPageSize` | function | 226 |
+| 11 | `Returns` | component/function | 231 |
+| 12 | `promise` | const arrow | 305 |
 
 ### 3.147 `frontend/src/components/returns/ReturnsListSurface.tsx`
 

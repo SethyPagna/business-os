@@ -278,6 +278,10 @@ assert.match(sales, /const SALES_HISTORY_READY_DELAY_MS = 1800/, 'Sales backgrou
 assert.match(sales, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Sales should have an explicit post-ready action-history gate')
 assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/, 'Sales should not fetch server action history during first route load')
 assert.match(sales, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*SALES_HISTORY_READY_DELAY_MS/, 'Sales should enable history only after the first sales data load settles')
+assert.match(returns, /const RETURNS_HISTORY_READY_DELAY_MS = 1800/, 'Returns background history should wait until after first route-ready work')
+assert.match(returns, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Returns should have an explicit post-ready action-history gate')
+assert.match(returns, /useActionHistory\(\{ limit: 8, notify, scope: 'returns', enabled: historyReady \}\)/, 'Returns should not fetch server action history during first route load')
+assert.match(returns, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*RETURNS_HISTORY_READY_DELAY_MS/, 'Returns should enable history only after the first returns data load settles')
 
 assert.match(backup, /useState<BackupSectionId>\('all'\)/, 'Backup should default to the lightweight overview tab without showing duplicate All and Overview tabs')
 assert.match(backup, /BackupOverview/, 'Backup overview should provide lightweight section entry points')

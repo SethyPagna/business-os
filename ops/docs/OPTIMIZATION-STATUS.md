@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 732, defer Sales background history/user reads and add focused route-load tracing
+- Latest completed move: Move 733, defer Returns background history/user reads and harden all-pages control audit sequencing
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `696ba3a8fffee895`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `e01139c6b67c1fea`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `c2f0e97a8ccdfca9`
+  `9e92c75c3aefac1d`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-32-00-189Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T04-18-20-042Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-31-56-597Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-54-18-902Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -55,7 +55,7 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `696ba3a8fffee895` across 34 routes, with 519 visible controls
+  build hash `e01139c6b67c1fea` across 34 routes, with 519 visible controls
   discovered, 381 controls exercised, 138 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
@@ -69,13 +69,30 @@ Current honest pockets:
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606031125` is serving the
+- Docker release image `business-os:v6.0.0-202606031149` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-112741`
+  `ops/runtime/docker-release/backups/20260603-115040`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Returns first-load now matches the Sales history deferral pattern. The
+  Returns page delays non-critical server action-history and admin user-option
+  reads until after the route is ready, preserving local undo/redo recording
+  for real return actions while removing `/api/users` and
+  `/api/action-history?scope=returns...` from the first visible route window.
+  Proof: `ops/runtime/reports/route-load-trace-latest.json` shows Returns with
+  35 total requests, 2 API requests, zero failed requests, and zero console/page
+  errors after the change. The focused Sales/Returns route-control audit passed
+  with 30 exercised controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T04-17-44-648Z/summary.json`.
+  The exhaustive all-pages audit then passed across 34 routes with 381 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T04-18-20-042Z/summary.json`.
+  The all-pages harness now tests non-disruptive controls before import/export
+  style controls and restores the route before final layout/screenshot checks,
+  improving mobile Sales coverage without hiding modal/navigation side effects.
 
 - Sales first-load now defers non-critical server action-history and admin
   user-option reads until after the route is ready. The new reusable

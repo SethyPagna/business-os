@@ -9113,3 +9113,50 @@ Move 732 status:
   Sales still pulls local DB/Dexie/catalog support via the legacy API registry.
   Continue by splitting specific typed read transports out of `api/methods.ts`
   before touching broader route UI.
+
+Move 733 status:
+- Move 733 applies the measured first-load history deferral to Returns and
+  hardens the broad all-pages control audit so it exercises more meaningful
+  mobile controls before opening disruptive import/export surfaces.
+- `frontend/src/components/returns/Returns.tsx` now gates
+  `useActionHistory()` with `historyReady`, enabling server history and admin
+  user option reads only after the first Returns data load has settled plus a
+  short delay. Real return mutations still call `pushAction()` immediately, so
+  local undo/redo recording is preserved while the automatic background reads
+  move out of the first route window.
+- `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now sorts
+  low-risk controls such as Filters, History, and Collapse ahead of
+  import/export/create controls, and restores the audited route before final
+  layout collection and screenshots. This avoids mobile Sales losing coverage
+  after the Import surface opens and keeps final layout evidence attached to
+  the route page, not a transient interaction state.
+- Docker release image `business-os:v6.0.0-202606031149` is serving frontend
+  hash `e01139c6b67c1fea`; update backup:
+  `ops/runtime/docker-release/backups/20260603-115040`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `9e92c75c3aefac1d`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, local health/build metadata, focused route-load trace,
+  focused Sales/Returns route-control audit, public Cloudflare portal
+  Playwright, and full desktop/mobile all-pages Playwright passed. The focused
+  route-load trace `ops/runtime/reports/route-load-trace-latest.json` shows
+  Returns reduced from 4 to 2 first-window API requests, with 35 total
+  requests, zero failed requests, and zero console/page errors. The post-change
+  first-window API list is only `/api/auth/bootstrap` and
+  `/api/returns?scope=customer`.
+- The focused route-control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T04-17-44-648Z/summary.json`
+  exercised 30 controls across desktop/mobile Sales and Returns with zero
+  failures and zero findings. The exhaustive all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T04-18-20-042Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-54-18-902Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Next candidates from the same measured trace: Products still has 8 API calls
+  in the first window, POS has 7, Inventory has 5, and Server has a duplicate
+  `/health` read. Continue with one route at a time, starting with Inventory
+  or Products only after proving which reads are truly non-critical.

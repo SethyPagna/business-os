@@ -1366,4 +1366,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 463 records roadmap Move 733: defer Returns background history/user
+  reads and make broad all-pages control sequencing smarter. Returns now gates
+  `useActionHistory()` behind a post-ready `historyReady` delay, preserving
+  local undo/redo recording while moving server action-history and admin user
+  option reads out of the first route window. The all-pages Playwright harness
+  now clicks Filters/History/Collapse style controls before import/export
+  surfaces and restores the route before final layout/screenshot collection.
+  Docker-served build hash `e01139c6b67c1fea` passed frontend utility tests,
+  JSX/source check, production build, Docker release/update, focused
+  route-load trace, focused Sales/Returns route-control audit, public
+  Cloudflare Playwright, and full desktop/mobile all-pages Playwright. The
+  focused trace `ops/runtime/reports/route-load-trace-latest.json` reduced
+  Returns first-window API requests from 4 to 2 and reported zero failed
+  requests and zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T04-18-20-042Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

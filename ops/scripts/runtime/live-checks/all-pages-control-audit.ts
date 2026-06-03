@@ -282,6 +282,13 @@ function buttonMayOpenFileChooser(label: string): boolean {
   return /\b(upload|import|choose file|file|image|photo|avatar|camera|scan|browse)\b/i.test(label)
 }
 
+function buttonInteractionPriority(label: string): number {
+  if (/^(filters?|history|collapse|expand|manage|show|hide)$/i.test(label)) return 0
+  if (/\b(import|export|new|add|create|product|return|sale)\b/i.test(label)) return 2
+  if (buttonMayOpenFileChooser(label)) return 3
+  return 1
+}
+
 function timeBudgetExceeded(): boolean {
   return TIME_BUDGET_MS > 0 && performance.now() - SCRIPT_STARTED_AT > TIME_BUDGET_MS
 }
@@ -756,7 +763,12 @@ async function activeButtonCandidates(root: Locator): Promise<ButtonCandidate[]>
       reason: reason || undefined,
     })
   }
-  return candidates
+  return candidates.sort((left, right) => {
+    if (left.skipped !== right.skipped) return Number(left.skipped) - Number(right.skipped)
+    return buttonInteractionPriority(left.label) - buttonInteractionPriority(right.label)
+      || left.index - right.index
+      || left.label.localeCompare(right.label)
+  })
 }
 
 async function clickButtonCandidate(
@@ -955,9 +967,24 @@ async function collectLayoutIssues(page: Page, route: AuditRoute): Promise<Layou
     const issues: LayoutIssue[] = []
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
-    const root = scope === 'public'
-      ? document.body
-      : document.querySelector(`[data-bos-active-page="true"][data-bos-page-slot="${routeName}"]`) || document.body
+    const body = document.body
+    if (!body) {
+      issues.push({
+        type: 'document-body-missing',
+        message: 'document body was not available during layout collection',
+      })
+      return issues
+    }
+    const activeRouteRoot = scope === 'public'
+      ? body
+      : document.querySelector(`[data-bos-active-page="true"][data-bos-page-slot="${routeName}"]`)
+    if (!activeRouteRoot && scope !== 'public') {
+      issues.push({
+        type: 'route-root-missing',
+        message: `active route root for ${routeName} was not available during layout collection`,
+      })
+    }
+    const root = activeRouteRoot || body
     const doc = document.documentElement
     if (doc.scrollWidth > viewportWidth + 4) {
       issues.push({
@@ -1039,6 +1066,7 @@ async function runRoute(page: Page, profile: AuditProfile, route: AuditRoute, st
   for (const candidate of clickableButtonCandidates) {
     controls.push(await clickButtonCandidate(page, root, route, candidate, storageState))
   }
+  await navigateRoute(page, route, storageState).catch(() => {})
   const layoutIssues = await collectLayoutIssues(page, route)
   const appConsoleIssues = consoleEntries.filter(isAppConsoleIssue)
   const appNetworkIssues = networkEntries.filter(isAppNetworkIssue)
