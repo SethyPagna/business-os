@@ -24,6 +24,7 @@ const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
 const SERVER_SECURITY_CONFIG_TIMEOUT_MS = 8000
 const SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS = 12000
 const SERVER_SYNC_TEST_TIMEOUT_MS = 12000
+const SERVER_ONLINE_CHECK_READY_DELAY_MS = 1800
 
 type TranslationFn = (key: string) => string
 
@@ -683,9 +684,12 @@ export default function ServerPage() {
       } catch {}
     }
 
-    check()
+    const initialTimer = window.setTimeout(check, SERVER_ONLINE_CHECK_READY_DELAY_MS)
     const timer = setInterval(check, 10000)
-    return () => clearInterval(timer)
+    return () => {
+      window.clearTimeout(initialTimer)
+      clearInterval(timer)
+    }
   }, [isActive, syncUrl, syncConnected])
   useEffect(() => () => {
     invalidateTrackedRequest(onlineCheckRequestRef)

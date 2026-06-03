@@ -1586,6 +1586,8 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/,
   'server connection test should timeout slow sync test actions',
 )
+assert.match(serverPage, /const SERVER_ONLINE_CHECK_READY_DELAY_MS = 1800/, 'server online count should wait until after first route-ready work')
+assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*setInterval\(check, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
 assert.match(
   settingsPage,
   /const SETTINGS_OTP_STATUS_TIMEOUT_MS = 8000/,

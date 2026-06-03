@@ -9160,3 +9160,47 @@ Move 733 status:
   in the first window, POS has 7, Inventory has 5, and Server has a duplicate
   `/health` read. Continue with one route at a time, starting with Inventory
   or Products only after proving which reads are truly non-critical.
+
+Move 734 status:
+- Move 734 removes Server's duplicate first-window `/health` work by deferring
+  the card-level online device count probe until after the route is already
+  useful. The route still loads authenticated bootstrap, system debug log, and
+  system config immediately; only the non-critical online-count refresh moves
+  out of the initial 600 ms trace window.
+- `frontend/src/components/server/ServerPage.tsx` now uses
+  `SERVER_ONLINE_CHECK_READY_DELAY_MS` before the initial `check()` call, while
+  keeping the 10 second interval for live refreshes. The visible connection
+  state still comes from the existing app sync state, and the online count
+  appears shortly after route-ready instead of competing with first paint.
+- Docker release image `business-os:v6.0.0-202606031455` is serving frontend
+  hash `f3bf6be019ef79a0`; update backup:
+  `ops/runtime/docker-release/backups/20260603-145726`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `061039a21bb5586a`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, local health/build metadata, focused route-load trace,
+  focused Server/Products/Inventory/POS route-control audit, public Cloudflare
+  portal Playwright, and full desktop/mobile all-pages Playwright passed. The
+  focused route-load trace `ops/runtime/reports/route-load-trace-latest.json`
+  shows Server reduced from 33 to 31 total requests and from 5 to 3
+  first-window API requests, with zero failed requests and zero console/page
+  errors. The post-change first-window API list is only
+  `/api/auth/bootstrap`, `/api/system/debug/log`, and `/api/system/config`.
+- The focused route-control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T06-58-49-350Z/summary.json`
+  exercised 127 controls across desktop/mobile Server, Products, Inventory,
+  and POS with zero failures and zero findings. The exhaustive all-pages
+  report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-01-14-100Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 382, skipped 137 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-01-11-106Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Next candidates from the latest measured trace: Products still has 8 API
+  calls in the first window, POS has 7, and Inventory has 5. Products and
+  Inventory both still load action history/users immediately; POS still loads
+  contacts and metadata alongside the product search. Continue one route at a
+  time and keep each change tied to a route-load trace.

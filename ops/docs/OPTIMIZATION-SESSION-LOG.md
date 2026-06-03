@@ -2186,3 +2186,46 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: defer Server page online-count health probe out of first route
+  window
+- affected files:
+  `frontend/src/components/server/ServerPage.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Server first route load, `/health`,
+  `/api/system/debug/log`, and `/api/system/config`
+- keeper or rollback: keeper; the Server page still shows sync connection
+  state immediately from app state, and the online device count refresh still
+  runs shortly after route-ready and then every 10 seconds
+- route-scoped result: `ops/runtime/reports/route-load-trace-latest.json`
+  compared Server, Inventory, Products, and POS. Server dropped from 33 to 31
+  total requests and from 5 to 3 first-window API requests by moving the
+  duplicate `/health` probe out of the initial route window. The post-change
+  Server trace had zero failed requests and zero console/page errors.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T06-58-49-350Z/summary.json`
+  covered desktop/mobile Server, Products, Inventory, and POS, discovered 165
+  controls, exercised 127 controls, intentionally skipped 38 stable
+  broad-audit guardrail controls, captured 16 screenshots, and recorded zero
+  failed controls and zero findings.
+- warm whole-app result: frontend utility tests, JSX/source check, production
+  build, Docker release build/update, local `/health`, local
+  `/business-os-build.json`, public Cloudflare Playwright, focused Playwright
+  route-load trace, and full all-pages desktop/mobile Playwright passed. Docker
+  image `business-os:v6.0.0-202606031455` is serving build hash
+  `f3bf6be019ef79a0`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-145726`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-01-14-100Z/summary.json`
+  covered 34 routes, discovered 519 visible controls, exercised 382 controls,
+  intentionally skipped 137 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-01-11-106Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.

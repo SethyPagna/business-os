@@ -2189,26 +2189,26 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getServerApi` | function | 129 |
-| 2 | `getErrorMessage` | function | 133 |
-| 3 | `normalizePendingSyncState` | function | 137 |
-| 4 | `normalizeSystemDebugLog` | function | 148 |
-| 5 | `normalizeSystemConfig` | function | 157 |
-| 6 | `useLocalCopy` | function | 161 |
-| 7 | `isAutoDetected` | function | 172 |
-| 8 | `StatusRow` | function | 179 |
-| 9 | `InfoTab` | function | 191 |
-| 10 | `DiagnosticsPanel` | function | 344 |
-| 11 | `onErr` | const arrow | 384 |
-| 12 | `onQueueChanged` | const arrow | 389 |
-| 13 | `handleRetryQueue` | function | 436 |
-| 14 | `handleDiscardQueue` | function | 453 |
-| 15 | `ServerPage` | component/function | 644 |
-| 16 | `check` | const arrow | 671 |
-| 17 | `loadSecurityConfig` | const arrow | 699 |
-| 18 | `handleTest` | function | 717 |
-| 19 | `handleSave` | function | 746 |
-| 20 | `handleDisconnect` | function | 753 |
+| 1 | `getServerApi` | function | 130 |
+| 2 | `getErrorMessage` | function | 134 |
+| 3 | `normalizePendingSyncState` | function | 138 |
+| 4 | `normalizeSystemDebugLog` | function | 149 |
+| 5 | `normalizeSystemConfig` | function | 158 |
+| 6 | `useLocalCopy` | function | 162 |
+| 7 | `isAutoDetected` | function | 173 |
+| 8 | `StatusRow` | function | 180 |
+| 9 | `InfoTab` | function | 192 |
+| 10 | `DiagnosticsPanel` | function | 345 |
+| 11 | `onErr` | const arrow | 385 |
+| 12 | `onQueueChanged` | const arrow | 390 |
+| 13 | `handleRetryQueue` | function | 437 |
+| 14 | `handleDiscardQueue` | function | 454 |
+| 15 | `ServerPage` | component/function | 645 |
+| 16 | `check` | const arrow | 672 |
+| 17 | `loadSecurityConfig` | const arrow | 703 |
+| 18 | `handleTest` | function | 721 |
+| 19 | `handleSave` | function | 750 |
+| 20 | `handleDisconnect` | function | 757 |
 
 ### 3.156 `frontend/src/components/shared/ActionHistoryBar.tsx`
 

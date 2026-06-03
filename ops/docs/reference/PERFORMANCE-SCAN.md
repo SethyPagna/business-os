@@ -1384,4 +1384,20 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 464 records roadmap Move 734: defer the Server page online-count health
+  probe out of the first route window. `ServerPage` now waits on
+  `SERVER_ONLINE_CHECK_READY_DELAY_MS` before the initial card-level online
+  device count check, while keeping immediate app sync status, system debug
+  log, system config, and the 10 second refresh interval. Docker-served build
+  hash `f3bf6be019ef79a0` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, focused
+  Server/Products/Inventory/POS route-control audit, public Cloudflare
+  Playwright, and full desktop/mobile all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-latest.json` reduced Server
+  first-window API requests from 5 to 3 and total requests from 33 to 31, with
+  zero failed requests and zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-01-14-100Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 382, skipped 137 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->
