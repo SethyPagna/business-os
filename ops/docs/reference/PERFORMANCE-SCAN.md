@@ -1811,4 +1811,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   scripts had `product-read-api`, no `app-api-methods`, no `csv-utils`, and no
   `FilterPanel`, while the post-click script list added only
   `truck-Y2SFGnKm.js` and `FilterPanel-BSgPp0Gy.js`.
+- Move 491 records roadmap Move 761: keep POS delayed customer and
+  delivery-contact option reads out of the broad API methods registry.
+  `POS.tsx` now lazy-loads `contactReadTransport.ts`, while `vite.config.ts`
+  assigns that read boundary to the separate 1.31 kB `contact-read-api` chunk.
+  Route-level local mirror writes wait beyond the first route/interaction
+  windows so IndexedDB/Dexie and CSV helpers do not wake during read-only POS
+  browsing. Docker image `business-os:v6.0.0-202606040246` served the focused
+  trace `ops/runtime/reports/route-load-trace-2026-06-03T18-48-15-082Z.json`:
+  POS was ready in 353 ms with 30 requests and 22 scripts, with zero failed
+  requests and zero console/page errors. A live Chromium delayed-contact probe
+  confirmed the first 600 ms window had no `contact-read-api`,
+  `app-api-methods`, `csv-utils`, `app-local-db`, or `vendor-dexie`; after the
+  delayed gate, only `contact-read-api-3bBCBgdj.js` was added and those broad
+  chunks stayed unloaded through the tested customer interaction window.
 <!-- phase29-manual-notes:end -->

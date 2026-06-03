@@ -8,7 +8,7 @@ type IdleCallback = (deadline?: unknown) => void
 
 let sensitiveMirrorPurgePromise: Promise<unknown> | null = null
 let localDbPromise: Promise<typeof import('./localDb.ts')> | null = null
-const MIRROR_WRITE_IDLE_DELAY_MS = 2500
+const MIRROR_WRITE_IDLE_DELAY_MS = 10_000
 
 function getLocalDbModule(): Promise<typeof import('./localDb.ts')> {
   if (!localDbPromise) localDbPromise = import('./localDb.ts')

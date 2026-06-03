@@ -212,6 +212,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
+    if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
     if (
       normalized.endsWith('/src/api/productReadTransport.ts')
       || normalized.endsWith('/src/api/lookupTransport.ts')

@@ -1411,6 +1411,14 @@ Recent route-level win:
   was ready in 262 ms with 30 requests and 22 scripts, and a live POS
   search-plus-Filters click added only the icon chunk and `FilterPanel`, with
   no `app-api-methods` or `csv-utils` loaded before or after the click.
+- POS delayed customer and delivery-contact option reads now use a separate
+  1.31 kB `contact-read-api` chunk instead of the broad API methods registry.
+  The Docker-served Move 761 trace was ready in 353 ms with 30 requests and
+  22 scripts. A live Chromium delayed-contact probe confirmed the first
+  600 ms POS window had no `contact-read-api`, `app-api-methods`, `csv-utils`,
+  `app-local-db`, or `vendor-dexie`; after the delayed gate, only
+  `contact-read-api-3bBCBgdj.js` loaded, with zero failed requests and zero
+  relevant console/page errors.
 - API HTTP, local Dexie, websocket, and browser API bootstrap were converted to
   TypeScript and verified through frontend utility tests, the TypeScript source
   guard, production build, Phase 29 audit, schema audit, organization audit,
@@ -1475,8 +1483,8 @@ Recent route-level win:
 5. Continue mobile public portal polish from the screenshots: next candidates
    are the large hero logo/avatar sizing and first-card spacing if the public
    owner wants an even shorter first viewport.
-6. Continue measured POS splits after Move 760: customer/contact lookups,
-   checkout writes, receipt printing, and product-management writes can still
-   wake broad registry paths on real intent. Keep each slice guarded by route
-   traces plus interaction proof so read-only POS browsing remains light while
-   live/offline write behavior stays intact.
+6. Continue measured POS splits after Move 761: checkout writes, receipt
+   printing, product-management writes, and settings/system transports can
+   still wake broad registry paths on real intent. Keep each slice guarded by
+   route traces plus interaction proof so read-only POS browsing remains light
+   while live/offline write behavior stays intact.

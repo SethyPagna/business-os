@@ -296,8 +296,6 @@ type PosApi = {
   createDeliveryContact?: (payload: DeliveryFormState) => Promise<Partial<DeliveryContactRecord>>
   createSale?: (payload: Record<string, unknown>) => Promise<SaleResult>
   getBranches?: () => Promise<BranchRecord[]>
-  getCustomers?: () => Promise<CustomerRecord[]>
-  getDeliveryContacts?: () => Promise<DeliveryContactRecord[]>
   lookupPortalMembership?: (membershipNumber: string) => Promise<MembershipInfo | null>
 }
 
@@ -348,6 +346,23 @@ function loadPosProductFilters(query: QueryParams = {}): Promise<Partial<Product
 
 function loadPosCategories(): Promise<unknown[]> {
   return getPosCategories() as Promise<unknown[]>
+}
+
+let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
+
+function getContactReadTransport(): Promise<typeof import('../../api/contactReadTransport.ts')> {
+  if (!contactReadTransportPromise) contactReadTransportPromise = import('../../api/contactReadTransport.ts')
+  return contactReadTransportPromise
+}
+
+async function loadPosCustomers(): Promise<CustomerRecord[]> {
+  const { getCustomers } = await getContactReadTransport()
+  return getCustomers() as Promise<CustomerRecord[]>
+}
+
+async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
+  const { getDeliveryContacts } = await getContactReadTransport()
+  return getDeliveryContacts() as Promise<DeliveryContactRecord[]>
 }
 
 function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
@@ -743,8 +758,7 @@ export default function POS() {
   const loadCustomers = useCallback(async (label = 'POS customers') => {
     const requestId = beginTrackedRequest(customerRequestRef)
     try {
-      const api = getPosApi()
-      const data = await withLoaderTimeout(() => api.getCustomers?.() || missingPosApiMethod('getCustomers'), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
+      const data = await withLoaderTimeout(() => loadPosCustomers(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerRequestRef, requestId)) return null
       const nextCustomers = Array.isArray(data) ? data : []
       setCustomers(nextCustomers)
@@ -759,8 +773,7 @@ export default function POS() {
   const loadDeliveryContacts = useCallback(async (label = 'POS delivery contacts') => {
     const requestId = beginTrackedRequest(deliveryRequestRef)
     try {
-      const api = getPosApi()
-      const data = await withLoaderTimeout(() => api.getDeliveryContacts?.() || missingPosApiMethod('getDeliveryContacts'), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
+      const data = await withLoaderTimeout(() => loadPosDeliveryContacts(), label, POS_CONTACT_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(deliveryRequestRef, requestId)) return null
       const nextContacts = Array.isArray(data) ? data : []
       setDeliveryContacts(nextContacts)

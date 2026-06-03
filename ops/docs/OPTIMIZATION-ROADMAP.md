@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 758.
+- Latest completed implementation move in this roadmap: Move 761.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -10058,3 +10058,43 @@ Move 760 status:
   broad-registry wakes in POS customer/write paths, product management writes,
   and settings/system transport clusters without moving live business data or
   weakening offline fallback behavior.
+
+Move 761 status:
+- Move 761 narrows POS delayed customer and delivery-contact option reads.
+  `POS.tsx` now lazy-loads `contactReadTransport.ts` only when the delayed
+  contact option gate fires, and that transport reads `/api/customers` and
+  `/api/delivery-contacts` directly without entering the broad
+  `window.api` methods registry. Local mirror writes remain available, but
+  route-level mirror writes wait longer so IndexedDB/Dexie and CSV helpers do
+  not wake during the first route and first POS interaction windows.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, JSX/source check, production build, Docker release image
+  `business-os:v6.0.0-202606040246`, focused POS route-load Playwright trace,
+  and a live Chromium POS delayed-contact probe.
+- Build proof: local and Docker production builds emitted
+  `contact-read-api-*.js` as a separate 1.31 kB chunk and kept
+  `product-read-api-*.js` at 5.87 kB. The performance-loading guard now
+  prevents POS from calling `api.getCustomers` or `api.getDeliveryContacts`
+  through the broad registry and verifies the separate `contact-read-api`
+  manual chunk boundary.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-48-15-082Z.json`
+  measured POS at 353 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors.
+- Interaction proof: a Docker-served Chromium check opened POS and recorded
+  the script list before and after the delayed contact option gate. The first
+  600 ms window had 22 scripts and no `contact-read-api`, `app-api-methods`,
+  `csv-utils`, `app-local-db`, or `vendor-dexie`. After the delayed gate, only
+  `contact-read-api-3bBCBgdj.js` was added; `app-api-methods`, `csv-utils`,
+  `app-local-db`, and `vendor-dexie` stayed unloaded through the tested
+  customer interaction window. Screenshot:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-contact-read-1780512638903.png`.
+- Current plan position after Move 761: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with measured route/interaction proof, focusing on POS checkout
+  writes, receipt printing, product-management writes, and settings/system
+  transport clusters without moving live business data or weakening offline
+  fallback behavior.

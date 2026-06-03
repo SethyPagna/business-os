@@ -8,6 +8,7 @@ const webApi = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'u
 const httpApi = fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8')
 const websocketApi = fs.readFileSync(new URL('../src/api/websocket.ts', import.meta.url), 'utf8')
 const appBootstrapTransport = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
+const localMirrors = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
 const clientRuntime = fs.readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
 const viteConfig = fs.readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
@@ -193,6 +194,7 @@ assert.match(webApi, /const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200/, 'boo
 assert.match(webApi, /const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000/, 'bootstrap storage maintenance should still run when idle time is scarce')
 assert.match(webApi, /const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000/, 'bootstrap IndexedDB mirror writes should wait until the visible app has settled')
 assert.match(webApi, /const BOOTSTRAP_OFFLINE_DB_WRITE_IDLE_TIMEOUT_MS = 60_000/, 'bootstrap IndexedDB mirror writes should still eventually run during long-lived sessions')
+assert.match(localMirrors, /const MIRROR_WRITE_IDLE_DELAY_MS = 10_000/, 'route mirror writes should wait beyond the first route and first interaction windows before waking IndexedDB')
 assert.doesNotMatch(webApi, /import \{ dexieDb \}\s+from '\.\/api\/localDb\.ts'/, 'web API startup should not statically import Dexie/local DB')
 assert.match(webApi, /let localDbPromise: Promise<any> \| null = null[\s\S]*function getOfflineDb\(\): Promise<any> \{[\s\S]*import\('\.\/api\/localDb\.ts'\)\.then\(\(module\) => module\.dexieDb as any\)/, 'web API should lazy-load Dexie/local DB only for offline or persisted settings work')
 assert.match(webApi, /function loadAppBootstrapModule\(\): Promise<AppBootstrapModule> \{[\s\S]*import\('\.\/api\/appBootstrapTransport\.ts'\)/, 'app bootstrap should have a direct lazy transport instead of loading the full API registry')
@@ -256,6 +258,7 @@ assert.match(viteConfig, /'assets\/catalog-',[\s\S]*'assets\/portal-tools-',/, '
 assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*return 'product-shared'/, 'product image primitives shared by Products, POS, and catalog should not be owned by the heavy catalog route chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/actionGuards\.ts'\)\) \{[\s\S]*return 'action-guards'/, 'shared synchronous action guards should not be owned by the heavy catalog route chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/scriptTypography\.ts'\)\) \{[\s\S]*return 'script-typography'/, 'shared Khmer typography helpers should not be owned by the public catalog preview chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactReadTransport\.ts'\)\) return 'contact-read-api'/, 'POS delayed contact option reads should have their own lazy contact-read API chunk')
 assert.match(viteConfig, /productReadTransport\.ts'[\s\S]*lookupTransport\.ts'[\s\S]*expectedUpdatedAt\.ts'[\s\S]*localMirrors\.ts'[\s\S]*lazyLocalDb\.ts'[\s\S]*queryCache\.ts'[\s\S]*return 'product-read-api'/, 'POS product and lookup reads should have a narrow product-read API chunk instead of landing in app-api-methods')
 assert.match(viteConfig, /catalog\/catalogUi\.tsx'[\s\S]*return 'catalog-ui'[\s\S]*catalog\/portalCatalogDisplay\.ts'[\s\S]*return 'catalog-display'[\s\S]*CatalogPageContext\.tsx'[\s\S]*return 'catalog-context'[\s\S]*components\/catalog\/'\)\) return 'catalog'/, 'small catalog UI/display/context helpers should be split before the generic catalog route chunk')
 assert.match(viteConfig, /CatalogEditorSurface\.tsx'\)[\s\S]*CatalogImageField\.tsx'\)[\s\S]*return 'catalog-editor'/, 'editor-only catalog image fields should not be grouped into the public catalog chunk')
@@ -279,7 +282,8 @@ assert.doesNotMatch(pos, /import FilterPanel from '\.\/FilterPanel'/, 'POS shoul
 assert.match(pos, /const FilterPanel = lazy\(\(\) => import\('\.\/FilterPanel'\)\)/, 'POS filter panel should load only on filter-button intent')
 assert.match(pos, /getProductBootstrap as getPosProductBootstrap[\s\S]*getProductFilters as getPosProductFilters[\s\S]*searchProducts as searchPosProducts[\s\S]*from '\.\.\/\.\.\/api\/productReadTransport\.ts'/, 'POS product reads should use the narrow product transport instead of the full window.api registry')
 assert.match(pos, /getCategories as getPosCategories[\s\S]*from '\.\.\/\.\.\/api\/lookupTransport\.ts'/, 'POS category options should use the narrow lookup transport instead of the full window.api registry')
-assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories/, 'POS product and category reads should not wake app-api-methods during catalog and filter option loads')
+assert.match(pos, /let contactReadTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \| null = null[\s\S]*function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)>/, 'POS contact reads should lazy-load the narrow contact read transport after the delayed option gate')
+assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts/, 'POS product, category, customer, and delivery reads should not wake app-api-methods during catalog and option loads')
 assert.match(lazyPortalMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module\.default\)/, 'LazyPortalMenu should dynamically import PortalMenu')
 assert.match(lazyPortalMenu, /onClickCapture=\{\(event\) => \{[\s\S]*loadPortalMenu\(true\)/, 'LazyPortalMenu should open the menu from the first click after the chunk loads')
 assert.match(portalMenu, /defaultOpen\?: boolean[\s\S]*const \[open, setOpen\] = useState\(defaultOpen\)/, 'PortalMenu should support first-click lazy mount opening')
@@ -2333,7 +2337,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.getCustomers(?:\?\.)?\(\)[\s\S]*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\s*\(\) => loadPosCustomers\(\),\s*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
   'POS customer option reads should timeout slow customer requests',
 )
 assert.match(
@@ -2353,7 +2357,7 @@ assert.doesNotMatch(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.getDeliveryContacts(?:\?\.)?\(\)[\s\S]*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\s*\(\) => loadPosDeliveryContacts\(\),\s*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
   'POS delivery option reads should timeout slow delivery contact requests',
 )
 assert.match(

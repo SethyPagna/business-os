@@ -2864,3 +2864,41 @@ Use this shape for future entries:
   `csv-utils`, and no `FilterPanel`; after click, only `truck-Y2SFGnKm.js`
   and `FilterPanel-BSgPp0Gy.js` were added. Screenshot:
   `C:\Users\user\Downloads\business-os\output\playwright\pos-lookup-filter-1780510955919.png`.
+
+- change: keep POS delayed customer/contact option reads out of broad API methods
+- affected files:
+  `frontend/src/api/contactReadTransport.ts`,
+  `frontend/src/api/localMirrors.ts`,
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS delayed customer and delivery-contact option reads,
+  plus first-window IndexedDB/Dexie/CSV wake timing
+- keeper or rollback: keeper; POS now lazy-loads `contactReadTransport.ts`
+  when contact options are needed, reads `/api/customers` and
+  `/api/delivery-contacts` directly, and preserves local mirror fallback while
+  deferring mirror writes beyond the first route/interaction windows
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `contact-read-api-*.js` at
+  1.31 kB and kept `product-read-api-*.js` at 5.87 kB. The source guard
+  prevents POS from calling `api.getCustomers` or `api.getDeliveryContacts`
+  through the broad registry and verifies the manual `contact-read-api`
+  boundary.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-48-15-082Z.json`
+  measured POS at 353 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors. Docker image
+  `business-os:v6.0.0-202606040246` served the check.
+- interaction proof:
+  a Docker-served Chromium probe opened POS and recorded loaded scripts before
+  and after the delayed contact option gate. The first 600 ms window had
+  22 scripts and no `contact-read-api`, `app-api-methods`, `csv-utils`,
+  `app-local-db`, or `vendor-dexie`; after the delayed gate, only
+  `contact-read-api-3bBCBgdj.js` was added. Those broad/local chunks stayed
+  unloaded through the tested customer interaction window, with zero failed
+  requests and zero relevant console/page errors. Screenshot:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-contact-read-1780512638903.png`.
