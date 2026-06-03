@@ -29,7 +29,8 @@ type PortalChecks = {
   configStatus: number | null
   metaStatus: number | null
   searchStatus: number | null
-  aiStatus: number | null
+  aiStatusBeforeInteraction: number | null
+  aiStatusAfterInteraction: number | null
   enforcedCspPresent: boolean
   reportOnlyCspPresent: boolean
   toleratedCloudflareScriptMonitorReportOnlyCsp: boolean
@@ -112,6 +113,18 @@ async function main(): Promise<void> {
     const portalVisible = /Leang Cosmetic/i.test(bodyText) && /Products/i.test(bodyText)
     const internalServerErrorVisible = /"success"\s*:\s*false|Internal server error/i.test(bodyText)
     const renderedProductCount = await page.locator('article, [data-product-card], .product-card').count().catch(() => 0)
+
+    const aiStatusBeforeInteraction = endpointStatus(observedRequests, /\/api\/portal\/ai\/status/i)
+    const assistantTab = page.getByRole('button', { name: /assistant|beauty/i }).first()
+    if (await assistantTab.count()) {
+      await assistantTab.click()
+      await page.waitForResponse(
+        (response) => /\/api\/portal\/ai\/status/i.test(response.url()),
+        { timeout: 15_000 },
+      ).catch(() => null)
+      await page.waitForTimeout(500)
+    }
+    const aiStatusAfterInteraction = endpointStatus(observedRequests, /\/api\/portal\/ai\/status/i)
     const relevantConsole = consoleMessages.filter((message) => isRelevantConsole(message.text))
     const failedResponses = observedRequests.filter((request) => request.status >= 500)
 
@@ -123,7 +136,8 @@ async function main(): Promise<void> {
       configStatus: endpointStatus(observedRequests, /\/api\/portal\/config/i),
       metaStatus: endpointStatus(observedRequests, /\/api\/portal\/catalog\/meta/i),
       searchStatus: endpointStatus(observedRequests, /\/api\/portal\/catalog\/products\/search/i),
-      aiStatus: endpointStatus(observedRequests, /\/api\/portal\/ai\/status/i),
+      aiStatusBeforeInteraction,
+      aiStatusAfterInteraction,
       enforcedCspPresent: /script-src\s+'self'/i.test(enforcedCsp) && /connect-src\s+'self'/i.test(enforcedCsp),
       reportOnlyCspPresent: Boolean(reportOnlyCsp),
       toleratedCloudflareScriptMonitorReportOnlyCsp: isCloudflareScriptMonitorReportOnlyCsp(reportOnlyCsp),
@@ -156,7 +170,8 @@ async function main(): Promise<void> {
     assert(checks.configStatus === 200, `Remote portal config returned HTTP ${checks.configStatus}`)
     assert(checks.metaStatus === 200, `Remote portal metadata returned HTTP ${checks.metaStatus}`)
     assert(checks.searchStatus === 200, `Remote portal product search returned HTTP ${checks.searchStatus}`)
-    assert(checks.aiStatus === 200, `Remote portal AI status returned HTTP ${checks.aiStatus}`)
+    assert(checks.aiStatusBeforeInteraction == null, `Remote portal AI status should be deferred, saw HTTP ${checks.aiStatusBeforeInteraction}`)
+    assert(checks.aiStatusAfterInteraction === 200, `Remote portal AI status after Assistant click returned HTTP ${checks.aiStatusAfterInteraction}`)
     assert(checks.enforcedCspPresent, 'Remote public portal response did not expose the expected enforced CSP')
     assert(!checks.reportOnlyCspPresent || checks.toleratedCloudflareScriptMonitorReportOnlyCsp, 'Remote public portal response still exposes an app-origin report-only CSP header')
     assert(failedResponses.length === 0, `Remote public portal had ${failedResponses.length} HTTP 5xx response(s)`)

@@ -43,11 +43,26 @@ This is a concise running log of what actually happened in recent sessions.
     39 total requests, 2 API requests, zero failed requests, and zero console/
     page errors, while a longer trace proves history wakes around 2.6 s
 
+- Public portal first-load deferral
+  - route: `public_catalog`
+  - result: kept
+  - note: made Products the default public tab, deferred Google Maps until
+    About is visible, and deferred portal AI status until the Assistant tab is
+    clicked; Docker-served route trace now shows the public catalog at 25 total
+    requests, 3 API requests, zero failed requests, and zero console/page
+    errors, while the Cloudflare check proves AI status is absent before
+    interaction and returns HTTP 200 after the Assistant click
+
 ### Verification
 
 - Frontend `test:utils`, `check:jsx`, and production build passed.
-- Docker release image `business-os:v6.0.0-202606031903` is healthy on
-  `http://127.0.0.1:4000/health` with frontend hash `2e7905d575e826a0`.
+- Docker release image `business-os:v6.0.0-202606031923` is healthy on
+  `http://127.0.0.1:4000/health` with frontend hash `02444cf84d29ee29`.
+- Focused public catalog route-load trace passed at 25 requests, 3 API
+  requests, and zero failures.
+- Public Cloudflare portal check passed after clicking the Assistant tab, with
+  20 rendered products, deferred AI status, and no relevant console/page
+  errors.
 - Focused Contacts desktop/mobile control audit passed with 23 tested controls
   and zero failures.
 - Focused Backup/Files/Users/Server control audit passed with 50 tested
@@ -58,7 +73,7 @@ This is a concise running log of what actually happened in recent sessions.
   controls and zero failures.
 - Exhaustive desktop/mobile all-pages control audit passed with 369 tested
   controls and zero failures.
-- Public Cloudflare portal check passed with 20 rendered products and no
+- Prior public Cloudflare portal check passed with 20 rendered products and no
   relevant console/page errors.
 
 ## 2026-05-31

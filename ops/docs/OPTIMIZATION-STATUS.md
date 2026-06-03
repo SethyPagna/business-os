@@ -8,16 +8,16 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 744, defer Contacts action-history reads out of first route window
+- Latest completed move: Move 745, make public portal product-first and defer map/AI reads
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `2e7905d575e826a0`
+- latest verified frontend hash from the most recent Docker-served live check: `02444cf84d29ee29`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `f8b8792ae545cb84`
+  `2c9623229efa4326`
 
 Latest verified reports:
 
@@ -28,7 +28,7 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-07-11-097Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-27-43-868Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -68,18 +68,35 @@ Current honest pockets:
   per burst, zero category/branch/filter metadata responses after page-ready,
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
-  responses, zero relevant console messages, zero page errors, and enforced CSP
+  responses, zero relevant console messages, zero page errors, enforced CSP,
+  deferred AI status before interaction, and HTTP 200 AI status after the
+  Assistant tab click
 - Docker release image `business-os:v6.0.0-202606031726` is serving the
   verified build from Move 740; Move 741 is served by Docker release image
   `business-os:v6.0.0-202606031752`; Move 742 is served by Docker release
   image `business-os:v6.0.0-202606031814`; Move 743 is served by Docker
   release image `business-os:v6.0.0-202606031841`; Move 744 is served by
-  Docker release image `business-os:v6.0.0-202606031903`, and the release
-  update created backup `ops/runtime/docker-release/backups/20260603-190546`
+  Docker release image `business-os:v6.0.0-202606031903`; Move 745 is served
+  by Docker release image `business-os:v6.0.0-202606031923`, and the release
+  update created backup `ops/runtime/docker-release/backups/20260603-192530`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Public portal first-load is now product-first and avoids nonessential third-
+  party work before the catalog is useful. The public catalog defaults to
+  Products when catalog display is enabled, Google Maps is only mounted when
+  About is visible, and portal AI status waits until the Assistant tab is
+  clicked. Proof: `ops/runtime/reports/route-load-trace-2026-06-03T11-27-44-386Z.json`
+  shows public_catalog at 25 total requests, 3 API requests, zero failed
+  requests, and zero console/page errors, down from 27 total requests, 4 API
+  requests, and one failed Google Maps document in the earlier trace. The
+  Cloudflare check at
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-27-43-868Z/report.json`
+  rendered 20 products, confirmed no AI status before interaction, clicked the
+  Assistant tab, then observed `/api/portal/ai/status` return HTTP 200 with no
+  relevant console/page errors.
 
 - Contacts first-load now defers server action-history and admin user-option
   reads until after the first visible contact list is useful. The default

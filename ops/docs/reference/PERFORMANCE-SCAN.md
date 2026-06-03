@@ -17,7 +17,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
 | `frontend/src/components/inventory/Inventory.tsx` | 216.9 | 4305 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 153.3 | 3529 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 153.5 | 3531 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
 | `frontend/src/components/pos/POS.tsx` | 124.3 | 2382 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 118.1 | 2376 |
@@ -46,7 +46,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `frontend/src/components/inventory/Inventory.tsx` | 4305 | 216.9 |
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 3529 | 153.3 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 3531 | 153.5 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
 | `frontend/src/components/products/Products.tsx` | 2450 | 113.6 |
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-BhxBcQzB.js` | 191.1 |
+| `frontend/dist/assets/catalog-ds4zuMAx.js` | 191.1 |
 | `frontend/dist/assets/index-Cw6aCC7m.css` | 152.6 |
-| `frontend/dist/assets/Inventory-CCnKFFpa.js` | 144.3 |
+| `frontend/dist/assets/Inventory-B2tRBDqH.js` | 144.3 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-B3jjMoBf.js` | 95.7 |
-| `frontend/dist/assets/POS-BaWGfas-.js` | 79.6 |
-| `frontend/dist/assets/catalog-editor-KU5FyDQv.js` | 73.5 |
+| `frontend/dist/assets/Products-NQVNCW78.js` | 95.7 |
+| `frontend/dist/assets/POS-fgTO_p8c.js` | 79.6 |
+| `frontend/dist/assets/catalog-editor-DLdxt476.js` | 73.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-CFNL8Z-8.js` | 72.0 |
-| `frontend/dist/assets/app-shared-BDVljYdQ.js` | 69.4 |
-| `frontend/dist/assets/BulkImportModal-Bp_JaFjv.js` | 68.6 |
-| `frontend/dist/assets/catalog-preview-ChLmJNT0.js` | 67.5 |
-| `frontend/dist/assets/Backup-BrjIohr5.js` | 60.7 |
-| `frontend/dist/assets/app-api-methods-C9p3WUE0.js` | 59.4 |
-| `frontend/dist/assets/Settings-wmbValIy.js` | 53.7 |
-| `frontend/dist/assets/index-C9he5ABc.js` | 50.3 |
-| `frontend/dist/assets/UserProfileModal-jybkHlu-.js` | 43.5 |
-| `frontend/dist/assets/Users-nD411-8c.js` | 41.5 |
-| `frontend/dist/assets/ReceiptSettings-CQGNdMLg.js` | 40.3 |
-| `frontend/dist/assets/Branches-BrrPOKGz.js` | 39.0 |
-| `frontend/dist/assets/Sales-DjpZLLq1.js` | 35.4 |
-| `frontend/dist/assets/AuditLog-BCK9Pusj.js` | 34.8 |
+| `frontend/dist/assets/Dashboard-B3xloSMS.js` | 72.0 |
+| `frontend/dist/assets/app-shared-CIYJSxNM.js` | 69.4 |
+| `frontend/dist/assets/BulkImportModal-CGrPRFQ2.js` | 68.6 |
+| `frontend/dist/assets/catalog-preview-rRaV5Y9k.js` | 67.5 |
+| `frontend/dist/assets/Backup-XBe4Ea-T.js` | 60.7 |
+| `frontend/dist/assets/app-api-methods-DHhjLx-i.js` | 59.4 |
+| `frontend/dist/assets/Settings-74GqiDn6.js` | 53.7 |
+| `frontend/dist/assets/index-Dq1S7rMQ.js` | 50.3 |
+| `frontend/dist/assets/UserProfileModal-B8dojOX7.js` | 43.5 |
+| `frontend/dist/assets/Users-CxScwC2m.js` | 41.5 |
+| `frontend/dist/assets/ReceiptSettings-lPhaxZDO.js` | 40.3 |
+| `frontend/dist/assets/Branches-BNohBErI.js` | 39.0 |
+| `frontend/dist/assets/Sales-BtlGNq4W.js` | 35.4 |
+| `frontend/dist/assets/AuditLog-PZK_ssms.js` | 34.8 |
 
 ## 5. Notes
 
@@ -1580,4 +1580,20 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 518 controls, exercised 369, skipped 149 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 475 records roadmap Move 745: make the public portal product-first and
+  defer nonessential map/AI work. `CatalogPage` now defaults the public route
+  to Products when catalog display is enabled, only mounts the Google Maps
+  iframe when About is visible, and requests `/api/portal/ai/status` only after
+  the Assistant tab is active. Docker-served build hash `02444cf84d29ee29`
+  passed frontend utility tests, JSX/source check, production build, Docker
+  release/update, focused public route-load trace, and public Cloudflare
+  Playwright with a real Assistant tab click. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-27-44-386Z.json` reduced
+  public_catalog from 27 total requests, 4 API requests, and one failed Google
+  Maps document to 25 total requests, 3 API requests, zero failed requests, and
+  zero console/page errors. The Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-27-43-868Z/report.json`
+  rendered 20 products, confirmed AI status is absent before interaction, then
+  clicked Assistant and observed AI status HTTP 200 with zero relevant console/
+  page errors.
 <!-- phase29-manual-notes:end -->

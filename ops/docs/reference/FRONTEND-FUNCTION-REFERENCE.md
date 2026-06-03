@@ -959,65 +959,65 @@ Total files documented: **234**
 | 61 | `warmPublicSecondaryTabs` | const arrow | 1408 |
 | 62 | `updateMediaUploadState` | const arrow | 1560 |
 | 63 | `forgetMediaUploadState` | const arrow | 1567 |
-| 64 | `loadAssistantStatus` | function | 1618 |
-| 65 | `openProductGallery` | function | 1641 |
-| 66 | `changeTranslateTarget` | function | 1654 |
-| 67 | `isPortalLoadCurrent` | function | 1702 |
-| 68 | `loadPortalEditorData` | function | 1706 |
-| 69 | `refreshPortalView` | function | 1748 |
-| 70 | `loadPortal` | function | 1777 |
-| 71 | `ensureLink` | const arrow | 2033 |
-| 72 | `updateVisibility` | const arrow | 2126 |
-| 73 | `handleScroll` | const arrow | 2156 |
-| 74 | `initWidget` | const arrow | 2201 |
-| 75 | `waitForWidget` | const arrow | 2219 |
-| 76 | `toggleFilterValue` | function | 2343 |
-| 77 | `clearPortalFilters` | function | 2351 |
-| 78 | `setDraft` | function | 2359 |
-| 79 | `toggleRecommendedProduct` | function | 2364 |
-| 80 | `openPortalImage` | function | 2373 |
-| 81 | `setAboutBlocksDraft` | function | 2384 |
-| 82 | `setPromoItemsDraft` | function | 2388 |
-| 83 | `getPortalMediaValue` | function | 2392 |
-| 84 | `setPortalMediaValue` | function | 2406 |
-| 85 | `clearPortalUploadPreview` | function | 2420 |
-| 86 | `clearPortalMediaTarget` | function | 2426 |
-| 87 | `uploadPortalMedia` | function | 2437 |
-| 88 | `cancelPortalMediaUpload` | function | 2508 |
-| 89 | `updateAboutBlock` | function | 2514 |
-| 90 | `updatePromoItem` | function | 2520 |
-| 91 | `addAboutBlock` | function | 2526 |
-| 92 | `addPromoItem` | function | 2530 |
-| 93 | `moveAboutBlockBefore` | function | 2534 |
-| 94 | `removeAboutBlock` | function | 2546 |
-| 95 | `movePromoItemBefore` | function | 2557 |
-| 96 | `removePromoItem` | function | 2569 |
-| 97 | `setFaqDraft` | function | 2580 |
-| 98 | `addFaqItem` | function | 2584 |
-| 99 | `mergeFaqStarterItems` | function | 2595 |
-| 100 | `addFaqStarterSet` | function | 2608 |
-| 101 | `addAiFaqStarterSet` | function | 2612 |
-| 102 | `updateFaqItem` | function | 2616 |
-| 103 | `removeFaqItem` | function | 2622 |
-| 104 | `clearAssistantState` | function | 2626 |
-| 105 | `uploadDraftImage` | function | 2641 |
-| 106 | `uploadAboutBlockMedia` | function | 2645 |
-| 107 | `uploadPromoItemMedia` | function | 2651 |
-| 108 | `openFilePicker` | function | 2655 |
-| 109 | `handleFilePickerSelect` | function | 2659 |
-| 110 | `savePortalDraft` | function | 2687 |
-| 111 | `askAssistant` | function | 2879 |
-| 112 | `refreshMembershipData` | function | 2925 |
-| 113 | `handleMembershipLookup` | function | 2967 |
-| 114 | `addSubmissionImages` | function | 2980 |
-| 115 | `handleSubmissionPaste` | function | 2990 |
-| 116 | `handleSubmitShareProof` | function | 3006 |
-| 117 | `handleReviewSubmission` | function | 3053 |
-| 118 | `renderCatalogSection` | function | 3216 |
-| 119 | `handleUploadSubmissionImages` | const arrow | 3242 |
-| 120 | `renderSecondaryTabPanel` | function | 3298 |
-| 121 | `renderSecondaryTabSection` | function | 3310 |
-| 122 | `scrollPublicPortal` | const arrow | 3439 |
+| 64 | `loadAssistantStatus` | function | 1619 |
+| 65 | `openProductGallery` | function | 1642 |
+| 66 | `changeTranslateTarget` | function | 1655 |
+| 67 | `isPortalLoadCurrent` | function | 1703 |
+| 68 | `loadPortalEditorData` | function | 1707 |
+| 69 | `refreshPortalView` | function | 1749 |
+| 70 | `loadPortal` | function | 1778 |
+| 71 | `ensureLink` | const arrow | 2034 |
+| 72 | `updateVisibility` | const arrow | 2127 |
+| 73 | `handleScroll` | const arrow | 2157 |
+| 74 | `initWidget` | const arrow | 2202 |
+| 75 | `waitForWidget` | const arrow | 2220 |
+| 76 | `toggleFilterValue` | function | 2344 |
+| 77 | `clearPortalFilters` | function | 2352 |
+| 78 | `setDraft` | function | 2360 |
+| 79 | `toggleRecommendedProduct` | function | 2365 |
+| 80 | `openPortalImage` | function | 2374 |
+| 81 | `setAboutBlocksDraft` | function | 2385 |
+| 82 | `setPromoItemsDraft` | function | 2389 |
+| 83 | `getPortalMediaValue` | function | 2393 |
+| 84 | `setPortalMediaValue` | function | 2407 |
+| 85 | `clearPortalUploadPreview` | function | 2421 |
+| 86 | `clearPortalMediaTarget` | function | 2427 |
+| 87 | `uploadPortalMedia` | function | 2438 |
+| 88 | `cancelPortalMediaUpload` | function | 2509 |
+| 89 | `updateAboutBlock` | function | 2515 |
+| 90 | `updatePromoItem` | function | 2521 |
+| 91 | `addAboutBlock` | function | 2527 |
+| 92 | `addPromoItem` | function | 2531 |
+| 93 | `moveAboutBlockBefore` | function | 2535 |
+| 94 | `removeAboutBlock` | function | 2547 |
+| 95 | `movePromoItemBefore` | function | 2558 |
+| 96 | `removePromoItem` | function | 2570 |
+| 97 | `setFaqDraft` | function | 2581 |
+| 98 | `addFaqItem` | function | 2585 |
+| 99 | `mergeFaqStarterItems` | function | 2596 |
+| 100 | `addFaqStarterSet` | function | 2609 |
+| 101 | `addAiFaqStarterSet` | function | 2613 |
+| 102 | `updateFaqItem` | function | 2617 |
+| 103 | `removeFaqItem` | function | 2623 |
+| 104 | `clearAssistantState` | function | 2627 |
+| 105 | `uploadDraftImage` | function | 2642 |
+| 106 | `uploadAboutBlockMedia` | function | 2646 |
+| 107 | `uploadPromoItemMedia` | function | 2652 |
+| 108 | `openFilePicker` | function | 2656 |
+| 109 | `handleFilePickerSelect` | function | 2660 |
+| 110 | `savePortalDraft` | function | 2688 |
+| 111 | `askAssistant` | function | 2880 |
+| 112 | `refreshMembershipData` | function | 2926 |
+| 113 | `handleMembershipLookup` | function | 2968 |
+| 114 | `addSubmissionImages` | function | 2981 |
+| 115 | `handleSubmissionPaste` | function | 2991 |
+| 116 | `handleSubmitShareProof` | function | 3007 |
+| 117 | `handleReviewSubmission` | function | 3054 |
+| 118 | `renderCatalogSection` | function | 3218 |
+| 119 | `handleUploadSubmissionImages` | const arrow | 3244 |
+| 120 | `renderSecondaryTabPanel` | function | 3300 |
+| 121 | `renderSecondaryTabSection` | function | 3312 |
+| 122 | `scrollPublicPortal` | const arrow | 3441 |
 
 ### 3.52 `frontend/src/components/catalog/CatalogPageContext.tsx`
 

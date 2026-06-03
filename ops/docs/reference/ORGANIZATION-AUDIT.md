@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T11:17:46.005Z
+Generated: 2026-06-03T11:29:02.167Z
 
 ## Summary
 
@@ -69,13 +69,13 @@ Generated: 2026-06-03T11:17:46.005Z
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4305 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| frontend/src/components/catalog/CatalogPage.tsx | 3529 | frontend/components/catalog |
+| frontend/src/components/catalog/CatalogPage.tsx | 3531 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2573 | ops/docs |
-| frontend/tests/performanceLoadingUx.test.ts | 2515 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2588 | ops/docs |
+| frontend/tests/performanceLoadingUx.test.ts | 2518 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/products/Products.tsx | 2450 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2382 | frontend/components/pos |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
@@ -92,7 +92,7 @@ Generated: 2026-06-03T11:17:46.005Z
 | frontend/src/components/utils-settings/Backup.tsx | 1754 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |
-| backend/src/routes/sales.ts | 1591 | backend/routes |
+| ops/docs/reference/PERFORMANCE-SCAN.md | 1600 | ops/docs/reference |
 
 ## Relative Import Hotspots
 

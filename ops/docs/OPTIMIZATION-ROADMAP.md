@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 744.
+- Latest completed implementation move in this roadmap: Move 745.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,

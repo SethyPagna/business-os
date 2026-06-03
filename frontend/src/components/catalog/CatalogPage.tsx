@@ -1323,7 +1323,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({
     ...DEFAULT_CONFIG,
     ...(cachedPortal?.config || {}),
-  }, null, 'about'))
+  }, null, 'products'))
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string[]>([])
   const [brandFilter, setBrandFilter] = useState<string[]>([])
@@ -1610,6 +1610,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       setAssistantRequestPolicy(null)
       return
     }
+    if (activeTab !== 'ai') return undefined
 
     const statusKey = String(previewConfig.aiProviderId || 'default')
     if (assistantStatusKeyRef.current === statusKey) return undefined
@@ -1635,7 +1636,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     return () => {
       invalidateTrackedRequest(assistantStatusRequestRef)
     }
-  }, [publicView, previewConfig.aiEnabled, previewConfig.aiProviderId])
+  }, [activeTab, publicView, previewConfig.aiEnabled, previewConfig.aiProviderId])
 
   /** Open modal gallery for selected product image list. */
   function openProductGallery(product: CatalogProduct, startIndex = 0) {
@@ -3083,7 +3084,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     }
   }
 
-  const mapEmbedUrl = displayConfig.showGoogleMap
+  const shouldLoadMapEmbed = displayConfig.showGoogleMap && (!publicView || activeTab === 'about')
+  const mapEmbedUrl = shouldLoadMapEmbed
     ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '')
     : ''
   const socialLinks = [
