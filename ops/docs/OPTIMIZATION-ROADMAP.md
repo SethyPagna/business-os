@@ -8946,3 +8946,36 @@ Move 728 status:
   `/api/products/search` response at HTTP 200. Public Cloudflare initially
   returned stale tunnel errors after runtime restart, but restarting only
   `business-os-cloudflared-1` restored public and admin health to HTTP 200.
+
+Move 729 status:
+- Move 729 caches POS catalog metadata during filter/search/page reloads. The
+  repeated live route sweep found a remaining POS waterfall: after Move 728
+  coalesced rapid catalog loads, every POS catalog reload still fetched
+  categories, branches, and product-filter metadata alongside the product
+  search. Those lookup datasets are needed at route-ready and after branch or
+  category sync, but not for every ordinary filter tap.
+- `frontend/src/components/pos/POS.tsx` now separates product application from
+  metadata application. The first POS catalog load fetches products plus
+  categories/branches/filter metadata; normal filter/search/page reloads fetch
+  products only; branch/category sync passes `forceMetadata` to refresh lookup
+  state deliberately.
+- `ops/scripts/runtime/live-checks/filter-burst-check.ts` now records metadata
+  responses as well as product-search responses, and fails if a post-ready
+  burst triggers `/api/categories`, `/api/branches`, or
+  `/api/products/filters`.
+- Docker release image `business-os:v6.0.0-202606031003` is serving frontend
+  hash `25a697370460f92b`; update backup:
+  `ops/runtime/docker-release/backups/20260603-100513`.
+- Proof: frontend JSX/source check, frontend typecheck, production build,
+  Docker release build/update, local health/build metadata, filter burst
+  Playwright, focused Products/POS/Public route-control sweep, public
+  Cloudflare portal Playwright, and full desktop/mobile all-pages Playwright
+  passed. The burst report `ops/runtime/reports/filter-burst-check-latest.json`
+  produced one `/api/products/search` response and zero metadata responses per
+  three-click burst on desktop/mobile Products and POS. The full all-pages
+  report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-16-24-667Z/summary.json`
+  covered 34 routes, discovered 518 visible controls, exercised 384 controls,
+  skipped 134 by stable broad-audit guardrails, captured 68 screenshots, and
+  recorded zero failed controls and zero findings. Public and admin Cloudflare
+  `/health` both returned HTTP 200 after the update.

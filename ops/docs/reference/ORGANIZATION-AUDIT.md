@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T01:52:08.505Z
+Generated: 2026-06-03T02:24:41.922Z
 
 ## Summary
 
@@ -63,7 +63,7 @@ Generated: 2026-06-03T01:52:08.505Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 8949 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 8982 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
@@ -77,12 +77,12 @@ Generated: 2026-06-03T01:52:08.505Z
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
 | frontend/src/components/products/Products.tsx | 2369 | frontend/components/products |
 | frontend/tests/performanceLoadingUx.test.ts | 2320 | frontend/tests/performanceLoadingUx.test.ts |
-| frontend/src/components/pos/POS.tsx | 2252 | frontend/components/pos |
+| frontend/src/components/pos/POS.tsx | 2281 | frontend/components/pos |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2147 | frontend/components/products |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 1972 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2014 | ops/docs |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/App.tsx | 1879 | frontend/src/App.tsx |

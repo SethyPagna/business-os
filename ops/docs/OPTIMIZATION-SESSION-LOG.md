@@ -1969,3 +1969,45 @@ Use this shape for future entries:
   530 while local/admin health were reachable. Restarting only
   `business-os-cloudflared-1` restored both public and admin health to HTTP
   200; the tunnel/Docker DNS stability follow-up remains open.
+
+- change: cache POS catalog metadata during filter reloads
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `ops/scripts/runtime/live-checks/filter-burst-check.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS catalog reloads, Products/POS filter bursts,
+  `/api/products/search`, `/api/categories`, `/api/branches`, and
+  `/api/products/filters`
+- keeper or rollback: keeper; POS now fetches lookup metadata at first
+  route-ready load and on explicit branch/category sync, while normal
+  filter/search/page changes keep product data current without repeating
+  category/branch/filter metadata requests
+- route-scoped result: `ops/runtime/reports/filter-burst-check-latest.json`
+  rapidly clicked three filter controls on desktop/mobile Products and POS.
+  Each burst produced one `/api/products/search` response, zero metadata
+  responses, and HTTP 200 statuses.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-11-44-128Z/summary.json`
+  covered desktop/mobile Products, POS, and Public Catalog, discovered 143
+  controls, exercised 118 controls, skipped 25 by stable broad-audit
+  guardrails, captured 12 screenshots, and recorded zero failed controls.
+- warm whole-app result: frontend source check, frontend typecheck, production
+  build, Docker release build/update, local `/health`, local
+  `/business-os-build.json`, public/admin Cloudflare health, public Cloudflare
+  Playwright, and full all-pages desktop/mobile Playwright passed. Docker
+  image `business-os:v6.0.0-202606031003` is serving build hash
+  `25a697370460f92b`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-100513`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-16-24-667Z/summary.json`
+  covered 34 routes, discovered 518 visible controls, exercised 384 controls,
+  intentionally skipped 134 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-14-58-954Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.

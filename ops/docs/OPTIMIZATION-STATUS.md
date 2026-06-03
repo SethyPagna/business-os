@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 728, coalesce Products/POS filter loads and speed live audit loops
+- Latest completed move: Move 729, cache POS catalog metadata during filter reloads
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `da6ef8d8e9971506`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `25a697370460f92b`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `da6ef8d8e9971506`
+  `25a697370460f92b`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T01-39-09-836Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-16-24-667Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T01-38-34-629Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-14-58-954Z/report.json`
 - latest Products/POS filter burst proof:
   `ops/runtime/reports/filter-burst-check-latest.json`
 - latest import-tracker focused proof:
@@ -49,22 +49,32 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `da6ef8d8e9971506` across 34 routes, with 519 visible controls
-  discovered, 386 controls exercised, 133 intentionally skipped by stable
+  build hash `25a697370460f92b` across 34 routes, with 518 visible controls
+  discovered, 384 controls exercised, 134 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - Products and POS desktop/mobile filter burst proof passed with three rapid
   filter/search clicks per route and only one `/api/products/search` response
-  per burst, all HTTP 200
+  per burst, zero category/branch/filter metadata responses after page-ready,
+  and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606030916` is serving the
+- Docker release image `business-os:v6.0.0-202606031003` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-092847`
+  `ops/runtime/docker-release/backups/20260603-100513`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- POS catalog reloads now cache categories, branches, and filter metadata
+  after the first route-ready load. Normal POS search/filter/page changes fetch
+  the product list only; branch/category sync forces a metadata refresh. The
+  live `filter-burst-check` now fails if any category, branch, or product
+  filter metadata request fires during a post-ready filter burst, and the
+  Docker-served proof passed with zero metadata responses on desktop/mobile
+  POS and Products. Full all-pages Playwright then passed on build
+  `25a697370460f92b` with zero failed controls.
 
 - Products and POS now coalesce rapid filter/search/page changes into one
   active product/catalog load plus one latest-state follow-up reload instead

@@ -10,8 +10,10 @@ type BurstResult = {
   route: string
   burstClicks: number
   productSearchResponses: number
+  metadataResponses: number
   statuses: number[]
   searches: string[]
+  metadataUrls: string[]
 }
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
@@ -37,15 +39,18 @@ async function clickIfPresent(page: Page, label: RegExp): Promise<boolean> {
 
 async function runBurst(page: Page, profile: string, route: string, pathName: string, readyText: string, labels: RegExp[]): Promise<BurstResult> {
   const events: Array<{ url: string, status: number }> = []
+  const metadataEvents: Array<{ url: string, status: number }> = []
   const onResponse = (response: Response) => {
     const url = response.url()
     if (/\/api\/products\/search/.test(url)) events.push({ url, status: response.status() })
+    if (/\/api\/(?:categories|branches|products\/filters)(?:[/?#]|$)/.test(url)) metadataEvents.push({ url, status: response.status() })
   }
   page.on('response', onResponse)
   try {
     await page.goto(pathName, { waitUntil: 'domcontentloaded' })
     await waitForPage(page, route, readyText)
     events.length = 0
+    metadataEvents.length = 0
     let clicked = 0
     for (const label of labels) {
       if (await clickIfPresent(page, label)) clicked += 1
@@ -57,8 +62,10 @@ async function runBurst(page: Page, profile: string, route: string, pathName: st
       route,
       burstClicks: clicked,
       productSearchResponses: events.length,
-      statuses: events.map((event) => event.status),
+      metadataResponses: metadataEvents.length,
+      statuses: [...events, ...metadataEvents].map((event) => event.status),
       searches: events.map((event) => new URL(event.url).search),
+      metadataUrls: metadataEvents.map((event) => new URL(event.url).pathname),
     }
   } finally {
     page.off('response', onResponse)
@@ -107,7 +114,8 @@ async function main(): Promise<void> {
       generatedAt: new Date().toISOString(),
       baseUrl: BASE_URL,
       maxExpectedSearchResponsesPerBurst: 2,
-      ok: results.every((result) => result.productSearchResponses <= 2 && result.statuses.every((status) => status < 400)),
+      maxExpectedMetadataResponsesPerBurst: 0,
+      ok: results.every((result) => result.productSearchResponses <= 2 && result.metadataResponses === 0 && result.statuses.every((status) => status < 400)),
       results,
     }
     await fs.mkdir(path.dirname(REPORT_PATH), { recursive: true })

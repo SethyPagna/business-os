@@ -1292,4 +1292,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 519 controls, exercised 386, skipped 133 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 459 records roadmap Move 729: cache POS catalog metadata during
+  filter/search/page reloads. The POS route now separates product application
+  from category/branch/filter metadata application: first route-ready load
+  fetches metadata, ordinary catalog reloads fetch products only, and
+  branch/category sync forces a metadata refresh. The live
+  `filter-burst-check` now counts `/api/categories`, `/api/branches`, and
+  `/api/products/filters` as metadata responses and fails if any appear during
+  a post-ready burst. Docker-served build hash `25a697370460f92b` passed
+  source checks, typecheck, production build, Docker release/update, focused
+  Products/POS/Public route-control sweep, public Cloudflare Playwright, and
+  full desktop/mobile all-pages Playwright. The burst proof
+  `ops/runtime/reports/filter-burst-check-latest.json` produced one
+  `/api/products/search` response and zero metadata responses per three-click
+  burst on desktop/mobile Products and POS. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-16-24-667Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 384, skipped 134 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

@@ -252,6 +252,10 @@ type ProductFilterMeta = {
   suppliers: string[]
 }
 
+type CatalogLoadOptions = {
+  forceMetadata?: boolean
+}
+
 type ProductPayload = {
   filters?: Partial<ProductFilterMeta>
   initials?: unknown[]
@@ -541,9 +545,10 @@ export default function POS() {
 
   const searchRef = useRef<HTMLInputElement | null>(null)
   const catalogRequestRef = useRef(0)
-  const catalogLoadPromiseRef = useRef<Promise<{ prods: ProductRecord[], cats: unknown[], brs: BranchRecord[] } | null> | null>(null)
-  const pendingCatalogLoadRef = useRef<{ label: string } | null>(null)
-  const latestLoadCatalogRef = useRef<((label?: string) => Promise<{ prods: ProductRecord[], cats: unknown[], brs: BranchRecord[] } | null>) | null>(null)
+  const catalogLoadPromiseRef = useRef<Promise<{ prods: ProductRecord[] } | null> | null>(null)
+  const pendingCatalogLoadRef = useRef<{ label: string, options?: CatalogLoadOptions } | null>(null)
+  const latestLoadCatalogRef = useRef<((label?: string, options?: CatalogLoadOptions) => Promise<{ prods: ProductRecord[] } | null>) | null>(null)
+  const catalogMetadataLoadedRef = useRef(false)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
@@ -569,8 +574,11 @@ export default function POS() {
     return t('products') || 'products'
   }, [hasProductDiscoveryQuery, stockFilter, t])
 
-  const applyCatalogData = useCallback((prods: ProductRecord[], cats: unknown[], brs: BranchRecord[]) => {
+  const applyCatalogProducts = useCallback((prods: ProductRecord[]) => {
     setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
+  }, [])
+
+  const applyCatalogMetadata = useCallback((cats: unknown[], brs: BranchRecord[]) => {
     setCategories(Array.isArray(cats) ? cats.map(normalizeCategory).filter((category): category is CategoryRecord => Boolean(category)) : [])
     const activeBranches = Array.isArray(brs) ? brs.filter((branch) => branch?.is_active) : []
     setBranches(activeBranches)
@@ -583,13 +591,26 @@ export default function POS() {
     })
   }, [])
 
+  const applyProductFilterMeta = useCallback((filters: Record<string, unknown>, fallbackInitials: unknown[] = []) => {
+    setProductFilterMeta({
+      brands: Array.isArray(filters?.brands) ? filters.brands as string[] : [],
+      suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers as string[] : [],
+      initials: aggregateInitialOptions((filters?.initials || fallbackInitials) as Array<Record<string, unknown>>),
+    })
+  }, [])
+
   useEffect(() => {
     membershipInfoRef.current = membershipInfo
   }, [membershipInfo])
 
-  const loadCatalogData = useCallback(async (label = 'POS catalog data') => {
+  const loadCatalogData = useCallback(async (label = 'POS catalog data', options: CatalogLoadOptions = {}) => {
     if (catalogLoadPromiseRef.current) {
-      pendingCatalogLoadRef.current = { label }
+      pendingCatalogLoadRef.current = {
+        label,
+        options: {
+          forceMetadata: Boolean(options.forceMetadata || pendingCatalogLoadRef.current?.options?.forceMetadata),
+        },
+      }
       return catalogLoadPromiseRef.current
     }
     const requestId = beginTrackedRequest(catalogRequestRef)
@@ -613,12 +634,17 @@ export default function POS() {
           include: 'branch_stock,images,family',
         }
         const api = getPosApi()
-        const [productPayload, cats, brs, filterPayload] = await withLoaderTimeout(
+        const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current)
+        const [productPayload, metadataPayload] = await withLoaderTimeout(
           () => Promise.all([
             api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
-            api.getCategories?.() || missingPosApiMethod('getCategories'),
-            api.getBranches?.() || missingPosApiMethod('getBranches'),
-            api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'),
+            shouldLoadMetadata
+              ? Promise.all([
+                api.getCategories?.() || missingPosApiMethod('getCategories'),
+                api.getBranches?.() || missingPosApiMethod('getBranches'),
+                api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'),
+              ])
+              : Promise.resolve(null),
           ]),
           label,
           POS_CATALOG_LOAD_TIMEOUT_MS,
@@ -628,15 +654,18 @@ export default function POS() {
         const prods = Array.isArray(payloadRecord.items)
           ? payloadRecord.items as ProductRecord[]
           : (Array.isArray(productPayload) ? productPayload : [])
-        applyCatalogData(prods, cats, brs)
+        applyCatalogProducts(prods)
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
-        const filters = isPlainRecord(filterPayload) ? filterPayload : (isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {})
-        setProductFilterMeta({
-          brands: Array.isArray(filters?.brands) ? filters.brands : [],
-          suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-          initials: aggregateInitialOptions((filters?.initials || payloadRecord.initials || []) as Array<Record<string, unknown>>),
-        })
-        return { prods, cats, brs }
+        if (Array.isArray(metadataPayload)) {
+          const [cats, brs, filterPayload] = metadataPayload
+          applyCatalogMetadata(cats as unknown[], brs as BranchRecord[])
+          catalogMetadataLoadedRef.current = true
+          const filters = isPlainRecord(filterPayload) ? filterPayload : (isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {})
+          applyProductFilterMeta(filters, payloadRecord.initials || [])
+        } else if (isPlainRecord(payloadRecord.filters) || Array.isArray(payloadRecord.initials)) {
+          applyProductFilterMeta(isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {}, payloadRecord.initials || [])
+        }
+        return { prods }
       } catch (error) {
         if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
         console.error('[POS] catalog load failed:', getErrorMessage(error))
@@ -656,13 +685,13 @@ export default function POS() {
         pendingCatalogLoadRef.current = null
         queueMicrotask(() => {
           const nextLoad = latestLoadCatalogRef.current || loadCatalogData
-          nextLoad(pending.label).catch(() => {})
+          nextLoad(pending.label, pending.options).catch(() => {})
         })
       }
     })
     catalogLoadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [applyCatalogData, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, hasProductDiscoveryQuery, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
+  }, [applyCatalogMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
 
   useEffect(() => {
     latestLoadCatalogRef.current = loadCatalogData
@@ -765,7 +794,7 @@ export default function POS() {
     if (!isActive || !syncChannel) return
     const { channel } = syncChannel
     if (channel === 'products' || channel === 'branches' || channel === 'categories') {
-      void loadCatalogData('POS sync catalog')
+      void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' || channel === 'categories' })
     }
     if (channel === 'customers') {
       void loadCustomers('POS sync customers')
