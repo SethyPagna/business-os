@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 762.
+- Latest completed implementation move in this roadmap: Move 763.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -10137,3 +10137,58 @@ Move 762 status:
   writes, receipt printing, customer/delivery create writes, product-management
   writes, and settings/system transport clusters without moving live business
   data or weakening offline fallback behavior.
+
+Move 763 status:
+- Move 763 narrows POS quick customer and delivery-contact create writes.
+  `POS.tsx` now lazy-loads `contactWriteTransport.ts` for the Add Customer and
+  Add Delivery modal save paths, so those real write intents no longer enter
+  the broad `window.api` methods registry. The new write transport posts
+  directly to `/api/customers` and `/api/delivery-contacts`, adds device
+  metadata, and owns a tiny local client-request-id helper so it does not pull
+  `requestIds.ts`, `app-api-methods`, or CSV helpers into the intent chunk.
+- The read transport was also tightened: `contactReadTransport.ts` now loads
+  `lazyLocalDb.ts` and `localMirrors.ts` dynamically only after the contact
+  read path really needs local fallback or mirror writes. This keeps the
+  customer/delivery option read chunk from waking `app-local-db`,
+  `vendor-dexie`, or CSV code during the first POS read windows.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, JSX/source check, production build, Docker release image
+  `business-os:v6.0.0-202606040328`, focused POS route-load Playwright trace,
+  and a headed live Chromium POS add-customer/add-delivery flow.
+- Build proof: production builds emitted a focused `contact-write-api-*.js`
+  chunk, and compiled inspection found no `app-api-methods`, `csv-utils`,
+  `requestIds`, or broad dynamic registry import in that chunk. The source
+  guard now verifies the contact-write manual chunk, rejects
+  `api.createCustomer` and `api.createDeliveryContact` in POS, requires the
+  memoized `contactWriteTransport.ts` dynamic import, and ensures
+  `contactReadTransport.ts` keeps local DB/mirror helpers behind dynamic
+  imports.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-31-04-184Z.json`
+  measured POS at 275 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors.
+- Interaction proof: a Docker-served headed Chromium check opened POS, clicked
+  the actual customer Add button, filled the quick-customer modal, saved it,
+  enabled delivery, clicked the actual delivery Add button, filled the
+  delivery modal, and saved it. The probe created customer id `4` and delivery
+  contact id `4`, then deleted both through the API; exact post-cleanup
+  searches returned zero remaining rows for each test record. Before the
+  create intents there were no interesting broad chunks; after customer and
+  delivery creates only `contact-read-api-DS-Y1Uow.js` and
+  `contact-write-api-BlLnWfno.js` were loaded. `app-api-methods`,
+  `csv-utils`, `app-local-db`, and `vendor-dexie` stayed unloaded, with zero
+  failed requests and zero relevant console/page errors. Screenshot:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-contact-create-1780515114591.png`.
+- Post-live hygiene: `npm.cmd --prefix ops run cleanup-test-data -- --prefix
+  "QA POS" --apply` removed four QA audit-log entries left by the live create
+  flow and found no remaining matching customer, delivery-contact, product,
+  sale, return, inventory, import-job, file, or notification rows.
+- Current plan position after Move 763: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with measured route/interaction proof, focusing on POS checkout
+  sale writes, receipt printing, product-management writes, and
+  settings/system transport clusters without moving live business data or
+  weakening offline fallback behavior.

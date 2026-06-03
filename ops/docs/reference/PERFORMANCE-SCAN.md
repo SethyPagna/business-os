@@ -1836,4 +1836,25 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   no `app-portal`, `app-api-methods`, `csv-utils`, `app-local-db`, or
   `vendor-dexie`, and membership selection added only
   `app-portal-Bi-RHhNA.js` after the earlier delayed `contact-read-api` wake.
+- Move 493 records roadmap Move 763: keep POS quick customer and
+  delivery-contact create writes out of the broad API methods registry.
+  `POS.tsx` now lazy-loads `contactWriteTransport.ts` for Add Customer and
+  Add Delivery saves, and `vite.config.ts` assigns that boundary to
+  `contact-write-api`. The new transport posts directly to `/api/customers`
+  and `/api/delivery-contacts`, adds device metadata, and owns a local
+  client-request-id helper so the intent chunk does not import `requestIds.ts`,
+  `app-api-methods`, or CSV helpers. `contactReadTransport.ts` now dynamically
+  imports `lazyLocalDb.ts` and `localMirrors.ts`, preventing the read chunk
+  from waking `app-local-db`, `vendor-dexie`, or CSV code during the first
+  read windows. Docker image `business-os:v6.0.0-202606040328` served the
+  focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-31-04-184Z.json`: POS
+  was ready in 275 ms with 30 requests and 22 scripts, with zero failed
+  requests and zero console/page errors. A headed live Chromium probe used the
+  actual POS Add Customer and Add Delivery buttons, saved both records, deleted
+  the created customer id `4` and delivery contact id `4`, and confirmed exact
+  post-cleanup searches returned zero remaining rows. The create flow loaded
+  only `contact-read-api-DS-Y1Uow.js` and `contact-write-api-BlLnWfno.js`;
+  `app-api-methods`, `csv-utils`, `app-local-db`, and `vendor-dexie` stayed
+  unloaded. Post-live hygiene removed four matching QA audit-log entries.
 <!-- phase29-manual-notes:end -->

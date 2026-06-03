@@ -1,6 +1,4 @@
 import { apiFetch, isInvalidSessionError } from './http.ts'
-import { getLocalDb } from './lazyLocalDb.ts'
-import { mirrorTable } from './localMirrors.ts'
 
 type ContactTableName = 'customers' | 'delivery_contacts'
 
@@ -36,6 +34,7 @@ const readCache = new Map<string, CacheEntry>()
 const inflightReads = new Map<string, Promise<unknown>>()
 
 async function readLocalContacts(tableName: ContactTableName): Promise<unknown[]> {
+  const { getLocalDb } = await import('./lazyLocalDb.ts')
   const db = await getLocalDb()
   return db.table(tableName).orderBy('name').toArray()
 }
@@ -54,7 +53,8 @@ function setCachedRead(routeKey: string, data: unknown): unknown {
 function scheduleLateMirror(config: ContactReadConfig, data: unknown): void {
   if (typeof window === 'undefined') return
   window.setTimeout(() => {
-    const run = () => {
+    const run = async () => {
+      const { mirrorTable } = await import('./localMirrors.ts')
       mirrorTable(config.tableName)(data).catch(() => {})
     }
     const idle = (window as unknown as { requestIdleCallback?: (callback: IdleCallback, options?: { timeout?: number }) => number }).requestIdleCallback

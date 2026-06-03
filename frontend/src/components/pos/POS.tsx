@@ -292,8 +292,6 @@ type SaleResult = {
 }
 
 type PosApi = {
-  createCustomer?: (payload: CustomerFormState) => Promise<Partial<CustomerRecord>>
-  createDeliveryContact?: (payload: DeliveryFormState) => Promise<Partial<DeliveryContactRecord>>
   createSale?: (payload: Record<string, unknown>) => Promise<SaleResult>
   getBranches?: () => Promise<BranchRecord[]>
 }
@@ -348,11 +346,17 @@ function loadPosCategories(): Promise<unknown[]> {
 }
 
 let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
+let contactWriteTransportPromise: Promise<typeof import('../../api/contactWriteTransport.ts')> | null = null
 let portalTransportPromise: Promise<typeof import('../../api/portalTransport.ts')> | null = null
 
 function getContactReadTransport(): Promise<typeof import('../../api/contactReadTransport.ts')> {
   if (!contactReadTransportPromise) contactReadTransportPromise = import('../../api/contactReadTransport.ts')
   return contactReadTransportPromise
+}
+
+function getContactWriteTransport(): Promise<typeof import('../../api/contactWriteTransport.ts')> {
+  if (!contactWriteTransportPromise) contactWriteTransportPromise = import('../../api/contactWriteTransport.ts')
+  return contactWriteTransportPromise
 }
 
 function getPortalTransport(): Promise<typeof import('../../api/portalTransport.ts')> {
@@ -368,6 +372,16 @@ async function loadPosCustomers(): Promise<CustomerRecord[]> {
 async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
   const { getDeliveryContacts } = await getContactReadTransport()
   return getDeliveryContacts() as Promise<DeliveryContactRecord[]>
+}
+
+async function createPosCustomer(payload: CustomerFormState): Promise<Partial<CustomerRecord>> {
+  const { createCustomer } = await getContactWriteTransport()
+  return createCustomer(payload) as Promise<Partial<CustomerRecord>>
+}
+
+async function createPosDeliveryContact(payload: DeliveryFormState): Promise<Partial<DeliveryContactRecord>> {
+  const { createDeliveryContact } = await getContactWriteTransport()
+  return createDeliveryContact(payload) as Promise<Partial<DeliveryContactRecord>>
 }
 
 async function lookupPosPortalMembership(membershipNumber: string): Promise<MembershipInfo | null> {
@@ -1090,9 +1104,8 @@ export default function POS() {
     savingCustomerRef.current = true
     setSavingCustomer(true)
     try {
-      const api = getPosApi()
       const created = await withLoaderTimeout(
-        () => api.createCustomer?.(newCustomerForm) || missingPosApiMethod('createCustomer'),
+        () => createPosCustomer(newCustomerForm),
         'Create POS customer',
         POS_CUSTOMER_CREATE_TIMEOUT_MS,
       )
@@ -1141,9 +1154,8 @@ export default function POS() {
         ...newDeliveryForm,
         name: newDeliveryForm.name.trim() || `Driver ${newDeliveryForm.phone.trim()}`,
       }
-      const api = getPosApi()
       const res = await withLoaderTimeout(
-        () => api.createDeliveryContact?.(payload) || missingPosApiMethod('createDeliveryContact'),
+        () => createPosDeliveryContact(payload),
         'Create POS delivery contact',
         POS_DELIVERY_CREATE_TIMEOUT_MS,
       )

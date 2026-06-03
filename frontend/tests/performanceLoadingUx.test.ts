@@ -8,6 +8,8 @@ const webApi = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'u
 const httpApi = fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8')
 const websocketApi = fs.readFileSync(new URL('../src/api/websocket.ts', import.meta.url), 'utf8')
 const appBootstrapTransport = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
+const contactReadTransport = fs.readFileSync(new URL('../src/api/contactReadTransport.ts', import.meta.url), 'utf8')
+const contactWriteTransport = fs.readFileSync(new URL('../src/api/contactWriteTransport.ts', import.meta.url), 'utf8')
 const localMirrors = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
 const clientRuntime = fs.readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
 const viteConfig = fs.readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
@@ -259,6 +261,7 @@ assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHe
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/actionGuards\.ts'\)\) \{[\s\S]*return 'action-guards'/, 'shared synchronous action guards should not be owned by the heavy catalog route chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/scriptTypography\.ts'\)\) \{[\s\S]*return 'script-typography'/, 'shared Khmer typography helpers should not be owned by the public catalog preview chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactReadTransport\.ts'\)\) return 'contact-read-api'/, 'POS delayed contact option reads should have their own lazy contact-read API chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactWriteTransport\.ts'\)\) return 'contact-write-api'/, 'POS quick contact create writes should have their own lazy contact-write API chunk')
 assert.match(viteConfig, /productReadTransport\.ts'[\s\S]*lookupTransport\.ts'[\s\S]*expectedUpdatedAt\.ts'[\s\S]*localMirrors\.ts'[\s\S]*lazyLocalDb\.ts'[\s\S]*queryCache\.ts'[\s\S]*return 'product-read-api'/, 'POS product and lookup reads should have a narrow product-read API chunk instead of landing in app-api-methods')
 assert.match(viteConfig, /catalog\/catalogUi\.tsx'[\s\S]*return 'catalog-ui'[\s\S]*catalog\/portalCatalogDisplay\.ts'[\s\S]*return 'catalog-display'[\s\S]*CatalogPageContext\.tsx'[\s\S]*return 'catalog-context'[\s\S]*components\/catalog\/'\)\) return 'catalog'/, 'small catalog UI/display/context helpers should be split before the generic catalog route chunk')
 assert.match(viteConfig, /CatalogEditorSurface\.tsx'\)[\s\S]*CatalogImageField\.tsx'\)[\s\S]*return 'catalog-editor'/, 'editor-only catalog image fields should not be grouped into the public catalog chunk')
@@ -283,8 +286,14 @@ assert.match(pos, /const FilterPanel = lazy\(\(\) => import\('\.\/FilterPanel'\)
 assert.match(pos, /getProductBootstrap as getPosProductBootstrap[\s\S]*getProductFilters as getPosProductFilters[\s\S]*searchProducts as searchPosProducts[\s\S]*from '\.\.\/\.\.\/api\/productReadTransport\.ts'/, 'POS product reads should use the narrow product transport instead of the full window.api registry')
 assert.match(pos, /getCategories as getPosCategories[\s\S]*from '\.\.\/\.\.\/api\/lookupTransport\.ts'/, 'POS category options should use the narrow lookup transport instead of the full window.api registry')
 assert.match(pos, /let contactReadTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \| null = null[\s\S]*function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)>/, 'POS contact reads should lazy-load the narrow contact read transport after the delayed option gate')
+assert.match(pos, /let contactWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)> \| null = null[\s\S]*function getContactWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)>/, 'POS quick contact creates should lazy-load the narrow contact write transport on add intent')
 assert.match(pos, /let portalTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)> \| null = null[\s\S]*function getPortalTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)>/, 'POS membership lookup should lazy-load the narrow portal transport on membership intent')
-assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts|api\.lookupPortalMembership/, 'POS product, category, customer, delivery, and membership reads should not wake app-api-methods during catalog and option loads')
+assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts|api\.lookupPortalMembership|api\.createCustomer|api\.createDeliveryContact/, 'POS product, category, customer, delivery, membership reads, and quick contact creates should not wake app-api-methods during catalog, option, or add flows')
+assert.doesNotMatch(contactReadTransport, /import .*['"]\.\/(?:localMirrors|lazyLocalDb)\.ts['"]/, 'POS contact reads should not statically import mirror or IndexedDB helpers')
+assert.match(contactReadTransport, /await import\('\.\/lazyLocalDb\.ts'\)/, 'POS contact read offline fallback should load IndexedDB only after network failure')
+assert.match(contactReadTransport, /await import\('\.\/localMirrors\.ts'\)/, 'POS contact read mirroring should load mirror helpers only after the delayed mirror timer')
+assert.doesNotMatch(contactWriteTransport, /import .*['"]\.\/requestIds\.ts['"]/, 'POS contact quick-create writes should not import the shared app-api-methods request-id owner')
+assert.match(contactWriteTransport, /function ensureContactClientRequestId/, 'POS contact quick-create writes should keep a tiny local request-id helper')
 assert.match(lazyPortalMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module\.default\)/, 'LazyPortalMenu should dynamically import PortalMenu')
 assert.match(lazyPortalMenu, /onClickCapture=\{\(event\) => \{[\s\S]*loadPortalMenu\(true\)/, 'LazyPortalMenu should open the menu from the first click after the chunk loads')
 assert.match(portalMenu, /defaultOpen\?: boolean[\s\S]*const \[open, setOpen\] = useState\(defaultOpen\)/, 'PortalMenu should support first-click lazy mount opening')
@@ -2318,12 +2327,12 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createCustomer(?:\?\.)?\(newCustomerForm\)[\s\S]*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => createPosCustomer\(newCustomerForm\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
   'POS quick-add customer writes should timeout slow creates',
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createDeliveryContact(?:\?\.)?\(payload\)[\s\S]*'Create POS delivery contact',\s*POS_DELIVERY_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => createPosDeliveryContact\(payload\),\s*'Create POS delivery contact',\s*POS_DELIVERY_CREATE_TIMEOUT_MS,\s*\)/,
   'POS quick-add delivery writes should timeout slow creates',
 )
 assert.match(

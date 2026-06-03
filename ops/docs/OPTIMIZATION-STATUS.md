@@ -8,17 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 758, intent-load the POS filter panel so closed
-  filter UI code stays out of POS first route paint
+- Latest completed move: Move 763, narrow POS quick customer and delivery
+  create writes so the actual add-customer/add-delivery intents avoid the
+  broad API methods registry
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `2a554c3c40e34b1e`
+- latest verified frontend hash from the most recent Docker-served live check: `c153ad12d7babef6`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `4702746e8570d644`
+  `b1a985617627433d`
 
 Latest verified reports:
 
@@ -31,7 +32,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T17-51-33-389Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-31-04-184Z.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
@@ -92,11 +93,32 @@ Current honest pockets:
   Move 755 is served by Docker release image `business-os:v6.0.0-202606040111`;
   Move 756 is served by Docker release image `business-os:v6.0.0-202606040128`;
   Move 757 is served by Docker release image `business-os:v6.0.0-202606040138`;
-  Move 758 is served by Docker release image `business-os:v6.0.0-202606040149`
+  Move 758 is served by Docker release image `business-os:v6.0.0-202606040149`;
+  Move 759 is served by Docker release image `business-os:v6.0.0-202606040205`;
+  Move 760 is served by Docker release image `business-os:v6.0.0-202606040219`;
+  Move 761 is served by Docker release image `business-os:v6.0.0-202606040246`;
+  Move 762 is served by Docker release image `business-os:v6.0.0-202606040258`;
+  Move 763 is served by Docker release image `business-os:v6.0.0-202606040328`.
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- POS quick customer and delivery-contact create writes now use a focused
+  `contact-write-api` transport chunk instead of the broad API methods
+  registry. Proof: Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-31-04-184Z.json`
+  measured POS at 275 ms route-ready with 30 requests and 22 scripts, zero
+  failed requests, and zero console/page errors. A headed live Chromium check
+  used the real POS Add Customer and Add Delivery buttons, filled both modals,
+  saved both records, and then deleted the created customer id `4` and
+  delivery contact id `4`; exact post-cleanup searches returned zero remaining
+  rows. The script list added only `contact-read-api-DS-Y1Uow.js` and
+  `contact-write-api-BlLnWfno.js`, while `app-api-methods`, `csv-utils`,
+  `app-local-db`, and `vendor-dexie` stayed unloaded. Post-live hygiene
+  removed four matching QA audit-log entries. Docker release image
+  `business-os:v6.0.0-202606040328` serves frontend hash
+  `c153ad12d7babef6`.
 
 - POS now lazy-loads the filter panel only after the cashier opens Filters.
   Proof: Docker-served route trace
@@ -1489,9 +1511,8 @@ Recent route-level win:
 5. Continue mobile public portal polish from the screenshots: next candidates
    are the large hero logo/avatar sizing and first-card spacing if the public
    owner wants an even shorter first viewport.
-6. Continue measured POS splits after Move 762: checkout writes, receipt
-   printing, customer/delivery create writes, product-management writes, and
-   settings/system transports can still wake broad registry paths on real
-   intent. Keep each slice guarded by route traces plus interaction proof so
-   read-only POS browsing remains light while live/offline write behavior stays
-   intact.
+6. Continue measured POS splits after Move 763: checkout sale writes, receipt
+   printing, product-management writes, and settings/system transports can
+   still wake broad registry paths on real intent. Keep each slice guarded by
+   route traces plus interaction proof so read-only POS browsing remains light
+   while live/offline write behavior stays intact.

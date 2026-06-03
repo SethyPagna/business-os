@@ -2936,3 +2936,51 @@ Use this shape for future entries:
   `app-portal-Bi-RHhNA.js` was added. Broad/local chunks stayed unloaded with
   zero failed requests and zero relevant console/page errors. Screenshot:
   `C:\Users\user\Downloads\business-os\output\playwright\pos-membership-lookup-1780513393629.png`.
+
+- change: keep POS quick customer and delivery-contact create writes out of
+  broad API methods
+- affected files:
+  `frontend/src/api/contactReadTransport.ts`,
+  `frontend/src/api/contactWriteTransport.ts`,
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS Add Customer and Add Delivery modal save paths,
+  plus contact-option read fallback/mirror timing
+- keeper or rollback: keeper; POS now lazy-loads `contactWriteTransport.ts`
+  for quick customer and delivery-contact creates. The write transport posts
+  directly to `/api/customers` and `/api/delivery-contacts`, adds device
+  metadata, and owns a local client-request-id helper so it does not import
+  `requestIds.ts`, `app-api-methods`, or CSV helpers. `contactReadTransport.ts`
+  dynamically imports local DB and mirror helpers only after those fallback
+  paths are needed.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `contact-write-api-*.js` as a
+  focused write chunk. Compiled inspection found no `app-api-methods`,
+  `csv-utils`, `requestIds`, or broad dynamic registry import in the chunk. The
+  source guard verifies the contact-write manual chunk, rejects
+  `api.createCustomer` and `api.createDeliveryContact` in POS, and requires
+  dynamic local DB/mirror imports in `contactReadTransport.ts`.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-31-04-184Z.json`
+  measured POS at 275 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors. Docker image
+  `business-os:v6.0.0-202606040328` served the check.
+- interaction proof:
+  a Docker-served headed Chromium probe opened POS, clicked the real Add
+  Customer and Add Delivery buttons, filled both modals, saved both records,
+  and then deleted the created customer id `4` and delivery contact id `4`.
+  Exact post-cleanup searches returned zero remaining rows. The flow loaded
+  only `contact-read-api-DS-Y1Uow.js` and `contact-write-api-BlLnWfno.js`,
+  while `app-api-methods`, `csv-utils`, `app-local-db`, and `vendor-dexie`
+  stayed unloaded with zero failed requests and zero relevant console/page
+  errors. Screenshot:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-contact-create-1780515114591.png`.
+- post-live hygiene:
+  `npm.cmd --prefix ops run cleanup-test-data -- --prefix "QA POS" --apply`
+  removed four QA audit-log entries left by the live create flow and found no
+  remaining matching source rows.
