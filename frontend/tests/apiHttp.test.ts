@@ -359,12 +359,14 @@ await runTest('import job delete prefers canonical DELETE route with legacy fall
 
 await runTest('read-only 530 pollers use fallback data and backoff hooks', () => {
   const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  const notificationSummarySource = fs.readFileSync(new URL('../src/api/notificationSummary.ts', import.meta.url), 'utf8')
   const importJobsTransportSource = fs.readFileSync(new URL('../src/api/importJobsTransport.ts', import.meta.url), 'utf8')
   const trackerSource = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
   const appContextSource = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
   const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 
-  assert.match(methodsSource, /isTransientGatewayError\(error\?\.status\)/)
+  assert.match(methodsSource, /getNotificationSummary as getNotificationSummaryRequest/)
+  assert.match(notificationSummarySource, /isTransientGatewayError\(status\)/)
   assert.match(importJobsTransportSource, /lastImportJobsByQuery/)
   assert.match(importJobsTransportSource, /transient:\s*true/)
   assert.match(trackerSource, /pollBackoffMs/)
@@ -811,7 +813,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /export \{ getImageDataUrl, openCSVDialog, openImageDialog \} from '\.\/browserDialogs\.ts'/)
   assert.match(expectedUpdatedAtSource, /export async function withExpectedUpdatedAt\([\s\S]*body\.expectedUpdatedAt = body\.updated_at[\s\S]*table\?\.get\?\.\(id\)/)
   assert.match(localMirrorsSource, /export function mirrorReadResult[\s\S]*return result/)
-  assert.match(localMirrorsSource, /MIRROR_WRITE_IDLE_DELAY_MS = 2500/)
+  assert.match(localMirrorsSource, /MIRROR_WRITE_IDLE_DELAY_MS = 10_000/)
   assert.match(localMirrorsSource, /window\.setTimeout\(\(\) => \{[\s\S]*requestIdleCallback[\s\S]*idle\(\(\) => run\(\), \{ timeout: MIRROR_WRITE_IDLE_DELAY_MS \}\)[\s\S]*\}, MIRROR_WRITE_IDLE_DELAY_MS\)/)
   assert.match(localMirrorsSource, /export function mirrorTable[\s\S]*for \(const row of Array\.isArray\(rows\) \? rows : \[\]\)[\s\S]*replaceTableContents/)
   assert.match(lookupTransportSource, /export function getCategories/)

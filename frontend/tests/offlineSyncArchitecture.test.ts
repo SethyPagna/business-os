@@ -19,6 +19,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 const swSource = fs.readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+const saleWriteTransportSource = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
 
 await runTest('service worker replays the IndexedDB outbox through secure authenticated background sync', () => {
@@ -82,13 +83,15 @@ await runTest('online maintenance keeps the offline mirror and app shell fresh w
 })
 
 await runTest('queued offline writes carry version metadata and do not disappear on server conflicts', () => {
-  assert.match(methodsSource, /registerOutboxBackgroundSync/)
-  assert.match(methodsSource, /emitSyncQueueChanged/)
-  assert.match(methodsSource, /queue_version/)
-  assert.match(methodsSource, /base_updated_at/)
-  assert.match(methodsSource, /isWriteConflictError/)
-  assert.match(methodsSource, /status: 'conflict'/)
-  assert.doesNotMatch(methodsSource, /isWriteConflictError\(error\)[\s\S]{0,120}completeQueuedSale/)
+  assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
+  assert.match(webApiSource, /registerOutboxBackgroundSync/)
+  assert.match(saleWriteTransportSource, /registerOutboxBackgroundSync/)
+  assert.match(saleWriteTransportSource, /emitSyncQueueChanged/)
+  assert.match(saleWriteTransportSource, /queue_version/)
+  assert.match(saleWriteTransportSource, /base_updated_at/)
+  assert.match(saleWriteTransportSource, /isWriteConflictError/)
+  assert.match(saleWriteTransportSource, /status: 'conflict'/)
+  assert.doesNotMatch(saleWriteTransportSource, /isWriteConflictError\(error\)[\s\S]{0,120}completeQueuedSale/)
 })
 
 if (failed > 0) {

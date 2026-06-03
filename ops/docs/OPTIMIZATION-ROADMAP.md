@@ -10415,3 +10415,60 @@ Move 767 status:
   focus on further reducing Contacts export/template eager chunks,
   settings/system/backup transport clusters, and Cloudflare tunnel latency
   without moving live business data or weakening offline fallback behavior.
+
+Move 768 status:
+- Move 768 narrows Inventory first-load resource use. `Inventory.tsx` no
+  longer reads from `window.api`; it now owns memoized lazy loaders for
+  `inventoryTransport.ts`, `productReadTransport.ts`, `branchTransport.ts`,
+  `dashboardTransport.ts`, `returnsTransport.ts`, `rfidTransport.ts`, and the
+  new tiny `userReadTransport.ts`.
+- New transport proof: `returnsTransport.ts` provides the server-first returns
+  read with IndexedDB fallback, and `userReadTransport.ts` provides the narrow
+  admin user-list read without importing the full access-control write/roles
+  transport. `vite.config.ts` pins these boundaries to `returns-api`,
+  `user-read-api`, `dashboard-api`, and `rfid-api`; the focused performance
+  guard rejects Inventory `window.api` access and checks the lazy loader paths.
+- Local Docker route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-06-34-762Z.json`
+  measured Inventory at 364 ms route-ready with 39 requests, 2 API requests,
+  and 32 scripts, with zero failed requests and zero console/page errors. The
+  broader 17-route local trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-07-07-709Z.json`
+  measured Inventory at 227 ms with the same 39-request/32-script shape and
+  passed every route with zero failed requests and zero console/page errors.
+  Before this move, the previous local trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-51-14-968Z.json`
+  measured Inventory at 47 requests and 40 scripts.
+- Live control and public proof: fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-07-37-291Z/summary.json`
+  discovered 255 controls across 17 routes, safely exercised 184 controls,
+  intentionally skipped 71 guarded controls, captured 34 screenshots, and
+  found zero failed controls. Public Cloudflare portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-07-37-740Z/report.json`
+  rendered 20 products, confirmed portal bootstrap HTTP 200, confirmed AI
+  status HTTP 200 after interaction, and recorded zero failed responses, zero
+  relevant console messages, and zero page errors.
+- Actual Cloudflare proof:
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned HTTP 200. Remote admin
+  Inventory trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-07-37-804Z.json`
+  passed with 27 requests, 1 API request, 22 scripts, zero failed requests, and
+  zero console/page errors, but still took 6308 ms route-ready through the
+  public tunnel/auth shell. That confirms the remaining user-visible slowness
+  is Cloudflare/tunnel-path latency rather than a local rendering failure.
+- Verification proof: frontend `test:utils`, backend `test:utils`, frontend
+  typecheck, JSX/source check, production build, Docker release
+  `business-os:v6.0.0-202606040703`, route traces, all-pages control audit,
+  public portal Cloudflare check, actual link HEAD checks, and post-live
+  hygiene all passed. The stale architecture guards in frontend tests now
+  assert the extracted focused transports instead of the old broad registry
+  paths.
+- Current plan position after Move 768: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue reducing settings/system/backup route transports and Cloudflare
+  tunnel latency without moving live business data or weakening offline
+  fallback behavior.

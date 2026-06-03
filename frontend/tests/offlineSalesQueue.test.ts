@@ -17,6 +17,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 }
 
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+const saleWriteTransportSource = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
@@ -24,15 +25,16 @@ const serverPageSource = fs.readFileSync(new URL('../src/components/server/Serve
 
 await runTest('createSale queues retryable offline writes with an idempotency key', () => {
   assert.match(methodsSource, /export async function createSale/)
-  assert.match(methodsSource, /ensureClientRequestId\(\{ \.\.\.getDeviceInfo\(\), \.\.\.d \}, 'sale'\)/)
-  assert.match(methodsSource, /catch\s*\(error\)/)
-  assert.match(methodsSource, /isRetryableOfflineSaleError\(error\)/)
-  assert.match(methodsSource, /queueOfflineSale\(payload/)
+  assert.match(methodsSource, /loadSaleWriteTransport\(\)/)
+  assert.match(saleWriteTransportSource, /ensureSaleClientRequestId\(\{ \.\.\.getClientDeviceInfo\(\), \.\.\.payload \}, 'sale'\)/)
+  assert.match(saleWriteTransportSource, /catch\s*\(error\)/)
+  assert.match(saleWriteTransportSource, /isRetryableOfflineSaleError\(error\)/)
+  assert.match(saleWriteTransportSource, /queueOfflineSale\(salePayload/)
 })
 
 await runTest('retryPendingSyncNow syncs pending sales instead of discarding them', () => {
-  assert.match(methodsSource, /async function syncPendingSalesQueue/)
-  assert.match(methodsSource, /createSaleWithoutWriteDedupeRequest\(payload\)/)
+  assert.match(saleWriteTransportSource, /export async function syncPendingSalesQueue/)
+  assert.match(saleWriteTransportSource, /createSaleWithoutWriteDedupe\(payload\)/)
   assert.match(salesTransportSource, /apiFetch\(\s*'POST',\s*'\/api\/sales'/)
   assert.match(salesTransportSource, /skipWriteDedupe:\s*true/)
   const retryBody = methodsSource.match(/export async function retryPendingSyncNow\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
@@ -42,8 +44,8 @@ await runTest('retryPendingSyncNow syncs pending sales instead of discarding the
 
 await runTest('browser startup and online recovery retry queued work without clearing it', () => {
   assert.doesNotMatch(webApiSource, /discardPendingSyncQueue\?\.\(\)/)
-  assert.match(webApiSource, /getLazyApiMethod\('retryPendingSyncNow'\)\(\)/)
-  assert.match(webApiSource, /getLazyApiMethod\('refreshOfflineDeviceSnapshot'\)\(\{ force \}\)/)
+  assert.match(webApiSource, /loadSaleWriteTransportModule\(\)[\s\S]*module\.syncPendingSalesQueue\(\{ force: true \}\)/)
+  assert.match(webApiSource, /loadOfflineSnapshotTransportModule\(\)[\s\S]*module\.refreshOfflineDeviceSnapshot\(\{ force \}\)/)
   assert.match(webApiSource, /sync:reconnected/)
   assert.match(webApiSource, /addEventListener\('online'/)
 })

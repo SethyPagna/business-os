@@ -3201,3 +3201,66 @@ Use this shape for future entries:
   status, zero broad QA cleanup matches, zero smoke/action-history cleanup
   matches, zero generated integrity matches, and relationship orphan checks
   passing for 49 FK candidates.
+
+- change: narrow Inventory first-load reads and stock mutation transports
+- affected files:
+  `frontend/src/components/inventory/Inventory.tsx`,
+  `frontend/src/api/returnsTransport.ts`,
+  `frontend/src/api/userReadTransport.ts`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/offlineSalesQueue.test.ts`,
+  `frontend/tests/offlineSyncArchitecture.test.ts`,
+  `frontend/tests/productSearchPagination.test.ts`,
+  `frontend/tests/actionStability.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Inventory route first-load, stats, movement reads,
+  branch/product/user/returns/RFID reads, stock adjust/move/transfer writes,
+  actual admin/public Cloudflare links, and all-page local control sweeps
+- keeper or rollback: keeper; Inventory no longer wakes `window.api` or the
+  broad `app-api-methods` chunk for its tested first-load path. The focused
+  transports preserve server-first reads and local fallback behavior while
+  reducing first-load request/script pressure.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `inventory-api-uLLdUUMj.js`,
+  `product-read-api-DHxOeOrS.js`, `returns-api-gGxVAAzH.js`,
+  `user-read-api-DLkRgI9Y.js`, `dashboard-api-BJnL1tJk.js`, and
+  `rfid-api-C15O85S3.js` without a circular chunk warning. The performance
+  guard rejects Inventory `window.api` access and checks the focused lazy
+  loaders.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-06-34-762Z.json`
+  measured local Docker Inventory at 364 ms route-ready with 39 requests, 2
+  API requests, and 32 scripts, with zero failed requests and zero console/page
+  errors. The broader 17-route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-07-07-709Z.json`
+  measured Inventory at 227 ms with 39 requests and 32 scripts and passed all
+  17 routes with zero failures or page errors. Before Move 768, Inventory was
+  47 requests and 40 scripts in
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-51-14-968Z.json`.
+- interaction/control proof:
+  fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-07-37-291Z/summary.json`
+  discovered 255 controls across 17 routes, exercised 184 stable controls,
+  skipped 71 guarded/noisy controls, captured 34 screenshots, and found zero
+  failed controls.
+- actual link proof:
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned HTTP 200. Remote admin
+  Inventory trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-07-37-804Z.json`
+  passed with 27 requests, 1 API request, 22 scripts, zero failed requests,
+  and zero console/page errors, but still took 6308 ms route-ready through the
+  public tunnel/auth shell. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-07-37-740Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, AI status 200 after
+  interaction, zero failed responses, zero relevant console messages, and zero
+  page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset
+  status, zero QA cleanup matches, zero generated integrity matches, and
+  relationship orphan checks passing for 49 FK candidates.

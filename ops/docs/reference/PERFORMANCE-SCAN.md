@@ -1940,4 +1940,31 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T22-45-03-158Z/report.json`
   rendered 20 products with portal bootstrap 200, AI status 200 after
   interaction, and zero failed responses.
+- Move 498 records roadmap Move 768: keep Inventory first-load reads, stats,
+  movement reads, focused user/returns/RFID/dashboard reads, and stock
+  mutations out of the broad API methods registry. `Inventory.tsx` now uses
+  memoized lazy loaders for focused transports, with new `returnsTransport.ts`
+  and `userReadTransport.ts` boundaries plus manual chunks for `returns-api`,
+  `user-read-api`, `dashboard-api`, and `rfid-api`. Docker image
+  `business-os:v6.0.0-202606040703` served local Inventory trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-06-34-762Z.json`:
+  Inventory was ready in 364 ms with 39 requests, 2 API requests, and 32
+  scripts, with zero failed requests and zero console/page errors. The broader
+  local 17-route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-07-07-709Z.json`
+  measured Inventory at 227 ms with 39 requests/32 scripts and passed all
+  routes with zero failures. This improves the prior Inventory first-load
+  shape of 47 requests and 40 scripts from
+  `ops/runtime/reports/route-load-trace-2026-06-03T22-51-14-968Z.json`.
+  Fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-07-37-291Z/summary.json`
+  exercised 184 controls across 17 routes with zero failed controls. Remote
+  admin Inventory trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-07-37-804Z.json`
+  passed with zero failures but still needed 6308 ms through the public
+  Cloudflare/tunnel/auth path, marking tunnel latency as the next non-local
+  bottleneck. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-07-37-740Z/report.json`
+  rendered 20 products with portal bootstrap 200, AI status 200 after
+  interaction, and zero failed responses.
 <!-- phase29-manual-notes:end -->

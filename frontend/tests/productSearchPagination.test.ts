@@ -98,7 +98,7 @@ assert.match(
 )
 assert.match(
   posPage,
-  /withLoaderTimeout\(\s*\(\) => shouldLoadMetadata && api\.getProductBootstrap[\s\S]*api\.getProductBootstrap\(productQuery\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => shouldLoadMetadata[\s\S]*loadPosProductBootstrap\(productQuery\)[\s\S]*searchPosCatalogProducts\(productQuery\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
   'POS catalog bootstrap should apply the named timeout to the combined first-window product and branch read',
 )
 assert.doesNotMatch(
@@ -113,12 +113,12 @@ assert.doesNotMatch(
 )
 assert.match(
   posPage,
-  /withLoaderTimeout\(\(\) => (?:window\.api|api)\.getProductFilters(?:\?\.)?\(\{\}\) \|\| missingPosApiMethod\('getProductFilters'\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => loadPosProductFilters\(\{\}\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)/,
   'POS filter panel should receive delayed global filter metadata',
 )
 assert.match(
   posPage,
-  /withLoaderTimeout\(\(\) => (?:window\.api|api)\.getCategories(?:\?\.)?\(\) \|\| missingPosApiMethod\('getCategories'\), label, POS_CATEGORY_OPTIONS_TIMEOUT_MS\)/,
+  /withLoaderTimeout\(\(\) => loadPosCategories\(\), label, POS_CATEGORY_OPTIONS_TIMEOUT_MS\)/,
   'POS filter panel should receive delayed category metadata',
 )
 assert.match(

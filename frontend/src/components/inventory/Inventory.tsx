@@ -40,6 +40,7 @@ import { buildBatchPreview } from '../../utils/productBatches.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
+import type { QueryParams } from '../../api/query.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -183,13 +184,79 @@ type InventorySyncContext = {
 }
 
 type InventoryApi = Record<string, any>
+type BranchTransportModule = typeof import('../../api/branchTransport.ts')
+type DashboardTransportModule = typeof import('../../api/dashboardTransport.ts')
+type InventoryTransportModule = typeof import('../../api/inventoryTransport.ts')
+type ProductReadTransportModule = typeof import('../../api/productReadTransport.ts')
+type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
+type RfidTransportModule = typeof import('../../api/rfidTransport.ts')
+type UserReadTransportModule = typeof import('../../api/userReadTransport.ts')
 
 type LoadOptions = {
   force?: boolean
 }
 
+let branchTransportPromise: Promise<BranchTransportModule> | null = null
+let dashboardTransportPromise: Promise<DashboardTransportModule> | null = null
+let inventoryTransportPromise: Promise<InventoryTransportModule> | null = null
+let productReadTransportPromise: Promise<ProductReadTransportModule> | null = null
+let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
+let rfidTransportPromise: Promise<RfidTransportModule> | null = null
+let userReadTransportPromise: Promise<UserReadTransportModule> | null = null
+
+function loadBranchTransport(): Promise<BranchTransportModule> {
+  if (!branchTransportPromise) branchTransportPromise = import('../../api/branchTransport.ts')
+  return branchTransportPromise
+}
+
+function loadDashboardTransport(): Promise<DashboardTransportModule> {
+  if (!dashboardTransportPromise) dashboardTransportPromise = import('../../api/dashboardTransport.ts')
+  return dashboardTransportPromise
+}
+
+function loadInventoryTransport(): Promise<InventoryTransportModule> {
+  if (!inventoryTransportPromise) inventoryTransportPromise = import('../../api/inventoryTransport.ts')
+  return inventoryTransportPromise
+}
+
+function loadProductReadTransport(): Promise<ProductReadTransportModule> {
+  if (!productReadTransportPromise) productReadTransportPromise = import('../../api/productReadTransport.ts')
+  return productReadTransportPromise
+}
+
+function loadReturnsTransport(): Promise<ReturnsTransportModule> {
+  if (!returnsTransportPromise) returnsTransportPromise = import('../../api/returnsTransport.ts')
+  return returnsTransportPromise
+}
+
+function loadRfidTransport(): Promise<RfidTransportModule> {
+  if (!rfidTransportPromise) rfidTransportPromise = import('../../api/rfidTransport.ts')
+  return rfidTransportPromise
+}
+
+function loadUserReadTransport(): Promise<UserReadTransportModule> {
+  if (!userReadTransportPromise) userReadTransportPromise = import('../../api/userReadTransport.ts')
+  return userReadTransportPromise
+}
+
 function getInventoryApi(): InventoryApi {
-  return window.api as InventoryApi
+  return {
+    getBranches: async () => (await loadBranchTransport()).getBranches(),
+    getDashboard: async () => (await loadDashboardTransport()).getDashboard(),
+    getInventoryBootstrap: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryBootstrap(params),
+    getInventoryMovements: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryMovements(params),
+    getInventoryReasons: async () => (await loadInventoryTransport()).getInventoryReasons(),
+    getInventoryStats: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryStats(params),
+    getProductsByIds: async (ids: unknown[] = [], params: QueryParams = {}) => (await loadProductReadTransport()).getProductsByIds(ids, params),
+    getReturns: async (params: QueryParams = {}) => (await loadReturnsTransport()).getReturns(params),
+    getRfidStatus: async (params: QueryParams = {}) => (await loadRfidTransport()).getRfidStatus(params),
+    getUsers: async () => (await loadUserReadTransport()).getUsers(),
+    saveInventoryReasons: async (items: unknown[] = []) => (await loadInventoryTransport()).saveInventoryReasons(items),
+    searchInventoryProducts: async (params: QueryParams = {}) => (await loadInventoryTransport()).searchInventoryProducts(params),
+    adjustStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryTransport()).adjustStock(payload),
+    moveStockRow: async (payload: Record<string, unknown> = {}) => (await loadInventoryTransport()).moveStockRow(payload),
+    transferInventoryStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryTransport()).transferInventoryStock(payload),
+  }
 }
 
 const DASHBOARD_INVENTORY_FOCUS_KEY = 'bos:dashboard:inventory-focus'
