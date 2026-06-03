@@ -8,17 +8,17 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 752, keep Dexie/local DB and system helpers out
-  of healthy first-route loads
+- Latest completed move: Move 753, intent-load shared portal menus on Products,
+  Contacts, and related action surfaces without first-route chunk cost
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `14ac974b42985491`
+- latest verified frontend hash from the most recent Docker-served live check: `7530b3876d0d1959`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `2360d8a61225f40b`
+  `a4d2e4a810595a77`
 
 Latest verified reports:
 
@@ -31,7 +31,9 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T15-23-15-920Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T16-17-24-309Z.json`
+- latest lazy portal-menu interaction proof:
+  `ops/runtime/reports/lazy-portal-menu-live-check-2026-06-03T16-20-20-068Z/report.json`
 - latest public portal load trace:
   `ops/runtime/reports/public-load-trace-latest.json`
 - latest top-route load trace:
@@ -80,13 +82,28 @@ Current honest pockets:
   Docker release image `business-os:v6.0.0-202606031903`; Move 745 is served
   by Docker release image `business-os:v6.0.0-202606031923`; Move 746 is
   served by Docker release image `business-os:v6.0.0-202606031937`; Move 747
-  is served by Docker release image `business-os:v6.0.0-202606031954`, and
-  the latest release update created backup
-  `ops/runtime/docker-release/backups/20260603-195615`
+  is served by Docker release image `business-os:v6.0.0-202606031954`; Move
+  753 is served by Docker release image `business-os:v6.0.0-202606040015`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Shared portal positioning/menu code is now truly intent-loaded on Products,
+  Contacts, and reusable filter/action surfaces. `FilterMenu`, Products manage
+  menus, product row actions, and contact row actions use `LazyPortalMenu`,
+  while `PortalMenu` honors delayed first-click `defaultOpen` after the chunk
+  arrives. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T16-17-24-309Z.json` shows
+  `shared-portal-menu=none`, `app-local-db=none`, and `vendor-dexie=none` for
+  Products, Inventory, POS, Sales, Returns, and Contacts in the first 600 ms,
+  with route-ready timings from 187 ms to 318 ms and zero failed requests or
+  console/page errors. The live Playwright interaction proof at
+  `ops/runtime/reports/lazy-portal-menu-live-check-2026-06-03T16-20-20-068Z/report.json`
+  clicked Products Filters and Contacts row actions, loaded
+  `shared-portal-menu-D4vj-XWE.js` only on demand, opened both menus, and
+  recorded zero relevant console/page errors. Docker release image
+  `business-os:v6.0.0-202606040015` serves the verified runtime.
 
 - Healthy first-route loads no longer wake IndexedDB/Dexie. Local mirror writes,
   expected-updated-at reads, query-cache fallbacks, and transport fallbacks now

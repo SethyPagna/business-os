@@ -2612,3 +2612,36 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: intent-load shared portal menus for Products, Contacts, and reusable
+  filter/action surfaces
+- affected files:
+  `frontend/src/components/shared/LazyPortalMenu.tsx`,
+  `frontend/src/components/shared/PortalMenu.tsx`,
+  `frontend/src/components/shared/FilterMenu.tsx`,
+  `frontend/src/components/products/surfaces/HeaderActions.tsx`,
+  `frontend/src/components/products/surfaces/ProductRowParts.tsx`,
+  `frontend/src/components/contacts/shared.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products, Inventory, POS, Sales, Returns, and Contacts
+  first-route script windows plus Products Filters and Contacts row action
+  clicks
+- keeper or rollback: keeper; it removes body-level menu positioning code
+  from healthy first-route loads while preserving first-click menu behavior
+  through delayed `defaultOpen` handling in `PortalMenu`
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T16-17-24-309Z.json`
+  measured Products 218 ms, Inventory 237 ms, POS 318 ms, Sales 209 ms,
+  Returns 187 ms, and Contacts 208 ms, all with zero failed requests, zero
+  console/page errors, no first-window `shared-portal-menu`, no
+  `app-local-db`, and no `vendor-dexie`
+- interaction proof:
+  `ops/runtime/reports/lazy-portal-menu-live-check-2026-06-03T16-20-20-068Z/report.json`
+  clicked Products Filters and Contacts row actions in the Docker-served app,
+  loaded `shared-portal-menu-D4vj-XWE.js` only after intent, opened both
+  menus, and recorded zero relevant console/page errors. Docker image
+  `business-os:v6.0.0-202606040015` is serving frontend hash
+  `7530b3876d0d1959`.

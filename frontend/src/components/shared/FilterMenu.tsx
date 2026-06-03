@@ -1,7 +1,7 @@
 import Filter from 'lucide-react/dist/esm/icons/filter.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { ReactNode } from 'react'
-import PortalMenu from './PortalMenu'
+import LazyPortalMenu from './LazyPortalMenu'
 
 type CloseMenu = () => void
 
@@ -51,7 +51,7 @@ export default function FilterMenu({
   const triggerLabel = activeCount > 0 ? `${label} (${activeCount})` : label
 
   return (
-    <PortalMenu
+    <LazyPortalMenu
       align="right"
       menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0"
       onOpenChange={onOpenChange}

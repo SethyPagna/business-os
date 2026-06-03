@@ -101,6 +101,12 @@ export default function PortalMenu({
     setPosition({ top, left })
   }, [align])
 
+  useEffect(() => {
+    if (!defaultOpen) return
+    setOpen(true)
+    setTimeout(reposition, 0)
+  }, [defaultOpen, reposition])
+
   const toggleOpen = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     event.stopPropagation()
     setOpen((isOpen) => {

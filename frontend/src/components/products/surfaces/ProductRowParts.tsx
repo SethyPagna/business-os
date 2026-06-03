@@ -1,6 +1,7 @@
+import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import type { ReactNode } from 'react'
-import { ThreeDotPortal } from '../../shared/PortalMenu'
 import type { PortalMenuItem } from '../../shared/PortalMenu'
+import LazyPortalMenu from '../../shared/LazyPortalMenu'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 
@@ -107,19 +108,20 @@ export function ProductRowActions({
   ]
 
   return (
-    <ThreeDotPortal
-      onDetails={onDetails}
-      onEdit={onEdit}
-      onDelete={onDelete}
-      onAddVariant={onAddVariant}
-      labels={{
-        details: label('view_details', label('details', 'View Details')),
-        edit: label('edit', 'Edit'),
-        addVariant: label('add_variant', 'Add Variant'),
-        delete: label('delete', 'Delete'),
-        ariaLabel: label('actions', 'Open actions menu'),
-      }}
-      extraItems={extraItems}
+    <LazyPortalMenu
+      trigger={(
+        <button type="button" className="three-dot-btn" aria-label={label('actions', 'Open actions menu')}>
+          <MoreHorizontal className="h-4 w-4" />
+        </button>
+      )}
+      items={[
+        onDetails && { label: label('view_details', label('details', 'View Details')), onClick: onDetails },
+        onEdit && { label: label('edit', 'Edit'), onClick: onEdit, color: 'blue' },
+        onAddVariant && { label: label('add_variant', 'Add Variant'), onClick: onAddVariant, color: 'purple' },
+        ...extraItems,
+        onDelete && ('divider' as const),
+        onDelete && { label: label('delete', 'Delete'), onClick: onDelete, color: 'red' },
+      ]}
     />
   )
 }

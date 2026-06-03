@@ -3,7 +3,7 @@ import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Modal from '../shared/Modal'
-import PortalMenu from '../shared/PortalMenu'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -204,7 +204,7 @@ export function ThreeDotMenu({ onDetails, onEdit, onDelete }: ThreeDotMenuProps)
   )
 
   return (
-    <PortalMenu
+    <LazyPortalMenu
       trigger={(
         <button
           type="button"

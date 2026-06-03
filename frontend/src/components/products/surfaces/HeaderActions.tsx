@@ -2,9 +2,9 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import PortalMenu from '../../shared/PortalMenu'
 import type { PortalMenuItem } from '../../shared/PortalMenu'
 import ExportMenu from '../../shared/ExportMenu'
+import LazyPortalMenu from '../../shared/LazyPortalMenu'
 
 type Translate = (key: string) => string | undefined
 
@@ -82,7 +82,7 @@ export default function ProductsHeaderActions({
             <span className="min-w-0 truncate whitespace-nowrap">{exportLabel}</span>
           </button>
         )}
-        <PortalMenu
+        <LazyPortalMenu
           align="right"
           triggerWrapperClassName="w-full min-w-0"
           trigger={(
@@ -105,7 +105,7 @@ export default function ProductsHeaderActions({
       </div>
 
       <div className="hidden flex-wrap items-center justify-end gap-1.5 md:flex">
-        <PortalMenu
+        <LazyPortalMenu
           align="right"
           trigger={(
             <button type="button" className="btn-secondary inline-flex min-w-[6.5rem] items-center justify-center gap-1.5 px-3 py-1.5 text-sm" aria-haspopup="true">

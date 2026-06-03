@@ -1709,4 +1709,17 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   then loaded `app-api-methods`, `app-local-db`, and `vendor-dexie` on demand,
   rendered pending/syncing/failed counters, and recorded zero console/page
   errors.
+- Move 483 records roadmap Move 753: intent-load shared portal positioning
+  menus across Products, Contacts, and reusable filter/action surfaces. The
+  focused Docker-served trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T16-17-24-309Z.json` shows
+  Products, Inventory, POS, Sales, Returns, and Contacts route-ready in
+  187-318 ms with zero failed requests or console/page errors, and no
+  `shared-portal-menu`, `app-local-db`, or `vendor-dexie` chunk in the first
+  600 ms. The live Playwright proof
+  `ops/runtime/reports/lazy-portal-menu-live-check-2026-06-03T16-20-20-068Z/report.json`
+  clicked Products Filters and Contacts row actions, loaded
+  `shared-portal-menu-D4vj-XWE.js` only after intent, opened both menus, and
+  recorded zero relevant console/page errors. Docker image
+  `business-os:v6.0.0-202606040015` serves the verified runtime.
 <!-- phase29-manual-notes:end -->
