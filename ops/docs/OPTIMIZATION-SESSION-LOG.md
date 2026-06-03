@@ -3033,3 +3033,50 @@ Use this shape for future entries:
   removed the QA sale, sale item, allocation, product, stock rows, batch rows,
   inventory movement, action-history entry, and audit log created by the live
   checkout proof.
+
+- change: lazy-load receipt export generators from receipt preview
+- affected files:
+  `frontend/src/components/receipt/Receipt.tsx`,
+  `frontend/tests/receiptTemplate.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS checkout receipt preview, then Print/Open
+  PDF/Image export intent
+- keeper or rollback: keeper; receipt preview now avoids static
+  `printReceipt.ts` loading and uses one memoized dynamic import when export
+  buttons are clicked. This keeps preview fast after checkout while preserving
+  the same PDF, print, and image export behavior.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `Receipt-B-UUoysE.js` at
+  16,162 bytes and separated `printReceipt-C-vsIQZL.js` at 21,413 bytes, with
+  no circular chunk warning. The source guard rejects static `printReceipt`
+  imports in `Receipt.tsx` and requires `loadReceiptPrintModule()` plus
+  `printTools.downloadReceiptImage`, `printTools.printReceipt`, and
+  `printTools.openReceiptPdf` usage in export handlers.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T20-14-57-395Z.json`
+  measured POS at 270 ms route-ready with 30 requests, 2 API requests, and 22
+  scripts, with zero failed requests and zero console/page errors. Docker image
+  `business-os:v6.0.0-202606040412` served frontend hash
+  `71ea4f3183cefe58`.
+- interaction proof:
+  a Docker-served headed Chromium probe created temporary product
+  `QA POS Move765 1780517748968 Item`, opened POS, searched for it, clicked
+  the product card, clicked `Exact $`, `Done`, and `Completed`, reached receipt
+  preview, and confirmed the sale through `/api/sales` search. Before clicking
+  Image there were zero `printReceipt-*` scripts in the loaded script list;
+  clicking Image loaded `printReceipt-C-vsIQZL.js` and downloaded
+  `C:\Users\user\Downloads\business-os\output\playwright\move765-Receipt-RCP-1780517750786-H5W7.png`.
+  The flow had zero failed requests, zero relevant console messages, and zero
+  page errors. Screenshots:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-receipt-export-before.png`
+  and
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-receipt-export-after.png`.
+- post-live hygiene:
+  `npm.cmd --prefix ops run cleanup-test-data -- --prefix "QA POS Move765" --apply --output ops/runtime/reports/pos-receipt-export-cleanup-latest.json`
+  removed the QA sale, sale item, allocation, product, stock rows, batch rows,
+  inventory movement, action-history entry, and audit log created by the live
+  receipt export proof.

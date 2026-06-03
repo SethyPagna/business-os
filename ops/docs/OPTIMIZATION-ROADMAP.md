@@ -10246,3 +10246,58 @@ Move 764 status:
   printing/export intent, product-management writes, settings/system transport
   clusters, and any remaining POS checkout-adjacent chunks without moving live
   business data or weakening offline fallback behavior.
+
+Move 765 status:
+- Move 765 narrows receipt export loading. `Receipt.tsx` now keeps the receipt
+  preview path free of the PDF/image/print generator module and loads
+  `printReceipt.ts` only when the cashier clicks a real export action such as
+  Print, Open PDF, or Image. The existing receipt preview still renders
+  immediately after checkout, while export handlers share one memoized dynamic
+  import so repeated export clicks do not refetch the generator code.
+- Proof: `node frontend\tests\receiptTemplate.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, frontend typecheck,
+  JSX/source check, production build with no circular chunk warning, Docker
+  release image `business-os:v6.0.0-202606040412`, focused POS route-load
+  Playwright trace, headed live Chromium POS checkout plus receipt Image
+  export, and post-check QA cleanup.
+- Build proof: production build emitted `Receipt-B-UUoysE.js` at 16,162 bytes
+  and a separate `printReceipt-C-vsIQZL.js` at 21,413 bytes. Compiled
+  inspection shows the receipt chunk references the print/image/PDF generator
+  only through Vite's dynamic import wrapper. The source guard rejects a static
+  `printReceipt` import in `Receipt.tsx` and requires
+  `loadReceiptPrintModule()` plus `printTools.downloadReceiptImage`,
+  `printTools.printReceipt`, and `printTools.openReceiptPdf` in export paths.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T20-14-57-395Z.json`
+  measured POS at 270 ms route-ready with 30 requests, 2 API requests, and 22
+  scripts, with zero failed requests and zero console/page errors. Docker
+  image `business-os:v6.0.0-202606040412` served frontend hash
+  `71ea4f3183cefe58`.
+- Interaction proof: a Docker-served headed Chromium check created temporary
+  product `QA POS Move765 1780517748968 Item`, opened POS, searched for that
+  product, clicked the real product card, used the real `Exact $`, `Done`,
+  and `Completed` controls, reached receipt preview, and confirmed the created
+  sale by searching `/api/sales`. Before clicking Image, the script list had
+  26 scripts and zero `printReceipt-*` files. After clicking the actual Image
+  export button, `printReceipt-C-vsIQZL.js` loaded and the receipt image was
+  downloaded to
+  `C:\Users\user\Downloads\business-os\output\playwright\move765-Receipt-RCP-1780517750786-H5W7.png`.
+  The flow had zero failed requests, zero relevant console messages, and zero
+  page errors. Screenshots:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-receipt-export-before.png`
+  and
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-receipt-export-after.png`.
+- Post-live hygiene: `npm.cmd --prefix ops run cleanup-test-data -- --prefix
+  "QA POS Move765" --apply --output ops/runtime/reports/pos-receipt-export-cleanup-latest.json`
+  removed the QA sale, sale item, sale allocation, product, stock rows, batch
+  rows, inventory movement, action-history entry, and audit log created by the
+  live receipt export proof.
+- Current plan position after Move 765: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with measured route/interaction proof, focusing on
+  product-management writes, settings/system transport clusters, and any
+  remaining checkout-adjacent chunks without moving live business data or
+  weakening offline fallback behavior.

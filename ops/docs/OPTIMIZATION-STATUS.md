@@ -8,18 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 764, narrow POS checkout sale writes so the
-  actual Done -> Completed intent avoids the broad API methods registry while
-  preserving offline sale queue fallback
+- Latest completed move: Move 765, lazy-load receipt export generators so the
+  receipt preview path avoids PDF/image/print code until the cashier clicks an
+  export action
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `95087b02ae5f91bc`
+- latest verified frontend hash from the most recent Docker-served live check: `71ea4f3183cefe58`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `7c2d6bd5fda426a2`
+  `a5a46c3d2b056663`
 
 Latest verified reports:
 
@@ -32,7 +32,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T19-56-35-700Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T20-14-57-395Z.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
@@ -99,11 +99,25 @@ Current honest pockets:
   Move 761 is served by Docker release image `business-os:v6.0.0-202606040246`;
   Move 762 is served by Docker release image `business-os:v6.0.0-202606040258`;
   Move 763 is served by Docker release image `business-os:v6.0.0-202606040328`;
-  Move 764 is served by Docker release image `business-os:v6.0.0-202606040354`.
+  Move 764 is served by Docker release image `business-os:v6.0.0-202606040354`;
+  Move 765 is served by Docker release image `business-os:v6.0.0-202606040412`.
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Receipt preview now lazy-loads PDF/image/print generators only after an
+  export intent. Proof: Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T20-14-57-395Z.json`
+  measured POS at 270 ms route-ready with 30 requests, 2 API requests, 22
+  scripts, zero failed requests, and zero console/page errors. A headed live
+  Chromium checkout reached receipt preview with zero `printReceipt-*` scripts
+  loaded; clicking the actual Image button loaded `printReceipt-C-vsIQZL.js`
+  and downloaded the receipt image. Post-live cleanup removed the QA sale,
+  sale item, allocation, product, stock rows, batch rows, inventory movement,
+  action-history entry, and audit log. Docker release image
+  `business-os:v6.0.0-202606040412` serves frontend hash
+  `71ea4f3183cefe58`.
 
 - POS checkout sale writes now use a focused `sale-write-api` transport chunk
   instead of the broad API methods registry. Proof: Docker-served route trace
@@ -1517,8 +1531,8 @@ Recent route-level win:
 5. Continue mobile public portal polish from the screenshots: next candidates
    are the large hero logo/avatar sizing and first-card spacing if the public
    owner wants an even shorter first viewport.
-6. Continue measured POS splits after Move 764: receipt printing/export,
-   product-management writes, and settings/system transports can
-   still wake broad registry paths on real intent. Keep each slice guarded by
-   route traces plus interaction proof so read-only POS browsing remains light
-   while live/offline write behavior stays intact.
+6. Continue measured POS splits after Move 765: product-management writes,
+   settings/system transports, and any remaining checkout-adjacent paths can
+   still wake broad registry or generator code on real intent. Keep each slice
+   guarded by route traces plus interaction proof so read-only POS browsing
+   remains light while live/offline write behavior stays intact.

@@ -1875,4 +1875,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   write intent; `app-api-methods` and `csv-utils` stayed unloaded. Cleanup
   removed the QA sale, sale item, allocation, product, stock rows, batch rows,
   inventory movement, action-history entry, and audit log.
+- Move 495 records roadmap Move 765: keep receipt PDF/image/print generators
+  out of the receipt preview path. `Receipt.tsx` now dynamically imports
+  `printReceipt.ts` only from Print, Open PDF, and Image export handlers, with
+  a memoized module promise for repeated export clicks. Production build
+  emitted `Receipt-B-UUoysE.js` at 16,162 bytes and split
+  `printReceipt-C-vsIQZL.js` at 21,413 bytes, with no circular chunk warning.
+  Docker image `business-os:v6.0.0-202606040412` served the focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T20-14-57-395Z.json`: POS
+  was ready in 270 ms with 30 requests, 2 API requests, and 22 scripts, with
+  zero failed requests and zero console/page errors. A headed live Chromium
+  checkout probe reached receipt preview with zero `printReceipt-*` scripts
+  loaded; clicking the real Image export button loaded
+  `printReceipt-C-vsIQZL.js` and downloaded the receipt image. Cleanup removed
+  the QA sale, sale item, allocation, product, stock rows, batch rows,
+  inventory movement, action-history entry, and audit log.
 <!-- phase29-manual-notes:end -->

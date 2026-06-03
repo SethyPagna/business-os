@@ -4,7 +4,6 @@ import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
-import { downloadReceiptImage, openReceiptPdf, printReceipt } from '../../utils/printReceipt'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { getStatusLabel } from '../sales/StatusBadge'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
@@ -12,6 +11,7 @@ import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 type LanguageMode = 'en' | 'km' | 'both'
 type ReceiptExportMode = 'print' | 'open' | 'image'
 type ReceiptLabelKey = keyof typeof LABELS.en
+type ReceiptPrintModule = typeof import('../../utils/printReceipt')
 type TranslateFn = (key: string) => string | undefined
 type MoneyFormatter = (value: number | string) => string
 
@@ -102,6 +102,13 @@ const useApp = useAppHook as () => {
   fmtKHR: MoneyFormatter
   khrSymbol: string
   t?: TranslateFn
+}
+
+let receiptPrintModulePromise: Promise<ReceiptPrintModule> | null = null
+
+function loadReceiptPrintModule(): Promise<ReceiptPrintModule> {
+  if (!receiptPrintModulePromise) receiptPrintModulePromise = import('../../utils/printReceipt')
+  return receiptPrintModulePromise
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -454,19 +461,20 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     if (!printRef.current) return
     setPdfBusy(mode)
     try {
+      const printTools = await loadReceiptPrintModule()
       if (mode === 'image') {
-        await downloadReceiptImage(printRef.current, {
+        await printTools.downloadReceiptImage(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
           printSettings: appliedPrintSettings,
         })
       } else if (mode === 'print') {
-        await printReceipt(printRef.current, {
+        await printTools.printReceipt(printRef.current, {
           title: receiptTitle,
           printSettings: appliedPrintSettings,
         })
       } else {
-        await openReceiptPdf(printRef.current, {
+        await printTools.openReceiptPdf(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
           printSettings: appliedPrintSettings,

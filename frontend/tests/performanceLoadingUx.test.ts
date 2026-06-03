@@ -32,6 +32,7 @@ const resetData = fs.readFileSync(new URL('../src/components/utils-settings/Rese
 const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
+const receipt = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
 const contacts = fs.readFileSync(new URL('../src/components/contacts/Contacts.tsx', import.meta.url), 'utf8')
 const contactsShared = fs.readFileSync(new URL('../src/components/contacts/shared.tsx', import.meta.url), 'utf8')
 const contactImportModal = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.tsx', import.meta.url), 'utf8')
@@ -1550,6 +1551,21 @@ assert.match(
   receiptPreview,
   /'Receipt preview',\s*RECEIPT_PREVIEW_IMPORT_TIMEOUT_MS,/,
   'receipt preview dynamic import should timeout slow preview chunks',
+)
+assert.doesNotMatch(
+  receipt,
+  /from ['"]\.\.\/\.\.\/utils\/printReceipt['"]/,
+  'receipt preview should not statically load PDF/image/print generators before export intent',
+)
+assert.match(
+  receipt,
+  /let receiptPrintModulePromise: Promise<ReceiptPrintModule> \| null = null[\s\S]*function loadReceiptPrintModule\(\): Promise<ReceiptPrintModule>[\s\S]*import\('\.\.\/\.\.\/utils\/printReceipt'\)/,
+  'receipt export buttons should lazy-load the print/PDF/image generator through a memoized dynamic import',
+)
+assert.match(
+  receipt,
+  /const printTools = await loadReceiptPrintModule\(\)[\s\S]*printTools\.downloadReceiptImage[\s\S]*printTools\.printReceipt[\s\S]*printTools\.openReceiptPdf/,
+  'receipt export actions should use the lazy-loaded print tools for image, print, and PDF flows',
 )
 assert.match(
   usersPage,
