@@ -2829,3 +2829,38 @@ Use this shape for future entries:
   bottleneck: delayed category options still wake `app-api-methods` and
   `csv-utils`. Docker image `business-os:v6.0.0-202606040205` is serving the
   verified runtime.
+
+- change: keep POS filter-open category lookup out of broad API methods
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS Filters click, category options, and the
+  `product-read-api` manual chunk boundary
+- keeper or rollback: keeper; POS now calls `lookupTransport.ts` directly for
+  category options, while the manual chunk also owns `expectedUpdatedAt.ts` to
+  avoid a circular chunk warning and keep optimistic write helpers consistent
+  with the lookup transport
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `product-read-api-*.js` at
+  5.87 kB with no circular chunk warning. Compiled POS inspection showed POS
+  importing `product-read-api` and no `app-api-methods` or `csv-utils`; the
+  compiled `product-read-api` chunk contains `/api/categories` and
+  `/api/products/bootstrap`, with no `app-api-methods` import.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-22-00-988Z.json`
+  measured POS at 262 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors. Docker image
+  `business-os:v6.0.0-202606040219` served the check.
+- interaction proof:
+  a Docker-served Playwright check opened POS, dismissed the update toast,
+  typed `mask`, clicked Filters, rendered Stock Status and Groups controls,
+  and recorded zero failed requests and zero relevant console/page errors.
+  Pre-click scripts had `product-read-api`, no `app-api-methods`, no
+  `csv-utils`, and no `FilterPanel`; after click, only `truck-Y2SFGnKm.js`
+  and `FilterPanel-BSgPp0Gy.js` were added. Screenshot:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-lookup-filter-1780510955919.png`.

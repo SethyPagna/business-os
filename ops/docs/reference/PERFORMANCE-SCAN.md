@@ -1798,4 +1798,17 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   verified Stock Status and Groups controls; the post-click script list loaded
   `FilterPanel-BSgPp0Gy.js` on intent and exposed delayed category options as
   the next source of `app-api-methods`/`csv-utils`.
+- Move 490 records roadmap Move 760: keep POS filter-open category lookups
+  out of the broad API methods registry. `POS.tsx` now calls
+  `lookupTransport.ts` directly for category options, while `vite.config.ts`
+  keeps `lookupTransport.ts` and `expectedUpdatedAt.ts` in the
+  `product-read-api` manual chunk with product read helpers. Docker image
+  `business-os:v6.0.0-202606040219` served the focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-22-00-988Z.json`: POS
+  was ready in 262 ms with 30 requests and 22 scripts, with zero failed
+  requests and zero console/page errors. A live POS interaction typed `mask`,
+  opened Filters, and verified Stock Status and Groups controls; the pre-click
+  scripts had `product-read-api`, no `app-api-methods`, no `csv-utils`, and no
+  `FilterPanel`, while the post-click script list added only
+  `truck-Y2SFGnKm.js` and `FilterPanel-BSgPp0Gy.js`.
 <!-- phase29-manual-notes:end -->

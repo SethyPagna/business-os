@@ -1406,6 +1406,11 @@ Recent route-level win:
   The Docker-served POS route trace for Move 759 was ready in 244 ms with 30
   requests and 22 scripts, and the first-window script list had no
   `app-api-methods` or `csv-utils`.
+- POS filter-open category options now also stay inside the narrowed
+  `product-read-api`/lookup transport path. The Docker-served Move 760 trace
+  was ready in 262 ms with 30 requests and 22 scripts, and a live POS
+  search-plus-Filters click added only the icon chunk and `FilterPanel`, with
+  no `app-api-methods` or `csv-utils` loaded before or after the click.
 - API HTTP, local Dexie, websocket, and browser API bootstrap were converted to
   TypeScript and verified through frontend utility tests, the TypeScript source
   guard, production build, Phase 29 audit, schema audit, organization audit,
@@ -1470,7 +1475,8 @@ Recent route-level win:
 5. Continue mobile public portal polish from the screenshots: next candidates
    are the large hero logo/avatar sizing and first-card spacing if the public
    owner wants an even shorter first viewport.
-6. Continue the POS interaction split found by Move 759: opening Filters still
-   wakes `app-api-methods` and `csv-utils` through delayed category-option
-   loading. Move that read behind a narrow category/product-filter transport
-   before deeper POS checkout or customer write rewires.
+6. Continue measured POS splits after Move 760: customer/contact lookups,
+   checkout writes, receipt printing, and product-management writes can still
+   wake broad registry paths on real intent. Keep each slice guarded by route
+   traces plus interaction proof so read-only POS browsing remains light while
+   live/offline write behavior stays intact.

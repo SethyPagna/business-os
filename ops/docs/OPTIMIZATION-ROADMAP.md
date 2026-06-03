@@ -10019,3 +10019,42 @@ Move 759 status:
   the POS filter-open category/options read so the Filters interaction does
   not need to wake the full API methods registry unless a later write/import
   action requires it.
+
+Move 760 status:
+- Move 760 narrows the POS filter-open category lookup. POS now reads
+  categories through `lookupTransport.ts` directly, and the `product-read-api`
+  manual chunk owns `lookupTransport.ts` plus `expectedUpdatedAt.ts` so the
+  filter-open path can fetch category options without entering the broad
+  `window.api` methods registry.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, production build, Docker release image
+  `business-os:v6.0.0-202606040219`, compiled chunk inspection, focused POS
+  route-load Playwright trace, and a live POS search plus Filters click check.
+- Build proof: local and Docker production builds emitted
+  `product-read-api-*.js` at 5.87 kB and removed the prior circular manual
+  chunk warning by keeping the optimistic updated-at helper with the narrowed
+  lookup/product-read transport boundary. The compiled POS chunk imports
+  `product-read-api` and does not import `app-api-methods` or `csv-utils`;
+  the compiled `product-read-api` chunk contains `/api/categories` and
+  `/api/products/bootstrap`, with no `app-api-methods` import.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-22-00-988Z.json`
+  measured POS at 262 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors.
+- Interaction proof: a Docker-served Playwright check opened POS, dismissed the
+  update toast, typed `mask` into product search, clicked Filters, rendered
+  Stock Status and Groups controls, and recorded zero failed requests and zero
+  relevant console/page errors. Before the click, scripts had
+  `product-read-api`, no `app-api-methods`, no `csv-utils`, and no
+  `FilterPanel`; after the click, only `truck-Y2SFGnKm.js` and
+  `FilterPanel-BSgPp0Gy.js` were added. `app-api-methods` and `csv-utils`
+  stayed unloaded after the filter-open category lookup.
+- Current plan position after Move 760: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with measured route/interaction proof, focusing on remaining
+  broad-registry wakes in POS customer/write paths, product management writes,
+  and settings/system transport clusters without moving live business data or
+  weakening offline fallback behavior.

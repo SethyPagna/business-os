@@ -56,6 +56,7 @@ import {
   getProductFilters as getPosProductFilters,
   searchProducts as searchPosProducts,
 } from '../../api/productReadTransport.ts'
+import { getCategories as getPosCategories } from '../../api/lookupTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -295,7 +296,6 @@ type PosApi = {
   createDeliveryContact?: (payload: DeliveryFormState) => Promise<Partial<DeliveryContactRecord>>
   createSale?: (payload: Record<string, unknown>) => Promise<SaleResult>
   getBranches?: () => Promise<BranchRecord[]>
-  getCategories?: () => Promise<string[]>
   getCustomers?: () => Promise<CustomerRecord[]>
   getDeliveryContacts?: () => Promise<DeliveryContactRecord[]>
   lookupPortalMembership?: (membershipNumber: string) => Promise<MembershipInfo | null>
@@ -344,6 +344,10 @@ function searchPosCatalogProducts(query: QueryParams): Promise<ProductPayload | 
 
 function loadPosProductFilters(query: QueryParams = {}): Promise<Partial<ProductFilterMeta>> {
   return getPosProductFilters(query) as Promise<Partial<ProductFilterMeta>>
+}
+
+function loadPosCategories(): Promise<unknown[]> {
+  return getPosCategories() as Promise<unknown[]>
 }
 
 function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
@@ -772,8 +776,7 @@ export default function POS() {
     if (categoryOptionsLoadedRef.current) return null
     const requestId = beginTrackedRequest(categoryOptionsRequestRef)
     try {
-      const api = getPosApi()
-      const data = await withLoaderTimeout(() => api.getCategories?.() || missingPosApiMethod('getCategories'), label, POS_CATEGORY_OPTIONS_TIMEOUT_MS)
+      const data = await withLoaderTimeout(() => loadPosCategories(), label, POS_CATEGORY_OPTIONS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(categoryOptionsRequestRef, requestId)) return null
       applyCategoryOptions(Array.isArray(data) ? data : [])
       categoryOptionsLoadedRef.current = true
