@@ -8879,3 +8879,35 @@ Move 726 status:
   sales, products, returns, files/library, catalog/public portal, receipt
   settings, POS, inventory, contacts, loyalty, users, audit, settings, server,
   and backup helper paths, and recorded zero relevant console messages.
+
+Move 727 status:
+- Move 727 redesigns the public portal contact/social hero for smaller
+  screens. The mobile screenshot showed the phone, address, and social media
+  links taking most of the first viewport as separate stacked blocks. The
+  accepted rework keeps the current public portal visual system but removes
+  the forced tall mobile hero, removes the mobile intro reserve, merges contact
+  and social links into one compact glass tray, clamps long address text on
+  phones, and collapses social links to accessible icon buttons below the
+  `sm` breakpoint.
+- `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` owns the
+  responsive markup. `frontend/src/styles/main.css` adds the public-only
+  `.portal-contact-value` clamp helpers. `frontend/tests/portalCatalogDisplay.test.ts`
+  guards the compact tray, mobile hero height, address clamp, and icon-only
+  social labels.
+- Production build hash `988172b09a81dc18` was deployed into
+  `business-os-app-1` and verified through local `/health`,
+  `/business-os-build.json`, and `/public`.
+- Proof: `node frontend/tests/portalCatalogDisplay.test.ts`, `node
+  frontend/tests/performanceLoadingUx.test.ts`, `npm.cmd --prefix frontend run
+  typecheck`, `npm.cmd --prefix frontend run check:jsx`, `npm.cmd --prefix
+  frontend run build`, Docker live sync, mobile/tablet Playwright screenshots,
+  public Cloudflare Playwright, and `git diff --check` passed. The public
+  Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T00-40-53-697Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP.
+- Screenshot evidence:
+  `output/playwright/public-mobile-before-waited.png`,
+  `output/playwright/public-mobile-after.png`,
+  `output/playwright/public-large-mobile-after.png`, and
+  `output/playwright/public-tablet-after.png`.

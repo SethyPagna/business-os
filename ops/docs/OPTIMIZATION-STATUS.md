@@ -934,6 +934,10 @@ Recent route-level win:
   methods inside the legacy registry now lazy-load `portalTransport.ts`
   through a memoized dynamic boundary, so `app-api-methods` no longer carries
   portal endpoint strings by default.
+- The public portal About hero is now mobile-friendlier: phone, address, and
+  social media links share one compact action tray on phones, long addresses
+  clamp instead of stretching the hero, and social links collapse to accessible
+  icon buttons until the `sm` breakpoint.
 
 ## Recently Rejected Candidates
 
@@ -968,3 +972,6 @@ Recent route-level win:
    implementation moves behind a compatibility wrapper.
 4. Refresh Phase 29 references after each migration and keep the public
    Cloudflare portal failure separate until the tunnel/runtime path is fixed.
+5. Continue mobile public portal polish from the screenshots: next candidates
+   are the large hero logo/avatar sizing and first-card spacing if the public
+   owner wants an even shorter first viewport.

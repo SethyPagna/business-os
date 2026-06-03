@@ -1045,9 +1045,9 @@ Total files documented: **234**
 | 1 | `normalizePortalColor` | function | 267 |
 | 2 | `CatalogMembershipSection` | function | 272 |
 | 3 | `CatalogAboutSection` | function | 618 |
-| 4 | `CatalogFaqSection` | function | 832 |
-| 5 | `CatalogAiSection` | function | 886 |
-| 6 | `CatalogSecondaryTabs` | component/function | 1072 |
+| 4 | `CatalogFaqSection` | function | 838 |
+| 5 | `CatalogAiSection` | function | 892 |
+| 6 | `CatalogSecondaryTabs` | component/function | 1078 |
 
 ### 3.56 `frontend/src/components/catalog/catalogUi.tsx`
 

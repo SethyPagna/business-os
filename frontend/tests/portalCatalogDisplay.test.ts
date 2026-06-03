@@ -12,6 +12,7 @@ import {
 
 const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.ts', import.meta.url), 'utf8')
 const catalogEditorSource = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.tsx', import.meta.url), 'utf8')
+const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/catalog/CatalogSecondaryTabs.tsx', import.meta.url), 'utf8')
 
 let failed = 0
 
@@ -118,6 +119,13 @@ runTest('ranking badges do not render numeric prefixes in compact mobile cards',
   }, (key, fallback) => (key === 'topSellerBadge' ? 'Top {value} Seller' : fallback))
 
   assert.equal(badges[0].label, 'Top Seller')
+})
+
+runTest('public portal mobile contact actions stay compact', () => {
+  assert.match(catalogSecondaryTabsSource, /className="relative min-h-0 overflow-hidden text-white sm:min-h-\[30rem\]"/, 'public about hero should not force a tall mobile viewport')
+  assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
+  assert.match(catalogSecondaryTabsSource, /<span className="sr-only sm:not-sr-only">\{item\.label\}<\/span>/, 'social labels should collapse to accessible icon buttons on phones')
+  assert.match(catalogSecondaryTabsSource, /businessFacts\?\.length \|\| socialLinks\?\.length/, 'contact and social actions should share one compact mobile tray')
 })
 
 if (failed > 0) {

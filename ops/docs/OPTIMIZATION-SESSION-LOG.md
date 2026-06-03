@@ -1899,3 +1899,35 @@ Use this shape for future entries:
   restart while local `/public` stayed HTTP 200. Restarting only
   `business-os-cloudflared-1` restored public HTTP 200, matching the existing
   tunnel/Docker DNS follow-up rather than an app rendering regression.
+
+- change: redesign public portal contact/social area for mobile
+- affected files:
+  `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`,
+  `frontend/src/styles/main.css`,
+  `frontend/tests/portalCatalogDisplay.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`
+- route or API target: public customer portal `/public`, About hero on
+  phone-sized and small-tablet screens
+- keeper or rollback: keeper; it preserves the desktop portal presentation
+  while phone screens use one compact contact/social tray with icon social
+  actions and clamped address text
+- route-scoped result: local Docker-served build hash `988172b09a81dc18`
+  rendered `/public` at 390x844, 430x932, and 768x900 with the compact tray
+  visible and no horizontal visual overflow. Screenshot evidence:
+  `output/playwright/public-mobile-before-waited.png`,
+  `output/playwright/public-mobile-after.png`,
+  `output/playwright/public-large-mobile-after.png`, and
+  `output/playwright/public-tablet-after.png`.
+- warm whole-app result: focused portal catalog display test, performance
+  loading guard, frontend typecheck, JSX/source check, production build,
+  Docker live sync, public Cloudflare Playwright, and `git diff --check`
+  passed. The public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T00-40-53-697Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP.
+- infrastructure note: public Cloudflare returned HTTP 530 after the app
+  restart while local `/public` was HTTP 200. Restarting only
+  `business-os-cloudflared-1` restored public HTTP 200, matching the existing
+  tunnel/Docker DNS follow-up.

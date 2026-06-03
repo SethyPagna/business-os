@@ -223,6 +223,26 @@ body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-
   color: rgb(51 65 85);
 }
 
+body[data-public-portal='true'] .portal-contact-value {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  word-break: break-word;
+}
+
+body[data-public-portal='true'] .portal-contact-value-address {
+  -webkit-line-clamp: 2;
+}
+
+@media (min-width: 640px) {
+  body[data-public-portal='true'] .portal-contact-value {
+    display: block;
+    overflow: visible;
+    -webkit-line-clamp: unset;
+  }
+}
+
 .portal-image-checker {
   background-color: #ffffff;
   background-image:
