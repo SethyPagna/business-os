@@ -9977,3 +9977,45 @@ Move 758 status:
   keep using focused route traces and interaction checks to remove accidental
   first-window chunks, delayed wakes, and repeated render loops without moving
   live business data or weakening offline fallback behavior.
+
+Move 759 status:
+- Move 759 narrows POS product-read startup to a dedicated product transport
+  and manual `product-read-api` chunk. POS catalog bootstrap/search and delayed
+  product-filter metadata now call `productReadTransport.ts` directly instead
+  of entering the broad `window.api` methods registry, preserving mirrored
+  live/offline reads while keeping import/export and CSV helpers out of the
+  first POS route window.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, production build, Docker release image
+  `business-os:v6.0.0-202606040205`, compiled POS chunk inspection, focused
+  POS route-load Playwright trace, and a live POS search plus Filters click
+  check.
+- Build proof: local and Docker production builds emitted
+  `product-read-api-*.js` as a separate 4.22 kB chunk. The compiled POS chunk
+  imports `product-read-api` and does not import `app-api-methods` or
+  `csv-utils`; `app-api-methods` fell from 60.71 kB to 57.82 kB in the local
+  build.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-07-22-223Z.json`
+  measured POS at 244 ms route-ready with 30 requests and 22 scripts, down
+  from Move 758's 302 ms, 32 requests, and 24 scripts. The first-window parse
+  confirmed `product-read-api-DbMd_KMA.js` loaded, while `app-api-methods` and
+  `csv-utils` did not; there were zero failed requests and zero console/page
+  errors.
+- Interaction proof: a Docker-served Playwright check opened POS, dismissed the
+  update toast, typed `mask` into the product search, clicked Filters, rendered
+  Stock Status and Groups controls, and recorded zero failed requests and zero
+  relevant console/page errors. The pre-click script list had
+  `product-read-api`, no `app-api-methods`, no `csv-utils`, and no
+  `FilterPanel`; after the click, `FilterPanel-BSgPp0Gy.js` loaded on intent.
+  The same click also woke `app-api-methods` and `csv-utils` through delayed
+  category-option loading, which is the next measurable POS interaction
+  optimization target.
+- Current plan position after Move 759: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: narrow
+  the POS filter-open category/options read so the Filters interaction does
+  not need to wake the full API methods registry unless a later write/import
+  action requires it.

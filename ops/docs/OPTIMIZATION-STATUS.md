@@ -1402,6 +1402,10 @@ Recent route-level win:
 - POS global filter metadata now waits until Filters opens.
 - Dashboard export helpers now load on demand.
 - Backup version list and route hot paths were hardened in earlier passes.
+- POS product catalog startup now uses a dedicated `product-read-api` chunk.
+  The Docker-served POS route trace for Move 759 was ready in 244 ms with 30
+  requests and 22 scripts, and the first-window script list had no
+  `app-api-methods` or `csv-utils`.
 - API HTTP, local Dexie, websocket, and browser API bootstrap were converted to
   TypeScript and verified through frontend utility tests, the TypeScript source
   guard, production build, Phase 29 audit, schema audit, organization audit,
@@ -1466,3 +1470,7 @@ Recent route-level win:
 5. Continue mobile public portal polish from the screenshots: next candidates
    are the large hero logo/avatar sizing and first-card spacing if the public
    owner wants an even shorter first viewport.
+6. Continue the POS interaction split found by Move 759: opening Filters still
+   wakes `app-api-methods` and `csv-utils` through delayed category-option
+   loading. Move that read behind a narrow category/product-filter transport
+   before deeper POS checkout or customer write rewires.

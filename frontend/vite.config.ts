@@ -212,6 +212,14 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
+    if (
+      normalized.endsWith('/src/api/productReadTransport.ts')
+      || normalized.endsWith('/src/api/localMirrors.ts')
+      || normalized.endsWith('/src/api/lazyLocalDb.ts')
+      || normalized.endsWith('/src/api/queryCache.ts')
+    ) {
+      return 'product-read-api'
+    }
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
     if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
     if (normalized.endsWith('/src/api/systemRuntime.ts')) return 'app-system'

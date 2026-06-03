@@ -1784,4 +1784,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `FilterPanel` chunk, and a live Filters click loaded
   `FilterPanel-BSgPp0Gy.js` only after intent and rendered Stock Status and
   Groups controls.
+- Move 489 records roadmap Move 759: split POS product-read startup from the
+  broad API methods registry. `POS.tsx` now calls `productReadTransport.ts`
+  directly for catalog bootstrap/search and delayed product-filter metadata,
+  while `vite.config.ts` assigns the read boundary to `product-read-api`.
+  Docker image `business-os:v6.0.0-202606040205` served the focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-07-22-223Z.json`: POS
+  was ready in 244 ms with 30 requests and 22 scripts, down from 302 ms, 32
+  requests, and 24 scripts in Move 758, with zero failed requests and zero
+  console/page errors. The first-window script parse loaded
+  `product-read-api-DbMd_KMA.js` and did not load `app-api-methods` or
+  `csv-utils`. A live POS interaction then typed `mask`, opened Filters, and
+  verified Stock Status and Groups controls; the post-click script list loaded
+  `FilterPanel-BSgPp0Gy.js` on intent and exposed delayed category options as
+  the next source of `app-api-methods`/`csv-utils`.
 <!-- phase29-manual-notes:end -->

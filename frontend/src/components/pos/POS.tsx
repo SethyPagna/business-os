@@ -51,6 +51,12 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import {
+  getProductBootstrap as getPosProductBootstrap,
+  getProductFilters as getPosProductFilters,
+  searchProducts as searchPosProducts,
+} from '../../api/productReadTransport.ts'
+import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
@@ -292,10 +298,7 @@ type PosApi = {
   getCategories?: () => Promise<string[]>
   getCustomers?: () => Promise<CustomerRecord[]>
   getDeliveryContacts?: () => Promise<DeliveryContactRecord[]>
-  getProductBootstrap?: (query: Record<string, unknown>) => Promise<ProductBootstrapPayload>
-  getProductFilters?: (filters: Record<string, unknown>) => Promise<Partial<ProductFilterMeta>>
   lookupPortalMembership?: (membershipNumber: string) => Promise<MembershipInfo | null>
-  searchProducts?: (query: Record<string, unknown>) => Promise<ProductPayload | ProductRecord[]>
 }
 
 type ImageLightboxState = {
@@ -329,6 +332,18 @@ function getPosApi(): PosApi {
 
 function missingPosApiMethod(methodName: string): Promise<never> {
   return Promise.reject(new Error(`POS API method is unavailable: ${methodName}`))
+}
+
+function loadPosProductBootstrap(query: QueryParams): Promise<ProductBootstrapPayload> {
+  return getPosProductBootstrap(query) as Promise<ProductBootstrapPayload>
+}
+
+function searchPosCatalogProducts(query: QueryParams): Promise<ProductPayload | ProductRecord[]> {
+  return searchPosProducts(query) as Promise<ProductPayload | ProductRecord[]>
+}
+
+function loadPosProductFilters(query: QueryParams = {}): Promise<Partial<ProductFilterMeta>> {
+  return getPosProductFilters(query) as Promise<Partial<ProductFilterMeta>>
 }
 
 function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
@@ -657,21 +672,18 @@ export default function POS() {
           initial: initialFilter === 'all' ? '' : initialFilter,
           sort: 'name_asc',
           include: 'branch_stock,images,family',
-        }
-        const api = getPosApi()
+        } satisfies QueryParams
         const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current)
         const [productPayload, metadataPayload] = await withLoaderTimeout(
-          () => shouldLoadMetadata && api.getProductBootstrap
-            ? api.getProductBootstrap(productQuery)
+          () => shouldLoadMetadata
+            ? loadPosProductBootstrap(productQuery)
               .then((bootstrapPayload) => [
                 bootstrapPayload?.products || [],
                 Array.isArray(bootstrapPayload?.branches) ? bootstrapPayload.branches : null,
               ] as [ProductPayload | ProductRecord[], BranchRecord[] | null])
             : Promise.all([
-              api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
-              shouldLoadMetadata
-                ? api.getBranches?.() || missingPosApiMethod('getBranches')
-                : Promise.resolve(null),
+              searchPosCatalogProducts(productQuery),
+              Promise.resolve(null),
             ]),
           label,
           POS_CATALOG_LOAD_TIMEOUT_MS,
@@ -888,8 +900,7 @@ export default function POS() {
     if (!isActive || !filterMetaReady || filterMetaLoadedRef.current) return
     filterMetaLoadedRef.current = true
     const requestId = beginTrackedRequest(filterMetaRequestRef)
-    const api = getPosApi()
-    void withLoaderTimeout(() => api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'), 'POS product filters', POS_FILTER_META_TIMEOUT_MS).then((filters) => {
+    void withLoaderTimeout(() => loadPosProductFilters({}), 'POS product filters', POS_FILTER_META_TIMEOUT_MS).then((filters) => {
       if (!isTrackedRequestCurrent(filterMetaRequestRef, requestId)) return
       applyProductFilterMeta(isPlainRecord(filters) ? filters : {}, [])
     }).catch(() => {})

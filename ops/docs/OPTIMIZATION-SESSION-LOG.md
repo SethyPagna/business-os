@@ -2792,3 +2792,40 @@ Use this shape for future entries:
   and zero relevant console/page errors. Docker image
   `business-os:v6.0.0-202606040149` is serving frontend hash
   `2a554c3c40e34b1e`.
+
+- change: split POS product-read startup from the broad API methods registry
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS first-route product catalog bootstrap/search and
+  delayed product-filter metadata
+- keeper or rollback: keeper; POS keeps mirrored live/offline product reads,
+  but those reads now enter `productReadTransport.ts` directly and land in a
+  narrow `product-read-api` chunk instead of loading all of
+  `app-api-methods`
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `product-read-api-*.js` at
+  4.22 kB, reduced `app-api-methods` from 60.71 kB to 57.82 kB locally, and
+  compiled POS inspection showed `product-read-api` with no POS import of
+  `app-api-methods` or `csv-utils`.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T18-07-22-223Z.json`
+  measured POS at 244 ms route-ready with 30 requests and 22 scripts, down
+  from Move 758's 302 ms, 32 requests, and 24 scripts. POS loaded
+  `product-read-api-DbMd_KMA.js`, `app-api-methods` was absent, `csv-utils`
+  was absent, and there were zero failed requests and zero console/page errors.
+- interaction proof:
+  a Docker-served Playwright check opened POS, dismissed the update toast,
+  typed `mask` in product search, clicked Filters, rendered Stock Status and
+  Groups controls, and recorded zero failed requests and zero relevant
+  console/page errors. Pre-click scripts had `product-read-api`, no
+  `app-api-methods`, no `csv-utils`, and no `FilterPanel`; after click,
+  `FilterPanel-BSgPp0Gy.js` loaded on intent. The click also revealed the next
+  bottleneck: delayed category options still wake `app-api-methods` and
+  `csv-utils`. Docker image `business-os:v6.0.0-202606040205` is serving the
+  verified runtime.
