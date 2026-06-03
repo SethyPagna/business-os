@@ -3264,3 +3264,49 @@ Use this shape for future entries:
   `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset
   status, zero QA cleanup matches, zero generated integrity matches, and
   relationship orphan checks passing for 49 FK candidates.
+
+- change: defer Products CSV export helpers until export intent
+- affected files:
+  `frontend/src/components/products/Products.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products export menu, Products first-paint resource
+  list, actual admin/public Cloudflare links, local Products/POS/public route
+  traces, and broad local all-page control sweep
+- keeper or rollback: keeper; Products keeps CSV export behavior but no longer
+  requests `csv-utils` before an Export click.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `Products-Br7M9jP8.js` and
+  `csv-utils-DOaabJN_.js` as separate chunks. The source guard now rejects a
+  static Products `downloadCSV` import and requires the dynamic
+  `../../utils/csv.ts` export helper load.
+- route-scoped result:
+  local Docker trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-36-07-611Z.json`
+  measured Products at 265 ms, POS at 296 ms, and public catalog at 215 ms,
+  all with zero failed requests and zero console/page errors. Trace parsing
+  confirmed `csv-utils` was absent from first-paint scripts for all three.
+- interaction/control proof:
+  fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-37-55-737Z/summary.json`
+  discovered 254 controls, exercised 183 stable controls, skipped 71 guarded
+  controls, captured 34 screenshots, and found zero failed controls.
+- actual link proof:
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned HTTP 200. Remote admin
+  trace `ops/runtime/reports/route-load-trace-2026-06-03T23-41-37-731Z.json`
+  measured Products at 3443 ms and POS at 4173 ms with zero failures/errors
+  and no first-paint `csv-utils`. Real public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-42-27-763Z.json`
+  measured `/public` at 2635 ms with zero failures/errors. Public portal
+  Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-36-08-136Z/report.json`
+  rendered 20 products with portal bootstrap 200, AI status 200 after
+  interaction, and zero failed responses.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero QA cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.

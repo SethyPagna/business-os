@@ -7,7 +7,6 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
-import { downloadCSV } from '../../utils/csv'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
 import { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
@@ -1218,7 +1217,8 @@ export default function Products() {
     supplierFilter,
   }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, parentProductIds, products, searchMode, searchTerms, stockFilter, supplierFilter])
 
-  const exportProductsCsv = useCallback((rowsToExport = filtered, filePrefix = 'products') => {
+  const exportProductsCsv = useCallback(async (rowsToExport = filtered, filePrefix = 'products') => {
+    const { downloadCSV } = await import('../../utils/csv.ts')
     downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0,10)}.csv`, buildProductExportRows(rowsToExport))
   }, [filtered])
 

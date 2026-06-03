@@ -8,33 +8,37 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 768, keep Inventory first-load reads and stock
-  mutations on focused lazy transports instead of the broad API methods
-  registry
+- Latest completed move: Move 769, defer Products CSV export helpers until
+  export intent so the Products first-paint path no longer requests
+  `csv-utils`
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `dfdc78bfc985b8f5`
+- latest verified frontend hash from the most recent Docker-served live check: `17300cced4c769ea`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `3d8013d8250c20b1`
+  `c15b3319a92c57d2`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
+- latest fast all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-37-55-737Z/summary.json`
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-07-37-740Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-36-08-136Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T23-06-34-762Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-36-07-611Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T23-07-37-804Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-41-37-731Z.json`
+- latest focused public-host route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-42-27-763Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:

@@ -10472,3 +10472,53 @@ Move 768 status:
   continue reducing settings/system/backup route transports and Cloudflare
   tunnel latency without moving live business data or weakening offline
   fallback behavior.
+
+Move 769 status:
+- Move 769 defers Products CSV export helpers until export intent. The
+  Products route no longer statically imports `downloadCSV` from
+  `utils/csv`; `exportProductsCsv` now loads `../../utils/csv.ts` only inside
+  the async export handler, preserving the same visible/full/filtered export
+  menu behavior while removing `csv-utils` from first paint.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now rejects a
+  static Products `downloadCSV` import and requires the dynamic export helper
+  load. `node frontend/tests/performanceLoadingUx.test.ts`, frontend
+  `test:utils`, frontend typecheck, JSX/source check, frontend production
+  build, backend `test:utils`, Docker release/start, `git diff --check`, and
+  post-live hygiene all passed.
+- Docker/runtime proof: Docker release image
+  `business-os:v6.0.0-202606040733` is running for app and worker containers.
+  Docker health reports served frontend hash `17300cced4c769ea`; local source
+  production build reports hash `c15b3319a92c57d2`.
+- Local Playwright proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-36-07-611Z.json`
+  measured Products at 265 ms route-ready, POS at 296 ms, and public catalog at
+  215 ms, all with zero failed requests and zero console/page errors. The
+  trace parser confirmed `csv-utils` is absent from first-paint scripts for
+  Products, POS, and public catalog.
+- Actual Cloudflare proof: focused remote admin route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-41-37-731Z.json`
+  measured Dashboard at 3684 ms, Products at 3443 ms, and POS at 4173 ms with
+  zero failed requests and zero console/page errors; `csv-utils` stayed absent
+  from those first-paint scripts. The focused real public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-42-27-763Z.json`
+  measured `https://leangcosmetics.dpdns.org/public` at 2635 ms with 29
+  requests, 24 scripts, one API request, zero failures, and zero errors. The
+  dedicated public portal Playwright check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-36-08-136Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Broad live proof: fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-37-55-737Z/summary.json`
+  discovered 254 controls across 17 routes, exercised 183 stable controls,
+  skipped 71 guarded/noisy controls, captured 34 screenshots, and found zero
+  failed controls.
+- Current plan position after Move 769: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  keep shrinking route-first chunks and Cloudflare request count, with likely
+  candidates in public catalog contact/map/social payloads, settings/system
+  route clusters, and any remaining export/template helpers that can safely
+  move behind user intent.

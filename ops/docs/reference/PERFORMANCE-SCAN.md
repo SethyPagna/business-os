@@ -1967,4 +1967,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-07-37-740Z/report.json`
   rendered 20 products with portal bootstrap 200, AI status 200 after
   interaction, and zero failed responses.
+- Move 499 records roadmap Move 769: defer Products CSV export helpers until
+  export intent. `Products.tsx` now dynamically imports `../../utils/csv.ts`
+  inside `exportProductsCsv`, and the performance guard rejects a static
+  Products `downloadCSV` import. Docker image
+  `business-os:v6.0.0-202606040733` served local trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-36-07-611Z.json`:
+  Products was ready in 265 ms with zero failed requests/errors, POS was ready
+  in 296 ms, and public catalog was ready in 215 ms. Trace parsing confirmed
+  `csv-utils` is absent from Products, POS, and public first-paint scripts.
+  Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-41-37-731Z.json`
+  measured Products at 3443 ms and POS at 4173 ms with zero failures/errors
+  and no first-paint `csv-utils`. Real public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-42-27-763Z.json`
+  measured `https://leangcosmetics.dpdns.org/public` at 2635 ms with zero
+  failures/errors. Fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-37-55-737Z/summary.json`
+  exercised 183 stable controls across 17 routes with zero failed controls.
 <!-- phase29-manual-notes:end -->
