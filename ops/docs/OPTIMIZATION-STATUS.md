@@ -1419,6 +1419,12 @@ Recent route-level win:
   `app-local-db`, or `vendor-dexie`; after the delayed gate, only
   `contact-read-api-3bBCBgdj.js` loaded, with zero failed requests and zero
   relevant console/page errors.
+- POS membership lookup now uses the focused `app-portal` transport chunk
+  directly instead of the broad API methods registry. The Docker-served
+  Move 762 trace was ready in 268 ms with 30 requests and 22 scripts. A live
+  Chromium customer-selection probe loaded only `app-portal-Bi-RHhNA.js` after
+  selecting existing membership customer `Customer 1`, while `app-api-methods`,
+  `csv-utils`, `app-local-db`, and `vendor-dexie` stayed unloaded.
 - API HTTP, local Dexie, websocket, and browser API bootstrap were converted to
   TypeScript and verified through frontend utility tests, the TypeScript source
   guard, production build, Phase 29 audit, schema audit, organization audit,
@@ -1483,8 +1489,9 @@ Recent route-level win:
 5. Continue mobile public portal polish from the screenshots: next candidates
    are the large hero logo/avatar sizing and first-card spacing if the public
    owner wants an even shorter first viewport.
-6. Continue measured POS splits after Move 761: checkout writes, receipt
-   printing, product-management writes, and settings/system transports can
-   still wake broad registry paths on real intent. Keep each slice guarded by
-   route traces plus interaction proof so read-only POS browsing remains light
-   while live/offline write behavior stays intact.
+6. Continue measured POS splits after Move 762: checkout writes, receipt
+   printing, customer/delivery create writes, product-management writes, and
+   settings/system transports can still wake broad registry paths on real
+   intent. Keep each slice guarded by route traces plus interaction proof so
+   read-only POS browsing remains light while live/offline write behavior stays
+   intact.

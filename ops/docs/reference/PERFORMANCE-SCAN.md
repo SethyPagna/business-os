@@ -1825,4 +1825,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `app-api-methods`, `csv-utils`, `app-local-db`, or `vendor-dexie`; after the
   delayed gate, only `contact-read-api-3bBCBgdj.js` was added and those broad
   chunks stayed unloaded through the tested customer interaction window.
+- Move 492 records roadmap Move 762: keep POS membership lookup out of the
+  broad API methods registry. `POS.tsx` now lazy-loads `portalTransport.ts`
+  directly for `lookupPortalMembership`, reusing the focused `app-portal`
+  manual chunk. Docker image `business-os:v6.0.0-202606040258` served the
+  focused trace `ops/runtime/reports/route-load-trace-2026-06-03T19-00-43-680Z.json`:
+  POS was ready in 268 ms with 30 requests and 22 scripts, with zero failed
+  requests and zero console/page errors. A live Chromium customer-selection
+  probe chose existing membership customer `Customer 1`; the first window had
+  no `app-portal`, `app-api-methods`, `csv-utils`, `app-local-db`, or
+  `vendor-dexie`, and membership selection added only
+  `app-portal-Bi-RHhNA.js` after the earlier delayed `contact-read-api` wake.
 <!-- phase29-manual-notes:end -->

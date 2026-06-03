@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 761.
+- Latest completed implementation move in this roadmap: Move 762.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -10098,3 +10098,42 @@ Move 761 status:
   writes, receipt printing, product-management writes, and settings/system
   transport clusters without moving live business data or weakening offline
   fallback behavior.
+
+Move 762 status:
+- Move 762 narrows POS membership lookup. `POS.tsx` now lazy-loads
+  `portalTransport.ts` directly for `lookupPortalMembership`, so selecting a
+  customer with a membership number no longer enters the broad `window.api`
+  methods registry. The change is read-only and keeps checkout/offline sale
+  behavior untouched.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, JSX/source check, production build, Docker release image
+  `business-os:v6.0.0-202606040258`, focused POS route-load Playwright trace,
+  and a live Chromium POS membership-selection probe.
+- Build proof: production builds emitted `app-portal-*.js` as the existing
+  focused portal transport chunk and kept POS membership lookup guarded by a
+  memoized `portalTransport.ts` dynamic import. The source guard now rejects
+  `api.lookupPortalMembership` in POS.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-00-43-680Z.json`
+  measured POS at 268 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors.
+- Interaction proof: a Docker-served Chromium check opened POS, waited through
+  the delayed contact gate, opened the customer picker, selected existing
+  customer `Customer 1` with membership `LCMN-P3D01HD0`, and recorded scripts
+  before and after membership lookup. The first window had no `app-portal`,
+  `app-api-methods`, `csv-utils`, `app-local-db`, or `vendor-dexie`; after
+  the delayed contact gate only `contact-read-api-DeDopXO-.js` was added; and
+  after selecting the membership customer only `app-portal-Bi-RHhNA.js` was
+  added. `app-api-methods`, `csv-utils`, `app-local-db`, and `vendor-dexie`
+  stayed unloaded with zero failed requests and zero relevant console/page
+  errors. Screenshot:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-membership-lookup-1780513393629.png`.
+- Current plan position after Move 762: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with measured route/interaction proof, focusing on POS checkout
+  writes, receipt printing, customer/delivery create writes, product-management
+  writes, and settings/system transport clusters without moving live business
+  data or weakening offline fallback behavior.

@@ -296,7 +296,6 @@ type PosApi = {
   createDeliveryContact?: (payload: DeliveryFormState) => Promise<Partial<DeliveryContactRecord>>
   createSale?: (payload: Record<string, unknown>) => Promise<SaleResult>
   getBranches?: () => Promise<BranchRecord[]>
-  lookupPortalMembership?: (membershipNumber: string) => Promise<MembershipInfo | null>
 }
 
 type ImageLightboxState = {
@@ -349,10 +348,16 @@ function loadPosCategories(): Promise<unknown[]> {
 }
 
 let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
+let portalTransportPromise: Promise<typeof import('../../api/portalTransport.ts')> | null = null
 
 function getContactReadTransport(): Promise<typeof import('../../api/contactReadTransport.ts')> {
   if (!contactReadTransportPromise) contactReadTransportPromise = import('../../api/contactReadTransport.ts')
   return contactReadTransportPromise
+}
+
+function getPortalTransport(): Promise<typeof import('../../api/portalTransport.ts')> {
+  if (!portalTransportPromise) portalTransportPromise = import('../../api/portalTransport.ts')
+  return portalTransportPromise
 }
 
 async function loadPosCustomers(): Promise<CustomerRecord[]> {
@@ -363,6 +368,11 @@ async function loadPosCustomers(): Promise<CustomerRecord[]> {
 async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
   const { getDeliveryContacts } = await getContactReadTransport()
   return getDeliveryContacts() as Promise<DeliveryContactRecord[]>
+}
+
+async function lookupPosPortalMembership(membershipNumber: string): Promise<MembershipInfo | null> {
+  const { lookupPortalMembership } = await getPortalTransport()
+  return lookupPortalMembership(membershipNumber) as Promise<MembershipInfo | null>
 }
 
 function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
@@ -809,9 +819,8 @@ export default function POS() {
     setMembershipLoading(true)
     setMembershipError('')
     try {
-      const api = getPosApi()
       const data = await withLoaderTimeout(
-        () => api.lookupPortalMembership?.(membershipNumber) || missingPosApiMethod('lookupPortalMembership'),
+        () => lookupPosPortalMembership(membershipNumber),
         label,
         POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )

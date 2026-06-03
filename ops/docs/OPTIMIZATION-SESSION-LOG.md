@@ -2902,3 +2902,37 @@ Use this shape for future entries:
   unloaded through the tested customer interaction window, with zero failed
   requests and zero relevant console/page errors. Screenshot:
   `C:\Users\user\Downloads\business-os\output\playwright\pos-contact-read-1780512638903.png`.
+
+- change: keep POS membership lookup out of broad API methods
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS customer membership lookup after selecting a
+  customer with a membership number
+- keeper or rollback: keeper; POS now lazy-loads `portalTransport.ts`
+  directly for `lookupPortalMembership`, preserving the focused portal
+  transport path while leaving checkout/offline sale writes untouched
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `app-portal-*.js` as the
+  existing focused portal transport chunk. The source guard verifies the
+  memoized `portalTransport.ts` dynamic import and rejects
+  `api.lookupPortalMembership` in POS.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-00-43-680Z.json`
+  measured POS at 268 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors. Docker image
+  `business-os:v6.0.0-202606040258` served the check.
+- interaction proof:
+  a Docker-served Chromium probe opened POS, waited through the delayed
+  contact gate, opened the customer picker, selected existing customer
+  `Customer 1` with membership `LCMN-P3D01HD0`, and recorded loaded scripts.
+  The first window had no `app-portal`, `app-api-methods`, `csv-utils`,
+  `app-local-db`, or `vendor-dexie`; after the delayed contact gate only
+  `contact-read-api-DeDopXO-.js` was added; after membership selection only
+  `app-portal-Bi-RHhNA.js` was added. Broad/local chunks stayed unloaded with
+  zero failed requests and zero relevant console/page errors. Screenshot:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-membership-lookup-1780513393629.png`.
