@@ -1274,4 +1274,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-49-20-982Z/report.json`
   kept all checked admin/helper paths at HTTP 200 with zero relevant console
   messages.
+- Move 458 records roadmap Move 728: coalesce Products/POS filter loads and
+  speed live audit loops. Products and POS now allow one active
+  product/catalog request plus one pending latest-state reload during rapid
+  filter/search/page changes, which keeps visible route state current without
+  sending every intermediate state to `/api/products/search`. The all-pages
+  audit harness also uses shorter configurable settle waits, records route
+  filters/time budgets in summaries, and waits for file chooser events only on
+  likely file/media controls. Docker-served build hash `da6ef8d8e9971506`
+  passed frontend source checks, typecheck, production build, Docker
+  release/update, focused all-pages route slice, filter burst proof, public
+  Cloudflare Playwright, and exhaustive all-pages desktop/mobile Playwright.
+  The burst proof `ops/runtime/reports/filter-burst-check-latest.json`
+  produced one `/api/products/search` response per three-click burst on
+  desktop/mobile Products and POS, all HTTP 200. The exhaustive report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T01-39-09-836Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 386, skipped 133 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

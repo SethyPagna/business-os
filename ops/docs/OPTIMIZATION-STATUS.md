@@ -8,27 +8,29 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 725, split public portal API bootstrap from the legacy API/Dexie registry
+- Latest completed move: Move 728, coalesce Products/POS filter loads and speed live audit loops
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent broad Phase 8.4 UI live check: `cbfed31b11f3c265`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `da6ef8d8e9971506`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `cbfed31b11f3c265`
+  `da6ef8d8e9971506`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-01T17-28-30-123Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T01-39-09-836Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-02T18-58-27-864Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T01-38-34-629Z/report.json`
+- latest Products/POS filter burst proof:
+  `ops/runtime/reports/filter-burst-check-latest.json`
 - latest import-tracker focused proof:
   `ops/runtime/reports/move723-import-tracker-probe-2026-06-02T16-53-06-381Z.json`
 - post-live hygiene:
@@ -46,19 +48,34 @@ Latest cleanup run:
 
 Current honest pockets:
 
-- exhaustive desktop/mobile all-pages Playwright control audit passed across
-  34 routes, with 519 visible controls discovered, 392 controls exercised, 127
-  intentionally skipped by stable broad-audit guardrails, 68 screenshots, zero
-  failed controls, and zero findings
-- broad Phase 8.4 UI live check passed on frontend hash `cb6332a2ac6f7165`
-  with 71 checked signals, no relevant console messages, and no framework
-  overlay
+- exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
+  build hash `da6ef8d8e9971506` across 34 routes, with 519 visible controls
+  discovered, 386 controls exercised, 133 intentionally skipped by stable
+  broad-audit guardrails, 68 screenshots, zero failed controls, and zero
+  findings
+- Products and POS desktop/mobile filter burst proof passed with three rapid
+  filter/search clicks per route and only one `/api/products/search` response
+  per burst, all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
+- Docker release image `business-os:v6.0.0-202606030916` is serving the
+  verified build; the release update created backup
+  `ops/runtime/docker-release/backups/20260603-092847`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Products and POS now coalesce rapid filter/search/page changes into one
+  active product/catalog load plus one latest-state follow-up reload instead
+  of issuing every intermediate request. The all-pages live audit harness was
+  also tightened: it only waits for file chooser events on likely file/media
+  buttons, uses shorter settle waits, and can stop cleanly on time budgets.
+  Proof: `ops/runtime/reports/filter-burst-check-latest.json` passed across
+  desktop/mobile Products and POS, the focused all-pages slice passed, and the
+  exhaustive all-pages audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T01-39-09-836Z/summary.json`
+  passed with zero failed controls.
 
 - Public portal first load now avoids the legacy API registry and offline DB
   chunks. `frontend/src/web-api.ts` lazy-loads `portalTransport.ts` directly

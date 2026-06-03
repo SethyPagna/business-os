@@ -8911,3 +8911,38 @@ Move 727 status:
   `output/playwright/public-mobile-after.png`,
   `output/playwright/public-large-mobile-after.png`, and
   `output/playwright/public-tablet-after.png`.
+
+Move 728 status:
+- Move 728 coalesces Products and POS filter/search load loops and speeds the
+  broad all-pages live audit harness. The repeated route sweep found that
+  rapid filter taps could still start overlapping product/catalog loads, and
+  the audit harness spent avoidable time waiting for file chooser events on
+  ordinary buttons.
+- `frontend/src/components/products/Products.tsx` now keeps one active product
+  load and one pending latest-state reload. `frontend/src/components/pos/POS.tsx`
+  uses the same pattern for catalog loads. This keeps the UI honest while
+  avoiding backend/API waterfalls for intermediate filter states.
+- `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` now has shorter
+  configurable settle waits, optional time budgets, route-filter metadata in
+  summaries, and file chooser waits only for likely file/media controls.
+  `ops/scripts/runtime/live-checks/filter-burst-check.ts` records a focused
+  Products/POS request-coalescing proof.
+- Docker release image `business-os:v6.0.0-202606030916` was deployed into the
+  local runtime. `/business-os-build.json` reports frontend hash
+  `da6ef8d8e9971506`, and the update created backup
+  `ops/runtime/docker-release/backups/20260603-092847`.
+- Proof: frontend JSX/source check, frontend typecheck, production build,
+  Docker release build/update, focused Products/Inventory/POS/Audit/Public
+  all-pages slice, filter burst checker, public Cloudflare portal Playwright,
+  and exhaustive all-pages desktop/mobile Playwright passed. The exhaustive
+  report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T01-39-09-836Z/summary.json`
+  covered 34 routes, discovered 519 visible controls, exercised 386 controls,
+  intentionally skipped 133 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- The focused burst report
+  `ops/runtime/reports/filter-burst-check-latest.json` rapidly clicked three
+  filter controls on desktop/mobile Products and POS; each burst produced one
+  `/api/products/search` response at HTTP 200. Public Cloudflare initially
+  returned stale tunnel errors after runtime restart, but restarting only
+  `business-os-cloudflared-1` restored public and admin health to HTTP 200.

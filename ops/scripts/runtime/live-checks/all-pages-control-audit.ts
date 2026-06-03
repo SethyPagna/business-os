@@ -114,6 +114,9 @@ type AuditSummary = {
     startedAt: string
     finishedAt?: string
     ok?: boolean
+    routeFilters?: string[]
+    timeBudgetMs?: number
+    timeBudgetExceeded?: boolean
   }
   routes: RouteResult[]
   controls: ControlRecord[]
@@ -152,6 +155,11 @@ const MIN_TESTED_CONTROLS_PER_ROUTE = Number(process.env.BOS_ALL_PAGES_MIN_TESTE
 const MIN_TESTED_CONTROLS = Number(process.env.BOS_ALL_PAGES_MIN_TESTED_CONTROLS || 0)
 const MAX_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_SKIPPED_RATIO || 0.75)
 const MAX_ROUTE_SKIPPED_CONTROL_RATIO = Number(process.env.BOS_ALL_PAGES_MAX_ROUTE_SKIPPED_RATIO || 0.8)
+const DISMISS_SETTLE_MS = Number(process.env.BOS_ALL_PAGES_DISMISS_SETTLE_MS || 50)
+const CONTROL_SETTLE_MS = Number(process.env.BOS_ALL_PAGES_CONTROL_SETTLE_MS || 90)
+const FILE_CHOOSER_TIMEOUT_MS = Number(process.env.BOS_ALL_PAGES_FILE_CHOOSER_TIMEOUT_MS || 350)
+const TIME_BUDGET_MS = Number(process.env.BOS_ALL_PAGES_TIME_BUDGET_MS || 0)
+const SCRIPT_STARTED_AT = performance.now()
 
 const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b/i
 const SETTINGS_LANGUAGE_BUTTON_RE = /^(en|kh|both)$/i
@@ -267,6 +275,14 @@ function buttonSkipReason(label: string): string {
 function expectedButtonNavigation(route: AuditRoute, label: string): { page: string; path: string } | null {
   const candidates = INTENTIONAL_ROUTE_BUTTONS[route.name] || []
   return candidates.find((candidate) => candidate.label.test(label)) || null
+}
+
+function buttonMayOpenFileChooser(label: string): boolean {
+  return /\b(upload|import|choose file|file|image|photo|avatar|camera|scan|browse)\b/i.test(label)
+}
+
+function timeBudgetExceeded(): boolean {
+  return TIME_BUDGET_MS > 0 && performance.now() - SCRIPT_STARTED_AT > TIME_BUDGET_MS
 }
 
 function escapeRegExp(value: string): string {
@@ -653,7 +669,7 @@ async function saveScreenshot(page: Page, name: string): Promise<string> {
 
 async function dismissTransientUi(page: Page): Promise<void> {
   await page.keyboard.press('Escape').catch(() => {})
-  await page.waitForTimeout(120)
+  await page.waitForTimeout(DISMISS_SETTLE_MS)
   const candidates = [
     page.locator('button[aria-label*="Close" i]').first(),
     page.getByRole('button', { name: /^Close$/i }).first(),
@@ -664,7 +680,7 @@ async function dismissTransientUi(page: Page): Promise<void> {
     if (!(await button.count().catch(() => 0))) continue
     if (!(await button.isVisible().catch(() => false))) continue
     await button.click({ timeout: 1_000 }).catch(() => {})
-    await page.waitForTimeout(120)
+    await page.waitForTimeout(DISMISS_SETTLE_MS)
     break
   }
 }
@@ -774,7 +790,9 @@ async function clickButtonCandidate(
     if (await button.isDisabled().catch(() => false)) {
       return { kind: 'button', label: resultName, ok: true, skipped: true, ms: 0, reason: 'candidate disabled' }
     }
-    const fileChooser = page.waitForEvent('filechooser', { timeout: 800 }).catch(() => null)
+    const fileChooser = buttonMayOpenFileChooser(resultName)
+      ? page.waitForEvent('filechooser', { timeout: FILE_CHOOSER_TIMEOUT_MS }).catch(() => null)
+      : Promise.resolve(null)
     await button.click({ timeout: CONTROL_TIMEOUT_MS }).catch(async (error) => {
       if (!/intercepts pointer events|Timeout/i.test(String(error?.message || ''))) throw error
       await button.click({ timeout: CONTROL_TIMEOUT_MS, force: true })
@@ -784,7 +802,7 @@ async function clickButtonCandidate(
       await page.keyboard.press('Escape').catch(() => {})
       return { kind: 'button', label: resultName, ok: true, skipped: true, ms: Math.round(performance.now() - started), reason: 'file chooser avoided' }
     }
-    await page.waitForTimeout(180)
+    await page.waitForTimeout(CONTROL_SETTLE_MS)
     const bodyTextLength = await page.locator('body').evaluate((node) => node.textContent?.trim().length || 0).catch(() => 0)
     const overlayCount = await page.locator('#vite-error-overlay, [data-nextjs-dialog-overlay]').count().catch(() => 0)
     await dismissTransientUi(page)
@@ -1079,6 +1097,16 @@ async function createAuthedPage(browser: Browser, profile: AuditProfile, session
 async function runProfile(browser: Browser, profile: AuditProfile, routes: AuditRoute[]): Promise<void> {
   const session = await loginWithFetch({ baseUrl: BASE_URL, username: USERNAME, password: PASSWORD })
   for (const route of routes) {
+    if (timeBudgetExceeded()) {
+      summary.audit.timeBudgetExceeded = true
+      addFinding(1, 'runner', 'all-pages audit stopped at configured time budget', {
+        profile: profile.name,
+        nextRoute: route.name,
+        timeBudgetMs: TIME_BUDGET_MS,
+      })
+      await persistSummary()
+      return
+    }
     let context: BrowserContext | null = null
     try {
       if (route.authRequired === false) {
@@ -1115,7 +1143,10 @@ async function main(): Promise<void> {
   await fs.mkdir(SCREENSHOT_DIR, { recursive: true })
   const health = await fetch(`${BASE_URL}/health`, { signal: AbortSignal.timeout(20_000) }).then((response) => response.json())
   if (health?.status !== 'ok') throw new Error('Health check is not ok')
-  const selectedRoutes = resolveAuditRoutes(readArgs('--route'))
+  const routeFilters = readArgs('--route')
+  summary.audit.routeFilters = routeFilters
+  if (TIME_BUDGET_MS > 0) summary.audit.timeBudgetMs = TIME_BUDGET_MS
+  const selectedRoutes = resolveAuditRoutes(routeFilters)
   if (selectedRoutes.unknownRoutes.length) {
     throw new Error(`Unknown route(s): ${selectedRoutes.unknownRoutes.join(', ')}`)
   }
@@ -1125,6 +1156,14 @@ async function main(): Promise<void> {
   const browser = await chromium.launch({ headless: true })
   try {
     for (const profile of profiles) {
+      if (timeBudgetExceeded()) {
+        summary.audit.timeBudgetExceeded = true
+        addFinding(1, 'runner', 'all-pages audit stopped before next profile at configured time budget', {
+          profile: profile.name,
+          timeBudgetMs: TIME_BUDGET_MS,
+        })
+        break
+      }
       await runProfile(browser, profile, routes)
     }
   } finally {

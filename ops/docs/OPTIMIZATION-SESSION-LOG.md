@@ -1931,3 +1931,41 @@ Use this shape for future entries:
   restart while local `/public` was HTTP 200. Restarting only
   `business-os-cloudflared-1` restored public HTTP 200, matching the existing
   tunnel/Docker DNS follow-up.
+
+- change: coalesce Products/POS filter loads and speed live audit loops
+- affected files:
+  `frontend/src/components/products/Products.tsx`,
+  `frontend/src/components/pos/POS.tsx`,
+  `ops/scripts/runtime/live-checks/all-pages-control-audit.ts`,
+  `ops/scripts/runtime/live-checks/filter-burst-check.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products, POS, `/api/products/search`, and the broad
+  all-pages live Playwright audit harness
+- keeper or rollback: keeper; it preserves route-visible loading state while
+  collapsing rapid intermediate filter/search/page state changes into one
+  active request and one latest-state reload
+- route-scoped result: `ops/runtime/reports/filter-burst-check-latest.json`
+  rapidly clicked three filter controls on desktop/mobile Products and POS.
+  Each burst produced one `/api/products/search` response, all HTTP 200.
+- warm whole-app result: frontend JSX/source check, frontend typecheck,
+  production build, Docker release build/update, focused all-pages route
+  slice, public Cloudflare Playwright, and exhaustive all-pages desktop/mobile
+  Playwright passed. Docker image `business-os:v6.0.0-202606030916` is serving
+  build hash `da6ef8d8e9971506`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-092847`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T01-39-09-836Z/summary.json`
+  covered 34 routes, discovered 519 visible controls, exercised 386 controls,
+  intentionally skipped 133 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T01-38-34-629Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP.
+- infrastructure note: the post-start public health path returned Cloudflare
+  530 while local/admin health were reachable. Restarting only
+  `business-os-cloudflared-1` restored both public and admin health to HTTP
+  200; the tunnel/Docker DNS stability follow-up remains open.

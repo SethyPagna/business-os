@@ -541,6 +541,9 @@ export default function POS() {
 
   const searchRef = useRef<HTMLInputElement | null>(null)
   const catalogRequestRef = useRef(0)
+  const catalogLoadPromiseRef = useRef<Promise<{ prods: ProductRecord[], cats: unknown[], brs: BranchRecord[] } | null> | null>(null)
+  const pendingCatalogLoadRef = useRef<{ label: string } | null>(null)
+  const latestLoadCatalogRef = useRef<((label?: string) => Promise<{ prods: ProductRecord[], cats: unknown[], brs: BranchRecord[] } | null>) | null>(null)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
@@ -585,60 +588,85 @@ export default function POS() {
   }, [membershipInfo])
 
   const loadCatalogData = useCallback(async (label = 'POS catalog data') => {
+    if (catalogLoadPromiseRef.current) {
+      pendingCatalogLoadRef.current = { label }
+      return catalogLoadPromiseRef.current
+    }
     const requestId = beginTrackedRequest(catalogRequestRef)
     setCatalogRefreshing(true)
-    try {
-      const effectiveStockState = stockFilter === 'all' ? '' : stockFilter
-      const productQuery = {
-        page: productPage,
-        pageSize: productPageSize,
-        query: debouncedProductSearch,
-        searchMode,
-        category: categoryFilter === 'all' ? '' : categoryFilter,
-        brand: brandFilter === 'all' ? '' : brandFilter,
-        supplier: supplierFilter === 'all' ? '' : supplierFilter,
-        branchId: branchFilter === 'all' ? '' : branchFilter,
-        stockState: effectiveStockState,
-        groupState: groupFilter === 'all' ? '' : groupFilter,
-        initial: initialFilter === 'all' ? '' : initialFilter,
-        sort: 'name_asc',
-        include: 'branch_stock,images,family',
+    const promise = (async () => {
+      try {
+        const effectiveStockState = stockFilter === 'all' ? '' : stockFilter
+        const productQuery = {
+          page: productPage,
+          pageSize: productPageSize,
+          query: debouncedProductSearch,
+          searchMode,
+          category: categoryFilter === 'all' ? '' : categoryFilter,
+          brand: brandFilter === 'all' ? '' : brandFilter,
+          supplier: supplierFilter === 'all' ? '' : supplierFilter,
+          branchId: branchFilter === 'all' ? '' : branchFilter,
+          stockState: effectiveStockState,
+          groupState: groupFilter === 'all' ? '' : groupFilter,
+          initial: initialFilter === 'all' ? '' : initialFilter,
+          sort: 'name_asc',
+          include: 'branch_stock,images,family',
+        }
+        const api = getPosApi()
+        const [productPayload, cats, brs, filterPayload] = await withLoaderTimeout(
+          () => Promise.all([
+            api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
+            api.getCategories?.() || missingPosApiMethod('getCategories'),
+            api.getBranches?.() || missingPosApiMethod('getBranches'),
+            api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'),
+          ]),
+          label,
+          POS_CATALOG_LOAD_TIMEOUT_MS,
+        )
+        if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
+        const payloadRecord = isPlainRecord(productPayload) ? productPayload : {}
+        const prods = Array.isArray(payloadRecord.items)
+          ? payloadRecord.items as ProductRecord[]
+          : (Array.isArray(productPayload) ? productPayload : [])
+        applyCatalogData(prods, cats, brs)
+        setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
+        const filters = isPlainRecord(filterPayload) ? filterPayload : (isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {})
+        setProductFilterMeta({
+          brands: Array.isArray(filters?.brands) ? filters.brands : [],
+          suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
+          initials: aggregateInitialOptions((filters?.initials || payloadRecord.initials || []) as Array<Record<string, unknown>>),
+        })
+        return { prods, cats, brs }
+      } catch (error) {
+        if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
+        console.error('[POS] catalog load failed:', getErrorMessage(error))
+        return null
+      } finally {
+        if (isTrackedRequestCurrent(catalogRequestRef, requestId)) {
+          setCatalogRefreshing(false)
+        }
       }
-      const api = getPosApi()
-      const [productPayload, cats, brs, filterPayload] = await withLoaderTimeout(
-        () => Promise.all([
-          api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
-          api.getCategories?.() || missingPosApiMethod('getCategories'),
-          api.getBranches?.() || missingPosApiMethod('getBranches'),
-          api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'),
-        ]),
-        label,
-        POS_CATALOG_LOAD_TIMEOUT_MS,
-      )
-      if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
-      const payloadRecord = isPlainRecord(productPayload) ? productPayload : {}
-      const prods = Array.isArray(payloadRecord.items)
-        ? payloadRecord.items as ProductRecord[]
-        : (Array.isArray(productPayload) ? productPayload : [])
-      applyCatalogData(prods, cats, brs)
-      setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
-      const filters = isPlainRecord(filterPayload) ? filterPayload : (isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {})
-      setProductFilterMeta({
-        brands: Array.isArray(filters?.brands) ? filters.brands : [],
-        suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-        initials: aggregateInitialOptions((filters?.initials || payloadRecord.initials || []) as Array<Record<string, unknown>>),
-      })
-      return { prods, cats, brs }
-    } catch (error) {
-      if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
-      console.error('[POS] catalog load failed:', getErrorMessage(error))
-      return null
-    } finally {
-      if (isTrackedRequestCurrent(catalogRequestRef, requestId)) {
-        setCatalogRefreshing(false)
+    })()
+    const wrappedPromise = promise.finally(() => {
+      if (catalogLoadPromiseRef.current === wrappedPromise) {
+        catalogLoadPromiseRef.current = null
       }
-    }
+      const pending = pendingCatalogLoadRef.current
+      if (pending) {
+        pendingCatalogLoadRef.current = null
+        queueMicrotask(() => {
+          const nextLoad = latestLoadCatalogRef.current || loadCatalogData
+          nextLoad(pending.label).catch(() => {})
+        })
+      }
+    })
+    catalogLoadPromiseRef.current = wrappedPromise
+    return wrappedPromise
   }, [applyCatalogData, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, hasProductDiscoveryQuery, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
+
+  useEffect(() => {
+    latestLoadCatalogRef.current = loadCatalogData
+  }, [loadCatalogData])
 
   const loadCustomers = useCallback(async (label = 'POS customers') => {
     const requestId = beginTrackedRequest(customerRequestRef)
@@ -711,6 +739,8 @@ export default function POS() {
   useEffect(() => {
     if (!isActive) {
       invalidateTrackedRequest(catalogRequestRef)
+      catalogLoadPromiseRef.current = null
+      pendingCatalogLoadRef.current = null
       invalidateTrackedRequest(customerRequestRef)
       invalidateTrackedRequest(deliveryRequestRef)
       invalidateTrackedRequest(membershipRequestRef)
@@ -747,6 +777,8 @@ export default function POS() {
 
   useEffect(() => () => {
     invalidateTrackedRequest(catalogRequestRef)
+    catalogLoadPromiseRef.current = null
+    pendingCatalogLoadRef.current = null
     invalidateTrackedRequest(customerRequestRef)
     invalidateTrackedRequest(deliveryRequestRef)
     invalidateTrackedRequest(membershipRequestRef)

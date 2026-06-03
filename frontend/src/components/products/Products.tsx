@@ -458,6 +458,8 @@ export default function Products() {
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
+  const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
+  const latestLoadRef = useRef<((silent?: boolean) => Promise<void>) | null>(null)
   const productSaveInFlightRef = useRef(false)
   const productDeleteInFlightRef = useRef(false)
   const bulkActionInFlightRef = useRef(false)
@@ -477,6 +479,12 @@ export default function Products() {
   ), [])
 
   const load = useCallback(async (silent = false) => {
+    if (loadPromiseRef.current) {
+      const currentPending = pendingLoadRef.current || { silent: true }
+      currentPending.silent = currentPending.silent && silent
+      pendingLoadRef.current = currentPending
+      return loadPromiseRef.current
+    }
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
@@ -608,10 +616,22 @@ export default function Products() {
       if (loadPromiseRef.current === wrappedPromise) {
         loadPromiseRef.current = null
       }
+      const pending = pendingLoadRef.current
+      if (pending) {
+        pendingLoadRef.current = null
+        queueMicrotask(() => {
+          const nextLoad = latestLoadRef.current || load
+          nextLoad(Boolean(pending.silent)).catch(() => {})
+        })
+      }
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
   }, [branchFilter, brandFilter, branches.length, catFilter, categories.length, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr, units.length])
+
+  useEffect(() => {
+    latestLoadRef.current = load
+  }, [load])
 
   const fetchProductsByIds = useCallback(async (ids: EntityId[] = []): Promise<ProductRecord[]> => {
     const uniqueIds = Array.from(new Set(
@@ -633,6 +653,7 @@ export default function Products() {
       if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
+      pendingLoadRef.current = null
       setLoading(false)
       return
     }
@@ -651,6 +672,7 @@ export default function Products() {
     if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
     loadPromiseRef.current = null
+    pendingLoadRef.current = null
   }, [])
 
   const handleSave = async (form: ProductRecord) => {

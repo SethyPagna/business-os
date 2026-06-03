@@ -106,7 +106,7 @@ Total files documented: **234**
 | 94 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
 | 95 | `frontend/src/components/pos/CartItem.tsx` | 2 |
 | 96 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
-| 97 | `frontend/src/components/pos/POS.tsx` | 36 |
+| 97 | `frontend/src/components/pos/POS.tsx` | 37 |
 | 98 | `frontend/src/components/pos/posCore.ts` | 1 |
 | 99 | `frontend/src/components/pos/ProductImage.tsx` | 1 |
 | 100 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
@@ -1561,22 +1561,23 @@ Total files documented: **234**
 | 18 | `setPersistedInitial` | const arrow | 410 |
 | 19 | `addNewOrder` | const arrow | 471 |
 | 20 | `closeOrder` | const arrow | 483 |
-| 21 | `selectCustomer` | const arrow | 804 |
-| 22 | `applyCustomerOption` | const arrow | 852 |
-| 23 | `clearCustomer` | const arrow | 866 |
-| 24 | `handleAddCustomer` | const arrow | 874 |
-| 25 | `selectDelivery` | const arrow | 912 |
-| 26 | `clearDelivery` | const arrow | 917 |
-| 27 | `handleAddDelivery` | const arrow | 919 |
-| 28 | `qty` | const arrow | 1031 |
-| 29 | `addToCart` | function | 1195 |
-| 30 | `updateQty` | const arrow | 1234 |
-| 31 | `updatePrice` | const arrow | 1242 |
-| 32 | `updateItemBranch` | const arrow | 1266 |
-| 33 | `handleDiscountUsd` | const arrow | 1315 |
-| 34 | `handleDiscountKhr` | const arrow | 1316 |
-| 35 | `handleMembershipUnits` | const arrow | 1317 |
-| 36 | `handleCheckout` | const arrow | 1356 |
+| 21 | `promise` | const arrow | 597 |
+| 22 | `selectCustomer` | const arrow | 836 |
+| 23 | `applyCustomerOption` | const arrow | 884 |
+| 24 | `clearCustomer` | const arrow | 898 |
+| 25 | `handleAddCustomer` | const arrow | 906 |
+| 26 | `selectDelivery` | const arrow | 944 |
+| 27 | `clearDelivery` | const arrow | 949 |
+| 28 | `handleAddDelivery` | const arrow | 951 |
+| 29 | `qty` | const arrow | 1063 |
+| 30 | `addToCart` | function | 1227 |
+| 31 | `updateQty` | const arrow | 1266 |
+| 32 | `updatePrice` | const arrow | 1274 |
+| 33 | `updateItemBranch` | const arrow | 1298 |
+| 34 | `handleDiscountUsd` | const arrow | 1347 |
+| 35 | `handleDiscountKhr` | const arrow | 1348 |
+| 36 | `handleMembershipUnits` | const arrow | 1349 |
+| 37 | `handleCheckout` | const arrow | 1388 |
 
 ### 3.98 `frontend/src/components/pos/posCore.ts`
 
@@ -1845,19 +1846,19 @@ Total files documented: **234**
 | 9 | `toVariantParentProduct` | function | 382 |
 | 10 | `toLightboxState` | function | 388 |
 | 11 | `Products` | component/function | 398 |
-| 12 | `promise` | const arrow | 481 |
-| 13 | `handleSave` | const arrow | 656 |
-| 14 | `handleSaveWithGallery` | const arrow | 706 |
-| 15 | `handleBulkDelete` | const arrow | 773 |
-| 16 | `handleBulkOutOfStock` | const arrow | 820 |
-| 17 | `handleBulkChangeBranch` | const arrow | 863 |
-| 18 | `handleBulkAddStock` | const arrow | 893 |
-| 19 | `toggleSelect` | const arrow | 901 |
-| 20 | `toggleSelectAll` | const arrow | 908 |
-| 21 | `handleDelete` | const arrow | 915 |
-| 22 | `renderUnitChip` | const arrow | 1002 |
-| 23 | `openLightbox` | const arrow | 1016 |
-| 24 | `getStockBadge` | const arrow | 1023 |
+| 12 | `promise` | const arrow | 489 |
+| 13 | `handleSave` | const arrow | 678 |
+| 14 | `handleSaveWithGallery` | const arrow | 728 |
+| 15 | `handleBulkDelete` | const arrow | 795 |
+| 16 | `handleBulkOutOfStock` | const arrow | 842 |
+| 17 | `handleBulkChangeBranch` | const arrow | 885 |
+| 18 | `handleBulkAddStock` | const arrow | 915 |
+| 19 | `toggleSelect` | const arrow | 923 |
+| 20 | `toggleSelectAll` | const arrow | 930 |
+| 21 | `handleDelete` | const arrow | 937 |
+| 22 | `renderUnitChip` | const arrow | 1024 |
+| 23 | `openLightbox` | const arrow | 1038 |
+| 24 | `getStockBadge` | const arrow | 1045 |
 
 ### 3.123 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
