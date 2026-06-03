@@ -16,7 +16,7 @@ import {
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
 import { isWSConnected, reconnectWS } from './api/websocket.ts'
-import { APP_NAVIGATION_EVENT, getAdminPathForPage } from './app/appShellUtils.ts'
+import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage } from './app/appShellUtils.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { parsePermissionMap } from './utils/permissions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
@@ -455,6 +455,11 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   server:           'settings',
 }
 
+function getInitialAdminPage(publicMode: boolean): string {
+  if (publicMode || typeof window === 'undefined') return 'dashboard'
+  return getAdminPageFromPath(window.location.pathname) || 'dashboard'
+}
+
 function LoadingScreen() {
   // Used during the very first bootstrap before settings/user state are ready.
   return (
@@ -504,7 +509,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const [settings,            setSettings]            = useState<AppSettings>({})
   const [language,            setLanguage]            = useState('en')
   const [theme,               setTheme]               = useState('light')
-  const [page,                setPage]                = useState('dashboard')
+  const [page,                setPage]                = useState(() => getInitialAdminPage(publicMode))
   const [notification,        setNotification]        = useState<AppNotification | null>(null)
   const [writeConflict,       setWriteConflict]       = useState<WriteConflictDetail | null>(null)
   const [langRevision,        setLangRevision]        = useState(0)

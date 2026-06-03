@@ -1329,4 +1329,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 518 controls, exercised 380, skipped 138 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 461 records roadmap Move 731: initialize direct admin routes from the
+  current URL before the app shell mounts and move Sales/Returns into the
+  narrow delayed page-entry warmup set. `AppContext` now derives initial page
+  state with `getAdminPageFromPath(window.location.pathname)`, so direct
+  `/returns`, `/pos`, `/inventory`, and `/server` entries no longer mount
+  Dashboard first or pull Dashboard chart/startup chunks into the first-load
+  window. The top-route trace
+  `ops/runtime/reports/top-route-load-trace-latest.json` reduced Returns from
+  68 to 37 first-window requests, POS from 52 to 49, Inventory from 46 to 43,
+  and Server from 36 to 33, with zero failed requests and zero console/page
+  errors. Docker-served build hash `e2b70d07090424d9` passed frontend utility
+  tests, JSX/source check, typecheck, production build, Docker release/update,
+  focused Inventory/POS/Returns/Server route-control audit, public Cloudflare
+  Playwright, and full desktop/mobile all-pages Playwright. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-06-28-636Z/summary.json`
+  covered 34 routes, discovered 520 controls, exercised 384, skipped 136 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

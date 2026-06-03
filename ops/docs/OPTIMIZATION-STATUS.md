@@ -8,29 +8,31 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 730, dedupe public portal AI status and measure route-ready audit timing
+- Latest completed move: Move 731, initialize direct routes without Dashboard pre-mount and narrow admin-stack warmup
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `ca7fbc36b3f8c914`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `e2b70d07090424d9`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `98cfca7a1d31bbbe`
+  `a89c032bfeb9c91f`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T02-41-33-682Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-06-28-636Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T02-41-03-398Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-06-28-154Z/report.json`
 - latest public portal load trace:
   `ops/runtime/reports/public-load-trace-latest.json`
+- latest top-route load trace:
+  `ops/runtime/reports/top-route-load-trace-latest.json`
 - latest Products/POS filter burst proof:
   `ops/runtime/reports/filter-burst-check-latest.json`
 - latest import-tracker focused proof:
@@ -51,8 +53,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `ca7fbc36b3f8c914` across 34 routes, with 518 visible controls
-  discovered, 380 controls exercised, 138 intentionally skipped by stable
+  build hash `e2b70d07090424d9` across 34 routes, with 520 visible controls
+  discovered, 384 controls exercised, 136 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -65,13 +67,28 @@ Current honest pockets:
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606031036` is serving the
+- Docker release image `business-os:v6.0.0-202606031101` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-103722`
+  `ops/runtime/docker-release/backups/20260603-110259`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Direct admin URLs now initialize the active page from the browser path before
+  the shell mounts. `/returns`, `/pos`, `/inventory`, and other direct links no
+  longer briefly mount Dashboard first or pull Dashboard chart chunks into the
+  first-load window. Sales and Returns also use the narrow delayed page-entry
+  warmup path, so Returns no longer warms Contacts, Users, Audit Log, Receipt
+  Settings, Settings, Files, Server, and Backup immediately on entry. Proof:
+  `ops/runtime/reports/top-route-load-trace-latest.json` shows Returns request
+  count dropped from 68 to 37 in the 500 ms first-load trace window, with zero
+  unrelated route chunks, zero failed requests, and zero console/page errors.
+  The focused Inventory/POS/Returns/Server route-control audit passed with 105
+  exercised controls and zero failures at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-04-37-523Z/summary.json`;
+  the full all-pages audit passed at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-06-28-636Z/summary.json`.
 
 - Public portal first-load status checks now dedupe by AI provider key. The
   local Playwright load trace on `/public` showed root attached at 192 ms,

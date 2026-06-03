@@ -261,6 +261,8 @@ const ADMIN_PAGE_SEQUENCE: readonly PageId[] = [
 
 const PAGE_ENTRY_WARMUP_AHEAD_COUNT = 1
 const NARROW_PAGE_ENTRY_WARMUP_IDS: ReadonlySet<PageId> = new Set([
+  'sales',
+  'returns',
   'contacts',
   'users',
   'audit_log',

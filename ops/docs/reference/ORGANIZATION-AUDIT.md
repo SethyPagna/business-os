@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T02:49:27.782Z
+Generated: 2026-06-03T03:18:14.334Z
 
 ## Summary
 
@@ -63,7 +63,7 @@ Generated: 2026-06-03T02:49:27.782Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 9023 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9068 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
@@ -71,23 +71,23 @@ Generated: 2026-06-03T02:49:27.782Z
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3529 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3042 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
 | frontend/src/components/products/Products.tsx | 2369 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2320 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2324 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/pos/POS.tsx | 2281 | frontend/components/pos |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2147 | frontend/components/products |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2053 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2098 | ops/docs |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
-| frontend/src/App.tsx | 1879 | frontend/src/App.tsx |
+| frontend/src/App.tsx | 1881 | frontend/src/App.tsx |
+| frontend/src/AppContext.tsx | 1872 | frontend/src/AppContext.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1872 | frontend/components/utils-settings |
-| frontend/src/AppContext.tsx | 1867 | frontend/src/AppContext.tsx |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1813 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1741 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |

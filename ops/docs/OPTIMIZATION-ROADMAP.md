@@ -9020,3 +9020,48 @@ Move 730 status:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+Move 731 status:
+- Move 731 removes avoidable direct-route startup work. The route load trace
+  showed that direct admin URLs such as `/returns`, `/pos`, `/inventory`, and
+  `/server` still initialized the app context to Dashboard first, briefly
+  mounting Dashboard and pulling unrelated route chunks before the URL sync
+  corrected the active page.
+- `frontend/src/AppContext.tsx` now derives the initial admin page from
+  `window.location.pathname` through `getAdminPageFromPath()` before the app
+  shell mounts. This keeps direct URLs honest at first render and avoids
+  Dashboard chart/startup work on non-Dashboard entry.
+- `frontend/src/App.tsx` now treats Sales and Returns as narrow delayed
+  page-entry warmup routes. Returns no longer pulls the later admin stack
+  immediately on entry, including Contacts, Users, Audit Log, Receipt
+  Settings, Settings, Files, Server, and Backup.
+- Docker release image `business-os:v6.0.0-202606031101` is serving frontend
+  hash `e2b70d07090424d9`; update backup:
+  `ops/runtime/docker-release/backups/20260603-110259`.
+- Proof: frontend utility tests, JSX/source check, frontend typecheck,
+  production build, Docker release build/update, local health/build metadata,
+  top-route Playwright load trace, focused Inventory/POS/Returns/Server
+  route-control audit, public Cloudflare portal Playwright, and full
+  desktop/mobile all-pages Playwright passed. The top-route trace
+  `ops/runtime/reports/top-route-load-trace-latest.json` reduced the first
+  500 ms request window for Returns from 68 requests to 37 and kept Dashboard
+  or later-admin chunks out of the non-Dashboard direct-route traces, with zero
+  failed requests and zero console/page errors. POS dropped from 52 to 49
+  requests, Inventory from 46 to 43, and Server from 36 to 33 in the same
+  trace window.
+- The focused route-control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-04-37-523Z/summary.json`
+  exercised 105 controls across desktop/mobile Inventory, POS, Returns, and
+  Server with zero failures. The exhaustive all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-06-28-636Z/summary.json`
+  covered 34 routes, discovered 520 controls, exercised 384, skipped 136 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-06-28-154Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Next measured route hotspots after this pass are Sales around 340 ms,
+  Dashboard around 332 ms, Audit Log around 330 ms, and Inventory around
+  318 ms route navigation time in the exhaustive audit. Continue with
+  route-specific chunk/data-path traces before making broader rewires.

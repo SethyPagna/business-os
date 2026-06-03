@@ -2050,3 +2050,48 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: initialize direct routes from URL and narrow Sales/Returns warmup
+- affected files:
+  `frontend/src/AppContext.tsx`,
+  `frontend/src/App.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: direct admin route first-load behavior for `/returns`,
+  `/pos`, `/inventory`, `/server`, Sales, Returns, and delayed page-entry
+  warmup
+- keeper or rollback: keeper; direct URLs now mount the intended page first
+  instead of Dashboard, and Sales/Returns keep later route warmup useful but
+  delayed/narrow enough to avoid competing with first useful content
+- route-scoped result: `ops/runtime/reports/top-route-load-trace-latest.json`
+  compared top admin routes before and after the change. Returns dropped from
+  68 to 37 first-window requests, POS from 52 to 49, Inventory from 46 to 43,
+  and Server from 36 to 33; the post-change traces had zero unrelated
+  Dashboard or later-admin chunks for non-Dashboard entries, zero failed
+  requests, and zero console/page errors.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-04-37-523Z/summary.json`
+  covered desktop/mobile Inventory, POS, Returns, and Server, discovered 143
+  controls, exercised 105 controls, intentionally skipped 38 stable
+  broad-audit guardrail controls, captured 16 screenshots, and recorded zero
+  failed controls.
+- warm whole-app result: frontend utility tests, JSX/source check, frontend
+  typecheck, production build, Docker release build/update, local
+  `/health`, local `/business-os-build.json`, public Cloudflare Playwright,
+  and full all-pages desktop/mobile Playwright passed. Docker image
+  `business-os:v6.0.0-202606031101` is serving build hash
+  `e2b70d07090424d9`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-110259`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-06-28-636Z/summary.json`
+  covered 34 routes, discovered 520 visible controls, exercised 384 controls,
+  intentionally skipped 136 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-06-28-154Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
