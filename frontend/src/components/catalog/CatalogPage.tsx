@@ -96,8 +96,6 @@ const CatalogPreviewSurface = lazy(loadCatalogPreviewSurface)
 const CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS = 8000
 const CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS = 10000
 const CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
-const CATALOG_PORTAL_CONFIG_TIMEOUT_MS = 10000
-const CATALOG_PORTAL_META_TIMEOUT_MS = 10000
 const CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_FAVICON_TIMEOUT_MS = 8000
 const CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS = 25000
@@ -1383,6 +1381,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
   const portalFaviconRequestRef = useRef(0)
+  const skipNextBootstrappedProductSearchRef = useRef(false)
   const publicScrollAnchorRef = useRef(0)
   const publicPortalNavRef = useRef<HTMLElement | null>(null)
   const mediaUploadControllersRef = useRef(new Map<string, AbortController>())
@@ -1779,45 +1778,50 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (!isPageActive) return
     const requestId = beginTrackedRequest(loadRequestRef)
     if (publicView) {
-      const portalConfig = await withLoaderTimeout(
-        () => getCatalogApi().getPortalConfig(),
-        'Portal config',
-        CATALOG_PORTAL_CONFIG_TIMEOUT_MS,
+      const bootstrapResult = await withLoaderTimeout(
+        () => getCatalogApi().getPortalBootstrap(),
+        'Portal bootstrap',
+        CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS,
       )
       if (!isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
 
+      const portalConfig = bootstrapResult?.config || null
+      const meta = bootstrapResult?.meta || null
+      const catalogPage = bootstrapResult?.catalog || null
+      const portalProducts = catalogPage?.items || bootstrapResult?.products || null
+      if (!portalConfig && !meta && !portalProducts) throw new Error('Failed to load customer portal')
+
       const nextConfig = { ...DEFAULT_CONFIG, ...(portalConfig || {}) }
+      const nextMeta = {
+        categories: normalizeCatalogOptions(meta?.categories),
+        brands: normalizeBrandOptions(meta?.brands),
+        branches: normalizeCatalogOptions(meta?.branches),
+      }
+      const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
+
+      skipNextBootstrappedProductSearchRef.current = true
       setConfig(nextConfig)
       setPortalConfigReady(true)
       if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
+      setCategories(nextMeta.categories)
+      setBrands(nextMeta.brands)
+      setBranches(nextMeta.branches)
+      setProducts(nextProducts)
+      if (catalogPage && typeof catalogPage === 'object') {
+        setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
+        setPortalProductPage(Number(catalogPage.page || 1) || 1)
+        setPortalProductPageSize(Number(catalogPage.pageSize || 20) || 20)
+        setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
+      }
       setActiveTab((current) => resolveVisibleTab(current, nextConfig))
       writePortalCache({
         config: nextConfig,
-        categories,
-        brands,
-        branches,
-        products,
-        catalog: {
-          page: portalProductPage,
-          pageSize: portalProductPageSize,
-          total: portalProductTotal,
-          initials: portalProductInitials,
-        },
+        ...nextMeta,
+        products: nextProducts,
+        catalog: catalogPage || null,
         reviewItems: [],
       })
 
-      withLoaderTimeout(
-        () => getCatalogApi().getPortalCatalogMeta?.(),
-        'Portal catalog metadata',
-        CATALOG_PORTAL_META_TIMEOUT_MS,
-      )
-        .then((metaResult) => {
-          if (!aliveRef.current || !isPortalLoadCurrent(requestId) || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setCategories(normalizeCatalogOptions(metaResult?.categories))
-          setBrands(normalizeBrandOptions(metaResult?.brands))
-          setBranches(normalizeCatalogOptions(metaResult?.branches))
-        })
-        .catch(() => {})
       return
     }
 
@@ -1915,6 +1919,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     if (!isPageActive || !previewConfig.showCatalog || (publicView && !portalConfigReady)) return undefined
+    if (publicView && skipNextBootstrappedProductSearchRef.current) {
+      skipNextBootstrappedProductSearchRef.current = false
+      return undefined
+    }
     const requestId = beginTrackedRequest(portalProductsRequestRef)
     setPortalProductRefreshing(products.length > 0)
 

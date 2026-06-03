@@ -26,9 +26,7 @@ type PortalChecks = {
   portalVisible: boolean
   internalServerErrorVisible: boolean
   renderedProductCount: number
-  configStatus: number | null
-  metaStatus: number | null
-  searchStatus: number | null
+  bootstrapStatus: number | null
   aiStatusBeforeInteraction: number | null
   aiStatusAfterInteraction: number | null
   enforcedCspPresent: boolean
@@ -133,9 +131,7 @@ async function main(): Promise<void> {
       portalVisible,
       internalServerErrorVisible,
       renderedProductCount,
-      configStatus: endpointStatus(observedRequests, /\/api\/portal\/config/i),
-      metaStatus: endpointStatus(observedRequests, /\/api\/portal\/catalog\/meta/i),
-      searchStatus: endpointStatus(observedRequests, /\/api\/portal\/catalog\/products\/search/i),
+      bootstrapStatus: endpointStatus(observedRequests, /\/api\/portal\/bootstrap/i),
       aiStatusBeforeInteraction,
       aiStatusAfterInteraction,
       enforcedCspPresent: /script-src\s+'self'/i.test(enforcedCsp) && /connect-src\s+'self'/i.test(enforcedCsp),
@@ -167,9 +163,7 @@ async function main(): Promise<void> {
     assert(checks.portalVisible, 'Remote public portal did not render expected customer content')
     assert(!checks.internalServerErrorVisible, 'Remote public portal rendered an internal server error JSON/message')
     assert(checks.renderedProductCount > 0, 'Remote public portal rendered without visible product cards')
-    assert(checks.configStatus === 200, `Remote portal config returned HTTP ${checks.configStatus}`)
-    assert(checks.metaStatus === 200, `Remote portal metadata returned HTTP ${checks.metaStatus}`)
-    assert(checks.searchStatus === 200, `Remote portal product search returned HTTP ${checks.searchStatus}`)
+    assert(checks.bootstrapStatus === 200, `Remote portal bootstrap returned HTTP ${checks.bootstrapStatus}`)
     assert(checks.aiStatusBeforeInteraction == null, `Remote portal AI status should be deferred, saw HTTP ${checks.aiStatusBeforeInteraction}`)
     assert(checks.aiStatusAfterInteraction === 200, `Remote portal AI status after Assistant click returned HTTP ${checks.aiStatusAfterInteraction}`)
     assert(checks.enforcedCspPresent, 'Remote public portal response did not expose the expected enforced CSP')

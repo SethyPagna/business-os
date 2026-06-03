@@ -344,30 +344,16 @@ async function main(): Promise<void> {
     assert(catalogAiProvidersStatus === 200, `Catalog AI providers read returned HTTP ${catalogAiProvidersStatus}`)
     assert(catalogReviewItemsStatus === 200, `Catalog review items read returned HTTP ${catalogReviewItemsStatus}`)
 
-    console.log('[phase84] exercising public portal config/meta/product loaders')
-    const publicPortalConfigResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/portal/config') && response.status() < 500,
+    console.log('[phase84] exercising public portal bootstrap loader')
+    const publicPortalBootstrapResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/portal/bootstrap') && response.status() < 500,
       { timeout: 20_000 },
     )
-    const publicPortalMetaResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/portal/catalog/meta') && response.status() < 500,
-      { timeout: 20_000 },
-    ).catch(() => null)
-    const publicPortalSearchResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/portal/catalog/products/search') && response.status() < 500,
-      { timeout: 20_000 },
-    ).catch(() => null)
     await page.goto('/public', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await page.getByText(/Leang|Products|Catalog|Membership|Search/i).first().waitFor({ state: 'visible', timeout: 20_000 })
-    const publicPortalConfigStatus = (await publicPortalConfigResponse).status()
-    const publicPortalMetaRead = await publicPortalMetaResponse
-    const publicPortalSearchRead = await publicPortalSearchResponse
-    const publicPortalMetaStatus = publicPortalMetaRead?.status?.() || latestObservedStatus(chunkRequests, /\/api\/portal\/catalog\/meta/i)
-    const publicPortalSearchStatus = publicPortalSearchRead?.status?.() || latestObservedStatus(chunkRequests, /\/api\/portal\/catalog\/products\/search/i)
-    assert(publicPortalConfigStatus === 200, `Public portal config read returned HTTP ${publicPortalConfigStatus}`)
-    assert(publicPortalMetaStatus === 200, `Public portal metadata read returned HTTP ${publicPortalMetaStatus}`)
-    assert(publicPortalSearchStatus === 200, `Public portal product search returned HTTP ${publicPortalSearchStatus}`)
+    const publicPortalBootstrapStatus = (await publicPortalBootstrapResponse).status()
+    assert(publicPortalBootstrapStatus === 200, `Public portal bootstrap returned HTTP ${publicPortalBootstrapStatus}`)
 
     console.log('[phase84] exercising receipt settings preview loader')
     await page.goto('/receipt-settings', { waitUntil: 'domcontentloaded', timeout: 30_000 })
@@ -794,9 +780,7 @@ async function main(): Promise<void> {
         aiResponsesStatus,
         catalogAiProvidersStatus,
         catalogReviewItemsStatus,
-        publicPortalConfigStatus,
-        publicPortalMetaStatus,
-        publicPortalSearchStatus,
+        publicPortalBootstrapStatus,
         receiptPreviewVisible,
         posProductSearchStatus,
         posCategoriesStatus,

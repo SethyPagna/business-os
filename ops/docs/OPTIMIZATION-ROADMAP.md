@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 745.
+- Latest completed implementation move in this roadmap: Move 746.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9491,3 +9491,39 @@ Move 740 status:
   optimization candidates should move to another route or target code/runtime
   cleanup, because Products first-window work is close to the practical floor:
   auth plus first page data.
+
+Move 746 status:
+- Move 746 collapses the public portal first-load config, metadata, and first
+  product-page reads into the existing `/api/portal/bootstrap` endpoint.
+  `CatalogPage` now uses the bootstrap payload for public config, metadata,
+  products, and pagination, then skips the already-bootstrapped search effect
+  once. Normal public search/filter/page changes still use the existing search
+  endpoint.
+- Docker release image `business-os:v6.0.0-202606031937` is serving frontend
+  hash `26f11137bb93baee`; update backup:
+  `ops/runtime/docker-release/backups/20260603-193942`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `c96b8b33d98534da`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, local health metadata, focused public route-load
+  trace, public Cloudflare portal Playwright with Assistant interaction, and
+  broad Phase 8.4 UI Playwright passed. The focused route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-40-35-980Z.json` shows
+  public_catalog at 23 total requests and 1 API request, with zero failed
+  requests and zero console/page errors. The single first-window API request
+  is `/api/portal/bootstrap`.
+- The public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-40-45-423Z/report.json`
+  rendered 20 products, confirmed bootstrap HTTP 200, confirmed AI status is
+  absent before interaction, clicked Assistant, and observed AI status HTTP
+  200 with zero relevant console/page errors. The broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-42-12-482Z/report.json`
+  covered the admin/public/POS/inventory/settings live loaders and passed with
+  `publicPortalBootstrapStatus: 200`.
+- Current plan position after Move 746: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Public portal first-window API
+  work is now at the practical floor: one bootstrap response for the first
+  visible catalog.

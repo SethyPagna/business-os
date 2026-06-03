@@ -1287,16 +1287,6 @@ assert.match(
 )
 assert.match(
   catalogPage,
-  /const CATALOG_PORTAL_CONFIG_TIMEOUT_MS = 10000/,
-  'catalog portal config should use an explicit timeout constant',
-)
-assert.match(
-  catalogPage,
-  /const CATALOG_PORTAL_META_TIMEOUT_MS = 10000/,
-  'catalog portal metadata should use an explicit timeout constant',
-)
-assert.match(
-  catalogPage,
   /const CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000/,
   'catalog portal product search should use an explicit timeout constant',
 )
@@ -1327,18 +1317,28 @@ assert.match(
 )
 assert.match(
   catalogPage,
-  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalConfig\(\),\s*'Portal config',\s*CATALOG_PORTAL_CONFIG_TIMEOUT_MS,\s*\)/,
-  'catalog portal config should timeout slow config reads',
-)
-assert.match(
-  catalogPage,
-  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalCatalogMeta\?\.\(\),\s*'Portal catalog metadata',\s*CATALOG_PORTAL_META_TIMEOUT_MS,\s*\)/,
-  'catalog portal metadata should timeout slow metadata reads',
-)
-assert.match(
-  catalogPage,
   /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalBootstrap\(\),\s*'Portal bootstrap',\s*CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS,\s*\)/,
   'catalog portal bootstrap API read should timeout slow bootstrap reads',
+)
+assert.match(
+  catalogPage,
+  /if \(publicView\) \{[\s\S]*getCatalogApi\(\)\.getPortalBootstrap\(\)[\s\S]*const meta = bootstrapResult\?\.meta \|\| null[\s\S]*const catalogPage = bootstrapResult\?\.catalog \|\| null/,
+  'public catalog first-load should use the single bootstrap payload for config, metadata, and first products',
+)
+assert.match(
+  catalogPage,
+  /skipNextBootstrappedProductSearchRef\.current = true[\s\S]*if \(publicView && skipNextBootstrappedProductSearchRef\.current\) \{[\s\S]*skipNextBootstrappedProductSearchRef\.current = false[\s\S]*return undefined/,
+  'public catalog should not duplicate the bootstrapped first product page with an immediate search request',
+)
+assert.doesNotMatch(
+  catalogPage,
+  /if \(publicView\) \{[\s\S]{0,900}getCatalogApi\(\)\.getPortalConfig\(\)/,
+  'public catalog should not start with a standalone config read',
+)
+assert.doesNotMatch(
+  catalogPage,
+  /if \(publicView\) \{[\s\S]{0,1800}getCatalogApi\(\)\.getPortalCatalogMeta/,
+  'public catalog should not start with a standalone metadata read',
 )
 assert.match(
   catalogPage,
