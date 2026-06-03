@@ -1347,4 +1347,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 520 controls, exercised 384, skipped 136 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 462 records roadmap Move 732: add focused route-load tracing and
+  defer Sales background history/user reads. The new
+  `ops/scripts/runtime/live-checks/route-load-trace.ts` script records route
+  ready timing, total requests, API requests, script requests, failed requests,
+  and console/page errors for selected routes. Sales now gates
+  `useActionHistory()` behind a post-ready `historyReady` delay, preserving
+  local undo/redo recording while moving server action-history and admin user
+  option reads out of the first route window. Docker-served build hash
+  `696ba3a8fffee895` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, focused
+  Dashboard/Inventory/Sales/Audit Log control audit, public Cloudflare
+  Playwright, and full desktop/mobile all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-latest.json` reduced Sales
+  first-window API requests from 4 to 2 and reported zero failed requests and
+  zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-32-00-189Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

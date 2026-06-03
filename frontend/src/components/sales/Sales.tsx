@@ -33,6 +33,7 @@ import SalesListSurface from './SalesListSurface'
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
 const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
+const SALES_HISTORY_READY_DELAY_MS = 1800
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
@@ -221,6 +222,7 @@ export default function Sales() {
   const [salesPage, setSalesPage] = useState(1)
   const [salesPageSize, setSalesPageSize] = useState(50)
   const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
+  const [historyReady, setHistoryReady] = useState(false)
   const selectAllRef = useRef<HTMLInputElement>(null)
   const loadedOnceRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -230,7 +232,7 @@ export default function Sales() {
   const membershipActionRef = useRef<Set<string>>(new Set())
   const bulkStatusInFlightRef = useRef(false)
   const aliveRef = useRef(true)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
   const deferredSearch = useDeferredValue(search)
   const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const isAdmin = useMemo(() => {
@@ -343,6 +345,7 @@ export default function Sales() {
 
   useEffect(() => {
     if (!isActive) {
+      setHistoryReady(false)
       clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
@@ -352,6 +355,18 @@ export default function Sales() {
     aliveRef.current = true
     loadSales(loadedOnceRef.current)
   }, [clearLoadWatchdog, isActive, loadSales])
+
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, SALES_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
 
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return

@@ -9065,3 +9065,51 @@ Move 731 status:
   Dashboard around 332 ms, Audit Log around 330 ms, and Inventory around
   318 ms route navigation time in the exhaustive audit. Continue with
   route-specific chunk/data-path traces before making broader rewires.
+
+Move 732 status:
+- Move 732 adds a reusable focused route-load tracing harness and applies the
+  first finding to Sales. The new
+  `ops/scripts/runtime/live-checks/route-load-trace.ts` script logs route-ready
+  timing, request counts, API counts, script counts, failed requests, and
+  console/page errors for selected routes, writing both timestamped and latest
+  JSON reports. It is exposed as
+  `npm.cmd --prefix ops run phase84:route-load-trace`.
+- The first trace across Dashboard, Inventory, Sales, and Audit Log found
+  Sales doing non-critical background work during first route load:
+  `/api/users` from action-history user options and
+  `/api/action-history?scope=global...` from server history. Those reads are
+  useful, but they do not need to compete with the initial Sales list.
+- `frontend/src/components/sales/Sales.tsx` now gates `useActionHistory()` with
+  `historyReady` and enables it only after the first Sales data load has
+  settled plus a short delay. The local undo/redo push path remains available
+  when staff perform a reversible action; only the background server-history
+  and all-user option reads are deferred out of the first route window.
+- Docker release image `business-os:v6.0.0-202606031125` is serving frontend
+  hash `696ba3a8fffee895`; update backup:
+  `ops/runtime/docker-release/backups/20260603-112741`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `c2f0e97a8ccdfca9`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, focused route-load trace, focused
+  Dashboard/Inventory/Sales/Audit Log route-control audit, public Cloudflare
+  portal Playwright, and full desktop/mobile all-pages Playwright passed. The
+  focused route-load trace
+  `ops/runtime/reports/route-load-trace-latest.json` shows Sales first-window
+  API requests reduced from 4 to 2, with 34 total requests, zero failed
+  requests, and zero console/page errors. The focused control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-29-36-198Z/summary.json`
+  exercised 107 controls across desktop/mobile Dashboard, Inventory, Sales,
+  and Audit Log with zero failures. The exhaustive all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-32-00-189Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-31-56-597Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Next candidates from the same trace: Inventory still loads inventory history,
+  users, branches, local DB/Dexie, and catalog support during first entry;
+  Sales still pulls local DB/Dexie/catalog support via the legacy API registry.
+  Continue by splitting specific typed read transports out of `api/methods.ts`
+  before touching broader route UI.

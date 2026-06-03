@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-03T03:18:14.334Z
+Generated: 2026-06-03T03:43:52.983Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 599
+- Files scanned: 600
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-03T03:18:14.334Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 400 |
+| .ts | 401 |
 | .tsx | 107 |
 | .md | 45 |
 | .json | 17 |
@@ -33,7 +33,7 @@ Generated: 2026-06-03T03:18:14.334Z
 | frontend/utils | 32 |
 | ops/docs/reference | 32 |
 | backend/routes | 24 |
-| ops/scripts/runtime/live-checks | 21 |
+| ops/scripts/runtime/live-checks | 22 |
 | frontend/components/shared | 17 |
 | ops/docs | 14 |
 | frontend/components/catalog | 13 |
@@ -63,7 +63,7 @@ Generated: 2026-06-03T03:18:14.334Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 9068 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9116 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
@@ -76,13 +76,13 @@ Generated: 2026-06-03T03:18:14.334Z
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
 | frontend/src/components/products/Products.tsx | 2369 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2324 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2328 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/pos/POS.tsx | 2281 | frontend/components/pos |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2147 | frontend/components/products |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2098 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2144 | ops/docs |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | backend/src/routes/inventory.ts | 1881 | backend/routes |
 | frontend/src/App.tsx | 1881 | frontend/src/App.tsx |

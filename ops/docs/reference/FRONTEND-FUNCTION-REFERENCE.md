@@ -2135,22 +2135,22 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getSalesApi` | function | 128 |
-| 2 | `normalizeSaleRows` | function | 133 |
-| 3 | `normalizeUserOptions` | function | 141 |
-| 4 | `getErrorMessage` | function | 146 |
-| 5 | `isWriteConflict` | function | 150 |
-| 6 | `multiMatch` | function | 157 |
-| 7 | `normalizeFiniteIds` | function | 169 |
-| 8 | `countSelectedIds` | function | 173 |
-| 9 | `countActiveFlags` | function | 181 |
-| 10 | `getSaleBranchLabel` | function | 189 |
-| 11 | `Sales` | component/function | 197 |
-| 12 | `promise` | const arrow | 287 |
-| 13 | `toggleSelected` | const arrow | 624 |
-| 14 | `toggleSelectAll` | const arrow | 630 |
-| 15 | `handleExportSelected` | const arrow | 669 |
-| 16 | `handleBulkStatusUpdate` | const arrow | 717 |
+| 1 | `getSalesApi` | function | 129 |
+| 2 | `normalizeSaleRows` | function | 134 |
+| 3 | `normalizeUserOptions` | function | 142 |
+| 4 | `getErrorMessage` | function | 147 |
+| 5 | `isWriteConflict` | function | 151 |
+| 6 | `multiMatch` | function | 158 |
+| 7 | `normalizeFiniteIds` | function | 170 |
+| 8 | `countSelectedIds` | function | 174 |
+| 9 | `countActiveFlags` | function | 182 |
+| 10 | `getSaleBranchLabel` | function | 190 |
+| 11 | `Sales` | component/function | 198 |
+| 12 | `promise` | const arrow | 289 |
+| 13 | `toggleSelected` | const arrow | 639 |
+| 14 | `toggleSelectAll` | const arrow | 645 |
+| 15 | `handleExportSelected` | const arrow | 684 |
+| 16 | `handleBulkStatusUpdate` | const arrow | 732 |
 
 ### 3.151 `frontend/src/components/sales/SalesImportModal.tsx`
 

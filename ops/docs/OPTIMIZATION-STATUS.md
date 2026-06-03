@@ -8,27 +8,29 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 731, initialize direct routes without Dashboard pre-mount and narrow admin-stack warmup
+- Latest completed move: Move 732, defer Sales background history/user reads and add focused route-load tracing
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `e2b70d07090424d9`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `696ba3a8fffee895`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `a89c032bfeb9c91f`
+  `c2f0e97a8ccdfca9`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-06-28-636Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-32-00-189Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-06-28-154Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-31-56-597Z/report.json`
+- latest focused route-load trace:
+  `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
   `ops/runtime/reports/public-load-trace-latest.json`
 - latest top-route load trace:
@@ -53,8 +55,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `e2b70d07090424d9` across 34 routes, with 520 visible controls
-  discovered, 384 controls exercised, 136 intentionally skipped by stable
+  build hash `696ba3a8fffee895` across 34 routes, with 519 visible controls
+  discovered, 381 controls exercised, 138 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -67,13 +69,29 @@ Current honest pockets:
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606031101` is serving the
+- Docker release image `business-os:v6.0.0-202606031125` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-110259`
+  `ops/runtime/docker-release/backups/20260603-112741`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Sales first-load now defers non-critical server action-history and admin
+  user-option reads until after the route is ready. The new reusable
+  `npm.cmd --prefix ops run phase84:route-load-trace` Playwright probe saves
+  focused route request/timing reports, and the latest live trace shows Sales
+  first-window API requests dropped from 4 to 2 by removing `/api/users` and
+  `/api/action-history?scope=global...` from the initial Sales route window.
+  Proof: `ops/runtime/reports/route-load-trace-latest.json` shows Sales with
+  34 total requests, 2 API requests, zero failed requests, and zero console/page
+  errors. The focused Dashboard/Inventory/Sales/Audit Log route-control audit
+  passed with 107 exercised controls and zero failures at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-29-36-198Z/summary.json`;
+  the full all-pages audit passed at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T03-32-00-189Z/summary.json`,
+  and the public Cloudflare portal passed at
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T03-31-56-597Z/report.json`.
 
 - Direct admin URLs now initialize the active page from the browser path before
   the shell mounts. `/returns`, `/pos`, `/inventory`, and other direct links no
