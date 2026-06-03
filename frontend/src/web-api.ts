@@ -35,6 +35,8 @@ type AppBootstrapModule = typeof import('./api/appBootstrapTransport.ts')
 type AuthTransportModule = typeof import('./api/authTransport.ts')
 type PortalTransportModule = typeof import('./api/portalTransport.ts')
 type SystemRuntimeModule = typeof import('./api/systemRuntime.ts')
+type SaleWriteTransportModule = typeof import('./api/saleWriteTransport.ts')
+type OfflineSnapshotTransportModule = typeof import('./api/offlineSnapshotTransport.ts')
 type OfflineVaultKey = CryptoKey | null
 type OfflineRow = AnyRecord & {
   _seq?: number
@@ -91,6 +93,8 @@ let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
 let authTransportModulePromise: Promise<AuthTransportModule> | null = null
 let portalTransportModulePromise: Promise<PortalTransportModule> | null = null
 let systemRuntimeModulePromise: Promise<SystemRuntimeModule> | null = null
+let saleWriteTransportModulePromise: Promise<SaleWriteTransportModule> | null = null
+let offlineSnapshotTransportModulePromise: Promise<OfflineSnapshotTransportModule> | null = null
 let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
 
@@ -132,6 +136,16 @@ function loadPortalTransportModule(): Promise<PortalTransportModule> {
 function loadSystemRuntimeModule(): Promise<SystemRuntimeModule> {
   if (!systemRuntimeModulePromise) systemRuntimeModulePromise = import('./api/systemRuntime.ts')
   return systemRuntimeModulePromise
+}
+
+function loadSaleWriteTransportModule(): Promise<SaleWriteTransportModule> {
+  if (!saleWriteTransportModulePromise) saleWriteTransportModulePromise = import('./api/saleWriteTransport.ts')
+  return saleWriteTransportModulePromise
+}
+
+function loadOfflineSnapshotTransportModule(): Promise<OfflineSnapshotTransportModule> {
+  if (!offlineSnapshotTransportModulePromise) offlineSnapshotTransportModulePromise = import('./api/offlineSnapshotTransport.ts')
+  return offlineSnapshotTransportModulePromise
 }
 
 function getAuthTransportMethod<T extends keyof AuthTransportModule>(name: T): (...args: any[]) => Promise<any> {
@@ -625,7 +639,9 @@ function refreshOfflineSnapshotSoon(force = false): void {
       refreshOfflineSnapshotSoon(force)
       return
     }
-    getLazyApiMethod('refreshOfflineDeviceSnapshot')({ force }).catch(() => {})
+    loadOfflineSnapshotTransportModule()
+      .then((module) => module.refreshOfflineDeviceSnapshot({ force }))
+      .catch(() => {})
   }
   const delay = force ? OFFLINE_SNAPSHOT_FORCE_DELAY_MS : OFFLINE_SNAPSHOT_IDLE_DELAY_MS
   if (typeof window.requestIdleCallback === 'function') {
@@ -650,7 +666,9 @@ function refreshServiceWorkerSoon(force = false): void {
 function runOfflineMaintenance(force = false): void {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return
   if (!hasStoredUserSession()) return
-  getLazyApiMethod('retryPendingSyncNow')().catch(() => {})
+  loadSaleWriteTransportModule()
+    .then((module) => module.syncPendingSalesQueue({ force: true }))
+    .catch(() => {})
   if (offlineVaultKey) {
     syncUnlockedOfflineOutbox({ force }).catch(() => {})
     syncUnlockedOfflineFileChunks({ force }).catch(() => {})

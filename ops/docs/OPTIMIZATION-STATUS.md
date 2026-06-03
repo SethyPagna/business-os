@@ -8,18 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 765, lazy-load receipt export generators so the
-  receipt preview path avoids PDF/image/print code until the cashier clicks an
-  export action
+- Latest completed move: Move 766, keep Products write, ProductForm supplier,
+  product image-upload, action-history, and idle offline-snapshot paths out of
+  the broad API methods registry
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `71ea4f3183cefe58`
+- latest verified frontend hash from the most recent Docker-served live check: `30cbc69ea051e0fd`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `a5a46c3d2b056663`
+  `fd93172581ef3574`
 
 Latest verified reports:
 
@@ -30,9 +30,13 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T15-29-38-481Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
-- latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T20-14-57-395Z.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T21-26-13-600Z/report.json`
+- latest focused local route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-25-11-474Z.json`
+- latest focused remote admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-27-00-948Z.json`
+- latest focused Products write live check:
+  `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
@@ -100,11 +104,30 @@ Current honest pockets:
   Move 762 is served by Docker release image `business-os:v6.0.0-202606040258`;
   Move 763 is served by Docker release image `business-os:v6.0.0-202606040328`;
   Move 764 is served by Docker release image `business-os:v6.0.0-202606040354`;
-  Move 765 is served by Docker release image `business-os:v6.0.0-202606040412`.
+  Move 765 is served by Docker release image `business-os:v6.0.0-202606040412`;
+  Move 766 is served by Docker release image `business-os:v6.0.0-202606040522`.
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Products create/delete now avoids the broad API methods registry. Proof:
+  Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-25-11-474Z.json`
+  measured Products at 282 ms route-ready with 37 requests, 2 API requests,
+  and 29 scripts, zero failed requests, and zero console/page errors. A live
+  Playwright Product button -> create -> search -> row menu delete flow loaded
+  `product-write-api-CYyuCWn_.js` plus focused supplier/action-history chunks,
+  while `app-api-methods` stayed unloaded before and after the write intent.
+  The remote admin Products trace against
+  `https://admin.leangcosmetics.dpdns.org` passed with 16 requests, 1 API
+  request, 11 scripts, zero failed requests, and zero console/page errors.
+  The public Cloudflare portal check also passed with 20 rendered products,
+  `/api/portal/bootstrap` HTTP 200, AI status HTTP 200 after interaction, zero
+  failed responses, and zero relevant console/page errors. Post-live cleanup
+  removed 20 QA action-history rows and 10 QA audit-log rows. Docker release
+  image `business-os:v6.0.0-202606040522` serves frontend hash
+  `30cbc69ea051e0fd`.
 
 - Receipt preview now lazy-loads PDF/image/print generators only after an
   export intent. Proof: Docker-served route trace

@@ -3080,3 +3080,63 @@ Use this shape for future entries:
   removed the QA sale, sale item, allocation, product, stock rows, batch rows,
   inventory movement, action-history entry, and audit log created by the live
   receipt export proof.
+
+- change: narrow Products write, ProductForm supplier/image upload, action
+  history, and idle offline-snapshot paths
+- affected files:
+  `frontend/src/components/products/Products.tsx`,
+  `frontend/src/components/products/forms/ProductForm.tsx`,
+  `frontend/src/api/productImageUploadTransport.ts`,
+  `frontend/src/api/actionHistoryTransport.ts`,
+  `frontend/src/api/offlineSnapshotTransport.ts`,
+  `frontend/src/utils/actionHistory.ts`,
+  `frontend/src/web-api.ts`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/scripts/runtime/live-checks/move766-product-write-live-check.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products route load, Product button create flow,
+  ProductForm supplier options/image upload intents, action-history user
+  filter, idle offline snapshot refresh, and actual Cloudflare admin/public
+  links
+- keeper or rollback: keeper; ProductForm and Products intent paths now use
+  focused lazy transports and no longer wake `app-api-methods` for the tested
+  create/delete flow. The change preserves server-first reads, offline mirror
+  fallback, and cleanup hygiene while making the resource use measurable.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted focused
+  `product-write-api-CYyuCWn_.js`, `product-image-upload-api-CTBygZzI.js`,
+  `contacts-api--0vC5ZWJ.js`, `action-history-api-DdIk84Ze.js`, and
+  `offline-snapshot-api-C5dLnuHI.js` chunks. The source guard verifies those
+  manual chunk boundaries and rejects ProductForm `window.api` supplier/image
+  upload access.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-25-11-474Z.json`
+  measured local Docker Products at 282 ms route-ready with 37 requests, 2 API
+  requests, and 29 scripts, with zero failed requests and zero console/page
+  errors. Docker image `business-os:v6.0.0-202606040522` served frontend hash
+  `30cbc69ea051e0fd`.
+- interaction proof:
+  `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
+  created `QA Product Move766 1780521913531` through the Product modal, found
+  it through Products search, deleted it from the row menu, observed one
+  create call and one delete call, loaded `product-write-api-CYyuCWn_.js`, and
+  kept `app-api-methods` unloaded before and after the write intent.
+- actual link proof:
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned HTTP 200. Remote admin
+  Products route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-27-00-948Z.json`
+  passed with 16 requests, 1 API request, 11 scripts, zero failed requests,
+  and zero console/page errors. Remote public portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T21-26-13-600Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, AI status 200 after
+  interaction, zero failed responses, zero relevant console messages, and zero
+  page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run cleanup-test-data -- --prefix "QA Product Move766" --apply --output ops/runtime/reports/move766-product-write-cleanup-latest.json`
+  removed 20 QA action-history rows and 10 QA audit-log rows from repeated
+  product write proof runs.

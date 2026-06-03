@@ -10301,3 +10301,64 @@ Move 765 status:
   product-management writes, settings/system transport clusters, and any
   remaining checkout-adjacent chunks without moving live business data or
   weakening offline fallback behavior.
+
+Move 766 status:
+- Move 766 narrows the Products write, supplier, image-upload, action-history,
+  and idle offline-snapshot load paths. `Products.tsx` now keeps product create,
+  update, delete, stock, branch, and image-upload intents behind focused lazy
+  transports. `ProductForm.tsx` no longer reaches through `window.api` for
+  supplier options or image uploads; it lazy-loads `contactsTransport.ts` and
+  `productImageUploadTransport.ts` only when the form needs them. `web-api.ts`
+  now delegates idle offline snapshot refresh and forced sale queue retry to
+  focused transports instead of asking the broad API methods registry to wake
+  in the background.
+- Chunk proof: `vite.config.ts` assigns `product-write-api`,
+  `product-image-upload-api`, `contacts-api`, `sales-read-api`,
+  `action-history-api`, `offline-snapshot-api`, `branch-api`,
+  `inventory-api`, `request-ids`, and `product-read-api` boundaries. The
+  performance guard rejects ProductForm `window.api` supplier/image-upload
+  access, verifies the focused chunk rules, and confirms the offline snapshot
+  transport does not import `methods.ts`.
+- Local Docker route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-25-11-474Z.json`
+  measured Products at 282 ms route-ready with 37 requests, 2 API requests,
+  and 29 scripts, with zero failed requests and zero console/page errors.
+  Docker image `business-os:v6.0.0-202606040522` served frontend hash
+  `30cbc69ea051e0fd`.
+- Interaction proof:
+  `ops/scripts/runtime/live-checks/move766-product-write-live-check.ts`
+  opened the Docker-served Products page, clicked the real Product button,
+  created `QA Product Move766 1780521913531`, searched for that product,
+  opened its row menu, deleted it through the UI, accepted the dialog, and
+  confirmed the write flow loaded `product-write-api-CYyuCWn_.js` while
+  `app-api-methods` stayed unloaded before and after the write intent. The
+  flow recorded one create call, one delete call, zero failed requests, zero
+  relevant console messages, and zero page errors. Report:
+  `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`.
+- Actual Cloudflare proof:
+  `curl.exe -I https://admin.leangcosmetics.dpdns.org/health` returned HTTP
+  200 after the final Docker restart. `curl.exe -I
+  https://leangcosmetics.dpdns.org/public` returned HTTP 200. The remote admin
+  route trace against `https://admin.leangcosmetics.dpdns.org` measured
+  Products at 6504 ms route-ready with 16 requests, 1 API request, 11 scripts,
+  zero failed requests, and zero console/page errors:
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-27-00-948Z.json`.
+  The remote public portal Playwright check rendered 20 products, confirmed
+  `/api/portal/bootstrap` HTTP 200, confirmed AI status HTTP 200 after
+  interaction, and recorded zero failed responses, zero relevant console
+  messages, and zero page errors:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T21-26-13-600Z/report.json`.
+- Post-live hygiene: `npm.cmd --prefix ops run cleanup-test-data -- --prefix
+  "QA Product Move766" --apply --output ops/runtime/reports/move766-product-write-cleanup-latest.json`
+  removed 20 action-history rows and 10 audit-log rows from repeated QA product
+  proof runs; the UI-created product rows had already been deleted by the live
+  flow.
+- Current plan position after Move 766: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with measured route/interaction proof, focusing on
+  settings/system transport clusters, backup/storage flows, Cloudflare/tunnel
+  stability, and broad all-pages live testing without moving live business data
+  or weakening offline fallback behavior.

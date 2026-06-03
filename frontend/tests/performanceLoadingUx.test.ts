@@ -11,6 +11,9 @@ const appBootstrapTransport = fs.readFileSync(new URL('../src/api/appBootstrapTr
 const contactReadTransport = fs.readFileSync(new URL('../src/api/contactReadTransport.ts', import.meta.url), 'utf8')
 const contactWriteTransport = fs.readFileSync(new URL('../src/api/contactWriteTransport.ts', import.meta.url), 'utf8')
 const saleWriteTransport = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
+const productWriteTransport = fs.readFileSync(new URL('../src/api/productWriteTransport.ts', import.meta.url), 'utf8')
+const productImageUploadTransport = fs.readFileSync(new URL('../src/api/productImageUploadTransport.ts', import.meta.url), 'utf8')
+const offlineSnapshotTransport = fs.readFileSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url), 'utf8')
 const apiMethods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const localMirrors = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
 const clientRuntime = fs.readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
@@ -72,6 +75,7 @@ const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserPr
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
+const actionHistoryTransport = fs.readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 
 assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
@@ -264,7 +268,14 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/actionGuards\.ts'
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/scriptTypography\.ts'\)\) \{[\s\S]*return 'script-typography'/, 'shared Khmer typography helpers should not be owned by the public catalog preview chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactReadTransport\.ts'\)\) return 'contact-read-api'/, 'POS delayed contact option reads should have their own lazy contact-read API chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactWriteTransport\.ts'\)\) return 'contact-write-api'/, 'POS quick contact create writes should have their own lazy contact-write API chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactsTransport\.ts'\)\) return 'contacts-api'[\s\S]*normalized\.endsWith\('\/src\/api\/salesTransport\.ts'\)\) return 'sales-read-api'/, 'idle offline snapshot contact and sales reads should not be owned by app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/saleWriteTransport\.ts'\)\) return 'sale-write-api'/, 'POS checkout sale writes should have their own lazy sale-write API chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productWriteTransport\.ts'\)\) return 'product-write-api'/, 'Products page create\/update\/delete writes should have their own lazy product-write API chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productImageUploadTransport\.ts'\)\) return 'product-image-upload-api'/, 'Products page image upload intent should use a narrow product-image upload chunk instead of the full file transport')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/branchTransport\.ts'\)\) return 'branch-api'[\s\S]*normalized\.endsWith\('\/src\/api\/inventoryTransport\.ts'\)\) return 'inventory-api'/, 'Products page branch and stock intents should not collapse into app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'action-history-api'/, 'action history reads/writes and admin user filter reads should not collapse into app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/offlineSnapshotTransport\.ts'\)\) return 'offline-snapshot-api'/, 'idle offline snapshot refresh should not collapse into app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/requestIds\.ts'\)\) return 'request-ids'/, 'small request-id helpers used by focused write transports should not drag app-api-methods into product writes')
 assert.match(viteConfig, /productReadTransport\.ts'[\s\S]*lookupTransport\.ts'[\s\S]*expectedUpdatedAt\.ts'[\s\S]*localMirrors\.ts'[\s\S]*lazyLocalDb\.ts'[\s\S]*queryCache\.ts'[\s\S]*return 'product-read-api'/, 'POS product and lookup reads should have a narrow product-read API chunk instead of landing in app-api-methods')
 assert.match(viteConfig, /catalog\/catalogUi\.tsx'[\s\S]*return 'catalog-ui'[\s\S]*catalog\/portalCatalogDisplay\.ts'[\s\S]*return 'catalog-display'[\s\S]*CatalogPageContext\.tsx'[\s\S]*return 'catalog-context'[\s\S]*components\/catalog\/'\)\) return 'catalog'/, 'small catalog UI/display/context helpers should be split before the generic catalog route chunk')
 assert.match(viteConfig, /CatalogEditorSurface\.tsx'\)[\s\S]*CatalogImageField\.tsx'\)[\s\S]*return 'catalog-editor'/, 'editor-only catalog image fields should not be grouped into the public catalog chunk')
@@ -302,6 +313,17 @@ assert.match(saleWriteTransport, /export async function createSale[\s\S]*queueOf
 assert.match(saleWriteTransport, /export async function syncPendingSalesQueue/, 'sale write transport should preserve pending offline sale sync for background retry')
 assert.doesNotMatch(saleWriteTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"|from '\.\/salesTransport\.ts'|from "\.\/salesTransport\.ts"|from '\.\/requestIds\.ts'|from "\.\/requestIds\.ts"/, 'sale write transport should not import the broad API registry, sales read/mirror transport, or shared request-id owner')
 assert.match(saleWriteTransport, /function ensureSaleClientRequestId/, 'sale write transport should keep a tiny local request-id helper so checkout does not wake app-api-methods')
+assert.doesNotMatch(productWriteTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"/, 'product write transport should not import the broad API registry')
+assert.doesNotMatch(productImageUploadTransport, /from '\.\/(?:methods|fileTransport|importTransport)\.ts'|from "\.\/(?:methods|fileTransport|importTransport)\.ts"/, 'product image upload transport should not import the broad API registry, file transport, or import-job multipart stack')
+assert.match(products, /let productReadModulePromise: Promise<ProductReadModule> \| null = null[\s\S]*function loadProductReadModule\(\): Promise<ProductReadModule>[\s\S]*import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)/, 'Products route should lazy-load the narrow product read transport locally')
+assert.match(products, /let productWriteModulePromise: Promise<ProductWriteModule> \| null = null[\s\S]*function loadProductWriteModule\(\): Promise<ProductWriteModule>[\s\S]*import\('\.\.\/\.\.\/api\/productWriteTransport\.ts'\)/, 'Products route should lazy-load product create/update/delete transport locally')
+assert.match(products, /function loadBranchModule\(\): Promise<BranchModule>[\s\S]*import\('\.\.\/\.\.\/api\/branchTransport\.ts'\)[\s\S]*function loadInventoryModule\(\): Promise<InventoryModule>[\s\S]*import\('\.\.\/\.\.\/api\/inventoryTransport\.ts'\)[\s\S]*function loadProductImageUploadModule\(\): Promise<ProductImageUploadModule>[\s\S]*import\('\.\.\/\.\.\/api\/productImageUploadTransport\.ts'\)/, 'Products route should lazy-load branch, inventory, and product-image-upload transports only on their intent paths')
+assert.doesNotMatch(products, /\(window as Window & \{ api\?: ProductApi \}\)\.api|window\.api\.(?:createProduct|updateProduct|deleteProduct|adjustStock|transferStock|uploadProductImage)/, 'Products route should not depend on window.api for product write or stock/image intent paths')
+assert.match(actionHistory, /function loadActionHistoryTransport\(\): Promise<ActionHistoryTransportModule>[\s\S]*import\('\.\.\/api\/actionHistoryTransport\.ts'\)/, 'action history hook should lazy-load its focused transport instead of window.api')
+assert.match(actionHistoryTransport, /export function getActionHistoryUsers\(\): Promise<unknown>[\s\S]*apiFetch\('GET', '\/api\/users'\)/, 'action history admin user filter should stay in the focused action-history transport')
+assert.doesNotMatch(actionHistory, /window\.api\?\.(?:getActionHistory|getUsers|createActionHistory|undoActionHistory|redoActionHistory|updateActionHistory)/, 'action history hook should not wake the broad API registry for history or user-filter work')
+assert.match(offlineSnapshotTransport, /export async function refreshOfflineDeviceSnapshot/, 'idle offline snapshot refresh should live in a focused transport')
+assert.doesNotMatch(offlineSnapshotTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"/, 'idle offline snapshot transport should not import the broad API registry')
 assert.match(apiMethods, /function loadSaleWriteTransport\(\) \{[\s\S]*import\('\.\/saleWriteTransport\.ts'\)/, 'legacy API registry should lazy-load the focused sale write transport without creating a manual chunk cycle')
 assert.match(apiMethods, /export async function createSale\(d\) \{[\s\S]*await loadSaleWriteTransport\(\)[\s\S]*return createSaleRequest\(d\)/, 'legacy API registry should delegate createSale to the focused sale write transport')
 assert.match(apiMethods, /export async function retryPendingSyncNow\(\) \{[\s\S]*await loadSaleWriteTransport\(\)[\s\S]*return syncPendingSalesQueue\(\{ force: true \}\)/, 'legacy pending-sync retry should delegate to the focused sale write transport')
@@ -320,7 +342,9 @@ assert.match(webApi, /function isPublicRuntimePath\(\): boolean \{[\s\S]*pathnam
 assert.match(webApi, /const skipOfflineBootstrapDb = isPublicRuntimePath\(\)[\s\S]*if \(!skipOfflineBootstrapDb\) \{\s*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.delete\('sync_token'\)\)\s*\}/, 'retired token Dexie cleanup should be skipped for public portal startup')
 assert.match(webApi, /scheduleBootstrapStorageMaintenance\(\(\) => \{[\s\S]*localStorage\.setItem\(STORAGE_KEYS\.SYNC_SERVER, url\)[\s\S]*\}\)[\s\S]*if \(!skipOfflineBootstrapDb\) \{\s*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.put\(\{ key: 'sync_server_url', value: url \}\)\)\s*\}/, 'backend-origin sync URL should persist to localStorage while skipping the IndexedDB mirror on public portal')
 assert.match(webApi, /if \(!skipOfflineBootstrapDb\) \{[\s\S]*const db = await getOfflineDb\(\)[\s\S]*const stored = await db\.settings\.bulkGet\(\['sync_server_url'\]\)/, 'Vite dev IndexedDB sync URL fallback should stay available outside public portal startup')
-assert.match(webApi, /function runOfflineMaintenance\(force = false\): void \{[\s\S]*if \(!hasStoredUserSession\(\)\) return[\s\S]*getLazyApiMethod\('retryPendingSyncNow'\)/, 'logged-out startup should not load the full API registry for offline maintenance')
+assert.match(webApi, /function runOfflineMaintenance\(force = false\): void \{[\s\S]*if \(!hasStoredUserSession\(\)\) return[\s\S]*loadSaleWriteTransportModule\(\)[\s\S]*syncPendingSalesQueue\(\{ force: true \}\)/, 'logged-in idle maintenance should retry pending sale sync through the focused sale write transport')
+assert.match(webApi, /function refreshOfflineSnapshotSoon\(force = false\): void \{[\s\S]*loadOfflineSnapshotTransportModule\(\)[\s\S]*refreshOfflineDeviceSnapshot\(\{ force \}\)/, 'offline snapshot refresh should use the focused offline snapshot transport')
+assert.doesNotMatch(webApi, /getLazyApiMethod\('(?:retryPendingSyncNow|refreshOfflineDeviceSnapshot)'\)/, 'idle offline maintenance should call focused transports instead of the broad API registry')
 assert.match(webApi, /function ensureSessionRecoveryListeners\(\): void \{[\s\S]*sessionRecoveryListenersRegistered[\s\S]*window\.addEventListener\('online'[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(true\)\.catch[\s\S]*window\.addEventListener\('focus'[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(\)\.catch[\s\S]*document\.addEventListener\('visibilitychange'[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(\)\.catch[\s\S]*window\.addEventListener\('sync:reconnected'/, 'online/focus/visibility recovery listeners should be centralized in web-api after session recovery')
 assert.doesNotMatch(webApi, /if \(typeof window !== 'undefined'\) \{[\s\S]{0,500}window\.addEventListener\('online'/, 'signed-out startup should not register session recovery listeners at module load')
 assert.match(webApi, /const previousSyncServerUrl = getSyncServerUrl\(\)[\s\S]*const syncServerChanged = previousSyncServerUrl !== clean[\s\S]*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.put\(\{ key: 'sync_server_url', value: clean \}\)\)[\s\S]*cacheClearAll\(\)[\s\S]*if \(hasStoredUserSession\(\)\) \{[\s\S]*ensureSessionRecoveryListeners\(\)[\s\S]*connectWS\(\)[\s\S]*startHealthCheck\(\)[\s\S]*if \(syncServerChanged && hasStoredUserSession\(\)\) \{[\s\S]*scheduleInitialOfflineMaintenance\(\)/, 'setSyncServerUrl should avoid duplicate cache clears and start recovery loops only for stored sessions')
@@ -619,17 +643,17 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*\(\) => getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*async \(\) => \(await loadActionHistoryTransport\(\)\)\.getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
   'action history server reads should timeout slow history requests',
 )
 assert.match(
   actionHistory,
-  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\)\) return[\s\S]*setServerItems\(Array\.isArray\(result\?\.items\) \? result\.items : \[\]\)/,
+  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\)\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*setServerItems\(Array\.isArray\(record\?\.items\) \? record\.items : \[\]\)/,
   'action history should ignore stale history responses before updating rows',
 )
 assert.match(
   actionHistory,
-  /withLoaderTimeout\(\s*\(\) => getUsers\(\),\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*async \(\) => \(await loadActionHistoryTransport\(\)\)\.getActionHistoryUsers\(\),\s*'Action history users',\s*ACTION_HISTORY_USERS_TIMEOUT_MS,\s*\)/,
   'action history admin user options should timeout slow user reads',
 )
 assert.match(
@@ -1938,7 +1962,7 @@ assert.match(
 )
 assert.match(
   productForm,
-  /withLoaderTimeout\(\(\) => loadSuppliersFromApi\(\), 'Product suppliers', PRODUCT_SUPPLIERS_TIMEOUT_MS\)/,
+  /function loadContactsTransportModule\(\): Promise<ContactsTransportModule>[\s\S]*import\('\.\.\/\.\.\/\.\.\/api\/contactsTransport\.ts'\)[\s\S]*withLoaderTimeout\(\s*async \(\) => \(await loadContactsTransportModule\(\)\)\.getSuppliers\(\),\s*'Product suppliers',\s*PRODUCT_SUPPLIERS_TIMEOUT_MS,\s*\)/,
   'product supplier options should timeout slow supplier reads',
 )
 assert.match(
@@ -1948,8 +1972,13 @@ assert.match(
 )
 assert.match(
   productForm,
-  /withLoaderTimeout\(\s*\(\) => api\.uploadProductImage\(\{[\s\S]*productId: currentProductId \|\| null,[\s\S]*file,[\s\S]*fileName: file\.name \|\| 'product\.jpg',[\s\S]*\}\),\s*'Upload product form image',\s*PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /function loadProductImageUploadTransportModule\(\): Promise<ProductImageUploadTransportModule>[\s\S]*import\('\.\.\/\.\.\/\.\.\/api\/productImageUploadTransport\.ts'\)[\s\S]*withLoaderTimeout\(\s*async \(\) => \(await loadProductImageUploadTransportModule\(\)\)\.uploadProductImage\(\{[\s\S]*productId: currentProductId \|\| undefined,[\s\S]*file,[\s\S]*fileName: file\.name \|\| 'product\.jpg',[\s\S]*\}\) as Promise<ProductImageUploadResult \| undefined>,\s*'Upload product form image',\s*PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
   'product form image uploads should timeout slow uploads',
+)
+assert.doesNotMatch(
+  productForm,
+  /getProductFormApi|\(window as Window & \{ api\?:|window\.api|api\.uploadProductImage|api\?\.getSuppliers/,
+  'ProductForm supplier and image-upload intents should not wake the broad window.api registry',
 )
 assert.match(
   products,

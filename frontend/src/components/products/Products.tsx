@@ -277,6 +277,13 @@ type ProductSearchResponse = {
   total?: number
 }
 
+type ProductReadModule = typeof import('../../api/productReadTransport.ts')
+type ProductWriteModule = typeof import('../../api/productWriteTransport.ts')
+type LookupModule = typeof import('../../api/lookupTransport.ts')
+type BranchModule = typeof import('../../api/branchTransport.ts')
+type InventoryModule = typeof import('../../api/inventoryTransport.ts')
+type ProductImageUploadModule = typeof import('../../api/productImageUploadTransport.ts')
+
 type ProductApi = {
   adjustStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
   createProduct: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
@@ -334,8 +341,72 @@ type ProductSectionLike = {
 const useProductsApp = useApp as () => ProductsAppContext
 const useProductsSync = useSync as () => ProductsSyncContext
 
+let productReadModulePromise: Promise<ProductReadModule> | null = null
+let productWriteModulePromise: Promise<ProductWriteModule> | null = null
+let lookupModulePromise: Promise<LookupModule> | null = null
+let branchModulePromise: Promise<BranchModule> | null = null
+let inventoryModulePromise: Promise<InventoryModule> | null = null
+let productImageUploadModulePromise: Promise<ProductImageUploadModule> | null = null
+
+function loadProductReadModule(): Promise<ProductReadModule> {
+  if (!productReadModulePromise) productReadModulePromise = import('../../api/productReadTransport.ts')
+  return productReadModulePromise
+}
+
+function loadProductWriteModule(): Promise<ProductWriteModule> {
+  if (!productWriteModulePromise) productWriteModulePromise = import('../../api/productWriteTransport.ts')
+  return productWriteModulePromise
+}
+
+function loadLookupModule(): Promise<LookupModule> {
+  if (!lookupModulePromise) lookupModulePromise = import('../../api/lookupTransport.ts')
+  return lookupModulePromise
+}
+
+function loadBranchModule(): Promise<BranchModule> {
+  if (!branchModulePromise) branchModulePromise = import('../../api/branchTransport.ts')
+  return branchModulePromise
+}
+
+function loadInventoryModule(): Promise<InventoryModule> {
+  if (!inventoryModulePromise) inventoryModulePromise = import('../../api/inventoryTransport.ts')
+  return inventoryModulePromise
+}
+
+function loadProductImageUploadModule(): Promise<ProductImageUploadModule> {
+  if (!productImageUploadModulePromise) productImageUploadModulePromise = import('../../api/productImageUploadTransport.ts')
+  return productImageUploadModulePromise
+}
+
+const productApi: ProductApi = {
+  adjustStock: async (payload) => toProductApiResponse(await (await loadInventoryModule()).adjustStock(payload)),
+  createProduct: async (payload) => toProductApiResponse(await (await loadProductWriteModule()).createProduct(payload)),
+  deleteProduct: async (id) => toProductApiResponse(await (await loadProductWriteModule()).deleteProduct(id)),
+  getBranches: async () => (await (await loadBranchModule()).getBranches()) as BranchRecord[],
+  getCategories: async () => (await (await loadLookupModule()).getCategories()) as LookupRecord[],
+  getProductFilters: async (query = {}) => {
+    const module = await loadProductReadModule()
+    return (await module.getProductFilters(query as Parameters<ProductReadModule['getProductFilters']>[0])) as Partial<ProductFilterMeta>
+  },
+  getProductsByIds: async (ids, options = {}) => {
+    const module = await loadProductReadModule()
+    const result = await module.getProductsByIds(ids, options as Parameters<ProductReadModule['getProductsByIds']>[1])
+    if (Array.isArray(result)) return result as ProductRecord[]
+    if (isObjectRecord(result) && Array.isArray(result.items)) return result.items as ProductRecord[]
+    return []
+  },
+  getUnits: async () => (await (await loadLookupModule()).getUnits()) as LookupRecord[],
+  searchProducts: async (query) => {
+    const module = await loadProductReadModule()
+    return (await module.searchProducts(query as Parameters<ProductReadModule['searchProducts']>[0])) as ProductSearchResponse | ProductRecord[]
+  },
+  transferStock: async (payload) => toProductApiResponse(await (await loadBranchModule()).transferStock(payload)),
+  updateProduct: async (id, payload) => toProductApiResponse(await (await loadProductWriteModule()).updateProduct(id, payload)),
+  uploadProductImage: async (payload) => toProductApiResponse(await (await loadProductImageUploadModule()).uploadProductImage(payload)),
+}
+
 function getProductApi(): ProductApi {
-  return (window as Window & { api?: ProductApi }).api as ProductApi
+  return productApi
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

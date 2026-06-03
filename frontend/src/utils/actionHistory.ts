@@ -61,6 +61,8 @@ type UserOption = {
   username?: string
 }
 
+type ActionHistoryTransportModule = typeof import('../api/actionHistoryTransport.ts')
+
 type ActionHistoryOptions = {
   limit?: number
   notify?: NotifyFn
@@ -68,28 +70,20 @@ type ActionHistoryOptions = {
   enabled?: boolean
 }
 
-type ActionHistoryApi = {
-  [key: string]: any
-  getActionHistory?: (
-    scope: string,
-    limit: number,
-    options: { all?: number; userId?: string },
-  ) => Promise<{ items?: ServerHistoryItem[] }>
-  getUsers?: () => Promise<UserOption[]>
-  createActionHistory?: (payload: Record<string, unknown>) => Promise<{ id?: ActionHistoryId }>
-  undoActionHistory?: (id: ActionHistoryId) => Promise<unknown>
-  redoActionHistory?: (id: ActionHistoryId) => Promise<unknown>
-  updateActionHistory?: (id: ActionHistoryId, payload: Record<string, unknown>) => Promise<unknown>
-}
-
 declare global {
   interface Window {
-    api?: ActionHistoryApi
+    api?: Record<string, any>
   }
 }
 
 const ACTION_HISTORY_LOAD_TIMEOUT_MS = 10000
 const ACTION_HISTORY_USERS_TIMEOUT_MS = 8000
+let actionHistoryTransportPromise: Promise<ActionHistoryTransportModule> | null = null
+
+function loadActionHistoryTransport(): Promise<ActionHistoryTransportModule> {
+  if (!actionHistoryTransportPromise) actionHistoryTransportPromise = import('../api/actionHistoryTransport.ts')
+  return actionHistoryTransportPromise
+}
 
 function normalizeActionHistoryId(value: unknown): ActionHistoryId | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -144,11 +138,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   }, [user])
 
   const refreshServerItems = useCallback((): Promise<void> => {
-    const getActionHistory = typeof window !== 'undefined' ? window.api?.getActionHistory : undefined
-    if (!getActionHistory) return Promise.resolve()
     const requestId = beginTrackedRequest(historyRequestRef)
     return withLoaderTimeout(
-      () => getActionHistory(scope, Math.max(3, limit), {
+      async () => (await loadActionHistoryTransport()).getActionHistory(scope, Math.max(3, limit), {
         all: isAdmin ? 1 : undefined,
         userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
       }),
@@ -157,7 +149,8 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     )
       .then((result) => {
         if (!isTrackedRequestCurrent(historyRequestRef, requestId)) return
-        setServerItems(Array.isArray(result?.items) ? result.items : [])
+        const record = result as { items?: ServerHistoryItem[] } | null
+        setServerItems(Array.isArray(record?.items) ? record.items : [])
       })
       .catch(() => {})
   }, [isAdmin, limit, scope, userFilter])
@@ -169,11 +162,10 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
 
   useEffect(() => {
     if (!enabled) return
-    const getUsers = typeof window !== 'undefined' ? window.api?.getUsers : undefined
-    if (!isAdmin || !getUsers) return
+    if (!isAdmin) return
     const requestId = beginTrackedRequest(usersRequestRef)
     withLoaderTimeout(
-      () => getUsers(),
+      async () => (await loadActionHistoryTransport()).getActionHistoryUsers(),
       'Action history users',
       ACTION_HISTORY_USERS_TIMEOUT_MS,
     )
@@ -199,8 +191,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), nextEntry])
       setRedoStack([])
     }
-    if (typeof window !== 'undefined' && window.api?.createActionHistory) {
-      window.api.createActionHistory({
+    loadActionHistoryTransport().then((api) => api.createActionHistory({
         scope: entry.scope || scope,
         entity: entry.entity || null,
         entity_id: entry.entity_id || entry.entityId || null,
@@ -210,13 +201,12 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         reversible,
         undo_payload: entry.undo_payload || {},
         redo_payload: entry.redo_payload || {},
-      }).then((result) => {
-        const serverId = result?.id
+      })).then((result) => {
+        const record = result as { id?: ActionHistoryId } | null
         refreshServerItems()
-        if (!serverId) return
-        setUndoStack((current) => current.map((item) => item.id === nextEntry.id ? { ...item, serverId } : item))
+        if (!record?.id) return
+        setUndoStack((current) => current.map((item) => item.id === nextEntry.id ? { ...item, serverId: record.id || null } : item))
       }).catch(() => {})
-    }
     return nextEntry
   }, [limit, refreshServerItems, scope])
 
@@ -229,37 +219,32 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     setBusy(direction)
     let serverTransitioned = false
     try {
-      if (entry.serverId && typeof window !== 'undefined') {
-        const transition = direction === 'undo' ? window.api?.undoActionHistory : window.api?.redoActionHistory
-        if (typeof transition === 'function') {
-          await transition(entry.serverId)
-          serverTransitioned = true
-          refreshServerItems()
-        } else if (window.api?.updateActionHistory) {
-          await window.api.updateActionHistory(entry.serverId, { status: direction === 'undo' ? 'redoable' : 'undoable' })
-          serverTransitioned = true
-          refreshServerItems()
-        }
+      if (entry.serverId) {
+        const api = await loadActionHistoryTransport()
+        if (direction === 'undo') await api.undoActionHistory(entry.serverId)
+        else await api.redoActionHistory(entry.serverId)
+        serverTransitioned = true
+        refreshServerItems()
       }
       await Promise.resolve(action())
       if (direction === 'undo') {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
-        if (entry.serverId && !serverTransitioned && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'redoable' }).then(refreshServerItems).catch(() => {})
+        if (entry.serverId && !serverTransitioned) loadActionHistoryTransport().then((api) => api.updateActionHistory(entry.serverId!, { status: 'redoable' })).then(refreshServerItems).catch(() => {})
       } else {
         setRedoStack((current) => current.filter((item) => item.id !== entry.id))
         setUndoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
-        if (entry.serverId && !serverTransitioned && typeof window !== 'undefined' && window.api?.updateActionHistory) window.api.updateActionHistory(entry.serverId, { status: 'undoable' }).then(refreshServerItems).catch(() => {})
+        if (entry.serverId && !serverTransitioned) loadActionHistoryTransport().then((api) => api.updateActionHistory(entry.serverId!, { status: 'undoable' })).then(refreshServerItems).catch(() => {})
       }
       return true
     } catch (error) {
-      if (entry.serverId && typeof window !== 'undefined' && window.api?.updateActionHistory) {
+      if (entry.serverId) {
         const fallbackStatus = direction === 'undo' ? 'undoable' : 'redoable'
         const nextStatus = serverTransitioned ? fallbackStatus : 'failed'
-        window.api.updateActionHistory(entry.serverId, {
+        loadActionHistoryTransport().then((api) => api.updateActionHistory(entry.serverId!, {
           status: nextStatus,
           last_error: getErrorMessage(error, ''),
-        }).then(refreshServerItems).catch(() => {})
+        })).then(refreshServerItems).catch(() => {})
       }
       notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
       return false

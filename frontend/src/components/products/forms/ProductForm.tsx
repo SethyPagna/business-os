@@ -137,15 +137,6 @@ interface ProductImageUploadResult {
   } | null
 }
 
-interface ProductFormApi {
-  getSuppliers?: () => Promise<unknown>
-  uploadProductImage: (payload: {
-    productId: number | null
-    file: File
-    fileName: string
-  }) => Promise<ProductImageUploadResult | undefined>
-}
-
 interface FilePickerModalProps {
   open: boolean
   mediaType: string
@@ -185,8 +176,22 @@ const FilePickerModal = lazy(async () => ({
   default: (await import('../../files/FilePickerModal')).default as ComponentType<FilePickerModalProps>,
 }))
 
-function getProductFormApi(): ProductFormApi | undefined {
-  return (window as Window & { api?: ProductFormApi }).api
+type ContactsTransportModule = typeof import('../../../api/contactsTransport.ts')
+type ProductImageUploadTransportModule = typeof import('../../../api/productImageUploadTransport.ts')
+
+let contactsTransportModulePromise: Promise<ContactsTransportModule> | null = null
+let productImageUploadTransportModulePromise: Promise<ProductImageUploadTransportModule> | null = null
+
+function loadContactsTransportModule(): Promise<ContactsTransportModule> {
+  if (!contactsTransportModulePromise) contactsTransportModulePromise = import('../../../api/contactsTransport.ts')
+  return contactsTransportModulePromise
+}
+
+function loadProductImageUploadTransportModule(): Promise<ProductImageUploadTransportModule> {
+  if (!productImageUploadTransportModulePromise) {
+    productImageUploadTransportModulePromise = import('../../../api/productImageUploadTransport.ts')
+  }
+  return productImageUploadTransportModulePromise
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -360,17 +365,14 @@ export default function ProductForm({
   }, [])
 
   useEffect(() => {
-    const api = getProductFormApi()
-    const getSuppliers = api?.getSuppliers
-    if (!getSuppliers) {
-      setSupplierList([])
-      return undefined
-    }
-    const loadSuppliersFromApi: () => Promise<unknown> = getSuppliers
     const requestId = beginTrackedRequest(supplierRequestRef)
     async function loadSuppliers() {
       try {
-        const data = await withLoaderTimeout(() => loadSuppliersFromApi(), 'Product suppliers', PRODUCT_SUPPLIERS_TIMEOUT_MS)
+        const data = await withLoaderTimeout(
+          async () => (await loadContactsTransportModule()).getSuppliers(),
+          'Product suppliers',
+          PRODUCT_SUPPLIERS_TIMEOUT_MS,
+        )
         if (!aliveRef.current || !isTrackedRequestCurrent(supplierRequestRef, requestId)) return
         setSupplierList(Array.isArray(data) ? data as SupplierOption[] : [])
       } catch {
@@ -422,16 +424,14 @@ export default function ProductForm({
         return
       }
       setImageUploading(true)
-      const api = getProductFormApi()
-      if (!api?.uploadProductImage) throw new Error(tr('image_upload_failed', 'Image upload failed', 'Image upload failed'))
       const stagedImages: string[] = []
       for (const file of files) {
         const uploaded = await withLoaderTimeout(
-          () => api.uploadProductImage({
-            productId: currentProductId || null,
+          async () => (await loadProductImageUploadTransportModule()).uploadProductImage({
+            productId: currentProductId || undefined,
             file,
             fileName: file.name || 'product.jpg',
-          }),
+          }) as Promise<ProductImageUploadResult | undefined>,
           'Upload product form image',
           PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,
         )

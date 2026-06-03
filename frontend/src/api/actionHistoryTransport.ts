@@ -21,6 +21,14 @@ export function getActionHistory(
   )
 }
 
+export function getActionHistoryUsers(): Promise<unknown> {
+  return route(
+    'actionHistory:users',
+    () => apiFetch('GET', '/api/users'),
+    () => [],
+  )
+}
+
 export function createActionHistory(payload: ActionHistoryPayload = {}): Promise<unknown> {
   return route(
     'actionHistory:create',

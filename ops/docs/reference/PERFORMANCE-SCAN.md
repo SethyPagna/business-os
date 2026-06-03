@@ -1890,4 +1890,30 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `printReceipt-C-vsIQZL.js` and downloaded the receipt image. Cleanup removed
   the QA sale, sale item, allocation, product, stock rows, batch rows,
   inventory movement, action-history entry, and audit log.
+- Move 496 records roadmap Move 766: keep Products create/delete,
+  ProductForm supplier/image-upload, action-history user filters, and idle
+  offline snapshot refresh out of the broad API methods registry.
+  `Products.tsx` and `ProductForm.tsx` now use focused lazy transports for
+  product writes, branch/stock actions, supplier options, image uploads, and
+  action-history calls; `web-api.ts` delegates idle offline snapshot refresh
+  and sale queue retry to focused transports instead of waking `methods.ts`.
+  `vite.config.ts` now pins `contactsTransport.ts`, `salesTransport.ts`,
+  `offlineSnapshotTransport.ts`, `productImageUploadTransport.ts`,
+  `productWriteTransport.ts`, `actionHistoryTransport.ts`, branch, inventory,
+  request-id, and product-read helpers into narrow chunks. Docker image
+  `business-os:v6.0.0-202606040522` served local Products route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T21-25-11-474Z.json`:
+  Products was ready in 282 ms with 37 requests, 2 API requests, and 29
+  scripts, with zero failed requests and zero console/page errors. The
+  Products write live check
+  `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
+  created and deleted `QA Product Move766 1780521913531`, loaded
+  `product-write-api-CYyuCWn_.js`, and kept `app-api-methods` unloaded before
+  and after the write intent. Remote admin Products trace against
+  `https://admin.leangcosmetics.dpdns.org` passed with 16 requests, 1 API
+  request, 11 scripts, zero failures, and zero console/page errors. Remote
+  public portal Playwright check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T21-26-13-600Z/report.json`
+  rendered 20 products with portal bootstrap 200, AI status 200 after
+  interaction, and zero failed responses.
 <!-- phase29-manual-notes:end -->
