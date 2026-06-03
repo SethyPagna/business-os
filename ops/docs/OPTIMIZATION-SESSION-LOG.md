@@ -2645,3 +2645,29 @@ Use this shape for future entries:
   menus, and recorded zero relevant console/page errors. Docker image
   `business-os:v6.0.0-202606040015` is serving frontend hash
   `7530b3876d0d1959`.
+
+- change: memoize Inventory product and movement filtering before grouping
+- affected files:
+  `frontend/src/components/inventory/Inventory.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Inventory Products and Movements render loops,
+  `/api/inventory/bootstrap`, Products initial filter, and public catalog
+  initial filter timing
+- keeper or rollback: keeper; stable memoized search terms, matchers,
+  haystack builders, and filtered lists reduce repeated O(n) render work
+  without changing server query contracts or moving business data
+- live timing proof:
+  `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
+  clicked Products `G288`, Inventory `G`, and public catalog `G` in the
+  Docker-served app. All three returned HTTP 200, completed in 491-520 ms, and
+  recorded zero relevant console/page errors.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-01-16-586Z.json`
+  measured Products 213 ms, Inventory 202 ms, POS 292 ms, and public_catalog
+  196 ms route-ready, all with zero failed requests and zero console/page
+  errors. Docker image `business-os:v6.0.0-202606040046` is serving frontend
+  hash `745ad264d4801eff`.

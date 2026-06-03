@@ -1011,6 +1011,26 @@ assert.match(
 )
 assert.match(
   inventory,
+  /const searchTerms: string\[\] = useMemo\(\(\) => \([\s\S]*\), \[deferredSearch\]\)/,
+  'inventory search terms should be memoized so unrelated UI state does not rebuild search arrays',
+)
+assert.match(
+  inventory,
+  /const filteredSummary = useMemo\(\(\) => summary\.filter[\s\S]*\), \[brandFilter, groupFilter, hasServerBackedProductSearch, matchesSearch, parentProductIds, productHay, stockFilter, summary\]\)/,
+  'inventory product filtering should stay memoized before grouping visible sections',
+)
+assert.match(
+  inventory,
+  /const filteredMovements = useMemo\(\(\) => movements\.filter[\s\S]*\), \[hasServerBackedMovementSearch, matchesSearch, movFilter, movHay, movements\]\)/,
+  'inventory movement filtering should stay memoized before grouped movement rebuilds',
+)
+assert.match(
+  inventory,
+  /const groupedMovements = useMemo\(\(\) => \{[\s\S]*buildMovementGroups\(filteredMovements\)[\s\S]*\}, \[filteredMovements, hasServerBackedMovementSearch, matchesSearch\]\)/,
+  'inventory grouped movements should depend on stable filtered movements and search matcher only',
+)
+assert.match(
+  inventory,
   /stockStats\?\.net_sold_qty\s*\?\?\s*visibleInventoryStats\.netSoldQty/,
   'inventory net-sold fallback should reuse the visible stats accumulator',
 )

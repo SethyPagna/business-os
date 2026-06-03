@@ -1722,4 +1722,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `shared-portal-menu-D4vj-XWE.js` only after intent, opened both menus, and
   recorded zero relevant console/page errors. Docker image
   `business-os:v6.0.0-202606040015` serves the verified runtime.
+- Move 484 records roadmap Move 754: memoize Inventory product and movement
+  filtering before grouping. `Inventory.tsx` now keeps `searchTerms`,
+  `matchesSearch`, `productHay`, `movHay`, `filteredSummary`, and
+  `filteredMovements` stable unless their real inputs change, preventing
+  unrelated UI state from repeatedly rebuilding product sections and grouped
+  movement history. Docker image `business-os:v6.0.0-202606040046` served the
+  live timing proof
+  `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`:
+  Products `G288` completed in 520 ms, Inventory `G` in 491 ms, and public
+  catalog `G` in 519 ms, all HTTP 200 with zero relevant console/page errors.
+  The focused route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-01-16-586Z.json`
+  measured Products 213 ms, Inventory 202 ms, POS 292 ms, and public_catalog
+  196 ms route-ready, all with zero failed requests and zero console/page
+  errors.
 <!-- phase29-manual-notes:end -->

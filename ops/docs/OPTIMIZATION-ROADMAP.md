@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 753.
+- Latest completed implementation move in this roadmap: Move 754.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9795,3 +9795,60 @@ Move 752 status:
   TypeScript, runtime, and performance sweeps. Next executable target:
   route-specific CSV/app-api-methods reductions and broader interaction audits,
   without moving live business data or weakening offline fallback behavior.
+
+Move 753 status:
+- Move 753 intent-loads shared portal positioning/menu code across Products,
+  Contacts, and reusable filter/action surfaces. `LazyPortalMenu` keeps
+  body-level menu positioning code out of healthy first-route chunks and loads
+  the shared portal menu only when the user opens a menu. `PortalMenu` keeps
+  first-click behavior by honoring delayed `defaultOpen` once the chunk is
+  available.
+- Proof: frontend performance guard tests, frontend typecheck, JSX/source
+  check, production build, Docker release image
+  `business-os:v6.0.0-202606040015`, focused route-load Playwright trace,
+  lazy portal-menu Playwright interaction, and exhaustive desktop/mobile
+  all-pages control audit passed.
+- The Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T16-17-24-309Z.json`
+  measured Products 218 ms, Inventory 237 ms, POS 318 ms, Sales 209 ms,
+  Returns 187 ms, and Contacts 208 ms, all with zero failed requests, zero
+  console/page errors, no first-window `shared-portal-menu`, no
+  `app-local-db`, and no `vendor-dexie`. The live interaction proof
+  `ops/runtime/reports/lazy-portal-menu-live-check-2026-06-03T16-20-20-068Z/report.json`
+  clicked Products Filters and Contacts row actions, loaded
+  `shared-portal-menu-D4vj-XWE.js` only after intent, opened both menus, and
+  recorded zero relevant console/page errors.
+- The exhaustive all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
+  covered 34 routes, discovered 518 visible controls, exercised 371 controls,
+  intentionally skipped 147 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+
+Move 754 status:
+- Move 754 memoizes Inventory product and movement filtering before grouping.
+  `searchTerms`, `matchesSearch`, `productHay`, and `movHay` now have stable
+  identities, while `filteredSummary` and `filteredMovements` are memoized
+  inputs for visible product sections and grouped movement history. This keeps
+  unrelated UI state changes from rebuilding the same filter arrays,
+  per-record haystacks, and grouped movement sections.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, JSX/source check, production build, Docker release image
+  `business-os:v6.0.0-202606040046`, live Playwright initial-filter timing,
+  focused route-load Playwright trace, and `git diff --check` passed.
+- The live timing proof
+  `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
+  clicked Products `G288`, Inventory `G`, and public catalog `G` in the
+  Docker-served app. All three filter interactions returned HTTP 200,
+  completed in 491-520 ms, and recorded zero relevant console/page errors.
+- The focused route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-01-16-586Z.json`
+  measured Products 213 ms, Inventory 202 ms, POS 292 ms, and public_catalog
+  196 ms route-ready, with zero failed requests and zero console/page errors.
+- Current plan position after Move 754: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  keep using measured live traces: identify remaining repeated render loops,
+  delayed-wake opportunities, and route-specific chunk ownership without
+  moving live business data or weakening offline fallback behavior.

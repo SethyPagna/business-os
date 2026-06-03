@@ -8,30 +8,33 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 753, intent-load shared portal menus on Products,
-  Contacts, and related action surfaces without first-route chunk cost
+- Latest completed move: Move 754, memoize Inventory product and movement
+  filtering before grouping so unrelated UI state does not rebuild the same
+  search arrays, haystacks, filtered lists, and grouped movement sections
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `7530b3876d0d1959`
+- latest verified frontend hash from the most recent Docker-served live check: `745ad264d4801eff`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `a4d2e4a810595a77`
+  `66f7cc8718a1628c`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T15-29-38-481Z/report.json`
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T16-17-24-309Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-01-16-586Z.json`
+- latest initial-filter timing proof:
+  `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
   `ops/runtime/reports/lazy-portal-menu-live-check-2026-06-03T16-20-20-068Z/report.json`
 - latest public portal load trace:
@@ -58,8 +61,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `2e7905d575e826a0` across 34 routes, with 518 visible controls
-  discovered, 369 controls exercised, 149 intentionally skipped by stable
+  build hash `7530b3876d0d1959` across 34 routes, with 518 visible controls
+  discovered, 371 controls exercised, 147 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -83,11 +86,29 @@ Current honest pockets:
   by Docker release image `business-os:v6.0.0-202606031923`; Move 746 is
   served by Docker release image `business-os:v6.0.0-202606031937`; Move 747
   is served by Docker release image `business-os:v6.0.0-202606031954`; Move
-  753 is served by Docker release image `business-os:v6.0.0-202606040015`
+  753 is served by Docker release image `business-os:v6.0.0-202606040015`;
+  Move 754 is served by Docker release image `business-os:v6.0.0-202606040046`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Inventory now memoizes the product and movement filter loops before building
+  visible product sections and grouped movement history. `searchTerms`,
+  `matchesSearch`, `productHay`, `movHay`, `filteredSummary`, and
+  `filteredMovements` are stable across unrelated state updates, so paging,
+  history controls, tab changes, and small UI toggles no longer force the same
+  product/movement scans before regrouping. Proof:
+  `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
+  clicked the Products `G288`, Inventory `G`, and public catalog `G` filters
+  in the Docker-served app; all three returned HTTP 200, completed in
+  491-520 ms, and recorded zero relevant console/page errors. The focused
+  route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-01-16-586Z.json`
+  measured Products 213 ms, Inventory 202 ms, POS 292 ms, and public_catalog
+  196 ms route-ready, with zero failed requests and zero console/page errors.
+  Docker release image `business-os:v6.0.0-202606040046` serves the verified
+  runtime.
 
 - Shared portal positioning/menu code is now truly intent-loaded on Products,
   Contacts, and reusable filter/action surfaces. `FilterMenu`, Products manage

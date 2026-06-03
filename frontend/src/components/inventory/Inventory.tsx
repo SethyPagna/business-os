@@ -1365,27 +1365,31 @@ export default function Inventory() {
   }
 
   // Search: comma-separated terms, AND/OR mode matching Products page behaviour
-  const searchTerms: string[] = deferredSearch.trim()
-    ? (deferredSearch.includes(',') ? deferredSearch.split(',') : deferredSearch.split(/\s+/))
-        .map((s: string) => s.trim().toLowerCase())
-        .filter(Boolean)
-    : []
+  const searchTerms: string[] = useMemo(() => (
+    deferredSearch.trim()
+      ? (deferredSearch.includes(',') ? deferredSearch.split(',') : deferredSearch.split(/\s+/))
+          .map((s: string) => s.trim().toLowerCase())
+          .filter(Boolean)
+      : []
+  ), [deferredSearch])
 
-  const matchesSearch = (hay: string): boolean => {
+  const matchesSearch = useCallback((hay: string): boolean => {
     if (!searchTerms.length) return true
     return searchMode === 'AND'
       ? searchTerms.every(term => hay.includes(term))
       : searchTerms.some(term => hay.includes(term))
-  }
+  }, [searchMode, searchTerms])
 
-  const productHay = (p: InventoryProduct): string =>
+  const productHay = useCallback((p: InventoryProduct): string => (
     `${p.name} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.sku||''} ${p.barcode||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
+  ), [])
 
-  const movHay = (m: InventoryMovement): string =>
+  const movHay = useCallback((m: InventoryMovement): string => (
     `${m.product_name||''} ${m.branch_name||''} ${m.reason||''} ${m.user_name||''} ${m.movement_type||''} ${m.reference_id||''} ${m.lot_code||''} ${m.expiry_date||''} ${m.created_at||''}`.toLowerCase()
+  ), [])
 
   const hasServerBackedProductSearch = !!searchTerms.length
-  const filteredSummary = summary.filter((p: InventoryProduct) => {
+  const filteredSummary = useMemo(() => summary.filter((p: InventoryProduct) => {
     if (!hasServerBackedProductSearch && !matchesSearch(productHay(p))) return false
     if (brandFilter !== 'all' && String(p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
     const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
@@ -1398,7 +1402,7 @@ export default function Inventory() {
     if (stockFilter === 'out')      return qty <= (p.out_of_stock_threshold || 0)
     if (stockFilter === 'in_stock') return qty > (p.low_stock_threshold || 0)
     return true
-  })
+  }), [brandFilter, groupFilter, hasServerBackedProductSearch, matchesSearch, parentProductIds, productHay, stockFilter, summary])
 
   const inventoryProductsById = useMemo(
     () => new Map(summary.map((product) => [Number(product?.id || 0), product])),
@@ -1754,17 +1758,17 @@ export default function Inventory() {
   }, [batchApplying, inventoryBatch, load, notify, runInventoryMutation, tr])
 
   const hasServerBackedMovementSearch = !!searchTerms.length
-  const filteredMovements = movements.filter(m => {
+  const filteredMovements = useMemo(() => movements.filter(m => {
     if (movFilter !== 'all' && m.movement_type !== movFilter) return false
     return hasServerBackedMovementSearch ? true : matchesSearch(movHay(m))
-  })
+  }), [hasServerBackedMovementSearch, matchesSearch, movFilter, movHay, movements])
 
   const groupedMovements = useMemo(() => {
     const groups = buildMovementGroups(filteredMovements)
     return hasServerBackedMovementSearch
       ? groups
       : groups.filter((group) => matchesSearch(movementGroupHaystack(group)))
-  }, [filteredMovements, hasServerBackedMovementSearch, searchTerms, searchMode])
+  }, [filteredMovements, hasServerBackedMovementSearch, matchesSearch])
 
   const movementYears = useMemo(
     () => getAvailableYears(groupedMovements, (group) => group?.latest_at || group?.created_at),
