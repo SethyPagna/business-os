@@ -62,12 +62,14 @@ const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox')
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
 const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
 const POS_FILTER_META_TIMEOUT_MS = 8000
+const POS_CATEGORY_OPTIONS_TIMEOUT_MS = 8000
 const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
 const POS_CHECKOUT_TIMEOUT_MS = 20000
 const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800
 const POS_FILTER_META_READY_DELAY_MS = 1800
+const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 1800
 
 // Customer contact-option helpers (mirrors CustomersTab)
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -539,6 +541,7 @@ export default function POS() {
   const [loading,          setLoading]          = useState(false)
   const [contactOptionsReady, setContactOptionsReady] = useState(false)
   const [filterMetaReady, setFilterMetaReady] = useState(false)
+  const [categoryOptionsReady, setCategoryOptionsReady] = useState(false)
   const [showStatusPicker, setShowStatusPicker] = useState(false)
   const [membershipInfo,   setMembershipInfo]   = useState<MembershipInfo | null>(null)
   const [membershipLoading, setMembershipLoading] = useState(false)
@@ -555,6 +558,8 @@ export default function POS() {
   const latestLoadCatalogRef = useRef<((label?: string, options?: CatalogLoadOptions) => Promise<{ prods: ProductRecord[] } | null>) | null>(null)
   const catalogMetadataLoadedRef = useRef(false)
   const catalogLoadedOnceRef = useRef(false)
+  const categoryOptionsLoadedRef = useRef(false)
+  const categoryOptionsRequestRef = useRef(0)
   const filterMetaLoadedRef = useRef(false)
   const filterMetaRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
@@ -586,8 +591,11 @@ export default function POS() {
     setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
   }, [])
 
-  const applyCatalogMetadata = useCallback((cats: unknown[], brs: BranchRecord[]) => {
+  const applyCategoryOptions = useCallback((cats: unknown[]) => {
     setCategories(Array.isArray(cats) ? cats.map(normalizeCategory).filter((category): category is CategoryRecord => Boolean(category)) : [])
+  }, [])
+
+  const applyBranchMetadata = useCallback((brs: BranchRecord[]) => {
     const activeBranches = Array.isArray(brs) ? brs.filter((branch) => branch?.is_active) : []
     setBranches(activeBranches)
     setDefaultBranchId((current) => {
@@ -647,10 +655,7 @@ export default function POS() {
           () => Promise.all([
             api.searchProducts?.(productQuery) || missingPosApiMethod('searchProducts'),
             shouldLoadMetadata
-              ? Promise.all([
-                api.getCategories?.() || missingPosApiMethod('getCategories'),
-                api.getBranches?.() || missingPosApiMethod('getBranches'),
-              ])
+              ? api.getBranches?.() || missingPosApiMethod('getBranches')
               : Promise.resolve(null),
           ]),
           label,
@@ -665,8 +670,7 @@ export default function POS() {
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
         catalogLoadedOnceRef.current = true
         if (Array.isArray(metadataPayload)) {
-          const [cats, brs] = metadataPayload
-          applyCatalogMetadata(cats as unknown[], brs as BranchRecord[])
+          applyBranchMetadata(metadataPayload as BranchRecord[])
           catalogMetadataLoadedRef.current = true
           const filters = isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {}
           applyProductFilterMeta(filters, payloadRecord.initials || [])
@@ -699,7 +703,7 @@ export default function POS() {
     })
     catalogLoadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [applyCatalogMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
+  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter])
 
   useEffect(() => {
     latestLoadCatalogRef.current = loadCatalogData
@@ -736,6 +740,23 @@ export default function POS() {
       return null
     }
   }, [])
+
+  const loadCategoryOptions = useCallback(async (label = 'POS categories') => {
+    if (categoryOptionsLoadedRef.current) return null
+    const requestId = beginTrackedRequest(categoryOptionsRequestRef)
+    try {
+      const api = getPosApi()
+      const data = await withLoaderTimeout(() => api.getCategories?.() || missingPosApiMethod('getCategories'), label, POS_CATEGORY_OPTIONS_TIMEOUT_MS)
+      if (!isTrackedRequestCurrent(categoryOptionsRequestRef, requestId)) return null
+      applyCategoryOptions(Array.isArray(data) ? data : [])
+      categoryOptionsLoadedRef.current = true
+      return Array.isArray(data) ? data : []
+    } catch (error) {
+      if (!isTrackedRequestCurrent(categoryOptionsRequestRef, requestId)) return null
+      console.error('[POS] categories load failed:', getErrorMessage(error))
+      return null
+    }
+  }, [applyCategoryOptions])
 
   const loadMembershipInfo = useCallback(async (
     membershipNumber: string,
@@ -777,9 +798,11 @@ export default function POS() {
     if (!isActive) {
       setContactOptionsReady(false)
       setFilterMetaReady(false)
+      setCategoryOptionsReady(false)
       invalidateTrackedRequest(catalogRequestRef)
       catalogLoadPromiseRef.current = null
       pendingCatalogLoadRef.current = null
+      invalidateTrackedRequest(categoryOptionsRequestRef)
       invalidateTrackedRequest(filterMetaRequestRef)
       invalidateTrackedRequest(customerRequestRef)
       invalidateTrackedRequest(deliveryRequestRef)
@@ -791,6 +814,28 @@ export default function POS() {
     void loadCatalogData('POS catalog')
     searchRef.current?.focus()
   }, [isActive, loadCatalogData])
+
+  useEffect(() => {
+    if (!isActive) {
+      setCategoryOptionsReady(false)
+      return undefined
+    }
+    if (!catalogLoadedOnceRef.current || catalogRefreshing || categoryOptionsLoadedRef.current) return undefined
+    const timer = window.setTimeout(() => {
+      setCategoryOptionsReady(true)
+    }, POS_CATEGORY_OPTIONS_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [catalogRefreshing, isActive])
+
+  useEffect(() => {
+    if (!isActive || !filterOpen || categoryOptionsLoadedRef.current) return
+    setCategoryOptionsReady(true)
+  }, [filterOpen, isActive])
+
+  useEffect(() => {
+    if (!isActive || !categoryOptionsReady || categoryOptionsLoadedRef.current) return
+    void loadCategoryOptions('POS initial categories')
+  }, [categoryOptionsReady, isActive, loadCategoryOptions])
 
   useEffect(() => {
     if (!isActive) {
@@ -843,7 +888,12 @@ export default function POS() {
       filterMetaLoadedRef.current = false
       setFilterMetaReady(false)
       invalidateTrackedRequest(filterMetaRequestRef)
-      void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' || channel === 'categories' })
+      if (channel === 'categories') {
+        categoryOptionsLoadedRef.current = false
+        setCategoryOptionsReady(Boolean(filterOpen))
+        invalidateTrackedRequest(categoryOptionsRequestRef)
+      }
+      void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' })
     }
     if (channel === 'customers') {
       void loadCustomers('POS sync customers')
@@ -851,12 +901,13 @@ export default function POS() {
     if (channel === 'deliveryContacts') {
       void loadDeliveryContacts('POS sync delivery contacts')
     }
-  }, [isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
+  }, [filterOpen, isActive, loadCatalogData, loadCustomers, loadDeliveryContacts, syncChannel])
 
   useEffect(() => () => {
     invalidateTrackedRequest(catalogRequestRef)
     catalogLoadPromiseRef.current = null
     pendingCatalogLoadRef.current = null
+    invalidateTrackedRequest(categoryOptionsRequestRef)
     invalidateTrackedRequest(filterMetaRequestRef)
     invalidateTrackedRequest(customerRequestRef)
     invalidateTrackedRequest(deliveryRequestRef)

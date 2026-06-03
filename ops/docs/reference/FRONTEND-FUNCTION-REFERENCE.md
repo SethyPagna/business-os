@@ -1542,43 +1542,43 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `isPlainRecord` | function | 296 |
-| 2 | `normalizeCategory` | function | 300 |
-| 3 | `getPosApi` | function | 315 |
-| 4 | `missingPosApiMethod` | function | 319 |
-| 5 | `normalizeOrder` | function | 323 |
-| 6 | `getErrorMessage` | function | 334 |
-| 7 | `asText` | function | 338 |
-| 8 | `asNumber` | function | 342 |
-| 9 | `allTermsMatch` | function | 346 |
-| 10 | `ProductDiscountBadge` | function | 360 |
-| 11 | `POS` | component/function | 380 |
-| 12 | `setPersistedCat` | const arrow | 411 |
-| 13 | `setPersistedBrand` | const arrow | 412 |
-| 14 | `setPersistedBranch` | const arrow | 413 |
-| 15 | `setPersistedStock` | const arrow | 414 |
-| 16 | `setPersistedGroup` | const arrow | 415 |
-| 17 | `setPersistedSupplier` | const arrow | 416 |
-| 18 | `setPersistedInitial` | const arrow | 417 |
-| 19 | `addNewOrder` | const arrow | 478 |
-| 20 | `closeOrder` | const arrow | 490 |
-| 21 | `promise` | const arrow | 626 |
-| 22 | `selectCustomer` | const arrow | 915 |
-| 23 | `applyCustomerOption` | const arrow | 963 |
-| 24 | `clearCustomer` | const arrow | 977 |
-| 25 | `handleAddCustomer` | const arrow | 985 |
-| 26 | `selectDelivery` | const arrow | 1023 |
-| 27 | `clearDelivery` | const arrow | 1028 |
-| 28 | `handleAddDelivery` | const arrow | 1030 |
-| 29 | `qty` | const arrow | 1142 |
-| 30 | `addToCart` | function | 1306 |
-| 31 | `updateQty` | const arrow | 1345 |
-| 32 | `updatePrice` | const arrow | 1353 |
-| 33 | `updateItemBranch` | const arrow | 1377 |
-| 34 | `handleDiscountUsd` | const arrow | 1426 |
-| 35 | `handleDiscountKhr` | const arrow | 1427 |
-| 36 | `handleMembershipUnits` | const arrow | 1428 |
-| 37 | `handleCheckout` | const arrow | 1467 |
+| 1 | `isPlainRecord` | function | 298 |
+| 2 | `normalizeCategory` | function | 302 |
+| 3 | `getPosApi` | function | 317 |
+| 4 | `missingPosApiMethod` | function | 321 |
+| 5 | `normalizeOrder` | function | 325 |
+| 6 | `getErrorMessage` | function | 336 |
+| 7 | `asText` | function | 340 |
+| 8 | `asNumber` | function | 344 |
+| 9 | `allTermsMatch` | function | 348 |
+| 10 | `ProductDiscountBadge` | function | 362 |
+| 11 | `POS` | component/function | 382 |
+| 12 | `setPersistedCat` | const arrow | 413 |
+| 13 | `setPersistedBrand` | const arrow | 414 |
+| 14 | `setPersistedBranch` | const arrow | 415 |
+| 15 | `setPersistedStock` | const arrow | 416 |
+| 16 | `setPersistedGroup` | const arrow | 417 |
+| 17 | `setPersistedSupplier` | const arrow | 418 |
+| 18 | `setPersistedInitial` | const arrow | 419 |
+| 19 | `addNewOrder` | const arrow | 480 |
+| 20 | `closeOrder` | const arrow | 492 |
+| 21 | `promise` | const arrow | 634 |
+| 22 | `selectCustomer` | const arrow | 966 |
+| 23 | `applyCustomerOption` | const arrow | 1014 |
+| 24 | `clearCustomer` | const arrow | 1028 |
+| 25 | `handleAddCustomer` | const arrow | 1036 |
+| 26 | `selectDelivery` | const arrow | 1074 |
+| 27 | `clearDelivery` | const arrow | 1079 |
+| 28 | `handleAddDelivery` | const arrow | 1081 |
+| 29 | `qty` | const arrow | 1193 |
+| 30 | `addToCart` | function | 1357 |
+| 31 | `updateQty` | const arrow | 1396 |
+| 32 | `updatePrice` | const arrow | 1404 |
+| 33 | `updateItemBranch` | const arrow | 1428 |
+| 34 | `handleDiscountUsd` | const arrow | 1477 |
+| 35 | `handleDiscountKhr` | const arrow | 1478 |
+| 36 | `handleMembershipUnits` | const arrow | 1479 |
+| 37 | `handleCheckout` | const arrow | 1518 |
 
 ### 3.98 `frontend/src/components/pos/posCore.ts`
 

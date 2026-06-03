@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 740, defer Products auxiliary lookup options out of first route window
+- Latest completed move: Move 741, defer POS category options out of first route window
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `b5ac468402187aa5`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `bfa5413c3b822243`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `2ce425b5b1e43404`
+  `23c952051b42ed07`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-33-46-064Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-58-08-520Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T09-33-45-517Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T09-58-08-058Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -70,12 +70,32 @@ Current honest pockets:
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
 - Docker release image `business-os:v6.0.0-202606031726` is serving the
-  verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-172827`
+  verified build from Move 740; Move 741 is served by Docker release image
+  `business-os:v6.0.0-202606031752`, and the release update created backup
+  `ops/runtime/docker-release/backups/20260603-175414`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- POS first-load now defers category option reads until after the first
+  product grid is useful, while still loading authenticated bootstrap,
+  active branches, and the first product search immediately. Opening the POS
+  filter panel wakes categories immediately, and category sync invalidates the
+  delayed category loader without forcing categories back into the route-ready
+  batch. Proof: `ops/runtime/reports/route-load-trace-latest.json` shows POS
+  with 45 total requests, 3 API requests, zero failed requests, and zero
+  console/page errors. The first-window API list is now `/api/auth/bootstrap`,
+  `/api/branches`, and `/api/products/search...`. A longer 3200 ms trace at
+  `ops/runtime/reports/route-load-trace-2026-06-03T09-55-22-507Z.json` proved
+  delayed `/api/categories`, `/api/customers`, `/api/delivery-contacts`, and
+  `/api/products/filters` wake around 2.3 s after navigation, outside the
+  route-ready window. The focused Products/POS/Inventory/Server route-control
+  audit passed with 123 exercised controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-55-50-606Z/summary.json`;
+  the exhaustive all-pages audit passed across 34 routes with 377 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-58-08-520Z/summary.json`.
 
 - Products first-load now defers category, unit, and branch auxiliary lookup
   options until after the first product list is useful. Products still loads

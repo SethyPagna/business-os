@@ -15,60 +15,60 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Size (KB) | Lines |
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
-| `frontend/src/components/inventory/Inventory.tsx` | 216.0 | 4281 |
+| `frontend/src/components/inventory/Inventory.tsx` | 216.9 | 4305 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 148.3 | 3396 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 153.3 | 3529 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
-| `frontend/src/components/pos/POS.tsx` | 117.4 | 2218 |
-| `frontend/src/components/dashboard/Dashboard.tsx` | 115.1 | 2304 |
-| `frontend/src/components/products/Products.tsx` | 109.7 | 2344 |
-| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 102.5 | 1479 |
-| `frontend/src/components/products/import/BulkImportModal.tsx` | 101.0 | 2144 |
+| `frontend/src/components/pos/POS.tsx` | 124.3 | 2382 |
+| `frontend/src/components/dashboard/Dashboard.tsx` | 118.1 | 2376 |
+| `frontend/src/components/products/Products.tsx` | 113.6 | 2450 |
+| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 103.0 | 1488 |
+| `frontend/src/components/products/import/BulkImportModal.tsx` | 101.2 | 2147 |
 | `backend/src/routes/products.ts` | 99.1 | 2218 |
-| `frontend/src/components/utils-settings/Settings.tsx` | 85.1 | 1846 |
+| `frontend/src/components/utils-settings/Settings.tsx` | 86.5 | 1872 |
 | `backend/src/routes/inventory.ts` | 83.8 | 1881 |
-| `frontend/src/components/utils-settings/Backup.tsx` | 78.5 | 1732 |
-| `frontend/src/AppContext.tsx` | 74.6 | 1854 |
+| `frontend/src/components/utils-settings/Backup.tsx` | 79.0 | 1741 |
+| `frontend/src/AppContext.tsx` | 75.3 | 1872 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
-| `frontend/src/App.tsx` | 69.0 | 1843 |
-| `frontend/src/components/users/UserProfileModal.tsx` | 67.7 | 1311 |
+| `frontend/src/App.tsx` | 70.6 | 1881 |
+| `frontend/src/components/users/UserProfileModal.tsx` | 67.9 | 1315 |
 | `backend/src/routes/system/index.ts` | 65.3 | 1659 |
-| `backend/src/routes/sales.ts` | 64.6 | 1573 |
+| `backend/src/routes/sales.ts` | 65.2 | 1591 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
-| `frontend/src/components/utils-settings/AuditLog.tsx` | 59.1 | 1292 |
-| `frontend/src/api/methods.ts` | 58.1 | 1421 |
+| `frontend/src/components/utils-settings/AuditLog.tsx` | 59.6 | 1300 |
+| `frontend/src/api/methods.ts` | 58.1 | 1428 |
+| `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 58.0 | 1085 |
 | `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
-| `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 56.8 | 865 |
 
 ## 3. Largest Source Files (by lines)
 
 | File | Lines | Size (KB) |
 |---|---:|---:|
-| `frontend/src/components/inventory/Inventory.tsx` | 4281 | 216.0 |
+| `frontend/src/components/inventory/Inventory.tsx` | 4305 | 216.9 |
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 3396 | 148.3 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 3529 | 153.3 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
-| `frontend/src/components/products/Products.tsx` | 2344 | 109.7 |
-| `frontend/src/components/dashboard/Dashboard.tsx` | 2304 | 115.1 |
-| `frontend/src/components/pos/POS.tsx` | 2218 | 117.4 |
+| `frontend/src/components/products/Products.tsx` | 2450 | 113.6 |
+| `frontend/src/components/pos/POS.tsx` | 2382 | 124.3 |
+| `frontend/src/components/dashboard/Dashboard.tsx` | 2376 | 118.1 |
 | `backend/src/routes/products.ts` | 2218 | 99.1 |
-| `frontend/src/components/products/import/BulkImportModal.tsx` | 2144 | 101.0 |
+| `frontend/src/components/products/import/BulkImportModal.tsx` | 2147 | 101.2 |
+| `frontend/src/App.tsx` | 1881 | 70.6 |
 | `backend/src/routes/inventory.ts` | 1881 | 83.8 |
-| `frontend/src/AppContext.tsx` | 1854 | 74.6 |
-| `frontend/src/components/utils-settings/Settings.tsx` | 1846 | 85.1 |
-| `frontend/src/App.tsx` | 1843 | 69.0 |
-| `frontend/src/components/utils-settings/Backup.tsx` | 1732 | 78.5 |
+| `frontend/src/AppContext.tsx` | 1872 | 75.3 |
+| `frontend/src/components/utils-settings/Settings.tsx` | 1872 | 86.5 |
+| `frontend/src/components/utils-settings/Backup.tsx` | 1741 | 79.0 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
 | `backend/src/routes/system/index.ts` | 1659 | 65.3 |
-| `backend/src/routes/sales.ts` | 1573 | 64.6 |
+| `backend/src/routes/sales.ts` | 1591 | 65.2 |
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
-| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1479 | 102.5 |
+| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1488 | 103.0 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
-| `frontend/src/api/methods.ts` | 1421 | 58.1 |
+| `frontend/src/api/methods.ts` | 1428 | 58.1 |
 | `backend/src/routes/portal.ts` | 1407 | 51.5 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
-| `frontend/src/components/users/UserProfileModal.tsx` | 1311 | 67.7 |
+| `frontend/src/components/users/UserProfileModal.tsx` | 1315 | 67.9 |
 
 ## 4. Largest Built Chunks
 
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-DcUhrnFM.js` | 184.0 |
-| `frontend/dist/assets/index-DQztsXP7.css` | 151.6 |
-| `frontend/dist/assets/Inventory-CMkxtr4a.js` | 143.7 |
+| `frontend/dist/assets/catalog-Dtl5TGNq.js` | 191.1 |
+| `frontend/dist/assets/index-Cw6aCC7m.css` | 152.6 |
+| `frontend/dist/assets/Inventory-BbENjE_X.js` | 144.3 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-GWhEPvAn.js` | 92.6 |
-| `frontend/dist/assets/app-shared-CEPLlOT-.js` | 91.0 |
-| `frontend/dist/assets/index-CxYaCr_e.js` | 78.6 |
-| `frontend/dist/assets/POS-D_221HPj.js` | 76.5 |
+| `frontend/dist/assets/Products-CIcWPYHF.js` | 95.7 |
+| `frontend/dist/assets/POS-CFCFYJPQ.js` | 79.6 |
+| `frontend/dist/assets/catalog-editor-BsS86oHG.js` | 73.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-D-jNsB77.js` | 70.7 |
-| `frontend/dist/assets/catalog-editor-DuBEYFOB.js` | 70.5 |
-| `frontend/dist/assets/BulkImportModal-C3Pp0voK.js` | 68.3 |
-| `frontend/dist/assets/catalog-preview-C-FDRFZ6.js` | 64.2 |
-| `frontend/dist/assets/app-api-methods-DGwxKEEJ.js` | 61.3 |
-| `frontend/dist/assets/Backup-6rFWAaaP.js` | 57.8 |
-| `frontend/dist/assets/vendor-lucide-CFbbW5Yl.js` | 52.5 |
-| `frontend/dist/assets/Settings-DuF-XAl7.js` | 52.1 |
-| `frontend/dist/assets/UserProfileModal-BxXszQBH.js` | 43.3 |
-| `frontend/dist/assets/Users-CS3zqDJ2.js` | 40.3 |
-| `frontend/dist/assets/Branches-8-ecPmDF.js` | 37.9 |
-| `frontend/dist/assets/ReceiptSettings-B4WGpE4X.js` | 37.3 |
-| `frontend/dist/assets/Sales-4S6U08tf.js` | 35.0 |
+| `frontend/dist/assets/Dashboard-BO7L_WjF.js` | 72.0 |
+| `frontend/dist/assets/app-shared-4eBg3zZI.js` | 69.4 |
+| `frontend/dist/assets/BulkImportModal-C32T-hGy.js` | 68.6 |
+| `frontend/dist/assets/catalog-preview-DJKdskwG.js` | 67.5 |
+| `frontend/dist/assets/Backup-DdrQqSKw.js` | 60.5 |
+| `frontend/dist/assets/app-api-methods-DeihmG0n.js` | 59.4 |
+| `frontend/dist/assets/Settings-CU1DabKz.js` | 53.7 |
+| `frontend/dist/assets/index-C_fYHHtN.js` | 50.3 |
+| `frontend/dist/assets/UserProfileModal-ClWYJORH.js` | 43.5 |
+| `frontend/dist/assets/Users-0tCFhGTD.js` | 41.3 |
+| `frontend/dist/assets/ReceiptSettings-tyG9wr74.js` | 40.3 |
+| `frontend/dist/assets/Branches-CWmNQbjQ.js` | 38.8 |
+| `frontend/dist/assets/Sales-Z7YByPhM.js` | 35.4 |
+| `frontend/dist/assets/AuditLog-C5wFN5wZ.js` | 34.8 |
 
 ## 5. Notes
 
@@ -1497,6 +1497,25 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   first-window API requests from 5 to 2 and total requests from 43 to 40, with
   zero failed requests and zero console/page errors. The full report
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-33-46-064Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 377, skipped 141 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
+- Move 471 records roadmap Move 741: defer POS category options out of the
+  first route window. `POS` now keeps bootstrap, branches, and first product
+  search in the route-ready batch, then loads categories through a tracked
+  delayed loader behind `POS_CATEGORY_OPTIONS_READY_DELAY_MS`; opening the
+  filter panel wakes category options immediately. Docker-served build hash
+  `bfa5413c3b822243` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, delayed
+  POS wake trace, focused Products/POS/Inventory/Server route-control audit,
+  public Cloudflare Playwright, and full desktop/mobile all-pages Playwright.
+  The focused trace `ops/runtime/reports/route-load-trace-latest.json` reduced
+  POS first-window API requests from 4 to 3 and total requests from 46 to 45,
+  with zero failed requests and zero console/page errors. The delayed trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T09-55-22-507Z.json` proved
+  `/api/categories` wakes around 2.3 s beside contact options and full product
+  filters. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-58-08-520Z/summary.json`
   covered 34 routes, discovered 518 controls, exercised 377, skipped 141 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.

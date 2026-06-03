@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T09:41:26.009Z
+Generated: 2026-06-03T10:06:01.900Z
 
 ## Summary
 
@@ -74,11 +74,11 @@ Generated: 2026-06-03T09:41:26.009Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2516 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2541 | ops/docs |
 | frontend/src/components/products/Products.tsx | 2450 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2422 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2447 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/src/components/pos/POS.tsx | 2382 | frontend/components/pos |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
-| frontend/src/components/pos/POS.tsx | 2331 | frontend/components/pos |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |

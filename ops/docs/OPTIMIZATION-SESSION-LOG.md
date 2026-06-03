@@ -1,8 +1,33 @@
 # Business OS Optimization Session Log
 
-Last updated: 2026-05-31
+Last updated: 2026-06-03
 
 This is a concise running log of what actually happened in recent sessions.
+
+## 2026-06-03
+
+### Accepted
+
+- POS category-options deferral
+  - route: `pos`
+  - result: kept
+  - note: moved `/api/categories` out of the POS route-ready batch and into a
+    tracked delayed loader that wakes immediately when the filter panel opens;
+    Docker-served route trace shows POS at 45 total requests, 3 API requests,
+    zero failed requests, and zero console/page errors, while a longer trace
+    proves categories wake around 2.3 s with other non-critical metadata
+
+### Verification
+
+- Frontend `test:utils`, `check:jsx`, and production build passed.
+- Docker release image `business-os:v6.0.0-202606031752` is healthy on
+  `http://127.0.0.1:4000/health` with frontend hash `bfa5413c3b822243`.
+- Focused Products/POS/Inventory/Server control audit passed with 123 tested
+  controls and zero failures.
+- Exhaustive desktop/mobile all-pages control audit passed with 377 tested
+  controls and zero failures.
+- Public Cloudflare portal check passed with 20 rendered products and no
+  relevant console/page errors.
 
 ## 2026-05-31
 

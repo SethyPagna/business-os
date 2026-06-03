@@ -2069,8 +2069,13 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getCategories(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*\]\),\s*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
-  'POS catalog reads should timeout the batched product, category, and branch requests',
+  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*\]\),\s*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  'POS catalog reads should timeout the first-window product and branch requests',
+)
+assert.doesNotMatch(
+  pos,
+  /getCategories(?:\?\.)?\(\)[\s\S]{0,260}POS_CATALOG_LOAD_TIMEOUT_MS/,
+  'POS catalog first route-load batch should not fetch category options',
 )
 assert.doesNotMatch(
   pos,
@@ -2089,6 +2094,11 @@ assert.match(
 )
 assert.match(
   pos,
+  /const POS_CATEGORY_OPTIONS_TIMEOUT_MS = 8000/,
+  'POS category option reads should use an explicit timeout',
+)
+assert.match(
+  pos,
   /const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800/,
   'POS customer and delivery option reads should wait until after first catalog route-ready work',
 )
@@ -2096,6 +2106,11 @@ assert.match(
   pos,
   /const POS_FILTER_META_READY_DELAY_MS = 1800/,
   'POS full product filter metadata should wait until after first catalog route-ready work',
+)
+assert.match(
+  pos,
+  /const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 1800/,
+  'POS category option reads should wait until after first catalog route-ready work',
 )
 assert.match(
   pos,
@@ -2146,6 +2161,16 @@ assert.match(
   pos,
   /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.getCustomers(?:\?\.)?\(\)[\s\S]*label,\s*POS_CONTACT_OPTIONS_TIMEOUT_MS\)/,
   'POS customer option reads should timeout slow customer requests',
+)
+assert.match(
+  pos,
+  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.getCategories(?:\?\.)?\(\)[\s\S]*label,\s*POS_CATEGORY_OPTIONS_TIMEOUT_MS\)/,
+  'POS delayed category option reads should timeout slow category requests',
+)
+assert.match(
+  pos,
+  /filterOpen[\s\S]{0,160}categoryOptionsLoadedRef\.current[\s\S]{0,120}setCategoryOptionsReady\(true\)/,
+  'POS should wake category options immediately when the filter panel opens',
 )
 assert.doesNotMatch(
   pos,
