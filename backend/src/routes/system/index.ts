@@ -764,17 +764,17 @@ router.delete('/audit-logs/retention', authToken, requirePermission('audit_log')
   }
 })
 
-router.get('/debug/log', authToken, (req, res) => {
-  res.json({ entries: getServerLog().slice(0, 200), clients: wss_clients.size, uptime: process.uptime() })
-})
+function buildSystemDebugLogPayload() {
+  return { entries: getServerLog().slice(0, 200), clients: wss_clients.size, uptime: process.uptime() }
+}
 
 const SERVER_START_TIME = Math.floor(Date.now() / 1000)
 
-router.get('/config', authToken, (req, res) => {
+function buildSystemConfigPayload(req) {
   const access = classifyRequestAccess(req)
   const { hostUiAvailable } = getHostUiAvailability(req)
   const organization = getDefaultOrganization()
-  res.json({
+  return {
     syncServerUrl: PUBLIC_BASE_URL || CLOUDFLARE_PUBLIC_URL || null,
     adminServerUrl: CLOUDFLARE_ADMIN_URL || null,
     requiresToken: access.tokenRequired,
@@ -804,7 +804,22 @@ router.get('/config', authToken, (req, res) => {
       trustedTailscale: access.trustedTailscale,
       hostUiAvailable,
     },
+  }
+}
+
+router.get('/debug/log', authToken, (req, res) => {
+  res.json(buildSystemDebugLogPayload())
+})
+
+router.get('/bootstrap', authToken, (req, res) => {
+  res.json({
+    config: buildSystemConfigPayload(req),
+    debugLog: buildSystemDebugLogPayload(),
   })
+})
+
+router.get('/config', authToken, (req, res) => {
+  res.json(buildSystemConfigPayload(req))
 })
 
 // ?€?€ Backup export ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€

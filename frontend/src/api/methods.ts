@@ -256,6 +256,7 @@ import {
   getDataPath as getDataPathRequest,
   getIntegrationDoctor as getIntegrationDoctorRequest,
   getScaleMigrationStatus as getScaleMigrationStatusRequest,
+  getSystemBootstrap as getSystemBootstrapRequest,
   getSystemConfig as getSystemConfigRequest,
   getSystemDebugLog as getSystemDebugLogRequest,
   openFolderDialog as openFolderDialogRequest,
@@ -463,6 +464,8 @@ export const getVerificationCapabilities = () =>
   getVerificationCapabilitiesRequest()
 export const getSystemConfig = () =>
   getSystemConfigRequest()
+export const getSystemBootstrap = () =>
+  getSystemBootstrapRequest()
 export async function getNotificationSummary() {
   return getNotificationSummaryRequest()
 }

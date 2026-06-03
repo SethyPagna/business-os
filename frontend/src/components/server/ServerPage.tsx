@@ -21,6 +21,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 
 const SERVER_PENDING_SYNC_TIMEOUT_MS = 8000
 const SERVER_DIAGNOSTICS_TIMEOUT_MS = 10000
+const SERVER_BOOTSTRAP_TIMEOUT_MS = 10000
 const SERVER_SECURITY_CONFIG_TIMEOUT_MS = 8000
 const SERVER_SYNC_QUEUE_ACTION_TIMEOUT_MS = 12000
 const SERVER_SYNC_TEST_TIMEOUT_MS = 12000
@@ -53,7 +54,9 @@ type InfoTabProps = {
   active?: boolean
 }
 
-type DiagnosticsPanelProps = InfoTabProps
+type DiagnosticsPanelProps = InfoTabProps & {
+  initialDebugLog?: unknown
+}
 type DiagnosticsTab = 'client' | 'server' | 'queue' | 'sync-center' | 'info'
 
 type CallLogEntry = {
@@ -107,6 +110,11 @@ type SystemConfig = {
   accessMode?: string
 }
 
+type SystemBootstrap = {
+  config?: unknown
+  debugLog?: unknown
+}
+
 type SyncTestResult = {
   ok: boolean
   message?: string
@@ -117,6 +125,7 @@ type ServerApi = {
   getPendingSyncState?: () => Promise<unknown>
   getCallLog?: () => CallLogEntry[]
   clearCallLog?: () => void
+  getSystemBootstrap?: () => Promise<unknown>
   getSystemDebugLog: () => Promise<unknown>
   retryPendingSyncNow?: () => Promise<unknown>
   discardPendingSyncQueue?: () => Promise<unknown>
@@ -157,6 +166,14 @@ function normalizeSystemDebugLog(value: unknown): { entries: ServerLogEntry[]; c
 
 function normalizeSystemConfig(value: unknown): SystemConfig | null {
   return typeof value === 'object' && value !== null ? value as SystemConfig : null
+}
+
+function normalizeSystemBootstrap(value: unknown): SystemBootstrap {
+  const candidate = typeof value === 'object' && value !== null ? value as SystemBootstrap : {}
+  return {
+    config: candidate.config,
+    debugLog: candidate.debugLog,
+  }
 }
 
 function useLocalCopy() {
@@ -342,7 +359,7 @@ function InfoTab({ syncUrl, syncConnected, active = true }: InfoTabProps) {
   )
 }
 
-function DiagnosticsPanel({ syncUrl, syncConnected, active = true }: DiagnosticsPanelProps) {
+function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugLog = null }: DiagnosticsPanelProps) {
   const copy = useLocalCopy()
   const [clientLog, setClientLog] = useState<CallLogEntry[]>([])
   const [serverLog, setServerLog] = useState<ServerLogEntry[]>([])
@@ -423,8 +440,14 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true }: Diagnostics
   }, [active, syncUrl])
 
   useEffect(() => {
+    if (!initialDebugLog) return
+    const normalized = normalizeSystemDebugLog(initialDebugLog)
+    setServerLog(normalized.entries)
+    setServerInfo({ clients: normalized.clients, uptime: normalized.uptime })
+  }, [initialDebugLog])
+
+  useEffect(() => {
     if (!active || !syncUrl || !autoRefresh) return
-    fetchServerLog()
     const timer = setInterval(fetchServerLog, 3000)
     return () => clearInterval(timer)
   }, [active, syncUrl, autoRefresh, fetchServerLog])
@@ -647,12 +670,13 @@ export default function ServerPage() {
   const isActive = useIsPageActive('server')
   const [urlInput, setUrlInput] = useState('')
   const [securityConfig, setSecurityConfig] = useState<SystemConfig | null>(null)
+  const [serverBootstrapDebugLog, setServerBootstrapDebugLog] = useState<unknown>(null)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<SyncTestResult | null>(null)
   const [onlineCount, setOnlineCount] = useState<number | null>(null)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const onlineCheckRequestRef = useRef(0)
-  const securityConfigRequestRef = useRef(0)
+  const serverBootstrapRequestRef = useRef(0)
   const testSyncInFlightRef = useRef(false)
 
   const autoDetected = isAutoDetected(syncUrl)
@@ -697,25 +721,42 @@ export default function ServerPage() {
 
   useEffect(() => {
     if (!isActive) {
-      invalidateTrackedRequest(securityConfigRequestRef)
+      invalidateTrackedRequest(serverBootstrapRequestRef)
       return
     }
-    const loadSecurityConfig = async () => {
-      const requestId = beginTrackedRequest(securityConfigRequestRef)
+    const loadServerBootstrap = async () => {
+      const requestId = beginTrackedRequest(serverBootstrapRequestRef)
       try {
-        const config = await withLoaderTimeout(
-          () => getServerApi().getSystemConfig?.(),
-          'Sync settings',
-          SERVER_SECURITY_CONFIG_TIMEOUT_MS,
+        const bootstrap = await withLoaderTimeout(
+          () => {
+            const api = getServerApi()
+            if (!api.getSystemBootstrap) throw new Error('Server bootstrap unavailable')
+            return api.getSystemBootstrap()
+          },
+          'Server bootstrap',
+          SERVER_BOOTSTRAP_TIMEOUT_MS,
         )
-        if (!isTrackedRequestCurrent(securityConfigRequestRef, requestId)) return
-        if (config) setSecurityConfig(normalizeSystemConfig(config))
-      } catch {}
+        if (!isTrackedRequestCurrent(serverBootstrapRequestRef, requestId)) return
+        const normalized = normalizeSystemBootstrap(bootstrap)
+        if (normalized.config) setSecurityConfig(normalizeSystemConfig(normalized.config))
+        if (normalized.debugLog) setServerBootstrapDebugLog(normalized.debugLog)
+      } catch {
+        const requestId = beginTrackedRequest(serverBootstrapRequestRef)
+        try {
+          const config = await withLoaderTimeout(
+            () => getServerApi().getSystemConfig?.(),
+            'Sync settings',
+            SERVER_SECURITY_CONFIG_TIMEOUT_MS,
+          )
+          if (!isTrackedRequestCurrent(serverBootstrapRequestRef, requestId)) return
+          if (config) setSecurityConfig(normalizeSystemConfig(config))
+        } catch {}
+      }
     }
-    loadSecurityConfig()
+    loadServerBootstrap()
   }, [isActive, syncUrl, syncConnected])
   useEffect(() => () => {
-    invalidateTrackedRequest(securityConfigRequestRef)
+    invalidateTrackedRequest(serverBootstrapRequestRef)
   }, [])
 
   async function handleTest() {
@@ -917,7 +958,7 @@ export default function ServerPage() {
           Reads can fall back to local IndexedDB when the server is unreachable, but changes are blocked and treated as invalid until the live server reconnects.
         </div>
 
-        <DiagnosticsPanel syncUrl={syncUrl} syncConnected={syncConnected} active={isActive} />
+        <DiagnosticsPanel syncUrl={syncUrl} syncConnected={syncConnected} active={isActive} initialDebugLog={serverBootstrapDebugLog} />
       </div>
     </div>
   )

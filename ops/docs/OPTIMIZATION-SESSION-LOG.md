@@ -62,21 +62,34 @@ This is a concise running log of what actually happened in recent sessions.
     total requests, 1 API request, zero failed requests, and zero console/page
     errors
 
+- Server startup bootstrap collapse
+  - route: `server`
+  - result: kept
+  - note: replaced the first-load `/api/system/config` plus
+    `/api/system/debug/log` pair with one `/api/system/bootstrap` response
+    carrying security config and initial diagnostics; Docker-served route trace
+    now shows Server at 30 total requests, 2 API requests, zero failed
+    requests, and zero console/page errors
+
 ### Verification
 
-- Frontend `test:utils`, `check:jsx`, and production build passed.
-- Docker release image `business-os:v6.0.0-202606031937` is healthy on
-  `http://127.0.0.1:4000/health` with frontend hash `26f11137bb93baee`.
+- Frontend `test:utils`, frontend `check:jsx`, backend `test:utils`, and
+  production build passed.
+- Docker release image `business-os:v6.0.0-202606031954` is healthy on
+  `http://127.0.0.1:4000/health` with frontend hash `05d5d4b5fb849663`.
+- Focused Server route-load trace passed at 30 requests, 2 API requests, and
+  zero failures:
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-57-06-358Z.json`.
 - Focused public catalog route-load trace passed at 23 requests, 1 API
   request, and zero failures:
   `ops/runtime/reports/route-load-trace-2026-06-03T11-40-35-980Z.json`.
-- Broad Phase 8.4 UI live check passed with `publicPortalBootstrapStatus: 200`
-  and zero relevant console messages:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-42-12-482Z/report.json`.
+- Broad Phase 8.4 UI live check passed with `publicPortalBootstrapStatus: 200`,
+  `serverBootstrapStatus: 200`, and zero relevant console messages:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-58-20-197Z/report.json`.
 - Public Cloudflare portal check passed after clicking the Assistant tab, with
   20 rendered products, deferred AI status, and no relevant console/page
   errors:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-40-45-423Z/report.json`.
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-59-08-126Z/report.json`.
 - Focused Contacts desktop/mobile control audit passed with 23 tested controls
   and zero failures.
 - Focused Backup/Files/Users/Server control audit passed with 50 tested

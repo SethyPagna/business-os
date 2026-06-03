@@ -1602,6 +1602,11 @@ assert.match(
 )
 assert.match(
   serverPage,
+  /const SERVER_BOOTSTRAP_TIMEOUT_MS = 10000/,
+  'server bootstrap should use an explicit timeout constant',
+)
+assert.match(
+  serverPage,
   /const SERVER_SECURITY_CONFIG_TIMEOUT_MS = 8000/,
   'server security config should use an explicit timeout constant',
 )
@@ -1619,6 +1624,11 @@ assert.match(
   serverPage,
   /withLoaderTimeout\(\s*\(\) => (?:getInventoryApi\\(\\)\\?|getServerApi\(\))\.getPendingSyncState\?\.\(\),\s*'Pending sync queue',\s*SERVER_PENDING_SYNC_TIMEOUT_MS,\s*\)/,
   'server pending sync state should timeout slow queue reads',
+)
+assert.match(
+  serverPage,
+  /withLoaderTimeout\(\s*\(\) => \{[\s\S]*api\.getSystemBootstrap[\s\S]*return api\.getSystemBootstrap\(\)[\s\S]*\},\s*'Server bootstrap',\s*SERVER_BOOTSTRAP_TIMEOUT_MS,\s*\)/,
+  'server first-load should use one bootstrap read for config and diagnostics',
 )
 assert.match(
   serverPage,
@@ -1645,6 +1655,8 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => (?:window\.api|getServerApi\(\))\.testSyncServer\(url\),\s*'Test sync server',\s*SERVER_SYNC_TEST_TIMEOUT_MS,\s*\)/,
   'server connection test should timeout slow sync test actions',
 )
+assert.match(serverPage, /const timer = setInterval\(fetchServerLog, 3000\)/, 'server diagnostics refresh should still poll after startup')
+assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*const timer = setInterval\(fetchServerLog, 3000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
 assert.match(serverPage, /const SERVER_ONLINE_CHECK_READY_DELAY_MS = 1800/, 'server online count should wait until after first route-ready work')
 assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*setInterval\(check, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
 assert.match(

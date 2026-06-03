@@ -714,25 +714,16 @@ async function main(): Promise<void> {
     const integrationDoctorStatus = integrationDoctorRead?.status?.() || latestObservedStatus(chunkRequests, /\/api\/system\/integration-doctor/i)
     assert(integrationDoctorStatus === 200, `Integration doctor read returned HTTP ${integrationDoctorStatus}`)
 
-    const serverConfigResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/system/config') && response.status() < 500,
+    const serverBootstrapResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/system/bootstrap') && response.status() < 500,
       { timeout: 20_000 },
-    ).catch(() => null)
-    const serverDiagnosticsResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/system/debug/log') && response.status() < 500,
-      { timeout: 20_000 },
-    ).catch(() => null)
+    )
     await page.goto('/server', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await page.getByText(/Sync Server|Diagnostics/).first().waitFor({ state: 'visible', timeout: 20_000 })
     await page.getByText(/Pending|No pending offline actions|Queue/i).first().waitFor({ state: 'visible', timeout: 20_000 })
-    await page.getByRole('button', { name: /Refresh/i }).last().click()
-    const serverConfigRead = await serverConfigResponse
-    const serverDiagnosticsRead = await serverDiagnosticsResponse
-    const serverConfigStatus = serverConfigRead?.status?.() || latestObservedStatus(chunkRequests, /\/api\/system\/config/i)
-    const serverDiagnosticsStatus = serverDiagnosticsRead?.status?.() || latestObservedStatus(chunkRequests, /\/api\/system\/debug\/log/i)
-    assert(serverConfigStatus === 200, `Server config read returned HTTP ${serverConfigStatus}`)
-    assert(serverDiagnosticsStatus === 200, `Server diagnostics read returned HTTP ${serverDiagnosticsStatus}`)
+    const serverBootstrapStatus = (await serverBootstrapResponse).status()
+    assert(serverBootstrapStatus === 200, `Server bootstrap read returned HTTP ${serverBootstrapStatus}`)
 
     const frameworkOverlayVisible = await page.locator('#vite-error-overlay, [data-nextjs-dialog-overlay]').count()
     assert(frameworkOverlayVisible === 0, 'A framework error overlay is visible')
@@ -816,8 +807,7 @@ async function main(): Promise<void> {
         auditLogStatus,
         otpStatusStatus,
         integrationDoctorStatus,
-        serverConfigStatus,
-        serverDiagnosticsStatus,
+        serverBootstrapStatus,
         frameworkOverlayVisible: false,
         relevantConsoleMessages: relevantConsole.length,
       },

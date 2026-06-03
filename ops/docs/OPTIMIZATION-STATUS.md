@@ -8,16 +8,16 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 746, collapse public portal first-load config/meta/search reads into bootstrap
+- Latest completed move: Move 747, collapse Server config/diagnostics startup reads into bootstrap
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `26f11137bb93baee`
+- latest verified frontend hash from the most recent Docker-served live check: `05d5d4b5fb849663`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `c96b8b33d98534da`
+  `d55c631a1473d604`
 
 Latest verified reports:
 
@@ -26,9 +26,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-42-12-482Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-58-20-197Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-40-45-423Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-59-08-126Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -78,13 +78,28 @@ Current honest pockets:
   release image `business-os:v6.0.0-202606031841`; Move 744 is served by
   Docker release image `business-os:v6.0.0-202606031903`; Move 745 is served
   by Docker release image `business-os:v6.0.0-202606031923`; Move 746 is
-  served by Docker release image `business-os:v6.0.0-202606031937`, and the
-  latest release update created backup
-  `ops/runtime/docker-release/backups/20260603-193942`
+  served by Docker release image `business-os:v6.0.0-202606031937`; Move 747
+  is served by Docker release image `business-os:v6.0.0-202606031954`, and
+  the latest release update created backup
+  `ops/runtime/docker-release/backups/20260603-195615`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Server page first-load now uses one authenticated system bootstrap response
+  for security config and initial diagnostics. The old first-window pair
+  `/api/system/config` plus `/api/system/debug/log` is replaced by
+  `/api/system/bootstrap`; diagnostics refresh still polls after startup, and
+  the old endpoints remain available for fallback/manual reads. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-57-06-358Z.json` shows
+  Server at 30 total requests, 2 API requests, zero failed requests, and zero
+  console/page errors, down from 31 total requests and 3 API requests in the
+  pre-change trace. The first-window API list is now `/api/auth/bootstrap` and
+  `/api/system/bootstrap`. The broad Phase 8.4 UI live check at
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-58-20-197Z/report.json`
+  passed with `serverBootstrapStatus: 200`, no framework overlay, and zero
+  relevant console messages.
 
 - Public portal first-load now uses one customer-safe bootstrap response for
   config, metadata, and the first product page. The old public waterfall of

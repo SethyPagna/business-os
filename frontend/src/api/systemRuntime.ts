@@ -9,6 +9,10 @@ export function getSystemConfig(): Promise<unknown> {
   return route('system:config', () => apiFetch('GET', '/api/system/config'), () => null)
 }
 
+export function getSystemBootstrap(): Promise<unknown> {
+  return route('system:bootstrap', () => apiFetch('GET', '/api/system/bootstrap'), () => ({ config: null, debugLog: { entries: [] } }))
+}
+
 export function getSystemDebugLog(): Promise<unknown> {
   return route('system:debugLog', () => apiFetch('GET', '/api/system/debug/log'), () => ({ entries: [] }))
 }

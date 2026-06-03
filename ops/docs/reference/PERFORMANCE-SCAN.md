@@ -32,11 +32,11 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/App.tsx` | 70.6 | 1881 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 67.9 | 1315 |
-| `backend/src/routes/system/index.ts` | 65.3 | 1659 |
+| `backend/src/routes/system/index.ts` | 65.6 | 1674 |
 | `backend/src/routes/sales.ts` | 65.2 | 1591 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
 | `frontend/src/components/utils-settings/AuditLog.tsx` | 59.6 | 1300 |
-| `frontend/src/api/methods.ts` | 58.1 | 1428 |
+| `frontend/src/api/methods.ts` | 58.3 | 1431 |
 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 58.0 | 1085 |
 | `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
 
@@ -59,13 +59,13 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/AppContext.tsx` | 1872 | 75.3 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1872 | 86.5 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1754 | 79.4 |
+| `backend/src/routes/system/index.ts` | 1674 | 65.6 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
-| `backend/src/routes/system/index.ts` | 1659 | 65.3 |
 | `backend/src/routes/sales.ts` | 1591 | 65.2 |
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1488 | 103.0 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
-| `frontend/src/api/methods.ts` | 1428 | 58.1 |
+| `frontend/src/api/methods.ts` | 1431 | 58.3 |
 | `backend/src/routes/portal.ts` | 1407 | 51.5 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 1315 | 67.9 |
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-TmaY3nPu.js` | 191.4 |
+| `frontend/dist/assets/catalog-DETTbhy4.js` | 191.4 |
 | `frontend/dist/assets/index-Cw6aCC7m.css` | 152.6 |
-| `frontend/dist/assets/Inventory-DjCm3Oji.js` | 144.3 |
+| `frontend/dist/assets/Inventory-C6MZcvvu.js` | 144.3 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-BM3hofMH.js` | 95.7 |
-| `frontend/dist/assets/POS-iDqordfi.js` | 79.6 |
-| `frontend/dist/assets/catalog-editor-CcZH1mZD.js` | 73.5 |
+| `frontend/dist/assets/Products-BWEttNSt.js` | 95.7 |
+| `frontend/dist/assets/POS-i23NHnRN.js` | 79.6 |
+| `frontend/dist/assets/catalog-editor-CJxOfVxC.js` | 73.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-j85ilAkR.js` | 72.0 |
-| `frontend/dist/assets/app-shared-BFn2jIg1.js` | 69.4 |
-| `frontend/dist/assets/BulkImportModal-B5comC4f.js` | 68.6 |
-| `frontend/dist/assets/catalog-preview-BaPD7onu.js` | 67.5 |
-| `frontend/dist/assets/Backup-CwKYTmeF.js` | 60.7 |
-| `frontend/dist/assets/app-api-methods-BdK0RVGQ.js` | 59.4 |
-| `frontend/dist/assets/Settings-B-wlA0NI.js` | 53.7 |
-| `frontend/dist/assets/index-BXkR5F3f.js` | 50.3 |
-| `frontend/dist/assets/UserProfileModal-Bgbg_LAu.js` | 43.5 |
-| `frontend/dist/assets/Users-BPGeyIkz.js` | 41.5 |
-| `frontend/dist/assets/ReceiptSettings-DavIZvN2.js` | 40.3 |
-| `frontend/dist/assets/Branches-CjTuMngf.js` | 39.0 |
-| `frontend/dist/assets/Sales-Dc65l3i0.js` | 35.4 |
-| `frontend/dist/assets/AuditLog-NqrJfIgi.js` | 34.8 |
+| `frontend/dist/assets/Dashboard-BHbyekgP.js` | 72.0 |
+| `frontend/dist/assets/app-shared-CVjzqgnJ.js` | 69.4 |
+| `frontend/dist/assets/BulkImportModal-DTkc2w7w.js` | 68.6 |
+| `frontend/dist/assets/catalog-preview-Ezelui0l.js` | 67.5 |
+| `frontend/dist/assets/Backup-BUpDG9g1.js` | 60.7 |
+| `frontend/dist/assets/app-api-methods-68zpY4z4.js` | 59.5 |
+| `frontend/dist/assets/Settings-ykXHKa5q.js` | 53.7 |
+| `frontend/dist/assets/index-BiKTJ-5c.js` | 50.3 |
+| `frontend/dist/assets/UserProfileModal-CyxkHM38.js` | 43.5 |
+| `frontend/dist/assets/Users-B4DjkO9g.js` | 41.5 |
+| `frontend/dist/assets/ReceiptSettings-p-6pcXnH.js` | 40.3 |
+| `frontend/dist/assets/Branches-DK81gicF.js` | 39.0 |
+| `frontend/dist/assets/Sales-BZ3jRgX_.js` | 35.4 |
+| `frontend/dist/assets/AuditLog-C3dqEEzv.js` | 34.8 |
 
 ## 5. Notes
 
@@ -1613,4 +1613,20 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   200 with zero relevant console/page errors. The broad Phase 8.4 report
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-42-12-482Z/report.json`
   passed with `publicPortalBootstrapStatus: 200`.
+- Move 477 records roadmap Move 747: collapse the Server page first-load
+  security config and initial diagnostics reads into one authenticated
+  `/api/system/bootstrap` response. The backend keeps `/api/system/config` and
+  `/api/system/debug/log` available, but they now share payload builders with
+  bootstrap; `ServerPage` seeds security config and Diagnostics from bootstrap
+  and lets diagnostics refresh after startup. Docker-served build hash
+  `05d5d4b5fb849663` passed frontend utility tests, frontend JSX/source check,
+  backend utility tests, production build, Docker release/update, focused
+  Server route-load trace, broad Phase 8.4 UI Playwright, and public
+  Cloudflare Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-57-06-358Z.json` shows
+  Server at 30 total requests, 2 API requests, zero failed requests, and zero
+  console/page errors. The broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-58-20-197Z/report.json`
+  passed with `serverBootstrapStatus: 200`, no framework overlay, and zero
+  relevant console messages.
 <!-- phase29-manual-notes:end -->

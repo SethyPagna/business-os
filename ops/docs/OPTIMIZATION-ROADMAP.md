@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 746.
+- Latest completed implementation move in this roadmap: Move 747.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9527,3 +9527,44 @@ Move 746 status:
   TypeScript, runtime, and performance sweeps. Public portal first-window API
   work is now at the practical floor: one bootstrap response for the first
   visible catalog.
+
+Move 747 status:
+- Move 747 collapses the Server page first-load security config and initial
+  diagnostics reads into a new authenticated `/api/system/bootstrap` endpoint.
+  The endpoint returns the same config payload as `/api/system/config` plus the
+  same debug payload as `/api/system/debug/log`; both old endpoints remain for
+  fallback/manual reads.
+- `ServerPage` now seeds security config and Diagnostics from the bootstrap
+  payload, while Diagnostics keeps its normal post-startup polling interval.
+  The broad Phase 8.4 live check now asserts `serverBootstrapStatus` instead
+  of separate config/debug startup reads.
+- Docker release image `business-os:v6.0.0-202606031954` is serving frontend
+  hash `05d5d4b5fb849663`; update backup:
+  `ops/runtime/docker-release/backups/20260603-195615`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `d55c631a1473d604`.
+- Proof: frontend utility tests, frontend JSX/source check, backend utility
+  tests, production build, Docker release build/update, local health metadata,
+  focused Server route-load trace, broad Phase 8.4 UI Playwright, and public
+  Cloudflare portal Playwright passed. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-57-06-358Z.json` shows
+  Server at 30 total requests and 2 API requests, with zero failed requests
+  and zero console/page errors. The first-window API list is
+  `/api/auth/bootstrap` and `/api/system/bootstrap`.
+- The broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-58-20-197Z/report.json`
+  covered the admin/public/POS/inventory/settings live loaders and passed with
+  `serverBootstrapStatus: 200`, `publicPortalBootstrapStatus: 200`, no
+  framework overlay, and zero relevant console messages. Public Cloudflare
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-59-08-126Z/report.json`
+  rendered 20 products and passed with bootstrap/AI HTTP 200 after Assistant
+  interaction.
+- Current plan position after Move 747: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Dashboard, Products, Returns,
+  public catalog, and Server are now at two-or-fewer first-window API reads;
+  POS and Inventory remain the clearest measured candidates for future
+  bootstrap/deferral slices.
