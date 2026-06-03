@@ -1836,30 +1836,30 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getProductApi` | function | 333 |
-| 2 | `getErrorMessage` | function | 337 |
-| 3 | `isObjectRecord` | function | 341 |
-| 4 | `toProductApiResponse` | function | 345 |
-| 5 | `scrollNodeWithOffset` | function | 349 |
-| 6 | `summarizeProductRun` | function | 355 |
-| 7 | `aggregateProductInitials` | function | 359 |
-| 8 | `toModalProduct` | function | 370 |
-| 9 | `toVariantParentProduct` | function | 382 |
-| 10 | `toLightboxState` | function | 388 |
-| 11 | `Products` | component/function | 398 |
-| 12 | `promise` | const arrow | 489 |
-| 13 | `handleSave` | const arrow | 678 |
-| 14 | `handleSaveWithGallery` | const arrow | 728 |
-| 15 | `handleBulkDelete` | const arrow | 795 |
-| 16 | `handleBulkOutOfStock` | const arrow | 842 |
-| 17 | `handleBulkChangeBranch` | const arrow | 885 |
-| 18 | `handleBulkAddStock` | const arrow | 915 |
-| 19 | `toggleSelect` | const arrow | 923 |
-| 20 | `toggleSelectAll` | const arrow | 930 |
-| 21 | `handleDelete` | const arrow | 937 |
-| 22 | `renderUnitChip` | const arrow | 1024 |
-| 23 | `openLightbox` | const arrow | 1038 |
-| 24 | `getStockBadge` | const arrow | 1045 |
+| 1 | `getProductApi` | function | 335 |
+| 2 | `getErrorMessage` | function | 339 |
+| 3 | `isObjectRecord` | function | 343 |
+| 4 | `toProductApiResponse` | function | 347 |
+| 5 | `scrollNodeWithOffset` | function | 351 |
+| 6 | `summarizeProductRun` | function | 357 |
+| 7 | `aggregateProductInitials` | function | 361 |
+| 8 | `toModalProduct` | function | 372 |
+| 9 | `toVariantParentProduct` | function | 384 |
+| 10 | `toLightboxState` | function | 390 |
+| 11 | `Products` | component/function | 400 |
+| 12 | `promise` | const arrow | 492 |
+| 13 | `handleSave` | const arrow | 693 |
+| 14 | `handleSaveWithGallery` | const arrow | 743 |
+| 15 | `handleBulkDelete` | const arrow | 810 |
+| 16 | `handleBulkOutOfStock` | const arrow | 857 |
+| 17 | `handleBulkChangeBranch` | const arrow | 900 |
+| 18 | `handleBulkAddStock` | const arrow | 930 |
+| 19 | `toggleSelect` | const arrow | 938 |
+| 20 | `toggleSelectAll` | const arrow | 945 |
+| 21 | `handleDelete` | const arrow | 952 |
+| 22 | `renderUnitChip` | const arrow | 1039 |
+| 23 | `openLightbox` | const arrow | 1053 |
+| 24 | `getStockBadge` | const arrow | 1060 |
 
 ### 3.123 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 

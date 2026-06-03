@@ -2229,3 +2229,48 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: defer Products action-history and admin user reads out of first route
+  window
+- affected files:
+  `frontend/src/components/products/Products.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products first route load,
+  `/api/action-history?scope=products...`, `/api/users`,
+  `/api/products/search`, and lookup/filter metadata
+- keeper or rollback: keeper; Products still records local undo/redo actions
+  immediately, and the server history/user option reads still wake after the
+  first product data load settles
+- route-scoped result: `ops/runtime/reports/route-load-trace-latest.json`
+  compared Products, Inventory, POS, and Server. Products dropped from 46 to
+  44 total requests and from 8 to 6 first-window API requests by moving
+  `/api/users` and `/api/action-history?scope=products...` out of the initial
+  route window. The post-change Products trace had zero failed requests and
+  zero console/page errors.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-19-41-250Z/summary.json`
+  covered desktop/mobile Products, Inventory, POS, and Server, discovered 165
+  controls, exercised 124 controls, intentionally skipped 41 stable
+  broad-audit guardrail controls, captured 16 screenshots, and recorded zero
+  failed controls and zero findings.
+- warm whole-app result: frontend utility tests, JSX/source check, production
+  build, Docker release build/update, local `/health`, local
+  `/business-os-build.json`, public Cloudflare Playwright, focused Playwright
+  route-load trace, and full all-pages desktop/mobile Playwright passed. Docker
+  image `business-os:v6.0.0-202606031516` is serving build hash
+  `f3aa7ba4ab674f79`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-151830`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-22-24-340Z/summary.json`
+  covered 34 routes, discovered 519 visible controls, exercised 381 controls,
+  intentionally skipped 138 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-22-20-564Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.

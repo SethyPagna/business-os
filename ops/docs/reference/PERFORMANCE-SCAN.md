@@ -1400,4 +1400,20 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 519 controls, exercised 382, skipped 137 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 465 records roadmap Move 735: defer Products action-history and admin
+  user-option reads out of the first route window. `Products` now waits on
+  `PRODUCTS_HISTORY_READY_DELAY_MS` before enabling server action history,
+  while preserving immediate product search, lookup/filter metadata, and local
+  undo/redo recording for real product writes. Docker-served build hash
+  `f3aa7ba4ab674f79` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, focused
+  Products/Inventory/POS/Server route-control audit, public Cloudflare
+  Playwright, and full desktop/mobile all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-latest.json` reduced Products
+  first-window API requests from 8 to 6 and total requests from 46 to 44, with
+  zero failed requests and zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-22-24-340Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

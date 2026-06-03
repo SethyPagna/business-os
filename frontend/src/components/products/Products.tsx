@@ -129,6 +129,8 @@ const ProductForm = lazy(() => import('./forms/ProductForm'))
 const ProductDetailModal = lazy(() => import('./surfaces/ProductDetailModal'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
+const PRODUCTS_HISTORY_READY_DELAY_MS = 1800
+
 type EntityId = string | number
 type Loader<T = unknown> = () => Promise<T>
 type NotificationTone = 'error' | 'info' | 'success' | 'warning' | string
@@ -453,6 +455,7 @@ export default function Products() {
   const [collapsedProductSections, setCollapsedProductSections] = useState<Set<string>>(() => new Set())
   const [collapsedProductGroups, setCollapsedProductGroups] = useState<Set<string>>(() => new Set())
   const [isProductFilterMenuOpen, setIsProductFilterMenuOpen] = useState(false)
+  const [historyReady, setHistoryReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const auxOptionsLoadedRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -466,7 +469,7 @@ export default function Products() {
   const desktopSelectAllRef = useRef<HTMLInputElement | null>(null)
   const mobileSelectAllRef = useRef<HTMLInputElement | null>(null)
   const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
-  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products' })
+  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products', enabled: historyReady })
   const debouncedSearch = useDebouncedValue(search, 180)
   const runProductWriteMutation = useCallback(<T,>(loader: Loader<T>, label: string, timeoutMs = PRODUCT_WRITE_MUTATION_TIMEOUT_MS): Promise<T> => (
     withLoaderTimeout(loader, label, timeoutMs)
@@ -650,6 +653,7 @@ export default function Products() {
 
   useEffect(() => {
     if (!isActive) {
+      setHistoryReady(false)
       if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
@@ -660,6 +664,17 @@ export default function Products() {
     const silent = loadedOnceRef.current
     load(silent)
   }, [isActive, load])
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, PRODUCTS_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
   useEffect(() => {
     if (!isActive || !syncChannelTs) return
     if (syncChannelReason === 'cache-refresh') {

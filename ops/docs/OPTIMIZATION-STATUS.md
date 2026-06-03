@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 734, defer Server page online-count health probe out of first route window
+- Latest completed move: Move 735, defer Products action-history/user reads out of first route window
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `f3bf6be019ef79a0`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `f3aa7ba4ab674f79`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `061039a21bb5586a`
+  `ea98ec4a4768b9a8`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-01-14-100Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-22-24-340Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-01-11-106Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-22-20-564Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -55,8 +55,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `f3bf6be019ef79a0` across 34 routes, with 519 visible controls
-  discovered, 382 controls exercised, 137 intentionally skipped by stable
+  build hash `f3aa7ba4ab674f79` across 34 routes, with 519 visible controls
+  discovered, 381 controls exercised, 138 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -69,13 +69,29 @@ Current honest pockets:
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606031455` is serving the
+- Docker release image `business-os:v6.0.0-202606031516` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-145726`
+  `ops/runtime/docker-release/backups/20260603-151830`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Products first-load now defers non-critical server action-history and admin
+  user-option reads until after the product list is useful. The route still
+  loads authenticated bootstrap, the first products search, auxiliary options,
+  and filter metadata immediately, but it no longer starts `/api/users` or
+  `/api/action-history?scope=products...` in the first visible route window.
+  Proof: `ops/runtime/reports/route-load-trace-latest.json` shows Products
+  with 44 total requests, 6 API requests, zero failed requests, and zero
+  console/page errors. The first-window API list is now `/api/auth/bootstrap`,
+  `/api/products/search...`, `/api/branches`, `/api/categories`, `/api/units`,
+  and `/api/products/filters`. The focused Products/Inventory/POS/Server
+  route-control audit passed with 124 exercised controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-19-41-250Z/summary.json`;
+  the exhaustive all-pages audit passed across 34 routes with 381 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-22-24-340Z/summary.json`.
 
 - Server page first-load now defers the card-level online device count health
   probe until after route-ready. The route still loads authenticated bootstrap,

@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T07:11:09.553Z
+Generated: 2026-06-03T07:30:41.902Z
 
 ## Summary
 
@@ -63,7 +63,7 @@ Generated: 2026-06-03T07:11:09.553Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 9207 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9251 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
@@ -74,11 +74,11 @@ Generated: 2026-06-03T07:11:09.553Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
+| frontend/src/components/products/Products.tsx | 2384 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
-| frontend/src/components/products/Products.tsx | 2369 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2334 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2338 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/pos/POS.tsx | 2281 | frontend/components/pos |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2232 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2277 | ops/docs |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
