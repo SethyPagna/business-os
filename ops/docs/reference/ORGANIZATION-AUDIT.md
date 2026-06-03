@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T10:31:42.848Z
+Generated: 2026-06-03T10:58:45.149Z
 
 ## Summary
 
@@ -74,8 +74,8 @@ Generated: 2026-06-03T10:31:42.848Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2552 | ops/docs |
-| frontend/tests/performanceLoadingUx.test.ts | 2467 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2562 | ops/docs |
+| frontend/tests/performanceLoadingUx.test.ts | 2511 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/products/Products.tsx | 2450 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2382 | frontend/components/pos |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
@@ -89,7 +89,7 @@ Generated: 2026-06-03T10:31:42.848Z
 | frontend/src/AppContext.tsx | 1872 | frontend/src/AppContext.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1872 | frontend/components/utils-settings |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1813 | ops/docs/reference |
-| frontend/src/components/utils-settings/Backup.tsx | 1741 | frontend/components/utils-settings |
+| frontend/src/components/utils-settings/Backup.tsx | 1754 | frontend/components/utils-settings |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
 | backend/src/routes/system/index.ts | 1659 | backend/routes |
 | backend/src/routes/sales.ts | 1591 | backend/routes |

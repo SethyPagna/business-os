@@ -37,6 +37,7 @@ const AI_PROVIDER_MUTATION_TIMEOUT_MS = 12000
 const AI_PROVIDER_TEST_TIMEOUT_MS = 30000
 const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000
 const FILES_ASSET_DELETE_TIMEOUT_MS = 12000
+const FILES_HISTORY_READY_DELAY_MS = 1800
 
 type TranslateFunction = (key: string) => string | undefined
 type TranslateWithFallback = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -382,12 +383,14 @@ export default function FilesPage() {
   const fileLoadRequestRef = useRef(0)
   const providerLoadRequestRef = useRef(0)
   const responseLoadRequestRef = useRef(0)
+  const filesLoadedOnceRef = useRef(false)
   const uploadInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const saveProviderInFlightRef = useRef(false)
   const testProviderInFlightRef = useRef(false)
   const deleteProviderInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const [historyReady, setHistoryReady] = useState(false)
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
 
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr: TranslateWithFallback = (key, fallback = key, fallbackKm = fallback) => {
@@ -493,6 +496,7 @@ export default function FilesPage() {
       const nextFiles = Array.isArray(result?.items) ? result.items : []
       setFiles(nextFiles)
       setTotalFiles(Number(result?.total || nextFiles.length || 0))
+      filesLoadedOnceRef.current = true
       setSelectedAssetIds((current) => {
         const validIds = new Set(nextFiles.map((asset) => Number(asset?.id || 0)).filter((id) => id > 0))
         return new Set([...current].filter((id) => validIds.has(id)))
@@ -578,6 +582,7 @@ export default function FilesPage() {
       invalidateTrackedRequest(fileLoadRequestRef)
       invalidateTrackedRequest(providerLoadRequestRef)
       invalidateTrackedRequest(responseLoadRequestRef)
+      setHistoryReady(false)
       setLoadingFiles(false)
       setLoadingProviders(false)
       setLoadingResponses(false)
@@ -591,6 +596,18 @@ export default function FilesPage() {
     const timer = window.setTimeout(() => { void loadFiles() }, 120)
     return () => window.clearTimeout(timer)
   }, [isActive, loadFiles])
+
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!filesLoadedOnceRef.current || loadingFiles) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, FILES_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loadingFiles])
 
   useEffect(() => {
     if (!isActive || activeTab !== 'providers') return undefined

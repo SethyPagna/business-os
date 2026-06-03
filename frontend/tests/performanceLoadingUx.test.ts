@@ -293,6 +293,10 @@ assert.match(products, /if \(!loadedOnceRef\.current \|\| loading\) return undef
 
 assert.match(backup, /useState<BackupSectionId>\('all'\)/, 'Backup should default to the lightweight overview tab without showing duplicate All and Overview tabs')
 assert.match(backup, /BackupOverview/, 'Backup overview should provide lightweight section entry points')
+assert.match(backup, /const BACKUP_HISTORY_READY_DELAY_MS = 1800/, 'Backup background history should wait until after first route-ready work')
+assert.match(backup, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Backup should have an explicit post-ready action-history gate')
+assert.match(backup, /useActionHistory\(\{ limit: 3, notify, scope: 'backup', enabled: historyReady \}\)/, 'Backup should not fetch server action history during first route load')
+assert.match(backup, /window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*BACKUP_HISTORY_READY_DELAY_MS/, 'Backup should enable history only after the overview has rendered')
 assert.doesNotMatch(backup, /function DataFolderLocation/, 'unused backup data-folder UI should not remain in the bundle')
 assert.doesNotMatch(backup, /function ScaleMigrationSection/, 'unused backup migration UI should not remain in the bundle')
 assert.doesNotMatch(backup, /backupSection === 'all' \|\|/, 'Backup sections should not mount every tool in overview mode')
@@ -1451,6 +1455,26 @@ assert.match(
 )
 assert.match(
   usersPage,
+  /const USERS_HISTORY_READY_DELAY_MS = 1800/,
+  'Users background history should wait until after first route-ready work',
+)
+assert.match(
+  usersPage,
+  /const \[historyReady, setHistoryReady\] = useState\(false\)/,
+  'Users should have an explicit post-ready action-history gate',
+)
+assert.match(
+  usersPage,
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/,
+  'Users should not fetch server action history during first route load',
+)
+assert.match(
+  usersPage,
+  /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*USERS_HISTORY_READY_DELAY_MS/,
+  'Users should enable history only after the first user data load settles',
+)
+assert.match(
+  usersPage,
   /withLoaderTimeout\(\(\) => getUsersApi\(\)\.getUsers\(\), 'Users list', USERS_LIST_TIMEOUT_MS\)/,
   'users list should timeout slow user reads',
 )
@@ -1995,6 +2019,26 @@ assert.match(
   filesPage,
   /const FILES_ASSET_DELETE_TIMEOUT_MS = 12000/,
   'files page deletes should use an explicit timeout',
+)
+assert.match(
+  filesPage,
+  /const FILES_HISTORY_READY_DELAY_MS = 1800/,
+  'Files background history should wait until after first route-ready work',
+)
+assert.match(
+  filesPage,
+  /const \[historyReady, setHistoryReady\] = useState\(false\)/,
+  'Files should have an explicit post-ready action-history gate',
+)
+assert.match(
+  filesPage,
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/,
+  'Files should not fetch server action history during first route load',
+)
+assert.match(
+  filesPage,
+  /if \(!filesLoadedOnceRef\.current \|\| loadingFiles\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*FILES_HISTORY_READY_DELAY_MS/,
+  'Files should enable history only after the first file library load settles',
 )
 assert.match(
   filesPage,

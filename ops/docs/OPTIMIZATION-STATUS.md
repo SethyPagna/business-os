@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 742, defer Branches action-history reads out of first route window
+- Latest completed move: Move 743, defer Files, Users, and Backup action-history reads out of first route window
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `ab34fc8688353364`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `211a8ad974753d8e`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `29bd7caccd5ba4be`
+  `e50a88741a7a1bc2`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-21-23-872Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-50-19-615Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T10-21-23-409Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T10-45-02-459Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -55,8 +55,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `ab34fc8688353364` across 34 routes, with 518 visible controls
-  discovered, 377 controls exercised, 141 intentionally skipped by stable
+  build hash `211a8ad974753d8e` across 34 routes, with 518 visible controls
+  discovered, 371 controls exercised, 147 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -72,12 +72,33 @@ Current honest pockets:
 - Docker release image `business-os:v6.0.0-202606031726` is serving the
   verified build from Move 740; Move 741 is served by Docker release image
   `business-os:v6.0.0-202606031752`; Move 742 is served by Docker release
-  image `business-os:v6.0.0-202606031814`, and the release update created
-  backup `ops/runtime/docker-release/backups/20260603-181558`
+  image `business-os:v6.0.0-202606031814`; Move 743 is served by Docker
+  release image `business-os:v6.0.0-202606031841`, and the release update
+  created backup `ops/runtime/docker-release/backups/20260603-184306`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Files, Users, and Backup first-load now defer non-critical server
+  action-history reads until after the page is useful. Backup first-window API
+  calls now contain only `/api/auth/bootstrap`; Files now contains
+  `/api/auth/bootstrap` and `/api/files?...`; Users now contains
+  `/api/auth/bootstrap`, `/api/users`, and `/api/roles`. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T10-45-03-014Z.json`
+  shows Backup at 31 total requests and 1 API request, Files at 31 total
+  requests and 2 API requests, Users at 37 total requests and 3 API requests,
+  with zero failed requests and zero console/page errors. A longer 3200 ms
+  trace at
+  `ops/runtime/reports/route-load-trace-2026-06-03T10-43-53-491Z.json` proved
+  delayed `/api/users` and `/api/action-history...` wake around 2.1-2.3 s
+  after navigation, outside the route-ready window. The focused
+  Backup/Files/Users/Server route-control audit passed with 50 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-44-22-752Z/summary.json`;
+  the exhaustive all-pages audit passed across 34 routes with 371 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-50-19-615Z/summary.json`.
 
 - Branches first-load now defers server action-history and admin user-option
   reads until after the branch list and summary are useful. The page still

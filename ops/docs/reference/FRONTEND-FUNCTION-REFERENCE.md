@@ -1356,31 +1356,31 @@ Total files documented: **234**
 |---:|---|---:|---:|
 | 1 | `loadFilesProvidersTab` | const arrow | 28 |
 | 2 | `loadFilesResponsesTab` | const arrow | 29 |
-| 3 | `getFilesApi` | function | 223 |
-| 4 | `getErrorMessage` | function | 227 |
-| 5 | `hasMojibake` | function | 231 |
-| 6 | `sanitizeFallback` | function | 235 |
-| 7 | `AssetPreview` | function | 239 |
-| 8 | `AssetCardSkeleton` | function | 262 |
-| 9 | `formatDateTime` | function | 288 |
-| 10 | `formatFileSize` | function | 298 |
-| 11 | `emptyProviderForm` | function | 306 |
-| 12 | `compactTabLabel` | function | 329 |
-| 13 | `getDefaultFilesPageSize` | function | 335 |
-| 14 | `downloadAssetFile` | function | 340 |
-| 15 | `FilesPage` | component/function | 352 |
-| 16 | `handleUpload` | function | 630 |
-| 17 | `handleDeleteAsset` | function | 653 |
-| 18 | `toggleAssetSelection` | function | 681 |
-| 19 | `toggleSelectAllAssets` | function | 692 |
-| 20 | `handleCopySelectedPaths` | function | 699 |
-| 21 | `handleDownloadSelected` | function | 714 |
-| 22 | `handleDeleteSelectedAssets` | function | 722 |
-| 23 | `startCreateProvider` | function | 768 |
-| 24 | `startEditProvider` | function | 784 |
-| 25 | `saveProvider` | function | 809 |
-| 26 | `testProvider` | function | 893 |
-| 27 | `removeProvider` | function | 914 |
+| 3 | `getFilesApi` | function | 224 |
+| 4 | `getErrorMessage` | function | 228 |
+| 5 | `hasMojibake` | function | 232 |
+| 6 | `sanitizeFallback` | function | 236 |
+| 7 | `AssetPreview` | function | 240 |
+| 8 | `AssetCardSkeleton` | function | 263 |
+| 9 | `formatDateTime` | function | 289 |
+| 10 | `formatFileSize` | function | 299 |
+| 11 | `emptyProviderForm` | function | 307 |
+| 12 | `compactTabLabel` | function | 330 |
+| 13 | `getDefaultFilesPageSize` | function | 336 |
+| 14 | `downloadAssetFile` | function | 341 |
+| 15 | `FilesPage` | component/function | 353 |
+| 16 | `handleUpload` | function | 647 |
+| 17 | `handleDeleteAsset` | function | 670 |
+| 18 | `toggleAssetSelection` | function | 698 |
+| 19 | `toggleSelectAllAssets` | function | 709 |
+| 20 | `handleCopySelectedPaths` | function | 716 |
+| 21 | `handleDownloadSelected` | function | 731 |
+| 22 | `handleDeleteSelectedAssets` | function | 739 |
+| 23 | `startCreateProvider` | function | 785 |
+| 24 | `startEditProvider` | function | 801 |
+| 25 | `saveProvider` | function | 826 |
+| 26 | `testProvider` | function | 910 |
+| 27 | `removeProvider` | function | 931 |
 
 ### 3.82 `frontend/src/components/files/FilesProvidersTab.tsx`
 
@@ -2412,17 +2412,17 @@ Total files documented: **234**
 | 5 | `getErrorMessage` | function | 163 |
 | 6 | `clearTimeoutRef` | function | 167 |
 | 7 | `ThreeDot` | function | 184 |
-| 8 | `formatContactValue` | function | 223 |
-| 9 | `UsersDesktopSkeletonRows` | function | 228 |
-| 10 | `UsersMobileSkeletonCards` | function | 252 |
-| 11 | `Users` | component/function | 266 |
-| 12 | `promise` | const arrow | 333 |
-| 13 | `promise` | const arrow | 371 |
-| 14 | `openCreateUser` | const arrow | 483 |
-| 15 | `openCreateRole` | const arrow | 513 |
-| 16 | `handleSaveUser` | const arrow | 574 |
-| 17 | `handleResetPassword` | const arrow | 644 |
-| 18 | `handleSaveRole` | const arrow | 701 |
+| 8 | `formatContactValue` | function | 224 |
+| 9 | `UsersDesktopSkeletonRows` | function | 229 |
+| 10 | `UsersMobileSkeletonCards` | function | 253 |
+| 11 | `Users` | component/function | 267 |
+| 12 | `promise` | const arrow | 335 |
+| 13 | `promise` | const arrow | 373 |
+| 14 | `openCreateUser` | const arrow | 497 |
+| 15 | `openCreateRole` | const arrow | 527 |
+| 16 | `handleSaveUser` | const arrow | 588 |
+| 17 | `handleResetPassword` | const arrow | 658 |
+| 18 | `handleSaveRole` | const arrow | 715 |
 
 ### 3.177 `frontend/src/components/utils-settings/AuditLog.tsx`
 
@@ -2471,20 +2471,20 @@ Total files documented: **234**
 | 18 | `scheduleTick` | const arrow | 634 |
 | 19 | `tick` | const arrow | 640 |
 | 20 | `SectionChip` | function | 697 |
-| 21 | `secondsToSyncMinutes` | function | 719 |
-| 22 | `minutesToSyncSeconds` | function | 728 |
-| 23 | `GoogleDriveSyncSection` | function | 736 |
-| 24 | `handler` | const arrow | 858 |
-| 25 | `savePreferences` | const arrow | 943 |
-| 26 | `connectGoogleDrive` | const arrow | 973 |
-| 27 | `syncNow` | const arrow | 1018 |
-| 28 | `disconnect` | const arrow | 1055 |
-| 29 | `forgetCredentials` | const arrow | 1080 |
-| 30 | `BackupOverview` | function | 1310 |
-| 31 | `Backup` | component/function | 1382 |
-| 32 | `showBackupSection` | const arrow | 1397 |
-| 33 | `handleFolderExport` | const arrow | 1423 |
-| 34 | `handleFolderImport` | const arrow | 1492 |
+| 21 | `secondsToSyncMinutes` | function | 720 |
+| 22 | `minutesToSyncSeconds` | function | 729 |
+| 23 | `GoogleDriveSyncSection` | function | 737 |
+| 24 | `handler` | const arrow | 859 |
+| 25 | `savePreferences` | const arrow | 944 |
+| 26 | `connectGoogleDrive` | const arrow | 974 |
+| 27 | `syncNow` | const arrow | 1019 |
+| 28 | `disconnect` | const arrow | 1056 |
+| 29 | `forgetCredentials` | const arrow | 1081 |
+| 30 | `BackupOverview` | function | 1311 |
+| 31 | `Backup` | component/function | 1383 |
+| 32 | `showBackupSection` | const arrow | 1399 |
+| 33 | `handleFolderExport` | const arrow | 1436 |
+| 34 | `handleFolderImport` | const arrow | 1505 |
 
 ### 3.179 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
 

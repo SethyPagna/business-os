@@ -216,6 +216,7 @@ const USERS_LIST_TIMEOUT_MS = 8000
 const ROLES_LIST_TIMEOUT_MS = 8000
 const USER_MUTATION_TIMEOUT_MS = 12000
 const ROLE_MUTATION_TIMEOUT_MS = 12000
+const USERS_HISTORY_READY_DELAY_MS = 1800
 
 /**
  * 1.2.1 Render-safe fallback for nullable contact values.
@@ -304,7 +305,8 @@ export default function Users() {
   const [loading, setLoading] = useState(false)
   const [rolesLoading, setRolesLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const [historyReady, setHistoryReady] = useState(false)
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
   const runUserMutation = useCallback((loader: () => Promise<MutationResult>, label: string) => (
     withLoaderTimeout(loader, label, USER_MUTATION_TIMEOUT_MS)
   ), [])
@@ -435,7 +437,8 @@ export default function Users() {
   }, [canManage, notify, tr])
 
   useEffect(() => {
-      if (!isActive) {
+    if (!isActive) {
+      setHistoryReady(false)
       clearTimeoutRef(loadWatchdogRef)
       invalidateTrackedRequest(loadRequestRef)
       invalidateTrackedRequest(rolesRequestRef)
@@ -448,6 +451,17 @@ export default function Users() {
     load({ silent: loadedOnceRef.current })
     loadRoles({ silent: rolesLoadedOnceRef.current })
   }, [canManage, isActive, load, loadRoles])
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, USERS_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
   useEffect(() => {
     if (!isActive || !syncChannelName) return
     if (syncChannelName === 'users') {

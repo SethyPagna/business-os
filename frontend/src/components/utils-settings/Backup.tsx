@@ -714,6 +714,7 @@ const DRIVE_SYNC_MIN_INTERVAL_MINUTES = 60
 const DRIVE_SYNC_MAX_INTERVAL_MINUTES = 24 * 60
 const DRIVE_SYNC_PRESET_HOURS = [3, 6, 9, 12, 24]
 const DRIVE_SYNC_STATUS_TIMEOUT_MS = 5000
+const BACKUP_HISTORY_READY_DELAY_MS = 1800
 const DRIVE_SYNC_JOB_POLL_MS = 2000
 
 function secondsToSyncMinutes(seconds: unknown): number {
@@ -1383,7 +1384,8 @@ export default function Backup() {
   const { t, notify, hasPermission } = useApp()
   const copy = useCopy(t)
   const isActive = useIsPageActive('backup')
-  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup' }) as ActionHistoryValue
+  const [historyReady, setHistoryReady] = useState(false)
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup', enabled: historyReady }) as ActionHistoryValue
   const [loading, setLoading] = useState<BackupAction>('')
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')
@@ -1407,6 +1409,17 @@ export default function Backup() {
       jobStopRef.current?.()
     }
   }, [])
+
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, BACKUP_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive])
 
   const beginBackupAction = useCallback((action: BackupAction) => {
     if (actionLockRef.current) return false

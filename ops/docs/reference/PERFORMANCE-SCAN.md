@@ -27,7 +27,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/products.ts` | 99.1 | 2218 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 86.5 | 1872 |
 | `backend/src/routes/inventory.ts` | 83.8 | 1881 |
-| `frontend/src/components/utils-settings/Backup.tsx` | 79.0 | 1741 |
+| `frontend/src/components/utils-settings/Backup.tsx` | 79.4 | 1754 |
 | `frontend/src/AppContext.tsx` | 75.3 | 1872 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/App.tsx` | 70.6 | 1881 |
@@ -58,7 +58,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/inventory.ts` | 1881 | 83.8 |
 | `frontend/src/AppContext.tsx` | 1872 | 75.3 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1872 | 86.5 |
-| `frontend/src/components/utils-settings/Backup.tsx` | 1741 | 79.0 |
+| `frontend/src/components/utils-settings/Backup.tsx` | 1754 | 79.4 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
 | `backend/src/routes/system/index.ts` | 1659 | 65.3 |
 | `backend/src/routes/sales.ts` | 1591 | 65.2 |
@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-DWEi05uB.js` | 191.1 |
+| `frontend/dist/assets/catalog-B60yj366.js` | 191.1 |
 | `frontend/dist/assets/index-Cw6aCC7m.css` | 152.6 |
-| `frontend/dist/assets/Inventory-OLUanSSL.js` | 144.3 |
+| `frontend/dist/assets/Inventory-FFnAsznV.js` | 144.3 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-xd_WNDOf.js` | 95.7 |
-| `frontend/dist/assets/POS-D80dIMiz.js` | 79.6 |
-| `frontend/dist/assets/catalog-editor-C5iYQrU0.js` | 73.5 |
+| `frontend/dist/assets/Products-DIIhhm3L.js` | 95.7 |
+| `frontend/dist/assets/POS-B37hN8ps.js` | 79.6 |
+| `frontend/dist/assets/catalog-editor-DBY0j5w_.js` | 73.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-CjWb4-cQ.js` | 72.0 |
-| `frontend/dist/assets/app-shared-DHBCiZAz.js` | 69.4 |
-| `frontend/dist/assets/BulkImportModal-CB31aV6J.js` | 68.6 |
-| `frontend/dist/assets/catalog-preview-BjX6yKcU.js` | 67.5 |
-| `frontend/dist/assets/Backup-Ck3RI4kM.js` | 60.5 |
-| `frontend/dist/assets/app-api-methods-Bg0DHqv8.js` | 59.4 |
-| `frontend/dist/assets/Settings-BCGGhAhy.js` | 53.7 |
-| `frontend/dist/assets/index-BIv6w8_B.js` | 50.3 |
-| `frontend/dist/assets/UserProfileModal-CODBF4w0.js` | 43.5 |
-| `frontend/dist/assets/Users-Dahv4utB.js` | 41.3 |
-| `frontend/dist/assets/ReceiptSettings-BOh-20Lo.js` | 40.3 |
-| `frontend/dist/assets/Branches-1UrIiuQ7.js` | 39.0 |
-| `frontend/dist/assets/Sales-CdzVoyOW.js` | 35.4 |
-| `frontend/dist/assets/AuditLog-DOwyJKjy.js` | 34.8 |
+| `frontend/dist/assets/Dashboard-DBlYtWT4.js` | 72.0 |
+| `frontend/dist/assets/app-shared-J9vn_DZt.js` | 69.4 |
+| `frontend/dist/assets/BulkImportModal-DJw__-d5.js` | 68.6 |
+| `frontend/dist/assets/catalog-preview-Bw_pazIa.js` | 67.5 |
+| `frontend/dist/assets/Backup-fdRYkdpw.js` | 60.7 |
+| `frontend/dist/assets/app-api-methods-Dip_Us_E.js` | 59.4 |
+| `frontend/dist/assets/Settings-BTK3fjhB.js` | 53.7 |
+| `frontend/dist/assets/index-BoXkwfPp.js` | 50.3 |
+| `frontend/dist/assets/UserProfileModal-Dw_oN-K2.js` | 43.5 |
+| `frontend/dist/assets/Users-B9Iwuwnc.js` | 41.5 |
+| `frontend/dist/assets/ReceiptSettings-BWMSVjSU.js` | 40.3 |
+| `frontend/dist/assets/Branches-DvkVE-Mb.js` | 39.0 |
+| `frontend/dist/assets/Sales-l0CILqIM.js` | 35.4 |
+| `frontend/dist/assets/AuditLog-1q-uIXBH.js` | 34.8 |
 
 ## 5. Notes
 
@@ -1537,6 +1537,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `/api/users` and `/api/action-history...` wake around 2.3 s. The full report
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-21-23-872Z/summary.json`
   covered 34 routes, discovered 518 controls, exercised 377, skipped 141 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
+- Move 473 records roadmap Move 743: defer Files, Users, and Backup server
+  action-history reads out of the first route window. `FilesPage` waits for the
+  first file library load to settle, `Users` waits for the first users load to
+  settle, and `Backup` waits for the lightweight overview to render before
+  enabling `useActionHistory`, keeping local undo/redo action pushes intact
+  while moving `/api/users` and `/api/action-history...` after route-ready.
+  Docker-served build hash `211a8ad974753d8e` passed frontend utility tests,
+  JSX/source check, production build, Docker release/update, focused route-load
+  trace, delayed history wake trace, focused Backup/Files/Users/Server
+  route-control audit, public Cloudflare Playwright, and full desktop/mobile
+  all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T10-45-03-014Z.json` reduced
+  Backup first-window API requests from 3 to 1, Files from 4 to 2, and Users
+  from 4 to 3, with zero failed requests and zero console/page errors. The
+  delayed trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T10-43-53-491Z.json` proved
+  `/api/users` and `/api/action-history...` wake around 2.1-2.3 s. The full
+  report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-50-19-615Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 371, skipped 147 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
 <!-- phase29-manual-notes:end -->

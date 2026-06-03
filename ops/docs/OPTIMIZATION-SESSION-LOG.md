@@ -26,16 +26,26 @@ This is a concise running log of what actually happened in recent sessions.
     requests, 3 API requests, zero failed requests, and zero console/page
     errors, while a longer trace proves history wakes around 2.3 s
 
+- Files/Users/Backup action-history deferral
+  - routes: `files`, `users`, `backup`
+  - result: kept
+  - note: moved non-critical server action-history reads out of the first route
+    window; Docker-served route trace now shows Backup at 1 API request, Files
+    at 2 API requests, and Users at 3 API requests, while a longer trace proves
+    server history wakes around 2.1-2.3 s after navigation
+
 ### Verification
 
 - Frontend `test:utils`, `check:jsx`, and production build passed.
-- Docker release image `business-os:v6.0.0-202606031814` is healthy on
-  `http://127.0.0.1:4000/health` with frontend hash `ab34fc8688353364`.
+- Docker release image `business-os:v6.0.0-202606031841` is healthy on
+  `http://127.0.0.1:4000/health` with frontend hash `211a8ad974753d8e`.
+- Focused Backup/Files/Users/Server control audit passed with 50 tested
+  controls and zero failures.
 - Focused Branches/Products/POS/Inventory/Server control audit passed with 144
   tested controls and zero failures.
 - Prior focused Products/POS/Inventory/Server control audit passed with 123 tested
   controls and zero failures.
-- Exhaustive desktop/mobile all-pages control audit passed with 377 tested
+- Exhaustive desktop/mobile all-pages control audit passed with 371 tested
   controls and zero failures.
 - Public Cloudflare portal check passed with 20 rendered products and no
   relevant console/page errors.
