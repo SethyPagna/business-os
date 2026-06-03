@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 755.
+- Latest completed implementation move in this roadmap: Move 756.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9885,3 +9885,32 @@ Move 755 status:
   keep using measured live traces and interaction proofs: continue trimming
   first-window chunks, route-specific delayed wakes, and repeated render loops
   without moving live business data or weakening offline fallback behavior.
+
+Move 756 status:
+- Move 756 isolates the shared Khmer script typography helper into its own
+  tiny `script-typography` chunk. Products, Inventory, POS, and public catalog
+  still use the same `getKhmerTextProps` and `withKhmerTextClass` behavior, but
+  admin routes no longer wake the public `catalog-preview`, `catalog-ui`, or
+  `catalog-display` chunks merely to render Khmer-safe product text.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, production build, Docker release image
+  `business-os:v6.0.0-202606040128`, and focused Products/Inventory/POS/public
+  route-load Playwright trace. Local `dist` inspection showed Products,
+  Inventory, and POS importing `script-typography-avi8xpqd.js` and no
+  `catalog-preview`, `catalog-ui`, or `catalog-display` chunk.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-31-19-384Z.json`
+  measured Products 272 ms, Inventory 232 ms, POS 335 ms, and public 199 ms
+  route-ready in the Docker-served app, all with zero failed requests and zero
+  console/page errors. The first-window script parse confirmed Products,
+  Inventory, and POS had `catalog-preview: []`, `catalog-ui: []`,
+  `catalog-display: []`, and `script-typography-avi8xpqd.js`; `/public`
+  continued loading the catalog preview/display/UI chunks by design.
+- Current plan position after Move 756: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue using measured traces to split accidental cross-route ownership,
+  delayed wakes, and repeated render loops without moving live business data or
+  weakening offline fallback behavior.

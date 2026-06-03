@@ -1750,4 +1750,16 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   then loaded `shared-portal-menu-D4vj-XWE.js` only after the Language tools
   click, rendered language options, and recorded zero relevant console/page
   errors.
+- Move 486 records roadmap Move 756: isolate shared Khmer script typography
+  helpers into their own manual chunk. `vite.config.ts` now assigns
+  `src/utils/scriptTypography.ts` to `script-typography`, and the
+  performance-loading guard prevents that helper from being re-owned by public
+  catalog preview. Docker image `business-os:v6.0.0-202606040128` served the
+  focused route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-31-19-384Z.json`:
+  Products 272 ms, Inventory 232 ms, POS 335 ms, and public 199 ms route-ready,
+  all with zero failed requests and zero console/page errors. The request parse
+  confirmed Products, Inventory, and POS loaded `script-typography-avi8xpqd.js`
+  and no `catalog-preview`, `catalog-ui`, or `catalog-display` chunks, while
+  `/public` still loaded those catalog chunks by design.
 <!-- phase29-manual-notes:end -->

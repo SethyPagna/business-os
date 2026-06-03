@@ -253,6 +253,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/utils/initials.ts')) {
       return 'initials-utils'
     }
+    if (normalized.endsWith('/src/utils/scriptTypography.ts')) {
+      return 'script-typography'
+    }
     if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
       return 'public-asset-urls'
     }

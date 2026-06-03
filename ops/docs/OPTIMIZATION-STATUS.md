@@ -8,17 +8,17 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 755, intent-load the public catalog language
-  menu so the shared portal-menu chunk loads only after language-button intent
+- Latest completed move: Move 756, isolate shared Khmer script typography into
+  its own tiny chunk so admin routes no longer wake public catalog preview code
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `1fbc899a2010cd9d`
+- latest verified frontend hash from the most recent Docker-served live check: `604112e02c049f10`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `64215aac9afc8903`
+  `22b8ad67754ff792`
 
 Latest verified reports:
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T17-14-07-644Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-31-19-384Z.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
@@ -89,11 +89,24 @@ Current honest pockets:
   is served by Docker release image `business-os:v6.0.0-202606031954`; Move
   753 is served by Docker release image `business-os:v6.0.0-202606040015`;
   Move 754 is served by Docker release image `business-os:v6.0.0-202606040046`;
-  Move 755 is served by Docker release image `business-os:v6.0.0-202606040111`
+  Move 755 is served by Docker release image `business-os:v6.0.0-202606040111`;
+  Move 756 is served by Docker release image `business-os:v6.0.0-202606040128`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Shared Khmer script typography helpers now live in a dedicated
+  `script-typography` chunk instead of being owned by public catalog preview.
+  Proof: Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-31-19-384Z.json`
+  measured Products 272 ms, Inventory 232 ms, POS 335 ms, and public 199 ms
+  route-ready with zero failed requests and zero console/page errors. Products,
+  Inventory, and POS loaded `script-typography-avi8xpqd.js` and did not load
+  `catalog-preview`, `catalog-ui`, or `catalog-display`; `/public` still loaded
+  those catalog chunks by design. Docker release image
+  `business-os:v6.0.0-202606040128` serves frontend hash
+  `604112e02c049f10`.
 
 - Public catalog translation tools now use `LazyPortalMenu`, keeping
   `shared-portal-menu` out of the first public catalog route window until a

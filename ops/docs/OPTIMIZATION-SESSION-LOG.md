@@ -2700,3 +2700,33 @@ Use this shape for future entries:
   rendered visible language options, and recorded zero relevant console/page
   errors. Docker image `business-os:v6.0.0-202606040111` is serving frontend
   hash `1fbc899a2010cd9d`.
+
+- change: isolate shared Khmer script typography helpers from public catalog
+  preview ownership
+- affected files:
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products, Inventory, POS, and public catalog first-route
+  script windows
+- keeper or rollback: keeper; Products, Inventory, POS, and public catalog keep
+  the same Khmer-safe text rendering helper behavior, but admin routes no
+  longer import the public catalog preview/display/UI chunks just to style
+  mixed Khmer/Latin product names
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted
+  `script-typography-avi8xpqd.js` at 0.30 kB, and local dist inspection showed
+  Products, Inventory, and POS importing that chunk with no `catalog-preview`,
+  `catalog-ui`, or `catalog-display` imports.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-31-19-384Z.json`
+  measured Products 272 ms, Inventory 232 ms, POS 335 ms, and public 199 ms
+  route-ready in the Docker-served app, all with zero failed requests and zero
+  console/page errors. The request parse confirmed Products, Inventory, and
+  POS loaded `script-typography-avi8xpqd.js` and no catalog preview/display/UI
+  chunks, while `/public` kept loading the public catalog chunks by design.
+  Docker image `business-os:v6.0.0-202606040128` is serving frontend hash
+  `604112e02c049f10`.
