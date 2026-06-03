@@ -7132,6 +7132,24 @@ Decision rule:
     `catalog=none`; the public catalog still loads the Catalog route by
     design. Backup and Server each dropped three first-window script requests.
 
+731. Keep local DB and system runtime behind explicit lazy boundaries.
+    Done: local mirror, expected-updated-at, query-cache, and transport fallback
+    code now use `frontend/src/api/lazyLocalDb.ts` instead of static local DB
+    imports. CSV template downloads moved to `frontend/src/utils/csvTemplate.ts`,
+    and `csvImport.ts` is grouped into `csv-utils` so CSV parsing does not make
+    `app-local-db` own import helpers. `frontend/src/web-api.ts` owns a narrow
+    lazy `app-system` path for Server bootstrap/config/debug/test calls, while
+    legacy system wrappers in `frontend/src/api/methods.ts` dynamically import
+    `systemRuntime.ts` only when those system actions are used. Server pending
+    sync queue reads are now gated behind the Queue diagnostics tab.
+    Proof: frontend utility tests, production build, Docker release image
+    `business-os:v6.0.0-202606032321`, focused route-load Playwright trace
+    `ops/runtime/reports/route-load-trace-2026-06-03T15-23-15-920Z.json`, and
+    a live Server Queue-tab interaction passed. No traced route loads
+    `app-local-db` or `vendor-dexie` in the first 600 ms; only Server loads
+    `app-system` initially, and queue diagnostics load local DB after the
+    explicit Queue click.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

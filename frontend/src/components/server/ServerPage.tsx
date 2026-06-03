@@ -398,14 +398,13 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
     }
     mounted.current = true
     if (getServerApi().getCallLog) setClientLog(getServerApi().getCallLog?.() || [])
-    loadQueueState()
     const onErr = (event: Event) => {
       if (!mounted.current) return
       const detail = event instanceof CustomEvent && typeof event.detail === 'object' && event.detail !== null ? event.detail as Partial<WriteErrorEntry> : {}
       setWriteErrors((prev) => [{ ...detail, _id: Date.now() }, ...prev].slice(0, 20))
     }
     const onQueueChanged = () => {
-      loadQueueState()
+      if (tab === 'queue') loadQueueState()
     }
     window.addEventListener('sync:error', onErr)
     window.addEventListener('sync:write-blocked', onErr)
@@ -418,7 +417,12 @@ function DiagnosticsPanel({ syncUrl, syncConnected, active = true, initialDebugL
       window.removeEventListener('sync:write-blocked', onErr)
       window.removeEventListener('sync:queue-changed', onQueueChanged)
     }
-  }, [active, loadQueueState])
+  }, [active, loadQueueState, tab])
+
+  useEffect(() => {
+    if (!active || tab !== 'queue') return
+    loadQueueState()
+  }, [active, loadQueueState, tab])
 
   const fetchServerLog = useCallback(async () => {
     if (!active || !syncUrl) return

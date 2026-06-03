@@ -1,5 +1,5 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
@@ -19,7 +19,8 @@ async function ensureSupplierExists(name: unknown): Promise<void> {
   if (!supplierName) return
 
   try {
-    const suppliers = dexieDb.table('suppliers') as unknown as {
+    const db = await getLocalDb()
+    const suppliers = db.table('suppliers') as unknown as {
       where: (field: string) => {
         equalsIgnoreCase: (value: string) => {
           first: () => Promise<unknown>

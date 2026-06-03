@@ -8,10 +8,36 @@ function getDeviceInfo() {
 }
 
 let portalTransportPromise = null
+let localDbModulePromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
   return portalTransportPromise
+}
+
+function loadLocalDbModule() {
+  if (!localDbModulePromise) localDbModulePromise = import('./localDb.ts')
+  return localDbModulePromise
+}
+
+async function getLocalDb() {
+  const { dexieDb } = await loadLocalDbModule()
+  return dexieDb
+}
+
+async function localGetSettings() {
+  const { localGetSettings: readSettings } = await loadLocalDbModule()
+  return readSettings()
+}
+
+async function localSaveSettings(updates) {
+  const { localSaveSettings: writeSettings } = await loadLocalDbModule()
+  return writeSettings(updates)
+}
+
+async function localSaveSettingsMeta(updatedAt) {
+  const { localSaveSettingsMeta: writeSettingsMeta } = await loadLocalDbModule()
+  return writeSettingsMeta(updatedAt)
 }
 
 /**
@@ -35,7 +61,7 @@ import {
   isTransientGatewayError,
 } from './http.ts'
 import { appendQuery, buildQueryString } from './query.ts'
-import { dexieDb, localGetSettings, localSaveSettings, localSaveSettingsMeta, buildCSVTemplate } from './localDb.ts'
+import { buildCSVTemplate } from '../utils/csvTemplate.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
@@ -252,35 +278,50 @@ import {
   queueBackupFolderExport as queueBackupFolderExportRequest,
   queueBackupFolderRestore as queueBackupFolderRestoreRequest,
 } from './systemJobs.ts'
-import {
-  browseDir as browseDirRequest,
-  factoryReset as factoryResetRequest,
-  getDataPath as getDataPathRequest,
-  getIntegrationDoctor as getIntegrationDoctorRequest,
-  getScaleMigrationStatus as getScaleMigrationStatusRequest,
-  getSystemBootstrap as getSystemBootstrapRequest,
-  getSystemConfig as getSystemConfigRequest,
-  getSystemDebugLog as getSystemDebugLogRequest,
-  openFolderDialog as openFolderDialogRequest,
-  openPath as openPathRequest,
-  prepareScaleMigration as prepareScaleMigrationRequest,
-  resetData as resetDataRequest,
-  resetDataPath as resetDataPathRequest,
-  runScaleMigration as runScaleMigrationRequest,
-  setDataPath as setDataPathRequest,
-  testSyncServer as testSyncServerRequest,
-} from './systemRuntime.ts'
 export { getImageDataUrl, openCSVDialog, openImageDialog } from './browserDialogs.ts'
 
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
 const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_DEVICE_SNAPSHOT_META_KEY = 'offline_device_snapshot_meta'
 const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
+const SENSITIVE_MIRROR_PURGE_DELAY_MS = 15_000
+const SENSITIVE_MIRROR_PURGE_IDLE_TIMEOUT_MS = 30_000
 let offlineDeviceSnapshotPromise = null
+let systemRuntimeModulePromise = null
+
+function loadSystemRuntimeModule() {
+  if (!systemRuntimeModulePromise) systemRuntimeModulePromise = import('./systemRuntime.ts')
+  return systemRuntimeModulePromise
+}
+
+async function callSystemRuntimeMethod(name, ...args) {
+  const module = await loadSystemRuntimeModule()
+  const fn = module?.[name]
+  if (typeof fn !== 'function') throw new Error(`System runtime method ${name} is not available.`)
+  return fn(...args)
+}
+
+function scheduleSensitiveMirrorPurge() {
+  const run = () => {
+    purgeSensitiveLiveServerMirrors().catch(() => {})
+  }
+  if (typeof window === 'undefined') {
+    run()
+    return
+  }
+  window.setTimeout(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run, { timeout: SENSITIVE_MIRROR_PURGE_IDLE_TIMEOUT_MS })
+      return
+    }
+    run()
+  }, SENSITIVE_MIRROR_PURGE_DELAY_MS)
+}
 
 export async function discardPendingSyncQueue(reason = 'Offline changes were cleared.') {
-  const existing = await dexieDb.sync_queue.toArray().catch(() => [])
-  await dexieDb.sync_queue.clear().catch(() => {})
+  const db = await getLocalDb()
+  const existing = await db.sync_queue.toArray().catch(() => [])
+  await db.sync_queue.clear().catch(() => {})
   emitSyncQueueChanged({ reason, discarded: existing.length })
   dispatchSyncUpdates(DISCARD_SYNC_UPDATE_CHANNELS, 'discard-pending-sync-queue')
   return {
@@ -291,7 +332,8 @@ export async function discardPendingSyncQueue(reason = 'Offline changes were cle
 }
 
 export async function getPendingSyncState() {
-  const items = await dexieDb.sync_queue
+  const db = await getLocalDb()
+  const items = await db.sync_queue
     .orderBy('_seq')
     .toArray()
     .catch(() => [])
@@ -331,18 +373,20 @@ function canRefreshOfflineDeviceSnapshot(options = {}) {
 
 async function readOfflineDeviceSnapshotMeta() {
   try {
-    return (await dexieDb.settings.get(OFFLINE_DEVICE_SNAPSHOT_META_KEY))?.value || ''
+    const db = await getLocalDb()
+    return (await db.settings.get(OFFLINE_DEVICE_SNAPSHOT_META_KEY))?.value || ''
   } catch (_) {
     return ''
   }
 }
 
 async function writeOfflineDeviceSnapshotMeta(meta = {}) {
+  const db = await getLocalDb()
   const value = JSON.stringify({
     refreshedAt: new Date().toISOString(),
     ...meta,
   })
-  await dexieDb.settings.put({
+  await db.settings.put({
     key: OFFLINE_DEVICE_SNAPSHOT_META_KEY,
     value,
   }).catch(() => {})
@@ -436,7 +480,7 @@ async function invalidateClientRuntimeState(reason = 'server-mutation') {
 }
 
 if (typeof window !== 'undefined') {
-  Promise.resolve().then(() => purgeSensitiveLiveServerMirrors()).catch(() => {})
+  scheduleSensitiveMirrorPurge()
   window.addEventListener('sync:update', (event) => {
     const channel = String(event?.detail?.channel || '').trim().toLowerCase()
     if (!channel) return
@@ -465,14 +509,14 @@ export const updateSessionDuration = (payload) =>
 export const getVerificationCapabilities = () =>
   getVerificationCapabilitiesRequest()
 export const getSystemConfig = () =>
-  getSystemConfigRequest()
+  callSystemRuntimeMethod('getSystemConfig')
 export const getSystemBootstrap = () =>
-  getSystemBootstrapRequest()
+  callSystemRuntimeMethod('getSystemBootstrap')
 export async function getNotificationSummary() {
   return getNotificationSummaryRequest()
 }
 export const getSystemDebugLog = () =>
-  getSystemDebugLogRequest()
+  callSystemRuntimeMethod('getSystemDebugLog')
 export const startGoogleOauth = (payload) =>
   startGoogleOauthRequest(payload)
 export const completeGoogleOauth = (payload) =>
@@ -862,14 +906,16 @@ function isRetryableOfflineSaleError(error) {
 async function findQueuedSale(clientRequestId) {
   const clean = String(clientRequestId || '').trim()
   if (!clean) return null
-  const rows = await dexieDb.sync_queue.where('channel').equals(OFFLINE_SALE_QUEUE_CHANNEL).toArray().catch(() => [])
+  const db = await getLocalDb()
+  const rows = await db.sync_queue.where('channel').equals(OFFLINE_SALE_QUEUE_CHANNEL).toArray().catch(() => [])
   return rows.find((row) => String(row?.payload?.client_request_id || '') === clean) || null
 }
 
 async function putOfflineSaleMirror(payload, receiptNumber) {
+  const db = await getLocalDb()
   const now = new Date().toISOString()
   const offlineId = -Math.abs(Date.now())
-  await dexieDb.sales.put({
+  await db.sales.put({
     id: offlineId,
     receipt_number: receiptNumber,
     client_request_id: payload.client_request_id,
@@ -927,7 +973,8 @@ async function queueOfflineSale(payload, reason = 'server_offline') {
     queue_version: 1,
     base_updated_at: salePayload.expectedUpdatedAt || salePayload.expected_updated_at || salePayload.updated_at || now,
   }
-  await dexieDb.sync_queue.put(row)
+  const db = await getLocalDb()
+  await db.sync_queue.put(row)
   registerOutboxBackgroundSync()
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, queued: 1 })
   if (typeof window !== 'undefined') {
@@ -956,7 +1003,8 @@ function queuedSaleBackoffMs(retryCount = 0) {
 
 async function updateQueuedRow(row, updates = {}) {
   if (!row?._seq) return
-  await dexieDb.sync_queue.put({
+  const db = await getLocalDb()
+  await db.sync_queue.put({
     ...row,
     ...updates,
     updated_at: new Date().toISOString(),
@@ -964,12 +1012,13 @@ async function updateQueuedRow(row, updates = {}) {
 }
 
 async function completeQueuedSale(row, result) {
-  await dexieDb.transaction('rw', dexieDb.sync_queue, dexieDb.sales, async () => {
-    await dexieDb.sync_queue.delete(row._seq)
-    if (Number(row.entity_id || 0) < 0) await dexieDb.sales.delete(row.entity_id)
+  const db = await getLocalDb()
+  await db.transaction('rw', db.sync_queue, db.sales, async () => {
+    await db.sync_queue.delete(row._seq)
+    if (Number(row.entity_id || 0) < 0) await db.sales.delete(row.entity_id)
   }).catch(async () => {
-    await dexieDb.sync_queue.delete(row._seq).catch(() => {})
-    if (Number(row.entity_id || 0) < 0) await dexieDb.sales.delete(row.entity_id).catch(() => {})
+    await db.sync_queue.delete(row._seq).catch(() => {})
+    if (Number(row.entity_id || 0) < 0) await db.sales.delete(row.entity_id).catch(() => {})
   })
   emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, synced: 1 })
   if (typeof window !== 'undefined') {
@@ -1023,7 +1072,8 @@ async function markQueuedSaleConflict(row, error) {
 
 async function syncPendingSalesQueue({ force = false } = {}) {
   const now = Date.now()
-  const rows = await dexieDb.sync_queue
+  const db = await getLocalDb()
+  const rows = await db.sync_queue
     .where('channel')
     .equals(OFFLINE_SALE_QUEUE_CHANNEL)
     .toArray()
@@ -1207,7 +1257,7 @@ export async function pollSystemJob(jobId, options = {}) {
 }
 
 export const getIntegrationDoctor = (options = {}) =>
-  getIntegrationDoctorRequest(options)
+  callSystemRuntimeMethod('getIntegrationDoctor', options)
 
 export async function queueBackupFolderExport(destinationDir = '') {
   return queueBackupFolderExportRequest(destinationDir)
@@ -1251,14 +1301,14 @@ export const syncGoogleDriveNow = () =>
   syncGoogleDriveNowRequest()
 
 export async function resetData(mode = 'sales') {
-  const result = await resetDataRequest(mode)
+  const result = await callSystemRuntimeMethod('resetData', mode)
   await invalidateClientRuntimeState(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
   cacheClearAll()
   return result
 }
 
 export async function factoryReset() {
-  const result = await factoryResetRequest()
+  const result = await callSystemRuntimeMethod('factoryReset')
   await invalidateClientRuntimeState('factory-reset')
   cacheClearAll()
   return result
@@ -1313,14 +1363,17 @@ export function downloadImportTemplate(type) {
 
 // ─── No-ops for API compatibility ────────────────────────────────────────────
 export const openPath = (targetPath) =>
-  openPathRequest(targetPath)
+  callSystemRuntimeMethod('openPath', targetPath)
 
 // ─── Returns ──────────────────────────────────────────────────────────────────
 export const getReturns  = (params) => {
   const q = buildQueryString(params, { skipEmpty: false })
   const cacheKey = q ? `returns:get:${q}` : 'returns:get'
   const mirror = q ? null : mirrorTable('returns')
-  return routeMirrored(cacheKey, () => apiFetch('GET', appendQuery('/api/returns', q)), () => dexieDb.returns.orderBy('created_at').reverse().toArray(), mirror)
+  return routeMirrored(cacheKey, () => apiFetch('GET', appendQuery('/api/returns', q)), async () => {
+    const db = await getLocalDb()
+    return db.returns.orderBy('created_at').reverse().toArray()
+  }, mirror)
 }
 export async function createReturn(d) {
   const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'return')
@@ -1341,7 +1394,8 @@ export const updateSaleStatus = async (id, sale_status, notes) => {
   const payload = await withExpectedUpdatedAt('sales', id, { ...getDeviceInfo(), sale_status, notes })
   try {
     const result = await route('sales:updateStatus', () => apiFetch('PATCH', `/api/sales/${id}/status`, payload), null, true)
-    await dexieDb.sales.update(id, {
+    const db = await getLocalDb()
+    await db.sales.update(id, {
       sale_status,
       updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
     }).catch(() => {})
@@ -1357,7 +1411,8 @@ export const attachSaleCustomer = async (id, payload) => {
   const body = await withExpectedUpdatedAt('sales', id, { ...getDeviceInfo(), ...(payload || {}) })
   try {
     const result = await route('sales:attachCustomer', () => apiFetch('PATCH', `/api/sales/${id}/customer`, body), null, true)
-    await dexieDb.sales.update(id, {
+    const db = await getLocalDb()
+    await db.sales.update(id, {
       customer_id: result?.customer?.id || null,
       customer_name: result?.customer?.name || null,
       customer_membership_number: result?.customer?.membership_number || null,
@@ -1385,7 +1440,8 @@ export const updateReturn = async (id, d) => {
   const payload = await withExpectedUpdatedAt('returns', id, { ...getDeviceInfo(), ...(d || {}) })
   try {
     const result = await route('returns:update', () => apiFetch('PATCH', `/api/returns/${id}`, payload), null, true)
-    await dexieDb.returns.update(id, {
+    const db = await getLocalDb()
+    await db.returns.update(id, {
       ...d,
       updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
     }).catch(() => {})
@@ -1406,31 +1462,31 @@ export const updateReturn = async (id, d) => {
 // ─── Sync server health test ──────────────────────────────────────────────────
 // Used by ServerPage to validate a URL before saving it.
 export const testSyncServer = (url) =>
-  testSyncServerRequest(url)
+  callSystemRuntimeMethod('testSyncServer', url)
 
 // ─── Folder dialog (optional — only available in Electron/Tauri contexts) ─────
 // In web mode this is a no-op; callers use optional chaining (?.) defensively.
 export const openFolderDialog = (initialPath = '') =>
-  openFolderDialogRequest(initialPath)
+  callSystemRuntimeMethod('openFolderDialog', initialPath)
 
 // ─── Data folder location ─────────────────────────────────────────────────────
 export const getDataPath = () =>
-  getDataPathRequest()
+  callSystemRuntimeMethod('getDataPath')
 export const getScaleMigrationStatus = () =>
-  getScaleMigrationStatusRequest()
+  callSystemRuntimeMethod('getScaleMigrationStatus')
 export const prepareScaleMigration = () =>
-  prepareScaleMigrationRequest()
+  callSystemRuntimeMethod('prepareScaleMigration')
 export const runScaleMigration = (payload = {}) =>
-  runScaleMigrationRequest(payload)
+  callSystemRuntimeMethod('runScaleMigration', payload)
 export async function setDataPath(dir) {
-  const result = await setDataPathRequest(dir)
+  const result = await callSystemRuntimeMethod('setDataPath', dir)
   await invalidateClientRuntimeState('data-path-update')
   return result
 }
 export async function resetDataPath() {
-  const result = await resetDataPathRequest()
+  const result = await callSystemRuntimeMethod('resetDataPath')
   await invalidateClientRuntimeState('data-path-reset')
   return result
 }
 export const browseDir = (dir) =>
-  browseDirRequest(dir)
+  callSystemRuntimeMethod('browseDir', dir)

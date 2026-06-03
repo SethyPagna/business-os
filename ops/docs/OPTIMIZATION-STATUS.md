@@ -8,17 +8,17 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 751, split reusable catalog-adjacent code out of
-  the Catalog route startup path
+- Latest completed move: Move 752, keep Dexie/local DB and system helpers out
+  of healthy first-route loads
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `48c34f2b25dcf911`
+- latest verified frontend hash from the most recent Docker-served live check: `14ac974b42985491`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `a19f449e216dbd7b`
+  `2360d8a61225f40b`
 
 Latest verified reports:
 
@@ -27,11 +27,11 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T13-54-32-703Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T15-29-38-481Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T13-54-32-706Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T13-53-46-619Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T15-23-15-920Z.json`
 - latest public portal load trace:
   `ops/runtime/reports/public-load-trace-latest.json`
 - latest top-route load trace:
@@ -47,10 +47,11 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the Move 751 verification pass
-  removed 72,185 bytes of old reports and 38.06 MB of Docker builder cache,
+- `npm.cmd --prefix ops run prune-storage` in the Move 752 verification pass
+  removed 907,162 bytes of old reports and 38.08 MB of Docker builder cache,
   kept uploads, secrets, env files, newest local backup packages, Docker
-  images, and Docker volumes, and retained the newest R2 backup object.
+  images, Docker volumes, and retained newest R2 backup object
+  `datasync-2026-06-03T14-36-41-074Z`.
 
 Current honest pockets:
 
@@ -86,6 +87,26 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Healthy first-route loads no longer wake IndexedDB/Dexie. Local mirror writes,
+  expected-updated-at reads, query-cache fallbacks, and transport fallbacks now
+  load `localDb.ts` through lazy boundaries only when the local fallback,
+  queued offline work, or explicit queue diagnostics are actually used. CSV
+  template/download helpers moved to `csvTemplate.ts`, `csvImport.ts` is owned
+  by `csv-utils`, and sensitive mirror purge is delayed into a later idle slot.
+  Server bootstrap/debug/test calls now use a tiny `app-system` transport from
+  `web-api.ts`, while the legacy API registry lazy-loads `systemRuntime.ts`
+  instead of statically owning it. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T15-23-15-920Z.json` shows
+  `app-local-db=none` and `vendor-dexie=none` for dashboard, products,
+  inventory, POS, sales, returns, backup, contacts, server, and public_catalog
+  in the first 600 ms. The same trace shows `app-system=none` for domain routes
+  and `app-system` only for Server. A live Playwright Queue-tab interaction
+  loaded `app-local-db`, `vendor-dexie`, and `app-api-methods` only after the
+  Queue button click, rendered pending/syncing/failed queue labels, and
+  recorded zero console/page errors. Broad Phase 8.4 UI and public Cloudflare
+  portal checks also passed with zero relevant console/page errors. Docker release image
+  `business-os:v6.0.0-202606032321` served the verified runtime.
 
 - Non-catalog admin routes no longer fetch the heavy Catalog route chunk for
   shared icons and helpers. Reusable product primitives, action guards, small

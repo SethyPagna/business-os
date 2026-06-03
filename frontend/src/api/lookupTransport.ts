@@ -1,5 +1,5 @@
 import { apiFetch, route } from './http.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 
@@ -27,7 +27,10 @@ function listLookupRows(config: LookupConfig): Promise<unknown> {
   return routeMirrored(
     `${config.routeKey}:get`,
     () => apiFetch('GET', config.path),
-    () => dexieDb.table(config.kind).orderBy('name').toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table(config.kind).orderBy('name').toArray()
+    },
     mirrorTable(config.kind),
   )
 }

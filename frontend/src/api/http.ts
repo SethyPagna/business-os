@@ -79,6 +79,7 @@ const HEALTH_CHECK_INTERVAL_MS = 30_000
 const HEALTH_CHECK_INITIAL_DELAY_MS = 2_500
 const HEALTH_PROBE_TIMEOUT_MS = 4_000
 const HEALTH_PROBE_REUSE_MS = 8_000
+const HEALTHY_SERVER_LOCAL_FALLBACK_MS = 1_200
 export const FRONTEND_BUILD_INFO = {
   hash: typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev',
   revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
@@ -860,27 +861,34 @@ async function raceServerReadWithLocalFallback<T>(
   localFn: RouteFn<T>,
   t0: number,
   sourceLabel = 'cache-dedup',
+  fallbackDelayMs: number = SYNC.READ_LOCAL_FALLBACK_MS,
 ): Promise<T> {
-  const localPromise = Promise.resolve()
-    .then(() => localFn())
-    .then((result) => {
-      if (hasUsableLocalData(result)) {
-        cacheSet(channel, result)
-      }
-      return result
-    })
-    .catch(() => null)
+  let localPromise: Promise<T | null> | null = null
+  const startLocalRead = (): Promise<T | null> => {
+    if (!localPromise) {
+      localPromise = Promise.resolve()
+        .then(() => localFn())
+        .then((result) => {
+          if (hasUsableLocalData(result)) {
+            cacheSet(channel, result)
+          }
+          return result
+        })
+        .catch(() => null)
+    }
+    return localPromise
+  }
 
   let fallbackTimer: number | null = null
   const localFallbackPromise = new Promise<RaceReadResult>((resolve) => {
     fallbackTimer = window.setTimeout(async () => {
-      const localResult = await localPromise
+      const localResult = await startLocalRead()
       if (hasUsableLocalData(localResult)) {
         resolve({ source: 'local', data: localResult })
         return
       }
       resolve({ source: 'local', data: null })
-    }, SYNC.READ_LOCAL_FALLBACK_MS)
+    }, fallbackDelayMs)
   })
 
   try {
@@ -893,7 +901,7 @@ async function raceServerReadWithLocalFallback<T>(
     }
 
     if (winner?.source === 'local' && winner.data !== null) {
-      logCall(channel, `${sourceLabel}-local`, Date.now() - t0)
+      logCall(channel, sourceLabel ? `${sourceLabel}-local` : 'local-fast', Date.now() - t0)
       inflightPromise
         .then((result) => {
           cacheSet(channel, result)
@@ -903,18 +911,31 @@ async function raceServerReadWithLocalFallback<T>(
       return winner.data
     }
 
-    logCall(channel, sourceLabel, Date.now() - t0)
+    if (sourceLabel) {
+      logCall(channel, sourceLabel, Date.now() - t0)
+    }
     return winner?.data ?? await inflightPromise
   } catch (error: any) {
     if (fallbackTimer != null) {
       window.clearTimeout(fallbackTimer)
     }
-    const localResult = await localPromise
+    if (isApiVersionMismatchError(error)) {
+      logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
+      throw error
+    }
+    if (isInvalidSessionError(error)) {
+      logCall(channel, 'auth-required', Date.now() - t0, false)
+      throw error
+    }
+    const localResult = await startLocalRead()
     if (hasUsableLocalData(localResult)) {
       if (isTransientGatewayError(error?.status)) {
-        noteReadFailure(channel, error, `${sourceLabel}-transient-gateway-local-recovery`, t0)
+        const recoverySource = sourceLabel
+          ? `${sourceLabel}-transient-gateway-local-recovery`
+          : 'transient-gateway-local-recovery'
+        noteReadFailure(channel, error, recoverySource, t0)
       }
-      logCall(channel, `${sourceLabel}-local-recovery`, Date.now() - t0)
+      logCall(channel, sourceLabel ? `${sourceLabel}-local-recovery` : 'local-recovery', Date.now() - t0)
       inflightPromise
         .then((result) => {
           cacheSet(channel, result)
@@ -923,7 +944,8 @@ async function raceServerReadWithLocalFallback<T>(
         .catch(() => {})
       return localResult as T
     }
-    throw error
+    noteReadFailure(channel, error, 'local-fallback', t0)
+    return resolveLocalRead(channel, localFn)
   }
 }
 
@@ -968,7 +990,7 @@ export async function route<T = any>(channel: string, serverFn: RouteFn<T>, loca
         // Request deduplication: if same request already in flight, wait for it instead of re-requesting
         if (hasReusableInflight(channel)) {
           if (localFn) {
-            return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0)
+            return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0, 'cache-dedup', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
           }
           logCall(channel, 'cache-dedup', Date.now() - t0)
           return _inflight[channel]
@@ -989,70 +1011,7 @@ export async function route<T = any>(channel: string, serverFn: RouteFn<T>, loca
         _inflightStartedAt[channel] = Date.now()
         
         if (localFn) {
-          const localPromise = Promise.resolve()
-            .then(() => localFn())
-            .then((result) => {
-              if (hasUsableLocalData(result)) {
-                cacheSet(channel, result)
-              }
-              return result
-            })
-            .catch(() => null)
-          let fallbackTimer: number | null = null
-          const localFallbackPromise = new Promise<RaceReadResult>((resolve) => {
-            fallbackTimer = window.setTimeout(async () => {
-              const localResult = await localPromise
-              if (hasUsableLocalData(localResult)) {
-                resolve({ source: 'local', data: localResult })
-                return
-              }
-              resolve({ source: 'local', data: null })
-            }, SYNC.READ_LOCAL_FALLBACK_MS)
-          })
-
-          try {
-            const winner = await Promise.race<RaceReadResult>([
-              promise.then((result) => ({ source: 'server', data: result })),
-              localFallbackPromise,
-            ])
-            if (fallbackTimer != null) {
-              window.clearTimeout(fallbackTimer)
-            }
-
-            if (winner?.source === 'local' && winner.data !== null) {
-              logCall(channel, 'local-fast', Date.now() - t0)
-              promise
-                .then(() => emitCacheRefresh(channel))
-                .catch(() => {})
-              return winner.data
-            }
-
-            return winner?.data ?? await promise
-          } catch (e: any) {
-            if (fallbackTimer != null) {
-              window.clearTimeout(fallbackTimer)
-            }
-            if (isApiVersionMismatchError(e)) {
-              logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
-              throw e
-            }
-            if (isInvalidSessionError(e)) {
-              logCall(channel, 'auth-required', Date.now() - t0, false)
-              throw e
-            }
-            const localResult = await localPromise
-            if (hasUsableLocalData(localResult)) {
-              if (isTransientGatewayError(e?.status)) {
-                noteReadFailure(channel, e, 'transient-gateway-local-recovery', t0)
-              }
-              logCall(channel, 'local-recovery', Date.now() - t0)
-              promise
-                .then(() => emitCacheRefresh(channel))
-                .catch(() => {})
-              return localResult
-            }
-            noteReadFailure(channel, e, 'local-fallback', t0)
-          }
+          return raceServerReadWithLocalFallback(channel, promise, localFn, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
         } else {
           try {
             return await promise

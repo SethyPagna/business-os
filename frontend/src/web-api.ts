@@ -34,6 +34,7 @@ type MethodsModule = Record<string, (...args: any[]) => any>
 type AppBootstrapModule = typeof import('./api/appBootstrapTransport.ts')
 type AuthTransportModule = typeof import('./api/authTransport.ts')
 type PortalTransportModule = typeof import('./api/portalTransport.ts')
+type SystemRuntimeModule = typeof import('./api/systemRuntime.ts')
 type OfflineVaultKey = CryptoKey | null
 type OfflineRow = AnyRecord & {
   _seq?: number
@@ -89,6 +90,7 @@ let methodsModulePromise: Promise<MethodsModule> | null = null
 let appBootstrapModulePromise: Promise<AppBootstrapModule> | null = null
 let authTransportModulePromise: Promise<AuthTransportModule> | null = null
 let portalTransportModulePromise: Promise<PortalTransportModule> | null = null
+let systemRuntimeModulePromise: Promise<SystemRuntimeModule> | null = null
 let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
 
@@ -127,6 +129,11 @@ function loadPortalTransportModule(): Promise<PortalTransportModule> {
   return portalTransportModulePromise
 }
 
+function loadSystemRuntimeModule(): Promise<SystemRuntimeModule> {
+  if (!systemRuntimeModulePromise) systemRuntimeModulePromise = import('./api/systemRuntime.ts')
+  return systemRuntimeModulePromise
+}
+
 function getAuthTransportMethod<T extends keyof AuthTransportModule>(name: T): (...args: any[]) => Promise<any> {
   return (...args) =>
     loadAuthTransportModule().then((module) => {
@@ -141,6 +148,17 @@ function getAuthTransportMethod<T extends keyof AuthTransportModule>(name: T): (
 function getPortalTransportMethod<T extends keyof PortalTransportModule>(name: T): (...args: any[]) => Promise<any> {
   return (...args) =>
     loadPortalTransportModule().then((module) => {
+      const fn = module?.[name]
+      if (typeof fn !== 'function') {
+        throw new Error(`window.api.${String(name)} is not available.`)
+      }
+      return (fn as (...methodArgs: any[]) => Promise<any>)(...args)
+    })
+}
+
+function getSystemRuntimeMethod<T extends keyof SystemRuntimeModule>(name: T): (...args: any[]) => Promise<any> {
+  return (...args) =>
+    loadSystemRuntimeModule().then((module) => {
       const fn = module?.[name]
       if (typeof fn !== 'function') {
         throw new Error(`window.api.${String(name)} is not available.`)
@@ -876,6 +894,10 @@ const staticApi = {
   askPortalAi: getPortalTransportMethod('askPortalAi'),
   getPortalSubmissionsForReview: getPortalTransportMethod('getPortalSubmissionsForReview'),
   reviewPortalSubmission: getPortalTransportMethod('reviewPortalSubmission'),
+  getSystemConfig: getSystemRuntimeMethod('getSystemConfig'),
+  getSystemBootstrap: getSystemRuntimeMethod('getSystemBootstrap'),
+  getSystemDebugLog: getSystemRuntimeMethod('getSystemDebugLog'),
+  testSyncServer: getSystemRuntimeMethod('testSyncServer'),
 
   setSyncServerUrl(url: unknown) {
     const clean = sanitizeSyncServerUrl(url)

@@ -117,6 +117,7 @@ const deferredModulePreloadPrefixes = [
   'assets/app-bootstrap-',
   'assets/app-auth-',
   'assets/app-portal-',
+  'assets/app-system-',
   'assets/catalog-',
   'assets/catalog-preview-',
   'assets/catalog-editor-',
@@ -213,11 +214,19 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
     if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
+    if (normalized.endsWith('/src/api/systemRuntime.ts')) return 'app-system'
     if (
       normalized.endsWith('/src/api/portalTransport.ts')
       || normalized.endsWith('/src/api/portalHttp.ts')
     ) return 'app-portal'
     if (normalized.endsWith('/src/api/localDb.ts')) return 'app-local-db'
+    if (
+      normalized.endsWith('/src/utils/csv.ts')
+      || normalized.endsWith('/src/utils/csvTemplate.ts')
+      || normalized.endsWith('/src/utils/csvImport.ts')
+    ) {
+      return 'csv-utils'
+    }
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/products/shared/')

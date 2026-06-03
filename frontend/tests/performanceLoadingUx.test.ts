@@ -97,6 +97,11 @@ assert.doesNotMatch(httpApi, /window\.addEventListener\('online'[\s\S]{0,160}pin
 assert.doesNotMatch(httpApi, /window\.addEventListener\('focus'[\s\S]{0,160}pingServerHealth/, 'HTTP module should not duplicate web-api focus recovery listeners')
 assert.doesNotMatch(httpApi, /document\.addEventListener\('visibilitychange'[\s\S]{0,220}pingServerHealth/, 'HTTP module should not duplicate web-api visibility recovery listeners')
 assert.doesNotMatch(httpApi, /if \(typeof window !== 'undefined'\) \{\s*window\.addEventListener\('online'/, 'signed-out startup should not register health online/focus lifecycle listeners at module load')
+assert.match(httpApi, /let localPromise: Promise<T \| null> \| null = null[\s\S]*const startLocalRead = \(\): Promise<T \| null> => \{[\s\S]*Promise\.resolve\(\)[\s\S]*\.then\(\(\) => localFn\(\)\)/, 'server read fallback should lazy-start local storage only through the fallback helper')
+assert.match(httpApi, /const HEALTHY_SERVER_LOCAL_FALLBACK_MS = 1_200/, 'healthy live server reads should wait longer before waking the offline DB fallback')
+assert.match(httpApi, /fallbackTimer = window\.setTimeout\(async \(\) => \{[\s\S]*const localResult = await startLocalRead\(\)[\s\S]*\}, fallbackDelayMs\)/, 'local fallback should not import Dexie until the selected fallback timer actually fires')
+assert.match(httpApi, /raceServerReadWithLocalFallback\(channel, promise, localFn, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS\)/, 'fresh healthy server reads should use the longer local fallback delay')
+assert.doesNotMatch(httpApi, /const localPromise = Promise\.resolve\(\)\s*\.then\(\(\) => localFn\(\)\)/, 'healthy server reads should not eagerly start the local fallback promise')
 assert.match(websocketApi, /let wsLifecycleListenersRegistered = false/, 'websocket lifecycle listeners should be one-shot and not module-load work')
 assert.match(websocketApi, /export function connectWS\(\): void \{\s*ensureWebSocketLifecycleListeners\(\)/, 'websocket lifecycle listeners should install only when an authenticated websocket connection starts')
 assert.match(websocketApi, /export function resumeWS\(\): void \{[\s\S]*wsSuppressReconnectUntil = 0[\s\S]*reconnectAttempts = 0[\s\S]*reconnectWS\(\)/, 'central session recovery should have a websocket resume helper that clears reconnect suppression')
@@ -192,6 +197,9 @@ assert.match(webApi, /getVerificationCapabilities: getAuthTransportMethod\('getV
 assert.match(webApi, /type PortalTransportModule = typeof import\('\.\/api\/portalTransport\.ts'\)/, 'public portal calls should have a narrow transport boundary')
 assert.match(webApi, /function loadPortalTransportModule\(\): Promise<PortalTransportModule> \{[\s\S]*import\('\.\/api\/portalTransport\.ts'\)/, 'public portal transport should lazy-load independently of the full API registry')
 assert.match(webApi, /getPortalConfig: getPortalTransportMethod\('getPortalConfig'\)[\s\S]*searchPortalCatalogProducts: getPortalTransportMethod\('searchPortalCatalogProducts'\)[\s\S]*askPortalAi: getPortalTransportMethod\('askPortalAi'\)/, 'public portal reads and actions should not route through app-api-methods or Dexie')
+assert.match(webApi, /type SystemRuntimeModule = typeof import\('\.\/api\/systemRuntime\.ts'\)/, 'server diagnostics should have a narrow system runtime boundary')
+assert.match(webApi, /function loadSystemRuntimeModule\(\): Promise<SystemRuntimeModule> \{[\s\S]*import\('\.\/api\/systemRuntime\.ts'\)/, 'system runtime should lazy-load independently of the full API registry')
+assert.match(webApi, /getSystemConfig: getSystemRuntimeMethod\('getSystemConfig'\)[\s\S]*getSystemBootstrap: getSystemRuntimeMethod\('getSystemBootstrap'\)[\s\S]*getSystemDebugLog: getSystemRuntimeMethod\('getSystemDebugLog'\)[\s\S]*testSyncServer: getSystemRuntimeMethod\('testSyncServer'\)/, 'server bootstrap and diagnostics should not route through app-api-methods or Dexie')
 assert.match(webApi, /async getAppBootstrap\(\) \{[\s\S]*const module = await loadAppBootstrapModule\(\)[\s\S]*return module\.getAppBootstrap\(\)/, 'window.api.getAppBootstrap should not go through app-api-methods during logged-out startup')
 assert.doesNotMatch(appBootstrapTransport, /import \{[^}]*localGetSettings[^}]*\} from '\.\/localDb\.ts'/, 'app bootstrap transport should not statically import local DB on unauthenticated startup')
 assert.doesNotMatch(appBootstrapTransport, /import \{[^}]*purgeSensitiveLiveServerMirrors[^}]*\} from '\.\/localMirrors\.ts'/, 'app bootstrap transport should not statically import mirror cleanup on unauthenticated startup')
@@ -204,16 +212,24 @@ assert.match(appBootstrapTransport, /if \(!hasServer\) \{[\s\S]*return \{ \.\.\.
 assert.match(appBootstrapTransport, /const localBootstrap = emptyBootstrap\(\)/, 'invalid-session bootstrap should not load IndexedDB just to render the sign-in page')
 assert.doesNotMatch(apiMethods, /import \{ getAppBootstrap as getAppBootstrapRequest \} from '\.\/appBootstrapTransport\.ts'/, 'legacy API registry should not pull app bootstrap into app-api-methods at module load')
 assert.match(apiMethods, /export const getAppBootstrap = async \(\) => \{[\s\S]*await import\('\.\/appBootstrapTransport\.ts'\)/, 'legacy getAppBootstrap should use the same direct lazy bootstrap boundary')
+assert.doesNotMatch(apiMethods, /from '\.\/systemRuntime\.ts'/, 'legacy API registry should not statically pull Server/system helpers into product-page loads')
+assert.match(apiMethods, /function loadSystemRuntimeModule\(\) \{[\s\S]*import\('\.\/systemRuntime\.ts'\)/, 'legacy Server/system wrappers should lazy-load the system runtime chunk only when used')
+assert.match(apiMethods, /const SENSITIVE_MIRROR_PURGE_DELAY_MS = 15_000/, 'sensitive mirror purge should stay out of the first route-load window')
+assert.match(apiMethods, /function scheduleSensitiveMirrorPurge\(\)[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*window\.requestIdleCallback\(run, \{ timeout: SENSITIVE_MIRROR_PURGE_IDLE_TIMEOUT_MS \}\)[\s\S]*\}, SENSITIVE_MIRROR_PURGE_DELAY_MS\)/, 'sensitive mirror purge should use a delayed idle slot before loading local DB')
+assert.doesNotMatch(apiMethods, /Promise\.resolve\(\)\.then\(\(\) => purgeSensitiveLiveServerMirrors\(\)\)/, 'API registry should not wake local DB via immediate sensitive mirror purge')
 assert.doesNotMatch(clientRuntime, /import \{ resetLocalMirrorDb \} from '\.\.\/\.\.\/api\/localDb\.ts'/, 'runtime descriptor helpers should not statically import Dexie/local DB during startup')
 assert.match(clientRuntime, /const \{ resetLocalMirrorDb \} = await import\('\.\.\/\.\.\/api\/localDb\.ts'\)[\s\S]*await resetLocalMirrorDb\(\)/, 'runtime reset should load local DB only when a reset is actually running')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/localDb\.ts'\)\) return 'app-local-db'/, 'Vite should keep localDb out of the startup app-api chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/csv\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/utils\/csvTemplate\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/utils\/csvImport\.ts'\)[\s\S]*return 'csv-utils'/, 'CSV import/export helpers should not be owned by the app-local-db chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/appBootstrapTransport\.ts'\)\) return 'app-bootstrap'/, 'Vite should keep unauthenticated bootstrap out of the full app-api-methods registry chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\)\) return 'app-auth'/, 'Vite should keep sign-in auth helpers out of the full app-api-methods registry chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/systemRuntime\.ts'\)\) return 'app-system'/, 'Vite should keep Server page diagnostics transport out of app-api-methods and local DB chunks')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/portalTransport\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/portalHttp\.ts'\)[\s\S]*return 'app-portal'/, 'Vite should keep public portal transport out of app-api-methods and local DB chunks')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)[\s\S]*return 'app-api'/, 'Vite should keep Dashboard summary transport in the startup API chunk instead of app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/http\.ts'\)[\s\S]*return 'app-api'[\s\S]*if \(normalized\.includes\('\/src\/api\/'\)\) return 'app-api-methods'/, 'Vite should keep only startup API files in app-api and move method transports behind the lazy methods chunk')
 assert.match(viteConfig, /'assets\/app-bootstrap-',[\s\S]*'assets\/app-auth-',/, 'bootstrap and auth chunks should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/app-auth-',[\s\S]*'assets\/app-portal-',/, 'public portal transport should also be excluded from initial modulepreload')
+assert.match(viteConfig, /'assets\/app-portal-',[\s\S]*'assets\/app-system-',/, 'server diagnostics transport should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/auth-login-',/, 'signed-out Login UI should not be eagerly modulepreloaded into the authenticated shell')
 assert.match(viteConfig, /Login\.tsx'\)\) return 'auth-login'/, 'Vite should keep Login UI in an auth-only chunk')
 assert.match(viteConfig, /'assets\/app-local-db-',[\s\S]*'assets\/vendor-dexie-',/, 'local DB and Dexie chunks should be excluded from eager modulepreload')
@@ -1637,6 +1653,21 @@ assert.match(
   serverPage,
   /withLoaderTimeout\(\s*\(\) => (?:getInventoryApi\\(\\)\\?|getServerApi\(\))\.getPendingSyncState\?\.\(\),\s*'Pending sync queue',\s*SERVER_PENDING_SYNC_TIMEOUT_MS,\s*\)/,
   'server pending sync state should timeout slow queue reads',
+)
+assert.doesNotMatch(
+  serverPage,
+  /setClientLog\(getServerApi\(\)\.getCallLog\?\.\(\) \|\| \[\]\)\s*\n\s*loadQueueState\(\)/,
+  'server diagnostics should not wake IndexedDB queue reads on the default first paint',
+)
+assert.match(
+  serverPage,
+  /const onQueueChanged = \(\) => \{[\s\S]*if \(tab === 'queue'\) loadQueueState\(\)[\s\S]*\}/,
+  'server queue events should only refresh the IndexedDB queue while the queue tab is active',
+)
+assert.match(
+  serverPage,
+  /useEffect\(\(\) => \{[\s\S]*if \(!active \|\| tab !== 'queue'\) return[\s\S]*loadQueueState\(\)[\s\S]*\}, \[active, loadQueueState, tab\]\)/,
+  'server queue tab should load pending sync state on demand',
 )
 assert.match(
   serverPage,

@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 600,
+  "filesScanned": 602,
   "largeFiles": 79,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -32,14 +32,14 @@
   "largestAreas": [
     [
       "frontend/api",
-      41
-    ],
-    [
-      "frontend/components/products",
-      32
+      42
     ],
     [
       "frontend/utils",
+      33
+    ],
+    [
+      "frontend/components/products",
       32
     ],
     [

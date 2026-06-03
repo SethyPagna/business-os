@@ -11,7 +11,7 @@
 import Dexie from 'dexie'
 import type { Table } from 'dexie'
 import { parseCsvRows } from '../utils/csvImport.ts'
-import { UTF8_BOM } from '../utils/csv.ts'
+import { buildCSVTemplate as buildCSVTemplateFile } from '../utils/csvTemplate.ts'
 
 type LocalRow = Record<string, unknown>
 type SettingsMap = Record<string, string>
@@ -277,10 +277,5 @@ function splitCSVLine(line: string): string[] {
 }
 
 export function buildCSVTemplate(headers: string[], filename: string): void {
-  const blob = new Blob([UTF8_BOM, headers.join(','), '\n'], { type: 'text/csv;charset=utf-8' })
-  const a    = document.createElement('a')
-  a.href     = URL.createObjectURL(blob)
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(a.href)
+  buildCSVTemplateFile(headers, filename)
 }

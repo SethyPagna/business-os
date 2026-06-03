@@ -1,18 +1,42 @@
 import { shouldPersistLocalMirror as shouldPersistLocalMirrorByPolicy, LIVE_SERVER_SENSITIVE_MIRROR_TABLES } from '../platform/storage/storagePolicy.ts'
 import { getSyncServerUrl, route } from './http.ts'
-import { clearLocalMirrorTables, replaceTableContents } from './localDb.ts'
 
 type MirrorRows = Record<string, unknown>
 type MirrorFn<TResult> = (result: TResult) => unknown | Promise<unknown>
 type RouteFn<TResult> = () => TResult | Promise<TResult>
+type IdleCallback = (deadline?: unknown) => void
 
 let sensitiveMirrorPurgePromise: Promise<unknown> | null = null
+let localDbPromise: Promise<typeof import('./localDb.ts')> | null = null
+const MIRROR_WRITE_IDLE_DELAY_MS = 2500
+
+function getLocalDbModule(): Promise<typeof import('./localDb.ts')> {
+  if (!localDbPromise) localDbPromise = import('./localDb.ts')
+  return localDbPromise
+}
+
+function scheduleMirrorWrite(run: () => void): void {
+  if (typeof window === 'undefined') {
+    Promise.resolve().then(run).catch(() => {})
+    return
+  }
+  window.setTimeout(() => {
+    const idle = (window as unknown as { requestIdleCallback?: (callback: IdleCallback, options?: { timeout?: number }) => number }).requestIdleCallback
+    if (typeof idle === 'function') {
+      idle(() => run(), { timeout: MIRROR_WRITE_IDLE_DELAY_MS })
+      return
+    }
+    run()
+  }, MIRROR_WRITE_IDLE_DELAY_MS)
+}
 
 export function mirrorReadResult<TResult>(mirrorFn: MirrorFn<TResult> | null | undefined, result: TResult): TResult {
   if (typeof mirrorFn === 'function') {
-    Promise.resolve()
-      .then(() => mirrorFn(result))
-      .catch(() => {})
+    scheduleMirrorWrite(() => {
+      Promise.resolve()
+        .then(() => mirrorFn(result))
+        .catch(() => {})
+    })
   }
   return result
 }
@@ -36,6 +60,7 @@ export async function purgeSensitiveLiveServerMirrors(): Promise<void> {
     return
   }
   if (!sensitiveMirrorPurgePromise) {
+    const { clearLocalMirrorTables } = await getLocalDbModule()
     sensitiveMirrorPurgePromise = clearLocalMirrorTables([...LIVE_SERVER_SENSITIVE_MIRROR_TABLES]).catch(() => {})
   }
   await sensitiveMirrorPurgePromise
@@ -43,6 +68,7 @@ export async function purgeSensitiveLiveServerMirrors(): Promise<void> {
 
 export function mirrorTable(tableName: string) {
   return async (rows: unknown): Promise<unknown> => {
+    const { clearLocalMirrorTables, replaceTableContents } = await getLocalDbModule()
     if (!shouldPersistLocalMirror(tableName)) {
       await clearLocalMirrorTables([tableName]).catch(() => {})
       return []

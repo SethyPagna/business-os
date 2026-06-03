@@ -1,6 +1,6 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { buildCSVTemplate } from '../utils/csvTemplate.ts'
 import { apiFetch, route } from './http.ts'
-import { buildCSVTemplate, dexieDb } from './localDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { readCachedQueryResult, writeCachedQueryResult } from './queryCache.ts'
@@ -36,6 +36,13 @@ const CONTACT_ENTITY = {
   },
 } satisfies Record<string, ContactEntityConfig>
 
+let localDbPromise: Promise<typeof import('./localDb.ts')> | null = null
+
+function getLocalDbModule(): Promise<typeof import('./localDb.ts')> {
+  if (!localDbPromise) localDbPromise = import('./localDb.ts')
+  return localDbPromise
+}
+
 function getDevicePayload(): ContactPayload {
   return { ...getClientDeviceInfo() }
 }
@@ -49,7 +56,8 @@ function hasPagedParams(params: QueryParams = {}): boolean {
     || Object.prototype.hasOwnProperty.call(params || {}, 'pageSize')
 }
 
-function localSortedRows(tableName: ContactEntityConfig['tableName']): Promise<unknown[]> {
+async function localSortedRows(tableName: ContactEntityConfig['tableName']): Promise<unknown[]> {
+  const { dexieDb } = await getLocalDbModule()
   return dexieDb.table(tableName).orderBy('name').toArray()
 }
 

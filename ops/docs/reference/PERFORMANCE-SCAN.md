@@ -1690,4 +1690,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   first-window scripts with zero failed requests and zero console/page errors.
   Broad Phase 8.4 UI Playwright and public Cloudflare Playwright passed on
   Docker image `business-os:v6.0.0-202606032143`.
+- Move 482 records roadmap Move 752: keep Dexie/local DB and system helper
+  chunks out of healthy first-route loads. Local DB usage now goes through
+  `lazyLocalDb.ts` for transport fallback paths, CSV template/download helpers
+  no longer sit in the local DB chunk, healthy-server local fallbacks start
+  only after the fallback timer/server failure path, and sensitive mirror purge
+  runs in a delayed idle slot. Server bootstrap/config/debug/test calls use the
+  narrow `app-system` transport, and pending sync queue diagnostics load only
+  after the Queue tab is active. Docker image
+  `business-os:v6.0.0-202606032321` served the final proof trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T15-23-15-920Z.json`:
+  dashboard 211 ms, products 233 ms, inventory 240 ms, POS 287 ms, sales
+  200 ms, returns 202 ms, backup 230 ms, contacts 239 ms, server 215 ms, and
+  public_catalog 242 ms, all with zero failed requests and zero console/page
+  errors. Chunk analysis showed `app-local-db=none` and `vendor-dexie=none` on
+  all ten traced routes in the first 600 ms, `system=none` on domain routes,
+  and `app-system` only on Server. A live Server Queue-tab Playwright click
+  then loaded `app-api-methods`, `app-local-db`, and `vendor-dexie` on demand,
+  rendered pending/syncing/failed counters, and recorded zero console/page
+  errors.
 <!-- phase29-manual-notes:end -->

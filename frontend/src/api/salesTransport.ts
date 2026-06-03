@@ -1,6 +1,6 @@
 import { SYNC } from '../constants.ts'
 import { apiFetch, route } from './http.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 
@@ -31,7 +31,10 @@ export function getSales(params: QueryParams = {}): Promise<unknown> {
   return routeMirrored(
     `sales:get:${query}`,
     () => apiFetch('GET', appendQuery('/api/sales', query)),
-    () => dexieDb.table('sales').orderBy('created_at').reverse().limit(1000).toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table('sales').orderBy('created_at').reverse().limit(1000).toArray()
+    },
     mirror,
   )
 }

@@ -1,5 +1,3 @@
-import { dexieDb, localGetSettingsMeta } from './localDb.ts'
-
 export type ExpectedUpdatedAtPayload = Record<string, unknown>
 
 type LocalUpdatedAtRow = {
@@ -8,6 +6,13 @@ type LocalUpdatedAtRow = {
 
 type LocalTableReader = {
   get?: (id: unknown) => Promise<LocalUpdatedAtRow | undefined>
+}
+
+let localDbPromise: Promise<typeof import('./localDb.ts')> | null = null
+
+function getLocalDbModule(): Promise<typeof import('./localDb.ts')> {
+  if (!localDbPromise) localDbPromise = import('./localDb.ts')
+  return localDbPromise
 }
 
 function hasExpectedUpdatedAt(payload: ExpectedUpdatedAtPayload): boolean {
@@ -26,6 +31,7 @@ export async function withExpectedUpdatedAt(
     return body
   }
   try {
+    const { dexieDb } = await getLocalDbModule()
     const table = (dexieDb as unknown as Record<string, LocalTableReader>)[tableName]
     const row = await table?.get?.(id)
     if (row?.updated_at) body.expectedUpdatedAt = row.updated_at
@@ -39,6 +45,7 @@ export async function withSettingsExpectedUpdatedAt(
   const body: ExpectedUpdatedAtPayload = { ...(payload || {}) }
   if (hasExpectedUpdatedAt(body)) return body
   try {
+    const { localGetSettingsMeta } = await getLocalDbModule()
     const meta = await localGetSettingsMeta()
     if (meta?.updatedAt) body.expectedUpdatedAt = meta.updatedAt
   } catch (_) {}

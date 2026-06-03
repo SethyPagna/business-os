@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-03T12:01:12.831Z
+Generated: 2026-06-03T15:29:01.344Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 600
+- Files scanned: 602
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-03T12:01:12.831Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 401 |
+| .ts | 403 |
 | .tsx | 107 |
 | .md | 45 |
 | .json | 17 |
@@ -28,9 +28,9 @@ Generated: 2026-06-03T12:01:12.831Z
 
 | Area | Files |
 | --- | --- |
-| frontend/api | 41 |
+| frontend/api | 42 |
+| frontend/utils | 33 |
 | frontend/components/products | 32 |
-| frontend/utils | 32 |
 | ops/docs/reference | 32 |
 | backend/routes | 24 |
 | ops/scripts/runtime/live-checks | 22 |
@@ -63,11 +63,11 @@ Generated: 2026-06-03T12:01:12.831Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 9571 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9798 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
-| frontend/src/components/inventory/Inventory.tsx | 4305 | frontend/components/inventory |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7171 | ops/docs |
+| frontend/src/components/inventory/Inventory.tsx | 4332 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3539 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
@@ -75,31 +75,31 @@ Generated: 2026-06-03T12:01:12.831Z
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 2615 | ops/docs |
-| frontend/tests/performanceLoadingUx.test.ts | 2530 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2574 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/products/Products.tsx | 2450 | frontend/components/products |
-| frontend/src/components/pos/POS.tsx | 2382 | frontend/components/pos |
+| frontend/src/components/pos/POS.tsx | 2394 | frontend/components/pos |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
-| backend/src/routes/products.ts | 2218 | backend/routes |
+| backend/src/routes/products.ts | 2238 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2147 | frontend/components/products |
+| backend/src/routes/inventory.ts | 1902 | backend/routes |
+| frontend/src/App.tsx | 1901 | frontend/src/App.tsx |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
-| backend/src/routes/inventory.ts | 1881 | backend/routes |
-| frontend/src/App.tsx | 1881 | frontend/src/App.tsx |
 | frontend/src/AppContext.tsx | 1872 | frontend/src/AppContext.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1872 | frontend/components/utils-settings |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1813 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1754 | frontend/components/utils-settings |
+| ops/docs/reference/PERFORMANCE-SCAN.md | 1713 | ops/docs/reference |
 | backend/src/routes/system/index.ts | 1674 | backend/routes |
 | ops/scripts/architecture/language-runtime-audit.ts | 1666 | ops/scripts/architecture |
-| ops/docs/reference/PERFORMANCE-SCAN.md | 1633 | ops/docs/reference |
 
 ## Relative Import Hotspots
 
 | File | Relative imports | Area |
 | --- | --- | --- |
 | frontend/src/components/products/Products.tsx | 41 | frontend/components/products |
-| frontend/src/api/methods.ts | 38 | frontend/api |
+| frontend/src/api/methods.ts | 39 | frontend/api |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/inventory/Inventory.tsx | 29 | frontend/components/inventory |
 | frontend/src/components/dashboard/Dashboard.tsx | 21 | frontend/components/dashboard |
@@ -113,16 +113,17 @@ Generated: 2026-06-03T12:01:12.831Z
 | frontend/src/components/contacts/DeliveryTab.tsx | 17 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.tsx | 17 | frontend/components/contacts |
 | backend/test/routeContracts.test.ts | 16 | backend/test/routeContracts.test.ts |
+| frontend/src/web-api.ts | 16 | frontend/src/web-api.ts |
 | frontend/tests/apiHttp.test.ts | 15 | frontend/tests/apiHttp.test.ts |
 | backend/src/routes/auth.ts | 14 | backend/routes |
 | backend/src/services/importJobs.ts | 14 | backend/services |
 | frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
-| frontend/src/web-api.ts | 14 | frontend/src/web-api.ts |
 | frontend/src/components/users/Users.tsx | 13 | frontend/components/users |
 | frontend/src/components/utils-settings/Settings.tsx | 13 | frontend/components/utils-settings |
 | backend/src/routes/portal.ts | 12 | backend/routes |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
 | backend/src/routes/inventory.ts | 11 | backend/routes |
+| frontend/src/api/contactsTransport.ts | 11 | frontend/api |
 | frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
 | frontend/src/components/contacts/Contacts.tsx | 10 | frontend/components/contacts |

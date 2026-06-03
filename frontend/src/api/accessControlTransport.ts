@@ -1,6 +1,6 @@
 import { apiFetch, route } from './http.ts'
 import { appendActorQuery } from './actorQuery.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 
@@ -14,7 +14,10 @@ export function getUsers(): Promise<unknown> {
   return routeMirrored(
     'users:get',
     () => apiFetch('GET', appendActorQuery('/api/users')),
-    () => dexieDb.table('users').toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table('users').toArray()
+    },
     mirrorTable('users'),
   )
 }
@@ -95,7 +98,10 @@ export function getRoles(): Promise<unknown> {
   return routeMirrored(
     'roles:get',
     () => apiFetch('GET', appendActorQuery('/api/roles')),
-    () => dexieDb.table('roles').toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table('roles').toArray()
+    },
     mirrorTable('roles'),
   )
 }

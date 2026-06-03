@@ -1,6 +1,6 @@
 import { apiFetch, requireLiveServerWrite } from './http.ts'
 import { appendQuery, buildQueryString, normalizePositiveUniqueIds, type QueryParams } from './query.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { readCachedQueryResult, writeCachedQueryResult } from './queryCache.ts'
 
@@ -16,7 +16,10 @@ export function getProducts(): Promise<unknown> {
   return routeMirrored(
     'products:get',
     () => apiFetch('GET', '/api/products'),
-    () => dexieDb.table('products').orderBy('name').toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table('products').orderBy('name').toArray()
+    },
     mirrorTable('products'),
   )
 }

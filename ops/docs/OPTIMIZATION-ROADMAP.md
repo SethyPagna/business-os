@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 751.
+- Latest completed implementation move in this roadmap: Move 752.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9759,3 +9759,39 @@ Move 751 status:
   `catalog-preview` and `app-local-db` first-window ownership on Products,
   Inventory, POS, Sales, Returns, Contacts, and Server without weakening
   offline safety.
+
+Move 752 status:
+- Move 752 keeps Dexie/local DB and system helper chunks out of healthy
+  first-route loads. `frontend/src/api/lazyLocalDb.ts` centralizes the local DB
+  dynamic import for transport fallbacks, and the expected-updated-at,
+  query-cache, local mirror, branch/product/lookup/sales/access-control/custom
+  table/audit/contact transports now load local mirrors only when the local
+  fallback path is used. CSV template downloads moved to
+  `frontend/src/utils/csvTemplate.ts`, while `csvImport.ts` is owned by
+  `csv-utils` instead of the local DB chunk.
+- `frontend/src/api/http.ts` now keeps healthy-server local fallbacks from
+  starting until the fallback timer or server failure path actually needs
+  them. `frontend/src/api/methods.ts` delays sensitive mirror purge into an
+  idle slot and lazy-loads `systemRuntime.ts` for legacy system wrappers.
+  `frontend/src/web-api.ts` exposes Server-page bootstrap/debug/test calls
+  through a narrow `app-system` transport, and
+  `frontend/src/components/server/ServerPage.tsx` loads pending sync queue
+  state only after the Queue diagnostics tab is active.
+- Proof: `npm.cmd --prefix frontend run test:utils`, production build, Docker
+  release/update image `business-os:v6.0.0-202606032321`, route-load
+  Playwright trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T15-23-15-920Z.json`, and a
+  live Server Queue-tab Playwright interaction passed. The trace shows
+  `app-local-db=none` and `vendor-dexie=none` for dashboard, products,
+  inventory, POS, sales, returns, backup, contacts, server, and public_catalog
+  in the first 600 ms; domain routes also report `system=none`, while Server
+  loads only `app-system` initially. The Queue click intentionally loads
+  `app-api-methods`, `app-local-db`, and `vendor-dexie` afterward, renders the
+  queue counters, and records zero console/page errors.
+- Current plan position after Move 752: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target:
+  route-specific CSV/app-api-methods reductions and broader interaction audits,
+  without moving live business data or weakening offline fallback behavior.

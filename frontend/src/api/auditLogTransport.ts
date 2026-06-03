@@ -1,5 +1,5 @@
 import { apiFetch, route } from './http.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 
@@ -24,7 +24,8 @@ export function getAuditLogs(params: AuditLogParams = {}): Promise<unknown> {
       return result
     },
     async () => {
-      const rows = await dexieDb.table('audit_logs').orderBy('created_at').reverse().limit(pageSize).toArray()
+      const db = await getLocalDb()
+      const rows = await db.table('audit_logs').orderBy('created_at').reverse().limit(pageSize).toArray()
       return {
         items: rows,
         total: rows.length,

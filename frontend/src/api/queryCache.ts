@@ -1,4 +1,4 @@
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 
 const QUERY_CACHE_PREFIX = 'read_cache:'
 const QUERY_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000
@@ -10,7 +10,8 @@ export function buildQueryCacheStorageKey(key: string): string {
 export async function readCachedQueryResult<TData = unknown>(key: string): Promise<TData | null> {
   const storageKey = buildQueryCacheStorageKey(key)
   try {
-    const row = await dexieDb.settings.get(storageKey)
+    const db = await getLocalDb()
+    const row = await db.settings.get(storageKey)
     if (!row?.value) return null
     const parsed = JSON.parse(String(row.value)) as { savedAt?: string; data?: TData }
     const savedAtMs = Date.parse(parsed?.savedAt || '')
@@ -24,7 +25,8 @@ export async function readCachedQueryResult<TData = unknown>(key: string): Promi
 export async function writeCachedQueryResult<TData>(key: string, data: TData): Promise<TData> {
   const storageKey = buildQueryCacheStorageKey(key)
   try {
-    await dexieDb.settings.put({
+    const db = await getLocalDb()
+    await db.settings.put({
       key: storageKey,
       value: JSON.stringify({
         savedAt: new Date().toISOString(),
@@ -43,7 +45,8 @@ export async function clearCachedQueryResults(prefixes: string[] = []): Promise<
   }
   if (!keys.length) return
   try {
-    const rows = await dexieDb.settings.toArray()
+    const db = await getLocalDb()
+    const rows = await db.settings.toArray()
     const matchingKeys: string[] = []
     for (const row of rows) {
       const rowKey = String(row?.key || '')
@@ -54,6 +57,6 @@ export async function clearCachedQueryResults(prefixes: string[] = []): Promise<
         break
       }
     }
-    if (matchingKeys.length) await dexieDb.settings.bulkDelete(matchingKeys)
+    if (matchingKeys.length) await db.settings.bulkDelete(matchingKeys)
   } catch (_) {}
 }

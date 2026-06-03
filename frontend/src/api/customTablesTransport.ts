@@ -1,5 +1,5 @@
 import { apiFetch, route } from './http.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 
 type CustomTablePayload = Record<string, unknown>
 
@@ -37,7 +37,10 @@ export function getCustomTables(): Promise<unknown> {
   return route(
     'customTables:get',
     () => apiFetch('GET', '/api/custom-tables'),
-    () => dexieDb.table('custom_tables').toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table('custom_tables').toArray()
+    },
   )
 }
 

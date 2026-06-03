@@ -1,6 +1,6 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
-import { dexieDb } from './localDb.ts'
+import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
@@ -19,7 +19,10 @@ export function getBranches(): Promise<unknown> {
   return routeMirrored(
     'branches:get',
     () => apiFetch('GET', '/api/branches'),
-    () => dexieDb.table('branches').toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table('branches').toArray()
+    },
     mirrorTable('branches'),
   )
 }
@@ -85,7 +88,10 @@ export function getTransfers(): Promise<unknown> {
   return route(
     'transfers:get',
     () => apiFetch('GET', '/api/transfers'),
-    () => dexieDb.table('stock_transfers').orderBy('created_at').reverse().toArray(),
+    async () => {
+      const db = await getLocalDb()
+      return db.table('stock_transfers').orderBy('created_at').reverse().toArray()
+    },
   )
 }
 
