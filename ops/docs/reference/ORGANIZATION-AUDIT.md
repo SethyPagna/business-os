@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T08:13:43.531Z
+Generated: 2026-06-03T08:53:24.198Z
 
 ## Summary
 
@@ -63,7 +63,7 @@ Generated: 2026-06-03T08:13:43.531Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 9342 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9389 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
@@ -74,10 +74,10 @@ Generated: 2026-06-03T08:13:43.531Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| frontend/src/components/products/Products.tsx | 2384 | frontend/components/products |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2414 | ops/docs |
+| frontend/src/components/products/Products.tsx | 2411 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2369 | ops/docs |
-| frontend/tests/performanceLoadingUx.test.ts | 2357 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2372 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/pos/POS.tsx | 2298 | frontend/components/pos |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |

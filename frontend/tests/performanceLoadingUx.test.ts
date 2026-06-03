@@ -1778,6 +1778,21 @@ assert.match(
 )
 assert.match(
   products,
+  /const PRODUCTS_FILTER_META_READY_DELAY_MS = 1800/,
+  'products full filter metadata should wait until after first product route-ready work',
+)
+assert.match(
+  products,
+  /if \(!loadedOnceRef\.current \|\| loading \|\| filterMetaLoadedRef\.current\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setFilterMetaReady\(true\)[\s\S]*PRODUCTS_FILTER_META_READY_DELAY_MS/,
+  'products should enable full filter metadata only after the first product load settles',
+)
+assert.match(
+  products,
+  /if \(!isActive \|\| !filterMetaReady \|\| filterMetaLoadedRef\.current\) return[\s\S]*const requestId = beginTrackedRequest\(filterMetaRequestRef\)[\s\S]*withLoaderTimeout\(\(\) => productApi\.getProductFilters\(\{\}\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)[\s\S]*if \(!isTrackedRequestCurrent\(filterMetaRequestRef, requestId\)\) return/,
+  'products should keep full filter metadata out of the first route load and ignore stale delayed responses',
+)
+assert.match(
+  products,
   /withLoaderTimeout\(\s*\(\) => productApi\.getProductsByIds\(uniqueIds, \{ include: 'branch_stock,images,batches' \}\),\s*'Products by id',\s*PRODUCTS_BY_ID_TIMEOUT_MS,\s*\)/,
   'products by-id refreshes should timeout slow detail requests',
 )

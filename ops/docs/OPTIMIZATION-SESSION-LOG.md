@@ -2366,3 +2366,48 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: defer Products full filter metadata out of first route window
+- affected files:
+  `frontend/src/components/products/Products.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products first route load,
+  `/api/products/filters`, `/api/products/search`, categories, units, and
+  branches
+- keeper or rollback: keeper; Products still renders product rows and
+  lightweight filter hints from the search payload immediately, then refreshes
+  full brand/category/supplier/initial metadata shortly after route-ready and
+  resets the one-shot metadata loader on product/category/unit/branch/
+  supplier/settings sync
+- route-scoped result: `ops/runtime/reports/route-load-trace-latest.json`
+  compared Products, POS, Inventory, and Server. Products dropped from 44 to
+  43 total requests and from 6 to 5 first-window API requests by moving
+  `/api/products/filters` out of the initial route window. The post-change
+  Products trace had zero failed requests and zero console/page errors.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-42-55-113Z/summary.json`
+  covered desktop/mobile Products, POS, Inventory, and Server, discovered 165
+  controls, exercised 124 controls, intentionally skipped 41 stable
+  broad-audit guardrail controls, captured 16 screenshots, and recorded zero
+  failed controls and zero findings.
+- warm whole-app result: frontend utility tests, JSX/source check, production
+  build, Docker release build/update, local `/health`, local
+  `/business-os-build.json`, public Cloudflare Playwright, focused Playwright
+  route-load trace, and full all-pages desktop/mobile Playwright passed. Docker
+  image `business-os:v6.0.0-202606031639` is serving build hash
+  `3dfa9015ce1870dc`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-164146`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-45-34-334Z/summary.json`
+  covered 34 routes, discovered 519 visible controls, exercised 380 controls,
+  intentionally skipped 139 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T08-42-52-358Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.

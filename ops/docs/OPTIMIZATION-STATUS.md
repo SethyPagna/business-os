@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 737, defer POS customer/delivery option reads out of first route window
+- Latest completed move: Move 738, defer Products full filter metadata out of first route window
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `45a502aeada4c721`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `3dfa9015ce1870dc`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `66e47424178b8f60`
+  `1d1733a5d9e828f3`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-05-09-969Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-45-34-334Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T08-05-10-948Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T08-42-52-358Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -55,8 +55,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `45a502aeada4c721` across 34 routes, with 518 visible controls
-  discovered, 378 controls exercised, 140 intentionally skipped by stable
+  build hash `3dfa9015ce1870dc` across 34 routes, with 519 visible controls
+  discovered, 380 controls exercised, 139 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -69,13 +69,29 @@ Current honest pockets:
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606031558` is serving the
+- Docker release image `business-os:v6.0.0-202606031639` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-160045`
+  `ops/runtime/docker-release/backups/20260603-164146`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Products first-load now defers the full `/api/products/filters` metadata
+  refresh until after the first product search is useful. The product search
+  response still seeds lightweight brand/category/supplier/initial filter
+  hints immediately, while the full filter metadata wakes after route-ready
+  and resets on product/category/unit/branch/supplier/settings sync. Proof:
+  `ops/runtime/reports/route-load-trace-latest.json` shows Products with 43
+  total requests, 5 API requests, zero failed requests, and zero console/page
+  errors. The first-window API list is now `/api/auth/bootstrap`,
+  `/api/products/search...`, `/api/branches`, `/api/categories`, and
+  `/api/units`. The focused Products/POS/Inventory/Server route-control audit
+  passed with 124 exercised controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-42-55-113Z/summary.json`;
+  the exhaustive all-pages audit passed across 34 routes with 380 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T08-45-34-334Z/summary.json`.
 
 - POS first-load now defers customer and delivery option list reads until the
   first catalog load is useful. The route still loads authenticated bootstrap,

@@ -130,6 +130,7 @@ const ProductDetailModal = lazy(() => import('./surfaces/ProductDetailModal'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
 const PRODUCTS_HISTORY_READY_DELAY_MS = 1800
+const PRODUCTS_FILTER_META_READY_DELAY_MS = 1800
 
 type EntityId = string | number
 type Loader<T = unknown> = () => Promise<T>
@@ -456,9 +457,12 @@ export default function Products() {
   const [collapsedProductGroups, setCollapsedProductGroups] = useState<Set<string>>(() => new Set())
   const [isProductFilterMenuOpen, setIsProductFilterMenuOpen] = useState(false)
   const [historyReady, setHistoryReady] = useState(false)
+  const [filterMetaReady, setFilterMetaReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const auxOptionsLoadedRef = useRef(false)
+  const filterMetaLoadedRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const filterMetaRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const pendingLoadRef = useRef<{ silent: boolean } | null>(null)
@@ -586,16 +590,6 @@ export default function Products() {
           }).catch(() => {})
         }
 
-        void withLoaderTimeout(() => productApi.getProductFilters({}), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS).then((filters) => {
-          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setProductFilterMeta({
-            brands: Array.isArray(filters?.brands) ? filters.brands : [],
-            categories: Array.isArray(filters?.categories) ? filters.categories : [],
-            suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
-            initials: aggregateProductInitials(filters?.initials || []),
-          })
-        }).catch(() => {})
-
         if (result.hasErrors && !silent) {
           notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
         }
@@ -654,8 +648,10 @@ export default function Products() {
   useEffect(() => {
     if (!isActive) {
       setHistoryReady(false)
+      setFilterMetaReady(false)
       if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      invalidateTrackedRequest(filterMetaRequestRef)
       loadPromiseRef.current = null
       pendingLoadRef.current = null
       setLoading(false)
@@ -676,16 +672,47 @@ export default function Products() {
     return () => window.clearTimeout(timer)
   }, [isActive, loading])
   useEffect(() => {
+    if (!isActive) {
+      setFilterMetaReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading || filterMetaLoadedRef.current) return undefined
+    const timer = window.setTimeout(() => {
+      setFilterMetaReady(true)
+    }, PRODUCTS_FILTER_META_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
+  useEffect(() => {
+    if (!isActive || !filterMetaReady || filterMetaLoadedRef.current) return
+    filterMetaLoadedRef.current = true
+    const requestId = beginTrackedRequest(filterMetaRequestRef)
+    void withLoaderTimeout(() => productApi.getProductFilters({}), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS).then((filters) => {
+      if (!isTrackedRequestCurrent(filterMetaRequestRef, requestId)) return
+      setProductFilterMeta({
+        brands: Array.isArray(filters?.brands) ? filters.brands : [],
+        categories: Array.isArray(filters?.categories) ? filters.categories : [],
+        suppliers: Array.isArray(filters?.suppliers) ? filters.suppliers : [],
+        initials: aggregateProductInitials(filters?.initials || []),
+      })
+    }).catch(() => {})
+  }, [filterMetaReady, isActive])
+  useEffect(() => {
     if (!isActive || !syncChannelTs) return
     if (syncChannelReason === 'cache-refresh') {
       const sourceTable = syncChannelSource.split(':')[0]
       if (['products', 'categories', 'units', 'branches', 'suppliers', 'settings'].includes(sourceTable)) return
     }
-    if (['products', 'categories', 'units', 'branches', 'suppliers', 'settings'].includes(syncChannelName)) load(true)
+    if (['products', 'categories', 'units', 'branches', 'suppliers', 'settings'].includes(syncChannelName)) {
+      filterMetaLoadedRef.current = false
+      setFilterMetaReady(false)
+      invalidateTrackedRequest(filterMetaRequestRef)
+      load(true)
+    }
   }, [isActive, load, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
   useEffect(() => () => {
     if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
+    invalidateTrackedRequest(filterMetaRequestRef)
     loadPromiseRef.current = null
     pendingLoadRef.current = null
   }, [])
