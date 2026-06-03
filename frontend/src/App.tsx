@@ -106,6 +106,10 @@ interface SyncUpdateDetail {
   importJobId?: string | number
   importJobStatus?: string
   importJobType?: string
+  notificationCount?: number | string
+  notificationSummary?: unknown
+  notificationType?: string
+  unreadCount?: number | string
   ts?: number | string
 }
 
@@ -620,10 +624,21 @@ function isImportTrackerWakeEvent(event: Event): boolean {
 }
 
 function isNotificationCenterWakeEvent(event: Event): boolean {
+  if (event.type === 'notification:activity') return true
   if (!(event instanceof CustomEvent)) return false
   const detail = event.detail as SyncUpdateDetail | null
   const channel = String(detail?.channel || '').trim().toLowerCase()
-  return ['inventory', 'sales', 'returns', 'customers', 'contacts', 'catalog', 'settings', 'backup'].includes(channel)
+  const reason = String(detail?.reason || '').trim().toLowerCase()
+  const source = String(detail?.source || '').trim().toLowerCase()
+  const notificationType = String(detail?.notificationType || '').trim().toLowerCase()
+  return channel === 'notifications'
+    || channel === 'notification'
+    || !!detail?.notificationSummary
+    || detail?.notificationCount != null
+    || detail?.unreadCount != null
+    || !!notificationType
+    || reason.includes('notification')
+    || source.includes('notification')
 }
 
 function getDataWarmupLoaders(_canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
@@ -897,8 +912,12 @@ function useDeferredNotificationCenterMount(user: AppUser | null): {
     const onSyncUpdate = (event: Event) => {
       if (isNotificationCenterWakeEvent(event)) enable()
     }
+    const onNotificationActivity = (event: Event) => {
+      if (isNotificationCenterWakeEvent(event)) enable()
+    }
 
     window.addEventListener('sync:update', onSyncUpdate)
+    window.addEventListener('notification:activity', onNotificationActivity)
     timerId = window.setTimeout(() => {
       if (typeof window.requestIdleCallback === 'function') {
         idleId = window.requestIdleCallback(enableWhenVisible, { timeout: NOTIFICATION_CENTER_IDLE_TIMEOUT_MS })
@@ -910,6 +929,7 @@ function useDeferredNotificationCenterMount(user: AppUser | null): {
     return () => {
       cancelled = true
       window.removeEventListener('sync:update', onSyncUpdate)
+      window.removeEventListener('notification:activity', onNotificationActivity)
       if (timerId != null) window.clearTimeout(timerId)
       if (idleId != null && typeof window.cancelIdleCallback === 'function') {
         window.cancelIdleCallback(idleId)

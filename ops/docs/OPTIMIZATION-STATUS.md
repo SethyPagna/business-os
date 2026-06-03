@@ -8,16 +8,17 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 747, collapse Server config/diagnostics startup reads into bootstrap
+- Latest completed move: Move 750, split cross-route notification icons out of
+  the notification-center startup path
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `05d5d4b5fb849663`
+- latest verified frontend hash from the most recent Docker-served live check: `952d8c4fc27e5146`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `d55c631a1473d604`
+  `0a6b7bd9bc3acd7c`
 
 Latest verified reports:
 
@@ -26,11 +27,11 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T11-58-20-197Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T13-24-40-995Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-59-08-126Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T13-24-41-519Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-latest.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-23-37-802Z.json`
 - latest public portal load trace:
   `ops/runtime/reports/public-load-trace-latest.json`
 - latest top-route load trace:
@@ -46,11 +47,10 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the 2026-06-02 Move 723
-  verification pass removed old live/audit report folders and stale probe
-  output for 60,810,012 bytes, kept the latest local backups, kept the newest
-  R2 backup object `datasync-2026-06-02T14-23-51-966Z`, and found no stopped
-  containers or Docker builder cache to reclaim.
+- `npm.cmd --prefix ops run prune-storage` in the Move 750 verification pass
+  removed 615,296 bytes of old reports and 38.06 MB of Docker builder cache,
+  kept uploads, secrets, env files, newest local backup packages, Docker
+  images, and Docker volumes, and retained the newest R2 backup object.
 
 Current honest pockets:
 
@@ -86,6 +86,18 @@ Current honest pockets:
   integrity matches
 
 Recent runtime/load win:
+
+- Route startup no longer pulls the notification-center chunk just because a
+  feature page shares an icon with NotificationCenter. Shared Lucide icons now
+  live in `shared-icons`, and NotificationCenter only wakes from explicit
+  notification-shaped events. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-23-37-802Z.json` shows
+  `notification=none` for dashboard, products, inventory, POS, sales, returns,
+  backup, contacts, server, and public_catalog. Backup dropped from 31 to 29
+  requests and 27 to 25 scripts, Server dropped from 30 to 28 requests and 25
+  to 23 scripts, and all traced routes recorded zero failed requests and zero
+  console/page errors. Broad Phase 8.4 still verified
+  `notificationPanelVisible: true`, so the panel remains available on use.
 
 - Server page first-load now uses one authenticated system bootstrap response
   for security config and initial diagnostics. The old first-window pair

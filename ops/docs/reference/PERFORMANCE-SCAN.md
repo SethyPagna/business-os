@@ -1667,4 +1667,16 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   errors. Storage pruning removed 295,764 bytes of old reports, 4,827,993
   bytes of old Docker-release backup data, and 76.13 MB of Docker builder
   cache.
+- Move 480 records roadmap Move 750: split cross-route Lucide icon ownership
+  away from `notification-center` and tighten notification wakeups to explicit
+  notification-shaped events. The Docker-served trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-23-37-802Z.json` shows
+  `notification=none` for dashboard, products, inventory, POS, sales, returns,
+  backup, contacts, server, and public_catalog. Products now uses
+  `shared-icons-1LAsiUVr.js` instead of `notification-center`; Backup fell
+  31->29 requests and 27->25 scripts, Server fell 30->28 requests and
+  25->23 scripts, and all routes had zero failed requests and zero
+  console/page errors. Broad Phase 8.4 UI Playwright verified
+  `notificationPanelVisible: true`, and public Cloudflare Playwright rendered
+  20 products with zero relevant console/page errors.
 <!-- phase29-manual-notes:end -->

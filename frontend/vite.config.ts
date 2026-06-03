@@ -163,6 +163,18 @@ const authLoginIconNames = new Set([
   'shield-check',
 ])
 
+const routeSharedIconNames = new Set([
+  'alert-circle',
+  'alert-triangle',
+  'check-circle-2',
+  'chevron-down',
+  'external-link',
+  'info',
+  'search',
+  'settings-2',
+  'x',
+])
+
 function shouldDeferModulePreload(dep: string): boolean {
   return deferredModulePreloadPrefixes.some((prefix) => dep.includes(prefix))
 }
@@ -175,6 +187,7 @@ function manualChunks(id: string): string | undefined {
   if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
     const iconName = path.basename(normalized, '.js')
     if (authLoginIconNames.has(iconName)) return 'auth-login'
+    if (routeSharedIconNames.has(iconName)) return 'shared-icons'
     return appShellIconNames.has(iconName) ? 'app-shell-icons' : undefined
   }
   if (!id.includes('node_modules')) {

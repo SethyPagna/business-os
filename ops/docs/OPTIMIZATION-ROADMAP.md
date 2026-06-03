@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 749.
+- Latest completed implementation move in this roadmap: Move 750.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9674,3 +9674,43 @@ Move 749 status:
   first-window API reads. Next executable target: deeper chunk-size, delayed
   wake, and route-specific interaction paths instead of the now-collapsed
   branch/product startup waterfalls.
+
+Move 750 status:
+- Move 750 removes accidental first-window notification-center chunk loads by
+  splitting cross-route Lucide icons into `shared-icons` and tightening
+  notification wakeups to explicit notification-shaped events.
+  `vite.config.ts` now routes `alert-circle`, `alert-triangle`,
+  `check-circle-2`, `chevron-down`, `external-link`, `info`, `search`,
+  `settings-2`, and `x` into `shared-icons` instead of letting Rollup place
+  shared icon exports in `notification-center`; `App.tsx` no longer wakes the
+  notification center from bare inventory, sales, returns, or cache sync
+  events.
+- Proof: frontend utility tests, production build, `git diff --check`, Docker
+  release/update image `business-os:v6.0.0-202606032121`, route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T13-23-37-802Z.json`,
+  broad Phase 8.4 UI Playwright, public Cloudflare portal Playwright, and
+  storage pruning passed.
+- The Docker-served trace shows every traced route with `notification=none`.
+  Products, Inventory, POS, Sales, Returns, Contacts, and public_catalog use
+  the tiny `shared-icons-1LAsiUVr.js` chunk instead of the 18 KB notification
+  panel. Backup dropped from 31 to 29 requests and 27 to 25 scripts, and
+  Server dropped from 30 to 28 requests and 25 to 23 scripts. Ready timings
+  improved across the traced baseline: Products 294->252 ms, Inventory
+  333->275 ms, POS 327->280 ms, Backup 279->212 ms, Server 260->194 ms, with
+  zero failed requests and zero console/page errors.
+- Broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T13-24-40-995Z/report.json`
+  passed and still verified `notificationPanelVisible: true`, proving the
+  notification panel loads on click/use. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T13-24-41-519Z/report.json`
+  rendered 20 products, observed bootstrap/AI HTTP 200, and recorded zero
+  failed responses, console messages, or page errors. Storage pruning removed
+  615,296 bytes of old reports and 38.06 MB of Docker builder cache.
+- Current plan position after Move 750: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Main measured routes still have
+  two-or-fewer first-window API reads, and the next executable target is
+  route-specific chunk ownership for catalog, app-local-db, and
+  app-api-methods without moving live business data.

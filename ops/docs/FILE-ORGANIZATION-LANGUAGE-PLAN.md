@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 728 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 729 in this file.
 
 ## Goal
 
@@ -7093,6 +7093,25 @@ Decision rule:
     old reports, 4,827,993 bytes of old Docker-release backup data, and
     76.13 MB of Docker builder cache while preserving uploads, secrets, env
     files, current business data, images, volumes, and newest backups.
+
+729. Split cross-route notification icons from the notification-center chunk.
+    Done: `frontend/vite.config.ts` now routes cross-route Lucide icons shared
+    by NotificationCenter and feature pages into a focused `shared-icons`
+    chunk, and `frontend/src/App.tsx` wakes NotificationCenter only from
+    explicit notification-shaped events. This is a file/chunk-ownership move,
+    not a language/runtime conversion: the measured bottleneck was Rollup
+    ownership of common icons by the notification feature chunk.
+    `frontend/tests/performanceLoadingUx.test.ts` guards both the wake
+    predicate and the `shared-icons` manual chunk. Proof: frontend utility
+    tests, production build, Docker release/update image
+    `business-os:v6.0.0-202606032121`, route-load trace
+    `ops/runtime/reports/route-load-trace-2026-06-03T13-23-37-802Z.json`,
+    broad Phase 8.4 UI Playwright, public Cloudflare Playwright, storage
+    pruning, and `git diff --check` passed. Every traced route reported
+    `notification=none`; Backup and Server each dropped two first-window
+    script requests, while icon-using routes now fetch the 2.99 KB / 0.74 KB
+    gzip `shared-icons-1LAsiUVr.js` chunk instead of pulling the notification
+    panel.
 
 ## Safety Gates
 
