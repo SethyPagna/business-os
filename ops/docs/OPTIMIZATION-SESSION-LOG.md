@@ -2730,3 +2730,35 @@ Use this shape for future entries:
   chunks, while `/public` kept loading the public catalog chunks by design.
   Docker image `business-os:v6.0.0-202606040128` is serving frontend hash
   `604112e02c049f10`.
+
+- change: remove POS dependency on customer-management route code
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS first-route script window, customer panel, and
+  Contacts route compatibility
+- keeper or rollback: keeper; POS keeps customer contact-option parsing through
+  `parseStoredContactOptions(raw, { legacyField: 'address' })`, but no longer
+  imports the whole `CustomersTab` module to get that helper
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted a 1.48 kB
+  `contactOptionUtils-BSXveFTP.js` chunk, and compiled POS inspection showed
+  POS importing that chunk with no `CustomersTab` import.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-40-43-530Z.json`
+  measured POS at 281 ms route-ready with 33 requests and 25 scripts, down
+  from the prior focused trace's 42 requests and 34 scripts. POS and Contacts
+  both recorded zero failed requests and zero console/page errors. POS loaded
+  `contactOptionUtils-BSXveFTP.js` and no `CustomersTab`, `Contacts`, or
+  `CustomerFormModal` chunks.
+- interaction proof:
+  a Docker-served Playwright check opened POS, expanded the Customer panel,
+  filled `#pos-customer-search`, confirmed the input was visible, and recorded
+  zero failed requests, zero relevant console/page errors, loaded
+  `contactOptionUtils`, and no `CustomersTab`, `Contacts`, or
+  `CustomerFormModal`. Docker image `business-os:v6.0.0-202606040138` is
+  serving frontend hash `586f2e7f02c612bf`.

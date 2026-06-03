@@ -8,17 +8,17 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 756, isolate shared Khmer script typography into
-  its own tiny chunk so admin routes no longer wake public catalog preview code
+- Latest completed move: Move 757, remove POS's accidental dependency on
+  customer-management route code by using the lean contact-option utility
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `604112e02c049f10`
+- latest verified frontend hash from the most recent Docker-served live check: `586f2e7f02c612bf`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `22b8ad67754ff792`
+  `de0734a0ea4c9d1d`
 
 Latest verified reports:
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T17-31-19-384Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-40-43-530Z.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
@@ -90,11 +90,25 @@ Current honest pockets:
   753 is served by Docker release image `business-os:v6.0.0-202606040015`;
   Move 754 is served by Docker release image `business-os:v6.0.0-202606040046`;
   Move 755 is served by Docker release image `business-os:v6.0.0-202606040111`;
-  Move 756 is served by Docker release image `business-os:v6.0.0-202606040128`
+  Move 756 is served by Docker release image `business-os:v6.0.0-202606040128`;
+  Move 757 is served by Docker release image `business-os:v6.0.0-202606040138`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- POS no longer imports customer-management route code just to parse customer
+  contact options. `POS.tsx` uses `parseStoredContactOptions` from the lean
+  contact-option utility, and the startup guard prevents reintroducing a
+  `CustomersTab` import. Proof: Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-40-43-530Z.json`
+  measured POS at 281 ms route-ready with 33 requests and 25 scripts, down
+  from 42 requests and 34 scripts in the prior focused trace, with zero failed
+  requests and zero console/page errors. POS loaded
+  `contactOptionUtils-BSXveFTP.js` and no `CustomersTab`, `Contacts`, or
+  `CustomerFormModal` chunks. Docker release image
+  `business-os:v6.0.0-202606040138` serves frontend hash
+  `586f2e7f02c612bf`.
 
 - Shared Khmer script typography helpers now live in a dedicated
   `script-typography` chunk instead of being owned by public catalog preview.

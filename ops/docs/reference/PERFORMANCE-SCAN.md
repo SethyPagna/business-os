@@ -1762,4 +1762,15 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   confirmed Products, Inventory, and POS loaded `script-typography-avi8xpqd.js`
   and no `catalog-preview`, `catalog-ui`, or `catalog-display` chunks, while
   `/public` still loaded those catalog chunks by design.
+- Move 487 records roadmap Move 757: remove POS's accidental dependency on
+  customer-management route code. `POS.tsx` now imports
+  `parseStoredContactOptions` directly from `contactOptionUtils` and keeps a
+  local `parseContactOptions` wrapper for the customer option picker, while the
+  performance-loading guard prevents POS from importing `CustomersTab`.
+  Docker image `business-os:v6.0.0-202606040138` served the focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-40-43-530Z.json`: POS
+  was ready in 281 ms with 33 requests and 25 scripts, down from 42 requests
+  and 34 scripts in the prior focused trace, with zero failed requests and zero
+  console/page errors. POS loaded `contactOptionUtils-BSXveFTP.js` and no
+  `CustomersTab`, `Contacts`, or `CustomerFormModal` chunks.
 <!-- phase29-manual-notes:end -->

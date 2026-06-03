@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 756.
+- Latest completed implementation move in this roadmap: Move 757.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9914,3 +9914,35 @@ Move 756 status:
   continue using measured traces to split accidental cross-route ownership,
   delayed wakes, and repeated render loops without moving live business data or
   weakening offline fallback behavior.
+
+Move 757 status:
+- Move 757 removes the accidental POS dependency on the contacts/customer
+  management route chunk. POS now parses customer contact options through the
+  lean `contactOptionUtils` utility instead of importing `CustomersTab` just
+  for `parseContactOptions`, preserving customer option behavior without
+  pulling customer-management UI code into POS startup.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, production build, Docker release image
+  `business-os:v6.0.0-202606040138`, compiled POS chunk inspection, focused
+  POS/Contacts route-load Playwright trace, and a live POS customer-panel
+  interaction check.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-40-43-530Z.json`
+  measured POS at 281 ms route-ready with 33 requests and 25 scripts, down
+  from the prior focused trace's 42 requests and 34 scripts, with zero failed
+  requests and zero console/page errors. The request parse confirmed POS loaded
+  `contactOptionUtils-BSXveFTP.js`, did not load `CustomersTab`, `Contacts`,
+  or `CustomerFormModal`, and Contacts still loaded cleanly as its own route.
+- Interaction proof: a Docker-served Playwright check opened POS, expanded the
+  Customer panel, filled `#pos-customer-search`, confirmed the input was
+  visible, observed `contactOptionUtils` loaded, and recorded zero failed
+  requests, zero relevant console/page errors, and no `CustomersTab`,
+  `Contacts`, or `CustomerFormModal` chunks.
+- Current plan position after Move 757: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue using measured traces and real interactions to remove accidental
+  cross-route imports, delayed wakes, and repeated render loops without moving
+  live business data or weakening offline fallback behavior.

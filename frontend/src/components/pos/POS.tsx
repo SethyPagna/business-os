@@ -71,8 +71,7 @@ const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800
 const POS_FILTER_META_READY_DELAY_MS = 1800
 const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 1800
 
-// Customer contact-option helpers (mirrors CustomersTab)
-import { parseContactOptions } from '../contacts/CustomersTab'
+import { parseStoredContactOptions } from '../contacts/contactOptionUtils'
 import type { ContactOption } from '../contacts/contactOptionUtils'
 
 type AppSettings = Record<string, unknown> & {
@@ -99,6 +98,10 @@ type AppContextValue = {
 
 type SyncContextValue = {
   syncChannel?: { channel?: string; ts?: unknown } | null
+}
+
+function parseContactOptions(raw: unknown): ContactOption[] {
+  return parseStoredContactOptions(raw, { legacyField: 'address' })
 }
 
 type BranchRecord = {
