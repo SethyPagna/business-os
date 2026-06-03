@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 754.
+- Latest completed implementation move in this roadmap: Move 755.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9852,3 +9852,36 @@ Move 754 status:
   keep using measured live traces: identify remaining repeated render loops,
   delayed-wake opportunities, and route-specific chunk ownership without
   moving live business data or weakening offline fallback behavior.
+
+Move 755 status:
+- Move 755 intent-loads the public catalog language menu. The public catalog
+  preview now uses `LazyPortalMenu` for translation tools instead of rendering
+  `PortalMenu` through React.lazy during first route paint, so the shared
+  body-level menu positioning chunk stays out of the first public catalog
+  request window until the visitor opens the language button.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, JSX/source check, production build, Docker release image
+  `business-os:v6.0.0-202606040111`, focused Products/Inventory/POS/public
+  route-load Playwright trace, mobile public language-menu Playwright click,
+  and `git diff --check` passed.
+- The focused route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-14-07-644Z.json`
+  measured public_catalog at 229 ms route-ready with 28 requests and 23
+  scripts, down from 29 requests and 24 scripts in the prior trace. It records
+  zero failed requests, zero console/page errors, and no first-window
+  `shared-portal-menu` chunk. Products, Inventory, and POS stayed clean in the
+  same sweep.
+- The mobile interaction proof
+  `ops/runtime/reports/public-language-menu-live-check-2026-06-03T17-18-31-063Z/report.json`
+  opened `http://127.0.0.1:4000/public`, confirmed no `shared-portal-menu`
+  script before the language-button click, loaded
+  `shared-portal-menu-D4vj-XWE.js` at HTTP 200 after intent, rendered visible
+  language options, and recorded zero relevant console/page errors.
+- Current plan position after Move 755: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  keep using measured live traces and interaction proofs: continue trimming
+  first-window chunks, route-specific delayed wakes, and repeated render loops
+  without moving live business data or weakening offline fallback behavior.

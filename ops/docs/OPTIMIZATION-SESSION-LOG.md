@@ -2671,3 +2671,32 @@ Use this shape for future entries:
   196 ms route-ready, all with zero failed requests and zero console/page
   errors. Docker image `business-os:v6.0.0-202606040046` is serving frontend
   hash `745ad264d4801eff`.
+
+- change: intent-load public catalog language menu
+- affected files:
+  `frontend/src/components/catalog/CatalogPreviewSurface.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: public catalog first-route script window and the
+  public Language tools button
+- keeper or rollback: keeper; public translation controls still open on first
+  click, but the shared portal-menu positioning code now loads only after
+  language-button intent instead of during healthy first route paint
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-14-07-644Z.json`
+  measured public_catalog at 229 ms route-ready with 28 requests and 23
+  scripts, down from 29 requests and 24 scripts in the prior trace, with zero
+  failed requests, zero console/page errors, and no first-window
+  `shared-portal-menu` chunk. Products, Inventory, and POS stayed clean in the
+  same sweep.
+- interaction proof:
+  `ops/runtime/reports/public-language-menu-live-check-2026-06-03T17-18-31-063Z/report.json`
+  opened the Docker-served mobile public catalog, confirmed no
+  `shared-portal-menu` before the click, loaded
+  `shared-portal-menu-D4vj-XWE.js` at HTTP 200 after clicking Language tools,
+  rendered visible language options, and recorded zero relevant console/page
+  errors. Docker image `business-os:v6.0.0-202606040111` is serving frontend
+  hash `1fbc899a2010cd9d`.

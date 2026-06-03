@@ -6,8 +6,8 @@ import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import { ProductImg } from '../products/shared/primitives'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
 
-const PortalMenu = lazy(() => import('../shared/PortalMenu'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
 type CopyFunction = (key: string, fallback: string) => string
@@ -257,84 +257,70 @@ export default function CatalogPreviewSurface({
                   </div>
                   <div className="flex items-center gap-2">
                     {displayConfig.translateWidgetEnabled ? (
-                      <Suspense
-                        fallback={(
+                      <LazyPortalMenu
+                        align="right"
+                        trigger={(
                           <button
                             type="button"
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-400 shadow-sm dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-300"
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
                             aria-label={copy('publicTranslation', 'Language tools')}
                             title={copy('publicTranslation', 'Language tools')}
-                            disabled
                           >
                             <Globe className="h-4 w-4" />
                           </button>
                         )}
-                      >
-                        <PortalMenu
-                          align="right"
-                          trigger={(
-                            <button
-                              type="button"
-                              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200/80 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700/80 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                              aria-label={copy('publicTranslation', 'Language tools')}
-                              title={copy('publicTranslation', 'Language tools')}
-                            >
-                              <Globe className="h-4 w-4" />
-                            </button>
-                          )}
-                          content={({ closeMenu }) => (
-                            <div className="max-h-[min(70vh,22rem)] overflow-y-auto py-1">
-                              <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                                {copy('publicTranslation', 'Language tools')}
-                              </div>
-                              {allPublicTranslateOptions.map((option) => {
-                                const active = translateTarget === option.value && (
-                                  translateApplyState === 'applied'
-                                  || (option.value === 'original' && translateApplyState === 'idle')
-                                )
-                                return (
-                                  <button
-                                    key={option.value}
-                                    type="button"
-                                    className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
-                                      active
-                                        ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                                        : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
-                                    }`}
-                                    onClick={() => {
-                                      changeTranslateTarget(option.value)
-                                      closeMenu()
-                                    }}
-                                  >
-                                    <span>
-                                      {option.value === 'original'
-                                        ? copy('followApp', 'Original')
-                                        : option.kind === 'external'
-                                          ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
-                                          : option.label}
-                                    </span>
-                                    {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
-                                  </button>
-                                )
-                              })}
-                              {translateApplyMessage ? (
-                                <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-slate-700 ${
-                                  translateApplyState === 'failed'
-                                    ? 'text-rose-600 dark:text-rose-300'
-                                    : 'text-slate-500 dark:text-slate-400'
-                                }`}>
-                                  {translateApplyMessage}
-                                </div>
-                              ) : null}
-                              {externalTranslateTarget && !translateReady ? (
-                                <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
-                                  {copy('externalTranslationPreparing', 'Preparing external translation...')}
-                                </div>
-                              ) : null}
+                        content={({ closeMenu }) => (
+                          <div className="max-h-[min(70vh,22rem)] overflow-y-auto py-1">
+                            <div className="px-4 pb-2 pt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                              {copy('publicTranslation', 'Language tools')}
                             </div>
-                          )}
-                        />
-                      </Suspense>
+                            {allPublicTranslateOptions.map((option) => {
+                              const active = translateTarget === option.value && (
+                                translateApplyState === 'applied'
+                                || (option.value === 'original' && translateApplyState === 'idle')
+                              )
+                              return (
+                                <button
+                                  key={option.value}
+                                  type="button"
+                                  className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
+                                    active
+                                      ? 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                                      : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-800'
+                                  }`}
+                                  onClick={() => {
+                                    changeTranslateTarget(option.value)
+                                    closeMenu()
+                                  }}
+                                >
+                                  <span>
+                                    {option.value === 'original'
+                                      ? copy('followApp', 'Original')
+                                      : option.kind === 'external'
+                                        ? `${copy('externalTranslation', 'External translation')}: ${option.label}`
+                                        : option.label}
+                                  </span>
+                                  {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
+                                </button>
+                              )
+                            })}
+                            {translateApplyMessage ? (
+                              <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-slate-700 ${
+                                translateApplyState === 'failed'
+                                  ? 'text-rose-600 dark:text-rose-300'
+                                  : 'text-slate-500 dark:text-slate-400'
+                              }`}>
+                                {translateApplyMessage}
+                              </div>
+                            ) : null}
+                            {externalTranslateTarget && !translateReady ? (
+                              <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                                {copy('externalTranslationPreparing', 'Preparing external translation...')}
+                              </div>
+                            ) : null}
+                          </div>
+                        )}
+                      />
                     ) : null}
                     <button
                       type="button"

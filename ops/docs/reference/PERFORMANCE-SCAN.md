@@ -1737,4 +1737,17 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   measured Products 213 ms, Inventory 202 ms, POS 292 ms, and public_catalog
   196 ms route-ready, all with zero failed requests and zero console/page
   errors.
+- Move 485 records roadmap Move 755: intent-load the public catalog language
+  menu. `CatalogPreviewSurface.tsx` now uses `LazyPortalMenu` for translation
+  tools, and the performance-loading guard prevents reintroducing the
+  React.lazy `PortalMenu` first-route path. Docker image
+  `business-os:v6.0.0-202606040111` served the focused route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-14-07-644Z.json`:
+  public_catalog was ready in 229 ms with 28 requests and 23 scripts, zero
+  failed requests, zero console/page errors, and no first-window
+  `shared-portal-menu`. The mobile click proof
+  `ops/runtime/reports/public-language-menu-live-check-2026-06-03T17-18-31-063Z/report.json`
+  then loaded `shared-portal-menu-D4vj-XWE.js` only after the Language tools
+  click, rendered language options, and recorded zero relevant console/page
+  errors.
 <!-- phase29-manual-notes:end -->

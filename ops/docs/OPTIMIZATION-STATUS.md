@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 ## Phase Board
 
@@ -8,18 +8,17 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 754, memoize Inventory product and movement
-  filtering before grouping so unrelated UI state does not rebuild the same
-  search arrays, haystacks, filtered lists, and grouped movement sections
+- Latest completed move: Move 755, intent-load the public catalog language
+  menu so the shared portal-menu chunk loads only after language-button intent
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `745ad264d4801eff`
+- latest verified frontend hash from the most recent Docker-served live check: `1fbc899a2010cd9d`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `66f7cc8718a1628c`
+  `64215aac9afc8903`
 
 Latest verified reports:
 
@@ -32,11 +31,13 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T17-01-16-586Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-14-07-644Z.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
   `ops/runtime/reports/lazy-portal-menu-live-check-2026-06-03T16-20-20-068Z/report.json`
+- latest public language-menu interaction proof:
+  `ops/runtime/reports/public-language-menu-live-check-2026-06-03T17-18-31-063Z/report.json`
 - latest public portal load trace:
   `ops/runtime/reports/public-load-trace-latest.json`
 - latest top-route load trace:
@@ -87,11 +88,26 @@ Current honest pockets:
   served by Docker release image `business-os:v6.0.0-202606031937`; Move 747
   is served by Docker release image `business-os:v6.0.0-202606031954`; Move
   753 is served by Docker release image `business-os:v6.0.0-202606040015`;
-  Move 754 is served by Docker release image `business-os:v6.0.0-202606040046`
+  Move 754 is served by Docker release image `business-os:v6.0.0-202606040046`;
+  Move 755 is served by Docker release image `business-os:v6.0.0-202606040111`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Public catalog translation tools now use `LazyPortalMenu`, keeping
+  `shared-portal-menu` out of the first public catalog route window until a
+  visitor opens the language button. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T17-14-07-644Z.json`
+  measured public_catalog at 229 ms route-ready with 28 requests and 23
+  scripts, down from 29 requests and 24 scripts in the prior trace, with zero
+  failed requests, zero console/page errors, and no first-window
+  `shared-portal-menu` chunk. The mobile click proof
+  `ops/runtime/reports/public-language-menu-live-check-2026-06-03T17-18-31-063Z/report.json`
+  loaded `shared-portal-menu-D4vj-XWE.js` only after clicking Language tools,
+  rendered visible language options, and recorded zero relevant console/page
+  errors. Docker release image `business-os:v6.0.0-202606040111` serves the
+  verified runtime.
 
 - Inventory now memoizes the product and movement filter loops before building
   visible product sections and grouped movement history. `searchTerms`,
