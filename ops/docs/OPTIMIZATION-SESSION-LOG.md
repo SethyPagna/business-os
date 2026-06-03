@@ -2274,3 +2274,49 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: defer Inventory action-history and admin user reads out of first
+  route window
+- affected files:
+  `frontend/src/components/inventory/Inventory.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Inventory first route load,
+  `/api/action-history?scope=inventory...`, `/api/users`, `/api/branches`,
+  and `/api/inventory/products/search`
+- keeper or rollback: keeper; Inventory still records local undo/redo actions
+  immediately, the movement filter's on-demand user loader is unchanged, and
+  the server history/user option reads wake after the first inventory data load
+  settles
+- route-scoped result: `ops/runtime/reports/route-load-trace-latest.json`
+  compared Inventory, Products, POS, and Server. Inventory dropped from 43 to
+  41 total requests and from 5 to 3 first-window API requests by moving
+  `/api/users` and `/api/action-history?scope=inventory...` out of the initial
+  route window. The post-change Inventory trace had zero failed requests and
+  zero console/page errors.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-39-02-233Z/summary.json`
+  covered desktop/mobile Inventory, Products, POS, and Server, discovered 165
+  controls, exercised 122 controls, intentionally skipped 43 stable
+  broad-audit guardrail controls, captured 16 screenshots, and recorded zero
+  failed controls and zero findings.
+- warm whole-app result: frontend utility tests, JSX/source check, production
+  build, Docker release build/update, local `/health`, local
+  `/business-os-build.json`, public Cloudflare Playwright, focused Playwright
+  route-load trace, and full all-pages desktop/mobile Playwright passed. Docker
+  image `business-os:v6.0.0-202606031535` is serving build hash
+  `beab212aef40e70f`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-153751`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-41-43-994Z/summary.json`
+  covered 34 routes, discovered 519 visible controls, exercised 378 controls,
+  intentionally skipped 141 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-41-40-527Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.

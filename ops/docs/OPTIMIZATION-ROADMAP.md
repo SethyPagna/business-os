@@ -9248,3 +9248,47 @@ Move 735 status:
   history/users immediately, so it is the next smallest route-scoped
   deferral. POS still loads contacts and metadata alongside the product search;
   continue only after proving which reads are non-critical to first paint.
+
+Move 736 status:
+- Move 736 applies the same post-ready action-history gate to Inventory.
+  Inventory still loads authenticated bootstrap, branch options, and the first
+  inventory product search immediately; only server action-history rows and
+  admin user options from the shared history bar move out of the initial route
+  window. The movement filter's separate on-demand user loader is unchanged.
+- `frontend/src/components/inventory/Inventory.tsx` now uses
+  `INVENTORY_HISTORY_READY_DELAY_MS` and passes `enabled: historyReady` into
+  `useActionHistory({ limit: 10, notify, scope: 'inventory', ... })`. Local
+  undo/redo recording remains available because `pushAction()` still records
+  real inventory mutations immediately, while automatic server history and
+  user option reads wake shortly after the first inventory load settles.
+- Docker release image `business-os:v6.0.0-202606031535` is serving frontend
+  hash `beab212aef40e70f`; update backup:
+  `ops/runtime/docker-release/backups/20260603-153751`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `71850d9d7d957ec6`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, local health/build metadata, focused route-load trace,
+  focused Inventory/Products/POS/Server route-control audit, public Cloudflare
+  portal Playwright, and full desktop/mobile all-pages Playwright passed. The
+  focused route-load trace `ops/runtime/reports/route-load-trace-latest.json`
+  shows Inventory reduced from 43 to 41 total requests and from 5 to 3
+  first-window API requests, with zero failed requests and zero console/page
+  errors. The post-change first-window API list is `/api/auth/bootstrap`,
+  `/api/branches`, and `/api/inventory/products/search...`.
+- The focused route-control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-39-02-233Z/summary.json`
+  exercised 122 controls across desktop/mobile Inventory, Products, POS, and
+  Server with zero failures and zero findings. The exhaustive all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-41-43-994Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 378, skipped 141 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-41-40-527Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Next candidate from the latest measured trace: POS still has 7 API calls in
+  the first window. It loads branches, categories, product search, customers,
+  delivery contacts, and product filters alongside bootstrap. Continue by
+  proving which POS reads can move after cart-first usability without breaking
+  customer, delivery, discount, and checkout flows.

@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 735, defer Products action-history/user reads out of first route window
+- Latest completed move: Move 736, defer Inventory action-history/user reads out of first route window
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `f3aa7ba4ab674f79`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `beab212aef40e70f`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `ea98ec4a4768b9a8`
+  `71850d9d7d957ec6`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-22-24-340Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-41-43-994Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-22-20-564Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T07-41-40-527Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -55,8 +55,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `f3aa7ba4ab674f79` across 34 routes, with 519 visible controls
-  discovered, 381 controls exercised, 138 intentionally skipped by stable
+  build hash `beab212aef40e70f` across 34 routes, with 519 visible controls
+  discovered, 378 controls exercised, 141 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -69,13 +69,29 @@ Current honest pockets:
   and all HTTP 200
 - public Cloudflare portal check passed with 20 rendered products, zero failed
   responses, zero relevant console messages, zero page errors, and enforced CSP
-- Docker release image `business-os:v6.0.0-202606031516` is serving the
+- Docker release image `business-os:v6.0.0-202606031535` is serving the
   verified build; the release update created backup
-  `ops/runtime/docker-release/backups/20260603-151830`
+  `ops/runtime/docker-release/backups/20260603-153751`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Inventory first-load now defers non-critical server action-history and admin
+  user-option reads until after the inventory products list is useful. The
+  route still loads authenticated bootstrap, branch options, and the first
+  inventory product search immediately, but it no longer starts `/api/users` or
+  `/api/action-history?scope=inventory...` in the first visible route window.
+  Proof: `ops/runtime/reports/route-load-trace-latest.json` shows Inventory
+  with 41 total requests, 3 API requests, zero failed requests, and zero
+  console/page errors. The first-window API list is now `/api/auth/bootstrap`,
+  `/api/branches`, and `/api/inventory/products/search...`. The focused
+  Inventory/Products/POS/Server route-control audit passed with 122 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-39-02-233Z/summary.json`;
+  the exhaustive all-pages audit passed across 34 routes with 378 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-41-43-994Z/summary.json`.
 
 - Products first-load now defers non-critical server action-history and admin
   user-option reads until after the product list is useful. The route still

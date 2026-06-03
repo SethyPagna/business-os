@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T07:30:41.902Z
+Generated: 2026-06-03T07:49:56.233Z
 
 ## Summary
 
@@ -63,11 +63,11 @@ Generated: 2026-06-03T07:30:41.902Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 9251 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9295 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
-| frontend/src/components/inventory/Inventory.tsx | 4289 | frontend/components/inventory |
+| frontend/src/components/inventory/Inventory.tsx | 4305 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3529 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3407 | ops/docs/reference |
@@ -76,9 +76,9 @@ Generated: 2026-06-03T07:30:41.902Z
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2384 | frontend/components/products |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
-| frontend/tests/performanceLoadingUx.test.ts | 2338 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2342 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2323 | ops/docs |
 | frontend/src/components/pos/POS.tsx | 2281 | frontend/components/pos |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2277 | ops/docs |
 | backend/src/routes/products.ts | 2218 | backend/routes |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |

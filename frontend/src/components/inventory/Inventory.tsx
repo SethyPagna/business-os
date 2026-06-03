@@ -26,6 +26,9 @@ const InventoryImportModal = lazy(() => import('./InventoryImportModal')) as any
 const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface')) as any
 const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface')) as any
 const InventoryProductsSurfaceLegacy = InventoryProductsSurface as any
+
+const INVENTORY_HISTORY_READY_DELAY_MS = 1800
+
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -479,6 +482,7 @@ export default function Inventory() {
   const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
   const [savingReasons, setSavingReasons] = useState(false)
+  const [historyReady, setHistoryReady] = useState(false)
   const movementSelectAllRef = useRef<HTMLInputElement | null>(null)
   const inventorySelectAllRef = useRef<HTMLInputElement | null>(null)
   const loadRequestRef = useRef(0)
@@ -495,7 +499,7 @@ export default function Inventory() {
   const moveStockInFlightRef = useRef(false)
   const transferStockInFlightRef = useRef(false)
   const batchInventoryInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory' })
+  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady })
   const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
     withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
@@ -897,6 +901,7 @@ export default function Inventory() {
 
   useEffect(() => {
     if (!isActive) {
+      setHistoryReady(false)
       if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
@@ -906,6 +911,17 @@ export default function Inventory() {
     }
     load(loadedOnceRef.current)
   }, [isActive, load])
+  useEffect(() => {
+    if (!isActive) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, INVENTORY_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
   useEffect(() => {
     if (!isActive || typeof window === 'undefined') return
     const raw = window.sessionStorage.getItem(DASHBOARD_INVENTORY_FOCUS_KEY)

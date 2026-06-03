@@ -1416,4 +1416,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 519 controls, exercised 381, skipped 138 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 466 records roadmap Move 736: defer Inventory action-history and admin
+  user-option reads out of the first route window. `Inventory` now waits on
+  `INVENTORY_HISTORY_READY_DELAY_MS` before enabling server action history,
+  while preserving immediate bootstrap, branches, inventory product search,
+  the movement filter's on-demand user loader, and local undo/redo recording
+  for real inventory writes. Docker-served build hash `beab212aef40e70f`
+  passed frontend utility tests, JSX/source check, production build, Docker
+  release/update, focused route-load trace, focused Inventory/Products/POS/
+  Server route-control audit, public Cloudflare Playwright, and full
+  desktop/mobile all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-latest.json` reduced Inventory
+  first-window API requests from 5 to 3 and total requests from 43 to 41, with
+  zero failed requests and zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T07-41-43-994Z/summary.json`
+  covered 34 routes, discovered 519 controls, exercised 378, skipped 141 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

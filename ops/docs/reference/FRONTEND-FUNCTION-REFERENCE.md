@@ -1405,29 +1405,29 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getInventoryApi` | function | 188 |
-| 2 | `normalizeFiniteIds` | function | 222 |
-| 3 | `countActiveFlags` | function | 226 |
-| 4 | `countSelectedIds` | function | 234 |
-| 5 | `renderDestinationProductOptions` | function | 242 |
-| 6 | `limitInventorySectionsForMobile` | function | 253 |
-| 7 | `priceCsv` | function | 280 |
-| 8 | `parseInventoryTimestamp` | function | 284 |
-| 9 | `InventoryDiscountBadge` | function | 298 |
-| 10 | `InventoryBatchPreview` | function | 309 |
-| 11 | `label` | const arrow | 321 |
-| 12 | `loadInventoryExportTools` | function | 376 |
-| 13 | `Inventory` | component/function | 391 |
-| 14 | `promise` | const arrow | 634 |
-| 15 | `handleAdjust` | const arrow | 1000 |
-| 16 | `openAdjust` | const arrow | 1082 |
-| 17 | `openMove` | const arrow | 1089 |
-| 18 | `openTransfer` | const arrow | 1112 |
-| 19 | `handleMoveStock` | const arrow | 1167 |
-| 20 | `handleTransferStock` | const arrow | 1240 |
-| 21 | `syncViewport` | const arrow | 1397 |
-| 22 | `statsValue` | const arrow | 2016 |
-| 23 | `selectInventorySection` | const arrow | 3239 |
+| 1 | `getInventoryApi` | function | 191 |
+| 2 | `normalizeFiniteIds` | function | 225 |
+| 3 | `countActiveFlags` | function | 229 |
+| 4 | `countSelectedIds` | function | 237 |
+| 5 | `renderDestinationProductOptions` | function | 245 |
+| 6 | `limitInventorySectionsForMobile` | function | 256 |
+| 7 | `priceCsv` | function | 283 |
+| 8 | `parseInventoryTimestamp` | function | 287 |
+| 9 | `InventoryDiscountBadge` | function | 301 |
+| 10 | `InventoryBatchPreview` | function | 312 |
+| 11 | `label` | const arrow | 324 |
+| 12 | `loadInventoryExportTools` | function | 379 |
+| 13 | `Inventory` | component/function | 394 |
+| 14 | `promise` | const arrow | 638 |
+| 15 | `handleAdjust` | const arrow | 1016 |
+| 16 | `openAdjust` | const arrow | 1098 |
+| 17 | `openMove` | const arrow | 1105 |
+| 18 | `openTransfer` | const arrow | 1128 |
+| 19 | `handleMoveStock` | const arrow | 1183 |
+| 20 | `handleTransferStock` | const arrow | 1256 |
+| 21 | `syncViewport` | const arrow | 1413 |
+| 22 | `statsValue` | const arrow | 2032 |
+| 23 | `selectInventorySection` | const arrow | 3255 |
 
 ### 3.86 `frontend/src/components/inventory/InventoryImportModal.tsx`
 
