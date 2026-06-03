@@ -31,6 +31,7 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
+const SUPPLIERS_HISTORY_READY_DELAY_MS = 1800
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -289,10 +290,11 @@ function SuppliersTab({ t, notify, active = true }: SuppliersTabProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [groupMode, setGroupMode] = useState<SupplierGroupMode>('time')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
+  const [historyReady, setHistoryReady] = useState(false)
   const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
   const supplierQuery = useMemo(() => ({
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
@@ -495,6 +497,7 @@ function SuppliersTab({ t, notify, active = true }: SuppliersTabProps) {
 
   useEffect(() => {
     if (!active) {
+      setHistoryReady(false)
       clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
@@ -508,6 +511,17 @@ function SuppliersTab({ t, notify, active = true }: SuppliersTabProps) {
       loadPromiseRef.current = null
     }
   }, [active, clearLoadWatchdog, load])
+  useEffect(() => {
+    if (!active) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, SUPPLIERS_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [active, loading])
   useEffect(() => {
     if (!active || syncChannelName !== 'suppliers') return
     load({ silent: true, label: 'Suppliers refresh' })

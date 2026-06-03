@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T10:58:45.149Z
+Generated: 2026-06-03T11:17:46.005Z
 
 ## Summary
 
@@ -74,8 +74,8 @@ Generated: 2026-06-03T10:58:45.149Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2562 | ops/docs |
-| frontend/tests/performanceLoadingUx.test.ts | 2511 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2573 | ops/docs |
+| frontend/tests/performanceLoadingUx.test.ts | 2515 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/products/Products.tsx | 2450 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2382 | frontend/components/pos |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |

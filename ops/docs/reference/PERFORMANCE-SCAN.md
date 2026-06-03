@@ -77,28 +77,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
-| `frontend/dist/assets/catalog-B60yj366.js` | 191.1 |
+| `frontend/dist/assets/catalog-BhxBcQzB.js` | 191.1 |
 | `frontend/dist/assets/index-Cw6aCC7m.css` | 152.6 |
-| `frontend/dist/assets/Inventory-FFnAsznV.js` | 144.3 |
+| `frontend/dist/assets/Inventory-CCnKFFpa.js` | 144.3 |
 | `frontend/dist/assets/lang-en-CsN37MFf.js` | 125.2 |
-| `frontend/dist/assets/Products-DIIhhm3L.js` | 95.7 |
-| `frontend/dist/assets/POS-B37hN8ps.js` | 79.6 |
-| `frontend/dist/assets/catalog-editor-DBY0j5w_.js` | 73.5 |
+| `frontend/dist/assets/Products-B3jjMoBf.js` | 95.7 |
+| `frontend/dist/assets/POS-BaWGfas-.js` | 79.6 |
+| `frontend/dist/assets/catalog-editor-KU5FyDQv.js` | 73.5 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/Dashboard-DBlYtWT4.js` | 72.0 |
-| `frontend/dist/assets/app-shared-J9vn_DZt.js` | 69.4 |
-| `frontend/dist/assets/BulkImportModal-DJw__-d5.js` | 68.6 |
-| `frontend/dist/assets/catalog-preview-Bw_pazIa.js` | 67.5 |
-| `frontend/dist/assets/Backup-fdRYkdpw.js` | 60.7 |
-| `frontend/dist/assets/app-api-methods-Dip_Us_E.js` | 59.4 |
-| `frontend/dist/assets/Settings-BTK3fjhB.js` | 53.7 |
-| `frontend/dist/assets/index-BoXkwfPp.js` | 50.3 |
-| `frontend/dist/assets/UserProfileModal-Dw_oN-K2.js` | 43.5 |
-| `frontend/dist/assets/Users-B9Iwuwnc.js` | 41.5 |
-| `frontend/dist/assets/ReceiptSettings-BWMSVjSU.js` | 40.3 |
-| `frontend/dist/assets/Branches-DvkVE-Mb.js` | 39.0 |
-| `frontend/dist/assets/Sales-l0CILqIM.js` | 35.4 |
-| `frontend/dist/assets/AuditLog-1q-uIXBH.js` | 34.8 |
+| `frontend/dist/assets/Dashboard-CFNL8Z-8.js` | 72.0 |
+| `frontend/dist/assets/app-shared-BDVljYdQ.js` | 69.4 |
+| `frontend/dist/assets/BulkImportModal-Bp_JaFjv.js` | 68.6 |
+| `frontend/dist/assets/catalog-preview-ChLmJNT0.js` | 67.5 |
+| `frontend/dist/assets/Backup-BrjIohr5.js` | 60.7 |
+| `frontend/dist/assets/app-api-methods-C9p3WUE0.js` | 59.4 |
+| `frontend/dist/assets/Settings-wmbValIy.js` | 53.7 |
+| `frontend/dist/assets/index-C9he5ABc.js` | 50.3 |
+| `frontend/dist/assets/UserProfileModal-jybkHlu-.js` | 43.5 |
+| `frontend/dist/assets/Users-nD411-8c.js` | 41.5 |
+| `frontend/dist/assets/ReceiptSettings-CQGNdMLg.js` | 40.3 |
+| `frontend/dist/assets/Branches-BrrPOKGz.js` | 39.0 |
+| `frontend/dist/assets/Sales-DjpZLLq1.js` | 35.4 |
+| `frontend/dist/assets/AuditLog-BCK9Pusj.js` | 34.8 |
 
 ## 5. Notes
 
@@ -1559,6 +1559,25 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   report
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-50-19-615Z/summary.json`
   covered 34 routes, discovered 518 controls, exercised 371, skipped 147 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
+- Move 474 records roadmap Move 744: defer Contacts server action-history and
+  admin user-option reads out of the first route window. `CustomersTab`,
+  `SuppliersTab`, and `DeliveryTab` now wait for their first contact data load
+  to settle, then enable `useActionHistory` behind a 1.8 s post-ready gate,
+  keeping local undo/redo action pushes intact while moving `/api/users` and
+  `/api/action-history...` after route-ready. Docker-served build hash
+  `2e7905d575e826a0` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, delayed
+  history wake trace, focused Contacts route-control audit, public Cloudflare
+  Playwright, and full desktop/mobile all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-06-34-317Z.json` reduced
+  Contacts first-window API requests from 4 to 2 and total requests from 41 to
+  39, with zero failed requests and zero console/page errors. The delayed trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-06-34-357Z.json` proved
+  `/api/users` and `/api/action-history...` wake around 2.6 s. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 369, skipped 149 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
 <!-- phase29-manual-notes:end -->

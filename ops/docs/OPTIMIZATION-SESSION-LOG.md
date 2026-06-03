@@ -34,18 +34,29 @@ This is a concise running log of what actually happened in recent sessions.
     at 2 API requests, and Users at 3 API requests, while a longer trace proves
     server history wakes around 2.1-2.3 s after navigation
 
+- Contacts action-history deferral
+  - route: `contacts`
+  - result: kept
+  - note: moved `/api/users` and `/api/action-history...` out of the Contacts
+    route-ready batch by giving Customers, Suppliers, and Delivery the same
+    post-ready history gate; Docker-served route trace now shows Contacts at
+    39 total requests, 2 API requests, zero failed requests, and zero console/
+    page errors, while a longer trace proves history wakes around 2.6 s
+
 ### Verification
 
 - Frontend `test:utils`, `check:jsx`, and production build passed.
-- Docker release image `business-os:v6.0.0-202606031841` is healthy on
-  `http://127.0.0.1:4000/health` with frontend hash `211a8ad974753d8e`.
+- Docker release image `business-os:v6.0.0-202606031903` is healthy on
+  `http://127.0.0.1:4000/health` with frontend hash `2e7905d575e826a0`.
+- Focused Contacts desktop/mobile control audit passed with 23 tested controls
+  and zero failures.
 - Focused Backup/Files/Users/Server control audit passed with 50 tested
   controls and zero failures.
 - Focused Branches/Products/POS/Inventory/Server control audit passed with 144
   tested controls and zero failures.
 - Prior focused Products/POS/Inventory/Server control audit passed with 123 tested
   controls and zero failures.
-- Exhaustive desktop/mobile all-pages control audit passed with 371 tested
+- Exhaustive desktop/mobile all-pages control audit passed with 369 tested
   controls and zero failures.
 - Public Cloudflare portal check passed with 20 rendered products and no
   relevant console/page errors.

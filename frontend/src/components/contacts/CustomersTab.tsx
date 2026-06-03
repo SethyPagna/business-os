@@ -29,6 +29,8 @@ import {
 import type { ContactOption } from './contactOptionUtils'
 import { generateCustomerMembershipNumber } from './customerMembershipNumber'
 
+const CUSTOMERS_HISTORY_READY_DELAY_MS = 1800
+
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
 type ContactModal = 'form' | 'import' | 'detail' | null
@@ -431,7 +433,7 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
     if (!loadedOnceRef.current || loading) return undefined
     const timer = window.setTimeout(() => {
       setHistoryReady(true)
-    }, 250)
+    }, CUSTOMERS_HISTORY_READY_DELAY_MS)
     return () => window.clearTimeout(timer)
   }, [active, loading])
 

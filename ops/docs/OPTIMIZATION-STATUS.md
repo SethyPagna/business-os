@@ -8,27 +8,27 @@ Last updated: 2026-06-03
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 743, defer Files, Users, and Backup action-history reads out of first route window
+- Latest completed move: Move 744, defer Contacts action-history reads out of first route window
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served all-pages live check: `211a8ad974753d8e`
+- latest verified frontend hash from the most recent Docker-served all-pages live check: `2e7905d575e826a0`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `e50a88741a7a1bc2`
+  `f8b8792ae545cb84`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest exhaustive desktop/mobile all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T10-50-19-615Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-02T19-20-44-127Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T10-45-02-459Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T11-07-11-097Z/report.json`
 - latest focused route-load trace:
   `ops/runtime/reports/route-load-trace-latest.json`
 - latest public portal load trace:
@@ -55,8 +55,8 @@ Latest cleanup run:
 Current honest pockets:
 
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
-  build hash `211a8ad974753d8e` across 34 routes, with 518 visible controls
-  discovered, 371 controls exercised, 147 intentionally skipped by stable
+  build hash `2e7905d575e826a0` across 34 routes, with 518 visible controls
+  discovered, 369 controls exercised, 149 intentionally skipped by stable
   broad-audit guardrails, 68 screenshots, zero failed controls, and zero
   findings
 - public catalog route-ready timing is now measured without waiting for
@@ -73,12 +73,34 @@ Current honest pockets:
   verified build from Move 740; Move 741 is served by Docker release image
   `business-os:v6.0.0-202606031752`; Move 742 is served by Docker release
   image `business-os:v6.0.0-202606031814`; Move 743 is served by Docker
-  release image `business-os:v6.0.0-202606031841`, and the release update
-  created backup `ops/runtime/docker-release/backups/20260603-184306`
+  release image `business-os:v6.0.0-202606031841`; Move 744 is served by
+  Docker release image `business-os:v6.0.0-202606031903`, and the release
+  update created backup `ops/runtime/docker-release/backups/20260603-190546`
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
+
+- Contacts first-load now defers server action-history and admin user-option
+  reads until after the first visible contact list is useful. The default
+  Customers tab still loads authenticated bootstrap and the customer page
+  immediately; Customers, Suppliers, and Delivery tabs now all use the same
+  post-ready history gate so tab switches do not pull server history before
+  the contact data settles. Proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-06-34-317Z.json` shows
+  Contacts with 39 total requests, 2 API requests, zero failed requests, and
+  zero console/page errors. The first-window API list is now
+  `/api/auth/bootstrap` and `/api/customers?...includePoints=1`. A longer
+  3200 ms trace at
+  `ops/runtime/reports/route-load-trace-2026-06-03T11-06-34-357Z.json` proved
+  delayed `/api/users` and `/api/action-history...` wake around 2.6 s after
+  navigation, outside the route-ready window. The focused Contacts desktop/
+  mobile route-control audit passed with 23 exercised controls and zero
+  findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-06-34-415Z/summary.json`;
+  the exhaustive all-pages audit passed across 34 routes with 369 exercised
+  controls and zero findings at
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T11-07-36-285Z/summary.json`.
 
 - Files, Users, and Backup first-load now defer non-critical server
   action-history reads until after the page is useful. Backup first-window API

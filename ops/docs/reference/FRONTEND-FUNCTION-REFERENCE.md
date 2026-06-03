@@ -1166,52 +1166,52 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getCustomerApi` | function | 121 |
-| 2 | `isSectionRow` | function | 126 |
-| 3 | `normalizeCustomerRows` | function | 130 |
-| 4 | `getApiListPayload` | function | 137 |
-| 5 | `getErrorMessage` | function | 141 |
-| 6 | `formatPoints` | function | 145 |
-| 7 | `tr` | function | 157 |
-| 8 | `CustomersTab` | function | 166 |
-| 9 | `toggleSectionCollapsed` | const arrow | 329 |
-| 10 | `isSectionFullySelected` | const arrow | 335 |
-| 11 | `isSectionPartiallySelected` | const arrow | 336 |
-| 12 | `toggleSectionSelection` | const arrow | 337 |
-| 13 | `promise` | const arrow | 371 |
-| 14 | `handleSave` | const arrow | 458 |
-| 15 | `handleDelete` | const arrow | 535 |
-| 16 | `handleBulkDelete` | const arrow | 574 |
+| 1 | `getCustomerApi` | function | 123 |
+| 2 | `isSectionRow` | function | 128 |
+| 3 | `normalizeCustomerRows` | function | 132 |
+| 4 | `getApiListPayload` | function | 139 |
+| 5 | `getErrorMessage` | function | 143 |
+| 6 | `formatPoints` | function | 147 |
+| 7 | `tr` | function | 159 |
+| 8 | `CustomersTab` | function | 168 |
+| 9 | `toggleSectionCollapsed` | const arrow | 331 |
+| 10 | `isSectionFullySelected` | const arrow | 337 |
+| 11 | `isSectionPartiallySelected` | const arrow | 338 |
+| 12 | `toggleSectionSelection` | const arrow | 339 |
+| 13 | `promise` | const arrow | 373 |
+| 14 | `handleSave` | const arrow | 460 |
+| 15 | `handleDelete` | const arrow | 537 |
+| 16 | `handleBulkDelete` | const arrow | 576 |
 
 ### 3.69 `frontend/src/components/contacts/DeliveryTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getDeliveryApi` | function | 116 |
-| 2 | `normalizeDeliveryRows` | function | 121 |
-| 3 | `isSectionRow` | function | 129 |
-| 4 | `getErrorMessage` | function | 133 |
-| 5 | `BLANK_OPTION` | const arrow | 150 |
-| 6 | `OptionEditor` | function | 161 |
-| 7 | `set` | const arrow | 162 |
-| 8 | `fieldId` | const arrow | 163 |
-| 9 | `DeliveryForm` | function | 208 |
-| 10 | `set` | const arrow | 217 |
-| 11 | `addOption` | const arrow | 218 |
-| 12 | `updateOption` | const arrow | 222 |
-| 13 | `removeOption` | const arrow | 223 |
-| 14 | `handleSave` | const arrow | 224 |
-| 15 | `OptionsDisplay` | function | 294 |
-| 16 | `OptionsBadge` | function | 311 |
-| 17 | `DeliveryTab` | function | 322 |
-| 18 | `toggleSectionCollapsed` | const arrow | 462 |
-| 19 | `isSectionFullySelected` | const arrow | 468 |
-| 20 | `isSectionPartiallySelected` | const arrow | 469 |
-| 21 | `toggleSectionSelection` | const arrow | 470 |
-| 22 | `promise` | const arrow | 502 |
-| 23 | `handleSave` | const arrow | 564 |
-| 24 | `handleDelete` | const arrow | 626 |
-| 25 | `handleBulkDelete` | const arrow | 663 |
+| 1 | `getDeliveryApi` | function | 117 |
+| 2 | `normalizeDeliveryRows` | function | 122 |
+| 3 | `isSectionRow` | function | 130 |
+| 4 | `getErrorMessage` | function | 134 |
+| 5 | `BLANK_OPTION` | const arrow | 151 |
+| 6 | `OptionEditor` | function | 162 |
+| 7 | `set` | const arrow | 163 |
+| 8 | `fieldId` | const arrow | 164 |
+| 9 | `DeliveryForm` | function | 209 |
+| 10 | `set` | const arrow | 218 |
+| 11 | `addOption` | const arrow | 219 |
+| 12 | `updateOption` | const arrow | 223 |
+| 13 | `removeOption` | const arrow | 224 |
+| 14 | `handleSave` | const arrow | 225 |
+| 15 | `OptionsDisplay` | function | 295 |
+| 16 | `OptionsBadge` | function | 312 |
+| 17 | `DeliveryTab` | function | 323 |
+| 18 | `toggleSectionCollapsed` | const arrow | 464 |
+| 19 | `isSectionFullySelected` | const arrow | 470 |
+| 20 | `isSectionPartiallySelected` | const arrow | 471 |
+| 21 | `toggleSectionSelection` | const arrow | 472 |
+| 22 | `promise` | const arrow | 504 |
+| 23 | `handleSave` | const arrow | 578 |
+| 24 | `handleDelete` | const arrow | 640 |
+| 25 | `handleBulkDelete` | const arrow | 677 |
 
 ### 3.70 `frontend/src/components/contacts/shared.tsx`
 
@@ -1225,26 +1225,26 @@ Total files documented: **234**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getSupplierApi` | function | 119 |
-| 2 | `normalizeSupplierRows` | function | 124 |
-| 3 | `isSectionRow` | function | 132 |
-| 4 | `getErrorMessage` | function | 136 |
-| 5 | `SupplierForm` | function | 147 |
-| 6 | `set` | const arrow | 163 |
-| 7 | `addOption` | const arrow | 164 |
-| 8 | `updateOption` | const arrow | 168 |
-| 9 | `removeOption` | const arrow | 169 |
-| 10 | `handleSubmit` | const arrow | 170 |
-| 11 | `fieldId` | const arrow | 218 |
-| 12 | `SuppliersTab` | function | 264 |
-| 13 | `toggleSectionCollapsed` | const arrow | 411 |
-| 14 | `isSectionFullySelected` | const arrow | 417 |
-| 15 | `isSectionPartiallySelected` | const arrow | 418 |
-| 16 | `toggleSectionSelection` | const arrow | 419 |
-| 17 | `promise` | const arrow | 453 |
-| 18 | `handleSave` | const arrow | 516 |
-| 19 | `handleDelete` | const arrow | 586 |
-| 20 | `handleBulkDelete` | const arrow | 625 |
+| 1 | `getSupplierApi` | function | 120 |
+| 2 | `normalizeSupplierRows` | function | 125 |
+| 3 | `isSectionRow` | function | 133 |
+| 4 | `getErrorMessage` | function | 137 |
+| 5 | `SupplierForm` | function | 148 |
+| 6 | `set` | const arrow | 164 |
+| 7 | `addOption` | const arrow | 165 |
+| 8 | `updateOption` | const arrow | 169 |
+| 9 | `removeOption` | const arrow | 170 |
+| 10 | `handleSubmit` | const arrow | 171 |
+| 11 | `fieldId` | const arrow | 219 |
+| 12 | `SuppliersTab` | function | 265 |
+| 13 | `toggleSectionCollapsed` | const arrow | 413 |
+| 14 | `isSectionFullySelected` | const arrow | 419 |
+| 15 | `isSectionPartiallySelected` | const arrow | 420 |
+| 16 | `toggleSectionSelection` | const arrow | 421 |
+| 17 | `promise` | const arrow | 455 |
+| 18 | `handleSave` | const arrow | 530 |
+| 19 | `handleDelete` | const arrow | 600 |
+| 20 | `handleBulkDelete` | const arrow | 639 |
 
 ### 3.72 `frontend/src/components/custom-tables/CustomTables.tsx`
 

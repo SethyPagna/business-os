@@ -32,6 +32,7 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
+const DELIVERY_HISTORY_READY_DELAY_MS = 1800
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -347,10 +348,11 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [groupMode, setGroupMode] = useState<DeliveryGroupMode>('time')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
+  const [historyReady, setHistoryReady] = useState(false)
   const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
   const deliveryQuery = useMemo(() => ({
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,
@@ -543,6 +545,7 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
   }, [clearLoadWatchdog, deliveryQuery, notify, tr])
   useEffect(() => {
     if (!active) {
+      setHistoryReady(false)
       clearLoadWatchdog()
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
@@ -556,6 +559,17 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
       loadPromiseRef.current = null
     }
   }, [active, clearLoadWatchdog, load])
+  useEffect(() => {
+    if (!active) {
+      setHistoryReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading) return undefined
+    const timer = window.setTimeout(() => {
+      setHistoryReady(true)
+    }, DELIVERY_HISTORY_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [active, loading])
   useEffect(() => {
     if (!active || syncChannelName !== 'deliveryContacts') return
     load({ silent: true, label: 'Delivery contacts refresh' })
