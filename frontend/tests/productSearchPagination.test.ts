@@ -98,13 +98,18 @@ assert.match(
 )
 assert.match(
   posPage,
-  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getCategories(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getProductFilters(?:\?\.)?\(\{\}\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
-  'POS catalog bootstrap should apply the named timeout to product, category, branch, and filter reads',
+  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getCategories(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  'POS catalog bootstrap should apply the named timeout to product, category, and branch reads',
+)
+assert.doesNotMatch(
+  posPage,
+  /getProductFilters(?:\?\.)?\(\{\}\)[\s\S]{0,260}POS_CATALOG_LOAD_TIMEOUT_MS/,
+  'POS catalog bootstrap should keep full product filters out of the first route-load batch',
 )
 assert.match(
   posPage,
-  /getProductFilters(?:\?\.)?\(\{\}\)/,
-  'POS filter panel should receive global filter metadata',
+  /withLoaderTimeout\(\(\) => (?:window\.api|api)\.getProductFilters(?:\?\.)?\(\{\}\) \|\| missingPosApiMethod\('getProductFilters'\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)/,
+  'POS filter panel should receive delayed global filter metadata',
 )
 assert.match(
   posFilterPanel,

@@ -1467,4 +1467,20 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 519 controls, exercised 380, skipped 139 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 469 records roadmap Move 739: defer POS full filter metadata out of
+  the first route window. `POS` now waits for the first catalog load to settle
+  and then enables `/api/products/filters` behind
+  `POS_FILTER_META_READY_DELAY_MS`, while the first product search payload still
+  seeds lightweight brand/supplier/initial filter hints. Docker-served build
+  hash `e24069f961a21ccd` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, focused
+  POS/Products/Inventory/Server route-control audit, public Cloudflare
+  Playwright, and full desktop/mobile all-pages Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-latest.json` reduced POS first-window
+  API requests from 5 to 4 and total requests from 47 to 46, with zero failed
+  requests and zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-09-56-238Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 378, skipped 140 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->

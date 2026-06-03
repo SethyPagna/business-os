@@ -9386,3 +9386,52 @@ Move 738 status:
   forms, filters, table labels, and bulk branch moves. POS still has 5
   first-window API calls. Any deeper metadata deferral should be guarded by a
   specific UI proof for the affected dropdown or cart path.
+
+Move 739 status:
+- Move 739 defers POS' full `/api/products/filters` metadata refresh out of
+  the first visible route window. POS still loads authenticated bootstrap,
+  active branch options, categories, and the first product search immediately;
+  the complete filter metadata now wakes after the first catalog load settles.
+- `frontend/src/components/pos/POS.tsx` now uses
+  `POS_FILTER_META_READY_DELAY_MS`, `POS_FILTER_META_TIMEOUT_MS`,
+  `filterMetaReady`, `filterMetaLoadedRef`, and `filterMetaRequestRef` to run
+  full filter metadata after route-ready. The product search response still
+  seeds lightweight brand/supplier/initial filter hints, so the POS filter
+  panel has immediate data while the complete metadata refresh waits.
+  Product/branch/category sync resets the one-shot metadata flag so later
+  updates still refresh.
+- Docker release image `business-os:v6.0.0-202606031703` is serving frontend
+  hash `e24069f961a21ccd`; update backup:
+  `ops/runtime/docker-release/backups/20260603-170519`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `299a1048a429052f`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, local health metadata, focused route-load trace,
+  focused POS/Products/Inventory/Server route-control audit, public
+  Cloudflare portal Playwright, and full desktop/mobile all-pages Playwright
+  passed. The focused route-load trace
+  `ops/runtime/reports/route-load-trace-latest.json` shows POS reduced from
+  47 to 46 total requests and from 5 to 4 first-window API requests, with
+  zero failed requests and zero console/page errors. The post-change
+  first-window API list is `/api/auth/bootstrap`, `/api/branches`,
+  `/api/categories`, and `/api/products/search...`.
+- The focused route-control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-07-16-666Z/summary.json`
+  exercised 123 controls across desktop/mobile POS, Products, Inventory, and
+  Server with zero failures and zero findings. The exhaustive all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-09-56-238Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 378, skipped 140 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T09-18-12-371Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Current plan position after Move 739: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next candidates from the latest
+  measured trace: POS now has 4 first-window API calls and Products has 5; any
+  deeper deferral should be route-specific, preserve first-use controls, and
+  include live trace/control proof.

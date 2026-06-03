@@ -2044,8 +2044,13 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getCategories(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getProductFilters(?:\?\.)?\(\{\}\)[\s\S]*\]\),\s*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
-  'POS catalog reads should timeout the batched product, category, branch, and filter requests',
+  /withLoaderTimeout\(\s*\(\) => Promise\.all\(\[[\s\S]*(?:window\.api|api)\.searchProducts(?:\?\.)?\(productQuery\)[\s\S]*(?:window\.api|api)\.getCategories(?:\?\.)?\(\)[\s\S]*(?:window\.api|api)\.getBranches(?:\?\.)?\(\)[\s\S]*\]\),\s*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  'POS catalog reads should timeout the batched product, category, and branch requests',
+)
+assert.doesNotMatch(
+  pos,
+  /getProductFilters(?:\?\.)?\(\{\}\)[\s\S]{0,260}POS_CATALOG_LOAD_TIMEOUT_MS/,
+  'POS catalog first route-load batch should not fetch full product filters',
 )
 assert.match(
   pos,
@@ -2054,8 +2059,18 @@ assert.match(
 )
 assert.match(
   pos,
+  /const POS_FILTER_META_TIMEOUT_MS = 8000/,
+  'POS full product filter metadata should use an explicit timeout',
+)
+assert.match(
+  pos,
   /const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800/,
   'POS customer and delivery option reads should wait until after first catalog route-ready work',
+)
+assert.match(
+  pos,
+  /const POS_FILTER_META_READY_DELAY_MS = 1800/,
+  'POS full product filter metadata should wait until after first catalog route-ready work',
 )
 assert.match(
   pos,
@@ -2126,6 +2141,16 @@ assert.match(
   pos,
   /if \(!isActive \|\| !contactOptionsReady\) return[\s\S]*loadCustomers\('POS initial customers'\)[\s\S]*loadDeliveryContacts\('POS initial delivery contacts'\)/,
   'POS should keep customer and delivery option reads out of the first route load',
+)
+assert.match(
+  pos,
+  /if \(!catalogLoadedOnceRef\.current \|\| catalogRefreshing \|\| filterMetaLoadedRef\.current\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setFilterMetaReady\(true\)[\s\S]*POS_FILTER_META_READY_DELAY_MS/,
+  'POS should enable full filter metadata only after the first catalog load settles',
+)
+assert.match(
+  pos,
+  /if \(!isActive \|\| !filterMetaReady \|\| filterMetaLoadedRef\.current\) return[\s\S]*const requestId = beginTrackedRequest\(filterMetaRequestRef\)[\s\S]*withLoaderTimeout\(\(\) => (?:window\.api|api)\.getProductFilters(?:\?\.)?\(\{\}\) \|\| missingPosApiMethod\('getProductFilters'\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)[\s\S]*if \(!isTrackedRequestCurrent\(filterMetaRequestRef, requestId\)\) return/,
+  'POS should fetch full product filters as a delayed tracked request',
 )
 assert.match(
   pos,

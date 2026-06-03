@@ -2411,3 +2411,52 @@ Use this shape for future entries:
   rendered 20 products with config/meta/search/AI HTTP 200, zero failed
   responses, zero relevant console messages, zero page errors, and enforced
   CSP.
+
+- change: defer POS full product filter metadata out of first route window
+- affected files:
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/productSearchPagination.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS first route load, `/api/products/filters`,
+  `/api/products/search`, categories, branches, customers, and delivery
+  contacts
+- keeper or rollback: keeper; POS keeps branch/category metadata and product
+  search in the first catalog window, still seeds lightweight filter hints from
+  the product search payload, and refreshes complete brand/supplier/initial
+  metadata shortly after route-ready with a tracked one-shot loader
+- route-scoped result: `ops/runtime/reports/route-load-trace-latest.json`
+  compared POS, Products, Inventory, and Server. POS dropped from 47 to 46
+  total requests and from 5 to 4 first-window API requests by moving
+  `/api/products/filters` out of the initial route window. The post-change POS
+  trace had zero failed requests and zero console/page errors. The
+  first-window API list is `/api/auth/bootstrap`, `/api/branches`,
+  `/api/categories`, and `/api/products/search...`.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-07-16-666Z/summary.json`
+  covered desktop/mobile POS, Products, Inventory, and Server, discovered 165
+  controls, exercised 123 controls, intentionally skipped 42 stable
+  broad-audit guardrail controls, captured 16 screenshots, and recorded zero
+  failed controls and zero findings.
+- warm whole-app result: frontend utility tests, JSX/source check, production
+  build, Docker release build/update, local `/health`, public Cloudflare
+  Playwright, focused Playwright route-load trace, and full all-pages desktop/
+  mobile Playwright passed. Docker image `business-os:v6.0.0-202606031703` is
+  serving build hash `e24069f961a21ccd`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-170519`. The local Vite build
+  hash was `299a1048a429052f`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-09-56-238Z/summary.json`
+  covered 34 routes, discovered 518 visible controls, exercised 378 controls,
+  intentionally skipped 140 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T09-18-12-371Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP. One immediately prior public-portal attempt rendered successfully but
+  saw a transient generic `net::ERR_CONNECTION_TIMED_OUT`; the rerun passed
+  without relevant console noise.

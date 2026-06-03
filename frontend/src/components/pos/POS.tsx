@@ -61,11 +61,13 @@ const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox')
 
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
 const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
+const POS_FILTER_META_TIMEOUT_MS = 8000
 const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
 const POS_CHECKOUT_TIMEOUT_MS = 20000
 const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800
+const POS_FILTER_META_READY_DELAY_MS = 1800
 
 // Customer contact-option helpers (mirrors CustomersTab)
 import { parseContactOptions } from '../contacts/CustomersTab'
@@ -536,6 +538,7 @@ export default function POS() {
   const [detailProduct,    setDetailProduct]    = useState<ProductRecord | null>(null)
   const [loading,          setLoading]          = useState(false)
   const [contactOptionsReady, setContactOptionsReady] = useState(false)
+  const [filterMetaReady, setFilterMetaReady] = useState(false)
   const [showStatusPicker, setShowStatusPicker] = useState(false)
   const [membershipInfo,   setMembershipInfo]   = useState<MembershipInfo | null>(null)
   const [membershipLoading, setMembershipLoading] = useState(false)
@@ -552,6 +555,8 @@ export default function POS() {
   const latestLoadCatalogRef = useRef<((label?: string, options?: CatalogLoadOptions) => Promise<{ prods: ProductRecord[] } | null>) | null>(null)
   const catalogMetadataLoadedRef = useRef(false)
   const catalogLoadedOnceRef = useRef(false)
+  const filterMetaLoadedRef = useRef(false)
+  const filterMetaRequestRef = useRef(0)
   const customerRequestRef = useRef(0)
   const deliveryRequestRef = useRef(0)
   const membershipRequestRef = useRef(0)
@@ -645,7 +650,6 @@ export default function POS() {
               ? Promise.all([
                 api.getCategories?.() || missingPosApiMethod('getCategories'),
                 api.getBranches?.() || missingPosApiMethod('getBranches'),
-                api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'),
               ])
               : Promise.resolve(null),
           ]),
@@ -661,10 +665,10 @@ export default function POS() {
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
         catalogLoadedOnceRef.current = true
         if (Array.isArray(metadataPayload)) {
-          const [cats, brs, filterPayload] = metadataPayload
+          const [cats, brs] = metadataPayload
           applyCatalogMetadata(cats as unknown[], brs as BranchRecord[])
           catalogMetadataLoadedRef.current = true
-          const filters = isPlainRecord(filterPayload) ? filterPayload : (isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {})
+          const filters = isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {}
           applyProductFilterMeta(filters, payloadRecord.initials || [])
         } else if (isPlainRecord(payloadRecord.filters) || Array.isArray(payloadRecord.initials)) {
           applyProductFilterMeta(isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {}, payloadRecord.initials || [])
@@ -772,9 +776,11 @@ export default function POS() {
   useEffect(() => {
     if (!isActive) {
       setContactOptionsReady(false)
+      setFilterMetaReady(false)
       invalidateTrackedRequest(catalogRequestRef)
       catalogLoadPromiseRef.current = null
       pendingCatalogLoadRef.current = null
+      invalidateTrackedRequest(filterMetaRequestRef)
       invalidateTrackedRequest(customerRequestRef)
       invalidateTrackedRequest(deliveryRequestRef)
       invalidateTrackedRequest(membershipRequestRef)
@@ -806,11 +812,37 @@ export default function POS() {
     ])
   }, [contactOptionsReady, isActive, loadCustomers, loadDeliveryContacts])
 
+  useEffect(() => {
+    if (!isActive) {
+      setFilterMetaReady(false)
+      return undefined
+    }
+    if (!catalogLoadedOnceRef.current || catalogRefreshing || filterMetaLoadedRef.current) return undefined
+    const timer = window.setTimeout(() => {
+      setFilterMetaReady(true)
+    }, POS_FILTER_META_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [catalogRefreshing, isActive])
+
+  useEffect(() => {
+    if (!isActive || !filterMetaReady || filterMetaLoadedRef.current) return
+    filterMetaLoadedRef.current = true
+    const requestId = beginTrackedRequest(filterMetaRequestRef)
+    const api = getPosApi()
+    void withLoaderTimeout(() => api.getProductFilters?.({}) || missingPosApiMethod('getProductFilters'), 'POS product filters', POS_FILTER_META_TIMEOUT_MS).then((filters) => {
+      if (!isTrackedRequestCurrent(filterMetaRequestRef, requestId)) return
+      applyProductFilterMeta(isPlainRecord(filters) ? filters : {}, [])
+    }).catch(() => {})
+  }, [applyProductFilterMeta, filterMetaReady, isActive])
+
 // Sync-push reload when another device changes data
   useEffect(() => {
     if (!isActive || !syncChannel) return
     const { channel } = syncChannel
     if (channel === 'products' || channel === 'branches' || channel === 'categories') {
+      filterMetaLoadedRef.current = false
+      setFilterMetaReady(false)
+      invalidateTrackedRequest(filterMetaRequestRef)
       void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' || channel === 'categories' })
     }
     if (channel === 'customers') {
@@ -825,6 +857,7 @@ export default function POS() {
     invalidateTrackedRequest(catalogRequestRef)
     catalogLoadPromiseRef.current = null
     pendingCatalogLoadRef.current = null
+    invalidateTrackedRequest(filterMetaRequestRef)
     invalidateTrackedRequest(customerRequestRef)
     invalidateTrackedRequest(deliveryRequestRef)
     invalidateTrackedRequest(membershipRequestRef)
