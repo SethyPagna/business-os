@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 727 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 728 in this file.
 
 ## Goal
 
@@ -7069,6 +7069,30 @@ Decision rule:
     pruning removed 238,110,370 bytes of old reports, 100,882,733 bytes of old
     Docker-release backups, and 38.06 MB of Docker builder cache while keeping
     the newest backup set and leaving Docker images/volumes intact.
+
+728. Collapse Inventory startup branch/product reads.
+    Done: `backend/src/routes/inventory.ts` now shares one inventory product
+    search payload builder between `/api/inventory/products/search` and a new
+    authenticated `/api/inventory/bootstrap` route. The bootstrap adds the
+    branch list needed by the product-section first paint, while normal product
+    refreshes, stats, movements, RFID, reasons, and action-history paths keep
+    their existing routes and deferred loaders. `frontend/src/api/
+    inventoryTransport.ts` and `frontend/src/api/methods.ts` expose
+    `getInventoryBootstrap`, and `frontend/src/components/inventory/
+    Inventory.tsx` uses it only for the product-section startup window with a
+    legacy fallback to separate branch/search reads for test doubles.
+    Proof: frontend utility tests, frontend JSX/source check, backend utility
+    tests, production build, Docker release/update, route-load trace
+    `ops/runtime/reports/route-load-trace-2026-06-03T12-48-29-331Z.json`,
+    broad Phase 8.4 UI Playwright, public Cloudflare Playwright, storage
+    pruning, and `git diff --check` passed. The Docker-served trace reduced
+    Inventory from 41 total requests and 3 API requests to 40 total requests
+    and 2 API requests, with first-window APIs `/api/auth/bootstrap` and
+    `/api/inventory/bootstrap`. The broad live check now asserts
+    `inventoryBootstrapStatus: 200`. Storage pruning removed 295,764 bytes of
+    old reports, 4,827,993 bytes of old Docker-release backup data, and
+    76.13 MB of Docker builder cache while preserving uploads, secrets, env
+    files, current business data, images, volumes, and newest backups.
 
 ## Safety Gates
 

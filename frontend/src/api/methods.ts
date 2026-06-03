@@ -102,6 +102,7 @@ import {
 } from './actionHistoryTransport.ts'
 import {
   adjustStock as adjustStockRequest,
+  getInventoryBootstrap as getInventoryBootstrapRequest,
   getInventoryMovements as getInventoryMovementsRequest,
   getInventoryReasons as getInventoryReasonsRequest,
   getInventoryStats as getInventoryStatsRequest,
@@ -832,6 +833,8 @@ export const getInventorySummary = (params = {}) =>
   getInventorySummaryRequest(params)
 export const getInventoryStats = (params = {}) =>
   getInventoryStatsRequest(params)
+export const getInventoryBootstrap = (params = {}) =>
+  getInventoryBootstrapRequest(params)
 export const searchInventoryProducts = (params = {}) =>
   searchInventoryProductsRequest(params)
 export const getInventoryMovements = (params = {}) =>

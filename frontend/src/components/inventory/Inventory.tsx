@@ -672,25 +672,47 @@ export default function Inventory() {
         groupState: groupFilter,
         initial: inventoryInitialFilter,
       }
+      const canBootstrapProducts = needsProductSummary && !needsStatsData && !needsMovementData && !needsRfidData
+      const loadInventoryBootstrap = () => withLoaderTimeout(
+        () => {
+          const inventoryApi = getInventoryApi()
+          if (typeof inventoryApi.getInventoryBootstrap === 'function') {
+            return inventoryApi.getInventoryBootstrap(productQuery)
+          }
+          return Promise.all([
+            inventoryApi.getBranches(),
+            inventoryApi.searchInventoryProducts(productQuery),
+          ]).then(([branchesResult, productsResult]) => ({
+            branches: branchesResult,
+            products: productsResult,
+          }))
+        },
+        'Inventory bootstrap',
+        INVENTORY_PRODUCTS_TIMEOUT_MS,
+      )
       try {
         const primaryLoaders = {
-          branches: () => withLoaderTimeout(
-            () => getInventoryApi().getBranches(),
-            'Inventory branches',
-            INVENTORY_BRANCHES_TIMEOUT_MS,
-          ),
+          ...(canBootstrapProducts ? {
+            bootstrap: loadInventoryBootstrap,
+          } : {
+            branches: () => withLoaderTimeout(
+              () => getInventoryApi().getBranches(),
+              'Inventory branches',
+              INVENTORY_BRANCHES_TIMEOUT_MS,
+            ),
+            ...(needsProductSummary ? {
+              summary: () => withLoaderTimeout(
+                () => getInventoryApi().searchInventoryProducts(productQuery),
+                'Inventory products',
+                INVENTORY_PRODUCTS_TIMEOUT_MS,
+              ),
+            } : {}),
+          }),
           ...(needsStatsData ? {
             stats: () => withLoaderTimeout(
               () => getInventoryApi().getInventoryStats(statsQuery),
               'Inventory stats',
               INVENTORY_STATS_TIMEOUT_MS,
-            ),
-          } : {}),
-          ...(needsProductSummary ? {
-            summary: () => withLoaderTimeout(
-              () => getInventoryApi().searchInventoryProducts(productQuery),
-              'Inventory products',
-              INVENTORY_PRODUCTS_TIMEOUT_MS,
             ),
           } : {}),
           ...(needsMovementData ? {
@@ -717,12 +739,17 @@ export default function Inventory() {
           } : {}),
         }
         const result = await settleLoaderMap(primaryLoaders) as LegacyInventoryRecord
-        const sumResult = result.values.summary
+        const bootstrapResult = result.values.bootstrap
+        const sumResult = bootstrapResult && !Array.isArray(bootstrapResult)
+          ? bootstrapResult.products
+          : result.values.summary
         const statsResult = result.values.stats
         const sum = Array.isArray(sumResult) ? sumResult : (Array.isArray(sumResult?.items) ? sumResult.items : [])
         const movs = result.values.movements
         const rfid = result.values.rfid
-        const brs = result.values.branches
+        const brs = bootstrapResult && !Array.isArray(bootstrapResult)
+          ? bootstrapResult.branches
+          : result.values.branches
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError) as Error | undefined

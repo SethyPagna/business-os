@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 747.
+- Latest completed implementation move in this roadmap: Move 749.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -9621,3 +9621,56 @@ Move 748 status:
   reads. Inventory is the clearest remaining measured bootstrap candidate
   because it still loads `/api/branches` beside
   `/api/inventory/products/search` in the first route window.
+
+Move 749 status:
+- Move 749 collapses the Inventory product-section startup branch list and
+  product summary reads into one authenticated `/api/inventory/bootstrap`
+  response. The backend now shares the inventory product-search payload builder
+  between `/api/inventory/products/search` and bootstrap, preserving the legacy
+  route while avoiding duplicate first-window SQL work. `Inventory.tsx` uses
+  bootstrap only when the visible startup section is Products; stats,
+  movements, RFID, reasons, and action-history loaders keep their existing
+  explicit/deferred paths.
+- `frontend/src/api/inventoryTransport.ts` and `frontend/src/api/methods.ts`
+  expose `getInventoryBootstrap` with the same mirrored-cache policy used by
+  product search. The broad Phase 8.4 UI live check now asserts
+  `inventoryBootstrapStatus: 200`, while route contracts still require
+  `/api/inventory/products/search`.
+- Proof: frontend utility tests, frontend JSX/source check, backend utility
+  tests, production build, Docker release/update, focused multi-route
+  Playwright route-load trace, broad Phase 8.4 UI Playwright, public
+  Cloudflare portal Playwright, storage pruning, and `git diff --check`
+  passed.
+- The Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T12-48-29-331Z.json` shows
+  Inventory at 40 total requests and 2 API requests, down from 41 total
+  requests and 3 API requests immediately before the move. The first-window
+  Inventory APIs are now `/api/auth/bootstrap` and `/api/inventory/bootstrap`.
+  Dashboard, Products, Inventory, POS, Returns, and Server all measured two
+  first-window API requests with zero failed requests and zero console/page
+  errors in the same sweep.
+- The broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T12-49-01-316Z/report.json`
+  passed with `inventoryBootstrapStatus: 200`, `inventoryReasonsStatus: 200`,
+  `inventoryStatsStatus: 200`, `inventoryMovementsStatus: 200`, no framework
+  overlay, and zero relevant console messages. The public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T12-49-52-154Z/report.json`
+  rendered 20 products, observed portal bootstrap HTTP 200, clicked Assistant
+  to observe AI status HTTP 200, and recorded zero failed responses, console
+  messages, or page errors.
+- Docker update created backup
+  `ops/runtime/docker-release/backups/20260603-204729` and the verified live
+  stack ran on `business-os:v6.0.0-202606032035`. Storage pruning removed
+  295,764 bytes of old reports, 4,827,993 bytes of old Docker-release backup
+  data, and 76.13 MB of Docker builder cache while keeping uploads, secrets,
+  env files, current business data, Docker images, Docker volumes, and the
+  newest backup packages intact.
+- Current plan position after Move 749: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Dashboard, Products, Inventory,
+  POS, Returns, public catalog, and Server are now at two-or-fewer
+  first-window API reads. Next executable target: deeper chunk-size, delayed
+  wake, and route-specific interaction paths instead of the now-collapsed
+  branch/product startup waterfalls.

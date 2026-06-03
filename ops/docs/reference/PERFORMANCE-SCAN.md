@@ -1644,4 +1644,27 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `/api/products/bootstrap?...include=branch_stock,images,family`. The same
   pass pruned 238,110,370 bytes of old reports, 100,882,733 bytes of old
   Docker-release backups, and 38.06 MB of Docker builder cache.
+- Move 479 records roadmap Move 749: collapse Inventory product-section
+  startup branch metadata and product summary reads into
+  `/api/inventory/bootstrap`. The backend now shares the inventory product
+  search payload builder between the legacy `/api/inventory/products/search`
+  route and bootstrap, and `Inventory.tsx` uses the combined route only when
+  Products is the visible startup section. Docker-served build hash
+  `877b43b78c35bc00` passed frontend utility tests, JSX/source check, backend
+  utility tests, production build, Docker release/update, focused multi-route
+  Playwright trace, broad Phase 8.4 UI Playwright, public Cloudflare
+  Playwright, storage pruning, and `git diff --check`. The focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T12-48-29-331Z.json`
+  reduced Inventory from 41 total requests and 3 API requests to 40 total
+  requests and 2 API requests, with zero failed requests and zero console/page
+  errors. First-window Inventory APIs are now `/api/auth/bootstrap` and
+  `/api/inventory/bootstrap`. The broad Phase 8.4 report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T12-49-01-316Z/report.json`
+  passed with `inventoryBootstrapStatus: 200`, and the public Cloudflare
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T12-49-52-154Z/report.json`
+  rendered 20 products with zero failed responses, console messages, or page
+  errors. Storage pruning removed 295,764 bytes of old reports, 4,827,993
+  bytes of old Docker-release backup data, and 76.13 MB of Docker builder
+  cache.
 <!-- phase29-manual-notes:end -->

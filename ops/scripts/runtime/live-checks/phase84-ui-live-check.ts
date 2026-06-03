@@ -472,12 +472,8 @@ async function main(): Promise<void> {
     assert(brandLookupUsageStatus === 200, `Brand lookup usage read returned HTTP ${brandLookupUsageStatus}`)
 
     console.log('[phase84] exercising inventory saved reason loader')
-    const inventoryProductsResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/inventory/products/search') && response.status() < 500,
-      { timeout: 20_000 },
-    ).catch(() => null)
-    const inventoryBranchesResponse = page.waitForResponse(
-      (response) => response.url().includes('/api/branches') && response.status() < 500,
+    const inventoryBootstrapResponse = page.waitForResponse(
+      (response) => response.url().includes('/api/inventory/bootstrap') && response.status() < 500,
       { timeout: 20_000 },
     ).catch(() => null)
     const inventoryReasonsResponse = page.waitForResponse(
@@ -487,12 +483,9 @@ async function main(): Promise<void> {
     await page.goto('/inventory', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
     await page.getByText('Inventory', { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
-    const inventoryProducts = await inventoryProductsResponse
-    const inventoryBranches = await inventoryBranchesResponse
-    const inventoryProductsStatus = inventoryProducts?.status?.() || latestObservedStatus(chunkRequests, /\/api\/inventory\/products\/search/i)
-    const inventoryBranchesStatus = inventoryBranches?.status?.() || latestObservedStatus(chunkRequests, /\/api\/branches/i)
-    assert(inventoryProductsStatus === 200, `Inventory product summary read returned HTTP ${inventoryProductsStatus}`)
-    assert(inventoryBranchesStatus === 200, `Inventory branch options read returned HTTP ${inventoryBranchesStatus}`)
+    const inventoryBootstrap = await inventoryBootstrapResponse
+    const inventoryBootstrapStatus = inventoryBootstrap?.status?.() || latestObservedStatus(chunkRequests, /\/api\/inventory\/bootstrap/i)
+    assert(inventoryBootstrapStatus === 200, `Inventory bootstrap read returned HTTP ${inventoryBootstrapStatus}`)
     const inventoryCheckboxes = page.getByRole('checkbox')
     assert(await inventoryCheckboxes.count() > 0, 'No inventory select checkbox rendered')
     await inventoryCheckboxes.first().check()
@@ -777,8 +770,7 @@ async function main(): Promise<void> {
         unitLookupStatus,
         unitLookupUsageStatus,
         brandLookupUsageStatus,
-        inventoryProductsStatus,
-        inventoryBranchesStatus,
+        inventoryBootstrapStatus,
         inventoryReasonsStatus,
         inventoryStatsStatus,
         inventoryReturnsStatsStatus,

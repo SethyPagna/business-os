@@ -82,6 +82,17 @@ export function searchInventoryProducts(params: QueryParams = {}): Promise<unkno
   )
 }
 
+export function getInventoryBootstrap(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params)
+  const cacheKey = `inventory:bootstrap:v1:${query}`
+  return routeMirrored(
+    cacheKey,
+    () => apiFetch('GET', appendQuery('/api/inventory/bootstrap', query)),
+    () => readCachedQueryResult(cacheKey),
+    (result: unknown) => writeCachedQueryResult(cacheKey, result),
+  )
+}
+
 export function getInventoryMovements({
   branchId,
   userId,

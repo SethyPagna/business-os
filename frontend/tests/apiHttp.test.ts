@@ -847,6 +847,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(actionHistoryTransportSource, /appendQuery\('\/api\/action-history', query\)/)
   assert.match(actionHistoryTransportSource, /export function undoActionHistory/)
   assert.match(inventoryTransportSource, /export function searchInventoryProducts/)
+  assert.match(inventoryTransportSource, /export function getInventoryBootstrap/)
+  assert.match(inventoryTransportSource, /appendQuery\('\/api\/inventory\/bootstrap', query\)/)
   assert.match(inventoryTransportSource, /readCachedQueryResult\(cacheKey\)/)
   assert.match(inventoryTransportSource, /export function saveInventoryReasons/)
   assert.match(rfidTransportSource, /export function getRfidStatus/)

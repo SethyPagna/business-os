@@ -40,7 +40,9 @@ runTest('product router registers required paged search routes', () => {
 runTest('inventory router registers required paged product search route', () => {
   const router = require('../src/routes/inventory.ts')
   const paths = getRoutePaths(router)
+  assert.ok(paths.includes('/bootstrap'), 'missing /api/inventory/bootstrap')
   assert.ok(paths.includes('/products/search'), 'missing /api/inventory/products/search')
+  assert.ok(paths.indexOf('/bootstrap') < paths.indexOf('/products/search'), '/bootstrap must be registered before product search')
   assert.ok(paths.includes('/rfid/status'), 'missing /api/inventory/rfid/status')
   assert.ok(paths.includes('/rfid/tags'), 'missing /api/inventory/rfid/tags')
   assert.ok(paths.includes('/rfid/tags/search'), 'missing /api/inventory/rfid/tags/search')

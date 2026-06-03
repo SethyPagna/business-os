@@ -882,8 +882,13 @@ assert.match(
 )
 assert.match(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.searchInventoryProducts\(productQuery\),\s*'Inventory products',\s*INVENTORY_PRODUCTS_TIMEOUT_MS,\s*\)/,
-  'inventory product summary should timeout slow product reads',
+  /const canBootstrapProducts = needsProductSummary && !needsStatsData && !needsMovementData && !needsRfidData/,
+  'inventory product startup should use the combined bootstrap only for the product section first window',
+)
+assert.match(
+  inventory,
+  /withLoaderTimeout\(\s*\(\) => \{[\s\S]*getInventoryBootstrap\(productQuery\)[\s\S]*'Inventory bootstrap',\s*INVENTORY_PRODUCTS_TIMEOUT_MS,\s*\)/,
+  'inventory product bootstrap should timeout slow product startup reads',
 )
 assert.match(
   inventory,
