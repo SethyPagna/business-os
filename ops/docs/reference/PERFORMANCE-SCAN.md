@@ -1857,4 +1857,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   only `contact-read-api-DS-Y1Uow.js` and `contact-write-api-BlLnWfno.js`;
   `app-api-methods`, `csv-utils`, `app-local-db`, and `vendor-dexie` stayed
   unloaded. Post-live hygiene removed four matching QA audit-log entries.
+- Move 494 records roadmap Move 764: keep POS checkout sale writes out of the
+  broad API methods registry. `POS.tsx` now lazy-loads
+  `saleWriteTransport.ts` for Done -> Completed checkout, and `vite.config.ts`
+  assigns that boundary to `sale-write-api`. The new transport owns sale
+  create, pending offline sale queue retry, client request ids, mirror writes,
+  retry/backoff, conflict marking, sync events, and background sync
+  registration without importing `methods.ts`, `salesTransport.ts`,
+  `requestIds.ts`, `app-api-methods`, or CSV helpers. Docker image
+  `business-os:v6.0.0-202606040354` served the focused trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-56-35-700Z.json`: POS
+  was ready in 245 ms with 30 requests and 22 scripts, with zero failed
+  requests and zero console/page errors. A headed live Chromium checkout probe
+  used the real POS product search/card click, `Exact $`, `Done`, and
+  `Completed` controls, reached receipt preview, confirmed the sale through
+  `/api/sales`, and loaded only `sale-write-api-BDCbXrEC.js` for the sale
+  write intent; `app-api-methods` and `csv-utils` stayed unloaded. Cleanup
+  removed the QA sale, sale item, allocation, product, stock rows, batch rows,
+  inventory movement, action-history entry, and audit log.
 <!-- phase29-manual-notes:end -->

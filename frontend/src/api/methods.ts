@@ -9,10 +9,16 @@ function getDeviceInfo() {
 
 let portalTransportPromise = null
 let localDbModulePromise = null
+let saleWriteTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
   return portalTransportPromise
+}
+
+function loadSaleWriteTransport() {
+  if (!saleWriteTransportPromise) saleWriteTransportPromise = import('./saleWriteTransport.ts')
+  return saleWriteTransportPromise
 }
 
 function loadLocalDbModule() {
@@ -53,12 +59,9 @@ import {
   getSyncServerUrl,
   cacheInvalidate,
   cacheClearAll,
-  isWriteBlockedError,
   isWriteConflictError,
   isInvalidSessionError,
-  isNetErr,
   isServerOnline,
-  isTransientGatewayError,
 } from './http.ts'
 import { appendQuery, buildQueryString } from './query.ts'
 import { buildCSVTemplate } from '../utils/csvTemplate.ts'
@@ -71,7 +74,7 @@ import {
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
-import { createClientRequestId, ensureClientRequestId } from './requestIds.ts'
+import { ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import {
   createCategory as createCategoryRequest,
@@ -224,8 +227,6 @@ import {
   getDashboard as getDashboardRequest,
 } from './dashboardTransport.ts'
 import {
-  createSale as createSaleRequest,
-  createSaleWithoutWriteDedupe as createSaleWithoutWriteDedupeRequest,
   getSales as getSalesRequest,
 } from './salesTransport.ts'
 import {
@@ -265,11 +266,9 @@ import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from './expected
 import { mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored } from './localMirrors.ts'
 import {
   DISCARD_SYNC_UPDATE_CHANNELS,
-  OFFLINE_SALE_SYNC_UPDATE_CHANNELS,
   dispatchSyncUpdates,
   emitSyncQueueChanged,
   hasStoredUserSession,
-  registerOutboxBackgroundSync,
 } from './syncRuntime.ts'
 import {
   cancelSystemJob as cancelSystemJobRequest,
@@ -280,8 +279,6 @@ import {
 } from './systemJobs.ts'
 export { getImageDataUrl, openCSVDialog, openImageDialog } from './browserDialogs.ts'
 
-const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
-const OFFLINE_SALE_RETRY_DELAY_MS = 30_000
 const OFFLINE_DEVICE_SNAPSHOT_META_KEY = 'offline_device_snapshot_meta'
 const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
 const SENSITIVE_MIRROR_PURGE_DELAY_MS = 15_000
@@ -361,6 +358,7 @@ export async function getPendingSyncState() {
 }
 
 export async function retryPendingSyncNow() {
+  const { syncPendingSalesQueue } = await loadSaleWriteTransport()
   return syncPendingSalesQueue({ force: true })
 }
 
@@ -888,232 +886,6 @@ export const getInventoryReasons = () =>
 export const saveInventoryReasons = (items = []) =>
   saveInventoryReasonsRequest(items)
 
-function buildOfflineSaleReceiptNumber(payload = {}) {
-  const clientRequestId = String(payload.client_request_id || createClientRequestId('sale')).trim()
-  const suffix = clientRequestId.replace(/^sale_/, '').replace(/[^a-z0-9]/gi, '').slice(0, 8).toUpperCase()
-  return `OFFLINE-${suffix || Date.now()}`
-}
-
-function isRetryableOfflineSaleError(error) {
-  if (!error) return false
-  if (isWriteBlockedError(error)) return true
-  if (isNetErr(error)) return true
-  if (isTransientGatewayError(error?.status)) return true
-  const message = String(error?.message || '').toLowerCase()
-  return message.includes('timed out') || message.includes('server is offline') || message.includes('server unavailable')
-}
-
-async function findQueuedSale(clientRequestId) {
-  const clean = String(clientRequestId || '').trim()
-  if (!clean) return null
-  const db = await getLocalDb()
-  const rows = await db.sync_queue.where('channel').equals(OFFLINE_SALE_QUEUE_CHANNEL).toArray().catch(() => [])
-  return rows.find((row) => String(row?.payload?.client_request_id || '') === clean) || null
-}
-
-async function putOfflineSaleMirror(payload, receiptNumber) {
-  const db = await getLocalDb()
-  const now = new Date().toISOString()
-  const offlineId = -Math.abs(Date.now())
-  await db.sales.put({
-    id: offlineId,
-    receipt_number: receiptNumber,
-    client_request_id: payload.client_request_id,
-    cashier_id: payload.cashier_id || null,
-    cashier_name: payload.cashier_name || '',
-    customer_name: payload.customer_name || '',
-    customer_phone: payload.customer_phone || '',
-    total_usd: payload.total_usd || 0,
-    total_khr: payload.total_khr || 0,
-    subtotal_usd: payload.subtotal_usd || payload.subtotal || 0,
-    subtotal_khr: payload.subtotal_khr || 0,
-    items: JSON.stringify(payload.items || []),
-    sale_status: payload.sale_status || 'completed',
-    payment_method: payload.payment_method || 'Cash',
-    created_at: payload.created_at || now,
-    updated_at: now,
-    offline_pending: true,
-  }).catch(() => null)
-  return offlineId
-}
-
-async function queueOfflineSale(payload, reason = 'server_offline') {
-  const salePayload = ensureClientRequestId({ ...(payload || {}) }, 'sale')
-  const existing = await findQueuedSale(salePayload.client_request_id)
-  if (existing) {
-    return {
-      success: true,
-      queued: true,
-      duplicate: true,
-      id: existing.entity_id || null,
-      receiptNumber: existing.entity_name || buildOfflineSaleReceiptNumber(salePayload),
-      client_request_id: salePayload.client_request_id,
-    }
-  }
-
-  const now = new Date().toISOString()
-  const receiptNumber = buildOfflineSaleReceiptNumber(salePayload)
-  salePayload.receipt_number = salePayload.receipt_number || receiptNumber
-  const localId = await putOfflineSaleMirror(salePayload, receiptNumber)
-  const row = {
-    id: salePayload.client_request_id,
-    channel: OFFLINE_SALE_QUEUE_CHANNEL,
-    operation: 'create',
-    entity_table: 'sales',
-    entity_id: localId,
-    entity_name: receiptNumber,
-    status: 'pending',
-    payload: salePayload,
-    created_at: now,
-    updated_at: now,
-    retry_count: 0,
-    retry_at: now,
-    error: null,
-    reason,
-    queue_version: 1,
-    base_updated_at: salePayload.expectedUpdatedAt || salePayload.expected_updated_at || salePayload.updated_at || now,
-  }
-  const db = await getLocalDb()
-  await db.sync_queue.put(row)
-  registerOutboxBackgroundSync()
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, queued: 1 })
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('sync:offline-sale-queued', {
-      detail: {
-        channel: OFFLINE_SALE_QUEUE_CHANNEL,
-        receiptNumber,
-        client_request_id: salePayload.client_request_id,
-        ts: now,
-      },
-    }))
-  }
-  return {
-    success: true,
-    queued: true,
-    id: localId,
-    receiptNumber,
-    client_request_id: salePayload.client_request_id,
-  }
-}
-
-function queuedSaleBackoffMs(retryCount = 0) {
-  const attempts = Math.max(0, Number(retryCount || 0))
-  return Math.min(5 * 60_000, OFFLINE_SALE_RETRY_DELAY_MS * Math.max(1, attempts + 1))
-}
-
-async function updateQueuedRow(row, updates = {}) {
-  if (!row?._seq) return
-  const db = await getLocalDb()
-  await db.sync_queue.put({
-    ...row,
-    ...updates,
-    updated_at: new Date().toISOString(),
-  }).catch(() => {})
-}
-
-async function completeQueuedSale(row, result) {
-  const db = await getLocalDb()
-  await db.transaction('rw', db.sync_queue, db.sales, async () => {
-    await db.sync_queue.delete(row._seq)
-    if (Number(row.entity_id || 0) < 0) await db.sales.delete(row.entity_id)
-  }).catch(async () => {
-    await db.sync_queue.delete(row._seq).catch(() => {})
-    if (Number(row.entity_id || 0) < 0) await db.sales.delete(row.entity_id).catch(() => {})
-  })
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, synced: 1 })
-  if (typeof window !== 'undefined') {
-    dispatchSyncUpdates(OFFLINE_SALE_SYNC_UPDATE_CHANNELS, 'offline-sale-synced')
-    window.dispatchEvent(new CustomEvent('sync:offline-sale-synced', {
-      detail: {
-        channel: OFFLINE_SALE_QUEUE_CHANNEL,
-        receiptNumber: result?.receiptNumber || result?.receipt_number || row.entity_name || null,
-        client_request_id: row?.payload?.client_request_id || row.id || null,
-        duplicate: !!result?.duplicate,
-        ts: Date.now(),
-      },
-    }))
-  }
-}
-
-async function failQueuedSale(row, error, { retryable = false } = {}) {
-  const retryCount = Number(row.retry_count || 0) + 1
-  const now = Date.now()
-  await updateQueuedRow(row, {
-    status: 'failed',
-    retry_count: retryCount,
-    retry_at: retryable ? new Date(now + queuedSaleBackoffMs(retryCount)).toISOString() : null,
-    error: error?.message || String(error || 'Sync failed'),
-  })
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, failed: 1 })
-  if (retryable) registerOutboxBackgroundSync()
-}
-
-async function markQueuedSaleConflict(row, error) {
-  await updateQueuedRow(row, {
-    status: 'conflict',
-    retry_at: null,
-    error: error?.message || String(error || 'Server has a newer version. Review before syncing.'),
-    conflict: true,
-  })
-  emitSyncQueueChanged({ channel: OFFLINE_SALE_QUEUE_CHANNEL, conflict: 1 })
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('sync:write-conflict', {
-      detail: {
-        channel: OFFLINE_SALE_QUEUE_CHANNEL,
-        entity_table: row.entity_table || 'sales',
-        entity_id: row.entity_id ?? null,
-        entity_name: row.entity_name || null,
-        refreshChannels: ['sales', 'products', 'inventory', 'dashboard'],
-        ts: Date.now(),
-      },
-    }))
-  }
-}
-
-async function syncPendingSalesQueue({ force = false } = {}) {
-  const now = Date.now()
-  const db = await getLocalDb()
-  const rows = await db.sync_queue
-    .where('channel')
-    .equals(OFFLINE_SALE_QUEUE_CHANNEL)
-    .toArray()
-    .catch(() => [])
-  const eligible = []
-  for (const row of rows) {
-    if (!row?.payload) continue
-    if (!force) {
-      const retryAt = row.retry_at ? Date.parse(row.retry_at) : 0
-      if (Number.isFinite(retryAt) && retryAt > now) continue
-    }
-    eligible.push(row)
-  }
-  eligible.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
-
-  const result = { success: true, attempted: 0, synced: 0, failed: 0, pending: rows.length }
-  for (const row of eligible) {
-    result.attempted += 1
-    await updateQueuedRow(row, { status: 'syncing', error: null })
-    try {
-      const payload = ensureClientRequestId({ ...(row.payload || {}) }, 'sale')
-      const response = await createSaleWithoutWriteDedupeRequest(payload)
-      await completeQueuedSale(row, response)
-      result.synced += 1
-    } catch (error) {
-      if (isWriteConflictError(error)) {
-        await markQueuedSaleConflict(row, error)
-        result.failed += 1
-        continue
-      }
-      const retryable = isRetryableOfflineSaleError(error)
-      await failQueuedSale(row, error, { retryable })
-      result.failed += 1
-      if (!retryable && !force) break
-    }
-  }
-  result.pending = Math.max(0, rows.length - result.synced)
-  return result
-}
-
 export const getRfidStatus = (params = {}) => {
   return getRfidStatusRequest(params)
 }
@@ -1133,15 +905,8 @@ export const applyRfidSession = (id, payload = {}) =>
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
-  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'sale')
-  try {
-    return await createSaleRequest(payload)
-  } catch (error) {
-    if (isRetryableOfflineSaleError(error)) {
-      return queueOfflineSale(payload, error?.reason || 'server_offline')
-    }
-    throw error
-  }
+  const { createSale: createSaleRequest } = await loadSaleWriteTransport()
+  return createSaleRequest(d)
 }
 
 export const getSales   = (params) => {

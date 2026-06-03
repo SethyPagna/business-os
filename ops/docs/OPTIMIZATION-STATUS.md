@@ -8,18 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 763, narrow POS quick customer and delivery
-  create writes so the actual add-customer/add-delivery intents avoid the
-  broad API methods registry
+- Latest completed move: Move 764, narrow POS checkout sale writes so the
+  actual Done -> Completed intent avoids the broad API methods registry while
+  preserving offline sale queue fallback
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `c153ad12d7babef6`
+- latest verified frontend hash from the most recent Docker-served live check: `95087b02ae5f91bc`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `b1a985617627433d`
+  `7c2d6bd5fda426a2`
 
 Latest verified reports:
 
@@ -32,7 +32,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T15-29-38-855Z/report.json`
 - latest focused route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T19-31-04-184Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-56-35-700Z.json`
 - latest initial-filter timing proof:
   `ops/runtime/reports/initial-filter-timing-2026-06-03T17-00-58-548Z/report.json`
 - latest lazy portal-menu interaction proof:
@@ -98,27 +98,26 @@ Current honest pockets:
   Move 760 is served by Docker release image `business-os:v6.0.0-202606040219`;
   Move 761 is served by Docker release image `business-os:v6.0.0-202606040246`;
   Move 762 is served by Docker release image `business-os:v6.0.0-202606040258`;
-  Move 763 is served by Docker release image `business-os:v6.0.0-202606040328`.
+  Move 763 is served by Docker release image `business-os:v6.0.0-202606040328`;
+  Move 764 is served by Docker release image `business-os:v6.0.0-202606040354`.
 - post-live hygiene passed with loaded dataset status and zero generated
   integrity matches
 
 Recent runtime/load win:
 
-- POS quick customer and delivery-contact create writes now use a focused
-  `contact-write-api` transport chunk instead of the broad API methods
-  registry. Proof: Docker-served route trace
-  `ops/runtime/reports/route-load-trace-2026-06-03T19-31-04-184Z.json`
-  measured POS at 275 ms route-ready with 30 requests and 22 scripts, zero
+- POS checkout sale writes now use a focused `sale-write-api` transport chunk
+  instead of the broad API methods registry. Proof: Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-56-35-700Z.json`
+  measured POS at 245 ms route-ready with 30 requests and 22 scripts, zero
   failed requests, and zero console/page errors. A headed live Chromium check
-  used the real POS Add Customer and Add Delivery buttons, filled both modals,
-  saved both records, and then deleted the created customer id `4` and
-  delivery contact id `4`; exact post-cleanup searches returned zero remaining
-  rows. The script list added only `contact-read-api-DS-Y1Uow.js` and
-  `contact-write-api-BlLnWfno.js`, while `app-api-methods`, `csv-utils`,
-  `app-local-db`, and `vendor-dexie` stayed unloaded. Post-live hygiene
-  removed four matching QA audit-log entries. Docker release image
-  `business-os:v6.0.0-202606040328` serves frontend hash
-  `c153ad12d7babef6`.
+  used the real POS product search/card click, `Exact $`, `Done`, and
+  `Completed` controls, reached the receipt preview, and confirmed the sale by
+  API search. The script list loaded `sale-write-api-BDCbXrEC.js`, while
+  `app-api-methods` and `csv-utils` stayed unloaded. Post-live cleanup removed
+  the QA sale, sale item, allocation, product, stock rows, batch rows,
+  inventory movement, action-history entry, and audit log. Docker release image
+  `business-os:v6.0.0-202606040354` serves frontend hash
+  `95087b02ae5f91bc`.
 
 - POS now lazy-loads the filter panel only after the cashier opens Filters.
   Proof: Docker-served route trace
@@ -1447,6 +1446,13 @@ Recent route-level win:
   Chromium customer-selection probe loaded only `app-portal-Bi-RHhNA.js` after
   selecting existing membership customer `Customer 1`, while `app-api-methods`,
   `csv-utils`, `app-local-db`, and `vendor-dexie` stayed unloaded.
+- POS checkout sale writes now use the focused `sale-write-api` transport chunk
+  directly instead of the broad API methods registry. The Docker-served
+  Move 764 trace was ready in 245 ms with 30 requests and 22 scripts. A headed
+  Chromium checkout probe used real POS product search/card click, `Exact $`,
+  `Done`, and `Completed` controls, reached receipt preview, and loaded
+  `sale-write-api-BDCbXrEC.js` while `app-api-methods` and `csv-utils` stayed
+  unloaded.
 - API HTTP, local Dexie, websocket, and browser API bootstrap were converted to
   TypeScript and verified through frontend utility tests, the TypeScript source
   guard, production build, Phase 29 audit, schema audit, organization audit,
@@ -1511,8 +1517,8 @@ Recent route-level win:
 5. Continue mobile public portal polish from the screenshots: next candidates
    are the large hero logo/avatar sizing and first-card spacing if the public
    owner wants an even shorter first viewport.
-6. Continue measured POS splits after Move 763: checkout sale writes, receipt
-   printing, product-management writes, and settings/system transports can
+6. Continue measured POS splits after Move 764: receipt printing/export,
+   product-management writes, and settings/system transports can
    still wake broad registry paths on real intent. Keep each slice guarded by
    route traces plus interaction proof so read-only POS browsing remains light
    while live/offline write behavior stays intact.

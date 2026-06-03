@@ -10192,3 +10192,57 @@ Move 763 status:
   sale writes, receipt printing, product-management writes, and
   settings/system transport clusters without moving live business data or
   weakening offline fallback behavior.
+
+Move 764 status:
+- Move 764 narrows POS checkout sale writes. `POS.tsx` now lazy-loads
+  `saleWriteTransport.ts` for the actual Done -> Completed checkout path
+  instead of going through the broad API methods registry. The new transport
+  owns `createSale`, pending offline sale queue retry, local client-request-id
+  creation, queue mirror writes, backoff, conflict handling, and sync-update
+  dispatch. `methods.ts` keeps compatibility exports but delegates
+  `createSale` and `retryPendingSyncNow` through a memoized dynamic import, so
+  existing callers still work while POS checkout intent stays focused.
+- Proof: `node frontend\tests\performanceLoadingUx.test.ts`, frontend
+  typecheck, JSX/source check, production build with no circular chunk warning,
+  Docker release image `business-os:v6.0.0-202606040354`, focused POS
+  route-load Playwright trace, headed live Chromium POS checkout, and
+  post-check QA cleanup.
+- Build proof: production builds emitted a focused `sale-write-api-*.js`
+  chunk. Compiled inspection found no `app-api-methods`, `csv-utils`,
+  `requestIds`, `methods`, or `salesTransport` imports in the chunk after the
+  local sale request-id helper was kept inside the transport. The source guard
+  verifies the manual `sale-write-api` boundary, rejects `api.createSale`,
+  `getPosApi`, and `missingPosApiMethod` in POS, ensures the broad methods
+  registry no longer owns duplicate offline sale queue functions, and requires
+  dynamic delegation for `createSale` and forced queue retry.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-56-35-700Z.json`
+  measured POS at 245 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors. Docker image
+  `business-os:v6.0.0-202606040354` served frontend hash
+  `95087b02ae5f91bc`.
+- Interaction proof: a Docker-served headed Chromium check created temporary
+  product `QA POS Move764 1780517016314 Item`, opened POS, searched for that
+  product, clicked the real product card, used the real `Exact $`, `Done`, and
+  `Completed` controls, reached the receipt preview, and confirmed the created
+  sale by searching `/api/sales`. The checkout flow loaded
+  `sale-write-api-BDCbXrEC.js`, loaded no `app-api-methods` or `csv-utils`,
+  had zero failed requests, zero relevant console messages, and zero page
+  errors. Screenshots:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-sale-write-before.png`
+  and
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-sale-write-after.png`.
+- Post-live hygiene: `npm.cmd --prefix ops run cleanup-test-data -- --prefix
+  "QA POS Move764" --apply --output ops/runtime/reports/pos-sale-write-cleanup-latest.json`
+  removed the QA sale, sale item, sale allocation, product, stock rows, batch
+  rows, inventory movement, action-history entry, and audit log created by the
+  live checkout proof.
+- Current plan position after Move 764: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with measured route/interaction proof, focusing on receipt
+  printing/export intent, product-management writes, settings/system transport
+  clusters, and any remaining POS checkout-adjacent chunks without moving live
+  business data or weakening offline fallback behavior.

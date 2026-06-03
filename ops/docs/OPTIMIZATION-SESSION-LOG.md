@@ -2984,3 +2984,52 @@ Use this shape for future entries:
   `npm.cmd --prefix ops run cleanup-test-data -- --prefix "QA POS" --apply`
   removed four QA audit-log entries left by the live create flow and found no
   remaining matching source rows.
+
+- change: keep POS checkout sale writes out of broad API methods
+- affected files:
+  `frontend/src/api/saleWriteTransport.ts`,
+  `frontend/src/api/methods.ts`,
+  `frontend/src/components/pos/POS.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: POS Done -> Completed sale checkout writes, plus
+  pending offline sale queue forced retry
+- keeper or rollback: keeper; POS now lazy-loads `saleWriteTransport.ts` for
+  checkout, while `methods.ts` keeps compatibility exports that dynamically
+  delegate `createSale` and `retryPendingSyncNow`. The focused transport owns
+  sale create, client request ids, offline sale queueing, retry/backoff,
+  conflict marking, mirror writes, sync update dispatch, and background sync
+  registration without importing the broad API methods registry.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted `sale-write-api-*.js` as a
+  focused write chunk with no circular chunk warning. Compiled inspection
+  found no `app-api-methods`, `csv-utils`, `requestIds`, `methods`, or
+  `salesTransport` imports in the sale-write chunk. The source guard verifies
+  the sale-write manual chunk, rejects `api.createSale`, `getPosApi`, and
+  `missingPosApiMethod` in POS, and ensures duplicate offline sale queue
+  helpers are no longer owned by `methods.ts`.
+- route-scoped result:
+  `ops/runtime/reports/route-load-trace-2026-06-03T19-56-35-700Z.json`
+  measured POS at 245 ms route-ready with 30 requests and 22 scripts, with
+  zero failed requests and zero console/page errors. Docker image
+  `business-os:v6.0.0-202606040354` served the check.
+- interaction proof:
+  a Docker-served headed Chromium probe created temporary product
+  `QA POS Move764 1780517016314 Item`, opened POS, searched for it, clicked
+  the product card, clicked `Exact $`, `Done`, and `Completed`, reached receipt
+  preview, and confirmed the sale through `/api/sales` search. The flow loaded
+  `sale-write-api-BDCbXrEC.js`, while `app-api-methods` and `csv-utils` stayed
+  unloaded with zero failed requests and zero relevant console/page errors.
+  Screenshots:
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-sale-write-before.png`
+  and
+  `C:\Users\user\Downloads\business-os\output\playwright\pos-sale-write-after.png`.
+- post-live hygiene:
+  `npm.cmd --prefix ops run cleanup-test-data -- --prefix "QA POS Move764" --apply --output ops/runtime/reports/pos-sale-write-cleanup-latest.json`
+  removed the QA sale, sale item, allocation, product, stock rows, batch rows,
+  inventory movement, action-history entry, and audit log created by the live
+  checkout proof.

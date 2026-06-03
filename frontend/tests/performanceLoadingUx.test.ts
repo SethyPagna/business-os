@@ -10,6 +10,8 @@ const websocketApi = fs.readFileSync(new URL('../src/api/websocket.ts', import.m
 const appBootstrapTransport = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
 const contactReadTransport = fs.readFileSync(new URL('../src/api/contactReadTransport.ts', import.meta.url), 'utf8')
 const contactWriteTransport = fs.readFileSync(new URL('../src/api/contactWriteTransport.ts', import.meta.url), 'utf8')
+const saleWriteTransport = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
+const apiMethods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const localMirrors = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
 const clientRuntime = fs.readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
 const viteConfig = fs.readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
@@ -70,7 +72,6 @@ const backgroundImportTracker = fs.readFileSync(new URL('../src/components/share
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
-const apiMethods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 
 assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
 assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/appShellUtils\.ts'/, 'app context should be able to derive the initial route page before the shell mounts')
@@ -262,6 +263,7 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/actionGuards\.ts'
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/scriptTypography\.ts'\)\) \{[\s\S]*return 'script-typography'/, 'shared Khmer typography helpers should not be owned by the public catalog preview chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactReadTransport\.ts'\)\) return 'contact-read-api'/, 'POS delayed contact option reads should have their own lazy contact-read API chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/contactWriteTransport\.ts'\)\) return 'contact-write-api'/, 'POS quick contact create writes should have their own lazy contact-write API chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/saleWriteTransport\.ts'\)\) return 'sale-write-api'/, 'POS checkout sale writes should have their own lazy sale-write API chunk')
 assert.match(viteConfig, /productReadTransport\.ts'[\s\S]*lookupTransport\.ts'[\s\S]*expectedUpdatedAt\.ts'[\s\S]*localMirrors\.ts'[\s\S]*lazyLocalDb\.ts'[\s\S]*queryCache\.ts'[\s\S]*return 'product-read-api'/, 'POS product and lookup reads should have a narrow product-read API chunk instead of landing in app-api-methods')
 assert.match(viteConfig, /catalog\/catalogUi\.tsx'[\s\S]*return 'catalog-ui'[\s\S]*catalog\/portalCatalogDisplay\.ts'[\s\S]*return 'catalog-display'[\s\S]*CatalogPageContext\.tsx'[\s\S]*return 'catalog-context'[\s\S]*components\/catalog\/'\)\) return 'catalog'/, 'small catalog UI/display/context helpers should be split before the generic catalog route chunk')
 assert.match(viteConfig, /CatalogEditorSurface\.tsx'\)[\s\S]*CatalogImageField\.tsx'\)[\s\S]*return 'catalog-editor'/, 'editor-only catalog image fields should not be grouped into the public catalog chunk')
@@ -288,12 +290,21 @@ assert.match(pos, /getCategories as getPosCategories[\s\S]*from '\.\.\/\.\.\/api
 assert.match(pos, /let contactReadTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \| null = null[\s\S]*function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)>/, 'POS contact reads should lazy-load the narrow contact read transport after the delayed option gate')
 assert.match(pos, /let contactWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)> \| null = null[\s\S]*function getContactWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)>/, 'POS quick contact creates should lazy-load the narrow contact write transport on add intent')
 assert.match(pos, /let portalTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)> \| null = null[\s\S]*function getPortalTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)>/, 'POS membership lookup should lazy-load the narrow portal transport on membership intent')
-assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts|api\.lookupPortalMembership|api\.createCustomer|api\.createDeliveryContact/, 'POS product, category, customer, delivery, membership reads, and quick contact creates should not wake app-api-methods during catalog, option, or add flows')
+assert.match(pos, /let saleWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)> \| null = null[\s\S]*function getSaleWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/saleWriteTransport\.ts'\)>/, 'POS checkout should lazy-load the narrow sale write transport only on Done intent')
+assert.doesNotMatch(pos, /api\.getProductBootstrap|api\.searchProducts|api\.getProductFilters|api\.getCategories|api\.getCustomers|api\.getDeliveryContacts|api\.lookupPortalMembership|api\.createCustomer|api\.createDeliveryContact|api\.createSale|getPosApi|missingPosApiMethod/, 'POS product, category, customer, delivery, membership reads, quick contact creates, and sale checkout should not wake app-api-methods during catalog, option, add, or checkout flows')
 assert.doesNotMatch(contactReadTransport, /import .*['"]\.\/(?:localMirrors|lazyLocalDb)\.ts['"]/, 'POS contact reads should not statically import mirror or IndexedDB helpers')
 assert.match(contactReadTransport, /await import\('\.\/lazyLocalDb\.ts'\)/, 'POS contact read offline fallback should load IndexedDB only after network failure')
 assert.match(contactReadTransport, /await import\('\.\/localMirrors\.ts'\)/, 'POS contact read mirroring should load mirror helpers only after the delayed mirror timer')
 assert.doesNotMatch(contactWriteTransport, /import .*['"]\.\/requestIds\.ts['"]/, 'POS contact quick-create writes should not import the shared app-api-methods request-id owner')
 assert.match(contactWriteTransport, /function ensureContactClientRequestId/, 'POS contact quick-create writes should keep a tiny local request-id helper')
+assert.match(saleWriteTransport, /export async function createSale[\s\S]*queueOfflineSale/, 'sale write transport should own checkout create and offline queue fallback outside the broad API registry')
+assert.match(saleWriteTransport, /export async function syncPendingSalesQueue/, 'sale write transport should preserve pending offline sale sync for background retry')
+assert.doesNotMatch(saleWriteTransport, /from '\.\/methods\.ts'|from "\.\/methods\.ts"|from '\.\/salesTransport\.ts'|from "\.\/salesTransport\.ts"|from '\.\/requestIds\.ts'|from "\.\/requestIds\.ts"/, 'sale write transport should not import the broad API registry, sales read/mirror transport, or shared request-id owner')
+assert.match(saleWriteTransport, /function ensureSaleClientRequestId/, 'sale write transport should keep a tiny local request-id helper so checkout does not wake app-api-methods')
+assert.match(apiMethods, /function loadSaleWriteTransport\(\) \{[\s\S]*import\('\.\/saleWriteTransport\.ts'\)/, 'legacy API registry should lazy-load the focused sale write transport without creating a manual chunk cycle')
+assert.match(apiMethods, /export async function createSale\(d\) \{[\s\S]*await loadSaleWriteTransport\(\)[\s\S]*return createSaleRequest\(d\)/, 'legacy API registry should delegate createSale to the focused sale write transport')
+assert.match(apiMethods, /export async function retryPendingSyncNow\(\) \{[\s\S]*await loadSaleWriteTransport\(\)[\s\S]*return syncPendingSalesQueue\(\{ force: true \}\)/, 'legacy pending-sync retry should delegate to the focused sale write transport')
+assert.doesNotMatch(apiMethods, /function buildOfflineSaleReceiptNumber|async function queueOfflineSale|async function syncPendingSalesQueue/, 'legacy API registry should not keep a duplicate offline-sale queue implementation')
 assert.match(lazyPortalMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module\.default\)/, 'LazyPortalMenu should dynamically import PortalMenu')
 assert.match(lazyPortalMenu, /onClickCapture=\{\(event\) => \{[\s\S]*loadPortalMenu\(true\)/, 'LazyPortalMenu should open the menu from the first click after the chunk loads')
 assert.match(portalMenu, /defaultOpen\?: boolean[\s\S]*const \[open, setOpen\] = useState\(defaultOpen\)/, 'PortalMenu should support first-click lazy mount opening')
@@ -2337,7 +2348,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|api)\.createSale(?:\?\.)?\(saleData\)[\s\S]*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => createPosSale\(saleData\),\s*'Create POS sale',\s*POS_CHECKOUT_TIMEOUT_MS,\s*\)/,
   'POS checkout should timeout slow sale creation',
 )
 assert.match(

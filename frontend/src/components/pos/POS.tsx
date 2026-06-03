@@ -291,11 +291,6 @@ type SaleResult = {
   success?: boolean
 }
 
-type PosApi = {
-  createSale?: (payload: Record<string, unknown>) => Promise<SaleResult>
-  getBranches?: () => Promise<BranchRecord[]>
-}
-
 type ImageLightboxState = {
   images: string[]
   index: number
@@ -321,14 +316,6 @@ function normalizeCategory(category: unknown): CategoryRecord | null {
   }
 }
 
-function getPosApi(): PosApi {
-  return (window as typeof window & { api?: PosApi }).api || {}
-}
-
-function missingPosApiMethod(methodName: string): Promise<never> {
-  return Promise.reject(new Error(`POS API method is unavailable: ${methodName}`))
-}
-
 function loadPosProductBootstrap(query: QueryParams): Promise<ProductBootstrapPayload> {
   return getPosProductBootstrap(query) as Promise<ProductBootstrapPayload>
 }
@@ -348,6 +335,7 @@ function loadPosCategories(): Promise<unknown[]> {
 let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
 let contactWriteTransportPromise: Promise<typeof import('../../api/contactWriteTransport.ts')> | null = null
 let portalTransportPromise: Promise<typeof import('../../api/portalTransport.ts')> | null = null
+let saleWriteTransportPromise: Promise<typeof import('../../api/saleWriteTransport.ts')> | null = null
 
 function getContactReadTransport(): Promise<typeof import('../../api/contactReadTransport.ts')> {
   if (!contactReadTransportPromise) contactReadTransportPromise = import('../../api/contactReadTransport.ts')
@@ -362,6 +350,11 @@ function getContactWriteTransport(): Promise<typeof import('../../api/contactWri
 function getPortalTransport(): Promise<typeof import('../../api/portalTransport.ts')> {
   if (!portalTransportPromise) portalTransportPromise = import('../../api/portalTransport.ts')
   return portalTransportPromise
+}
+
+function getSaleWriteTransport(): Promise<typeof import('../../api/saleWriteTransport.ts')> {
+  if (!saleWriteTransportPromise) saleWriteTransportPromise = import('../../api/saleWriteTransport.ts')
+  return saleWriteTransportPromise
 }
 
 async function loadPosCustomers(): Promise<CustomerRecord[]> {
@@ -387,6 +380,11 @@ async function createPosDeliveryContact(payload: DeliveryFormState): Promise<Par
 async function lookupPosPortalMembership(membershipNumber: string): Promise<MembershipInfo | null> {
   const { lookupPortalMembership } = await getPortalTransport()
   return lookupPortalMembership(membershipNumber) as Promise<MembershipInfo | null>
+}
+
+async function createPosSale(payload: Record<string, unknown>): Promise<SaleResult> {
+  const { createSale } = await getSaleWriteTransport()
+  return createSale(payload) as Promise<SaleResult>
 }
 
 function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
@@ -1664,9 +1662,8 @@ export default function POS() {
     }
 
     try {
-      const api = getPosApi()
       const result = await withLoaderTimeout(
-        () => api.createSale?.(saleData) || missingPosApiMethod('createSale'),
+        () => createPosSale(saleData),
         'Create POS sale',
         POS_CHECKOUT_TIMEOUT_MS,
       )
