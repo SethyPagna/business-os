@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-03T09:20:45.459Z
+Generated: 2026-06-03T09:41:26.009Z
 
 ## Summary
 
@@ -63,7 +63,7 @@ Generated: 2026-06-03T09:20:45.459Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 9438 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 9494 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7067 | ops/docs |
@@ -74,9 +74,9 @@ Generated: 2026-06-03T09:20:45.459Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3043 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2463 | ops/docs |
-| frontend/src/components/products/Products.tsx | 2411 | frontend/components/products |
-| frontend/tests/performanceLoadingUx.test.ts | 2397 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 2516 | ops/docs |
+| frontend/src/components/products/Products.tsx | 2450 | frontend/components/products |
+| frontend/tests/performanceLoadingUx.test.ts | 2422 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
 | frontend/src/components/pos/POS.tsx | 2331 | frontend/components/pos |
 | backend/src/routes/products.ts | 2218 | backend/routes |

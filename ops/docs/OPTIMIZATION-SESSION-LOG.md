@@ -2460,3 +2460,56 @@ Use this shape for future entries:
   CSP. One immediately prior public-portal attempt rendered successfully but
   saw a transient generic `net::ERR_CONNECTION_TIMED_OUT`; the rerun passed
   without relevant console noise.
+
+- change: defer Products auxiliary category/unit/branch options out of first
+  route window
+- affected files:
+  `frontend/src/components/products/Products.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Products first route load, `/api/categories`,
+  `/api/units`, `/api/branches`, `/api/products/search`, `/api/products/
+  filters`, action history, and user options
+- keeper or rollback: keeper; Products keeps bootstrap and first product
+  search immediate, while category/unit/branch auxiliary options wake behind a
+  post-route-ready one-shot loader or immediately when option-dependent UI
+  opens
+- route-scoped result: `ops/runtime/reports/route-load-trace-latest.json`
+  compared Products, POS, Inventory, and Server. Products dropped from 43 to
+  40 total requests and from 5 to 2 first-window API requests by moving
+  `/api/branches`, `/api/categories`, and `/api/units` out of the initial
+  route window. The post-change Products trace had zero failed requests and
+  zero console/page errors. The first-window API list is `/api/auth/bootstrap`
+  and `/api/products/search...`.
+- delayed wake proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T09-32-54-993Z.json` used a
+  3000 ms trace window and showed the delayed reads waking after route-ready:
+  `/api/users`, `/api/branches`, `/api/categories`, `/api/action-history?
+  scope=products...`, `/api/units`, and `/api/products/filters`, all HTTP 200.
+- focused route-control result:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-29-59-399Z/summary.json`
+  covered desktop/mobile Products, POS, Inventory, and Server, discovered 165
+  controls, exercised 123 controls, intentionally skipped 42 stable
+  broad-audit guardrail controls, captured 16 screenshots, and recorded zero
+  failed controls and zero findings.
+- warm whole-app result: frontend utility tests, JSX/source check, production
+  build, Docker release build/update, local `/health`, public Cloudflare
+  Playwright, focused Playwright route-load trace, delayed Products wake trace,
+  focused route-control audit, and full all-pages desktop/mobile Playwright
+  passed. Docker image `business-os:v6.0.0-202606031726` is serving build hash
+  `b5ac468402187aa5`; release update backup:
+  `ops/runtime/docker-release/backups/20260603-172827`. The local Vite build
+  hash was `2ce425b5b1e43404`.
+- exhaustive live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-33-46-064Z/summary.json`
+  covered 34 routes, discovered 518 visible controls, exercised 377 controls,
+  intentionally skipped 141 stable broad-audit guardrail controls, captured 68
+  screenshots, and recorded zero failed controls and zero findings.
+- public Cloudflare proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T09-33-45-517Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.

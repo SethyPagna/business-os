@@ -131,6 +131,7 @@ const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox')
 
 const PRODUCTS_HISTORY_READY_DELAY_MS = 1800
 const PRODUCTS_FILTER_META_READY_DELAY_MS = 1800
+const PRODUCTS_AUX_OPTIONS_READY_DELAY_MS = 1800
 
 type EntityId = string | number
 type Loader<T = unknown> = () => Promise<T>
@@ -458,10 +459,12 @@ export default function Products() {
   const [isProductFilterMenuOpen, setIsProductFilterMenuOpen] = useState(false)
   const [historyReady, setHistoryReady] = useState(false)
   const [filterMetaReady, setFilterMetaReady] = useState(false)
+  const [auxOptionsReady, setAuxOptionsReady] = useState(false)
   const loadedOnceRef = useRef(false)
   const auxOptionsLoadedRef = useRef(false)
   const filterMetaLoadedRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const auxOptionsRequestRef = useRef(0)
   const filterMetaRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
@@ -570,26 +573,6 @@ export default function Products() {
         loadedOnceRef.current = true
         setLoadError(null)
 
-        const shouldLoadAuxOptions = !auxOptionsLoadedRef.current || !categories.length || !units.length || !branches.length
-        if (shouldLoadAuxOptions) {
-          void settleLoaderMap({
-            categories: () => withLoaderTimeout(() => productApi.getCategories(), 'Product categories', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
-            units: () => withLoaderTimeout(() => productApi.getUnits(), 'Product units', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
-            branches: () => withLoaderTimeout(() => productApi.getBranches(), 'Product branches', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
-          }).then((auxResult) => {
-            if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-            const cats = auxResult.values.categories
-            const unitList = auxResult.values.units
-            const brs = auxResult.values.branches
-            if (Array.isArray(cats)) setCategories(cats)
-            if (Array.isArray(unitList)) setUnits(unitList)
-            if (Array.isArray(brs)) setBranches((brs || []).filter((branch) => branch.is_active))
-            if (Array.isArray(cats) || Array.isArray(unitList) || Array.isArray(brs)) {
-              auxOptionsLoadedRef.current = true
-            }
-          }).catch(() => {})
-        }
-
         if (result.hasErrors && !silent) {
           notify(t('products_partial_load') || 'Some product data is still catching up. The page will keep refreshing as data arrives.', 'warning')
         }
@@ -624,7 +607,7 @@ export default function Products() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, branches.length, catFilter, categories.length, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr, units.length])
+  }, [branchFilter, brandFilter, catFilter, debouncedSearch, groupFilter, initialFilter, notify, productPage, productPageSize, productSortDirection, searchMode, stockFilter, supplierFilter, t, tr])
 
   useEffect(() => {
     latestLoadRef.current = load
@@ -645,12 +628,37 @@ export default function Products() {
     return Array.isArray(payload) ? payload : []
   }, [])
 
+  const loadAuxOptions = useCallback(async (label = 'Product auxiliary options') => {
+    if (auxOptionsLoadedRef.current) return
+    const requestId = beginTrackedRequest(auxOptionsRequestRef)
+    const auxResult = await settleLoaderMap({
+      categories: () => withLoaderTimeout(() => productApi.getCategories(), 'Product categories', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+      units: () => withLoaderTimeout(() => productApi.getUnits(), 'Product units', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+      branches: () => withLoaderTimeout(() => productApi.getBranches(), 'Product branches', PRODUCTS_AUX_OPTIONS_TIMEOUT_MS),
+    })
+    if (!isTrackedRequestCurrent(auxOptionsRequestRef, requestId)) return
+    const cats = auxResult.values.categories
+    const unitList = auxResult.values.units
+    const brs = auxResult.values.branches
+    if (Array.isArray(cats)) setCategories(cats)
+    if (Array.isArray(unitList)) setUnits(unitList)
+    if (Array.isArray(brs)) setBranches((brs || []).filter((branch) => branch.is_active))
+    if (Array.isArray(cats) || Array.isArray(unitList) || Array.isArray(brs)) {
+      auxOptionsLoadedRef.current = true
+    }
+    if (auxResult.hasErrors) {
+      console.warn(`[Products] ${label} partially failed:`, getFirstLoaderError(auxResult.errors, 'option load failed'))
+    }
+  }, [])
+
   useEffect(() => {
     if (!isActive) {
       setHistoryReady(false)
       setFilterMetaReady(false)
+      setAuxOptionsReady(false)
       if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
+      invalidateTrackedRequest(auxOptionsRequestRef)
       invalidateTrackedRequest(filterMetaRequestRef)
       loadPromiseRef.current = null
       pendingLoadRef.current = null
@@ -660,6 +668,31 @@ export default function Products() {
     const silent = loadedOnceRef.current
     load(silent)
   }, [isActive, load])
+  useEffect(() => {
+    if (!isActive) {
+      setAuxOptionsReady(false)
+      return undefined
+    }
+    if (!loadedOnceRef.current || loading || auxOptionsLoadedRef.current) return undefined
+    const timer = window.setTimeout(() => {
+      setAuxOptionsReady(true)
+    }, PRODUCTS_AUX_OPTIONS_READY_DELAY_MS)
+    return () => window.clearTimeout(timer)
+  }, [isActive, loading])
+  useEffect(() => {
+    if (!isActive || auxOptionsLoadedRef.current) return
+    const optionUiOpen = isProductFilterMenuOpen
+      || Boolean(bulkEditMode)
+      || modal === 'form'
+      || modal === 'bulk'
+      || modal === 'cats'
+      || modal === 'units'
+    if (optionUiOpen) setAuxOptionsReady(true)
+  }, [bulkEditMode, isActive, isProductFilterMenuOpen, modal])
+  useEffect(() => {
+    if (!isActive || !auxOptionsReady || auxOptionsLoadedRef.current) return
+    void loadAuxOptions('Product auxiliary options').catch(() => {})
+  }, [auxOptionsReady, isActive, loadAuxOptions])
   useEffect(() => {
     if (!isActive) {
       setHistoryReady(false)
@@ -706,12 +739,18 @@ export default function Products() {
       filterMetaLoadedRef.current = false
       setFilterMetaReady(false)
       invalidateTrackedRequest(filterMetaRequestRef)
+      if (['categories', 'units', 'branches', 'settings'].includes(syncChannelName)) {
+        auxOptionsLoadedRef.current = false
+        setAuxOptionsReady(false)
+        invalidateTrackedRequest(auxOptionsRequestRef)
+      }
       load(true)
     }
   }, [isActive, load, syncChannelName, syncChannelReason, syncChannelSource, syncChannelTs])
   useEffect(() => () => {
     if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
     invalidateTrackedRequest(loadRequestRef)
+    invalidateTrackedRequest(auxOptionsRequestRef)
     invalidateTrackedRequest(filterMetaRequestRef)
     loadPromiseRef.current = null
     pendingLoadRef.current = null

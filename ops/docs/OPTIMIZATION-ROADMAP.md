@@ -9435,3 +9435,59 @@ Move 739 status:
   measured trace: POS now has 4 first-window API calls and Products has 5; any
   deeper deferral should be route-specific, preserve first-use controls, and
   include live trace/control proof.
+
+Move 740 status:
+- Move 740 defers Products' category, unit, and branch auxiliary lookup reads
+  out of the first visible route window. Products still loads authenticated
+  bootstrap and the first product search immediately; the auxiliary lookup
+  options now wake after route-ready or immediately when option-dependent UI
+  opens.
+- `frontend/src/components/products/Products.tsx` now uses
+  `PRODUCTS_AUX_OPTIONS_READY_DELAY_MS`, `auxOptionsReady`,
+  `auxOptionsLoadedRef`, `auxOptionsRequestRef`, and `loadAuxOptions()` to run
+  category/unit/branch reads through a separate tracked loader. The filter
+  menu, product form, bulk import, category/unit managers, and bulk edit
+  controls can wake that loader immediately, so first-use controls do not wait
+  for the passive delay.
+- Docker release image `business-os:v6.0.0-202606031726` is serving frontend
+  hash `b5ac468402187aa5`; update backup:
+  `ops/runtime/docker-release/backups/20260603-172827`. The local production
+  build hash from `npm.cmd --prefix frontend run build` is
+  `2ce425b5b1e43404`.
+- Proof: frontend utility tests, JSX/source check, production build, Docker
+  release build/update, local health metadata, focused route-load trace,
+  delayed Products wake trace, focused Products/POS/Inventory/Server
+  route-control audit, public Cloudflare portal Playwright, and full desktop/
+  mobile all-pages Playwright passed. The focused route-load trace
+  `ops/runtime/reports/route-load-trace-latest.json` shows Products reduced
+  from 43 to 40 total requests and from 5 to 2 first-window API requests, with
+  zero failed requests and zero console/page errors. The post-change
+  first-window API list is `/api/auth/bootstrap` and
+  `/api/products/search...`.
+- The delayed wake trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T09-32-54-993Z.json` used a
+  3000 ms window and confirmed the deferred `/api/branches`,
+  `/api/categories`, `/api/units`, `/api/products/filters`, `/api/users`, and
+  `/api/action-history?scope=products...` reads wake after route-ready with
+  HTTP 200 and no console/page errors.
+- The focused route-control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-29-59-399Z/summary.json`
+  exercised 123 controls across desktop/mobile Products, POS, Inventory, and
+  Server with zero failures and zero findings. The exhaustive all-pages report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-33-46-064Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 377, skipped 141 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T09-33-45-517Z/report.json`
+  rendered 20 products with config/meta/search/AI HTTP 200, zero failed
+  responses, zero relevant console messages, zero page errors, and enforced
+  CSP.
+- Current plan position after Move 740: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Products is now at 2
+  first-window API calls; POS is at 4, Inventory at 3, and Server at 3. Next
+  optimization candidates should move to another route or target code/runtime
+  cleanup, because Products first-window work is close to the practical floor:
+  auth plus first page data.

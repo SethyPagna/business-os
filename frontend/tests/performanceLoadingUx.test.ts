@@ -1773,6 +1773,31 @@ assert.match(
 )
 assert.match(
   products,
+  /const PRODUCTS_AUX_OPTIONS_READY_DELAY_MS = 1800/,
+  'products auxiliary category, unit, and branch reads should wait until after first product route-ready work',
+)
+assert.match(
+  products,
+  /if \(!loadedOnceRef\.current \|\| loading \|\| auxOptionsLoadedRef\.current\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setAuxOptionsReady\(true\)[\s\S]*PRODUCTS_AUX_OPTIONS_READY_DELAY_MS/,
+  'products should enable auxiliary options only after the first product load settles',
+)
+assert.match(
+  products,
+  /const optionUiOpen = isProductFilterMenuOpen[\s\S]*modal === 'form'[\s\S]*modal === 'bulk'[\s\S]*modal === 'cats'[\s\S]*modal === 'units'[\s\S]*if \(optionUiOpen\) setAuxOptionsReady\(true\)/,
+  'products should wake auxiliary options immediately when option-dependent UI opens',
+)
+assert.match(
+  products,
+  /if \(!isActive \|\| !auxOptionsReady \|\| auxOptionsLoadedRef\.current\) return[\s\S]*void loadAuxOptions\('Product auxiliary options'\)\.catch\(\(\) => \{\}\)/,
+  'products should keep auxiliary options out of the first route load and fetch them through the delayed loader',
+)
+assert.match(
+  products,
+  /const requestId = beginTrackedRequest\(auxOptionsRequestRef\)[\s\S]*settleLoaderMap\(\{[\s\S]*productApi\.getCategories\(\)[\s\S]*productApi\.getUnits\(\)[\s\S]*productApi\.getBranches\(\)[\s\S]*if \(!isTrackedRequestCurrent\(auxOptionsRequestRef, requestId\)\) return/,
+  'products delayed auxiliary options should ignore stale responses',
+)
+assert.match(
+  products,
   /withLoaderTimeout\(\(\) => productApi\.getProductFilters\(\{\}\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)/,
   'products filter metadata should timeout slow filter requests',
 )

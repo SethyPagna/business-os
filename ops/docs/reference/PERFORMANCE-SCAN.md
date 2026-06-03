@@ -1483,4 +1483,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   covered 34 routes, discovered 518 controls, exercised 378, skipped 140 by
   stable broad-audit guardrails, captured 68 screenshots, and recorded zero
   failures or findings.
+- Move 470 records roadmap Move 740: defer Products auxiliary category/unit/
+  branch options out of the first route window. `Products` now waits for the
+  first product load to settle and then enables category, unit, and branch
+  lookup reads behind `PRODUCTS_AUX_OPTIONS_READY_DELAY_MS`, while option-
+  dependent UI can wake the same loader immediately. Docker-served build hash
+  `b5ac468402187aa5` passed frontend utility tests, JSX/source check,
+  production build, Docker release/update, focused route-load trace, delayed
+  Products wake trace, focused Products/POS/Inventory/Server route-control
+  audit, public Cloudflare Playwright, and full desktop/mobile all-pages
+  Playwright. The focused trace
+  `ops/runtime/reports/route-load-trace-latest.json` reduced Products
+  first-window API requests from 5 to 2 and total requests from 43 to 40, with
+  zero failed requests and zero console/page errors. The full report
+  `ops/runtime/reports/all-pages-control-audit-2026-06-03T09-33-46-064Z/summary.json`
+  covered 34 routes, discovered 518 controls, exercised 377, skipped 141 by
+  stable broad-audit guardrails, captured 68 screenshots, and recorded zero
+  failures or findings.
 <!-- phase29-manual-notes:end -->
