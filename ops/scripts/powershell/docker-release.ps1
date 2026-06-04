@@ -36,6 +36,9 @@ $RouteContractLog = Join-Path $RuntimeDir 'route-contract.log'
 $PostStartDiagnosticsScript = Join-Path $Root 'ops\scripts\runtime\smoke\post-start-diagnostics.ts'
 $PostStartDiagnosticsReport = Join-Path $RuntimeDir 'post-start-diagnostics.json'
 $PostStartDiagnosticsLog = Join-Path $RuntimeDir 'post-start-diagnostics.log'
+$CloudflareStartupWarmupScript = Join-Path $Root 'ops\scripts\runtime\cloudflare\warm-cloudflare-startup-assets.ts'
+$CloudflareStartupWarmupReport = Join-Path $RuntimeDir 'cloudflare-startup-warmup.json'
+$CloudflareStartupWarmupLog = Join-Path $RuntimeDir 'cloudflare-startup-warmup.log'
 
 function Ensure-Dir($path) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -874,6 +877,23 @@ function Test-ReleaseHealth {
           Fail "Docker release post-start diagnostics failed. Report: $PostStartDiagnosticsReport"
         }
         Write-Ok "Docker release post-start diagnostics written: $PostStartDiagnosticsReport"
+      }
+      if (([string]$envMap.BUSINESS_OS_SKIP_CLOUDFLARE_WARMUP -ne '1') -and (Test-Path -LiteralPath $CloudflareStartupWarmupScript)) {
+        Write-Step 'Warming Cloudflare startup assets for public and admin links...'
+        $publicUrl = if ($envMap.BUSINESS_OS_PUBLIC_URL) { [string]$envMap.BUSINESS_OS_PUBLIC_URL } else { 'https://leangcosmetics.dpdns.org' }
+        $adminUrl = if ($envMap.BUSINESS_OS_ADMIN_URL) { [string]$envMap.BUSINESS_OS_ADMIN_URL } else { 'https://admin.leangcosmetics.dpdns.org' }
+        $warmup = Invoke-ProcessWithTimeout $node @(
+          $CloudflareStartupWarmupScript,
+          '--public-url', $publicUrl,
+          '--admin-url', $adminUrl,
+          '--output', $CloudflareStartupWarmupReport
+        ) 60
+        Set-Content -LiteralPath $CloudflareStartupWarmupLog -Encoding UTF8 -Value (($warmup.Stdout, $warmup.Stderr) -join [Environment]::NewLine)
+        if ($warmup.ExitCode -eq 0) {
+          Write-Ok "Cloudflare startup warmup completed: $CloudflareStartupWarmupReport"
+        } else {
+          Write-Warn "Cloudflare startup warmup did not complete. Startup will continue. Log: $CloudflareStartupWarmupLog"
+        }
       }
     } else {
       Write-Warn 'Node.js was not found on the host, so the route contract smoke could not run.'

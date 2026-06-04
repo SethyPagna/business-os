@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 770.
+- Latest completed implementation move in this roadmap: Move 771.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -10583,3 +10583,52 @@ Move 770 status:
   focus on reducing the remaining public catalog base route chunk, Settings
   and Backup transport clusters, and Cloudflare tunnel variance without moving
   live business data or weakening offline fallback behavior.
+
+Move 771 status:
+- Move 771 adds a guarded Cloudflare startup asset warmup. The new
+  `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts` script
+  fetches the real public and admin shell pages, extracts same-origin startup
+  scripts/styles/modulepreloads, warms those URLs through Cloudflare with
+  bounded concurrency and timeouts, and writes both timestamped and latest
+  reports.
+- `ops/package.json` exposes the tool as `npm.cmd --prefix ops run
+  warm-cloudflare-startup`. `run/docker/start.bat` now reaches the warmup
+  through `ops/scripts/powershell/docker-release.ps1` after Docker health,
+  route-contract smoke, and post-start diagnostics pass. The warmup is
+  best-effort: failures warn and do not mark the local runtime unhealthy.
+  `BUSINESS_OS_SKIP_CLOUDFLARE_WARMUP=1` can disable it.
+- Cold-edge proof: the first standalone run
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-13-07-290Z.json`
+  succeeded with zero failed assets and observed 16 `MISS`, 4 `HIT`, and 4
+  `BYPASS` responses. The immediate second run
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-13-28-973Z.json`
+  succeeded with zero failed assets and observed 20 `HIT` and 4 `BYPASS`
+  responses, proving the warmup turns cold hashed startup assets into edge
+  cache hits.
+- Launcher proof: `run\docker\start.bat` completed successfully and wrote
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json`; that report
+  observed 20 `HIT`, 4 `BYPASS`, and zero failed assets after the app was
+  healthy.
+- Actual-link proof after launcher warmup: real public route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-524Z.json` passed
+  `/public` with zero failed requests and zero console/page errors. Real admin
+  trace `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-525Z.json`
+  passed Dashboard and Products with zero failed requests and zero console/page
+  errors. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-15-52-108Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Safety proof: `node --check
+  ops\scripts\runtime\cloudflare\warm-cloudflare-startup-assets.ts`,
+  standalone `npm.cmd --prefix ops run warm-cloudflare-startup`, launcher
+  `run\docker\start.bat`, route traces, public portal check,
+  `npm.cmd --prefix ops run post-live-hygiene`, and `git diff --check`
+  passed.
+- Current plan position after Move 771: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue reducing public catalog base-route JavaScript, Settings/Backup
+  route transport clusters, and non-cacheable runtime bootstrap latency.

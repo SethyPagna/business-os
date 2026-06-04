@@ -2004,4 +2004,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   about 0.84-0.85 s total. Fast all-pages control audit
   `ops/runtime/reports/all-pages-control-audit-2026-06-04T00-01-16-941Z/summary.json`
   exercised 182 stable controls across 17 routes with zero failed controls.
+- Move 501 records roadmap Move 771: add a best-effort Cloudflare startup
+  asset warmup after Docker release health. The new
+  `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts` script
+  fetches public/admin shell HTML, extracts same-origin startup assets, warms
+  them with bounded concurrency, and writes timestamped plus latest reports.
+  The first standalone run
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-13-07-290Z.json`
+  saw 16 `MISS`, 4 `HIT`, 4 `BYPASS`, and zero failed assets; the immediate
+  second run
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-13-28-973Z.json`
+  saw 20 `HIT`, 4 `BYPASS`, and zero failed assets. The launcher-integrated
+  report `ops/runtime/docker-release/cloudflare-startup-warmup.json` also saw
+  20 `HIT`, 4 `BYPASS`, and zero failed assets after `run\docker\start.bat`.
+  Post-warmup route traces
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-524Z.json` and
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-525Z.json` passed
+  the real public/admin links with zero failures/errors.
 <!-- phase29-manual-notes:end -->

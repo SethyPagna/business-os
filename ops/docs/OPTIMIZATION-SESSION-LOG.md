@@ -3365,3 +3365,47 @@ Use this shape for future entries:
   zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
+
+- change: add best-effort Cloudflare startup asset warmup after Docker start
+- affected files:
+  `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts`,
+  `ops/scripts/powershell/docker-release.ps1`,
+  `ops/package.json`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: public/admin Cloudflare shell pages and their hashed
+  same-origin startup scripts/styles/modulepreloads after Docker release
+  health, plus actual public/admin route traces
+- keeper or rollback: keeper; the warmup is read-only, bounded, and
+  best-effort. It warns instead of failing startup if Cloudflare is unavailable,
+  and can be disabled with `BUSINESS_OS_SKIP_CLOUDFLARE_WARMUP=1`.
+- cold-edge proof:
+  first standalone warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-13-07-290Z.json`
+  succeeded with zero failed assets and observed 16 `MISS`, 4 `HIT`, and 4
+  `BYPASS` responses. Immediate second warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-13-28-973Z.json`
+  succeeded with zero failed assets and observed 20 `HIT` and 4 `BYPASS`
+  responses.
+- launcher proof:
+  `run\docker\start.bat` completed successfully and wrote
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json`; the launcher
+  report observed 20 `HIT`, 4 `BYPASS`, and zero failed assets.
+- actual link proof:
+  public-host route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-524Z.json` passed
+  `/public` with zero failures/errors. Remote admin route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-525Z.json` passed
+  Dashboard and Products with zero failures/errors. Public portal Cloudflare
+  check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-15-52-108Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
+  zero generated integrity matches, and relationship orphan checks passing for
+  49 FK candidates.
