@@ -258,6 +258,15 @@ runTest('setFrontendStaticHeaders keeps HTML fresh and caches built assets for t
   assert.equal(serviceWorker.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
   assert.equal(serviceWorker.get('Service-Worker-Allowed'), '/')
 
+  const buildMetadata = collectHeaders('C:/app/frontend/dist/business-os-build.json')
+  assert.equal(buildMetadata.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
+
+  const runtimeNoiseGuard = collectHeaders('C:/app/frontend/dist/runtime-noise-guard.js')
+  assert.equal(runtimeNoiseGuard.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=3600')
+
+  const themeBootstrap = collectHeaders('C:/app/frontend/dist/theme-bootstrap.js')
+  assert.equal(themeBootstrap.get('Cache-Control'), 'public, max-age=300, stale-while-revalidate=3600')
+
   const scannerEngine = collectHeaders('C:/app/frontend/dist/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm.wasm')
   assert.equal(scannerEngine.get('Content-Type'), 'application/wasm')
   assert.equal(scannerEngine.get('Cache-Control'), 'public, max-age=31536000, immutable')

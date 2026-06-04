@@ -8,9 +8,9 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 771, add best-effort Cloudflare startup asset
-  warmup after Docker release health so public/admin users do not pay the
-  first cold-edge MISS for hashed startup assets after a restart
+- Latest completed move: Move 772, short-cache the two root bootstrap scripts
+  so `runtime-noise-guard.js` and `theme-bootstrap.js` can become Cloudflare
+  hits after warmup instead of permanent `no-store` bypasses
 
 ## Current Baseline
 
@@ -32,15 +32,15 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-15-52-108Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-27-41-981Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-868Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-525Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-27-19-299Z.json`
 - latest focused public-host route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-524Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-26-53-991Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/docker-release/cloudflare-startup-warmup.json`
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-27-17-434Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:

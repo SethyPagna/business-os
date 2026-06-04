@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 771.
+- Latest completed implementation move in this roadmap: Move 772.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -10632,3 +10632,50 @@ Move 771 status:
   TypeScript, runtime, and performance sweeps. Next executable targets should
   continue reducing public catalog base-route JavaScript, Settings/Backup
   route transport clusters, and non-cacheable runtime bootstrap latency.
+
+Move 772 status:
+- Move 772 removes the permanent `no-store` bypass from the two static root
+  bootstrap helpers. `runtime-noise-guard.js` and `theme-bootstrap.js` now use
+  `Cache-Control: public, max-age=300, stale-while-revalidate=3600`, while
+  `sw.js` and `business-os-build.json` remain `no-cache, no-store,
+  must-revalidate`.
+- Guardrail proof: `backend/test/serverUtils.test.ts` now asserts both sides
+  of the split policy: service worker and build metadata stay uncached, and
+  the two static bootstrap helpers are short-cacheable. `npm.cmd --prefix
+  backend run test:utils` passed.
+- Docker/runtime proof: Docker release image
+  `business-os:v6.0.0-202606040823` is running. Local health reports runtime
+  source hash `5d419c030bf25d50` and frontend hash `17726bff239612d9`.
+- Actual header proof: real Cloudflare headers for
+  `https://leangcosmetics.dpdns.org/runtime-noise-guard.js` and
+  `https://leangcosmetics.dpdns.org/theme-bootstrap.js` now return
+  `Cache-Control: public, max-age=300, stale-while-revalidate=3600` instead of
+  the previous `no-cache, no-store, must-revalidate`.
+- Warmup proof: the immediate post-release Docker-start warmup report still
+  saw a first edge `MISS` while the new headers propagated, but the follow-up
+  standalone warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-27-17-434Z.json`
+  completed with `HIT: 24` and zero failed assets. This proves the two root
+  bootstrap scripts now participate in the same warm cache path as the hashed
+  startup assets.
+- Actual-link proof: real public route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-26-53-991Z.json` passed
+  `/public` with zero failed requests and zero console/page errors. Remote
+  admin trace `ops/runtime/reports/route-load-trace-2026-06-04T00-27-19-299Z.json`
+  passed Dashboard and Products with zero failed requests and zero console/page
+  errors. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-27-41-981Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 772: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with public catalog base-route JavaScript, Settings/Backup transport
+  clusters, and the remaining non-cacheable HTML/API/tunnel latency.

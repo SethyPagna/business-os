@@ -2021,4 +2021,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-524Z.json` and
   `ops/runtime/reports/route-load-trace-2026-06-04T00-15-51-525Z.json` passed
   the real public/admin links with zero failures/errors.
+- Move 502 records roadmap Move 772: short-cache the two static root
+  bootstrap helpers. `runtime-noise-guard.js` and `theme-bootstrap.js` now use
+  `Cache-Control: public, max-age=300, stale-while-revalidate=3600`; `sw.js`
+  and `business-os-build.json` remain no-store. Docker image
+  `business-os:v6.0.0-202606040823` served the new policy, and real
+  Cloudflare header checks confirmed both bootstrap scripts no longer return
+  `no-store`. Follow-up startup warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-27-17-434Z.json`
+  completed with `HIT: 24` and zero failed assets. Public route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-26-53-991Z.json`, admin
+  route trace `ops/runtime/reports/route-load-trace-2026-06-04T00-27-19-299Z.json`,
+  and public portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-27-41-981Z/report.json`
+  all passed with zero relevant failures/errors.
 <!-- phase29-manual-notes:end -->

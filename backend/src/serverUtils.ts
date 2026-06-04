@@ -318,9 +318,9 @@ function setTunnelSecurityHeaders(req, res) {
 function setFrontendStaticHeaders(res, filePath) {
   const normalizedPath = String(filePath || '').replace(/\\/g, '/')
   const fileName = normalizedPath.split('/').pop() || ''
-  const isRuntimeBootstrapAsset = fileName === 'sw.js'
+  const isRuntimeControlAsset = fileName === 'sw.js'
     || fileName === 'business-os-build.json'
-    || fileName === 'theme-bootstrap.js'
+  const isShortCachedBootstrapAsset = fileName === 'theme-bootstrap.js'
     || fileName === 'runtime-noise-guard.js'
 
   if (filePath.endsWith('.css')) {
@@ -340,7 +340,7 @@ function setFrontendStaticHeaders(res, filePath) {
     return
   }
 
-  if (isRuntimeBootstrapAsset) {
+  if (isRuntimeControlAsset) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
     res.setHeader('Pragma', 'no-cache')
     res.setHeader('Expires', '0')
@@ -352,6 +352,11 @@ function setFrontendStaticHeaders(res, filePath) {
 
   res.removeHeader?.('Pragma')
   res.removeHeader?.('Expires')
+
+  if (isShortCachedBootstrapAsset) {
+    res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=3600')
+    return
+  }
 
   const isScannerAsset = normalizedPath.includes('/scanbot-web-sdk/')
   const hasContentHash = /-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$/.test(fileName)

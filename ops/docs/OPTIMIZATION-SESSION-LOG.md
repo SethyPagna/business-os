@@ -3366,6 +3366,49 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+- change: short-cache static root bootstrap scripts for Cloudflare warmup
+- affected files:
+  `backend/src/serverUtils.ts`,
+  `backend/test/serverUtils.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: public/admin root startup scripts
+  `runtime-noise-guard.js` and `theme-bootstrap.js`, Cloudflare warmup, public
+  customer portal, and admin Dashboard/Products traces
+- keeper or rollback: keeper; `sw.js` and `business-os-build.json` remain
+  no-store, while only the two static bootstrap helpers become short-cacheable
+  with `public, max-age=300, stale-while-revalidate=3600`.
+- header proof:
+  after Docker release `business-os:v6.0.0-202606040823` and
+  `run\docker\start.bat`, real Cloudflare headers for
+  `https://leangcosmetics.dpdns.org/runtime-noise-guard.js` and
+  `https://leangcosmetics.dpdns.org/theme-bootstrap.js` returned
+  `Cache-Control: public, max-age=300, stale-while-revalidate=3600` instead of
+  the previous `no-cache, no-store, must-revalidate`.
+- warmup proof:
+  follow-up warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-27-17-434Z.json`
+  completed with `HIT: 24` and zero failed assets, proving the root bootstrap
+  scripts now participate in the warmed startup cache.
+- actual link proof:
+  public-host route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-26-53-991Z.json` passed
+  `/public` with zero failures/errors. Remote admin route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-27-19-299Z.json` passed
+  Dashboard and Products with zero failures/errors. Public portal Cloudflare
+  check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-27-41-981Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
+  zero generated integrity matches, and relationship orphan checks passing for
+  49 FK candidates.
+
 - change: add best-effort Cloudflare startup asset warmup after Docker start
 - affected files:
   `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts`,
