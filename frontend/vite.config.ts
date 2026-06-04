@@ -245,6 +245,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/productImageUploadTransport.ts')) return 'product-image-upload-api'
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
     if (normalized.endsWith('/src/api/inventoryTransport.ts')) return 'inventory-api'
+    if (normalized.endsWith('/src/api/userAdminTransport.ts')) return 'user-admin-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'
     if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-api'

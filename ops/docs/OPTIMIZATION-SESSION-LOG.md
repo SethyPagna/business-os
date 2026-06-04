@@ -8,6 +8,36 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Users focused startup transport
+  - route: Users
+  - result: kept
+  - note: moved Users list, role list, and guarded user/role mutations off the
+    broad `app-api-methods` registry. The page now uses
+    `userAdminTransport.ts`, which reuses the narrow user read transport and
+    lazy-loads local DB only for role fallback.
+  - proof: Docker release `business-os:v6.0.0-202606050403` is running with
+    frontend hash `47905159465a17b4`. Route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T20-13-07-390Z.json`
+    passed Users in 205 ms with 29 requests/23 scripts, down from
+    41 requests/35 scripts, with zero failed requests and zero console/page
+    errors. The served Users script list contains no `app-api-methods`,
+    `user-profile-modal`, or `vendor-dexie`, and contains focused
+    `user-admin-api` and `user-read-api` chunks.
+  - action proof:
+    `ops/runtime/reports/phase84-users-actions-live-check-2026-06-04T20-13-25-408Z/users-actions.png`
+    captured the live Users surface after loading users and roles with 200
+    statuses, opening Add User, Change Password, Roles, Edit/Delete Role, and
+    Create Role surfaces with zero relevant console messages.
+  - cleanup proof: removed 412,461,000 bytes from ignored/regenerable
+    `release` and `frontend/dist` after Docker health was verified; storage
+    prune removed 319,795 bytes of old reports plus 38.21 MB of Docker builder
+    cache; Phase 29 passed afterward with zero failures.
+  - public proof:
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T20-13-38-944Z/report.json`
+    passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+    products and zero relevant console messages, failed responses, or page
+    errors.
+
 - Files focused startup transport
   - route: Files / Library
   - result: kept

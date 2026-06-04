@@ -11426,3 +11426,58 @@ Move 787 status:
   and Users still show broad startup dependencies in the retained route trace,
   so split only the proven first-window transport surface and pair each split
   with focused live interaction proof.
+
+Move 788 status:
+- Move 788 splits Users first-window startup away from the broad legacy API
+  registry. `Users.tsx` now calls focused `userAdminTransport.ts` for user and
+  role reads/mutations. The transport reuses `userReadTransport.ts` for the
+  users list, lazy-loads local DB only for role fallback, and keeps
+  expected-updated-at protection for user/role writes without pulling the
+  profile/OAuth/avatar modal transport into route startup.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\actionStability.test.ts`, `npm.cmd --prefix frontend
+  run typecheck`, `npm.cmd --prefix frontend run check:jsx`, `npm.cmd
+  --prefix frontend run build`, `npm.cmd --prefix frontend run test:utils`,
+  Docker release build/start, Docker health, served route-load Playwright
+  trace, focused Users action Playwright check, public Cloudflare Playwright
+  check, post-live hygiene, storage prune, generated reference refresh, schema
+  audit, organization audit, and Phase 29 audit passed.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606050403` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend hash
+  `47905159465a17b4`.
+- Route proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T20-13-07-390Z.json` passed
+  Users in 205 ms with 29 requests/23 scripts, down from the pre-split
+  41 requests/35 scripts. The served Users script list contains no
+  `app-api-methods`, no `user-profile-modal`, and no `vendor-dexie`; it does
+  contain focused `user-admin-api` and `user-read-api` chunks.
+- Live Users action proof:
+  `node ops\scripts\runtime\live-checks\phase84-users-actions-live-check.ts`
+  passed against the Docker-served app. The report loaded users and roles with
+  200 statuses, opened Add User, Change Password, Roles, Edit/Delete Role, and
+  Create Role surfaces, and recorded zero relevant console messages.
+- Live public proof: `node ops\scripts\runtime\live-checks\phase84-public-portal-cloudflare-check.ts`
+  passed against `https://leangcosmetics.dpdns.org/public`; 20 products
+  rendered, portal bootstrap returned 200, AI status returned 200 after
+  interaction, and there were zero relevant console messages, failed
+  responses, or page errors. Report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T20-13-38-944Z/report.json`.
+- Phase 29 cleanup proof: deleted only regenerable generated output after the
+  Docker image was already built and healthy: `release` (380,736,085 bytes)
+  and `frontend/dist` (31,724,915 bytes), for 412,461,000 bytes removed.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures.
+- Storage hygiene proof: `node ops\scripts\runtime\storage\post-live-hygiene.ts`
+  found zero QA Smoke, QA Action History, broad QA, or generated-integrity
+  cleanup matches and confirmed the dataset remains loaded. `npm.cmd --prefix
+  ops run prune-storage` removed 319,795 bytes of old reports and 38.21 MB of
+  Docker builder cache while preserving uploads, secrets, env files, local
+  backup roots, Docker images, Docker volumes, and the newest R2 backup.
+- Current plan position after Move 788: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: Branches
+  remains the highest measured first-window script count in the retained route
+  trace, so split only proven route-start work and pair it with focused branch
+  CRUD/transfer live proof.

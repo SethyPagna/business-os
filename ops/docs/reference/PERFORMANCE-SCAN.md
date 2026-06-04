@@ -38,7 +38,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/utils-settings/AuditLog.tsx` | 59.9 | 1306 |
 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 58.0 | 1085 |
 | `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
-| `frontend/src/components/users/Users.tsx` | 56.1 | 1206 |
+| `frontend/src/components/users/Users.tsx` | 56.9 | 1224 |
 
 ## 3. Largest Source Files (by lines)
 

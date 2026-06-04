@@ -81,6 +81,7 @@ const usersPage = fs.readFileSync(new URL('../src/components/users/Users.tsx', i
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 const userPermissionEditor = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
 const userDetailSheet = fs.readFileSync(new URL('../src/components/users/UserDetailSheet.tsx', import.meta.url), 'utf8')
+const userAdminTransport = fs.readFileSync(new URL('../src/api/userAdminTransport.ts', import.meta.url), 'utf8')
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
@@ -303,6 +304,7 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/saleWriteTransport\
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productWriteTransport\.ts'\)\) return 'product-write-api'/, 'Products page create\/update\/delete writes should have their own lazy product-write API chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productImageUploadTransport\.ts'\)\) return 'product-image-upload-api'/, 'Products page image upload intent should use a narrow product-image upload chunk instead of the full file transport')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/branchTransport\.ts'\)\) return 'branch-api'[\s\S]*normalized\.endsWith\('\/src\/api\/inventoryTransport\.ts'\)\) return 'inventory-api'/, 'Products page branch and stock intents should not collapse into app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userAdminTransport\.ts'\)\) return 'user-admin-api'[\s\S]*normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'/, 'Users admin reads and mutations should use a focused route chunk instead of app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsTransport\.ts'\)\) return 'returns-api'[\s\S]*normalized\.endsWith\('\/src\/api\/rfidTransport\.ts'\)\) return 'rfid-api'/, 'Inventory user, dashboard, returns, and RFID reads should use focused chunks instead of app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'action-history-api'/, 'action history reads/writes and admin user filter reads should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/offlineSnapshotTransport\.ts'\)\) return 'offline-snapshot-api'/, 'idle offline snapshot refresh should not collapse into app-api-methods')
@@ -1732,6 +1734,26 @@ assert.match(
   usersPage,
   /const USERS_LIST_TIMEOUT_MS = 8000/,
   'users list should use an explicit timeout constant',
+)
+assert.match(
+  usersPage,
+  /from '\.\.\/\.\.\/api\/userAdminTransport\.ts'/,
+  'Users route should use the focused user admin transport instead of window.api or the broad access-control transport',
+)
+assert.doesNotMatch(
+  usersPage,
+  /window\.api|\(window as [^)]*\)\.api/,
+  'Users route should not bind to window.api during route startup',
+)
+assert.match(
+  userAdminTransport,
+  /import \{ getUsers as getUsersRequest \} from '\.\/userReadTransport\.ts'/,
+  'Users admin transport should reuse the narrow user read transport for the list',
+)
+assert.match(
+  userAdminTransport,
+  /const \{ getLocalDb \} = await import\('\.\/lazyLocalDb\.ts'\)/,
+  'Users admin roles fallback should lazy-load local DB only when the server read fallback is needed',
 )
 assert.match(
   usersPage,

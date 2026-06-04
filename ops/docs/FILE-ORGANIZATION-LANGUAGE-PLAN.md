@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 787 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 788 in this file.
 
 ## Goal
 
@@ -7384,6 +7384,42 @@ Decision rule:
   (31,722,976 bytes), for 412,455,989 bytes removed. Phase 29 audit then
   passed with zero failures. Prune storage removed 252,488 bytes of old
   reports and 38.2 MB of Docker builder cache while preserving business
+  uploads, secrets, env files, backups, images, and volumes.
+
+### Move 788: Users focused startup transport
+
+- Ownership evidence: Users route traces still loaded the broad
+  `app-api-methods` registry, profile/OAuth modal transport adjacency, and
+  local DB/Dexie-adjacent fallback code even though the default first-window
+  work only needs users, roles, and guarded user/role mutations.
+- Change: `Users.tsx` now binds directly to `userAdminTransport.ts`.
+  The new transport reuses `userReadTransport.ts` for users, lazy-loads local
+  DB only for role fallback, and keeps expected-updated-at guards for writes.
+  Vite groups this path as `user-admin-api`.
+- Verification: focused performance and action-stability guards, full
+  frontend utility suite, typecheck, JSX/source check, frontend build, Docker
+  release/start, health, served route-load trace, focused Users actions live
+  check, public Cloudflare check, post-live hygiene, storage prune, generated
+  reference refresh, schema audit, organization audit, and Phase 29 audit
+  passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606050403` is running
+  with frontend hash `47905159465a17b4`.
+- Route proof: Users startup dropped from 41 requests/35 scripts to
+  29 requests/23 scripts in
+  `ops/runtime/reports/route-load-trace-2026-06-04T20-13-07-390Z.json`, with
+  no `app-api-methods`, `user-profile-modal`, or `vendor-dexie` in the served
+  first-window script list and focused `user-admin-api` / `user-read-api`
+  chunks present.
+- Live action proof:
+  `ops/runtime/reports/phase84-users-actions-live-check-2026-06-04T20-13-25-408Z/users-actions.png`
+  loaded users and roles with 200 statuses, opened Add User, Change Password,
+  Roles, Edit/Delete Role, and Create Role surfaces, and recorded zero
+  relevant console messages.
+- Cleanup proof: deleted only ignored/regenerable output after Docker health
+  was verified: `release` (380,736,085 bytes) and `frontend/dist`
+  (31,724,915 bytes), for 412,461,000 bytes removed. Phase 29 audit then
+  passed with zero failures. Prune storage removed 319,795 bytes of old
+  reports and 38.21 MB of Docker builder cache while preserving business
   uploads, secrets, env files, backups, images, and volumes.
 
 ## Safety Gates

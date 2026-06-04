@@ -18,6 +18,16 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import {
+  changeUserPassword as changeUserPasswordRequest,
+  createRole as createRoleRequest,
+  createUser as createUserRequest,
+  deleteRole as deleteRoleRequest,
+  getRoles as getRolesRequest,
+  getUsers as getUsersRequest,
+  updateRole as updateRoleRequest,
+  updateUser as updateUserRequest,
+} from '../../api/userAdminTransport.ts'
 
 type EntityId = number | string
 type UsersTab = 'users' | 'roles'
@@ -131,8 +141,16 @@ const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 
 function getUsersApi(): UsersApi {
-  if (typeof window === 'undefined' || !window.api) throw new Error('Users API is not available.')
-  return window.api as UsersApi
+  return {
+    getUsers: getUsersRequest,
+    getRoles: getRolesRequest,
+    createUser: (payload) => createUserRequest(payload) as Promise<MutationResult>,
+    updateUser: (id, payload) => updateUserRequest(id, payload) as Promise<MutationResult>,
+    changeUserPassword: (id, payload) => changeUserPasswordRequest(id, payload) as Promise<MutationResult>,
+    createRole: (payload) => createRoleRequest(payload) as Promise<MutationResult>,
+    updateRole: (id, payload) => updateRoleRequest(id, payload) as Promise<MutationResult>,
+    deleteRole: (id, payload) => deleteRoleRequest(id, payload) as Promise<MutationResult>,
+  }
 }
 
 function normalizeUsers(value: unknown): UserRecord[] {
