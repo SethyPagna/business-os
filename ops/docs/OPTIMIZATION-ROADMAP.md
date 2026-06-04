@@ -10859,3 +10859,49 @@ Move 776 status:
   51 completed organization moves; Phase 28 remains active with the R2 prune
   follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
   TypeScript, runtime, and performance sweeps.
+
+Move 777 status:
+- Move 777 intent-loads the Settings two-factor OTP modal. `Settings.tsx` now
+  imports only the `OtpModalProps` type from `OtpModal.tsx`; the actual modal
+  component loads through `lazy(async () => import('./OtpModal'))` inside a
+  `Suspense` boundary only after the user presses Enable 2FA or Disable 2FA.
+  `OtpModal.tsx` exports its props type for compile-time safety without adding
+  runtime startup weight.
+- Vite now emits a focused `settings-otp-modal` chunk and excludes
+  `assets/settings-otp-modal-` from eager modulepreload, matching the existing
+  action-only strategy for backup reset tools.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` rejects a
+  static Settings `OtpModal` import, requires the lazy/Suspense boundary,
+  requires the `settings-otp-modal` manual chunk, and requires the chunk to be
+  absent from eager modulepreload. The focused guard, frontend typecheck,
+  source syntax check, full frontend utility suite, production build, Docker
+  release build/start, local and remote route traces, public Cloudflare portal
+  check, Docker container inspection, and post-live hygiene passed.
+- Bundle/runtime proof: production output emits
+  `settings-otp-modal-BTTCqa0J.js` at 6.74 KB gzip 2.28 KB, while normal
+  Settings remains `Settings-SNkEEPE-.js` at 54.43 KB gzip 15.37 KB. Docker
+  release image `business-os:v6.0.0-202606040944` is running; local health
+  reports source hash `5d419c030bf25d50`, and the standalone frontend build
+  hash is `4dc16c316e9b1246`.
+- Actual-link proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-30-975Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failed requests and zero
+  console/page errors. Settings loaded in 206 ms with 27 requests, two API
+  requests, and 22 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-31-450Z.json` passed
+  the same routes with zero failures/errors; Settings loaded in 216 ms. Both
+  traces show no normal-route `settings-otp-modal`, `OtpModal`, or
+  `backup-reset-tools` request. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-47-49-508Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 777: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps.

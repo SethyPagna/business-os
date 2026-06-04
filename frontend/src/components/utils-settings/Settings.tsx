@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -29,7 +29,7 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import FontFamilyPicker from './FontFamilyPicker'
-import OtpModal from './OtpModal'
+import type { OtpModalProps } from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
 import { createCircularFaviconDataUrl } from '../../utils/favicon.ts'
 import PageHeader from '../shared/PageHeader'
@@ -51,7 +51,7 @@ type NotifyFn = (message: string, type?: string) => void
 type SettingValue = string | number | null | undefined
 type SettingsRecord = Record<string, SettingValue>
 type SettingsSectionId = 'all' | 'business' | 'appearance' | 'security'
-type OtpModalMode = 'setup' | 'disable' | null
+type OtpModalMode = OtpModalProps['mode'] | null
 type ColorChoice = [string, string, string]
 type UploadAction = Record<string, unknown>
 type UploadState = ReturnType<typeof createInitialUploadState>
@@ -129,6 +129,7 @@ interface SettingsSectionProps {
 type CopyFn = (key: string, fallback: string) => string
 
 const useApp = useAppHook as () => AppContextValue
+const LazyOtpModal = lazy(async () => ({ default: (await import('./OtpModal')).default }))
 
 function getSettingsApi(): SettingsApi {
   return (window as unknown as { api: SettingsApi }).api || {}
@@ -1845,16 +1846,18 @@ export default function Settings() {
             </div>
 
             {otpModal ? (
-              <OtpModal
-                mode={otpModal}
-                userId={user.id}
-                onClose={() => setOtpModal(null)}
-                onDone={(enabled) => {
-                  setOtpStatus(enabled)
-                  setOtpModal(null)
-                }}
-                t={t}
-              />
+              <Suspense fallback={null}>
+                <LazyOtpModal
+                  mode={otpModal}
+                  userId={user.id}
+                  onClose={() => setOtpModal(null)}
+                  onDone={(enabled) => {
+                    setOtpStatus(enabled)
+                    setOtpModal(null)
+                  }}
+                  t={t}
+                />
+              </Suspense>
             ) : null}
           </SettingsSection>
         ) : null}

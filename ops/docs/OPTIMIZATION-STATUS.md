@@ -8,18 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 775, lazy-load the public Google Translate
-  controller so the customer portal does not fetch the external translation
-  controller chunk during ordinary first paint
+- Latest completed move: Move 777, lazy-load the Settings 2FA OTP modal so
+  normal Settings route load no longer fetches OTP setup/disable UI until the
+  user presses a 2FA action
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `85ba33f03f2cbcf2`
+- latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `f07235aa73cfa658`
+  `4dc16c316e9b1246`
 
 Latest verified reports:
 
@@ -32,11 +32,11 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-13-03-264Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-47-49-508Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-10-187Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-30-975Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T01-13-18-964Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-31-450Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
@@ -72,6 +72,25 @@ Latest cleanup run:
 
 Current honest pockets:
 
+- Move 777 is now served by Docker release image
+  `business-os:v6.0.0-202606040944`. `Settings.tsx` no longer statically
+  imports `OtpModal.tsx`; it imports only the modal props type and lazy-loads
+  the OTP setup/disable UI through React Suspense after the 2FA button is
+  pressed. Vite emits `settings-otp-modal-BTTCqa0J.js` at 6.74 KB gzip
+  2.28 KB and excludes `assets/settings-otp-modal-` from eager modulepreload.
+  Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-30-975Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failed requests and zero
+  console/page errors; Settings loaded in 206 ms with 27 requests, two API
+  requests, and 22 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-31-450Z.json` passed
+  the same routes with zero failures/errors; Settings loaded in 216 ms. Both
+  traces show no normal-route `settings-otp-modal`, `OtpModal`, or
+  `backup-reset-tools` request. Public portal Cloudflare check rendered 20
+  products, confirmed portal bootstrap 200, confirmed AI status 200 after
+  interaction, and recorded zero failed responses, zero relevant console
+  messages, and zero page errors. Post-live hygiene passed with loaded dataset
+  status and zero cleanup/integrity matches.
 - Move 775 is now served by Docker release image
   `business-os:v6.0.0-202606040909`. `CatalogPage.tsx` no longer statically
   imports `portalTranslateController.ts`; it reads stored translation

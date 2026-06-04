@@ -264,6 +264,7 @@ assert.doesNotMatch(viteConfig, /const authLoginIconNames = new Set\(\[[^\]]*'(c
 assert.match(viteConfig, /if \(authLoginIconNames\.has\(iconName\)\) return 'auth-login'[\s\S]*if \(routeSharedIconNames\.has\(iconName\)\) return 'shared-icons'[\s\S]*return appShellIconNames\.has\(iconName\) \? 'app-shell-icons' : undefined/, 'direct Lucide icon modules should keep auth, shared route, and shell icons out of feature chunks')
 assert.match(viteConfig, /'assets\/catalog-',[\s\S]*'assets\/portal-tools-',/, 'catalog and public portal chunks should be excluded from eager modulepreload')
 assert.match(viteConfig, /'assets\/backup-reset-tools-',/, 'Backup reset tools should not be eagerly modulepreloaded into the normal Backup route')
+assert.match(viteConfig, /'assets\/settings-otp-modal-',/, 'Settings OTP modal should not be eagerly modulepreloaded into the normal Settings route')
 assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*return 'product-shared'/, 'product image primitives shared by Products, POS, and catalog should not be owned by the heavy catalog route chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/actionGuards\.ts'\)\) \{[\s\S]*return 'action-guards'/, 'shared synchronous action guards should not be owned by the heavy catalog route chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/scriptTypography\.ts'\)\) \{[\s\S]*return 'script-typography'/, 'shared Khmer typography helpers should not be owned by the public catalog preview chunk')
@@ -283,6 +284,7 @@ assert.match(viteConfig, /CatalogPreviewSurface\.tsx'\)\) \{[\s\S]*return 'catal
 assert.match(viteConfig, /'assets\/catalog-preview-',[\s\S]*'assets\/catalog-products-',[\s\S]*'assets\/catalog-secondary-tabs-'/, 'public catalog split chunks should stay out of eager modulepreload on the first viewport')
 assert.match(viteConfig, /catalog\/catalogUi\.tsx'[\s\S]*return 'catalog-ui'[\s\S]*catalog\/portalCatalogDisplay\.ts'[\s\S]*return 'catalog-display'[\s\S]*CatalogPageContext\.tsx'[\s\S]*return 'catalog-context'[\s\S]*portalTranslateController\.ts'[\s\S]*return 'portal-translate-controller'[\s\S]*portalLanguagePacks\.ts'[\s\S]*portalEditorUtils\.ts'[\s\S]*return 'portal-tools'[\s\S]*components\/catalog\/'\)\) return 'catalog'/, 'small catalog UI/display/context helpers, portal translate controller, and portal tools should be split before the generic catalog route chunk')
 assert.match(viteConfig, /ResetData\.tsx'\)\) return 'backup-reset-tools'/, 'destructive Backup reset panels should have an action-only chunk')
+assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Settings OTP setup/disable modal should have an action-only chunk')
 assert.doesNotMatch(catalogPage, /from '\.\/portalTranslateController\.ts'/, 'public catalog should not statically import the Google Translate controller during route startup')
 assert.match(catalogPage, /import\('\.\/portalTranslateController\.ts'\)/, 'public catalog should load the Google Translate controller only from external translation intent')
 assert.doesNotMatch(catalogPage, /import \{ createCircularFaviconDataUrl \} from '\.\.\/\.\.\/utils\/favicon'/, 'public catalog should not statically import the canvas favicon helper during route startup')
@@ -1902,6 +1904,21 @@ assert.match(
   settingsPage,
   /withLoaderTimeout\(\s*\(\) => getSettingsApi\(\)\.uploadFileAsset\?\.\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload settings image',\s*SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
   'settings image uploads should timeout slow file uploads',
+)
+assert.doesNotMatch(
+  settingsPage,
+  /import OtpModal from '\.\/OtpModal'/,
+  'Settings should not statically import the OTP modal during normal route load',
+)
+assert.match(
+  settingsPage,
+  /const LazyOtpModal = lazy\(async \(\) => \(\{ default: \(await import\('\.\/OtpModal'\)\)\.default \}\)\)/,
+  'Settings should lazy-load the OTP modal only after a 2FA action opens it',
+)
+assert.match(
+  settingsPage,
+  /otpModal \? \([\s\S]*<Suspense fallback=\{null\}>[\s\S]*<LazyOtpModal/,
+  'Settings should render the lazy OTP modal behind a Suspense intent boundary',
 )
 assert.match(
   otpModal,

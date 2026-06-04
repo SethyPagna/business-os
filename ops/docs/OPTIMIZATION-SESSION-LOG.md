@@ -3419,6 +3419,45 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+Move 777 status:
+- Move 777 lazy-loads the Settings 2FA OTP modal. `Settings.tsx` now imports
+  only the `OtpModalProps` type and loads the runtime modal through a React
+  lazy/Suspense boundary after Enable 2FA or Disable 2FA is pressed.
+  `OtpModal.tsx` exports the props type so the intent boundary remains typed.
+- Vite emits `settings-otp-modal-BTTCqa0J.js` at 6.74 KB gzip 2.28 KB and
+  excludes `assets/settings-otp-modal-` from eager modulepreload. Normal
+  Settings route output is `Settings-SNkEEPE-.js` at 54.43 KB gzip 15.37 KB.
+- Guardrail proof: focused performance guard, frontend typecheck, source
+  syntax check, full frontend utility suite, production build, Docker release
+  build/start, local and remote route traces, public Cloudflare portal check,
+  Docker container inspection, and post-live hygiene passed.
+- Actual-link proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-30-975Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failed requests and zero
+  console/page errors; Settings loaded in 206 ms with 27 requests, two API
+  requests, and 22 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-31-450Z.json` passed
+  the same routes with zero failures/errors; Settings loaded in 216 ms. Both
+  traces show no normal-route `settings-otp-modal`, `OtpModal`, or
+  `backup-reset-tools` request. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-47-49-508Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Docker proof: `docker ps` shows only the expected current release runtime
+  set on image `business-os:v6.0.0-202606040944` plus Cloudflare, Postgres,
+  and Redis containers. Local health reports source hash
+  `5d419c030bf25d50`; standalone frontend build hash is `4dc16c316e9b1246`.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 777: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps.
+
 - change: lazy-load Backup destructive reset panels
 - affected files:
   `frontend/src/components/utils-settings/Backup.tsx`,

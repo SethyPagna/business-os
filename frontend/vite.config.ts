@@ -125,6 +125,7 @@ const deferredModulePreloadPrefixes = [
   'assets/catalog-editor-',
   'assets/portal-tools-',
   'assets/backup-reset-tools-',
+  'assets/settings-otp-modal-',
   'assets/app-local-db-',
   'assets/vendor-dexie-',
   'assets/vendor-zxing-',
@@ -313,6 +314,7 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (normalized.includes('/src/components/utils-settings/ResetData.tsx')) return 'backup-reset-tools'
+    if (normalized.includes('/src/components/utils-settings/OtpModal.tsx')) return 'settings-otp-modal'
     if (normalized.includes('/src/utils/favicon')) {
       return 'favicon-utils'
     }

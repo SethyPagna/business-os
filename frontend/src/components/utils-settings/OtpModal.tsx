@@ -12,7 +12,7 @@ type OtpMode = 'setup' | 'disable'
 type OtpStep = 'loading' | 'confirm_disable' | 'scan' | 'error'
 type Translate = (key: string, fallback?: string) => string | undefined
 
-type OtpModalProps = {
+export type OtpModalProps = {
   mode: OtpMode
   userId?: string | number | null
   onClose: () => void

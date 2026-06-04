@@ -2102,4 +2102,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-509Z.json` show no
   normal-route `backup-reset-tools` request, with Backup at 23 requests/19
   scripts and Settings at 28 requests/23 scripts, zero failures/errors.
+- Move 507 records roadmap Move 777: lazy-load Settings 2FA OTP modal into a
+  focused action-only chunk. `Settings.tsx` now imports only the
+  `OtpModalProps` type and renders `LazyOtpModal` behind Suspense after a 2FA
+  button intent. Production output: `Settings-SNkEEPE-.js` 54.43 KB gzip
+  15.37 KB and `settings-otp-modal-BTTCqa0J.js` 6.74 KB gzip 2.28 KB. Local
+  route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-30-975Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failures/errors; Settings
+  loaded in 206 ms with 27 requests, two API requests, and 22 scripts. Remote
+  admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-31-450Z.json` passed
+  the same routes with zero failures/errors; Settings loaded in 216 ms. Both
+  traces show no normal-route `settings-otp-modal`, `OtpModal`, or
+  `backup-reset-tools` request.
 <!-- phase29-manual-notes:end -->
