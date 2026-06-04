@@ -10835,7 +10835,7 @@ Move 776 status:
   Backup route chunk is `Backup-D63EkRDg.js` at 50.66 KB gzip 14.21 KB and
   the normal Settings route chunk is `Settings-D-HfFOkr.js` at 53.94 KB gzip
   15.19 KB. Docker release image `business-os:v6.0.0-202606040929` is running
-  with frontend hash `0f2d34b8a73070a8`.
+  with frontend hash `ce6346461b67f551`.
 - Actual-link proof: local route trace
   `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-024Z.json` passed
   Dashboard, Products, Backup, and Settings with zero failed requests and zero
