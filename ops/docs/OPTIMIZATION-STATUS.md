@@ -8,9 +8,9 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 784, retry Cloudflare startup warmup document
-  fetches so transient tunnel 1033/530 handshakes do not mark a healthy Docker
-  start as failed
+- Latest completed move: Move 785, remove the Products/Inventory product detail
+  modal chunk from first-window route loading while preserving lazy detail
+  click behavior
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `e00a60f6b9937815`
+  `28fb39f953a5425c`
 
 Latest verified reports:
 
@@ -32,9 +32,9 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-18-07-701Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-52-46-457Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T12-18-08-251Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-52-46-933Z.json`
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
@@ -63,6 +63,16 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- The Move 785 generated-artifact cleanup removed 412,450,532 bytes from
+  regenerable `release` and `frontend/dist` folders after Docker image
+  `business-os:v6.0.0-202606042050` was already built and running. The
+  follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures.
+- The Move 785 `npm.cmd --prefix ops run prune-storage` pass removed 594,838
+  bytes of old runtime reports and 38.2 MB of Docker builder cache. It kept
+  uploads, secrets, env files, local backup retention roots, Docker images,
+  Docker volumes, and newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
 
 - The Move 784 generated-artifact cleanup removed 380,729,941 bytes from the
   regenerable `release` folder after Docker image
@@ -1827,22 +1837,47 @@ Recent route-level win:
    still wake broad registry or generator code on real intent. Keep each slice
    guarded by route traces plus interaction proof so read-only POS browsing
    remains light while live/offline write behavior stays intact.
-7. Current position after Move 776: Phase 8.4 active; Phase 26 at 51 completed
+7. Current position after Move 785: Phase 8.4 active; Phase 26 at 51 completed
    organization moves; Phase 28 active with R2 prune follow-up; Phase 29 active
    for whole-codebase schema/cleanup/TypeScript/runtime/performance sweeps.
 
-## Latest Move 776
+## Latest Move 785
 
-- Backup normal route load no longer downloads destructive reset tools.
-  `Backup.tsx` lazy-loads `ResetData` and `FactoryReset` only after the
-  advanced maintenance details panel opens. Vite emits
-  `backup-reset-tools-CTsF6z9H.js` at 10.72 KB gzip 3.01 KB, and shared
-  reset/settings icons stay in `shared-icons` so Settings does not request the
-  reset chunk.
-- Docker-served local trace
-  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-024Z.json` and
-  real admin trace
-  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-509Z.json` passed
-  Dashboard, Products, Backup, and Settings with zero failures/errors and no
-  normal-route `backup-reset-tools` request. Backup was 23 requests/19 scripts;
-  Settings improved to 28 requests/23 scripts.
+- Products and Inventory no longer load the ProductDetailModal chunk during
+  first-window route startup. `frontend/vite.config.ts` keeps visible row
+  primitives in `product-shared`, including `productBatches.ts` and
+  `color.ts`, while the two ProductDetailModal files remain in the lazy
+  `product-detail` chunk.
+- Guardrails: `frontend/tests/performanceLoadingUx.test.ts` now asserts that
+  product image, color, and visible batch helpers are owned by
+  `product-shared`, and that `productBatches.ts` and `color.ts` cannot force
+  `product-detail` into startup.
+- Build/source proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`, and
+  `npm.cmd --prefix frontend run build` passed. Generated chunk inspection
+  confirmed Products has no static `from "./product-detail"` import, only the
+  intended lazy `import("./product-detail...")`.
+- Docker/live proof: Docker image `business-os:v6.0.0-202606042050` is
+  running with source hash `5d419c030bf25d50` and frontend hash
+  `28fb39f953a5425c`. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-52-46-933Z.json`
+  passed Products in 202 ms with 35 requests/27 scripts and Inventory in
+  194 ms with 38 requests/31 scripts, both with zero failures/errors and
+  `productDetailRequested=false`.
+- Interaction proof: an authenticated Playwright probe clicked a real Products
+  row and observed `beforeDetailClick=false` and `afterDetailClick=true` for
+  the `product-detail` chunk, with zero failed responses, zero request
+  failures, zero page errors, and zero relevant console messages.
+- Public link proof: Cloudflare portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-52-46-457Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200
+  after interaction, enforced CSP was present, and recorded zero failed
+  responses, zero relevant console messages, and zero page errors.
+- Hygiene/cleanup proof: post-live hygiene, schema audit, organization audit,
+  generated reference refresh, Phase 29 audit, and storage prune passed.
+  Generated-artifact cleanup removed 412,450,532 bytes from regenerable
+  `release` and `frontend/dist`; prune removed 594,838 bytes of old reports
+  and 38.2 MB of Docker builder cache while preserving uploads, secrets, env
+  files, backup roots, images, volumes, and newest R2 backup
+  `datasync-2026-06-04T09-26-59-912Z`.

@@ -8,6 +8,28 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Product detail chunk first-window deferral
+  - route: Products and Inventory
+  - result: kept
+  - note: moved visible row helpers `productBatches.ts` and `color.ts` into
+    `product-shared` so route startup no longer pays for ProductDetailModal
+    code. The two ProductDetailModal components stay lazy in `product-detail`.
+  - proof: Docker release `business-os:v6.0.0-202606042050` is running with
+    frontend hash `28fb39f953a5425c`. Route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T12-52-46-933Z.json`
+    passed Products in 202 ms with 35 requests/27 scripts and Inventory in
+    194 ms with 38 requests/31 scripts, both with zero failures/errors and no
+    `product-detail` request before detail intent. Authenticated Playwright
+    clicked a real Products row and observed `beforeDetailClick=false` and
+    `afterDetailClick=true`, with zero failed responses, zero request
+    failures, zero page errors, and zero relevant console messages. Public
+    portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-52-46-457Z/report.json`
+    rendered 20 products and recorded zero failed responses/errors. Cleanup
+    removed 412,450,532 bytes from regenerable `release` and `frontend/dist`;
+    prune removed 594,838 bytes of old reports and 38.2 MB of Docker builder
+    cache while preserving protected data and newest R2 backup.
+
 - Cloudflare startup warmup retry
   - route: `public` / `admin`
   - result: kept

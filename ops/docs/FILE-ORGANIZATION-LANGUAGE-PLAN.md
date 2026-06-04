@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 784 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 785 in this file.
 
 ## Goal
 
@@ -7278,6 +7278,45 @@ Decision rule:
   38.19 MB of Docker builder cache while preserving uploads, secrets, env
   files, local backup retention roots, Docker images, Docker volumes, and
   newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
+
+### Move 785: Product detail chunk first-window deferral
+
+- Ownership evidence: local route traces showed Products and Inventory were
+  paying for the ProductDetailModal chunk during route startup. The root cause
+  was shared visible-row helpers being assigned to the lazy `product-detail`
+  chunk. Those helpers belong in a shared product chunk, while detail modal
+  UI stays lazy.
+- Change: `frontend/vite.config.ts` now assigns `productBatches.ts` and
+  `color.ts` to `product-shared` beside existing product row/gallery helpers.
+  The Products and Inventory ProductDetailModal components remain in
+  `product-detail`.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` now requires the
+  product image, color, and visible batch primitives to stay in
+  `product-shared`, and rejects `productBatches.ts` or `color.ts` from the
+  `product-detail` ownership branch.
+- Verification: focused performance guard, frontend typecheck, JSX/source
+  check, frontend production build, production chunk inspection, Docker release
+  build/start, route-load Playwright trace, authenticated Products detail-click
+  probe, public Cloudflare portal Playwright check, post-live hygiene, schema
+  audit, organization audit, generated reference refresh, Phase 29 audit,
+  storage prune, and generated-artifact cleanup passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606042050` is running
+  with source hash `5d419c030bf25d50` and frontend hash
+  `28fb39f953a5425c`.
+- Route proof: route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-52-46-933Z.json` passed
+  Products in 202 ms with 35 requests/27 scripts and Inventory in 194 ms with
+  38 requests/31 scripts. Both routes had zero failures/errors and no
+  `product-detail` request before detail intent.
+- Interaction proof: authenticated Playwright clicked a real Products row and
+  observed `beforeDetailClick=false` and `afterDetailClick=true` for the
+  `product-detail` chunk, with zero failed responses, zero request failures,
+  zero page errors, and zero relevant console messages.
+- Cleanup proof: deleted 412,450,532 bytes from regenerable `release` and
+  `frontend/dist` after the running Docker image was already built. Storage
+  prune removed 594,838 bytes of old reports and 38.2 MB of Docker builder
+  cache while preserving uploads, secrets, env files, backup roots, images,
+  volumes, and newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
 
 ## Safety Gates
 

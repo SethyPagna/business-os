@@ -113,6 +113,7 @@ const deferredModulePreloadPrefixes = [
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
   'assets/browser-dialogs-',
+  'assets/product-detail-',
   'assets/shared-portal-menu-',
   'assets/auth-login-',
   'assets/app-bootstrap-',
@@ -281,6 +282,8 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.includes('/src/components/products/shared/')
       || normalized.includes('/src/components/products/helpers/productGalleryHelpers.ts')
+      || normalized.includes('/src/utils/productBatches.ts')
+      || normalized.includes('/src/utils/color.ts')
     ) {
       return 'product-shared'
     }
@@ -356,7 +359,6 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.includes('/src/components/products/surfaces/ProductDetailModal.tsx')
       || normalized.includes('/src/components/inventory/ProductDetailModal.tsx')
-      || normalized.includes('/src/utils/productBatches.ts')
     ) {
       return 'product-detail'
     }

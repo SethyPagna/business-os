@@ -11278,3 +11278,49 @@ Move 784 status:
   cutting first-window work only where route traces show a real loaded script
   or slow request, while keeping Cloudflare startup readiness and cleanup
   guardrails in the release path.
+
+Move 785 status:
+- Move 785 removes ProductDetailModal from Products/Inventory first-window
+  route startup without breaking the detail path. The chunk map now assigns
+  visible row helpers `productBatches.ts` and `color.ts` to `product-shared`,
+  while the two ProductDetailModal components remain in the lazy
+  `product-detail` chunk.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run build`, production chunk inspection, Docker
+  release build/start, route-load Playwright trace, authenticated Products row
+  detail-click probe, public Cloudflare portal Playwright check, post-live
+  hygiene, schema audit, organization audit, generated reference refresh,
+  Phase 29 audit, storage prune, and generated-artifact cleanup passed.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606042050` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend hash
+  `28fb39f953a5425c`.
+- Route proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-52-46-933Z.json` passed
+  Products in 202 ms with 35 requests/27 scripts and Inventory in 194 ms with
+  38 requests/31 scripts, both with zero failed requests, zero console/page
+  errors, and no `product-detail` request before detail intent.
+- Interaction proof: an authenticated Playwright probe opened Products, clicked
+  a real product row, and observed `beforeDetailClick=false` and
+  `afterDetailClick=true` for the `product-detail` chunk, with zero failed
+  responses, zero request failures, zero page errors, and zero relevant console
+  messages.
+- Public link proof: public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-52-46-457Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200 after
+  interaction, enforced CSP was present, and recorded zero failed responses,
+  zero relevant console messages, and zero page errors.
+- Cleanup proof: generated-artifact cleanup removed 412,450,532 bytes from
+  regenerable `release` and `frontend/dist` after the Docker image was built
+  and running. Storage prune removed 594,838 bytes of old reports plus 38.2 MB
+  of Docker builder cache while preserving uploads, secrets, env files, backup
+  retention roots, Docker images, Docker volumes, and newest R2 backup
+  `datasync-2026-06-04T09-26-59-912Z`.
+- Current plan position after Move 785: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: keep
+  trimming first-window chunks only when route traces prove eager work and pair
+  each deferral with a live interaction proof.
