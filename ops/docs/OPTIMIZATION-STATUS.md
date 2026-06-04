@@ -8,8 +8,9 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 783, lazy-load POS customer contact-option
-  parsing so normal POS startup no longer requests `contactOptionUtils`
+- Latest completed move: Move 784, retry Cloudflare startup warmup document
+  fetches so transient tunnel 1033/530 handshakes do not mark a healthy Docker
+  start as failed
 
 ## Current Baseline
 
@@ -18,7 +19,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `65f9c9c258d20478`
+  `e00a60f6b9937815`
 
 Latest verified reports:
 
@@ -31,9 +32,9 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-44-23-687Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-18-07-701Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T11-38-42-025Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-18-08-251Z.json`
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
@@ -63,6 +64,16 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- The Move 784 generated-artifact cleanup removed 380,729,941 bytes from the
+  regenerable `release` folder after Docker image
+  `business-os:v6.0.0-202606042015` was already built and running. The host
+  `frontend/dist` folder was already absent. The follow-up
+  `npm.cmd --prefix ops run phase29:audit` passed with zero failures.
+- The Move 784 `npm.cmd --prefix ops run prune-storage` pass removed 226,683
+  bytes of old runtime reports and 38.19 MB of Docker builder cache. It kept
+  uploads, secrets, env files, local backup retention roots, Docker images,
+  Docker volumes, and newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
+
 - The Move 783 generated-artifact cleanup removed 412,448,579 bytes from
   regenerable `release` and `frontend/dist` folders after Docker image
   `business-os:v6.0.0-202606041924` was already built and running. The
@@ -84,6 +95,30 @@ Latest cleanup run:
   follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero failures.
 
 Current honest pockets:
+
+- Move 784 is now served by Docker release image
+  `business-os:v6.0.0-202606042015`. The Cloudflare startup warmup now retries
+  transient document failures with five configurable attempts and a two-second
+  delay. Before the fix, startup warmup could report both public and admin
+  documents as Cloudflare Tunnel 1033/530 with zero warmed targets while the
+  local app was healthy. The launcher proof now passes through
+  `run\docker\start.bat`, writes
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json`, and reports
+  `ok=true`, `failedCount=0`, 26 targets, and retry options
+  `documentAttempts=5` / `documentRetryDelayMs=2000`.
+- The rebuilt Docker image reports source hash `5d419c030bf25d50` and
+  frontend hash `e00a60f6b9937815`. The broad local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-18-08-251Z.json` passed
+  Dashboard, Products, POS, Inventory, Contacts, Sales, Returns, and Server
+  with zero failed requests and zero console/page errors. Public Cloudflare
+  portal proof rendered 20 products, confirmed portal bootstrap 200 and AI
+  status 200 after interaction, enforced CSP was present, and recorded zero
+  failed responses, zero relevant console messages, and zero page errors.
+- Guardrail proof: Docker release verification now requires the Cloudflare
+  startup warmup retry knobs, transient failure predicate, attempt reporting,
+  and release-start coverage. Post-live hygiene passed with zero QA/smoke
+  cleanup matches, zero generated integrity matches, loaded dataset status, and
+  relationship orphan checks passing for 49 FK candidates.
 
 - Move 783 is now served by Docker release image
   `business-os:v6.0.0-202606041924`. `POS.tsx` no longer statically imports

@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-04T11:45:42.376Z
+Generated: 2026-06-04T12:19:35.084Z
 
 ## Summary
 
@@ -63,16 +63,16 @@ Generated: 2026-06-04T11:45:42.376Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 11181 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 11234 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7234 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7260 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4403 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 3839 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 3861 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
-| ops/docs/reference/PHASE29-AUDIT.json | 3255 | ops/docs/reference |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3217 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3218 | ops/docs/reference |
 | frontend/tests/performanceLoadingUx.test.ts | 2908 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
@@ -89,8 +89,8 @@ Generated: 2026-06-04T11:45:42.376Z
 | frontend/src/components/utils-settings/Settings.tsx | 1890 | frontend/components/utils-settings |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | frontend/src/AppContext.tsx | 1872 | frontend/src/AppContext.tsx |
+| ops/docs/OPTIMIZATION-STATUS.md | 1814 | ops/docs |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1813 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-STATUS.md | 1790 | ops/docs |
 | frontend/src/components/utils-settings/Backup.tsx | 1775 | frontend/components/utils-settings |
 | backend/src/routes/system/index.ts | 1674 | backend/routes |
 

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 783 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 784 in this file.
 
 ## Goal
 
@@ -7238,6 +7238,46 @@ Decision rule:
   `hasContactOptionUtils=false`.
 - Cleanup proof: deleted 412,448,579 bytes from regenerable `release` and
   `frontend/dist` after the running Docker image was already built.
+
+### Move 784: Cloudflare startup warmup retry
+
+- Ownership evidence: Phase 8.4 actual-link checks and Docker startup logs
+  showed a startup-only readiness gap: Cloudflare Tunnel can briefly return
+  1033/530 for public/admin documents while the local Docker health endpoint is
+  already healthy. This belongs in the Cloudflare startup warmup path rather
+  than app UI code or browser noise handling.
+- Change: `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts`
+  now retries transient document fetch failures (`status 0`, `429`, and
+  `>=500`) using configurable defaults of five attempts and a two-second delay.
+  Reports include the final result, every attempt, and `attemptCount` so future
+  startup failures show whether the tunnel never recovered or only needed a
+  warmup retry.
+- Guardrail: `ops/scripts/verification/verify-docker-release.ts` now requires
+  the warmup retry environment variables, CLI flags, transient failure
+  predicate, retry loop, release-start wiring, and attempt reporting.
+- Verification: Docker release guardrail, focused frontend performance guard,
+  Docker release build/start, Docker health, launcher Cloudflare startup
+  warmup, broad route-load Playwright trace, public Cloudflare portal
+  Playwright check, post-live hygiene, storage prune, reference refresh, and
+  Phase 29 audit passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606042015` is running
+  with frontend hash `e00a60f6b9937815`. The launcher warmup report
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json` passed with
+  `ok=true`, `failedCount=0`, 26 warmed targets, `documentAttempts=5`, and
+  `documentRetryDelayMs=2000`.
+- Live proof: route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-18-08-251Z.json` passed
+  Dashboard, Products, POS, Inventory, Contacts, Sales, Returns, and Server
+  with zero failed requests and zero console/page errors. Public portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-18-07-701Z/report.json`
+  rendered 20 products and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Cleanup proof: deleted 380,729,941 bytes from regenerable `release` after
+  the running Docker image was already built; host `frontend/dist` was already
+  absent. Storage prune removed 226,683 bytes of old runtime reports and
+  38.19 MB of Docker builder cache while preserving uploads, secrets, env
+  files, local backup retention roots, Docker images, Docker volumes, and
+  newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
 
 ## Safety Gates
 

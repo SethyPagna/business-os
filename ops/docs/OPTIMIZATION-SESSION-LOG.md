@@ -8,6 +8,28 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Cloudflare startup warmup retry
+  - route: `public` / `admin`
+  - result: kept
+  - note: fixed the startup readiness gap where Cloudflare Tunnel can briefly
+    return 1033/530 while the local Docker app is already healthy. The startup
+    warmup now retries document fetches for status `0`, `429`, and `>=500`,
+    reports all attempts, and exposes env/CLI retry controls.
+  - proof: Docker release `business-os:v6.0.0-202606042015` is running with
+    frontend hash `e00a60f6b9937815`. `run\docker\start.bat` completed the
+    Cloudflare startup warmup with `ok=true`, `failedCount=0`, 26 warmed
+    targets, and retry options `documentAttempts=5` /
+    `documentRetryDelayMs=2000`. Local route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T12-18-08-251Z.json`
+    passed Dashboard, Products, POS, Inventory, Contacts, Sales, Returns, and
+    Server with zero failed requests and zero console/page errors. Public
+    portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-18-07-701Z/report.json`
+    rendered 20 products, confirmed bootstrap 200 and AI status 200 after
+    interaction, and recorded zero failed responses, zero relevant console
+    messages, and zero page errors. Generated-artifact cleanup removed
+    380,729,941 bytes from regenerable `release`; Phase 29 audit passed.
+
 - POS customer contact-option parser deferral
   - route: `pos`
   - result: kept

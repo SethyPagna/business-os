@@ -2,7 +2,7 @@
   "summary": "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json",
   "status": "passed",
   "failures": [],
-  "requiredFiles": 32,
+  "requiredFiles": 33,
   "missingRequiredFiles": [],
   "releaseWrappers": 8,
   "retiredArtifactsPresent": [],
@@ -28,6 +28,13 @@
       "buildManifest": true,
       "serviceWorker": true
     }
+  },
+  "cloudflareStartupWarmupCoverage": {
+    "scriptPresent": true,
+    "releaseStartCallsWarmup": true,
+    "documentRetryConfigurable": true,
+    "retriesTransientTunnelErrors": true,
+    "retryLoopReportsAttempts": true
   },
   "packageStageCoverage": {
     "serverEntryScriptPresent": true,

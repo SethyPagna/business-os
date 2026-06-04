@@ -11231,3 +11231,50 @@ Move 783 status:
   trimming only scripts proven by Playwright route traces to load in the first
   window, with any further POS/customer split requiring a real selection-path
   probe so delayed code still works.
+
+Move 784 status:
+- Move 784 makes the Cloudflare startup warmup resilient to the real tunnel
+  handoff that can briefly return Cloudflare Tunnel 1033/530 while the local
+  Docker app is already healthy. `warm-cloudflare-startup-assets.ts` now
+  retries document fetches for status `0`, `429`, and `>=500` using five
+  configurable attempts with a two-second delay, and records all attempts plus
+  `attemptCount` in the warmup report. The defaults can be overridden with
+  `BOS_WARMUP_DOCUMENT_ATTEMPTS`, `BOS_WARMUP_DOCUMENT_RETRY_DELAY_MS`,
+  `--document-attempts`, and `--document-retry-delay-ms`.
+- Guardrail proof: `verify-docker-release.ts` now checks that the release
+  startup path still calls the Cloudflare warmup and that the retry knobs,
+  transient failure predicate, retry loop, and attempt reporting remain
+  present. `node ops\scripts\verification\verify-docker-release.ts` passed
+  with `cloudflareStartupWarmupCoverage` all true.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606042015` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend hash
+  `e00a60f6b9937815`. `run\docker\start.bat` completed the real launcher
+  warmup and wrote `ops/runtime/docker-release/cloudflare-startup-warmup.json`
+  with `ok=true`, `failedCount=0`, 26 warmed targets, and retry options
+  `documentAttempts=5` / `documentRetryDelayMs=2000`.
+- Live proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T12-18-08-251Z.json` passed
+  Dashboard, Products, POS, Inventory, Contacts, Sales, Returns, and Server
+  with zero failed requests and zero console/page errors. Public Cloudflare
+  portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-18-07-701Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200 after
+  interaction, enforced CSP was present, and recorded zero failed responses,
+  zero relevant console messages, and zero page errors.
+- Hygiene proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  post-live hygiene, storage prune, generated reference refresh, Phase 29
+  audit, and generated-artifact cleanup passed. The cleanup removed
+  380,729,941 bytes from the regenerable `release` folder after the running
+  Docker image was built; host `frontend/dist` was already absent. Storage
+  prune removed 226,683 bytes of old reports plus 38.19 MB of Docker builder
+  cache while preserving uploads, secrets, env files, backup retention roots,
+  Docker images, Docker volumes, and newest R2 backup
+  `datasync-2026-06-04T09-26-59-912Z`.
+- Current plan position after Move 784: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: continue
+  cutting first-window work only where route traces show a real loaded script
+  or slow request, while keeping Cloudflare startup readiness and cleanup
+  guardrails in the release path.

@@ -17,6 +17,7 @@ const actionHistoryCheckPath = path.join(root, 'ops', 'scripts', 'runtime', 'aud
 const liveSmokePath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'live-smoke.ts')
 const routeContractPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'check-route-contract.ts')
 const postStartDiagnosticsPath = path.join(root, 'ops', 'scripts', 'runtime', 'smoke', 'post-start-diagnostics.ts')
+const cloudflareStartupWarmupPath = path.join(root, 'ops', 'scripts', 'runtime', 'cloudflare', 'warm-cloudflare-startup-assets.ts')
 const fullAppAuditPath = path.join(root, 'ops', 'scripts', 'runtime', 'audits', 'full-app-audit.ts')
 const fullAutomationPath = path.join(root, 'ops', 'scripts', 'powershell', 'full-automation.ps1')
 const startRuntimePath = path.join(root, 'ops', 'scripts', 'powershell', 'start-runtime.ps1')
@@ -338,6 +339,7 @@ function main() {
     liveSmokePath,
     routeContractPath,
     postStartDiagnosticsPath,
+    cloudflareStartupWarmupPath,
     fullAppAuditPath,
     fullAutomationPath,
     startRuntimePath,
@@ -564,6 +566,38 @@ function main() {
   } catch (error) {
     failures.push(`Backend package JSON is invalid: ${error.message}`)
   }
+
+  const cloudflareStartupWarmup = read(cloudflareStartupWarmupPath)
+  ;[
+    'DEFAULT_DOCUMENT_ATTEMPTS',
+    'DEFAULT_DOCUMENT_RETRY_DELAY_MS',
+    'BOS_WARMUP_DOCUMENT_ATTEMPTS',
+    'BOS_WARMUP_DOCUMENT_RETRY_DELAY_MS',
+    '--document-attempts',
+    '--document-retry-delay-ms',
+    'function shouldRetryDocumentFetch',
+    'async function fetchDocumentWithRetry',
+    'documentAttempts',
+    'documentRetryDelayMs',
+    'attemptCount',
+  ].forEach((token) => requireToken(cloudflareStartupWarmup, token, 'Cloudflare startup warmup retry'))
+
+  const cloudflareStartupWarmupCoverage = {
+    scriptPresent: fs.existsSync(cloudflareStartupWarmupPath),
+    releaseStartCallsWarmup: automation.includes('warm-cloudflare-startup-assets.ts') &&
+      automation.includes('CloudflareStartupWarmupReport') &&
+      automation.includes('CloudflareStartupWarmupLog'),
+    documentRetryConfigurable: cloudflareStartupWarmup.includes('BOS_WARMUP_DOCUMENT_ATTEMPTS') &&
+      cloudflareStartupWarmup.includes('BOS_WARMUP_DOCUMENT_RETRY_DELAY_MS') &&
+      cloudflareStartupWarmup.includes('--document-attempts') &&
+      cloudflareStartupWarmup.includes('--document-retry-delay-ms'),
+    retriesTransientTunnelErrors: cloudflareStartupWarmup.includes('result.status === 0') &&
+      cloudflareStartupWarmup.includes('result.status === 429') &&
+      cloudflareStartupWarmup.includes('result.status >= 500'),
+    retryLoopReportsAttempts: cloudflareStartupWarmup.includes('async function fetchDocumentWithRetry') &&
+      cloudflareStartupWarmup.includes('attempts.push(result)') &&
+      cloudflareStartupWarmup.includes('attemptCount: attempts.length'),
+  }
   const packageStageScript = read(buildPackageStagePath)
   const serverEntryScript = read(buildServerEntryPath)
   const packageStageCoverage = {
@@ -674,6 +708,7 @@ function main() {
       !fullAutomation.includes('--docker-safe-prune'),
     dockerSafePrunePolicy,
     postStartDiagnosticsCoverage,
+    cloudflareStartupWarmupCoverage,
     packageStageCoverage,
     cloudflareRuntimeCoverage,
     testDataCleanupCoverage,

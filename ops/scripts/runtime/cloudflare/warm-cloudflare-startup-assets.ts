@@ -8,6 +8,8 @@ const DEFAULT_PUBLIC_URL = 'https://leangcosmetics.dpdns.org'
 const DEFAULT_ADMIN_URL = 'https://admin.leangcosmetics.dpdns.org'
 const DEFAULT_TIMEOUT_MS = 20_000
 const DEFAULT_LIMIT = 8
+const DEFAULT_DOCUMENT_ATTEMPTS = 5
+const DEFAULT_DOCUMENT_RETRY_DELAY_MS = 2_000
 const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-')
 const DEFAULT_OUTPUT = `ops/runtime/reports/cloudflare-startup-warmup-${TIMESTAMP}.json`
 const LATEST_OUTPUT = 'ops/runtime/reports/cloudflare-startup-warmup-latest.json'
@@ -29,10 +31,20 @@ function parsePositiveInt(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : fallback
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function shouldRetryDocumentFetch(result) {
+  return result.status === 0 || result.status === 429 || result.status >= 500
+}
+
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     adminUrl: normalizeBaseUrl(process.env.BOS_ADMIN_URL, DEFAULT_ADMIN_URL),
     includeApi: false,
+    documentAttempts: parsePositiveInt(process.env.BOS_WARMUP_DOCUMENT_ATTEMPTS, DEFAULT_DOCUMENT_ATTEMPTS),
+    documentRetryDelayMs: parsePositiveInt(process.env.BOS_WARMUP_DOCUMENT_RETRY_DELAY_MS, DEFAULT_DOCUMENT_RETRY_DELAY_MS),
     limit: parsePositiveInt(process.env.BOS_WARMUP_CONCURRENCY, DEFAULT_LIMIT),
     output: DEFAULT_OUTPUT,
     publicUrl: normalizeBaseUrl(process.env.BOS_PUBLIC_URL, DEFAULT_PUBLIC_URL),
@@ -45,6 +57,8 @@ function parseArgs(argv = process.argv.slice(2)) {
     else if (value === '--output') args.output = argv[++index] || args.output
     else if (value === '--timeout-ms') args.timeoutMs = parsePositiveInt(argv[++index], args.timeoutMs)
     else if (value === '--limit') args.limit = parsePositiveInt(argv[++index], args.limit)
+    else if (value === '--document-attempts') args.documentAttempts = parsePositiveInt(argv[++index], args.documentAttempts)
+    else if (value === '--document-retry-delay-ms') args.documentRetryDelayMs = parsePositiveInt(argv[++index], args.documentRetryDelayMs)
     else if (value === '--include-api') args.includeApi = true
     else throw new Error(`Unknown argument: ${value}`)
   }
@@ -149,9 +163,38 @@ async function runLimited(items, limit, worker) {
   return results
 }
 
+async function fetchDocumentWithRetry(url, args) {
+  const attempts = []
+  const maxAttempts = Math.max(1, args.documentAttempts)
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = await fetchWithTimeout(url, args.timeoutMs)
+    attempts.push(result)
+    if (!shouldRetryDocumentFetch(result) || attempt === maxAttempts) {
+      return {
+        ...result,
+        attempts,
+        attemptCount: attempts.length,
+      }
+    }
+    await sleep(args.documentRetryDelayMs)
+  }
+  return {
+    ok: false,
+    status: 0,
+    ms: 0,
+    bytes: 0,
+    cacheStatus: '',
+    contentType: '',
+    error: 'Document fetch retry loop did not run',
+    url,
+    attempts,
+    attemptCount: attempts.length,
+  }
+}
+
 async function warmSurface(name, baseUrl, routePath, args) {
   const documentUrl = asAbsoluteUrl(baseUrl, routePath)
-  const documentResult = await fetchWithTimeout(documentUrl, args.timeoutMs)
+  const documentResult = await fetchDocumentWithRetry(documentUrl, args)
   const html = documentResult.bodyText || ''
   const assets = documentResult.ok ? extractStartupAssets(baseUrl, html) : []
   const apiUrls = args.includeApi && name === 'public'
@@ -203,6 +246,8 @@ async function main() {
     ok: failed.length === 0,
     options: {
       includeApi: args.includeApi,
+      documentAttempts: args.documentAttempts,
+      documentRetryDelayMs: args.documentRetryDelayMs,
       limit: args.limit,
       timeoutMs: args.timeoutMs,
     },
