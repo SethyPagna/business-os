@@ -298,6 +298,14 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/CatalogPageContext.tsx')) {
       return 'catalog-context'
     }
+    if (
+      normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
+      || normalized.includes('/src/components/catalog/portalContentI18n.ts')
+      || normalized.includes('/src/components/catalog/portalTranslateController.ts')
+      || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+    ) {
+      return 'portal-tools'
+    }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (normalized.includes('/src/utils/favicon')) {
       return 'favicon-utils'
@@ -311,14 +319,6 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/PortalMenu.tsx')) return 'shared-portal-menu'
     if (normalized.includes('/src/components/files/FilePickerModal')) {
       return 'file-picker-modal'
-    }
-    if (
-      normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
-      || normalized.includes('/src/components/catalog/portalContentI18n.ts')
-      || normalized.includes('/src/components/catalog/portalTranslateController.ts')
-      || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
-    ) {
-      return 'portal-tools'
     }
     if (
       normalized.includes('/src/components/products/surfaces/ProductDetailModal.tsx')

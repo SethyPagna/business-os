@@ -2053,4 +2053,24 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   portal check
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-40-41-123Z/report.json`,
   and post-live hygiene all passed with zero relevant failures/errors.
+- Move 504 records roadmap Move 774: make the public catalog `portal-tools`
+  manual chunk rule reachable before the generic catalog fallback. Vite now
+  emits `catalog-De1dDiHJ.js` at 78,587 bytes and
+  `portal-tools-DEMOOZsR.js` at 99,711 bytes, replacing the prior roughly
+  156 KB base catalog route chunk from Move 773 with a narrower base route
+  chunk plus explicit editor/translation/language helper chunk. The focused
+  performance guard now asserts `portalLanguagePacks.ts`,
+  `portalContentI18n.ts`, `portalTranslateController.ts`, and
+  `portalEditorUtils.ts` are matched before the generic catalog fallback.
+  Docker image `business-os:v6.0.0-202606040854` served frontend hash
+  `06f2981d71deccc1`. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-55-40-207Z.json`
+  passed public catalog, Dashboard, Products, and POS with zero failures/
+  errors. Real public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-55-54-685Z.json`
+  passed `/public` in 3286 ms with zero failures/errors. Real admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-56-22-899Z.json`,
+  public portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-56-07-251Z/report.json`,
+  and post-live hygiene all passed with zero relevant failures/errors.
 <!-- phase29-manual-notes:end -->

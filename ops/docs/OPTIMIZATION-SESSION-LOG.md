@@ -1,8 +1,38 @@
 # Business OS Optimization Session Log
 
-Last updated: 2026-06-03
+Last updated: 2026-06-04
 
 This is a concise running log of what actually happened in recent sessions.
+
+## 2026-06-04
+
+### Accepted
+
+- Public catalog portal-tools chunk ordering
+  - route: `public_catalog`
+  - result: kept
+  - note: moved the existing `portalLanguagePacks.ts`,
+    `portalContentI18n.ts`, `portalTranslateController.ts`, and
+    `portalEditorUtils.ts` manual chunk rule before the generic catalog
+    fallback so the `portal-tools` chunk is actually emitted. Production
+    assets now split the base `catalog` chunk to 78,587 bytes and
+    `portal-tools` to 99,711 bytes instead of carrying the combined work in
+    the roughly 156 KB catalog route chunk from Move 773.
+  - proof: Docker release `business-os:v6.0.0-202606040854` is running with
+    frontend hash `06f2981d71deccc1`; local trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T00-55-40-207Z.json`
+    passed public catalog, Dashboard, Products, and POS with zero failures/
+    errors; real public trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T00-55-54-685Z.json`
+    passed `/public` with zero failures/errors; real admin trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T00-56-22-899Z.json`
+    passed Dashboard and Products with zero failures/errors; public portal
+    check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-56-07-251Z/report.json`
+    rendered 20 products with portal bootstrap 200, AI status 200 after
+    interaction, and zero relevant console/page errors. Post-live hygiene
+    passed with zero QA cleanup matches and relationship orphan checks passing
+    for 49 FK candidates.
 
 ## 2026-06-03
 

@@ -10723,3 +10723,49 @@ Move 773 status:
   TypeScript, runtime, and performance sweeps. Next executable targets should
   continue with remaining public catalog controller weight, Settings/Backup
   transport clusters, and Cloudflare tunnel/API latency reduction.
+
+Move 774 status:
+- Move 774 makes the existing public catalog `portal-tools` manual chunk rule
+  reachable. The rule for `portalLanguagePacks.ts`, `portalContentI18n.ts`,
+  `portalTranslateController.ts`, and `portalEditorUtils.ts` now runs before
+  the generic `/src/components/catalog/` fallback, so editor/translation and
+  language helper code is separated from the base catalog route chunk instead
+  of being swallowed by it.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now asserts
+  the small catalog UI/display/context chunks and the `portal-tools` rule
+  appear before the generic catalog fallback. The focused performance guard,
+  frontend typecheck, source syntax check, frontend utility suite, production
+  build, Docker release build/start, local and remote route traces, public
+  Cloudflare portal check, and post-live hygiene passed.
+- Bundle/runtime proof: production assets now include `catalog-De1dDiHJ.js`
+  at 78,587 bytes and `portal-tools-DEMOOZsR.js` at 99,711 bytes, replacing
+  the prior roughly 156 KB base catalog route chunk from Move 773 with a
+  narrower base chunk and explicit portal-tools chunk. Docker release image
+  `business-os:v6.0.0-202606040854` is running with frontend hash
+  `06f2981d71deccc1`.
+- Actual-link proof: public-host route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-55-54-685Z.json` passed
+  `/public` in 3286 ms with 30 requests, one API request, 25 scripts, zero
+  failed requests, and zero console/page errors. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-55-40-207Z.json` passed
+  public catalog, Dashboard, Products, and POS with zero failures/errors.
+  Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-56-22-899Z.json` passed
+  Dashboard and Products with zero failures/errors. Public portal Cloudflare
+  check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-56-07-251Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 774: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with follow-up public catalog intent-driven portal-tools loading,
+  Settings/Backup transport clusters, and Cloudflare tunnel/API latency
+  reduction.
