@@ -114,7 +114,7 @@ Total files documented: **246**
 | 102 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
 | 103 | `frontend/src/components/pos/CartItem.tsx` | 2 |
 | 104 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
-| 105 | `frontend/src/components/pos/POS.tsx` | 50 |
+| 105 | `frontend/src/components/pos/POS.tsx` | 51 |
 | 106 | `frontend/src/components/pos/posCore.ts` | 1 |
 | 107 | `frontend/src/components/pos/ProductImage.tsx` | 1 |
 | 108 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
@@ -1671,56 +1671,57 @@ Total files documented: **246**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `parseContactOptions` | function | 110 |
-| 2 | `isPlainRecord` | function | 300 |
-| 3 | `normalizeCategory` | function | 304 |
-| 4 | `loadPosProductBootstrap` | function | 319 |
-| 5 | `searchPosCatalogProducts` | function | 323 |
-| 6 | `loadPosProductFilters` | function | 327 |
-| 7 | `loadPosCategories` | function | 331 |
-| 8 | `getContactReadTransport` | function | 340 |
-| 9 | `getContactWriteTransport` | function | 345 |
-| 10 | `getPortalTransport` | function | 350 |
-| 11 | `getSaleWriteTransport` | function | 355 |
-| 12 | `loadPosCustomers` | function | 360 |
-| 13 | `loadPosDeliveryContacts` | function | 365 |
-| 14 | `createPosCustomer` | function | 370 |
-| 15 | `createPosDeliveryContact` | function | 375 |
-| 16 | `lookupPosPortalMembership` | function | 380 |
-| 17 | `createPosSale` | function | 385 |
-| 18 | `normalizeOrder` | function | 390 |
-| 19 | `getErrorMessage` | function | 401 |
-| 20 | `asText` | function | 405 |
-| 21 | `asNumber` | function | 409 |
-| 22 | `allTermsMatch` | function | 413 |
-| 23 | `ProductDiscountBadge` | function | 427 |
-| 24 | `POS` | component/function | 447 |
-| 25 | `setPersistedCat` | const arrow | 478 |
-| 26 | `setPersistedBrand` | const arrow | 479 |
-| 27 | `setPersistedBranch` | const arrow | 480 |
-| 28 | `setPersistedStock` | const arrow | 481 |
-| 29 | `setPersistedGroup` | const arrow | 482 |
-| 30 | `setPersistedSupplier` | const arrow | 483 |
-| 31 | `setPersistedInitial` | const arrow | 484 |
-| 32 | `addNewOrder` | const arrow | 545 |
-| 33 | `closeOrder` | const arrow | 557 |
-| 34 | `promise` | const arrow | 699 |
-| 35 | `selectCustomer` | const arrow | 1029 |
-| 36 | `applyCustomerOption` | const arrow | 1077 |
-| 37 | `clearCustomer` | const arrow | 1091 |
-| 38 | `handleAddCustomer` | const arrow | 1099 |
-| 39 | `selectDelivery` | const arrow | 1136 |
-| 40 | `clearDelivery` | const arrow | 1141 |
-| 41 | `handleAddDelivery` | const arrow | 1143 |
-| 42 | `qty` | const arrow | 1254 |
-| 43 | `addToCart` | function | 1418 |
-| 44 | `updateQty` | const arrow | 1457 |
-| 45 | `updatePrice` | const arrow | 1465 |
-| 46 | `updateItemBranch` | const arrow | 1489 |
-| 47 | `handleDiscountUsd` | const arrow | 1538 |
-| 48 | `handleDiscountKhr` | const arrow | 1539 |
-| 49 | `handleMembershipUnits` | const arrow | 1540 |
-| 50 | `handleCheckout` | const arrow | 1579 |
+| 1 | `loadContactOptionUtilsModule` | function | 87 |
+| 2 | `parseContactOptions` | function | 118 |
+| 3 | `isPlainRecord` | function | 309 |
+| 4 | `normalizeCategory` | function | 313 |
+| 5 | `loadPosProductBootstrap` | function | 328 |
+| 6 | `searchPosCatalogProducts` | function | 332 |
+| 7 | `loadPosProductFilters` | function | 336 |
+| 8 | `loadPosCategories` | function | 340 |
+| 9 | `getContactReadTransport` | function | 349 |
+| 10 | `getContactWriteTransport` | function | 354 |
+| 11 | `getPortalTransport` | function | 359 |
+| 12 | `getSaleWriteTransport` | function | 364 |
+| 13 | `loadPosCustomers` | function | 369 |
+| 14 | `loadPosDeliveryContacts` | function | 374 |
+| 15 | `createPosCustomer` | function | 379 |
+| 16 | `createPosDeliveryContact` | function | 384 |
+| 17 | `lookupPosPortalMembership` | function | 389 |
+| 18 | `createPosSale` | function | 394 |
+| 19 | `normalizeOrder` | function | 399 |
+| 20 | `getErrorMessage` | function | 410 |
+| 21 | `asText` | function | 414 |
+| 22 | `asNumber` | function | 418 |
+| 23 | `allTermsMatch` | function | 422 |
+| 24 | `ProductDiscountBadge` | function | 436 |
+| 25 | `POS` | component/function | 456 |
+| 26 | `setPersistedCat` | const arrow | 487 |
+| 27 | `setPersistedBrand` | const arrow | 488 |
+| 28 | `setPersistedBranch` | const arrow | 489 |
+| 29 | `setPersistedStock` | const arrow | 490 |
+| 30 | `setPersistedGroup` | const arrow | 491 |
+| 31 | `setPersistedSupplier` | const arrow | 492 |
+| 32 | `setPersistedInitial` | const arrow | 493 |
+| 33 | `addNewOrder` | const arrow | 554 |
+| 34 | `closeOrder` | const arrow | 566 |
+| 35 | `promise` | const arrow | 708 |
+| 36 | `selectCustomer` | const arrow | 1038 |
+| 37 | `applyCustomerOption` | const arrow | 1086 |
+| 38 | `clearCustomer` | const arrow | 1100 |
+| 39 | `handleAddCustomer` | const arrow | 1108 |
+| 40 | `selectDelivery` | const arrow | 1145 |
+| 41 | `clearDelivery` | const arrow | 1150 |
+| 42 | `handleAddDelivery` | const arrow | 1152 |
+| 43 | `qty` | const arrow | 1263 |
+| 44 | `addToCart` | function | 1427 |
+| 45 | `updateQty` | const arrow | 1466 |
+| 46 | `updatePrice` | const arrow | 1474 |
+| 47 | `updateItemBranch` | const arrow | 1498 |
+| 48 | `handleDiscountUsd` | const arrow | 1547 |
+| 49 | `handleDiscountKhr` | const arrow | 1548 |
+| 50 | `handleMembershipUnits` | const arrow | 1549 |
+| 51 | `handleCheckout` | const arrow | 1588 |
 
 ### 3.106 `frontend/src/components/pos/posCore.ts`
 

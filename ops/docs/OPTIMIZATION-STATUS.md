@@ -8,8 +8,8 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 782, lazy-load Contacts tab CSV export helpers
-  so normal Contacts startup no longer requests `csv-utils`
+- Latest completed move: Move 783, lazy-load POS customer contact-option
+  parsing so normal POS startup no longer requests `contactOptionUtils`
 
 ## Current Baseline
 
@@ -18,7 +18,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `225fc10e0846045b`
+  `65f9c9c258d20478`
 
 Latest verified reports:
 
@@ -31,9 +31,9 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-14-33-554Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-44-23-687Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T11-14-33-581Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T11-38-42-025Z.json`
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
@@ -63,6 +63,16 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- The Move 783 generated-artifact cleanup removed 412,448,579 bytes from
+  regenerable `release` and `frontend/dist` folders after Docker image
+  `business-os:v6.0.0-202606041924` was already built and running. The
+  follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures.
+- The Move 783 `npm.cmd --prefix ops run prune-storage` pass removed 160,733
+  bytes of old runtime reports and 38.19 MB of Docker builder cache. It kept
+  uploads, secrets, env files, local backup retention roots, Docker images,
+  Docker volumes, and newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
+
 - `npm.cmd --prefix ops run prune-storage` in the Move 782 verification pass
   removed 326,086 bytes of old runtime reports and 38.19 MB of Docker builder
   cache. It kept uploads, secrets, env files, newest local backup packages,
@@ -74,6 +84,20 @@ Latest cleanup run:
   follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero failures.
 
 Current honest pockets:
+
+- Move 783 is now served by Docker release image
+  `business-os:v6.0.0-202606041924`. `POS.tsx` no longer statically imports
+  `contactOptionUtils`; customer contact parsing is behind the memoized
+  `loadContactOptionUtilsModule()` boundary. The Docker-served POS trace
+  passed in 235 ms with 30 requests, 22 scripts, two API calls, zero failed
+  requests, zero console/page errors, and `hasContactOptionUtils=false`.
+- Authenticated Playwright interaction proof loaded POS, opened the customer
+  panel, accepted customer search input, and recorded zero failed requests and
+  zero page errors.
+- Public Cloudflare portal proof rendered 20 products at
+  `https://leangcosmetics.dpdns.org/public`, confirmed portal bootstrap 200
+  and AI status 200 after interaction, and recorded zero failed responses,
+  zero relevant console messages, and zero page errors.
 
 - Move 782 is now served by Docker release image
   `business-os:v6.0.0-202606041904`. `CustomersTab.tsx`,

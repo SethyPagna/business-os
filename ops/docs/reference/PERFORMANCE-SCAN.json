@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 416,
   "distAssets": 0,
-  "totalSourceBytes": 6788831,
-  "totalSourceLines": 155763,
+  "totalSourceBytes": 6789275,
+  "totalSourceLines": 155772,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -62,8 +62,8 @@
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 129871,
-      "lines": 2446
+      "size": 130315,
+      "lines": 2455
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.tsx",
@@ -194,8 +194,8 @@
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 129871,
-      "lines": 2446
+      "size": 130315,
+      "lines": 2455
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.tsx",

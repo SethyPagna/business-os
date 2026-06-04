@@ -11178,3 +11178,56 @@ Move 782 status:
   route-by-route startup chunk trimming only where the Playwright trace shows
   a real loaded script or first-window request, with Dashboard/Contacts still
   the measured routes to watch before deeper UI or language rewires.
+
+Move 783 status:
+- Move 783 lazy-loads POS customer contact-option parsing. `POS.tsx` keeps the
+  `ContactOption` type import but no longer statically imports
+  `parseStoredContactOptions`; the runtime parser now loads through memoized
+  `loadContactOptionUtilsModule()` only after customer selection/search intent.
+  This keeps read-only POS browsing focused on products, cart, and checkout UI
+  instead of downloading contact-address parsing before it is needed.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` rejects the
+  static `parseStoredContactOptions` import in POS and requires the dynamic
+  `import('../contacts/contactOptionUtils')` boundary plus async
+  `parseContactOptions()` path.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  build`, production chunk inspection, `npm.cmd --prefix frontend run
+  check:jsx`, `npm.cmd --prefix frontend run test:utils`, `git diff --check`,
+  Docker release build/start, Docker health, local POS route-load Playwright
+  trace, focused authenticated POS interaction probe, public Cloudflare portal
+  Playwright check, post-live hygiene, schema audit, organization audit,
+  generated reference refresh, and Phase 29 audit passed.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606041924` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend build
+  hash `65f9c9c258d20478`. Local Docker-served POS route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T11-38-42-025Z.json` passed
+  in 235 ms with 30 requests, 22 scripts, two API calls, zero failed requests,
+  zero console/page errors, and script inspection confirmed
+  `hasContactOptionUtils=false`. The previous Move 783 baseline was 277 ms,
+  31 requests, and 23 scripts.
+- Interaction proof: an authenticated Playwright probe loaded POS, opened the
+  customer panel, filled `Search by name or phone...`, and recorded zero
+  failed requests and zero page errors. The startup script list still had no
+  `contactOptionUtils` before customer contact selection.
+- Public link proof: public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-44-23-687Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, enforced CSP was present, and recorded zero failed
+  responses, zero relevant console messages, and zero page errors.
+- Cleanup proof: generated-artifact cleanup removed 412,448,579 bytes from
+  regenerable `release` and `frontend/dist` after the Docker image was built
+  and running. Follow-up `npm.cmd --prefix ops run phase29:audit` passed with
+  zero failures. Final `npm.cmd --prefix ops run prune-storage` removed
+  160,733 bytes of old runtime reports and 38.19 MB of Docker builder cache
+  while preserving uploads, secrets, env files, local backup retention roots,
+  Docker images, Docker volumes, and newest R2 backup
+  `datasync-2026-06-04T09-26-59-912Z`.
+- Current plan position after Move 783: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: keep
+  trimming only scripts proven by Playwright route traces to load in the first
+  window, with any further POS/customer split requiring a real selection-path
+  probe so delayed code still works.

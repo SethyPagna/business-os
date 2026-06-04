@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 782 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 783 in this file.
 
 ## Goal
 
@@ -7212,6 +7212,32 @@ Decision rule:
     reported `hasCsvUtils=false` during startup. Generated cleanup removed
     412,447,007 bytes from regenerable `release` and `frontend/dist` after the
     running Docker image was already built.
+
+### Move 783: POS customer contact-option parser deferral
+
+- Ownership evidence: Phase 29 performance scans and live route traces showed
+  POS first-load still benefits from intent-sized chunks. The customer contact
+  option parser belongs to the customer selection pathway, not the read-only
+  product/cart browsing startup path.
+- Change: `frontend/src/components/pos/POS.tsx` now keeps only the
+  `ContactOption` type import from `contactOptionUtils`; the runtime parser is
+  loaded through memoized `loadContactOptionUtilsModule()` when
+  `parseContactOptions()` is called after customer intent.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` rejects the static
+  POS parser import and requires the dynamic import boundary.
+- Verification: source guardrail test, frontend typecheck, production build,
+  emitted chunk inspection, JSX check, frontend utils tests, Docker
+  release/start, Docker health, POS Playwright route trace, authenticated POS
+  interaction probe, public Cloudflare portal check, post-live hygiene,
+  schema audit, organization audit, generated reference refresh, and Phase 29
+  audit passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606041924` is running
+  with frontend hash `65f9c9c258d20478`. POS route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T11-38-42-025Z.json` passed
+  in 235 ms with 30 requests, 22 scripts, zero failures/errors, and
+  `hasContactOptionUtils=false`.
+- Cleanup proof: deleted 412,448,579 bytes from regenerable `release` and
+  `frontend/dist` after the running Docker image was already built.
 
 ## Safety Gates
 

@@ -8,6 +8,28 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- POS customer contact-option parser deferral
+  - route: `pos`
+  - result: kept
+  - note: removed the normal-route static `contactOptionUtils` import from
+    `POS.tsx`; the customer contact parser now loads through memoized
+    `loadContactOptionUtilsModule()` only after customer selection/search
+    intent. The source guardrail rejects reintroducing the static parser import.
+  - proof: Docker release `business-os:v6.0.0-202606041924` is running with
+    frontend hash `65f9c9c258d20478`. Local POS route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T11-38-42-025Z.json`
+    passed in 235 ms with 30 requests, 22 scripts, two API calls, zero failed
+    requests, zero console/page errors, and `hasContactOptionUtils=false`.
+    An authenticated Playwright probe loaded POS, opened the customer panel,
+    filled `Search by name or phone...`, and recorded zero failed
+    requests/page errors. Public portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-44-23-687Z/report.json`
+    rendered 20 products, confirmed portal bootstrap 200 and AI status 200
+    after interaction, and recorded zero failed responses, zero relevant
+    console messages, and zero page errors. Generated-artifact cleanup removed
+    412,448,579 bytes from regenerable `release` and `frontend/dist`; the
+    follow-up Phase 29 audit passed with zero failures.
+
 - Settings media upload state/helper deferral
   - route: `settings`
   - result: kept

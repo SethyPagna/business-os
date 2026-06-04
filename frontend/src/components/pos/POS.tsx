@@ -78,8 +78,16 @@ const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1800
 const POS_FILTER_META_READY_DELAY_MS = 1800
 const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 1800
 
-import { parseStoredContactOptions } from '../contacts/contactOptionUtils'
 import type { ContactOption } from '../contacts/contactOptionUtils'
+
+type ContactOptionUtilsModule = typeof import('../contacts/contactOptionUtils')
+
+let contactOptionUtilsModulePromise: Promise<ContactOptionUtilsModule> | null = null
+
+function loadContactOptionUtilsModule(): Promise<ContactOptionUtilsModule> {
+  if (!contactOptionUtilsModulePromise) contactOptionUtilsModulePromise = import('../contacts/contactOptionUtils')
+  return contactOptionUtilsModulePromise
+}
 
 type AppSettings = Record<string, unknown> & {
   customer_portal_redeem_points?: string | number
@@ -107,7 +115,8 @@ type SyncContextValue = {
   syncChannel?: { channel?: string; ts?: unknown } | null
 }
 
-function parseContactOptions(raw: unknown): ContactOption[] {
+async function parseContactOptions(raw: unknown): Promise<ContactOption[]> {
+  const { parseStoredContactOptions } = await loadContactOptionUtilsModule()
   return parseStoredContactOptions(raw, { legacyField: 'address' })
 }
 
@@ -1026,8 +1035,8 @@ export default function POS() {
   }, [active?.customer?.membership_number, isActive, loadMembershipInfo, syncChannel?.ts])
 
 // Customer actions
-  const selectCustomer = (c: CustomerRecord) => {
-    const opts = parseContactOptions(c.address)
+  const selectCustomer = async (c: CustomerRecord) => {
+    const opts = await parseContactOptions(c.address)
     setCustomerSuggestions([])
     setShowCustomerDrop(false)
     if (opts.length > 1) {
@@ -1120,7 +1129,7 @@ export default function POS() {
         const exists = prev.some(customer => String(customer.id) === String(createdCustomer.id))
         return exists ? prev.map(customer => String(customer.id) === String(createdCustomer.id) ? { ...customer, ...createdCustomer } : customer) : [...prev, createdCustomer]
       })
-      selectCustomer(createdCustomer)
+      await selectCustomer(createdCustomer)
       setShowAddCustomer(false)
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
       await loadCustomers('POS refresh customers after create')
@@ -1990,7 +1999,7 @@ export default function POS() {
                     {showCustomerDrop && customerSuggestions.length > 0 && (
                       <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-20 max-h-32 overflow-auto mt-0.5">
                         {customerSuggestions.map(c => (
-                          <button key={c.id} className="w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-xs" onClick={() => selectCustomer(c)}>
+                          <button key={c.id} className="w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-xs" onClick={() => { void selectCustomer(c) }}>
                             <span className="font-medium text-gray-900 dark:text-white">{c.name}</span>
                             {c.phone && <span className="text-gray-400 ml-2">{c.phone}</span>}
                           </button>

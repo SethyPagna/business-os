@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-04T11:18:23.027Z
+Generated: 2026-06-04T11:45:42.376Z
 
 ## Summary
 
@@ -73,11 +73,11 @@ Generated: 2026-06-04T11:18:23.027Z
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3255 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3217 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 2907 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2908 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2521 | frontend/components/products |
-| frontend/src/components/pos/POS.tsx | 2446 | frontend/components/pos |
+| frontend/src/components/pos/POS.tsx | 2455 | frontend/components/pos |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
 | backend/src/routes/products.ts | 2238 | backend/routes |
 | ops/docs/reference/PERFORMANCE-SCAN.md | 2179 | ops/docs/reference |
@@ -101,7 +101,7 @@ Generated: 2026-06-04T11:18:23.027Z
 | frontend/src/components/products/Products.tsx | 53 | frontend/components/products |
 | frontend/src/components/inventory/Inventory.tsx | 44 | frontend/components/inventory |
 | frontend/src/api/methods.ts | 40 | frontend/api |
-| frontend/src/components/pos/POS.tsx | 35 | frontend/components/pos |
+| frontend/src/components/pos/POS.tsx | 36 | frontend/components/pos |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/contacts/CustomersTab.tsx | 24 | frontend/components/contacts |
 | frontend/src/components/sales/Sales.tsx | 24 | frontend/components/sales |

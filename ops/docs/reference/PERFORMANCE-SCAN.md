@@ -19,7 +19,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/catalog/CatalogPage.tsx` | 157.7 | 3630 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
-| `frontend/src/components/pos/POS.tsx` | 126.8 | 2446 |
+| `frontend/src/components/pos/POS.tsx` | 127.3 | 2455 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 118.1 | 2376 |
 | `frontend/src/components/products/Products.tsx` | 117.5 | 2521 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 103.0 | 1488 |
@@ -50,7 +50,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
 | `frontend/src/components/products/Products.tsx` | 2521 | 117.5 |
-| `frontend/src/components/pos/POS.tsx` | 2446 | 126.8 |
+| `frontend/src/components/pos/POS.tsx` | 2455 | 127.3 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 2376 | 118.1 |
 | `backend/src/routes/products.ts` | 2238 | 99.4 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2147 | 101.2 |
