@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { Suspense, lazy, memo, useCallback, useEffect, useRef, useState } from 'react'
+import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Cloud from 'lucide-react/dist/esm/icons/cloud.js'
@@ -11,7 +11,6 @@ import Link2Off from 'lucide-react/dist/esm/icons/link-2-off.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
-import { ResetData, FactoryReset } from './ResetData'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -214,6 +213,10 @@ interface BackupOverviewProps {
   onSelect: (section: BackupSectionId) => void
 }
 
+interface MaintenanceResetPanelProps {
+  actionHistory?: ActionHistoryValue | null
+}
+
 interface JobWatcherHandlers {
   onUpdate?: (job: BackupJob) => void
   onComplete?: (job: BackupJob | null) => void
@@ -257,6 +260,16 @@ const QUICK_BACKUP_SECTIONS = [
   'Contacts + users',
   'Portal + files',
 ]
+
+const LazyResetData = lazy(async () => {
+  const module = await import('./ResetData')
+  return { default: module.ResetData as ComponentType<MaintenanceResetPanelProps> }
+})
+
+const LazyFactoryReset = lazy(async () => {
+  const module = await import('./ResetData')
+  return { default: module.FactoryReset as ComponentType<MaintenanceResetPanelProps> }
+})
 
 const BACKUP_SECTION_OPTIONS: Array<{ value: BackupSectionId; label: string; hint: string }> = [
   { value: 'all', label: 'Overview', hint: 'Open one backup tool at a time so the page stays responsive.' },
@@ -1740,10 +1753,18 @@ export default function Backup() {
             {copy('advanced_maintenance_desc', 'These tools are loaded only when opened so backup, restore, and Drive actions stay responsive.')}
           </p>
           {advancedMaintenanceOpen ? (
-            <div className="mt-4 space-y-4">
-              <ResetData actionHistory={actionHistory} />
-              <FactoryReset actionHistory={actionHistory} />
-            </div>
+            <Suspense
+              fallback={(
+                <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-gray-300">
+                  {copy('loading', 'Loading...')}
+                </div>
+              )}
+            >
+              <div className="mt-4 space-y-4">
+                <LazyResetData actionHistory={actionHistory} />
+                <LazyFactoryReset actionHistory={actionHistory} />
+              </div>
+            </Suspense>
           ) : null}
         </details>
         ) : null}

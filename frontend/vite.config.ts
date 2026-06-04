@@ -124,6 +124,7 @@ const deferredModulePreloadPrefixes = [
   'assets/catalog-secondary-tabs-',
   'assets/catalog-editor-',
   'assets/portal-tools-',
+  'assets/backup-reset-tools-',
   'assets/app-local-db-',
   'assets/vendor-dexie-',
   'assets/vendor-zxing-',
@@ -189,8 +190,10 @@ const routeSharedIconNames = new Set([
   'search',
   'send',
   'settings-2',
+  'shield-alert',
   'sparkles',
   'store',
+  'trash-2',
   'upload',
   'x',
 ])
@@ -309,6 +312,7 @@ function manualChunks(id: string): string | undefined {
       return 'portal-tools'
     }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
+    if (normalized.includes('/src/components/utils-settings/ResetData.tsx')) return 'backup-reset-tools'
     if (normalized.includes('/src/utils/favicon')) {
       return 'favicon-utils'
     }

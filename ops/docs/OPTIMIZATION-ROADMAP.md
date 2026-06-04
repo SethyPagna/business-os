@@ -10816,3 +10816,46 @@ Move 775 status:
   TypeScript, runtime, and performance sweeps. Next executable targets should
   continue with language-pack/content-i18n splitting, Settings/Backup transport
   clusters, and Cloudflare tunnel/API latency reduction.
+
+Move 776 status:
+- Move 776 intent-loads Backup destructive reset panels and moves shared
+  reset/settings icons into the shared route icon chunk. `Backup.tsx` no
+  longer statically imports `ResetData.tsx`; the advanced maintenance section
+  loads `ResetData` and `FactoryReset` through React lazy/Suspense only after
+  the details panel opens. Vite now emits a focused `backup-reset-tools` chunk
+  and keeps it out of eager modulepreload, while `shield-alert` and `trash-2`
+  live with the existing shared route icons so Settings does not request the
+  reset panel chunk.
+- Guardrail proof: focused performance guard, frontend typecheck, source
+  syntax check, full frontend utility suite, production build, Docker release
+  build/start, local and remote route traces, public Cloudflare portal check,
+  and post-live hygiene passed.
+- Bundle/runtime proof: production output now emits
+  `backup-reset-tools-CTsF6z9H.js` at 10.72 KB gzip 3.01 KB, while the normal
+  Backup route chunk is `Backup-D63EkRDg.js` at 50.66 KB gzip 14.21 KB and
+  the normal Settings route chunk is `Settings-D-HfFOkr.js` at 53.94 KB gzip
+  15.19 KB. Docker release image `business-os:v6.0.0-202606040929` is running
+  with frontend hash `0f2d34b8a73070a8`.
+- Actual-link proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-024Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failed requests and zero
+  console/page errors. Backup loaded in 296 ms with 23 requests, one API
+  request, and 19 scripts; Settings loaded in 265 ms with 28 requests, two API
+  requests, and 23 scripts. Real admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-509Z.json` passed
+  the same routes with zero failures/errors; Backup loaded in 228 ms and
+  Settings loaded in 228 ms. Both traces show no `backup-reset-tools` request
+  during normal route load. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-32-13-122Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 776: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps.

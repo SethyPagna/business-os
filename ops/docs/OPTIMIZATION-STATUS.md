@@ -1604,3 +1604,22 @@ Recent route-level win:
    still wake broad registry or generator code on real intent. Keep each slice
    guarded by route traces plus interaction proof so read-only POS browsing
    remains light while live/offline write behavior stays intact.
+7. Current position after Move 776: Phase 8.4 active; Phase 26 at 51 completed
+   organization moves; Phase 28 active with R2 prune follow-up; Phase 29 active
+   for whole-codebase schema/cleanup/TypeScript/runtime/performance sweeps.
+
+## Latest Move 776
+
+- Backup normal route load no longer downloads destructive reset tools.
+  `Backup.tsx` lazy-loads `ResetData` and `FactoryReset` only after the
+  advanced maintenance details panel opens. Vite emits
+  `backup-reset-tools-CTsF6z9H.js` at 10.72 KB gzip 3.01 KB, and shared
+  reset/settings icons stay in `shared-icons` so Settings does not request the
+  reset chunk.
+- Docker-served local trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-024Z.json` and
+  real admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-509Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failures/errors and no
+  normal-route `backup-reset-tools` request. Backup was 23 requests/19 scripts;
+  Settings improved to 28 requests/23 scripts.

@@ -2090,4 +2090,16 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   public portal check
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-13-03-264Z/report.json`,
   and post-live hygiene all passed with zero relevant failures/errors.
+- Move 506 records roadmap Move 776: lazy-load Backup reset panels and split
+  their chunk from normal Backup/Settings route load. `ResetData.tsx` now sits
+  behind a lazy advanced-maintenance boundary and a focused
+  `backup-reset-tools` chunk, while shared reset/settings icons stay in
+  `shared-icons`. Production output: `Backup-D63EkRDg.js` 50.66 KB gzip
+  14.21 KB, `Settings-D-HfFOkr.js` 53.94 KB gzip 15.19 KB, and
+  `backup-reset-tools-CTsF6z9H.js` 10.72 KB gzip 3.01 KB. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-024Z.json` and
+  real admin route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-509Z.json` show no
+  normal-route `backup-reset-tools` request, with Backup at 23 requests/19
+  scripts and Settings at 28 requests/23 scripts, zero failures/errors.
 <!-- phase29-manual-notes:end -->

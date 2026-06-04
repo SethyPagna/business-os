@@ -3419,6 +3419,41 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+- change: lazy-load Backup destructive reset panels
+- affected files:
+  `frontend/src/components/utils-settings/Backup.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: normal Backup and Settings route startup, with
+  destructive reset/factory reset panels deferred until advanced maintenance
+  intent.
+- keeper or rollback: keeper; reset behavior remains available behind the
+  same UI panel, while normal route startup no longer requests the reset-tools
+  chunk.
+- bundle proof:
+  Docker image `business-os:v6.0.0-202606040929` emits
+  `Backup-D63EkRDg.js` at 50.66 KB gzip 14.21 KB,
+  `Settings-D-HfFOkr.js` at 53.94 KB gzip 15.19 KB, and
+  `backup-reset-tools-CTsF6z9H.js` at 10.72 KB gzip 3.01 KB.
+- actual link proof:
+  local trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-024Z.json` and
+  real admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-32-11-509Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failures/errors and no
+  normal-route `backup-reset-tools` request. Public portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-32-13-122Z/report.json`
+  rendered 20 products with zero relevant failures/errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
+  zero generated integrity matches, and relationship orphan checks passing for
+  49 FK candidates.
+
 - change: defer public catalog rounded-favicon canvas helper from first-load
   startup
 - affected files:
