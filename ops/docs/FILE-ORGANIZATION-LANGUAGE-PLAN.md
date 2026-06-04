@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 781 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 782 in this file.
 
 ## Goal
 
@@ -7194,6 +7194,24 @@ Decision rule:
     startup. Generated cleanup removed 415,957,346 bytes from regenerable
     `release`, `frontend/dist`, and `output` folders after the running Docker
     image was already built.
+
+782. Keep Contacts CSV exports out of route startup. Done:
+    `CustomersTab.tsx`, `SuppliersTab.tsx`, and `DeliveryTab.tsx` now lazy-load
+    `frontend/src/utils/csv.ts` only from the export button handlers through a
+    memoized dynamic import. This is a Phase 29 ownership/performance move, not
+    a folder move or language conversion: the measured issue was the Contacts
+    startup route loading `csv-utils` before export intent. Proof: focused
+    performance guard, frontend typecheck, source/JSX check, full frontend
+    utility suite, production build, Docker release image
+    `business-os:v6.0.0-202606041904`, local Contacts route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T11-14-33-581Z.json`,
+    public Cloudflare portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-14-33-554Z/report.json`,
+    post-live hygiene, organization audit, schema audit, reference refresh,
+    Phase 29 audit, storage prune, and `git diff --check` passed. Contacts
+    reported `hasCsvUtils=false` during startup. Generated cleanup removed
+    412,447,007 bytes from regenerable `release` and `frontend/dist` after the
+    running Docker image was already built.
 
 ## Safety Gates
 

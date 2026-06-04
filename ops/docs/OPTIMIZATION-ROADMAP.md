@@ -11131,3 +11131,50 @@ Move 781 status:
   narrowing action-only Sales/Returns write/detail paths and broad registry
   consumers only where live traces show a startup request, while preserving
   rollback through Docker release and post-live hygiene.
+
+Move 782 status:
+- Move 782 lazy-loads contact-tab CSV export helpers. `CustomersTab.tsx`,
+  `SuppliersTab.tsx`, and `DeliveryTab.tsx` now avoid the static
+  `../../utils/csv` import and memoize `import('../../utils/csv')` for export
+  button intent only. This keeps normal Contacts route startup focused on the
+  read transport and visible table UI instead of downloading export tooling
+  before it is used.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` rejects
+  static `downloadCSV` imports in Customers, Suppliers, and Delivery tabs and
+  requires the memoized dynamic import plus `downloadCSV` use after export
+  intent.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  check:jsx`, `npm.cmd --prefix frontend run test:utils`, production build,
+  `git diff --check`, Docker release build/start, Docker health, local
+  Contacts route-load Playwright trace, public Cloudflare portal Playwright
+  check, post-live hygiene, schema audit, organization audit, generated
+  reference refresh, Phase 29 audit, and storage prune passed.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606041904` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend build
+  hash `225fc10e0846045b`. Local Docker-served Contacts route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T11-14-33-581Z.json` passed
+  in 233 ms with 34 requests, 29 scripts, two API calls, zero failed requests,
+  zero console/page errors, and script inspection confirmed
+  `hasCsvUtils=false`.
+- Public link proof: public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-14-33-554Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, enforced CSP was present, and recorded zero failed
+  responses, zero relevant console messages, and zero page errors.
+- Cleanup proof: generated-artifact cleanup removed 412,447,007 bytes from
+  regenerable `release` and `frontend/dist` after the Docker image was built
+  and running. `npm.cmd --prefix ops run prune-storage` removed 326,086 bytes
+  of old reports plus 38.19 MB of Docker builder cache while preserving
+  uploads, secrets, env files, newest local backup packages, Docker images,
+  Docker volumes, and latest R2 backup
+  `datasync-2026-06-04T09-26-59-912Z`. Follow-up
+  `npm.cmd --prefix ops run phase29:audit` passed with zero failures.
+- Current plan position after Move 782: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: continue
+  route-by-route startup chunk trimming only where the Playwright trace shows
+  a real loaded script or first-window request, with Dashboard/Contacts still
+  the measured routes to watch before deeper UI or language rewires.

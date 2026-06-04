@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-04T03:27:22.744Z
+Generated: 2026-06-04T11:18:23.027Z
 
 ## Summary
 
@@ -63,17 +63,17 @@ Generated: 2026-06-04T03:27:22.744Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 11134 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 11181 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7216 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7234 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4403 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 3793 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 3839 | ops/docs |
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3255 | ops/docs/reference |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3214 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 2903 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3217 | ops/docs/reference |
+| frontend/tests/performanceLoadingUx.test.ts | 2907 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2521 | frontend/components/products |
@@ -90,8 +90,8 @@ Generated: 2026-06-04T03:27:22.744Z
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | frontend/src/AppContext.tsx | 1872 | frontend/src/AppContext.tsx |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1813 | ops/docs/reference |
+| ops/docs/OPTIMIZATION-STATUS.md | 1790 | ops/docs |
 | frontend/src/components/utils-settings/Backup.tsx | 1775 | frontend/components/utils-settings |
-| ops/docs/OPTIMIZATION-STATUS.md | 1775 | ops/docs |
 | backend/src/routes/system/index.ts | 1674 | backend/routes |
 
 ## Relative Import Hotspots
@@ -103,10 +103,10 @@ Generated: 2026-06-04T03:27:22.744Z
 | frontend/src/api/methods.ts | 40 | frontend/api |
 | frontend/src/components/pos/POS.tsx | 35 | frontend/components/pos |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
+| frontend/src/components/contacts/CustomersTab.tsx | 24 | frontend/components/contacts |
 | frontend/src/components/sales/Sales.tsx | 24 | frontend/components/sales |
-| frontend/src/components/contacts/CustomersTab.tsx | 23 | frontend/components/contacts |
-| frontend/src/components/contacts/DeliveryTab.tsx | 22 | frontend/components/contacts |
-| frontend/src/components/contacts/SuppliersTab.tsx | 22 | frontend/components/contacts |
+| frontend/src/components/contacts/DeliveryTab.tsx | 23 | frontend/components/contacts |
+| frontend/src/components/contacts/SuppliersTab.tsx | 23 | frontend/components/contacts |
 | frontend/src/components/dashboard/Dashboard.tsx | 21 | frontend/components/dashboard |
 | backend/src/routes/system/index.ts | 20 | backend/routes |
 | frontend/src/web-api.ts | 20 | frontend/src/web-api.ts |

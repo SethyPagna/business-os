@@ -8,7 +8,6 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
-import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
@@ -117,9 +116,11 @@ const useSync = useSyncHook as () => SyncContextValue
 
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
 type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
+type CsvUtilsModule = typeof import('../../utils/csv')
 
 let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
 let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
+let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
 
 function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
   if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
@@ -129,6 +130,11 @@ function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
 function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
   if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
   return contactWriteTransportModulePromise
+}
+
+function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
+  if (!csvUtilsModulePromise) csvUtilsModulePromise = import('../../utils/csv')
+  return csvUtilsModulePromise
 }
 
 function getDeliveryApi(): DeliveryApi {
@@ -804,7 +810,7 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
             <Download className="h-4 w-4" />
             <span className="hidden sm:inline">{tr('import_contacts', 'Import', 'នាំចូល')}</span>
           </button>
-          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => {
+          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={async () => {
             const rows = visibleContacts.map(c => {
               const options = parseDeliveryOptions(c.address)
               const primaryOption = getPrimaryContactOption(options, {
@@ -819,6 +825,7 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
                 Created: c.created_at || '',
               }
             })
+            const { downloadCSV } = await loadCsvUtilsModule()
             downloadCSV(`delivery-contacts-${new Date().toISOString().slice(0,10)}.csv`, rows)
           }} title={tr('export', 'Export', 'នាំចេញ')}>
             <Upload className="h-4 w-4" />

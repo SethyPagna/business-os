@@ -85,10 +85,10 @@ Total files documented: **246**
 | 73 | `frontend/src/components/contacts/Contacts.tsx` | 13 |
 | 74 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
 | 75 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 |
-| 76 | `frontend/src/components/contacts/CustomersTab.tsx` | 18 |
-| 77 | `frontend/src/components/contacts/DeliveryTab.tsx` | 27 |
+| 76 | `frontend/src/components/contacts/CustomersTab.tsx` | 19 |
+| 77 | `frontend/src/components/contacts/DeliveryTab.tsx` | 28 |
 | 78 | `frontend/src/components/contacts/shared.tsx` | 3 |
-| 79 | `frontend/src/components/contacts/SuppliersTab.tsx` | 22 |
+| 79 | `frontend/src/components/contacts/SuppliersTab.tsx` | 23 |
 | 80 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
 | 81 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
 | 82 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
@@ -1278,56 +1278,58 @@ Total files documented: **246**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `loadContactReadTransportModule` | function | 130 |
-| 2 | `loadContactWriteTransportModule` | function | 135 |
-| 3 | `getCustomerApi` | function | 140 |
-| 4 | `isSectionRow` | function | 149 |
-| 5 | `normalizeCustomerRows` | function | 153 |
-| 6 | `getApiListPayload` | function | 160 |
-| 7 | `getErrorMessage` | function | 164 |
-| 8 | `formatPoints` | function | 168 |
-| 9 | `tr` | function | 180 |
-| 10 | `CustomersTab` | function | 189 |
-| 11 | `toggleSectionCollapsed` | const arrow | 352 |
-| 12 | `isSectionFullySelected` | const arrow | 358 |
-| 13 | `isSectionPartiallySelected` | const arrow | 359 |
-| 14 | `toggleSectionSelection` | const arrow | 360 |
-| 15 | `promise` | const arrow | 394 |
-| 16 | `handleSave` | const arrow | 481 |
-| 17 | `handleDelete` | const arrow | 558 |
-| 18 | `handleBulkDelete` | const arrow | 597 |
+| 1 | `loadContactReadTransportModule` | function | 131 |
+| 2 | `loadContactWriteTransportModule` | function | 136 |
+| 3 | `loadCsvUtilsModule` | function | 141 |
+| 4 | `getCustomerApi` | function | 146 |
+| 5 | `isSectionRow` | function | 155 |
+| 6 | `normalizeCustomerRows` | function | 159 |
+| 7 | `getApiListPayload` | function | 166 |
+| 8 | `getErrorMessage` | function | 170 |
+| 9 | `formatPoints` | function | 174 |
+| 10 | `tr` | function | 186 |
+| 11 | `CustomersTab` | function | 195 |
+| 12 | `toggleSectionCollapsed` | const arrow | 358 |
+| 13 | `isSectionFullySelected` | const arrow | 364 |
+| 14 | `isSectionPartiallySelected` | const arrow | 365 |
+| 15 | `toggleSectionSelection` | const arrow | 366 |
+| 16 | `promise` | const arrow | 400 |
+| 17 | `handleSave` | const arrow | 487 |
+| 18 | `handleDelete` | const arrow | 564 |
+| 19 | `handleBulkDelete` | const arrow | 603 |
 
 ### 3.77 `frontend/src/components/contacts/DeliveryTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `loadContactReadTransportModule` | function | 124 |
-| 2 | `loadContactWriteTransportModule` | function | 129 |
-| 3 | `getDeliveryApi` | function | 134 |
-| 4 | `normalizeDeliveryRows` | function | 143 |
-| 5 | `isSectionRow` | function | 151 |
-| 6 | `getErrorMessage` | function | 155 |
-| 7 | `BLANK_OPTION` | const arrow | 172 |
-| 8 | `OptionEditor` | function | 183 |
-| 9 | `set` | const arrow | 184 |
-| 10 | `fieldId` | const arrow | 185 |
-| 11 | `DeliveryForm` | function | 230 |
-| 12 | `set` | const arrow | 239 |
-| 13 | `addOption` | const arrow | 240 |
-| 14 | `updateOption` | const arrow | 244 |
-| 15 | `removeOption` | const arrow | 245 |
-| 16 | `handleSave` | const arrow | 246 |
-| 17 | `OptionsDisplay` | function | 316 |
-| 18 | `OptionsBadge` | function | 333 |
-| 19 | `DeliveryTab` | function | 344 |
-| 20 | `toggleSectionCollapsed` | const arrow | 485 |
-| 21 | `isSectionFullySelected` | const arrow | 491 |
-| 22 | `isSectionPartiallySelected` | const arrow | 492 |
-| 23 | `toggleSectionSelection` | const arrow | 493 |
-| 24 | `promise` | const arrow | 525 |
-| 25 | `handleSave` | const arrow | 599 |
-| 26 | `handleDelete` | const arrow | 661 |
-| 27 | `handleBulkDelete` | const arrow | 698 |
+| 1 | `loadContactReadTransportModule` | function | 125 |
+| 2 | `loadContactWriteTransportModule` | function | 130 |
+| 3 | `loadCsvUtilsModule` | function | 135 |
+| 4 | `getDeliveryApi` | function | 140 |
+| 5 | `normalizeDeliveryRows` | function | 149 |
+| 6 | `isSectionRow` | function | 157 |
+| 7 | `getErrorMessage` | function | 161 |
+| 8 | `BLANK_OPTION` | const arrow | 178 |
+| 9 | `OptionEditor` | function | 189 |
+| 10 | `set` | const arrow | 190 |
+| 11 | `fieldId` | const arrow | 191 |
+| 12 | `DeliveryForm` | function | 236 |
+| 13 | `set` | const arrow | 245 |
+| 14 | `addOption` | const arrow | 246 |
+| 15 | `updateOption` | const arrow | 250 |
+| 16 | `removeOption` | const arrow | 251 |
+| 17 | `handleSave` | const arrow | 252 |
+| 18 | `OptionsDisplay` | function | 322 |
+| 19 | `OptionsBadge` | function | 339 |
+| 20 | `DeliveryTab` | function | 350 |
+| 21 | `toggleSectionCollapsed` | const arrow | 491 |
+| 22 | `isSectionFullySelected` | const arrow | 497 |
+| 23 | `isSectionPartiallySelected` | const arrow | 498 |
+| 24 | `toggleSectionSelection` | const arrow | 499 |
+| 25 | `promise` | const arrow | 531 |
+| 26 | `handleSave` | const arrow | 605 |
+| 27 | `handleDelete` | const arrow | 667 |
+| 28 | `handleBulkDelete` | const arrow | 704 |
 
 ### 3.78 `frontend/src/components/contacts/shared.tsx`
 
@@ -1341,28 +1343,29 @@ Total files documented: **246**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `loadContactReadTransportModule` | function | 127 |
-| 2 | `loadContactWriteTransportModule` | function | 132 |
-| 3 | `getSupplierApi` | function | 137 |
-| 4 | `normalizeSupplierRows` | function | 146 |
-| 5 | `isSectionRow` | function | 154 |
-| 6 | `getErrorMessage` | function | 158 |
-| 7 | `SupplierForm` | function | 169 |
-| 8 | `set` | const arrow | 185 |
-| 9 | `addOption` | const arrow | 186 |
-| 10 | `updateOption` | const arrow | 190 |
-| 11 | `removeOption` | const arrow | 191 |
-| 12 | `handleSubmit` | const arrow | 192 |
-| 13 | `fieldId` | const arrow | 240 |
-| 14 | `SuppliersTab` | function | 286 |
-| 15 | `toggleSectionCollapsed` | const arrow | 434 |
-| 16 | `isSectionFullySelected` | const arrow | 440 |
-| 17 | `isSectionPartiallySelected` | const arrow | 441 |
-| 18 | `toggleSectionSelection` | const arrow | 442 |
-| 19 | `promise` | const arrow | 476 |
-| 20 | `handleSave` | const arrow | 551 |
-| 21 | `handleDelete` | const arrow | 621 |
-| 22 | `handleBulkDelete` | const arrow | 660 |
+| 1 | `loadContactReadTransportModule` | function | 128 |
+| 2 | `loadContactWriteTransportModule` | function | 133 |
+| 3 | `loadCsvUtilsModule` | function | 138 |
+| 4 | `getSupplierApi` | function | 143 |
+| 5 | `normalizeSupplierRows` | function | 152 |
+| 6 | `isSectionRow` | function | 160 |
+| 7 | `getErrorMessage` | function | 164 |
+| 8 | `SupplierForm` | function | 175 |
+| 9 | `set` | const arrow | 191 |
+| 10 | `addOption` | const arrow | 192 |
+| 11 | `updateOption` | const arrow | 196 |
+| 12 | `removeOption` | const arrow | 197 |
+| 13 | `handleSubmit` | const arrow | 198 |
+| 14 | `fieldId` | const arrow | 246 |
+| 15 | `SuppliersTab` | function | 292 |
+| 16 | `toggleSectionCollapsed` | const arrow | 440 |
+| 17 | `isSectionFullySelected` | const arrow | 446 |
+| 18 | `isSectionPartiallySelected` | const arrow | 447 |
+| 19 | `toggleSectionSelection` | const arrow | 448 |
+| 20 | `promise` | const arrow | 482 |
+| 21 | `handleSave` | const arrow | 557 |
+| 22 | `handleDelete` | const arrow | 627 |
+| 23 | `handleBulkDelete` | const arrow | 666 |
 
 ### 3.80 `frontend/src/components/custom-tables/CustomTables.tsx`
 

@@ -3443,6 +3443,52 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+- change: lazy-load Contacts tab CSV export helpers
+- affected files:
+  `frontend/src/components/contacts/CustomersTab.tsx`,
+  `frontend/src/components/contacts/SuppliersTab.tsx`,
+  `frontend/src/components/contacts/DeliveryTab.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  generated references under `ops/docs/reference/`
+- route or API target: Contacts route startup, Customers/Suppliers/Delivery
+  export buttons, and the focused contact read transport path
+- keeper or rollback: keeper; export behavior stays behind the same buttons,
+  and rollback is the previous static CSV import if a future browser or build
+  issue appears.
+- source proof:
+  `CustomersTab.tsx`, `SuppliersTab.tsx`, and `DeliveryTab.tsx` no longer
+  statically import `../../utils/csv`; each tab memoizes
+  `import('../../utils/csv')` and awaits it only from the export handler.
+  `frontend/tests/performanceLoadingUx.test.ts` now rejects static contact CSV
+  imports and requires the dynamic import path.
+- actual link proof:
+  Docker release image `business-os:v6.0.0-202606041904` is running. Local
+  health reports frontend build hash `225fc10e0846045b`. Local Docker route
+  trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T11-14-33-581Z.json` passed
+  Contacts in 233 ms with 34 requests, 29 scripts, two API calls, zero failed
+  requests, zero console/page errors, and script inspection confirmed
+  `hasCsvUtils=false`.
+- public proof:
+  public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-14-33-554Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200
+  after interaction, and recorded zero failed responses, zero relevant console
+  messages, and zero page errors.
+- verification:
+  focused performance guard, frontend typecheck, JSX/source check, full
+  frontend utility suite, production build, Docker release build/start, public
+  Cloudflare portal Playwright, post-live hygiene, organization audit, schema
+  audit, generated reference refresh, Phase 29 audit, and prune checks passed.
+- cleanup:
+  deleted regenerable `release` and `frontend/dist` after the Docker image was
+  built and healthy, removing 412,447,007 bytes. Storage prune removed
+  326,086 bytes of old reports plus 38.19 MB of Docker builder cache while
+  preserving protected data, newest local backups, Docker images/volumes, and
+  latest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
+
 - change: narrow Sales/Returns route-start reads and split API HTTP core
 - affected files:
   `frontend/src/components/sales/Sales.tsx`,

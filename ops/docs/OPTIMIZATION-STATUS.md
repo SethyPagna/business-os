@@ -8,10 +8,8 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 781, move Sales/Returns route-start reads to
-  focused transports and split shared HTTP/query helpers into `api-http-core`
-  so normal Sales/Returns startup no longer requests `app-api-methods` or
-  `csv-utils`
+- Latest completed move: Move 782, lazy-load Contacts tab CSV export helpers
+  so normal Contacts startup no longer requests `csv-utils`
 
 ## Current Baseline
 
@@ -20,7 +18,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `c4818ba473b05528`
+  `225fc10e0846045b`
 
 Latest verified reports:
 
@@ -33,9 +31,9 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T03-19-53-181Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-14-33-554Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T03-19-53-714Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T11-14-33-581Z.json`
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
@@ -65,21 +63,38 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the Move 781 verification pass
-  removed 30,592,188 bytes of old runtime reports, one old local Docker
-  release backup package at 4,829,716 bytes, and 38.19 MB of Docker builder
+- `npm.cmd --prefix ops run prune-storage` in the Move 782 verification pass
+  removed 326,086 bytes of old runtime reports and 38.19 MB of Docker builder
   cache. It kept uploads, secrets, env files, newest local backup packages,
   Docker images, Docker volumes, and retained newest R2 backup object
-  `datasync-2026-06-03T21-19-31-003Z`.
-- The Move 781 generated-artifact cleanup removed an additional 415,957,346
-  bytes from regenerable `release`, `frontend/dist`, and `output` folders
-  after Docker image `business-os:v6.0.0-202606041117` was already built and
-  running. The follow-up `npm.cmd --prefix ops run phase29:audit` passed with
-  zero failures.
+  `datasync-2026-06-04T09-26-59-912Z`.
+- The Move 782 generated-artifact cleanup removed an additional 412,447,007
+  bytes from regenerable `release` and `frontend/dist` folders after Docker
+  image `business-os:v6.0.0-202606041904` was already built and running. The
+  follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero failures.
 
 Current honest pockets:
 
-- Move 781 is now served by Docker release image
+- Move 782 is now served by Docker release image
+  `business-os:v6.0.0-202606041904`. `CustomersTab.tsx`,
+  `SuppliersTab.tsx`, and `DeliveryTab.tsx` no longer statically import
+  `../../utils/csv`; each export button now lazy-loads the CSV helper through
+  a memoized dynamic import only after export intent. `performanceLoadingUx`
+  rejects static contact CSV imports and requires the memoized dynamic import
+  path. Local Docker-served Contacts route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T11-14-33-581Z.json` passed
+  in 233 ms with 34 requests, 29 scripts, two API calls, zero failed
+  responses, zero console/page errors, and `hasCsvUtils=false`. Public portal
+  Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T11-14-33-554Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors. Post-live hygiene passed with loaded
+  dataset status, zero QA/smoke/action-history cleanup matches, zero generated
+  integrity matches, and relationship orphan checks passing for 49 FK
+  candidates.
+
+- Move 781 is served by Docker release image
   `business-os:v6.0.0-202606041117`. `Sales.tsx` uses focused
   `salesTransport.getSales()` and `userReadTransport.getUsers()` for normal
   route-start reads, while write/status/member actions remain on the existing

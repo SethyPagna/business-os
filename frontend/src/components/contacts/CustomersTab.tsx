@@ -7,7 +7,6 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
-import { downloadCSV } from '../../utils/csv'
 import { fmtDate } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -123,9 +122,11 @@ const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) 
 
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
 type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
+type CsvUtilsModule = typeof import('../../utils/csv')
 
 let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
 let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
+let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
 
 function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
   if (!contactReadTransportModulePromise) contactReadTransportModulePromise = import('../../api/contactReadTransport.ts')
@@ -135,6 +136,11 @@ function loadContactReadTransportModule(): Promise<ContactReadTransportModule> {
 function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule> {
   if (!contactWriteTransportModulePromise) contactWriteTransportModulePromise = import('../../api/contactWriteTransport.ts')
   return contactWriteTransportModulePromise
+}
+
+function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
+  if (!csvUtilsModulePromise) csvUtilsModulePromise = import('../../utils/csv')
+  return csvUtilsModulePromise
 }
 
 function getCustomerApi(): CustomerApi {
@@ -715,7 +721,7 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
           </button>
           <button
             className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
-            onClick={() => {
+            onClick={async () => {
               const rows = visibleCustomers.map((customer) => {
                 const options = parseContactOptions(customer.address)
                 return {
@@ -729,6 +735,7 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
                   Created: customer.created_at || '',
                 }
               })
+              const { downloadCSV } = await loadCsvUtilsModule()
               downloadCSV(`customers-${new Date().toISOString().slice(0, 10)}.csv`, rows)
             }}
           >
