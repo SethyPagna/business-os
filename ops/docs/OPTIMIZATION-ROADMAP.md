@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 763.
+- Latest completed implementation move in this roadmap: Move 770.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -10522,3 +10522,64 @@ Move 769 status:
   candidates in public catalog contact/map/social payloads, settings/system
   route clusters, and any remaining export/template helpers that can safely
   move behind user intent.
+
+Move 770 status:
+- Move 770 splits public catalog first-load bundles by visible intent. Vite now
+  keeps `CatalogPreviewSurface.tsx`, `CatalogProductsSection.tsx`, and
+  `CatalogSecondaryTabs.tsx` in separate `catalog-preview`, `catalog-products`,
+  and `catalog-secondary-tabs` chunks, and those chunks stay out of eager
+  modulepreload.
+- Public catalog startup no longer idle-warms hidden secondary tabs. The first
+  Products viewport still warms the products panel, while tab changes to About,
+  Membership, FAQ, or AI immediately load the secondary tab chunk before
+  switching state.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now requires
+  the split chunk names, requires the modulepreload exclusions, rejects hidden
+  secondary-tab idle/timer warmups, and requires the interaction-driven
+  secondary-tab loader. `node frontend/tests/performanceLoadingUx.test.ts`,
+  `node frontend/tests/portalCatalogDisplay.test.ts`, frontend typecheck,
+  frontend JSX/source check, frontend `test:utils`, and frontend production
+  build passed.
+- Docker/runtime proof: Docker release image
+  `business-os:v6.0.0-202606040757` is running for the app and worker
+  containers. Docker health reports served frontend hash
+  `17726bff239612d9`.
+- Local Playwright route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-868Z.json`
+  measured local public catalog at 190 ms route-ready with 30 requests, one API
+  request, 25 scripts, zero failed requests, and zero console/page errors. The
+  script list included `catalog-preview` and `catalog-products`, but not
+  `catalog-secondary-tabs`.
+- Actual Cloudflare proof:
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned HTTP 200 with about
+  0.84-0.85 s direct curl totals in the final sample. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-898Z.json` passed
+  Dashboard, Products, POS, and Settings with zero failed requests and zero
+  console/page errors. Real public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-47-108Z.json`
+  measured `/public` with 29 requests, 24 scripts, one API request, zero
+  failures, and zero errors; the script list did not include
+  `catalog-secondary-tabs`. The variable 7835 ms ready sample remains a
+  tunnel/browser cold-path latency observation, not a failed app render.
+- Live interaction/control proof: public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-01-16-334Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors. Fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-04T00-01-16-941Z/summary.json`
+  discovered 254 controls across 17 routes, exercised 182 stable controls,
+  skipped 72 guarded/noisy controls, captured 34 screenshots, and found zero
+  failed controls.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 770: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  focus on reducing the remaining public catalog base route chunk, Settings
+  and Backup transport clusters, and Cloudflare tunnel variance without moving
+  live business data or weakening offline fallback behavior.

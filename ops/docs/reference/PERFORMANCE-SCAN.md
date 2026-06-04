@@ -1985,4 +1985,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   failures/errors. Fast all-pages control audit
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-37-55-737Z/summary.json`
   exercised 183 stable controls across 17 routes with zero failed controls.
+- Move 500 records roadmap Move 770: split the public catalog preview,
+  Products, and secondary-tab bundles. Vite now emits separate
+  `catalog-preview-BjcSy4tW.js`, `catalog-products-6njbw9vv.js`, and
+  `catalog-secondary-tabs-NY-SRrRp.js` chunks, while the production HTML
+  modulepreload list remains limited to core startup chunks. Docker image
+  `business-os:v6.0.0-202606040757` served local trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-868Z.json`:
+  public catalog was ready in 190 ms with 30 requests, one API request, 25
+  scripts, zero failures/errors, and no first-load `catalog-secondary-tabs`.
+  Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-898Z.json` passed
+  Dashboard, Products, POS, and Settings with zero failures/errors. Real
+  public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-47-108Z.json` passed
+  `/public` with zero failures/errors and no first-load
+  `catalog-secondary-tabs`; final direct curl samples for public/admin were
+  about 0.84-0.85 s total. Fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-04T00-01-16-941Z/summary.json`
+  exercised 182 stable controls across 17 routes with zero failed controls.
 <!-- phase29-manual-notes:end -->

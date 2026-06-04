@@ -1404,31 +1404,19 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       void loadCatalogProductsSection()
       setPublicProductsPanelPrimed(true)
     }
-    const warmPublicSecondaryTabs = () => {
-      void loadCatalogSecondaryTabs()
-      setPublicSecondaryTabsPrimed(true)
-    }
     if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
       const productsIdleId = window.requestIdleCallback(() => {
         warmPublicProductsPanel()
       }, { timeout: 400 })
-      const secondaryIdleId = window.requestIdleCallback(() => {
-        warmPublicSecondaryTabs()
-      }, { timeout: 1200 })
       return () => {
         window.cancelIdleCallback?.(productsIdleId)
-        window.cancelIdleCallback?.(secondaryIdleId)
       }
     }
     const productsTimerId = window.setTimeout(() => {
       warmPublicProductsPanel()
     }, 120)
-    const secondaryTimerId = window.setTimeout(() => {
-      warmPublicSecondaryTabs()
-    }, 180)
     return () => {
       window.clearTimeout(productsTimerId)
-      window.clearTimeout(secondaryTimerId)
     }
   }, [portalConfigReady, publicView])
   const recommendedProductIds = useMemo(
@@ -3305,6 +3293,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setAssistantExpandedProductId,
   }
 
+  const handlePortalTabChange = (key: string) => {
+    if (key !== 'products') {
+      void loadCatalogSecondaryTabs()
+      setPublicSecondaryTabsPrimed(true)
+    } else {
+      void loadCatalogProductsSection()
+      setPublicProductsPanelPrimed(true)
+    }
+    setActiveTab(key)
+  }
+
   function renderSecondaryTabPanel(tab: string, visible: boolean) {
     return (
       <div
@@ -3487,7 +3486,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         previewTitle={previewTitle}
         portalTabs={portalTabs}
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handlePortalTabChange}
         publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
         publicPortalNavPinned={publicPortalNavPinned}
         publicPortalNavMetrics={publicPortalNavMetrics}

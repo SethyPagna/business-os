@@ -3310,3 +3310,58 @@ Use this shape for future entries:
   `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
   zero QA cleanup matches, zero generated integrity matches, and relationship
   orphan checks passing for 49 FK candidates.
+
+- change: split public catalog preview, Products, and secondary-tab chunks
+- affected files:
+  `frontend/src/components/catalog/CatalogPage.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: public customer portal first Products viewport, public
+  About/Membership/FAQ/AI tab intent, actual admin/public Cloudflare links,
+  local public/Dashboard/Products/POS route traces, and broad local all-page
+  control sweep
+- keeper or rollback: keeper; the common public landing path no longer loads
+  hidden About/contact/social/map secondary-tab code during first paint, while
+  non-Products tab clicks immediately load the deferred secondary chunk.
+- compiled chunk proof:
+  `npm.cmd --prefix frontend run build` emitted
+  `catalog-preview-BjcSy4tW.js`, `catalog-products-6njbw9vv.js`, and
+  `catalog-secondary-tabs-NY-SRrRp.js`. The production HTML modulepreload list
+  still contains only core startup chunks, not the catalog split chunks.
+- route-scoped result:
+  local Docker trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-868Z.json`
+  measured public catalog at 190 ms, Dashboard at 236 ms, Products at 243 ms,
+  and POS at 266 ms, all with zero failed requests and zero console/page
+  errors. Local public first-load scripts included `catalog-preview` and
+  `catalog-products`, but not `catalog-secondary-tabs`.
+- interaction/control proof:
+  public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-01-16-334Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors. Fast all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-04T00-01-16-941Z/summary.json`
+  discovered 254 controls across 17 routes, exercised 182 stable controls,
+  skipped 72 guarded/noisy controls, captured 34 screenshots, and found zero
+  failed controls.
+- actual link proof:
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned HTTP 200 with final direct
+  curl totals around 0.84-0.85 s. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-898Z.json` passed
+  Dashboard, Products, POS, and Settings with zero failures/errors. Real
+  public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-47-108Z.json` passed
+  `/public` with zero failures/errors and no first-load
+  `catalog-secondary-tabs`; the 7835 ms ready sample is tracked as
+  tunnel/browser cold-path variance rather than a render failure.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
+  zero generated integrity matches, and relationship orphan checks passing for
+  49 FK candidates.

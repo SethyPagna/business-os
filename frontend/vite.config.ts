@@ -120,6 +120,8 @@ const deferredModulePreloadPrefixes = [
   'assets/app-system-',
   'assets/catalog-',
   'assets/catalog-preview-',
+  'assets/catalog-products-',
+  'assets/catalog-secondary-tabs-',
   'assets/catalog-editor-',
   'assets/portal-tools-',
   'assets/app-local-db-',
@@ -269,12 +271,14 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'catalog-editor'
     }
-    if (
-      normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')
-      || normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')
-      || normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
-    ) {
+    if (normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')) {
       return 'catalog-preview'
+    }
+    if (normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')) {
+      return 'catalog-products'
+    }
+    if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {
+      return 'catalog-secondary-tabs'
     }
     if (normalized.includes('/src/utils/initials.ts')) {
       return 'initials-utils'

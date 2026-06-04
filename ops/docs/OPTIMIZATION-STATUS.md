@@ -8,37 +8,37 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 769, defer Products CSV export helpers until
-  export intent so the Products first-paint path no longer requests
-  `csv-utils`
+- Latest completed move: Move 770, split the public catalog Products,
+  preview, and secondary-tab bundles so About/contact/social/map code no
+  longer loads during the first public Products viewport
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `17300cced4c769ea`
+- latest verified frontend hash from the most recent Docker-served live check: `17726bff239612d9`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `c15b3319a92c57d2`
+  `984d67f3518f82a4`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest fast all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-03T23-37-55-737Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-04T00-01-16-941Z/summary.json`
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-03T23-36-08-136Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-01-16-334Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T23-36-07-611Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-868Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T23-41-37-731Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-898Z.json`
 - latest focused public-host route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T23-42-27-763Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-47-108Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -1541,6 +1541,11 @@ Recent route-level win:
   social media links share one compact action tray on phones, long addresses
   clamp instead of stretching the hero, and social links collapse to accessible
   icon buttons until the `sm` breakpoint.
+- Public catalog first load now keeps About/contact/social/map code out of the
+  first Products viewport. Move 770 split `CatalogPreviewSurface`,
+  `CatalogProductsSection`, and `CatalogSecondaryTabs` into intent-sized
+  chunks, stopped idle warming for hidden secondary tabs, and verified the real
+  public link without first-loading `catalog-secondary-tabs`.
 - Inventory no longer wakes the broad `window.api`/`app-api-methods` registry
   for first-load reads, stats, movement reads, branch/product/user/returns/RFID
   reads, or stock mutations. The Docker-served Move 768 local Inventory trace
