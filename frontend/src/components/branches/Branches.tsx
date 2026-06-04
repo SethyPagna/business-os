@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
@@ -12,7 +12,6 @@ import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm from './BranchForm'
-import TransferModal from './TransferModal'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
@@ -25,6 +24,15 @@ import {
   settleLoaderMap,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import {
+  createBranch as createBranchRequest,
+  deleteBranch as deleteBranchRequest,
+  getBranches as getBranchesRequest,
+  getBranchStock as getBranchStockRequest,
+  getBranchSummary as getBranchSummaryRequest,
+  getTransfers as getTransfersRequest,
+  updateBranch as updateBranchRequest,
+} from '../../api/branchTransport.ts'
 
 /**
  * 1. Branches Page
@@ -76,6 +84,16 @@ interface BranchRecord {
   is_active?: BranchFlag | null
 }
 
+interface BranchFormPayload {
+  name: string
+  location: string
+  phone: string
+  manager: string
+  notes: string
+  is_default: BranchFlag | boolean
+  is_active: BranchFlag | boolean
+}
+
 interface BranchPayload {
   name: string
   location: string
@@ -87,6 +105,8 @@ interface BranchPayload {
   userId?: string | number
   userName?: string
 }
+
+type BranchTransportPayload = BranchPayload & Record<string, unknown>
 
 interface BranchSummary {
   branch_count?: number
@@ -153,8 +173,8 @@ interface BranchApi {
   getBranchSummary?: () => Promise<unknown>
   getTransfers: (params: Record<string, unknown>) => Promise<unknown>
   getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string }) => Promise<BranchStockState>
-  updateBranch: (id: string | number, payload: BranchPayload) => Promise<BranchMutationResult>
-  createBranch: (payload: BranchPayload) => Promise<BranchMutationResult>
+  updateBranch: (id: string | number, payload: BranchTransportPayload) => Promise<BranchMutationResult>
+  createBranch: (payload: BranchTransportPayload) => Promise<BranchMutationResult>
   deleteBranch: (id: string | number, userId?: string | number, userName?: string) => Promise<BranchMutationResult>
 }
 
@@ -181,9 +201,18 @@ type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
 
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
+const LazyTransferModal = lazy(async () => ({ default: (await import('./TransferModal')).default }))
 
 function getBranchApi(): BranchApi {
-  return (window as unknown as { api: BranchApi }).api
+  return {
+    getBranches: getBranchesRequest,
+    getBranchSummary: getBranchSummaryRequest,
+    getTransfers: () => getTransfersRequest(),
+    getBranchStock: (branchId, options) => getBranchStockRequest(branchId, options) as Promise<BranchStockState>,
+    updateBranch: (id, payload) => updateBranchRequest(id, payload) as Promise<BranchMutationResult>,
+    createBranch: (payload) => createBranchRequest(payload) as Promise<BranchMutationResult>,
+    deleteBranch: (id, userId, userName) => deleteBranchRequest(id, userId ?? null, userName ?? null) as Promise<BranchMutationResult>,
+  }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -410,7 +439,7 @@ export default function Branches() {
     setStatDetail({ title, value, detail })
   }, [])
 
-  const buildBranchPayload = useCallback((branch: Partial<BranchRecord> = {}): BranchPayload => ({
+  const buildBranchPayload = useCallback((branch: Partial<BranchRecord> = {}): BranchTransportPayload => ({
     name: branch.name || '',
     location: branch.location || '',
     phone: branch.phone || '',
@@ -482,11 +511,17 @@ export default function Branches() {
   /**
    * 6. CRUD Actions
    */
-  const handleSaveBranch = async (form: BranchPayload) => {
+  const handleSaveBranch = async (form: BranchFormPayload) => {
     if (!beginSingleAction(saveInFlightRef)) return
     try {
       const existingSnapshot = selected ? cloneHistorySnapshot(selected) : null
-      const payload = { ...form, userId: user?.id, userName: user?.name }
+      const payload: BranchTransportPayload = {
+        ...form,
+        is_default: form.is_default ? 1 : 0,
+        is_active: form.is_active ? 1 : 0,
+        userId: user?.id,
+        userName: user?.name,
+      }
       const res = selected
         ? await runBranchMutation(() => branchApi.updateBranch(selected.id, payload), 'Update branch')
         : await runBranchMutation(() => branchApi.createBranch(payload), 'Create branch')
@@ -1061,17 +1096,19 @@ export default function Branches() {
       ) : null}
 
       {modal === 'transfer' ? (
-        <TransferModal
-          branches={transferBranchOptions}
-          onClose={() => setModal(null)}
-          onDone={() => {
-            setModal(null)
-            load()
-            setBranchStocks({})
-          }}
-          user={user || undefined}
-          notify={notify}
-        />
+        <Suspense fallback={null}>
+          <LazyTransferModal
+            branches={transferBranchOptions}
+            onClose={() => setModal(null)}
+            onDone={() => {
+              setModal(null)
+              load()
+              setBranchStocks({})
+            }}
+            user={user || undefined}
+            notify={notify}
+          />
+        </Suspense>
       ) : null}
 
       {statDetail ? (

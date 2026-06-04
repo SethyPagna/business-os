@@ -291,6 +291,7 @@ assert.match(viteConfig, /'assets\/settings-otp-modal-',/, 'Settings OTP modal s
 assert.match(viteConfig, /'assets\/user-profile-modal-',/, 'Users profile modal should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /'assets\/user-detail-sheet-',/, 'Users detail sheet should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /'assets\/user-permission-editor-',/, 'Users role permission editor should not be eagerly modulepreloaded into the normal Users route')
+assert.match(viteConfig, /'assets\/branch-transfer-modal-',/, 'Branch transfer modal should not be eagerly modulepreloaded into the normal Branches route')
 assert.match(viteConfig, /'assets\/browser-dialogs-',/, 'CSV and image file dialogs should not be eagerly modulepreloaded into normal route startup')
 assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*productBatches\.ts[\s\S]*color\.ts[\s\S]*return 'product-shared'/, 'product image, color, and visible batch primitives should not be owned by heavy route or detail chunks')
 assert.doesNotMatch(viteConfig, /return 'product-detail'[\s\S]{0,240}productBatches\.ts/, 'visible row batch preview helpers should not force product detail modals into route startup')
@@ -322,6 +323,7 @@ assert.match(viteConfig, /actionHistory\.ts'\)\) \{[\s\S]*return 'shared-action-
 assert.match(viteConfig, /UserProfileModal\.tsx'\)\) return 'user-profile-modal'/, 'Users profile modal should have an action-only chunk')
 assert.match(viteConfig, /UserDetailSheet\.tsx'\)\) return 'user-detail-sheet'/, 'Users detail sheet should have an action-only chunk')
 assert.match(viteConfig, /PermissionEditor\.tsx'\)\) return 'user-permission-editor'/, 'Users role permission editor should have an action-only chunk')
+assert.match(viteConfig, /TransferModal\.tsx'\)\) return 'branch-transfer-modal'/, 'Branches transfer modal should have an action-only chunk')
 assert.doesNotMatch(catalogPage, /from '\.\/portalTranslateController\.ts'/, 'public catalog should not statically import the Google Translate controller during route startup')
 assert.match(catalogPage, /import\('\.\/portalTranslateController\.ts'\)/, 'public catalog should load the Google Translate controller only from external translation intent')
 assert.doesNotMatch(catalogPage, /import \{ createCircularFaviconDataUrl \} from '\.\.\/\.\.\/utils\/favicon'/, 'public catalog should not statically import the canvas favicon helper during route startup')
@@ -872,6 +874,21 @@ assert.match(
 )
 assert.match(
   branches,
+  /import \{[\s\S]*getBranches as getBranchesRequest,[\s\S]*getTransfers as getTransfersRequest,[\s\S]*\} from '\.\.\/\.\.\/api\/branchTransport\.ts'/,
+  'Branches route should use the focused branch transport instead of the full API registry',
+)
+assert.doesNotMatch(
+  branches,
+  /window(?: as [^)]+)?\.api|getAppApi\(|import\('\.\.\/\.\.\/api\/methods\.ts'\)/,
+  'Branches route should not bind to window.api or lazy-load the full API registry during startup',
+)
+assert.match(
+  branches,
+  /const LazyTransferModal = lazy\(async \(\) => \(\{ default: \(await import\('\.\/TransferModal'\)\)\.default \}\)\)/,
+  'Branches route should lazy-load the transfer modal only after transfer intent',
+)
+assert.match(
+  branches,
   /const \[historyReady, setHistoryReady\] = useState\(false\)/,
   'Branches should have an explicit post-ready action-history gate',
 )
@@ -924,6 +941,16 @@ assert.match(
   transferModal,
   /const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000/,
   'transfer stock modal should use an explicit branch stock timeout',
+)
+assert.match(
+  transferModal,
+  /import \{[\s\S]*getBranchStock as getBranchStockRequest,[\s\S]*transferStock as transferStockRequest,[\s\S]*\} from '\.\.\/\.\.\/api\/branchTransport\.ts'/,
+  'transfer stock modal should use focused branch transport calls',
+)
+assert.doesNotMatch(
+  transferModal,
+  /window(?: as [^)]+)?\.api|getAppApi\(|import\('\.\.\/\.\.\/api\/methods\.ts'\)/,
+  'transfer stock modal should not load the full API registry after transfer intent',
 )
 assert.match(
   transferModal,

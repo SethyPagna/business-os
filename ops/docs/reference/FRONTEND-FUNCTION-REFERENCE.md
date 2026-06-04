@@ -963,21 +963,21 @@ Total files documented: **248**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getBranchApi` | function | 185 |
-| 2 | `getErrorMessage` | function | 189 |
-| 3 | `isBranchRecord` | function | 193 |
-| 4 | `isTransferRecord` | function | 197 |
-| 5 | `BranchStatTile` | function | 201 |
-| 6 | `formatTransferDate` | function | 218 |
-| 7 | `Branches` | component/function | 235 |
-| 8 | `promise` | const arrow | 283 |
-| 9 | `loadBranchStock` | const arrow | 433 |
-| 10 | `loadMoreBranchStock` | const arrow | 454 |
-| 11 | `handleSaveBranch` | const arrow | 485 |
-| 12 | `handleDelete` | const arrow | 553 |
-| 13 | `handleBulkDelete` | const arrow | 601 |
-| 14 | `toggleSelect` | const arrow | 687 |
-| 15 | `toggleSelectAll` | const arrow | 696 |
+| 1 | `getBranchApi` | function | 206 |
+| 2 | `getErrorMessage` | function | 218 |
+| 3 | `isBranchRecord` | function | 222 |
+| 4 | `isTransferRecord` | function | 226 |
+| 5 | `BranchStatTile` | function | 230 |
+| 6 | `formatTransferDate` | function | 247 |
+| 7 | `Branches` | component/function | 264 |
+| 8 | `promise` | const arrow | 312 |
+| 9 | `loadBranchStock` | const arrow | 462 |
+| 10 | `loadMoreBranchStock` | const arrow | 483 |
+| 11 | `handleSaveBranch` | const arrow | 514 |
+| 12 | `handleDelete` | const arrow | 588 |
+| 13 | `handleBulkDelete` | const arrow | 636 |
+| 14 | `toggleSelect` | const arrow | 722 |
+| 15 | `toggleSelectAll` | const arrow | 731 |
 
 ### 3.57 `frontend/src/components/branches/BranchForm.tsx`
 
@@ -990,12 +990,12 @@ Total files documented: **248**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getTransferApi` | function | 71 |
-| 2 | `getErrorMessage` | function | 76 |
-| 3 | `normalizeTransferStockRows` | function | 80 |
-| 4 | `TransferModal` | component/function | 94 |
-| 5 | `loadStock` | function | 146 |
-| 6 | `handleTransfer` | const arrow | 194 |
+| 1 | `getTransferApi` | function | 75 |
+| 2 | `getErrorMessage` | function | 82 |
+| 3 | `normalizeTransferStockRows` | function | 86 |
+| 4 | `TransferModal` | component/function | 100 |
+| 5 | `loadStock` | function | 152 |
+| 6 | `handleTransfer` | const arrow | 200 |
 
 ### 3.59 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
@@ -3223,8 +3223,8 @@ Total files documented: **248**
 | 1 | `readGitRevision` | function | 11 |
 | 2 | `fixCrossorigin` | function | 49 |
 | 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 207 |
-| 5 | `manualChunks` | function | 211 |
+| 4 | `shouldDeferModulePreload` | function | 208 |
+| 5 | `manualChunks` | function | 212 |
 
 ### 3.248 `frontend/tailwind.config.ts`
 

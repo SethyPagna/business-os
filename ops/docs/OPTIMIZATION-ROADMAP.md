@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 772.
+- Latest completed implementation move in this roadmap: Move 789.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -11481,3 +11481,56 @@ Move 788 status:
   remains the highest measured first-window script count in the retained route
   trace, so split only proven route-start work and pair it with focused branch
   CRUD/transfer live proof.
+
+Move 789 status:
+- Move 789 splits Branches first-window startup away from the broad legacy API
+  registry and transfer workflow. `Branches.tsx` now uses focused
+  `branchTransport.ts` calls for list, summary, transfers, stock, and CRUD
+  mutations, while `TransferModal.tsx` lazy-loads as the action-only
+  `branch-transfer-modal` chunk and uses the same focused transport.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\actionStability.test.ts`, `npm.cmd --prefix frontend
+  run typecheck`, `npm.cmd --prefix frontend run check:jsx`, `npm.cmd
+  --prefix frontend run build`, Docker release build/start, Docker health,
+  served route-load Playwright trace, focused Branches action Playwright
+  check, public Cloudflare Playwright check, post-live hygiene, storage prune,
+  generated reference refresh, schema audit, organization audit, and Phase 29
+  audit passed.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606050450` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend hash
+  `cff197b375bc0cdd`.
+- Route proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T20-52-25-519Z.json` passed
+  Branches in 194 ms with 29 requests/23 scripts, down from the pre-split
+  42 requests/36 scripts and 3533 ms. The served Branches script list contains
+  no `app-api-methods` and no `branch-transfer-modal`; it does contain the
+  focused `branch-api` chunk.
+- Live Branches action proof:
+  `node ops\scripts\runtime\live-checks\phase84-branches-actions-live-check.ts`
+  passed against the Docker-served app. The report loaded branches and
+  summary with 200 statuses, opened Add Branch, edit, bulk-delete, and
+  transfer surfaces, loaded transfer stock with 200, and recorded zero
+  relevant console messages.
+- Release ops proof: the first release attempt built image
+  `business-os:v6.0.0-202606050445` but failed while writing
+  `docker-release.env`. `ops/scripts/powershell/docker-release.ps1` now writes
+  release env files with explicit .NET `WriteAllLines`, and the rerun completed
+  as image `business-os:v6.0.0-202606050450`.
+- Phase 29 cleanup proof: deleted only regenerable generated output after the
+  Docker image was already built and healthy: `release` (380,736,621 bytes)
+  and `frontend/dist` (31,726,454 bytes), for 412,463,075 bytes removed.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures.
+- Storage hygiene proof: `node ops\scripts\runtime\storage\post-live-hygiene.ts`
+  found zero QA Smoke, QA Action History, broad QA, or generated-integrity
+  cleanup matches and confirmed the dataset remains loaded. `npm.cmd --prefix
+  ops run prune-storage` removed 264,795 bytes of old reports and 76.43 MB of
+  Docker builder cache while preserving uploads, secrets, env files, local
+  backup roots, Docker images, Docker volumes, and the newest R2 backup.
+- Current plan position after Move 789: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: use the
+  latest route trace to choose the next highest first-window script/request
+  page, then split only proven startup work with focused Playwright proof.

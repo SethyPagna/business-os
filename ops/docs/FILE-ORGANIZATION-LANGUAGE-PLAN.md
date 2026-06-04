@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 788 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 789 in this file.
 
 ## Goal
 
@@ -7420,6 +7420,44 @@ Decision rule:
   (31,724,915 bytes), for 412,461,000 bytes removed. Phase 29 audit then
   passed with zero failures. Prune storage removed 319,795 bytes of old
   reports and 38.21 MB of Docker builder cache while preserving business
+  uploads, secrets, env files, backups, images, and volumes.
+
+### Move 789: Branches focused startup transport
+
+- Ownership evidence: Branches route traces still loaded the broad
+  `app-api-methods` registry and transfer workflow during first-window
+  list/summary loading, even though the default view only needs focused
+  branch reads and guarded branch mutations.
+- Change: `Branches.tsx` now binds directly to `branchTransport.ts` for branch
+  list, summary, transfers, stock expansion, and CRUD. `TransferModal.tsx`
+  lazy-loads only after transfer intent and uses the same focused branch
+  transport. Vite groups the modal as `branch-transfer-modal` and excludes it
+  from eager modulepreload.
+- Ops fix: `ops/scripts/powershell/docker-release.ps1` now writes
+  `docker-release.env` through explicit .NET `WriteAllLines`, fixing the
+  post-build release failure seen after image `business-os:v6.0.0-202606050445`.
+- Verification: focused performance and action-stability guards, typecheck,
+  JSX/source check, frontend build, Docker release/start, health, served
+  route-load trace, focused Branches actions live check, public Cloudflare
+  check, post-live hygiene, storage prune, generated reference refresh, schema
+  audit, organization audit, and Phase 29 audit passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606050450` is running
+  with frontend hash `cff197b375bc0cdd`.
+- Route proof: Branches startup dropped from 42 requests/36 scripts and
+  3533 ms to 29 requests/23 scripts and 194 ms in
+  `ops/runtime/reports/route-load-trace-2026-06-04T20-52-25-519Z.json`, with
+  no `app-api-methods` and no `branch-transfer-modal` in the served
+  first-window script list and focused `branch-api` present.
+- Live action proof:
+  `ops/runtime/reports/phase84-branches-actions-live-check-2026-06-04T20-53-47-119Z/branches-actions.png`
+  loaded branches with 200 status, opened Add Branch, edit, bulk-delete, and
+  transfer surfaces, loaded branch stock with 200, and recorded zero relevant
+  console messages.
+- Cleanup proof: deleted only ignored/regenerable output after Docker health
+  was verified: `release` (380,736,621 bytes) and `frontend/dist`
+  (31,726,454 bytes), for 412,463,075 bytes removed. Phase 29 audit then
+  passed with zero failures. Prune storage removed 264,795 bytes of old
+  reports and 76.43 MB of Docker builder cache while preserving business
   uploads, secrets, env files, backups, images, and volumes.
 
 ## Safety Gates

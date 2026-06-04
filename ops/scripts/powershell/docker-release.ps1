@@ -211,7 +211,7 @@ function Write-EnvFile($values) {
     'JOB_QUEUE_DRIVER=bullmq',
     'BUSINESS_OS_RUNTIME=docker'
   )
-  Set-Content -LiteralPath $EnvFile -Value $lines -Encoding ASCII
+  [System.IO.File]::WriteAllLines($EnvFile, [string[]]$lines, [System.Text.Encoding]::ASCII)
   Write-Ok "Docker release env ready: $EnvFile"
 }
 

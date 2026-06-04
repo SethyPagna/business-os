@@ -7,6 +7,10 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import {
+  getBranchStock as getBranchStockRequest,
+  transferStock as transferStockRequest,
+} from '../../api/branchTransport.ts'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -69,8 +73,10 @@ type TransferApi = {
 const useApp = useAppHook as () => AppContextValue
 
 function getTransferApi(): TransferApi {
-  if (!window.api) throw new Error('Branch transfer API is not available.')
-  return window.api as TransferApi
+  return {
+    getBranchStock: (branchId, options) => getBranchStockRequest(branchId, options),
+    transferStock: (payload) => transferStockRequest(payload) as Promise<TransferResult>,
+  }
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

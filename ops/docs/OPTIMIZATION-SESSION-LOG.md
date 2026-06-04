@@ -8,6 +8,39 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Branches focused startup transport
+  - route: Branches
+  - result: kept
+  - note: moved Branches list/summary/transfers/stock reads and guarded branch
+    CRUD off the broad `app-api-methods` registry. The transfer modal now
+    lazy-loads as an action-only `branch-transfer-modal` chunk and uses the
+    focused branch transport.
+  - ops fix: `docker-release.ps1` now writes release env files with explicit
+    .NET `WriteAllLines`; this fixed the post-build `docker-release.env`
+    failure and the rerun produced Docker image
+    `business-os:v6.0.0-202606050450`.
+  - proof: Docker release `business-os:v6.0.0-202606050450` is running with
+    frontend hash `cff197b375bc0cdd`. Route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T20-52-25-519Z.json`
+    passed Branches in 194 ms with 29 requests/23 scripts, down from
+    42 requests/36 scripts and 3533 ms. The served Branches script list
+    contains no `app-api-methods` and no `branch-transfer-modal`; it does
+    contain focused `branch-api`.
+  - action proof:
+    `ops/runtime/reports/phase84-branches-actions-live-check-2026-06-04T20-53-47-119Z/branches-actions.png`
+    loaded branches with 200 status, opened Add Branch, edit, bulk-delete, and
+    transfer surfaces, loaded transfer source stock with 200, and recorded
+    zero relevant console messages.
+  - cleanup proof: removed 412,463,075 bytes from ignored/regenerable
+    `release` and `frontend/dist` after Docker health was verified; storage
+    prune removed 264,795 bytes of old reports plus 76.43 MB of Docker builder
+    cache; Phase 29 passed afterward with zero failures.
+  - public proof:
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T20-53-20-203Z/report.json`
+    passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+    products and zero relevant console messages, failed responses, or page
+    errors.
+
 - Users focused startup transport
   - route: Users
   - result: kept

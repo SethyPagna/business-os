@@ -131,6 +131,7 @@ const deferredModulePreloadPrefixes = [
   'assets/user-profile-modal-',
   'assets/user-detail-sheet-',
   'assets/user-permission-editor-',
+  'assets/branch-transfer-modal-',
   'assets/app-local-db-',
   'assets/vendor-dexie-',
   'assets/vendor-zxing-',
@@ -350,6 +351,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/users/UserProfileModal.tsx')) return 'user-profile-modal'
     if (normalized.includes('/src/components/users/UserDetailSheet.tsx')) return 'user-detail-sheet'
     if (normalized.includes('/src/components/users/PermissionEditor.tsx')) return 'user-permission-editor'
+    if (normalized.includes('/src/components/branches/TransferModal.tsx')) return 'branch-transfer-modal'
     if (normalized.includes('/src/utils/favicon')) {
       return 'favicon-utils'
     }
