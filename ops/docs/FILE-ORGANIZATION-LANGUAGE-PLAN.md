@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 786 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 787 in this file.
 
 ## Goal
 
@@ -7350,7 +7350,41 @@ Decision rule:
   300,396 bytes of old reports and 38.2 MB of Docker builder cache while
   preserving business uploads, secrets, env files, backups, images, and
   volumes.
-  zero failed requests and zero console/page errors.
+
+### Move 787: Files focused startup transport
+
+- Ownership evidence: Files route traces still loaded the broad
+  `app-api-methods` registry even though the default Library view needs only
+  files, AI providers, and AI response reads plus focused upload/delete
+  actions.
+- Change: `FilesPage.tsx` now binds directly to `fileTransport.ts` and
+  `aiTransport.ts`. Multipart upload headers moved into
+  `multipartHeaders.ts` so Files can upload without importing the broad import
+  transport chain. Vite groups the route into focused `file-api` and `ai-api`
+  chunks.
+- Verification: focused API/performance guards, full frontend utility suite,
+  typecheck, JSX/source check, frontend build, Docker release/start, health,
+  served route-load trace, focused Files providers live action check, public
+  Cloudflare check, post-live hygiene, storage prune, generated reference
+  refresh, schema audit, organization audit, and Phase 29 audit passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606050336` is running
+  with frontend hash `c0f2db77bab2fe05`.
+- Route proof: Files startup dropped from 38 requests/33 scripts to
+  27 requests/22 scripts in
+  `ops/runtime/reports/route-load-trace-2026-06-04T19-46-51-343Z.json`, with
+  no `app-api-methods` in the served first-window script list and focused
+  `file-api` / `ai-api` chunks present.
+- Live action proof:
+  `ops/runtime/reports/phase84-files-providers-actions-live-check-2026-06-04T19-47-31-052Z/files-providers-actions.png`
+  loaded files, providers, and responses with 200 statuses, opened the
+  Providers tab, found 12 providers, and verified edit/test/delete actions for
+  each provider with zero relevant console messages.
+- Cleanup proof: deleted only ignored/regenerable output after Docker health
+  was verified: `release` (380,733,013 bytes) and `frontend/dist`
+  (31,722,976 bytes), for 412,455,989 bytes removed. Phase 29 audit then
+  passed with zero failures. Prune storage removed 252,488 bytes of old
+  reports and 38.2 MB of Docker builder cache while preserving business
+  uploads, secrets, env files, backups, images, and volumes.
 
 ## Safety Gates
 

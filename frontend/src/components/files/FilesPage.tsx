@@ -24,6 +24,19 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import {
+  deleteFileAsset as deleteFileAssetRequest,
+  getFiles as getFilesRequest,
+  uploadFileAsset as uploadFileAssetRequest,
+} from '../../api/fileTransport.ts'
+import {
+  createAiProvider as createAiProviderRequest,
+  deleteAiProvider as deleteAiProviderRequest,
+  getAiProviders as getAiProvidersRequest,
+  getAiResponses as getAiResponsesRequest,
+  testAiProvider as testAiProviderRequest,
+  updateAiProvider as updateAiProviderRequest,
+} from '../../api/aiTransport.ts'
 
 const loadFilesProvidersTab = () => import('./FilesProvidersTab.tsx')
 const loadFilesResponsesTab = () => import('./FilesResponsesTab')
@@ -141,6 +154,7 @@ interface ProviderFormState {
 }
 
 interface ProviderPayload {
+  [key: string]: unknown
   name: string
   provider: string
   provider_type: string
@@ -221,8 +235,20 @@ type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 
+const focusedFilesApi: FilesApi = {
+  getFiles: (options) => getFilesRequest(options) as Promise<FilesResponse>,
+  uploadFileAsset: (payload) => uploadFileAssetRequest(payload),
+  deleteFileAsset: (id, options) => deleteFileAssetRequest(id, options),
+  getAiProviders: () => getAiProvidersRequest() as Promise<ProvidersResponse>,
+  getAiResponses: (limit) => getAiResponsesRequest(limit) as Promise<AiResponsesResponse>,
+  createAiProvider: (payload) => createAiProviderRequest(payload) as Promise<ProviderMutationResult>,
+  updateAiProvider: (id, payload) => updateAiProviderRequest(id, payload) as Promise<ProviderMutationResult>,
+  deleteAiProvider: (id, options) => deleteAiProviderRequest(id, options) as Promise<ProviderMutationResult>,
+  testAiProvider: (id, options) => testAiProviderRequest(id, options) as Promise<ProviderTestResult>,
+}
+
 function getFilesApi(): FilesApi {
-  return (window as unknown as { api: FilesApi }).api
+  return focusedFilesApi
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {

@@ -12,6 +12,9 @@ const contactReadTransport = fs.readFileSync(new URL('../src/api/contactReadTran
 const contactWriteTransport = fs.readFileSync(new URL('../src/api/contactWriteTransport.ts', import.meta.url), 'utf8')
 const contactsTransport = fs.readFileSync(new URL('../src/api/contactsTransport.ts', import.meta.url), 'utf8')
 const auditLogTransport = fs.readFileSync(new URL('../src/api/auditLogTransport.ts', import.meta.url), 'utf8')
+const fileTransport = fs.readFileSync(new URL('../src/api/fileTransport.ts', import.meta.url), 'utf8')
+const aiTransport = fs.readFileSync(new URL('../src/api/aiTransport.ts', import.meta.url), 'utf8')
+const multipartHeaders = fs.readFileSync(new URL('../src/api/multipartHeaders.ts', import.meta.url), 'utf8')
 const saleWriteTransport = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const productWriteTransport = fs.readFileSync(new URL('../src/api/productWriteTransport.ts', import.meta.url), 'utf8')
 const productImageUploadTransport = fs.readFileSync(new URL('../src/api/productImageUploadTransport.ts', import.meta.url), 'utf8')
@@ -2413,6 +2416,51 @@ assert.match(
   filesPage,
   /const FILES_LIBRARY_LOAD_TIMEOUT_MS = 10000/,
   'files page library should use an explicit timeout',
+)
+assert.match(
+  filesPage,
+  /import \{[\s\S]*getFiles as getFilesRequest,[\s\S]*uploadFileAsset as uploadFileAssetRequest,[\s\S]*\} from '\.\.\/\.\.\/api\/fileTransport\.ts'/,
+  'Files page should use the focused file transport instead of the broad API registry',
+)
+assert.match(
+  filesPage,
+  /import \{[\s\S]*getAiProviders as getAiProvidersRequest,[\s\S]*getAiResponses as getAiResponsesRequest,[\s\S]*\} from '\.\.\/\.\.\/api\/aiTransport\.ts'/,
+  'Files page should use the focused AI transport for provider and response reads',
+)
+assert.doesNotMatch(
+  filesPage,
+  /window\.api/,
+  'Files page should not bind to window.api and load app-api-methods during route startup',
+)
+assert.match(
+  viteConfig,
+  /fileTransport\.ts'\)[\s\S]*multipartHeaders\.ts'\)[\s\S]*return 'file-api'[\s\S]*aiTransport\.ts'\)\) return 'ai-api'/,
+  'Vite should split Files focused transports away from app-api-methods',
+)
+assert.match(
+  fileTransport,
+  /export async function getFiles/,
+  'Focused file transport should own file list reads',
+)
+assert.doesNotMatch(
+  fileTransport,
+  /from '\.\/importTransport\.ts'/,
+  'Focused file transport should not import the broad import transport chunk',
+)
+assert.match(
+  fileTransport,
+  /from '\.\/multipartHeaders\.ts'/,
+  'Focused file transport should use the tiny multipart header helper',
+)
+assert.match(
+  multipartHeaders,
+  /export function buildMultipartHeaders\(\): MultipartHeaders/,
+  'Multipart upload headers should live in a small reusable helper',
+)
+assert.match(
+  aiTransport,
+  /export function getAiProviders\(\)[\s\S]*export function getAiResponses\(limit = 80\)/,
+  'Focused AI transport should own library provider and response reads',
 )
 assert.match(
   filesPage,

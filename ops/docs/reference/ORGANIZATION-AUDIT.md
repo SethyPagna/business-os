@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-04T19:26:36.601Z
+Generated: 2026-06-04T19:54:10.056Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 614
+- Files scanned: 615
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-04T19:26:36.601Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 414 |
+| .ts | 415 |
 | .tsx | 108 |
 | .md | 45 |
 | .json | 17 |
@@ -28,7 +28,7 @@ Generated: 2026-06-04T19:26:36.601Z
 
 | Area | Files |
 | --- | --- |
-| frontend/api | 49 |
+| frontend/api | 50 |
 | frontend/utils | 34 |
 | frontend/components/products | 32 |
 | ops/docs/reference | 32 |
@@ -63,17 +63,17 @@ Generated: 2026-06-04T19:26:36.601Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 11356 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 11373 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7358 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7373 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4403 | frontend/components/inventory |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 3922 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 3931 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
-| ops/docs/reference/PHASE29-AUDIT.json | 3427 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3221 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 2920 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 2968 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2521 | frontend/components/products |
@@ -121,12 +121,12 @@ Generated: 2026-06-04T19:26:36.601Z
 | frontend/src/AppContext.tsx | 14 | frontend/src/AppContext.tsx |
 | frontend/src/components/contacts/Contacts.tsx | 14 | frontend/components/contacts |
 | frontend/src/components/users/Users.tsx | 14 | frontend/components/users |
+| frontend/src/components/files/FilesPage.tsx | 13 | frontend/components/files |
 | backend/src/routes/portal.ts | 12 | backend/routes |
 | frontend/src/api/contactsTransport.ts | 12 | frontend/api |
 | frontend/src/components/branches/Branches.tsx | 12 | frontend/components/branches |
 | frontend/src/components/products/forms/ProductForm.tsx | 12 | frontend/components/products |
 | backend/src/routes/inventory.ts | 11 | backend/routes |
-| frontend/src/components/files/FilesPage.tsx | 11 | frontend/components/files |
 | frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
 
 ## Compatibility Wrappers

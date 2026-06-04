@@ -8,6 +8,35 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Files focused startup transport
+  - route: Files / Library
+  - result: kept
+  - note: moved Files reads/uploads/deletes and AI provider actions off the
+    broad `app-api-methods` registry. Multipart upload headers now live in a
+    tiny shared helper instead of forcing Files through the import transport
+    chain. Vite emits focused `file-api` and `ai-api` chunks for this path.
+  - proof: Docker release `business-os:v6.0.0-202606050336` is running with
+    frontend hash `c0f2db77bab2fe05`. Route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T19-46-51-343Z.json`
+    passed Files in 198 ms with 27 requests/22 scripts, down from
+    38 requests/33 scripts, with zero failed requests and zero console/page
+    errors. The served Files script list contains no `app-api-methods` and
+    does contain focused `file-api` and `ai-api` chunks.
+  - action proof:
+    `ops/runtime/reports/phase84-files-providers-actions-live-check-2026-06-04T19-47-31-052Z/files-providers-actions.png`
+    captured the live Files/Providers surface after loading files, providers,
+    and responses with 200 statuses, finding 12 providers and edit/test/delete
+    actions for each provider with zero relevant console messages.
+  - cleanup proof: removed 412,455,989 bytes from ignored/regenerable
+    `release` and `frontend/dist` after Docker health was verified; storage
+    prune removed 252,488 bytes of old reports plus 38.2 MB of Docker builder
+    cache; Phase 29 passed afterward with zero failures.
+  - public proof:
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T19-47-43-107Z/report.json`
+    passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+    products and zero relevant console messages, failed responses, or page
+    errors.
+
 - Audit Log focused startup transport
   - route: Audit Log
   - result: kept

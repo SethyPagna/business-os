@@ -11370,3 +11370,59 @@ Move 786 status:
   splitting page startup off the broad API registry where route traces prove
   loaded work, especially Files/Branches/Users if their normal first-window
   paths still pull action-only transports.
+
+Move 787 status:
+- Move 787 splits Files first-window startup away from the broad legacy API
+  registry. `FilesPage.tsx` now calls focused `fileTransport.ts` and
+  `aiTransport.ts` directly, and multipart upload headers live in
+  `multipartHeaders.ts` so Files no longer imports the broader import transport
+  chain. Vite emits focused `file-api` and `ai-api` chunks for the page.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`, `npm.cmd --prefix
+  frontend run test:utils`, `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`, `npm.cmd --prefix frontend run
+  build`, Docker release build/start, Docker health, served route-load
+  Playwright trace, focused Files providers action Playwright check, public
+  Cloudflare Playwright check, post-live hygiene, storage prune, generated
+  reference refresh, schema audit, organization audit, and Phase 29 audit
+  passed.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606050336` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend hash
+  `c0f2db77bab2fe05`.
+- Route proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T19-46-51-343Z.json` passed
+  Files in 198 ms with 27 requests/22 scripts, down from the pre-split
+  38 requests/33 scripts. The served Files script list contains no
+  `app-api-methods` and does contain the focused `file-api` and `ai-api`
+  chunks.
+- Live Files action proof:
+  `node ops\scripts\runtime\live-checks\phase84-files-providers-actions-live-check.ts`
+  passed against the Docker-served app. The report opened Files, loaded files,
+  providers, and responses with 200 statuses, opened the Providers tab, found
+  12 providers, and saw edit/test/delete actions for each provider with zero
+  relevant console messages.
+- Live public proof: `node ops\scripts\runtime\live-checks\phase84-public-portal-cloudflare-check.ts`
+  passed against `https://leangcosmetics.dpdns.org/public`; 20 products
+  rendered, portal bootstrap returned 200, AI status returned 200 after
+  interaction, and there were zero relevant console messages, failed
+  responses, or page errors. Report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T19-47-43-107Z/report.json`.
+- Phase 29 cleanup proof: deleted only regenerable generated output after the
+  Docker image was already built and healthy: `release` (380,733,013 bytes)
+  and `frontend/dist` (31,722,976 bytes), for 412,455,989 bytes removed.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures.
+- Storage hygiene proof: `node ops\scripts\runtime\storage\post-live-hygiene.ts`
+  found zero QA Smoke, QA Action History, broad QA, or generated-integrity
+  cleanup matches and confirmed the dataset remains loaded. `npm.cmd --prefix
+  ops run prune-storage` removed 252,488 bytes of old reports and 38.2 MB of
+  Docker builder cache while preserving uploads, secrets, env files, local
+  backup roots, Docker images, Docker volumes, and the newest R2 backup.
+- Current plan position after Move 787: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: Branches
+  and Users still show broad startup dependencies in the retained route trace,
+  so split only the proven first-window transport surface and pair each split
+  with focused live interaction proof.

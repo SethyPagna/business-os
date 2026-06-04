@@ -234,6 +234,11 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/contactWriteTransport.ts')) return 'contact-write-api'
     if (normalized.endsWith('/src/api/contactsTransport.ts')) return 'contacts-api'
     if (normalized.endsWith('/src/api/auditLogTransport.ts')) return 'audit-log-api'
+    if (
+      normalized.endsWith('/src/api/fileTransport.ts')
+      || normalized.endsWith('/src/api/multipartHeaders.ts')
+    ) return 'file-api'
+    if (normalized.endsWith('/src/api/aiTransport.ts')) return 'ai-api'
     if (normalized.endsWith('/src/api/salesTransport.ts')) return 'sales-read-api'
     if (normalized.endsWith('/src/api/saleWriteTransport.ts')) return 'sale-write-api'
     if (normalized.endsWith('/src/api/productWriteTransport.ts')) return 'product-write-api'

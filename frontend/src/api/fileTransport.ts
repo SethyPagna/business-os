@@ -7,7 +7,7 @@ import {
   requireLiveServerWrite,
   route,
 } from './http.ts'
-import { buildMultipartHeaders } from './importTransport.ts'
+import { buildMultipartHeaders } from './multipartHeaders.ts'
 
 type FileListResponse = {
   items?: unknown[]

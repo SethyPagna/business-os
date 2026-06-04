@@ -1,24 +1,10 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { getSyncServerUrl, requireLiveServerWrite } from './http.ts'
+import { buildMultipartHeaders, type MultipartHeaders } from './multipartHeaders.ts'
 
 export type ImportPayload = Record<string, unknown>
 
-export interface MultipartHeaders extends Record<string, string> {
-  'bypass-tunnel-reminder': string
-  'x-client-time': string
-  'x-device-tz': string
-  'x-device-name': string
-}
-
-export function buildMultipartHeaders(): MultipartHeaders {
-  const device = getClientDeviceInfo()
-  return {
-    'bypass-tunnel-reminder': 'true',
-    'x-client-time': device.clientTime || '',
-    'x-device-tz': device.deviceTz || '',
-    'x-device-name': device.deviceName || '',
-  }
-}
+export { buildMultipartHeaders, type MultipartHeaders }
 
 export function withImportDeviceInfo<TPayload extends ImportPayload | null | undefined>(
   payload: TPayload = {} as TPayload,
