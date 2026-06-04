@@ -12,6 +12,7 @@ type SectionSwitcherProps = {
   value?: string
   onChange?: (value: string) => void
   storageKey?: string
+  shouldRestoreStoredValue?: (value: string) => boolean
   className?: string
   label?: ReactNode
 }
@@ -30,6 +31,7 @@ export default function SectionSwitcher({
   value = 'all',
   onChange,
   storageKey = '',
+  shouldRestoreStoredValue,
   className = '',
   label = 'Sections',
 }: SectionSwitcherProps) {
@@ -44,7 +46,8 @@ export default function SectionSwitcher({
   useEffect(() => {
     if (!storageKey || typeof window === 'undefined') return
     const stored = readStoredSection(storageKey, value || 'all')
-    if (stored && stored !== activeValue && safeOptions.some((option) => option.value === stored)) {
+    const canRestoreStoredValue = !shouldRestoreStoredValue || shouldRestoreStoredValue(stored)
+    if (stored && canRestoreStoredValue && stored !== activeValue && safeOptions.some((option) => option.value === stored)) {
       if (onChange) onChange(stored)
       else setInternalValue(stored)
     }

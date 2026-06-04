@@ -15,7 +15,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Size (KB) | Lines |
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
-| `frontend/src/components/inventory/Inventory.tsx` | 222.5 | 4403 |
+| `frontend/src/components/inventory/Inventory.tsx` | 222.5 | 4404 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 157.7 | 3630 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
@@ -44,7 +44,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 | File | Lines | Size (KB) |
 |---|---:|---:|
-| `frontend/src/components/inventory/Inventory.tsx` | 4403 | 222.5 |
+| `frontend/src/components/inventory/Inventory.tsx` | 4404 | 222.5 |
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 3630 | 157.7 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |

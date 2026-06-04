@@ -8,10 +8,10 @@ Last updated: 2026-06-05
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 790, split Loyalty Points startup onto the
-  focused `contactReadTransport.ts` path and lazy portal lookup transport so
-  Loyalty Points no longer pulls the broad `app-api-methods` registry or
-  portal lookup code during first-window customer-points loading
+- Latest completed move: Move 791, keep Inventory products-first on startup
+  even when an older session persisted the heavy `All` section, so Inventory
+  does not resurrect stats, movements, RFID, dashboard, or returns reads before
+  the user asks for those sections
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `612786e4d941e56b`
+  `2881516323e52066`
 
 Latest verified reports:
 
@@ -33,9 +33,11 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-04T22-48-17-381Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T22-48-45-831Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T23-52-38-129Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T22-47-21-728Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T23-48-08-028Z.json`
+- latest Inventory persisted-section live check:
+  `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
@@ -65,6 +67,19 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- The Move 791 generated-artifact cleanup removed 412,470,343 bytes from
+  regenerable `release` and `frontend/dist` folders after Docker image
+  `business-os:v6.0.0-202606050737` was built and verified healthy. The
+  focused Inventory persisted-section live check seeded
+  `business-os:inventory:section:v2=all`, opened Inventory, confirmed
+  `Products` stayed active, loaded exactly one product startup read through
+  `/api/inventory/bootstrap`, and recorded zero stats, movements, RFID,
+  dashboard, or returns startup reads. `npm.cmd --prefix ops run
+  prune-storage` removed 488,515 bytes of old reports and 21.32 GB of Docker
+  builder cache while preserving uploads, secrets, env files, databases,
+  volumes, backup roots, and the newest R2 backup
+  `datasync-2026-06-04T21-30-57-430Z`. Phase 29 audit passed with zero
+  failures after cleanup.
 - The Move 790 generated-artifact cleanup removed 444,183,234 bytes from
   regenerable `release` and `frontend/dist` folders across the post-release
   and post-build cleanup passes. Docker release image

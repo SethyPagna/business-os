@@ -25,6 +25,7 @@
     "phase84:live-suite": "node scripts/runtime/live-checks/phase84-live-suite.ts",
     "phase84:all-pages-control-audit": "node scripts/runtime/live-checks/all-pages-control-audit.ts",
     "phase84:route-load-trace": "node scripts/runtime/live-checks/route-load-trace.ts",
+    "phase84:inventory-section-restore": "node scripts/runtime/live-checks/phase84-inventory-section-restore-live-check.ts",
     "warm-cloudflare-startup": "node scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts",
     "phase84:receipt-settings-rollback": "node scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts",
     "dataset-readiness": "node scripts/runtime/storage/dataset-readiness.ts --output ops/runtime/reports/dataset-readiness-latest.json",

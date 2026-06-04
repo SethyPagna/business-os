@@ -8,6 +8,36 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Inventory persisted-section startup gate
+  - route: Inventory
+  - result: kept
+  - note: `SectionSwitcher` now accepts a `shouldRestoreStoredValue` predicate,
+    and Inventory uses it to refuse only a persisted `all` value on page entry.
+    This keeps Inventory products-first after older sessions without removing
+    the user-visible `All` option.
+  - proof: Docker release `business-os:v6.0.0-202606050737` is running with
+    frontend hash `2881516323e52066`. The focused Playwright report
+    `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
+    seeded `business-os:inventory:section:v2=all`, loaded Inventory, confirmed
+    `Products` stayed active, completed one product startup read through
+    `/api/inventory/bootstrap`, and recorded zero stats, movements, RFID,
+    dashboard, returns, framework overlay, or relevant console messages.
+  - route proof:
+    `ops/runtime/reports/route-load-trace-2026-06-04T23-48-08-028Z.json`
+    passed Inventory, Products, Contacts, and Loyalty Points with zero failed
+    requests and zero console/page errors.
+  - public proof:
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T23-52-38-129Z/report.json`
+    passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+    products, portal bootstrap 200, AI status 200 after interaction, enforced
+    CSP present, and zero failed responses, relevant console messages, or page
+    errors.
+  - cleanup proof: removed 412,470,343 bytes from ignored/regenerable
+    `release` and `frontend/dist` output after Docker health was verified.
+    Storage prune removed 488,515 bytes of old reports and 21.32 GB of Docker
+    builder cache while preserving business uploads, secrets, env files,
+    databases, volumes, backups, images, and newest R2 backup.
+
 - Loyalty Points focused startup transport and Docker version cleanup
   - route: Loyalty Points
   - result: kept

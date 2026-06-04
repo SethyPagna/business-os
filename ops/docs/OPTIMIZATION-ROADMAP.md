@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 790.
+- Latest completed implementation move in this roadmap: Move 791.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -11582,3 +11582,54 @@ Move 790 status:
   guardrail. The next best optimization slice is another page still waking the
   broad `app-api-methods` registry or a targeted Docker retention script that
   formalizes the safe image-tag policy used in this move.
+
+Move 791 status:
+- Move 791 keeps Inventory products-first on startup even when a prior session
+  persisted the heavy `All` section in `business-os:inventory:section:v2`.
+  `SectionSwitcher` now accepts a narrow `shouldRestoreStoredValue` predicate,
+  and Inventory uses it to refuse only persisted `all` on page entry while
+  still allowing deliberate in-session `All` selection and focused persisted
+  sections.
+- Ops proof: added
+  `ops/scripts/runtime/live-checks/phase84-inventory-section-restore-live-check.ts`
+  and the runnable script `npm.cmd --prefix ops run
+  phase84:inventory-section-restore`.
+- Runtime proof: Docker release `business-os:v6.0.0-202606050737` is running
+  with frontend hash `2881516323e52066` and source hash
+  `5d419c030bf25d50`.
+- Live proof:
+  `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
+  seeded `business-os:inventory:section:v2=all`, opened Inventory, confirmed
+  the active section stayed `Products`, rendered the products search input,
+  completed one `/api/inventory/bootstrap` product startup read, and recorded
+  zero stats, movements, RFID, dashboard, returns, framework overlay, or
+  relevant console messages.
+- Route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-04T23-48-08-028Z.json`
+  passed Inventory in 231 ms, Products in 407 ms, Contacts in 266 ms, and
+  Loyalty Points in 229 ms with zero failed requests and zero console/page
+  errors.
+- Cleanup proof: removed only ignored/regenerable `release` and
+  `frontend/dist` output after Docker health was verified, reclaiming
+  412,470,343 bytes. `npm.cmd --prefix ops run prune-storage` removed 488,515
+  bytes of old runtime reports and 21.32 GB of Docker builder cache while
+  preserving uploads, secrets, env files, databases, volumes, backup roots,
+  Docker images, and newest R2 backup
+  `datasync-2026-06-04T21-30-57-430Z`.
+- Verification proof: `node frontend\tests\sectionNavigation.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `npm.cmd --prefix frontend run
+  typecheck`, `npm.cmd --prefix frontend run test:utils`, `npm.cmd --prefix
+  frontend run check:jsx`, `npm.cmd --prefix frontend run build`, Docker
+  release/start health, `npm.cmd --prefix ops run
+  phase84:inventory-section-restore`, route-load trace, public Cloudflare
+  portal Playwright check, backend utility suite, `npm.cmd --prefix ops run
+  prune-storage`, schema audit, organization audit, generated reference
+  refresh, `git diff --check`, and `npm.cmd --prefix ops run phase29:audit`
+  passed.
+- Current plan position after Move 791: Phase 8.4 remains active for live
+  browser checks and route startup reductions; Phase 26 stays at 51 completed
+  organization moves; Phase 28 remains active with R2/access follow-up open;
+  Phase 29 remains active as the repeated whole-codebase/schema/cleanup
+  guardrail. Next executable target: continue with a measured route/startup
+  slice or formalize Docker image-retention automation without touching
+  uploads, secrets, env files, databases, or volumes.

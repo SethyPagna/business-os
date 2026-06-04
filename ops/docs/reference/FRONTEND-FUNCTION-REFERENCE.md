@@ -2520,9 +2520,9 @@ Total files documented: **248**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `readStoredSection` | function | 19 |
-| 2 | `SectionSwitcher` | component/function | 28 |
-| 3 | `selectValue` | const arrow | 55 |
+| 1 | `readStoredSection` | function | 20 |
+| 2 | `SectionSwitcher` | component/function | 29 |
+| 3 | `selectValue` | const arrow | 58 |
 
 ### 3.183 `frontend/src/components/shared/WriteConflictModal.tsx`
 

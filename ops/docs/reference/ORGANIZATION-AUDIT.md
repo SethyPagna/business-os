@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-04T23:25:34.269Z
+Generated: 2026-06-04T23:50:23.417Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 616
+- Files scanned: 617
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-04T23:25:34.269Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 416 |
+| .ts | 417 |
 | .tsx | 108 |
 | .md | 45 |
 | .json | 17 |
@@ -33,7 +33,7 @@ Generated: 2026-06-04T23:25:34.269Z
 | frontend/components/products | 32 |
 | ops/docs/reference | 32 |
 | backend/routes | 24 |
-| ops/scripts/runtime/live-checks | 23 |
+| ops/scripts/runtime/live-checks | 24 |
 | frontend/components/shared | 18 |
 | ops/docs | 14 |
 | frontend/components/catalog | 13 |
@@ -67,11 +67,11 @@ Generated: 2026-06-04T23:25:34.269Z
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7519 | ops/docs |
-| frontend/src/components/inventory/Inventory.tsx | 4403 | frontend/components/inventory |
+| frontend/src/components/inventory/Inventory.tsx | 4404 | frontend/components/inventory |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4050 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
-| ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3427 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3234 | ops/docs/reference |
 | frontend/tests/performanceLoadingUx.test.ts | 3032 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |

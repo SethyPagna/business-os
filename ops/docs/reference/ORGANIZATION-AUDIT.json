@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 616,
+  "filesScanned": 617,
   "largeFiles": 80,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -52,7 +52,7 @@
     ],
     [
       "ops/scripts/runtime/live-checks",
-      23
+      24
     ],
     [
       "frontend/components/shared",

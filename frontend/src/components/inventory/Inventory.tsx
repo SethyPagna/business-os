@@ -3404,6 +3404,7 @@ export default function Inventory() {
         value={inventorySection}
         onChange={selectInventorySection}
         storageKey={sectionStorageKey}
+        shouldRestoreStoredValue={(storedValue) => storedValue !== 'all'}
       />
 
       <LoadingWatchdog

@@ -7498,6 +7498,49 @@ Decision rule:
   Phase 8.4 live suite, storage prune, schema audit, organization audit,
   generated reference refresh, and Phase 29 audit passed.
 
+### Move 791: Inventory persisted-section startup gate
+
+- Ownership evidence: Inventory already defaulted to `products`, but its
+  reusable section switcher could restore a previously persisted `all` value
+  from `business-os:inventory:section:v2`, turning the next page entry into a
+  heavier startup path with stats, movement, RFID, dashboard, and returns
+  adjacency.
+- Change: `SectionSwitcher` now accepts a narrow
+  `shouldRestoreStoredValue` guard. Inventory uses that guard to refuse only
+  the heavy persisted `all` value on page entry while preserving explicit
+  focused sections such as `products`, `stats`, `movements`, and `rfid`.
+  Users can still open `All` deliberately during a session.
+- Ops proof: added
+  `ops/scripts/runtime/live-checks/phase84-inventory-section-restore-live-check.ts`
+  plus `npm.cmd --prefix ops run phase84:inventory-section-restore` so this
+  guard can be tested with a real browser and seeded localStorage.
+- Runtime proof: Docker image `business-os:v6.0.0-202606050737` is running
+  with frontend hash `2881516323e52066`.
+- Live proof:
+  `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
+  seeded `business-os:inventory:section:v2=all`, loaded Inventory, confirmed
+  the active section was `Products`, completed one product startup read through
+  `/api/inventory/bootstrap`, and recorded zero stats, movements, RFID,
+  dashboard, returns, framework overlay, or relevant console messages.
+- Route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-04T23-48-08-028Z.json`
+  passed Inventory, Products, Contacts, and Loyalty Points with zero failed
+  requests and zero console/page errors. Inventory loaded in 231 ms with
+  38 requests/31 scripts on the served Docker build.
+- Cleanup proof: deleted only ignored/regenerable output after Docker health
+  was verified: `release` (380,743,476 bytes) and `frontend/dist`
+  (31,726,867 bytes), for 412,470,343 bytes removed. Storage prune removed
+  488,515 bytes of old reports and 21.32 GB of Docker builder cache while
+  preserving business uploads, secrets, env files, local backups, R2 newest
+  backup, images, and volumes. Phase 29 audit passed afterward with zero
+  failures.
+- Verification: frontend section navigation guard, performance loading guard,
+  frontend typecheck, frontend utility suite, JSX/source check, frontend build,
+  Docker release/start health, route-load trace, focused Inventory persisted
+  section Playwright check, public Cloudflare portal Playwright check, backend
+  utility suite, storage prune, schema audit, organization audit, generated
+  reference refresh, `git diff --check`, and Phase 29 audit passed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
