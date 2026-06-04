@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 789 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 790 in this file.
 
 ## Goal
 
@@ -7459,6 +7459,44 @@ Decision rule:
   passed with zero failures. Prune storage removed 264,795 bytes of old
   reports and 76.43 MB of Docker builder cache while preserving business
   uploads, secrets, env files, backups, images, and volumes.
+
+### Move 790: Loyalty Points focused startup transport and Docker version cleanup
+
+- Ownership evidence: Loyalty Points route traces still loaded the broad
+  `app-api-methods` registry and portal transport during first-window customer
+  points loading, even though the default view only needs the customer read
+  path.
+- Change: `LoyaltyPointsPage.tsx` now imports `getCustomers` from
+  `contactReadTransport.ts` for customer point rows. Membership lookup
+  lazy-loads `portalTransport.ts` only after lookup intent. The
+  `performanceLoadingUx` guard now rejects `window.api`, `getLoyaltyApi()`,
+  and `api/methods.ts` in Loyalty Points while preserving explicit loader
+  timeouts.
+- Runtime proof: Docker image `business-os:v6.0.0-202606050515` is running
+  with frontend hash `612786e4d941e56b`, and `business-os:latest` points at
+  that verified image.
+- Route proof: Loyalty Points startup dropped from 36 requests/31 scripts and
+  229 ms to 22 requests/17 scripts and 180 ms in
+  `ops/runtime/reports/route-load-trace-2026-06-04T22-47-21-728Z.json`, with
+  no `app-api-methods` and no `app-portal` in the served first-window script
+  list and focused `contact-read-api` present.
+- Live proof: `npm.cmd --prefix ops run phase84:live-suite` passed the broad
+  admin UI live check, public Cloudflare portal check, and post-live hygiene
+  gate. The broad UI report recorded 66 checked signals, zero relevant console
+  messages, and no framework overlay.
+- Cleanup proof: deleted only ignored/regenerable output after Docker health
+  was verified: `release` and post-build `frontend/dist`, for 444,183,234
+  bytes removed across cleanup passes. Phase 29 audit then passed with zero
+  failures. Prune storage removed 371,474 bytes of old reports and 76.44 MB of
+  Docker builder cache while preserving business uploads, secrets, env files,
+  backups, images, and volumes.
+- Docker version cleanup: removed 98 stale `business-os:v6.0.0-*` Docker image
+  tags while keeping the active image and four recent rollback images. Docker
+  volumes, uploads, databases, env files, and secrets were not pruned.
+- Verification: frontend/backend utility suites, frontend typecheck,
+  JSX/source check, frontend build, Docker health, route-load trace,
+  Phase 8.4 live suite, storage prune, schema audit, organization audit,
+  generated reference refresh, and Phase 29 audit passed.
 
 ## Safety Gates
 

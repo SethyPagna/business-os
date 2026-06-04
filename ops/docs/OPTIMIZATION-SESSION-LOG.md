@@ -8,6 +8,33 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Loyalty Points focused startup transport and Docker version cleanup
+  - route: Loyalty Points
+  - result: kept
+  - note: moved Loyalty Points customer point loading off the broad
+    `app-api-methods` registry and onto focused `contactReadTransport.ts`.
+    Portal membership lookup now lazy-loads `portalTransport.ts` only after
+    lookup intent.
+  - proof: Docker release `business-os:v6.0.0-202606050515` is running with
+    frontend hash `612786e4d941e56b`. Route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T22-47-21-728Z.json`
+    passed Loyalty Points in 180 ms with 22 requests/17 scripts, down from
+    36 requests/31 scripts and 229 ms. The served script list contains no
+    `app-api-methods` and no `app-portal`; it contains focused
+    `contact-read-api`.
+  - live suite proof: `npm.cmd --prefix ops run phase84:live-suite` passed the
+    broad admin UI live check, public Cloudflare portal check, and post-live
+    hygiene gate. The reports recorded zero relevant console messages, zero
+    failed public responses, and no framework overlay.
+  - cleanup proof: removed 444,183,234 bytes from ignored/regenerable
+    `release` and `frontend/dist` output across cleanup passes. Storage prune
+    removed 371,474 bytes of old reports plus 76.44 MB of Docker builder
+    cache.
+  - Docker proof: retagged `business-os:latest` to the verified `0515` image
+    and removed 98 stale `business-os:v6.0.0-*` image tags while keeping the
+    active image plus four recent rollback images. Docker volumes, uploads,
+    databases, env files, and secrets were not pruned.
+
 - Branches focused startup transport
   - route: Branches
   - result: kept

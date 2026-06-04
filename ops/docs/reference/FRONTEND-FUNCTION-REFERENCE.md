@@ -112,7 +112,7 @@ Total files documented: **248**
 | 100 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
 | 101 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
 | 102 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
-| 103 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 10 |
+| 103 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 11 |
 | 104 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
 | 105 | `frontend/src/components/pos/CartItem.tsx` | 2 |
 | 106 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
@@ -1640,16 +1640,17 @@ Total files documented: **248**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getLoyaltyApi` | function | 191 |
-| 2 | `toCustomerPointRows` | function | 195 |
-| 3 | `getErrorMessage` | function | 199 |
-| 4 | `sanitizeInteger` | function | 203 |
-| 5 | `sanitizeKhr` | function | 208 |
-| 6 | `formatLookupValue` | function | 214 |
-| 7 | `normalizeLoyaltySection` | function | 218 |
-| 8 | `LoyaltyPointsPage` | component/function | 222 |
-| 9 | `handleSave` | function | 331 |
-| 10 | `handleLookup` | function | 355 |
+| 1 | `getPortalTransport` | function | 190 |
+| 2 | `lookupLoyaltyPortalMembership` | function | 195 |
+| 3 | `toCustomerPointRows` | function | 200 |
+| 4 | `getErrorMessage` | function | 204 |
+| 5 | `sanitizeInteger` | function | 208 |
+| 6 | `sanitizeKhr` | function | 213 |
+| 7 | `formatLookupValue` | function | 219 |
+| 8 | `normalizeLoyaltySection` | function | 223 |
+| 9 | `LoyaltyPointsPage` | component/function | 227 |
+| 10 | `handleSave` | function | 336 |
+| 11 | `handleLookup` | function | 360 |
 
 ### 3.104 `frontend/src/components/navigation/Sidebar.tsx`
 

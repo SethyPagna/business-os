@@ -1459,12 +1459,27 @@ assert.match(
 )
 assert.match(
   loyaltyPointsPage,
-  /withLoaderTimeout\(\(\) => (?:window\.api|getLoyaltyApi\(\))\.getCustomers\(\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
+  /import \{ getCustomers as getLoyaltyCustomers \} from '\.\.\/\.\.\/api\/contactReadTransport\.ts'/,
+  'loyalty customer points should use the focused contact read transport instead of the broad window.api registry',
+)
+assert.match(
+  loyaltyPointsPage,
+  /let portalTransportPromise: Promise<PortalTransportModule> \| null = null[\s\S]*function getPortalTransport\(\): Promise<PortalTransportModule> \{[\s\S]*import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)/,
+  'loyalty membership lookup should lazy-load the focused portal transport only after lookup intent',
+)
+assert.doesNotMatch(
+  loyaltyPointsPage,
+  /window\.api|getLoyaltyApi\(|import\('\.\.\/\.\.\/api\/methods\.ts'\)/,
+  'loyalty points should not wake the broad API registry for customer points or membership lookup',
+)
+assert.match(
+  loyaltyPointsPage,
+  /withLoaderTimeout\(\(\) => getLoyaltyCustomers\(\), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS\)/,
   'loyalty customer points should timeout slow customer reads',
 )
 assert.match(
   loyaltyPointsPage,
-  /withLoaderTimeout\(\s*\(\) => (?:window\.api|getLoyaltyApi\(\))\.lookupPortalMembership\(value\),\s*'Loyalty membership lookup',\s*LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => lookupLoyaltyPortalMembership\(value\),\s*'Loyalty membership lookup',\s*LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
   'loyalty membership lookup should timeout slow membership reads',
 )
 assert.doesNotMatch(

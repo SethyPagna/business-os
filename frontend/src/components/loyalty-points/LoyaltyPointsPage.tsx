@@ -16,6 +16,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { getCustomers as getLoyaltyCustomers } from '../../api/contactReadTransport.ts'
 
 type LocaleCopy = Record<string, string>
 
@@ -64,10 +65,7 @@ type MembershipLookupTotals = {
   membershipDiscountUsd?: number | string | null
 }
 
-type LoyaltyApi = {
-  getCustomers: () => Promise<unknown>
-  lookupPortalMembership: (membershipNumber: string) => Promise<unknown>
-}
+type PortalTransportModule = typeof import('../../api/portalTransport.ts')
 
 type AppContextValue = {
   settings: Record<string, unknown>
@@ -81,6 +79,7 @@ type AppContextValue = {
 
 const useApp = useAppHook as () => AppContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+let portalTransportPromise: Promise<PortalTransportModule> | null = null
 
 const COPY: Record<'en' | 'km', LocaleCopy> = {
   en: {
@@ -188,8 +187,14 @@ const LOYALTY_SECTION_OPTIONS = [
 const LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS = 12000
 const LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 
-function getLoyaltyApi(): LoyaltyApi {
-  return (window as unknown as { api: LoyaltyApi }).api
+function getPortalTransport(): Promise<PortalTransportModule> {
+  portalTransportPromise ||= import('../../api/portalTransport.ts')
+  return portalTransportPromise
+}
+
+async function lookupLoyaltyPortalMembership(membershipNumber: string): Promise<unknown> {
+  const module = await getPortalTransport()
+  return module.lookupPortalMembership(membershipNumber)
 }
 
 function toCustomerPointRows(rows: unknown): CustomerPointRow[] {
@@ -274,7 +279,7 @@ export default function LoyaltyPointsPage() {
     const requestId = beginTrackedRequest(customerPointsRequestRef)
     setCustomerPointsLoading(true)
     try {
-      const rows = await withLoaderTimeout(() => getLoyaltyApi().getCustomers(), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
+      const rows = await withLoaderTimeout(() => getLoyaltyCustomers(), label, LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(customerPointsRequestRef, requestId)) return null
       const nextRows = toCustomerPointRows(rows)
       setCustomerPoints(nextRows)
@@ -365,7 +370,7 @@ export default function LoyaltyPointsPage() {
       setLookupLoading(true)
       setLookupError('')
       const result = await withLoaderTimeout(
-        () => getLoyaltyApi().lookupPortalMembership(value),
+        () => lookupLoyaltyPortalMembership(value),
         'Loyalty membership lookup',
         LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
       )

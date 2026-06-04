@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 789.
+- Latest completed implementation move in this roadmap: Move 790.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -11534,3 +11534,51 @@ Move 789 status:
   TypeScript, runtime, and performance sweeps. Next executable target: use the
   latest route trace to choose the next highest first-window script/request
   page, then split only proven startup work with focused Playwright proof.
+
+Move 790 status:
+- Move 790 splits Loyalty Points first-window startup away from the broad
+  legacy API registry. `LoyaltyPointsPage.tsx` now reads customer point rows
+  through the focused `contactReadTransport.ts` path, and membership lookup
+  lazy-loads the focused `portalTransport.ts` only after lookup intent.
+- The focused source guard in `frontend/tests/performanceLoadingUx.test.ts`
+  now rejects `window.api`, `getLoyaltyApi()`, and lazy imports of
+  `api/methods.ts` from Loyalty Points, while preserving explicit timeout
+  coverage for both customer-points loading and membership lookup.
+- Runtime proof: Docker release `business-os:v6.0.0-202606050515` is running
+  with frontend hash `612786e4d941e56b`. Route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T22-47-21-728Z.json` passed
+  Loyalty Points in 180 ms with 22 requests and 17 scripts, down from 229 ms
+  with 36 requests and 31 scripts. The served Loyalty script list contains no
+  `app-api-methods` and no `app-portal`; it does contain the focused
+  `contact-read-api` chunk.
+- Live action proof: `npm.cmd --prefix ops run phase84:live-suite` passed the
+  broad Phase 8.4 UI live check, the public Cloudflare portal check, and the
+  post-live hygiene gate. The broad UI report recorded 66 checked signals, zero
+  relevant console messages, and no framework overlay. The public portal report
+  rendered 20 products with zero failed responses, page errors, or relevant
+  console messages.
+- Cleanup proof: removed 444,183,234 bytes from regenerable `release` and
+  `frontend/dist` output across post-release and post-build cleanup passes.
+  `npm.cmd --prefix ops run prune-storage` removed 371,474 bytes of old reports
+  and 76.44 MB of Docker builder cache while preserving uploads, secrets, env
+  files, backup roots, Docker images/volumes, and the newest R2 backup.
+- Docker version cleanup: `business-os:latest` was retagged to the verified
+  `v6.0.0-202606050515` image. Ninety-eight stale `business-os:v6.0.0-*`
+  image tags were removed, keeping the active image plus four recent rollback
+  images and leaving Docker volumes untouched.
+- Verification: `npm.cmd --prefix frontend run test:utils`,
+  `npm.cmd --prefix backend run test:utils`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run build`,
+  `node ops\scripts\backend\schema-audit.ts`,
+  `node ops\scripts\architecture\organization-audit.ts`,
+  `node ops\scripts\docs\generate-doc-reference.ts`, and
+  `npm.cmd --prefix ops run phase29:audit` passed.
+- Current plan position after Move 790: Phase 8.4 remains active for live
+  stability and route startup checks; Phase 26 stays at 51 completed
+  organization moves; Phase 28 remains active with R2/access follow-up open;
+  Phase 29 remains active as the repeated whole-codebase/schema/cleanup
+  guardrail. The next best optimization slice is another page still waking the
+  broad `app-api-methods` registry or a targeted Docker retention script that
+  formalizes the safe image-tag policy used in this move.

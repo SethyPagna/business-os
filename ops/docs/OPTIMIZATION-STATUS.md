@@ -8,10 +8,10 @@ Last updated: 2026-06-05
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 789, split Branches startup onto focused
-  `branchTransport.ts` calls and an action-only transfer modal chunk so
-  Branches no longer pulls the broad `app-api-methods` registry or transfer
-  workflow during first-window list/summary loading
+- Latest completed move: Move 790, split Loyalty Points startup onto the
+  focused `contactReadTransport.ts` path and lazy portal lookup transport so
+  Loyalty Points no longer pulls the broad `app-api-methods` registry or
+  portal lookup code during first-window customer-points loading
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `cff197b375bc0cdd`
+  `612786e4d941e56b`
 
 Latest verified reports:
 
@@ -31,11 +31,11 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-04T22-48-17-381Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T20-53-20-203Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T22-48-45-831Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T20-52-25-519Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T22-47-21-728Z.json`
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
@@ -64,6 +64,24 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- The Move 790 generated-artifact cleanup removed 444,183,234 bytes from
+  regenerable `release` and `frontend/dist` folders across the post-release
+  and post-build cleanup passes. Docker release image
+  `business-os:v6.0.0-202606050515` is running, and `business-os:latest` was
+  retagged to that verified image.
+- Move 790 pruned 98 stale `business-os:v6.0.0-*` Docker image tags while
+  keeping the active image plus four recent rollback tags:
+  `v6.0.0-202606050515`, `v6.0.0-202606050504`,
+  `v6.0.0-202606050450`, `v6.0.0-202606050445`, and
+  `v6.0.0-202606050440`. Docker image count dropped from 109 to 11 without
+  pruning volumes, uploads, databases, or secrets.
+- The Move 790 `npm.cmd --prefix ops run prune-storage` pass removed 371,474
+  bytes of old runtime reports and 76.44 MB of Docker builder cache while
+  keeping uploads, secrets, env files, backup roots, Docker images/volumes, and
+  newest R2 backup `datasync-2026-06-04T21-30-57-430Z`.
+- The follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures after cleanup.
 
 - The Move 789 generated-artifact cleanup removed 412,463,075 bytes from
   regenerable `release` and `frontend/dist` folders after Docker image
