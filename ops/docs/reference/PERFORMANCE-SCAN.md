@@ -2035,4 +2035,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   and public portal check
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-27-41-981Z/report.json`
   all passed with zero relevant failures/errors.
+- Move 503 records roadmap Move 773: defer public catalog rounded-favicon
+  canvas generation from first-load startup. `CatalogPage.tsx` now sets the
+  favicon/logo URL immediately and loads `utils/favicon.ts` from an idle
+  dynamic import for the rounded data URL upgrade; the focused guard rejects a
+  static catalog favicon import. Docker image
+  `business-os:v6.0.0-202606040838` served the change with frontend hash
+  `b8e3f80f8cecccf8`. Production catalog chunk size dropped from prior
+  `catalog-CSNTiyfk.js` 177,479 bytes to `catalog-BmR4n15a.js` at about
+  156.14 KB. Public route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-41-174Z.json` passed
+  `/public` with 24 scripts, zero failures/errors, and no first-load
+  `favicon-utils` request. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-40-630Z.json`,
+  remote admin route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-41-02-114Z.json`, public
+  portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-40-41-123Z/report.json`,
+  and post-live hygiene all passed with zero relevant failures/errors.
 <!-- phase29-manual-notes:end -->

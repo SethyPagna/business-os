@@ -3366,6 +3366,47 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+- change: defer public catalog rounded-favicon canvas helper from first-load
+  startup
+- affected files:
+  `frontend/src/components/catalog/CatalogPage.tsx`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: public customer portal first-load catalog startup,
+  public/admin route traces, and public Cloudflare portal interaction check
+- keeper or rollback: keeper; the normal favicon/logo URL is applied
+  immediately, while rounded canvas generation moves to an idle dynamic import
+  of `utils/favicon.ts`. Rollback would be restoring the static import, which
+  would re-add `favicon-utils` to the public startup path.
+- bundle proof:
+  production `catalog` chunk dropped from prior `catalog-CSNTiyfk.js`
+  177,479 bytes to Docker release `catalog-BmR4n15a.js` at about 156.14 KB.
+  Docker release image `business-os:v6.0.0-202606040838` is running with
+  frontend hash `b8e3f80f8cecccf8`.
+- actual link proof:
+  public-host route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-41-174Z.json` passed
+  `/public` with 24 scripts, zero failures/errors, and no first-load
+  `favicon-utils` request. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-40-630Z.json` passed
+  public catalog, Dashboard, Products, and POS with zero failures/errors.
+  Remote admin route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-41-02-114Z.json` passed
+  Dashboard and Products with zero failures/errors. Public portal Cloudflare
+  check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-40-41-123Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
+  zero generated integrity matches, and relationship orphan checks passing for
+  49 FK candidates.
+
 - change: short-cache static root bootstrap scripts for Cloudflare warmup
 - affected files:
   `backend/src/serverUtils.ts`,

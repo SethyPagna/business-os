@@ -8,18 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 772, short-cache the two root bootstrap scripts
-  so `runtime-noise-guard.js` and `theme-bootstrap.js` can become Cloudflare
-  hits after warmup instead of permanent `no-store` bypasses
+- Latest completed move: Move 773, defer the public portal rounded-favicon
+  canvas helper out of first-load catalog startup while still setting the
+  normal favicon URL immediately
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `17726bff239612d9`
+- latest verified frontend hash from the most recent Docker-served live check: `b8e3f80f8cecccf8`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `984d67f3518f82a4`
+  `67e0495af1f60bb5`
 
 Latest verified reports:
 
@@ -32,15 +32,15 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-27-41-981Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-40-41-123Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-03T23-59-46-868Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-40-630Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T00-27-19-299Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-41-02-114Z.json`
 - latest focused public-host route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T00-26-53-991Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-41-174Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-04T00-27-17-434Z.json`
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -72,6 +72,12 @@ Latest cleanup run:
 
 Current honest pockets:
 
+- Move 773 is now served by Docker release image
+  `business-os:v6.0.0-202606040838`. The public catalog controller dropped its
+  static rounded-favicon canvas helper and unused product-image import; the
+  production catalog chunk went from the prior 177,479-byte
+  `catalog-CSNTiyfk.js` to `catalog-BmR4n15a.js` at about 156.14 KB, and the
+  real public-host route trace confirmed no first-load `favicon-utils` request.
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
   build hash `7530b3876d0d1959` across 34 routes, with 518 visible controls
   discovered, 371 controls exercised, 147 intentionally skipped by stable

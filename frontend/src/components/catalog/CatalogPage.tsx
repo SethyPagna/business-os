@@ -51,8 +51,6 @@ import {
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
 } from './portalCatalogDisplay.ts'
-import { createCircularFaviconDataUrl } from '../../utils/favicon'
-import { ProductImg } from '../products/shared/primitives'
 import {
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
   getPortalLanguageText,
@@ -2055,39 +2053,63 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           positionX: toNumber(previewConfig.logoPositionX, 50),
           positionY: toNumber(previewConfig.logoPositionY, 50),
         }
+    let faviconIdleId: number | null = null
+    let faviconTimerId: number | null = null
     if (iconSource) {
       const requestId = beginTrackedRequest(portalFaviconRequestRef)
-      withLoaderTimeout(
-        () => createCircularFaviconDataUrl(iconSource, faviconOptions),
-        'Portal favicon',
-        CATALOG_PORTAL_FAVICON_TIMEOUT_MS,
-      )
-        .then((faviconHref) => {
-          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
-          const resolvedHref = faviconHref || iconSource
-          iconLinks.forEach(({ linkEl, rel }) => {
-            if (!linkEl) return
-            linkEl.setAttribute('href', resolvedHref)
-            if (rel === 'icon' || rel === 'shortcut icon') {
-              linkEl.setAttribute('type', 'image/png')
-            }
+      iconLinks.forEach(({ linkEl, rel }) => {
+        if (!linkEl) return
+        linkEl.setAttribute('href', iconSource)
+        if (rel === 'icon' || rel === 'shortcut icon') {
+          linkEl.setAttribute('type', 'image/png')
+        }
+      })
+
+      const renderRoundedFavicon = () => {
+        withLoaderTimeout(
+          () => import('../../utils/favicon.ts').then(({ createCircularFaviconDataUrl }) => (
+            createCircularFaviconDataUrl(iconSource, faviconOptions)
+          )),
+          'Portal favicon',
+          CATALOG_PORTAL_FAVICON_TIMEOUT_MS,
+        )
+          .then((faviconHref) => {
+            if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
+            const resolvedHref = faviconHref || iconSource
+            iconLinks.forEach(({ linkEl, rel }) => {
+              if (!linkEl) return
+              linkEl.setAttribute('href', resolvedHref)
+              if (rel === 'icon' || rel === 'shortcut icon') {
+                linkEl.setAttribute('type', 'image/png')
+              }
+            })
           })
-        })
-        .catch(() => {
-          if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
-          iconLinks.forEach(({ linkEl, rel }) => {
-            if (!linkEl) return
-            linkEl.setAttribute('href', iconSource)
-            if (rel === 'icon' || rel === 'shortcut icon') {
-              linkEl.setAttribute('type', 'image/png')
-            }
+          .catch(() => {
+            if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
+            iconLinks.forEach(({ linkEl, rel }) => {
+              if (!linkEl) return
+              linkEl.setAttribute('href', iconSource)
+              if (rel === 'icon' || rel === 'shortcut icon') {
+                linkEl.setAttribute('type', 'image/png')
+              }
+            })
           })
-        })
+      }
+
+      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        faviconIdleId = window.requestIdleCallback(renderRoundedFavicon, { timeout: 1800 })
+      } else if (typeof window !== 'undefined') {
+        faviconTimerId = window.setTimeout(renderRoundedFavicon, 900)
+      } else {
+        renderRoundedFavicon()
+      }
     } else {
       invalidateTrackedRequest(portalFaviconRequestRef)
     }
 
     return () => {
+      if (faviconIdleId != null) window.cancelIdleCallback?.(faviconIdleId)
+      if (faviconTimerId != null) window.clearTimeout(faviconTimerId)
       invalidateTrackedRequest(portalFaviconRequestRef)
       document.title = previousTitle
       iconLinks.forEach(({ linkEl, created, previousHref }) => {

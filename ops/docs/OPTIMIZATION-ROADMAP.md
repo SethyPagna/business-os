@@ -10679,3 +10679,47 @@ Move 772 status:
   TypeScript, runtime, and performance sweeps. Next executable targets should
   continue with public catalog base-route JavaScript, Settings/Backup transport
   clusters, and the remaining non-cacheable HTML/API/tunnel latency.
+
+Move 773 status:
+- Move 773 defers the public portal rounded-favicon canvas helper out of the
+  first-load catalog route. `CatalogPage.tsx` no longer statically imports
+  `createCircularFaviconDataUrl` or the unused `ProductImg`; it immediately
+  assigns the resolved favicon/logo URL, then dynamically imports
+  `../../utils/favicon.ts` from an idle callback to upgrade the tab icon after
+  first viewport rendering.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now rejects a
+  static catalog favicon import and requires the delayed dynamic import. The
+  focused performance guard, frontend typecheck, source syntax check, frontend
+  utility suite, production build, Docker release build/start, local and remote
+  route traces, public Cloudflare portal check, post-live hygiene, and
+  `git diff --check` passed.
+- Bundle/runtime proof: production `catalog` chunk size dropped from the prior
+  `catalog-CSNTiyfk.js` 177,479 bytes to Docker release
+  `catalog-BmR4n15a.js` at about 156.14 KB. Docker release image
+  `business-os:v6.0.0-202606040838` is running with frontend hash
+  `b8e3f80f8cecccf8`.
+- Actual-link proof: public-host route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-41-174Z.json` passed
+  `/public` with 24 scripts, zero failed requests, zero console/page errors,
+  and no first-load `favicon-utils` request. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-40-40-630Z.json` passed
+  public catalog, Dashboard, Products, and POS with zero failures/errors.
+  Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T00-41-02-114Z.json` passed
+  Dashboard and Products with zero failures/errors. Public portal Cloudflare
+  check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-40-41-123Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 773: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with remaining public catalog controller weight, Settings/Backup
+  transport clusters, and Cloudflare tunnel/API latency reduction.
