@@ -11010,3 +11010,55 @@ Move 779 status:
   51 completed organization moves; Phase 28 remains active with the R2 prune
   follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
   TypeScript, runtime, and performance sweeps.
+
+Move 780 status:
+- Move 780 defers Sales/Returns CSV export helpers, CSV template generation,
+  and browser file-dialog utilities from normal route startup. `Sales.tsx` and
+  `Returns.tsx` dynamically import `utils/csv.ts` only when export actions run.
+  `contactsTransport.ts` and `api/methods.ts` lazy-load `csvTemplate.ts`, and
+  `api/methods.ts` lazy-loads `browserDialogs.ts` for CSV/image picker
+  compatibility.
+- Vite now assigns `browserDialogs.ts` to a focused `browser-dialogs` chunk and
+  excludes `assets/browser-dialogs-` from eager modulepreload. This prevents
+  the browser dialog's CSV decoder from being folded into the broad
+  `app-api-methods` registry and keeps `csv-utils` out of Sales/Returns first
+  load.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` rejects
+  static Sales/Returns `downloadCSV` imports, requires dynamic export imports,
+  requires lazy CSV template and browser-dialog wrappers, and verifies the
+  focused `browser-dialogs` chunk/modulepreload rule. `frontend/tests/
+  apiHttp.test.ts` verifies the legacy API registry exposes lazy browser
+  dialog wrappers and contact template downloads remain lazy.
+- Verification proof: focused performance guard, `npm.cmd --prefix frontend run
+  test:utils`, `npm.cmd --prefix frontend run check:jsx`, production build,
+  emitted chunk inspection, Docker release build/start, Docker health/container
+  inspection, local and remote admin route traces, public Cloudflare portal
+  check, post-live hygiene, and `git diff --check` passed.
+- Bundle/runtime proof: standalone output emits `browser-dialogs-b2rpWGfH.js`
+  at 0.75 KB gzip 0.47 KB, `csv-utils-rS6b7zK6.js` at 7.59 KB gzip 3.36 KB,
+  `Sales-BLPOxK6G.js` at 35.77 KB gzip 9.93 KB, `Returns-eWBP2b2n.js` at
+  23.11 KB gzip 7.72 KB, and `app-api-methods-CBKXmBPK.js` at 43.01 KB gzip
+  13.69 KB. Docker release image `business-os:v6.0.0-202606041056` is running;
+  health reports source hash `5d419c030bf25d50` and frontend build hash
+  `547935922e3f9ab5`.
+- Actual-link proof: local Docker route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-01-255Z.json` passed
+  Sales in 287 ms with 39 requests and 34 scripts and Returns in 221 ms with
+  40 requests and 35 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-25-149Z.json` passed
+  Sales in 248 ms and Returns in 252 ms with the same request/script counts.
+  Both traces had zero failures/errors and script-list inspection confirmed
+  `csv-utils-present=False` for both routes. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-59-23-699Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200 after
+  interaction, and recorded zero failed responses, zero relevant console
+  messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 780: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps.

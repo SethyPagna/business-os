@@ -10,6 +10,8 @@ function getDeviceInfo() {
 let portalTransportPromise = null
 let localDbModulePromise = null
 let saleWriteTransportPromise = null
+let csvTemplatePromise = null
+let browserDialogsPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -24,6 +26,21 @@ function loadSaleWriteTransport() {
 function loadLocalDbModule() {
   if (!localDbModulePromise) localDbModulePromise = import('./localDb.ts')
   return localDbModulePromise
+}
+
+function loadCsvTemplateModule() {
+  if (!csvTemplatePromise) csvTemplatePromise = import('../utils/csvTemplate.ts')
+  return csvTemplatePromise
+}
+
+function loadBrowserDialogsModule() {
+  if (!browserDialogsPromise) browserDialogsPromise = import('./browserDialogs.ts')
+  return browserDialogsPromise
+}
+
+async function buildImportCsvTemplate(headers, filename) {
+  const { buildCSVTemplate } = await loadCsvTemplateModule()
+  return buildCSVTemplate(headers, filename)
 }
 
 async function getLocalDb() {
@@ -64,7 +81,6 @@ import {
   isServerOnline,
 } from './http.ts'
 import { appendQuery, buildQueryString } from './query.ts'
-import { buildCSVTemplate } from '../utils/csvTemplate.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
@@ -277,7 +293,21 @@ import {
   queueBackupFolderExport as queueBackupFolderExportRequest,
   queueBackupFolderRestore as queueBackupFolderRestoreRequest,
 } from './systemJobs.ts'
-export { getImageDataUrl, openCSVDialog, openImageDialog } from './browserDialogs.ts'
+
+export async function openCSVDialog() {
+  const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
+  return openBrowserCSVDialog()
+}
+
+export async function openImageDialog() {
+  const { openImageDialog: openBrowserImageDialog } = await loadBrowserDialogsModule()
+  return openBrowserImageDialog()
+}
+
+export async function getImageDataUrl(path) {
+  const { getImageDataUrl: getBrowserImageDataUrl } = await loadBrowserDialogsModule()
+  return getBrowserImageDataUrl(path)
+}
 
 const OFFLINE_DEVICE_SNAPSHOT_META_KEY = 'offline_device_snapshot_meta'
 const OFFLINE_DEVICE_SNAPSHOT_MIN_INTERVAL_MS = 5 * 60_000
@@ -1085,7 +1115,7 @@ export function downloadImportTemplate(type) {
   // 2) Product template focuses on filename-based image columns.
   // 3) `image_conflict_mode` controls keep/replace/append behavior during bulk import.
   if (type === 'customer') return downloadCustomerTemplate()
-  if (type === 'deliveryContact') return buildCSVTemplate([
+  if (type === 'deliveryContact') return buildImportCsvTemplate([
     '_conflict_mode', '_field_rules',
     'name', 'phone', 'area', 'address', 'notes',
     'contact_label_1','contact_name_1','contact_phone_1','contact_area_1',
@@ -1094,7 +1124,7 @@ export function downloadImportTemplate(type) {
   ], 'delivery-contacts-template.csv')
   if (type === 'supplier') return downloadSupplierTemplate()
   if (type === 'sales') {
-    return buildCSVTemplate([
+    return buildImportCsvTemplate([
       '_conflict_mode',
       'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency',
       'branch', 'customer_name', 'customer_phone', 'customer_address',
@@ -1103,13 +1133,13 @@ export function downloadImportTemplate(type) {
     ], 'sales-template.csv')
   }
   if (type === 'inventory') {
-    return buildCSVTemplate([
+    return buildImportCsvTemplate([
       '_conflict_mode',
       'date', 'action', 'branch', 'name', 'sku', 'barcode', 'quantity',
       'unit_cost_usd', 'unit_cost_khr', 'reason',
     ], 'inventory-template.csv')
   }
-  buildCSVTemplate([
+  return buildImportCsvTemplate([
     '_action','_target_product_id','_parent_id','_field_rules',
     'name','sku','barcode','category','brand','unit','description',
     'selling_price_usd','selling_price_khr',

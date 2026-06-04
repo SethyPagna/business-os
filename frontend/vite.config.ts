@@ -112,6 +112,7 @@ const deferredModulePreloadPrefixes = [
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
+  'assets/browser-dialogs-',
   'assets/shared-portal-menu-',
   'assets/auth-login-',
   'assets/app-bootstrap-',
@@ -250,6 +251,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
     if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
     if (normalized.endsWith('/src/api/systemRuntime.ts')) return 'app-system'
+    if (normalized.endsWith('/src/api/browserDialogs.ts')) return 'browser-dialogs'
     if (
       normalized.endsWith('/src/api/portalTransport.ts')
       || normalized.endsWith('/src/api/portalHttp.ts')

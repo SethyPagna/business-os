@@ -8,9 +8,9 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 779, defer Users action-only profile/detail/
-  permission surfaces and keep shared date/history/permission metadata in
-  small non-modal chunks so normal Users route load avoids those modal bundles
+- Latest completed move: Move 780, defer Sales/Returns CSV export, CSV
+  template, and browser file-dialog utilities until explicit export/template
+  intent so normal route startup no longer requests `csv-utils`
 
 ## Current Baseline
 
@@ -18,8 +18,8 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
-- latest production build hash from `npm.cmd --prefix frontend run build`:
-  `215128ce8099410f`
+- latest production build hash from Docker-served live check:
+  `547935922e3f9ab5`
 
 Latest verified reports:
 
@@ -32,11 +32,11 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-29-03-671Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-59-23-699Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-37-499Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-01-255Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-50-177Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-25-149Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
@@ -72,6 +72,37 @@ Latest cleanup run:
 
 Current honest pockets:
 
+- Move 780 is now served by Docker release image
+  `business-os:v6.0.0-202606041056`. Sales and Returns no longer statically
+  import `downloadCSV`; both route components dynamically import
+  `utils/csv.ts` only from export handlers. The legacy API registry now
+  lazy-loads CSV template generation and browser file dialogs, and
+  `frontend/vite.config.ts` pins `browserDialogs.ts` to the focused
+  `browser-dialogs` chunk so CSV decoding does not fold back into
+  `app-api-methods`.
+  Standalone production output emits `browser-dialogs-b2rpWGfH.js` at
+  0.75 KB gzip 0.47 KB, `csv-utils-rS6b7zK6.js` at 7.59 KB gzip 3.36 KB,
+  `Sales-BLPOxK6G.js` at 35.77 KB gzip 9.93 KB,
+  `Returns-eWBP2b2n.js` at 23.11 KB gzip 7.72 KB, and
+  `app-api-methods-CBKXmBPK.js` at 43.01 KB gzip 13.69 KB. The Docker build
+  emitted matching runtime chunks including `browser-dialogs-biE403Mo.js`,
+  `csv-utils-BUq7xiy4.js`, `Sales-DZkPqEiA.js`, `Returns-Cl67aTYQ.js`, and
+  `app-api-methods-DN0RAWza.js`.
+  Local Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-01-255Z.json` passed
+  Sales in 287 ms with 39 requests and 34 scripts, and Returns in 221 ms with
+  40 requests and 35 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-25-149Z.json` passed
+  Sales in 248 ms with 39 requests and 34 scripts, and Returns in 252 ms with
+  40 requests and 35 scripts. Both traces had zero failed requests, zero
+  console/page errors, and script-list inspection confirmed
+  `csv-utils-present=False` for both routes.
+  Public portal Cloudflare check rendered 20 products, confirmed portal
+  bootstrap 200, confirmed AI status 200 after interaction, and recorded zero
+  failed responses, zero relevant console messages, and zero page errors.
+  Post-live hygiene passed with loaded dataset status, zero broad
+  QA/smoke/action-history cleanup matches, zero generated integrity matches,
+  and relationship orphan checks passing for 49 FK candidates.
 - Move 779 is now served by Docker release image
   `business-os:v6.0.0-202606041026`. `Users.tsx` lazy-loads
   `UserProfileModal`, `UserDetailSheet`, and `PermissionEditor` behind

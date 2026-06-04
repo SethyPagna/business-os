@@ -6,7 +6,6 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters'
-import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -722,13 +721,14 @@ export default function Returns() {
 
   const { customerRows, supplierRows, customerStats, supplierStats } = returnScopeSummary
 
-  const exportVisible = useCallback((rowsToExport: ReturnRow[] = visibleReturns, prefix = 'returns-visible') => {
+  const exportVisible = useCallback(async (rowsToExport: ReturnRow[] = visibleReturns, prefix = 'returns-visible') => {
+    const { downloadCSV } = await import('../../utils/csv.ts')
     downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportReturnRows(rowsToExport, tr))
   }, [tr, visibleReturns])
 
-  const exportSelected = useCallback(() => {
+  const exportSelected = useCallback(async () => {
     if (!selectedReturns.length) return
-    exportVisible(selectedReturns, 'returns-selected')
+    await exportVisible(selectedReturns, 'returns-selected')
     notify(`Exported ${selectedReturns.length} selected return${selectedReturns.length === 1 ? '' : 's'}.`)
   }, [exportVisible, notify, selectedReturns])
 

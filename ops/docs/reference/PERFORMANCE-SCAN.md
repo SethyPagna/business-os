@@ -2153,4 +2153,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   portal Cloudflare check
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-29-03-671Z/report.json`
   and post-live hygiene passed with zero relevant failures/errors.
+- Move 510 records roadmap Move 780: defer Sales/Returns CSV export helpers,
+  CSV template generation, and browser file-dialog utilities from route
+  startup. `Sales.tsx` and `Returns.tsx` dynamically import `utils/csv.ts`
+  only after export intent. `contactsTransport.ts` and `api/methods.ts`
+  lazy-load `csvTemplate.ts`; `api/methods.ts` lazy-loads `browserDialogs.ts`.
+  Vite pins `browserDialogs.ts` to a focused `browser-dialogs` chunk and keeps
+  `assets/browser-dialogs-` out of eager modulepreload so CSV decoding does
+  not fold into `app-api-methods`.
+  Standalone output emits `browser-dialogs-b2rpWGfH.js` at 0.75 KB gzip
+  0.47 KB, `csv-utils-rS6b7zK6.js` at 7.59 KB gzip 3.36 KB,
+  `Sales-BLPOxK6G.js` at 35.77 KB gzip 9.93 KB,
+  `Returns-eWBP2b2n.js` at 23.11 KB gzip 7.72 KB, and
+  `app-api-methods-CBKXmBPK.js` at 43.01 KB gzip 13.69 KB. Docker image
+  `business-os:v6.0.0-202606041056` served frontend hash
+  `547935922e3f9ab5`. Local trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-01-255Z.json` passed
+  Sales in 287 ms with 39 requests/34 scripts and Returns in 221 ms with
+  40 requests/35 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-25-149Z.json` passed
+  Sales in 248 ms and Returns in 252 ms with the same request/script counts.
+  Both traces had zero failures/errors and `csv-utils-present=False` for both
+  routes. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-59-23-699Z/report.json`
+  and post-live hygiene passed with zero relevant failures/errors.
 <!-- phase29-manual-notes:end -->

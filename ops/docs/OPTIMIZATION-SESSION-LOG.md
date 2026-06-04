@@ -3494,6 +3494,56 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+## 2026-06-04 - Move 780 Sales/Returns CSV Startup Deferral
+
+- change: lazy-load Sales and Returns CSV export helpers, CSV template
+  generation, and browser file-dialog utilities so normal route startup does
+  not request `csv-utils`.
+- affected files:
+  `frontend/src/components/sales/Sales.tsx`,
+  `frontend/src/components/returns/Returns.tsx`,
+  `frontend/src/api/contactsTransport.ts`,
+  `frontend/src/api/methods.ts`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: admin Sales and Returns startup, export actions,
+  contact/import template download actions, browser CSV/image file dialogs,
+  and actual admin/public Cloudflare links
+- keeper or rollback: keeper; visible Sales/Returns data still loads normally,
+  while CSV export/template/file-dialog code loads only after an explicit
+  export/template/dialog action.
+- bundle proof:
+  standalone output emits `browser-dialogs-b2rpWGfH.js` at 0.75 KB gzip
+  0.47 KB, `csv-utils-rS6b7zK6.js` at 7.59 KB gzip 3.36 KB,
+  `Sales-BLPOxK6G.js` at 35.77 KB gzip 9.93 KB,
+  `Returns-eWBP2b2n.js` at 23.11 KB gzip 7.72 KB, and
+  `app-api-methods-CBKXmBPK.js` at 43.01 KB gzip 13.69 KB. Docker image
+  `business-os:v6.0.0-202606041056` served frontend hash
+  `547935922e3f9ab5`.
+- actual link proof:
+  local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-01-255Z.json` passed
+  Sales in 287 ms with 39 requests/34 scripts and Returns in 221 ms with
+  40 requests/35 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-25-149Z.json` passed
+  Sales in 248 ms and Returns in 252 ms with the same request/script counts.
+  Both traces had zero failed requests, zero console/page errors, and
+  `csv-utils-present=False` for both routes. Public portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-59-23-699Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200
+  after interaction, and recorded zero failed responses, zero relevant console
+  messages, and zero page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
+  zero generated integrity matches, and relationship orphan checks passing for
+  49 FK candidates.
+
 Move 777 status:
 - Move 777 lazy-loads the Settings 2FA OTP modal. `Settings.tsx` now imports
   only the `OtpModalProps` type and loads the runtime modal through a React

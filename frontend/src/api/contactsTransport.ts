@@ -1,5 +1,4 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
-import { buildCSVTemplate } from '../utils/csvTemplate.ts'
 import { apiFetch, route } from './http.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
@@ -8,6 +7,7 @@ import { ensureClientRequestId } from './requestIds.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 
 type ContactPayload = ExpectedUpdatedAtPayload
+type CsvTemplateModule = typeof import('../utils/csvTemplate.ts')
 type ContactEntityConfig = {
   routeKey: string
   tableName: 'customers' | 'suppliers' | 'delivery_contacts'
@@ -37,10 +37,21 @@ const CONTACT_ENTITY = {
 } satisfies Record<string, ContactEntityConfig>
 
 let localDbPromise: Promise<typeof import('./localDb.ts')> | null = null
+let csvTemplatePromise: Promise<CsvTemplateModule> | null = null
 
 function getLocalDbModule(): Promise<typeof import('./localDb.ts')> {
   if (!localDbPromise) localDbPromise = import('./localDb.ts')
   return localDbPromise
+}
+
+function getCsvTemplateModule(): Promise<CsvTemplateModule> {
+  if (!csvTemplatePromise) csvTemplatePromise = import('../utils/csvTemplate.ts')
+  return csvTemplatePromise
+}
+
+async function buildContactCsvTemplate(headers: string[], filename: string): Promise<void> {
+  const { buildCSVTemplate } = await getCsvTemplateModule()
+  return buildCSVTemplate(headers, filename)
 }
 
 function getDevicePayload(): ContactPayload {
@@ -155,8 +166,8 @@ export function bulkImportCustomers(payload: ContactPayload = {}): Promise<unkno
   return bulkImportContact(CONTACT_ENTITY.customers, payload)
 }
 
-export function downloadCustomerTemplate(): void {
-  return buildCSVTemplate([
+export function downloadCustomerTemplate(): Promise<void> {
+  return buildContactCsvTemplate([
     '_conflict_mode', '_field_rules',
     'name', 'membership_number', 'phone', 'email', 'address', 'company', 'notes',
     'contact_label_1', 'contact_name_1', 'contact_phone_1', 'contact_email_1', 'contact_address_1',
@@ -185,8 +196,8 @@ export function bulkImportSuppliers(payload: ContactPayload = {}): Promise<unkno
   return bulkImportContact(CONTACT_ENTITY.suppliers, payload)
 }
 
-export function downloadSupplierTemplate(): void {
-  return buildCSVTemplate([
+export function downloadSupplierTemplate(): Promise<void> {
+  return buildContactCsvTemplate([
     '_conflict_mode', '_field_rules',
     'name', 'phone', 'email', 'address', 'company', 'contact_person', 'notes',
     'contact_label_1', 'contact_name_1', 'contact_phone_1', 'contact_email_1', 'contact_address_1',

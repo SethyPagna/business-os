@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 730 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 780 in this file.
 
 ## Goal
 
@@ -7149,6 +7149,27 @@ Decision rule:
     `app-local-db` or `vendor-dexie` in the first 600 ms; only Server loads
     `app-system` initially, and queue diagnostics load local DB after the
     explicit Queue click.
+
+780. Keep Sales/Returns CSV action utilities out of route startup. Done:
+    `frontend/src/components/sales/Sales.tsx` and
+    `frontend/src/components/returns/Returns.tsx` now dynamically import
+    `frontend/src/utils/csv.ts` only from export actions. `contactsTransport.ts`
+    and the legacy `api/methods.ts` registry lazy-load CSV template generation,
+    while `api/methods.ts` lazy-loads browser CSV/image file-dialog
+    compatibility. `frontend/vite.config.ts` gives `browserDialogs.ts` a
+    focused `browser-dialogs` chunk and excludes it from eager modulepreload.
+    This is a Phase 29 ownership/performance move, not a folder move or
+    language conversion: the measured issue was Rollup folding CSV decoding
+    into broad route startup. Proof: frontend utility tests, source/JSX check,
+    production build, emitted chunk inspection, Docker release image
+    `business-os:v6.0.0-202606041056`, local route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T02-59-01-255Z.json`,
+    remote admin trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T02-59-25-149Z.json`,
+    public Cloudflare portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-59-23-699Z/report.json`,
+    post-live hygiene, and `git diff --check` passed. Sales and Returns both
+    reported `csv-utils-present=False` during startup.
 
 ## Safety Gates
 

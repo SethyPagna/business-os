@@ -5,7 +5,6 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters'
-import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -193,6 +192,22 @@ function getSaleBranchLabel(sale: SaleRecord | null | undefined): string {
   if (itemBranchNames.length === 1) return itemBranchNames[0]
   if (itemBranchNames.length > 1) return 'Multiple branches'
   return ''
+}
+
+function buildSaleExportRows(rows: SaleRecord[] = []): Array<Record<string, unknown>> {
+  return rows.map((sale) => ({
+    Receipt: sale.receipt_number || '',
+    Date: sale.created_at || '',
+    Status: sale.sale_status || 'completed',
+    Cashier: sale.cashier_name || '',
+    Payment_Method: sale.payment_method || '',
+    Branch: getSaleBranchLabel(sale) || '',
+    Customer: sale.customer_name || '',
+    Total_USD: sale.total_usd || 0,
+    Net_Total_USD: sale.net_total_usd ?? sale.total_usd ?? 0,
+    Items: Array.isArray(sale.items) ? sale.items.length : 0,
+    Notes: sale.notes || '',
+  }))
 }
 
 export default function Sales() {
@@ -681,24 +696,13 @@ export default function Sales() {
     [selectedIds],
   )
 
-  const handleExportSelected = () => {
+  const handleExportSelected = useCallback(async () => {
     if (!selectedSales.length) return
-    const rows = selectedSales.map((sale) => ({
-      Receipt: sale.receipt_number || '',
-      Date: sale.created_at || '',
-      Status: sale.sale_status || 'completed',
-      Cashier: sale.cashier_name || '',
-      Payment_Method: sale.payment_method || '',
-      Branch: getSaleBranchLabel(sale) || '',
-      Customer: sale.customer_name || '',
-      Total_USD: sale.total_usd || 0,
-      Net_Total_USD: sale.net_total_usd ?? sale.total_usd ?? 0,
-      Items: Array.isArray(sale.items) ? sale.items.length : 0,
-      Notes: sale.notes || '',
-    }))
+    const { downloadCSV } = await import('../../utils/csv.ts')
+    const rows = buildSaleExportRows(selectedSales)
     downloadCSV(`sales-selected-${new Date().toISOString().slice(0, 10)}.csv`, rows)
     notify(`Exported ${selectedSales.length} selected sale${selectedSales.length === 1 ? '' : 's'}.`)
-  }
+  }, [notify, selectedSales])
 
   const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '') => {
     const statusRun = await runConcurrentTasks<SaleStatusEntry, number>(entries, async (entry: SaleStatusEntry) => {
@@ -760,20 +764,9 @@ export default function Sales() {
     }
   }
 
-  const exportVisibleSales = useCallback((rows: SaleRecord[] = filtered, filePrefix = 'sales-visible') => {
-    const exportRows = rows.map((sale) => ({
-      Receipt: sale.receipt_number || '',
-      Date: sale.created_at || '',
-      Status: sale.sale_status || 'completed',
-      Cashier: sale.cashier_name || '',
-      Payment_Method: sale.payment_method || '',
-      Branch: getSaleBranchLabel(sale) || '',
-      Customer: sale.customer_name || '',
-      Total_USD: sale.total_usd || 0,
-      Net_Total_USD: sale.net_total_usd ?? sale.total_usd ?? 0,
-      Items: Array.isArray(sale.items) ? sale.items.length : 0,
-      Notes: sale.notes || '',
-    }))
+  const exportVisibleSales = useCallback(async (rows: SaleRecord[] = filtered, filePrefix = 'sales-visible') => {
+    const { downloadCSV } = await import('../../utils/csv.ts')
+    const exportRows = buildSaleExportRows(rows)
     downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)
   }, [filtered])
 
