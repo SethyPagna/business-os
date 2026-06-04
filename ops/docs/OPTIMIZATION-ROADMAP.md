@@ -10769,3 +10769,50 @@ Move 774 status:
   continue with follow-up public catalog intent-driven portal-tools loading,
   Settings/Backup transport clusters, and Cloudflare tunnel/API latency
   reduction.
+
+Move 775 status:
+- Move 775 lazy-loads the public Google Translate controller. `CatalogPage.tsx`
+  no longer statically imports `portalTranslateController.ts`; it uses small
+  local helpers for stored target/cookie reads and hidden-widget cleanup, then
+  imports the controller only for external Google Translate setup or
+  user-triggered translate cleanup.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now rejects a
+  static `CatalogPage` import from `./portalTranslateController.ts`, requires
+  the dynamic import, and requires the focused `portal-translate-controller`
+  manual chunk to be declared before the generic catalog fallback. The focused
+  guard, frontend typecheck, source syntax check, full frontend utility suite,
+  production build, Docker release build/start, local and remote route traces,
+  public Cloudflare portal check, and post-live hygiene passed.
+- Bundle/runtime proof: production output now emits
+  `portal-translate-controller-DInGtqE9.js` at 5.51 KB gzip 2.16 KB, while
+  `portal-tools-Ct95pUNn.js` is down to 72.84 KB in Vite output. Docker release
+  image `business-os:v6.0.0-202606040909` is running with frontend hash
+  `85ba33f03f2cbcf2`; the standalone frontend build hash is
+  `f07235aa73cfa658`.
+- Actual-link proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-10-187Z.json` passed
+  public catalog, Dashboard, Products, and POS with zero failures/errors and
+  showed `portal-tools` but no `portal-translate-controller` request. Real
+  public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json` passed
+  `/public` in 3249 ms with 30 requests, one API request, 25 scripts, zero
+  failed requests, and zero console/page errors; the trace also showed
+  `portal-tools` but no `portal-translate-controller` request. Remote admin
+  trace `ops/runtime/reports/route-load-trace-2026-06-04T01-13-18-964Z.json`
+  passed Dashboard and Products with zero failures/errors. Public portal
+  Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-13-03-264Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 775: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable targets should
+  continue with language-pack/content-i18n splitting, Settings/Backup transport
+  clusters, and Cloudflare tunnel/API latency reduction.

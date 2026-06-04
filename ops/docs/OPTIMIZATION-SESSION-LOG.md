@@ -8,6 +8,29 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Public catalog translate-controller deferral
+  - route: `public_catalog`
+  - result: kept
+  - note: removed the static `portalTranslateController.ts` import from
+    `CatalogPage.tsx`, added small local preference helpers, and moved the
+    Google Translate controller behind a cached dynamic import. Ordinary public
+    first paint keeps first-party language/content behavior but does not fetch
+    the external translate controller.
+  - proof: Docker release `business-os:v6.0.0-202606040909` is running with
+    frontend hash `85ba33f03f2cbcf2`; production output emits
+    `portal-translate-controller-DInGtqE9.js` at 5.51 KB while `portal-tools`
+    is 72.84 KB in Vite output. Local trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T01-12-10-187Z.json`
+    and real public trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
+    passed with zero failures/errors and include no `portal-translate-controller`
+    first-load request. Public portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-13-03-264Z/report.json`
+    rendered 20 products with portal bootstrap 200, AI status 200 after
+    interaction, and zero relevant console/page errors. Post-live hygiene
+    passed with zero QA cleanup matches and relationship orphan checks passing
+    for 49 FK candidates.
+
 - Public catalog portal-tools chunk ordering
   - route: `public_catalog`
   - result: kept

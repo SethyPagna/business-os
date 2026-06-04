@@ -298,10 +298,12 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/CatalogPageContext.tsx')) {
       return 'catalog-context'
     }
+    if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
+      return 'portal-translate-controller'
+    }
     if (
       normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
       || normalized.includes('/src/components/catalog/portalContentI18n.ts')
-      || normalized.includes('/src/components/catalog/portalTranslateController.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
     ) {
       return 'portal-tools'

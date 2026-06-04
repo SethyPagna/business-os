@@ -2073,4 +2073,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   public portal check
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-56-07-251Z/report.json`,
   and post-live hygiene all passed with zero relevant failures/errors.
+- Move 505 records roadmap Move 775: lazy-load the public Google Translate
+  controller. `CatalogPage.tsx` now reads translate preference locally and
+  imports `portalTranslateController.ts` only for external Google Translate
+  setup or translate-switch cleanup. Vite emits
+  `portal-translate-controller-DInGtqE9.js` at 5.51 KB gzip 2.16 KB, while
+  `portal-tools-Ct95pUNn.js` drops to 72.84 KB in Vite output. Docker image
+  `business-os:v6.0.0-202606040909` served frontend hash
+  `85ba33f03f2cbcf2`. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-10-187Z.json` and
+  real public-host trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json` passed
+  with zero failures/errors and showed no first-load
+  `portal-translate-controller` request. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-13-18-964Z.json`,
+  public portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-13-03-264Z/report.json`,
+  and post-live hygiene all passed with zero relevant failures/errors.
 <!-- phase29-manual-notes:end -->

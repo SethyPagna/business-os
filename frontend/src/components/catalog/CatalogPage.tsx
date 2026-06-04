@@ -63,20 +63,6 @@ import {
   normalizePortalTranslations,
   stringifyPortalTranslations,
 } from './portalContentI18n.ts'
-import {
-  applyGoogleTranslateSelection,
-  ensurePortalTranslateScript,
-  ensurePortalTranslateWidgetHost,
-  hasPortalTranslatedMarker,
-  isPortalTranslateApplied,
-  normalizeTranslateTarget,
-  readStoredTranslateTarget,
-  removePortalTranslateWidgetHost,
-  requestPortalTranslateReload,
-  storePortalTranslatePreference,
-  writePortalTranslateTarget,
-  clearGoogleTranslateCookies,
-} from './portalTranslateController.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { CatalogPageProvider } from './CatalogPageContext'
@@ -85,6 +71,14 @@ const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
 const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const loadCatalogPreviewSurface = () => import('./CatalogPreviewSurface')
+type PortalTranslateControllerModule = typeof import('./portalTranslateController.ts')
+let portalTranslateControllerModulePromise: Promise<PortalTranslateControllerModule> | null = null
+function loadPortalTranslateControllerModule(): Promise<PortalTranslateControllerModule> {
+  if (!portalTranslateControllerModulePromise) {
+    portalTranslateControllerModulePromise = import('./portalTranslateController.ts')
+  }
+  return portalTranslateControllerModulePromise
+}
 
 const CatalogEditorSurface = lazy(loadCatalogEditorSurface)
 const CatalogSecondaryTabs = lazy(loadCatalogSecondaryTabs)
@@ -1156,6 +1150,24 @@ const ALL_PUBLIC_TRANSLATE_OPTIONS = [
   ...GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
 ]
 
+const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
+const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
+
+function canonicalPortalTranslateLanguage(value: unknown, fallback = 'en'): string {
+  const raw = String(value || fallback).trim()
+  if (!raw) return fallback
+  const lower = raw.toLowerCase()
+  if (lower === 'zh-cn') return 'zh-CN'
+  if (lower === 'zh-tw') return 'zh-TW'
+  return lower
+}
+
+function normalizeExternalTranslateTarget(value: unknown, sourceLang: unknown = 'en'): string {
+  const from = canonicalPortalTranslateLanguage(sourceLang)
+  const target = canonicalPortalTranslateLanguage(value, 'original')
+  return !target || target === from ? 'original' : target
+}
+
 function isFirstPartyTranslateTarget(value: unknown): boolean {
   const raw = String(value || '').trim()
   if (!raw) return false
@@ -1168,7 +1180,39 @@ function normalizePortalTranslateChoice(value: unknown, sourceLang = 'en'): stri
   const lower = raw.toLowerCase()
   const firstParty = FIRST_PARTY_TRANSLATE_BY_LOWER.get(lower) || normalizeFirstPartyPortalLanguage(raw)
   if (firstParty) return firstParty
-  return normalizeTranslateTarget(raw, sourceLang)
+  return normalizeExternalTranslateTarget(raw, sourceLang)
+}
+
+function readGoogleTranslateCookieTarget(sourceLang: unknown): string {
+  if (typeof document === 'undefined') return ''
+  const from = canonicalPortalTranslateLanguage(sourceLang)
+  const cookie = document.cookie
+    .split(';')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith('googtrans='))
+  if (!cookie) return ''
+  const cookieValue = decodeURIComponent(cookie.slice('googtrans='.length))
+  const parts = cookieValue.split('/').filter(Boolean)
+  const target = canonicalPortalTranslateLanguage(parts[1] || '', '')
+  return target && target !== from ? target : ''
+}
+
+function readStoredTranslateTargetLocal(sourceLang: unknown): string {
+  const cookieTarget = readGoogleTranslateCookieTarget(sourceLang)
+  if (cookieTarget) return cookieTarget
+  if (typeof window !== 'undefined') {
+    try {
+      const rawStored = canonicalPortalTranslateLanguage(window.localStorage?.getItem(PORTAL_TRANSLATE_STORAGE_KEY), 'original')
+      if (['original', 'en', 'km'].includes(rawStored)) return rawStored
+      return normalizeExternalTranslateTarget(rawStored, sourceLang)
+    } catch (_) {}
+  }
+  return 'original'
+}
+
+function removePortalTranslateWidgetHostLocal(): void {
+  if (typeof document === 'undefined') return
+  Array.from(document.querySelectorAll(`#${PORTAL_TRANSLATE_WIDGET_HOST_ID}`)).forEach((node) => node.remove())
 }
 
 function isDocumentVisible() {
@@ -1338,7 +1382,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [reviewSavingId, setReviewSavingId] = useState<string | number | null>(null)
   const [aiProviders, setAiProviders] = useState<LegacyCatalogRecord[]>([])
   const [translateReady, setTranslateReady] = useState(false)
-  const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTarget('en'))
+  const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTargetLocal('en'))
   const [translateApplyState, setTranslateApplyState] = useState('idle')
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
   const [productGalleryView, setProductGalleryView] = useState<GalleryViewState>({ open: false, title: '', items: [], index: 0 })
@@ -1645,9 +1689,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (typeof window === 'undefined') return
 
     if (isFirstPartyTranslateTarget(target)) {
+      const {
+        clearGoogleTranslateCookies,
+        hasPortalTranslatedMarker,
+        requestPortalTranslateReload,
+        storePortalTranslatePreference,
+      } = await loadPortalTranslateControllerModule()
       clearGoogleTranslateCookies()
       storePortalTranslatePreference(target)
-      removePortalTranslateWidgetHost()
+      removePortalTranslateWidgetHostLocal()
       setTranslateReady(true)
       setTranslateApplyState('pending')
       setTranslateApplyMessage(copy('translationApplied', 'Translation applied'))
@@ -1662,6 +1712,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       return
     }
 
+    const {
+      applyGoogleTranslateSelection,
+      isPortalTranslateApplied,
+      requestPortalTranslateReload,
+      writePortalTranslateTarget,
+    } = await loadPortalTranslateControllerModule()
     writePortalTranslateTarget(configuredPortalLanguage, target)
     setTranslateApplyState('pending')
     setTranslateApplyMessage(copy('externalTranslationPreparing', 'Preparing external translation...'))
@@ -2194,12 +2250,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled) return
-    setTranslateTarget(readStoredTranslateTarget(configuredPortalLanguage))
+    setTranslateTarget(readStoredTranslateTargetLocal(configuredPortalLanguage))
   }, [configuredPortalLanguage, previewConfig.translateWidgetEnabled, publicView])
 
   useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled || externalTranslateTarget) return undefined
-    removePortalTranslateWidgetHost()
+    removePortalTranslateWidgetHostLocal()
     setTranslateReady(true)
     setTranslateApplyState(normalizedTranslateTarget === 'original' ? 'idle' : 'applied')
     setTranslateApplyMessage(normalizedTranslateTarget === 'original'
@@ -2210,18 +2266,18 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     if (!publicView || !previewConfig.translateWidgetEnabled || !externalTranslateTarget || typeof window === 'undefined' || typeof document === 'undefined') {
-      removePortalTranslateWidgetHost()
+      removePortalTranslateWidgetHostLocal()
       return undefined
     }
-    const container = ensurePortalTranslateWidgetHost()
-    if (!container) return undefined
-
     let cancelled = false
+    let container: Element | HTMLDivElement | null = null
     const initWidget = () => {
       if (cancelled || !window.google?.translate?.TranslateElement) return
       try {
         setTranslateReady(false)
-        container.innerHTML = ''
+        const widgetContainer = container
+        if (!widgetContainer) return
+        widgetContainer.innerHTML = ''
         window.google.translate.TranslateElement(
           {
             pageLanguage: configuredPortalLanguage === 'km' ? 'km' : 'en',
@@ -2232,12 +2288,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
             autoDisplay: false,
             layout: window.google.translate.TranslateElement.InlineLayout?.SIMPLE,
           },
-          container.id,
+          widgetContainer.id,
         )
         let widgetChecks = 0
         const waitForWidget = () => {
           if (cancelled) return
-          const combo = container.querySelector('.goog-te-combo')
+          const combo = widgetContainer.querySelector('.goog-te-combo')
           if (combo) {
             setTranslateReady(true)
             setTranslateApplyMessage('')
@@ -2256,22 +2312,31 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       } catch (_) {}
     }
 
-    window.businessOsPortalTranslateInit = initWidget
+    async function setupExternalTranslateWidget() {
+      const {
+        ensurePortalTranslateScript,
+        ensurePortalTranslateWidgetHost,
+      } = await loadPortalTranslateControllerModule()
+      if (cancelled) return
+      container = ensurePortalTranslateWidgetHost()
+      if (!container) return
 
-    if (window.google?.translate?.TranslateElement) {
-      initWidget()
-      return () => {
-        cancelled = true
+      window.businessOsPortalTranslateInit = initWidget
+
+      if (window.google?.translate?.TranslateElement) {
+        initWidget()
+        return
       }
+
+      ensurePortalTranslateScript('businessOsPortalTranslateInit', () => {
+        if (!cancelled) {
+          setTranslateReady(false)
+          setTranslateApplyState('failed')
+          setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
+        }
+      })
     }
-
-    ensurePortalTranslateScript('businessOsPortalTranslateInit', () => {
-      if (!cancelled) {
-        setTranslateReady(false)
-        setTranslateApplyState('failed')
-        setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-      }
-    })
+    void setupExternalTranslateWidget()
 
     return () => {
       cancelled = true
@@ -2301,6 +2366,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (!publicView || !previewConfig.translateWidgetEnabled || !externalTranslateTarget || !translateReady) return undefined
     let cancelled = false
     const settleTimer = window.setTimeout(async () => {
+      const {
+        applyGoogleTranslateSelection,
+        isPortalTranslateApplied,
+        requestPortalTranslateReload,
+      } = await loadPortalTranslateControllerModule()
       const maxTries = 20
       for (let tries = 0; tries < maxTries; tries += 1) {
         if (cancelled) return

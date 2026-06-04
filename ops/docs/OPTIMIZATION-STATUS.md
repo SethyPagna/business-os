@@ -8,18 +8,18 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 774, make the existing public portal-tools
-  chunk rule reachable before the generic catalog route chunk so editor,
-  translation, and language helper code is split from the base catalog bundle
+- Latest completed move: Move 775, lazy-load the public Google Translate
+  controller so the customer portal does not fetch the external translation
+  controller chunk during ordinary first paint
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend hash from the most recent Docker-served live check: `06f2981d71deccc1`
+- latest verified frontend hash from the most recent Docker-served live check: `85ba33f03f2cbcf2`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `35279e24a1e87cfd`
+  `f07235aa73cfa658`
 
 Latest verified reports:
 
@@ -32,13 +32,13 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T00-56-07-251Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-13-03-264Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T00-55-40-207Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-10-187Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T00-56-22-899Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-13-18-964Z.json`
 - latest focused public-host route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T00-55-54-685Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
   `ops/runtime/docker-release/cloudflare-startup-warmup.json`
 - latest focused Products write live check:
@@ -72,14 +72,15 @@ Latest cleanup run:
 
 Current honest pockets:
 
-- Move 774 is now served by Docker release image
-  `business-os:v6.0.0-202606040854`. The public catalog manual chunk order now
-  places `portalLanguagePacks.ts`, `portalContentI18n.ts`,
-  `portalTranslateController.ts`, and `portalEditorUtils.ts` before the
-  generic catalog fallback, so the already-defined `portal-tools` chunk is
-  actually emitted. The local production assets split the base `catalog` chunk
-  to 78,587 bytes and `portal-tools` to 99,711 bytes, replacing the prior
-  single roughly 156 KB catalog route chunk from Move 773.
+- Move 775 is now served by Docker release image
+  `business-os:v6.0.0-202606040909`. `CatalogPage.tsx` no longer statically
+  imports `portalTranslateController.ts`; it reads stored translation
+  preference locally and lazy-loads the controller only for external Google
+  Translate setup or translate-switch cleanup. The build now emits
+  `portal-translate-controller-DInGtqE9.js` at 5.51 KB and `portal-tools` is
+  down to 72.84 KB in Vite output. Real public-host traces and the public
+  portal check confirm `portal-translate-controller` is absent from ordinary
+  first load while `/public` still renders 20 products with zero errors.
 - exhaustive desktop/mobile all-pages Playwright control audit passed on Docker
   build hash `7530b3876d0d1959` across 34 routes, with 518 visible controls
   discovered, 371 controls exercised, 147 intentionally skipped by stable
