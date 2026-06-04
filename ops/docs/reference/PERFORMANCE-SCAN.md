@@ -2130,4 +2130,27 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   the same routes with zero failures/errors; Settings loaded in 205 ms. Both
   traces show no normal-route `media-upload-utils`, `favicon-utils`,
   `settings-otp-modal`, or `backup-reset-tools` request.
+- Move 509 records roadmap Move 779: split Users action-only surfaces from
+  normal route load. `Users.tsx` lazy-loads `UserProfileModal`,
+  `UserDetailSheet`, and `PermissionEditor` only after user intent, while
+  `permissionDefinitions.ts`, `formatters.ts`, and `actionHistory.ts` are
+  pinned to small shared chunks so Rollup does not make the lazy action chunks
+  top-level route dependencies. Production output: `Users-CrxxMbTW.js` 34.74
+  KB gzip 8.33 KB, `user-profile-modal-fZZ1WHxv.js` 39.77 KB gzip 11.29 KB,
+  `user-detail-sheet-DrgkE-YZ.js` 3.83 KB gzip 1.50 KB,
+  `user-permission-editor-BDueo37y.js` 3.12 KB gzip 1.24 KB,
+  `user-permission-definitions-D4YB3sF5.js` 2.17 KB gzip 0.73 KB,
+  `shared-formatters-hlKiTBw1.js` 1.05 KB gzip 0.48 KB, and
+  `shared-action-history-C7vkR4lr.js` 11.26 KB gzip 3.77 KB. Artifact
+  inspection confirmed the three action chunks appear only inside runtime
+  `import()` calls. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-37-499Z.json` passed
+  Users, Settings, Backup, and Products with zero failures/errors; Users
+  loaded in 223 ms with 38 requests, three API requests, and 32 scripts, down
+  from the earlier stable 45 requests and 39 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-50-177Z.json` passed
+  the same routes with zero failures/errors; Users loaded in 267 ms. Public
+  portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-29-03-671Z/report.json`
+  and post-live hygiene passed with zero relevant failures/errors.
 <!-- phase29-manual-notes:end -->

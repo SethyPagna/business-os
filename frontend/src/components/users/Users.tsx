@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
@@ -7,9 +7,7 @@ import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import PermissionEditor, { PERMISSION_DEFS } from './PermissionEditor'
-import UserDetailSheet from './UserDetailSheet'
-import UserProfileModal from './UserProfileModal'
+import { PERMISSION_DEFS } from './permissionDefinitions'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
@@ -212,6 +210,9 @@ const INITIAL_ROLE_FORM: RoleFormState = {
   name: '',
   permissions: {},
 }
+const LazyPermissionEditor = lazy(async () => ({ default: (await import('./PermissionEditor')).default }))
+const LazyUserDetailSheet = lazy(async () => ({ default: (await import('./UserDetailSheet')).default }))
+const LazyUserProfileModal = lazy(async () => ({ default: (await import('./UserProfileModal')).default }))
 const USERS_LIST_TIMEOUT_MS = 8000
 const ROLES_LIST_TIMEOUT_MS = 8000
 const USER_MUTATION_TIMEOUT_MS = 12000
@@ -1041,18 +1042,20 @@ export default function Users() {
       )}
 
       {modal === 'userDetail' && selectedUser ? (
-        <UserDetailSheet
-          user={selectedUser}
-          roles={roles}
-          canManage={canManageTargetUser(selectedUser)}
-          t={t}
-          onEdit={() => openEditUser(selectedUser)}
-          onResetPw={() => {
-            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
-            setModal('resetPw')
-          }}
-          onClose={() => { setModal(null); setSelectedUser(null) }}
-        />
+        <Suspense fallback={null}>
+          <LazyUserDetailSheet
+            user={selectedUser}
+            roles={roles}
+            canManage={canManageTargetUser(selectedUser)}
+            t={t}
+            onEdit={() => openEditUser(selectedUser)}
+            onResetPw={() => {
+              setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+              setModal('resetPw')
+            }}
+            onClose={() => { setModal(null); setSelectedUser(null) }}
+          />
+        </Suspense>
       ) : null}
 
       {modal === 'editUser' ? (
@@ -1177,7 +1180,9 @@ export default function Users() {
             </div>
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('permissions', 'Permissions')}</label>
-              <PermissionEditor permissions={roleForm.permissions} onChange={(permissions) => setRoleForm((prev) => ({ ...prev, permissions }))} />
+              <Suspense fallback={<div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">{tr('loading', 'Loading...')}</div>}>
+                <LazyPermissionEditor permissions={roleForm.permissions} onChange={(permissions) => setRoleForm((prev) => ({ ...prev, permissions }))} />
+              </Suspense>
             </div>
             <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
               {tr('affected_users_logout_warning', 'Affected users must log out and back in for changes to take effect.')}
@@ -1190,7 +1195,11 @@ export default function Users() {
         </Modal>
       ) : null}
 
-      {profileOpen ? <UserProfileModal onClose={() => setProfileOpen(false)} /> : null}
+      {profileOpen ? (
+        <Suspense fallback={null}>
+          <LazyUserProfileModal onClose={() => setProfileOpen(false)} />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

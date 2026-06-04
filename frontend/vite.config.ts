@@ -126,6 +126,9 @@ const deferredModulePreloadPrefixes = [
   'assets/portal-tools-',
   'assets/backup-reset-tools-',
   'assets/settings-otp-modal-',
+  'assets/user-profile-modal-',
+  'assets/user-detail-sheet-',
+  'assets/user-permission-editor-',
   'assets/app-local-db-',
   'assets/vendor-dexie-',
   'assets/vendor-zxing-',
@@ -262,6 +265,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/mediaUploadState.ts')) {
       return 'media-upload-state'
     }
+    if (normalized.endsWith('/src/utils/formatters.ts')) {
+      return 'shared-formatters'
+    }
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/products/shared/')
@@ -271,6 +277,9 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.endsWith('/src/utils/actionGuards.ts')) {
       return 'action-guards'
+    }
+    if (normalized.endsWith('/src/utils/actionHistory.ts')) {
+      return 'shared-action-history'
     }
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
@@ -318,6 +327,10 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (normalized.includes('/src/components/utils-settings/ResetData.tsx')) return 'backup-reset-tools'
     if (normalized.includes('/src/components/utils-settings/OtpModal.tsx')) return 'settings-otp-modal'
+    if (normalized.includes('/src/components/users/permissionDefinitions.ts')) return 'user-permission-definitions'
+    if (normalized.includes('/src/components/users/UserProfileModal.tsx')) return 'user-profile-modal'
+    if (normalized.includes('/src/components/users/UserDetailSheet.tsx')) return 'user-detail-sheet'
+    if (normalized.includes('/src/components/users/PermissionEditor.tsx')) return 'user-permission-editor'
     if (normalized.includes('/src/utils/favicon')) {
       return 'favicon-utils'
     }

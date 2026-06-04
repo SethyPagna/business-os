@@ -2,15 +2,18 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 
 const source = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
+const definitions = fs.readFileSync(new URL('../src/components/users/permissionDefinitions.ts', import.meta.url), 'utf8')
 const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8'))
 const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8'))
 
 assert.match(source, /PERMISSION_SECTIONS/)
-assert.match(source, /backup_restore/)
-assert.match(source, /drive_credentials/)
-assert.match(source, /business_identity/)
+assert.match(source, /from '\.\/permissionDefinitions'/)
 assert.match(source, /permission_sensitive_critical/)
 assert.match(source, /section\.permissions\.map/)
+assert.match(definitions, /backup_restore/)
+assert.match(definitions, /drive_credentials/)
+assert.match(definitions, /business_identity/)
+assert.match(definitions, /destructive_delete/)
 
 const requiredKeys = [
   'perm_section_admin',

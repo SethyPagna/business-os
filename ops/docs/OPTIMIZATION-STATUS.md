@@ -8,9 +8,9 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 778, defer Settings media preview helpers so
-  normal Settings route load fetches only small upload state logic, while
-  favicon canvas work and cache-busted upload paths load after idle/intent
+- Latest completed move: Move 779, defer Users action-only profile/detail/
+  permission surfaces and keep shared date/history/permission metadata in
+  small non-modal chunks so normal Users route load avoids those modal bundles
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `8517c0bf4c9e5cd9`
+  `215128ce8099410f`
 
 Latest verified reports:
 
@@ -32,11 +32,11 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-01-45-667Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-29-03-671Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-353Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-37-499Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-931Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-50-177Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
@@ -72,6 +72,33 @@ Latest cleanup run:
 
 Current honest pockets:
 
+- Move 779 is now served by Docker release image
+  `business-os:v6.0.0-202606041026`. `Users.tsx` lazy-loads
+  `UserProfileModal`, `UserDetailSheet`, and `PermissionEditor` behind
+  Suspense intent boundaries. Shared helpers now live in focused chunks:
+  `shared-formatters-hlKiTBw1.js` at 1.05 KB gzip 0.48 KB,
+  `user-permission-definitions-D4YB3sF5.js` at 2.17 KB gzip 0.73 KB, and
+  `shared-action-history-C7vkR4lr.js` at 11.26 KB gzip 3.77 KB, so those
+  helpers are no longer owned by the lazy modal chunks. Standalone production
+  output emits `Users-CrxxMbTW.js` at 34.74 KB gzip 8.33 KB,
+  `user-profile-modal-fZZ1WHxv.js` at 39.77 KB gzip 11.29 KB,
+  `user-detail-sheet-DrgkE-YZ.js` at 3.83 KB gzip 1.50 KB, and
+  `user-permission-editor-BDueo37y.js` at 3.12 KB gzip 1.24 KB. Artifact
+  inspection confirms the three action chunks appear only in runtime
+  `import()` calls, not top-level imports. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-37-499Z.json` passed
+  Users, Settings, Backup, and Products with zero failed requests and zero
+  console/page errors; Users loaded in 223 ms with 38 requests, three API
+  requests, and 32 scripts, down from the earlier stable 45 requests and 39
+  scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-50-177Z.json` passed
+  the same routes with zero failures/errors; Users loaded in 267 ms. Public
+  portal Cloudflare check rendered 20 products, confirmed portal bootstrap
+  200, confirmed AI status 200 after interaction, and recorded zero failed
+  responses, zero relevant console messages, and zero page errors. Post-live
+  hygiene passed with loaded dataset status, zero broad QA/smoke/action-history
+  cleanup matches, zero generated integrity matches, and relationship orphan
+  checks passing for 49 FK candidates.
 - Move 778 is now served by Docker release image
   `business-os:v6.0.0-202606040958`. `Settings.tsx` no longer statically
   imports the full `mediaUpload.ts` helper or the favicon canvas helper during

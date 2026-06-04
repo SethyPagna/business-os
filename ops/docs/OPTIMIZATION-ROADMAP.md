@@ -10956,3 +10956,57 @@ Move 778 status:
   51 completed organization moves; Phase 28 remains active with the R2 prune
   follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
   TypeScript, runtime, and performance sweeps.
+
+Move 779 status:
+- Move 779 trims normal Users route startup by lazy-loading action-only
+  profile, detail, and role permission editor surfaces. `Users.tsx` now loads
+  `UserProfileModal`, `UserDetailSheet`, and `PermissionEditor` through
+  Suspense only after user intent.
+- Shared route helpers were split away from those action chunks:
+  `permissionDefinitions.ts` owns the lightweight permission catalog,
+  `formatters.ts` owns date formatting, and `actionHistory.ts` is pinned to
+  the existing `shared-action-history` chunk. This prevents Rollup from making
+  the profile/detail/editor chunks top-level dependencies of the Users route.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` rejects
+  static Users imports of the three action surfaces, requires the async lazy
+  boundaries, requires focused Vite chunks for the action surfaces and helper
+  modules, and keeps the action chunks out of eager modulepreload.
+  `frontend/tests/permissionEditor.test.ts` verifies the editor reads the
+  shared permission catalog and preserves sensitive permission definitions.
+- Verification proof: focused performance guard, frontend typecheck, source
+  syntax check, full frontend utility suite, production build, Docker release
+  build/start, local and remote route traces, public Cloudflare portal check,
+  Docker health/container inspection, and post-live hygiene passed.
+- Bundle/runtime proof: standalone production output emits
+  `Users-CrxxMbTW.js` at 34.74 KB gzip 8.33 KB,
+  `user-profile-modal-fZZ1WHxv.js` at 39.77 KB gzip 11.29 KB,
+  `user-detail-sheet-DrgkE-YZ.js` at 3.83 KB gzip 1.50 KB,
+  `user-permission-editor-BDueo37y.js` at 3.12 KB gzip 1.24 KB,
+  `user-permission-definitions-D4YB3sF5.js` at 2.17 KB gzip 0.73 KB,
+  `shared-formatters-hlKiTBw1.js` at 1.05 KB gzip 0.48 KB, and
+  `shared-action-history-C7vkR4lr.js` at 11.26 KB gzip 3.77 KB. Docker
+  release image `business-os:v6.0.0-202606041026` is running; local health
+  reports source hash `5d419c030bf25d50`, and the standalone frontend build
+  hash is `215128ce8099410f`.
+- Actual-link proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-37-499Z.json` passed
+  Users, Settings, Backup, and Products with zero failed requests and zero
+  console/page errors. Users loaded in 223 ms with 38 requests, three API
+  requests, and 32 scripts, improving the earlier stable Users baseline of 45
+  requests and 39 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-50-177Z.json` passed
+  the same routes with zero failures/errors; Users loaded in 267 ms. Public
+  portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-29-03-671Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 779: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps.

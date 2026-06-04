@@ -1,5 +1,5 @@
 import { fmtDate } from '../../utils/formatters'
-import { PERMISSION_DEFS as PERMISSION_DEFS_SOURCE } from './PermissionEditor'
+import { PERMISSION_DEFS as PERMISSION_DEFS_SOURCE } from './permissionDefinitions'
 
 type TranslateFunction = (key: string) => string
 

@@ -74,6 +74,8 @@ const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePic
 const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.tsx', import.meta.url), 'utf8')
 const usersPage = fs.readFileSync(new URL('../src/components/users/Users.tsx', import.meta.url), 'utf8')
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
+const userPermissionEditor = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
+const userDetailSheet = fs.readFileSync(new URL('../src/components/users/UserDetailSheet.tsx', import.meta.url), 'utf8')
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
@@ -268,6 +270,9 @@ assert.match(viteConfig, /if \(authLoginIconNames\.has\(iconName\)\) return 'aut
 assert.match(viteConfig, /'assets\/catalog-',[\s\S]*'assets\/portal-tools-',/, 'catalog and public portal chunks should be excluded from eager modulepreload')
 assert.match(viteConfig, /'assets\/backup-reset-tools-',/, 'Backup reset tools should not be eagerly modulepreloaded into the normal Backup route')
 assert.match(viteConfig, /'assets\/settings-otp-modal-',/, 'Settings OTP modal should not be eagerly modulepreloaded into the normal Settings route')
+assert.match(viteConfig, /'assets\/user-profile-modal-',/, 'Users profile modal should not be eagerly modulepreloaded into the normal Users route')
+assert.match(viteConfig, /'assets\/user-detail-sheet-',/, 'Users detail sheet should not be eagerly modulepreloaded into the normal Users route')
+assert.match(viteConfig, /'assets\/user-permission-editor-',/, 'Users role permission editor should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*return 'product-shared'/, 'product image primitives shared by Products, POS, and catalog should not be owned by the heavy catalog route chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/actionGuards\.ts'\)\) \{[\s\S]*return 'action-guards'/, 'shared synchronous action guards should not be owned by the heavy catalog route chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/scriptTypography\.ts'\)\) \{[\s\S]*return 'script-typography'/, 'shared Khmer typography helpers should not be owned by the public catalog preview chunk')
@@ -288,6 +293,12 @@ assert.match(viteConfig, /'assets\/catalog-preview-',[\s\S]*'assets\/catalog-pro
 assert.match(viteConfig, /catalog\/catalogUi\.tsx'[\s\S]*return 'catalog-ui'[\s\S]*catalog\/portalCatalogDisplay\.ts'[\s\S]*return 'catalog-display'[\s\S]*CatalogPageContext\.tsx'[\s\S]*return 'catalog-context'[\s\S]*portalTranslateController\.ts'[\s\S]*return 'portal-translate-controller'[\s\S]*portalLanguagePacks\.ts'[\s\S]*portalEditorUtils\.ts'[\s\S]*return 'portal-tools'[\s\S]*components\/catalog\/'\)\) return 'catalog'/, 'small catalog UI/display/context helpers, portal translate controller, and portal tools should be split before the generic catalog route chunk')
 assert.match(viteConfig, /ResetData\.tsx'\)\) return 'backup-reset-tools'/, 'destructive Backup reset panels should have an action-only chunk')
 assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Settings OTP setup/disable modal should have an action-only chunk')
+assert.match(viteConfig, /formatters\.ts'\)\) \{[\s\S]*return 'shared-formatters'/, 'shared date/number formatters should not be owned by a lazy user detail chunk')
+assert.match(viteConfig, /permissionDefinitions\.ts'\)\) return 'user-permission-definitions'/, 'lightweight user permission metadata should not be owned by the lazy permission editor chunk')
+assert.match(viteConfig, /actionHistory\.ts'\)\) \{[\s\S]*return 'shared-action-history'/, 'action-history hook should not be owned by the lazy user profile modal chunk')
+assert.match(viteConfig, /UserProfileModal\.tsx'\)\) return 'user-profile-modal'/, 'Users profile modal should have an action-only chunk')
+assert.match(viteConfig, /UserDetailSheet\.tsx'\)\) return 'user-detail-sheet'/, 'Users detail sheet should have an action-only chunk')
+assert.match(viteConfig, /PermissionEditor\.tsx'\)\) return 'user-permission-editor'/, 'Users role permission editor should have an action-only chunk')
 assert.doesNotMatch(catalogPage, /from '\.\/portalTranslateController\.ts'/, 'public catalog should not statically import the Google Translate controller during route startup')
 assert.match(catalogPage, /import\('\.\/portalTranslateController\.ts'\)/, 'public catalog should load the Google Translate controller only from external translation intent')
 assert.doesNotMatch(catalogPage, /import \{ createCircularFaviconDataUrl \} from '\.\.\/\.\.\/utils\/favicon'/, 'public catalog should not statically import the canvas favicon helper during route startup')
@@ -1703,6 +1714,46 @@ assert.doesNotMatch(
   usersPage,
   /if \(!loadedOnceRef\.current\) \{[\s\S]{0,160}setUsers\(\[\]\)[\s\S]{0,120}loadedOnceRef\.current = true/,
   'users list should not cache a failed first load as an empty completed load',
+)
+assert.doesNotMatch(
+  usersPage,
+  /import (PermissionEditor|UserDetailSheet|UserProfileModal)/,
+  'Users route should not statically import action-only profile, detail, or permission editor surfaces',
+)
+assert.match(
+  usersPage,
+  /import \{ PERMISSION_DEFS \} from '\.\/permissionDefinitions'/,
+  'Users route should keep lightweight permission labels without pulling in the permission editor UI',
+)
+assert.match(
+  usersPage,
+  /const LazyPermissionEditor = lazy\(async \(\) => \(\{ default: \(await import\('\.\/PermissionEditor'\)\)\.default \}\)\)[\s\S]*const LazyUserDetailSheet = lazy\(async \(\) => \(\{ default: \(await import\('\.\/UserDetailSheet'\)\)\.default \}\)\)[\s\S]*const LazyUserProfileModal = lazy\(async \(\) => \(\{ default: \(await import\('\.\/UserProfileModal'\)\)\.default \}\)\)/,
+  'Users action-only surfaces should lazy-load profile, detail, and permission editor UI',
+)
+assert.match(
+  usersPage,
+  /<Suspense fallback=\{null\}>\s*<LazyUserDetailSheet[\s\S]*<\/Suspense>/,
+  'Users detail sheet should still render behind a Suspense boundary when opened',
+)
+assert.match(
+  usersPage,
+  /<Suspense fallback=\{<div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">\{tr\('loading', 'Loading\.\.\.'\)\}<\/div>\}>\s*<LazyPermissionEditor/,
+  'Users role permission editor should show a bounded fallback while its action-only chunk loads',
+)
+assert.match(
+  usersPage,
+  /<Suspense fallback=\{null\}>\s*<LazyUserProfileModal onClose=\{\(\) => setProfileOpen\(false\)\} \/>/,
+  'Users profile modal should still render when opened',
+)
+assert.match(
+  userPermissionEditor,
+  /from '\.\/permissionDefinitions'/,
+  'PermissionEditor should read shared permission metadata from the lightweight definition module',
+)
+assert.match(
+  userDetailSheet,
+  /from '\.\/permissionDefinitions'/,
+  'UserDetailSheet should read shared permission metadata without importing the permission editor',
 )
 assert.match(
   userProfileModal,

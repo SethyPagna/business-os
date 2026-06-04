@@ -3443,6 +3443,57 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+## 2026-06-04 - Move 779 Users Action Surface Deferral
+
+- change: lazy-load Users profile/detail/permission editor surfaces and split
+  shared helper ownership away from those action-only chunks
+- affected files:
+  `frontend/src/components/users/Users.tsx`,
+  `frontend/src/components/users/UserDetailSheet.tsx`,
+  `frontend/src/components/users/PermissionEditor.tsx`,
+  `frontend/src/components/users/permissionDefinitions.ts`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `frontend/tests/permissionEditor.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: admin Users route, profile modal, user detail sheet,
+  role permission editor, shared action history, and actual admin/public
+  Cloudflare links
+- keeper or rollback: keeper; the normal Users list and role summary keep
+  their visible data, while profile/detail/permission editor UI loads only
+  after the user opens those actions. Helper chunks remain small and shared.
+- bundle proof:
+  standalone output emits `Users-CrxxMbTW.js` at 34.74 KB gzip 8.33 KB,
+  `user-profile-modal-fZZ1WHxv.js` at 39.77 KB gzip 11.29 KB,
+  `user-detail-sheet-DrgkE-YZ.js` at 3.83 KB gzip 1.50 KB,
+  `user-permission-editor-BDueo37y.js` at 3.12 KB gzip 1.24 KB,
+  `user-permission-definitions-D4YB3sF5.js` at 2.17 KB gzip 0.73 KB,
+  `shared-formatters-hlKiTBw1.js` at 1.05 KB gzip 0.48 KB, and
+  `shared-action-history-C7vkR4lr.js` at 11.26 KB gzip 3.77 KB. Artifact
+  inspection confirmed the action chunks appear only inside runtime
+  `import()` calls, not as top-level imports.
+- actual link proof:
+  local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-37-499Z.json` passed
+  Users, Settings, Backup, and Products with zero failed requests and zero
+  console/page errors. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-28-50-177Z.json` passed
+  the same routes with zero failures/errors. Users now loads with 38 requests
+  and 32 scripts instead of the earlier stable 45 requests and 39 scripts.
+  Public portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-29-03-671Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200
+  after interaction, and recorded zero failed responses, zero relevant console
+  messages, and zero page errors.
+- post-live hygiene:
+  `npm.cmd --prefix ops run post-live-hygiene` passed with loaded dataset,
+  zero broad QA cleanup matches, zero smoke/action-history cleanup matches,
+  zero generated integrity matches, and relationship orphan checks passing for
+  49 FK candidates.
+
 Move 777 status:
 - Move 777 lazy-loads the Settings 2FA OTP modal. `Settings.tsx` now imports
   only the `OtpModalProps` type and loads the runtime modal through a React
