@@ -17,6 +17,8 @@ import { useActionHistory } from '../../utils/actionHistory.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { getSales as fetchSales } from '../../api/salesTransport.ts'
+import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -112,8 +114,6 @@ interface SaleStatusEntry {
 }
 
 interface SalesApi {
-  getSales: (params: Record<string, unknown>) => Promise<unknown>
-  getUsers: () => Promise<unknown>
   updateSaleStatus: (saleId: number | string, status: string, notes?: string) => Promise<unknown>
   attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
 }
@@ -321,7 +321,7 @@ export default function Sales() {
           ...(debouncedSearch ? { search: debouncedSearch } : {}),
           ...salesDateRange,
         }
-        const result = await withLoaderTimeout(() => getSalesApi().getSales(params), 'Sales', 20000)
+        const result = await withLoaderTimeout(() => fetchSales(params), 'Sales', 20000)
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const rows = normalizeSaleRows(result)
         if (rows.length || Array.isArray(result)) {
@@ -390,7 +390,7 @@ export default function Sales() {
   useEffect(() => {
     if (!isActive || !isAdmin || !salesFiltersOpen || userOptionsLoaded) return
     let cancelled = false
-    withLoaderTimeout(() => getSalesApi().getUsers(), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS)
+    withLoaderTimeout(() => fetchUsers(), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS)
       .then((rows) => {
         if (cancelled) return
         setUserOptions(normalizeUserOptions(rows))

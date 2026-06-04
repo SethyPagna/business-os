@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 780 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 781 in this file.
 
 ## Goal
 
@@ -7170,6 +7170,30 @@ Decision rule:
     `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-59-23-699Z/report.json`,
     post-live hygiene, and `git diff --check` passed. Sales and Returns both
     reported `csv-utils-present=False` during startup.
+
+781. Keep Sales/Returns focused reads out of the broad API registry. Done:
+    `Sales.tsx` now uses `salesTransport.getSales()` and
+    `userReadTransport.getUsers()` for normal route-start reads, and
+    `Returns.tsx` now uses `returnsTransport.getReturns()` for normal list
+    startup. `frontend/vite.config.ts` now groups `http.ts`, `query.ts`, and
+    `actorQuery.ts` into `api-http-core`, so focused read transports no longer
+    inherit `app-api-methods` through shared HTTP/query helpers. This is a
+    Phase 29 ownership/performance move, not a folder move or language
+    conversion: the measured issue was route-start chunk ownership. Proof:
+    focused performance guard, frontend typecheck, source/JSX check, full
+    frontend utility suite, production build, emitted chunk inspection, Docker
+    release image `business-os:v6.0.0-202606041117`, local route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T03-19-53-714Z.json`,
+    remote admin trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`,
+    public Cloudflare portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T03-19-53-181Z/report.json`,
+    post-live hygiene, storage prune, generated-artifact cleanup, Phase 29
+    audit, and `git diff --check` passed. Sales and Returns both reported
+    `app-api-methods-present=False` and `csv-utils-present=False` during
+    startup. Generated cleanup removed 415,957,346 bytes from regenerable
+    `release`, `frontend/dist`, and `output` folders after the running Docker
+    image was already built.
 
 ## Safety Gates
 

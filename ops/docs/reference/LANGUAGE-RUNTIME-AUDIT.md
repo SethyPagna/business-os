@@ -1,11 +1,11 @@
 # Language Runtime Audit
 
-Generated: 2026-06-01T16:15:34.081Z
+Generated: 2026-06-04T03:27:21.432Z
 
 ## Summary
 
 - Mode: non-mutating audit.
-- Files scanned: 494
+- Files scanned: 507
 - Scan roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/config`, `run`
 - Default frontend runtime: React/TypeScript source with Vite-emitted browser JavaScript
 - Default backend runtime: Node.js
@@ -22,8 +22,8 @@ Generated: 2026-06-01T16:15:34.081Z
 
 | Language | Files |
 | --- | --- |
-| TypeScript | 355 |
-| React TSX | 107 |
+| TypeScript | 367 |
+| React TSX | 108 |
 | Windows batch | 16 |
 | PowerShell | 8 |
 | Shell | 3 |
@@ -35,14 +35,14 @@ Generated: 2026-06-01T16:15:34.081Z
 
 | Track | File | Lines | Score | Rule |
 | --- | --- | --- | --- | --- |
-| Web Worker extraction | frontend/src/api/importJobsTransport.ts | 236 | 6 | Browser CPU/file parsing/media work candidate. |
+| Web Worker extraction | frontend/src/api/importJobsTransport.ts | 257 | 6 | Browser CPU/file parsing/media work candidate. |
 
 ## First Executable Slices
 
 | Track | First candidate | Lines | Score | Required proof |
 | --- | --- | --- | --- | --- |
 | TypeScript utility conversion | none | 0 | 0 | `npm.cmd --prefix frontend run typecheck`<br>`npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`rg old import path after rename or extension change` |
-| Web Worker extraction | `frontend/src/api/importJobsTransport.ts` | 236 | 6 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
+| Web Worker extraction | `frontend/src/api/importJobsTransport.ts` | 257 | 6 | `npm.cmd --prefix frontend run test:utils`<br>`npm.cmd --prefix frontend run build`<br>`focused Playwright flow for the affected import/scanner/media action`<br>`fallback path when Worker construction fails` |
 | SQL/DuckDB/data-path optimization | none | 0 | 0 | `npm.cmd --prefix backend run test:utils`<br>`node ops\scripts\backend\schema-audit.ts`<br>`backup/restore or count-diff rehearsal for changed data paths`<br>`before/after timing on the same fixture` |
 
 ## Verification Matrix

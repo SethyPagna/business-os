@@ -11062,3 +11062,72 @@ Move 780 status:
   51 completed organization moves; Phase 28 remains active with the R2 prune
   follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
   TypeScript, runtime, and performance sweeps.
+
+Move 781 status:
+- Move 781 narrows Sales/Returns normal route-start reads and splits the
+  shared HTTP/query core. `Sales.tsx` now calls focused
+  `salesTransport.getSales()` and `userReadTransport.getUsers()` for read
+  startup, while preserving status and membership mutations on the existing
+  action API. `Returns.tsx` now calls focused `returnsTransport.getReturns()`
+  for list startup, while preserving detail/snapshot/restore actions on the
+  existing action API.
+- Vite now assigns `http.ts`, `query.ts`, and `actorQuery.ts` to
+  `api-http-core`. This prevents focused read transports from inheriting the
+  broad `app-api-methods` registry through shared query/actor helpers. The
+  remaining `app-api` chunk is reduced to runtime connection helpers rather
+  than method transport ownership.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now requires
+  focused Sales, Returns, and user read transports, rejects
+  `getSalesApi().getSales`, `getSalesApi().getUsers`, and
+  `getReturnApi().getReturns` on route-start paths, and verifies the
+  `api-http-core` manual chunk rule.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  check:jsx`, `npm.cmd --prefix frontend run test:utils`, production build,
+  emitted chunk inspection, `git diff --check`, Docker release build/start,
+  Docker health/container inspection, local and remote admin route traces,
+  public Cloudflare portal check, post-live hygiene, and storage prune passed.
+- Bundle/runtime proof: standalone output emits `api-http-core-BRrzV8AY.js` at
+  20.79 KB gzip 7.34 KB, `app-api-CJUW8tAi.js` at 4.41 KB gzip 1.72 KB,
+  `sales-read-api-BBx8NexI.js` at 0.36 KB gzip 0.28 KB,
+  `user-read-api-BIsGsdp_.js` at 0.93 KB gzip 0.46 KB,
+  `returns-api-CgYUCNqr.js` at 1.03 KB gzip 0.52 KB,
+  `Sales--kY2zhyr.js` at 35.98 KB gzip 10.00 KB, and
+  `Returns-D-9fvGHO.js` at 23.23 KB gzip 7.76 KB. Docker release image
+  `business-os:v6.0.0-202606041117` is running; health reports source hash
+  `5d419c030bf25d50` and frontend build hash `c4818ba473b05528`.
+- Actual-link proof: local Docker route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-19-53-714Z.json` passed
+  Sales in 399 ms with 31 requests and 26 scripts and Returns in 464 ms with
+  30 requests and 25 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json` passed
+  Sales in 240 ms with 31 requests and 26 scripts and Returns in 228 ms with
+  30 requests and 25 scripts. Script-list inspection confirmed
+  `app-api-methods-present=False` and `csv-utils-present=False` for both
+  routes in both local and remote traces, with zero failed requests and zero
+  console/page errors. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T03-19-53-181Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200 and AI status 200 after
+  interaction, and recorded zero failed responses, zero relevant console
+  messages, and zero page errors.
+- Cleanup proof: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates. `npm.cmd --prefix ops run
+  prune-storage` removed 30,592,188 bytes of old runtime reports, 4,829,716
+  bytes from one old local Docker-release backup package, and 38.19 MB of
+  Docker builder cache while keeping uploads, secrets, env files, newest local
+  backup packages, Docker images, Docker volumes, and latest R2 backup
+  `datasync-2026-06-03T21-19-31-003Z`. Generated-artifact cleanup removed an
+  additional 415,957,346 bytes from regenerable `release`, `frontend/dist`,
+  and `output` folders after the Docker image was already built and running;
+  the follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures.
+- Current plan position after Move 781: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: continue
+  narrowing action-only Sales/Returns write/detail paths and broad registry
+  consumers only where live traces show a startup request, while preserving
+  rollback through Docker release and post-live hygiene.

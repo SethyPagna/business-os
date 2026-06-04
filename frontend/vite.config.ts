@@ -221,6 +221,13 @@ function manualChunks(id: string): string | undefined {
   if (!id.includes('node_modules')) {
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
     if (normalized.endsWith('/src/lang/km.json')) return 'lang-km'
+    if (
+      normalized.endsWith('/src/api/http.ts')
+      || normalized.endsWith('/src/api/query.ts')
+      || normalized.endsWith('/src/api/actorQuery.ts')
+    ) {
+      return 'api-http-core'
+    }
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
     if (normalized.endsWith('/src/api/contactWriteTransport.ts')) return 'contact-write-api'
@@ -363,11 +370,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/PageHeader.tsx')) return 'shared-page-header'
     if (normalized.includes('/src/components/shared/Modal.tsx')) return 'shared-modal'
     if (
-      normalized.endsWith('/src/api/http.ts')
-      || normalized.endsWith('/src/api/websocket.ts')
+      normalized.endsWith('/src/api/websocket.ts')
       || normalized.endsWith('/src/api/syncRuntime.ts')
       || normalized.endsWith('/src/api/dashboardTransport.ts')
-      || normalized.endsWith('/src/api/query.ts')
     ) {
       return 'app-api'
     }

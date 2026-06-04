@@ -251,8 +251,13 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/appBootstrapTranspo
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\)\) return 'app-auth'/, 'Vite should keep sign-in auth helpers out of the full app-api-methods registry chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/systemRuntime\.ts'\)\) return 'app-system'/, 'Vite should keep Server page diagnostics transport out of app-api-methods and local DB chunks')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/portalTransport\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/portalHttp\.ts'\)[\s\S]*return 'app-portal'/, 'Vite should keep public portal transport out of app-api-methods and local DB chunks')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)[\s\S]*return 'app-api'/, 'Vite should keep Dashboard summary transport in the startup API chunk instead of app-api-methods')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/http\.ts'\)[\s\S]*return 'app-api'[\s\S]*if \(normalized\.includes\('\/src\/api\/'\)\) return 'app-api-methods'/, 'Vite should keep only startup API files in app-api and move method transports behind the lazy methods chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'/, 'Vite should keep Dashboard summary transport in a focused read chunk instead of app-api-methods')
+assert.match(
+  viteConfig,
+  /normalized\.endsWith\('\/src\/api\/http\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/query\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/actorQuery\.ts'\)[\s\S]*return 'api-http-core'/,
+  'focused read transports should share a tiny HTTP/query core instead of inheriting app-api-methods',
+)
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/websocket\.ts'\)[\s\S]*return 'app-api'[\s\S]*if \(normalized\.includes\('\/src\/api\/'\)\) return 'app-api-methods'/, 'Vite should keep only runtime connection files in app-api and move method transports behind the lazy methods chunk')
 assert.match(viteConfig, /'assets\/app-bootstrap-',[\s\S]*'assets\/app-auth-',/, 'bootstrap and auth chunks should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/app-auth-',[\s\S]*'assets\/app-portal-',/, 'public portal transport should also be excluded from initial modulepreload')
 assert.match(viteConfig, /'assets\/app-portal-',[\s\S]*'assets\/app-system-',/, 'server diagnostics transport should not be eagerly modulepreloaded into the initial shell')
@@ -920,12 +925,27 @@ assert.match(
 )
 assert.match(
   sales,
-  /withLoaderTimeout\(\(\) => getSalesApi\(\)\.getUsers\(\), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS\)/,
-  'sales user filter options should timeout slow user reads',
+  /import \{ getSales as fetchSales \} from '\.\.\/\.\.\/api\/salesTransport\.ts'[\s\S]*import \{ getUsers as fetchUsers \} from '\.\.\/\.\.\/api\/userReadTransport\.ts'/,
+  'sales route-start reads should use focused sales and user transports instead of app-api-methods',
+)
+assert.match(
+  sales,
+  /withLoaderTimeout\(\(\) => fetchSales\(params\), 'Sales', 20000\)/,
+  'sales list should timeout slow reads through the focused sales transport',
+)
+assert.match(
+  sales,
+  /withLoaderTimeout\(\(\) => fetchUsers\(\), 'Sales user filters', SALES_USER_OPTIONS_TIMEOUT_MS\)/,
+  'sales user filter options should timeout slow user reads through the focused user transport',
 )
 assert.doesNotMatch(
   sales,
-  /withLoaderTimeout\(\(\) => getSalesApi\(\)\.getUsers\(\), 'Sales user filters'[\s\S]{0,260}catch\(\(\) => \{[\s\S]{0,180}setUserOptions\(\[\]\)/,
+  /getSalesApi\(\)\.(?:getSales|getUsers)\(/,
+  'sales route-start reads should not wake the broad app-api-methods registry',
+)
+assert.doesNotMatch(
+  sales,
+  /withLoaderTimeout\(\(\) => fetchUsers\(\), 'Sales user filters'[\s\S]{0,260}catch\(\(\) => \{[\s\S]{0,180}setUserOptions\(\[\]\)/,
   'sales user filter options should keep previously loaded options on refresh failure',
 )
 assert.match(
@@ -1425,8 +1445,18 @@ assert.match(
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\(\) => getReturnApi\(\)\.getReturns\(params\), 'Returns', RETURNS_LOAD_TIMEOUT_MS\)/,
-  'returns list should timeout slow return reads with the explicit constant',
+  /import \{ getReturns as fetchReturns \} from '\.\.\/\.\.\/api\/returnsTransport\.ts'/,
+  'returns route-start list reads should use the focused returns transport instead of app-api-methods',
+)
+assert.match(
+  returns,
+  /withLoaderTimeout\(\(\) => fetchReturns\(params\), 'Returns', RETURNS_LOAD_TIMEOUT_MS\)/,
+  'returns list should timeout slow return reads with the focused transport and explicit constant',
+)
+assert.doesNotMatch(
+  returns,
+  /getReturnApi\(\)\.getReturns\(/,
+  'returns route-start reads should not wake the broad app-api-methods registry',
 )
 assert.match(
   returns,

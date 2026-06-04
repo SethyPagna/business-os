@@ -8,9 +8,10 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 780, defer Sales/Returns CSV export, CSV
-  template, and browser file-dialog utilities until explicit export/template
-  intent so normal route startup no longer requests `csv-utils`
+- Latest completed move: Move 781, move Sales/Returns route-start reads to
+  focused transports and split shared HTTP/query helpers into `api-http-core`
+  so normal Sales/Returns startup no longer requests `app-api-methods` or
+  `csv-utils`
 
 ## Current Baseline
 
@@ -19,7 +20,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `547935922e3f9ab5`
+  `c4818ba473b05528`
 
 Latest verified reports:
 
@@ -32,11 +33,11 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-59-23-699Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T03-19-53-181Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-01-255Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-19-53-714Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T02-59-25-149Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
@@ -64,14 +65,62 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- `npm.cmd --prefix ops run prune-storage` in the Move 752 verification pass
-  removed 907,162 bytes of old reports and 38.08 MB of Docker builder cache,
-  kept uploads, secrets, env files, newest local backup packages, Docker
-  images, Docker volumes, and retained newest R2 backup object
-  `datasync-2026-06-03T14-36-41-074Z`.
+- `npm.cmd --prefix ops run prune-storage` in the Move 781 verification pass
+  removed 30,592,188 bytes of old runtime reports, one old local Docker
+  release backup package at 4,829,716 bytes, and 38.19 MB of Docker builder
+  cache. It kept uploads, secrets, env files, newest local backup packages,
+  Docker images, Docker volumes, and retained newest R2 backup object
+  `datasync-2026-06-03T21-19-31-003Z`.
+- The Move 781 generated-artifact cleanup removed an additional 415,957,346
+  bytes from regenerable `release`, `frontend/dist`, and `output` folders
+  after Docker image `business-os:v6.0.0-202606041117` was already built and
+  running. The follow-up `npm.cmd --prefix ops run phase29:audit` passed with
+  zero failures.
 
 Current honest pockets:
 
+- Move 781 is now served by Docker release image
+  `business-os:v6.0.0-202606041117`. `Sales.tsx` uses focused
+  `salesTransport.getSales()` and `userReadTransport.getUsers()` for normal
+  route-start reads, while write/status/member actions remain on the existing
+  action API. `Returns.tsx` uses focused `returnsTransport.getReturns()` for
+  normal list reads, while detail/snapshot/restore writes remain action-bound.
+  `frontend/vite.config.ts` now splits `http.ts`, `query.ts`, and
+  `actorQuery.ts` into `api-http-core` so focused read transports do not
+  inherit broad `app-api-methods` chunk references. `performanceLoadingUx`
+  guards now reject Sales/Returns route-start reads through the broad API
+  registry and require the focused HTTP core chunk rule.
+  Standalone production output emits `api-http-core-BRrzV8AY.js` at 20.79 KB
+  gzip 7.34 KB, `app-api-CJUW8tAi.js` at 4.41 KB gzip 1.72 KB,
+  `sales-read-api-BBx8NexI.js` at 0.36 KB gzip 0.28 KB,
+  `user-read-api-BIsGsdp_.js` at 0.93 KB gzip 0.46 KB,
+  `returns-api-CgYUCNqr.js` at 1.03 KB gzip 0.52 KB,
+  `Sales--kY2zhyr.js` at 35.98 KB gzip 10.00 KB, and
+  `Returns-D-9fvGHO.js` at 23.23 KB gzip 7.76 KB. Docker release output
+  emitted matching chunks including `api-http-core-Bxclxty4.js`,
+  `app-api-BtC9oIBZ.js`, `sales-read-api-CBfvMGRA.js`,
+  `user-read-api-DDf_z86s.js`, `returns-api-Dv5fJpu_.js`,
+  `Sales-TpSCleO4.js`, and `Returns-Qj9xC_JH.js`.
+  Local Docker-served route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-19-53-714Z.json` passed
+  Sales in 399 ms with 31 requests and 26 scripts, and Returns in 464 ms with
+  30 requests and 25 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json` passed
+  Sales in 240 ms with 31 requests and 26 scripts, and Returns in 228 ms with
+  30 requests and 25 scripts. Both traces had zero failed requests, zero
+  console/page errors, `app-api-methods-present=False`, and
+  `csv-utils-present=False` for both routes. Public portal Cloudflare check
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors. Post-live hygiene passed with loaded
+  dataset status, zero broad QA/smoke/action-history cleanup matches, zero
+  generated integrity matches, and relationship orphan checks passing for 49
+  FK candidates. Storage prune removed 30,592,188 bytes of old reports,
+  4,829,716 bytes of old Docker-release backup package data, and 38.19 MB of
+  Docker builder cache while keeping protected data and the latest R2 backup.
+  Generated-artifact cleanup then removed 415,957,346 bytes from `release`,
+  `frontend/dist`, and `output`, and the follow-up Phase 29 audit passed with
+  zero failures.
 - Move 780 is now served by Docker release image
   `business-os:v6.0.0-202606041056`. Sales and Returns no longer statically
   import `downloadCSV`; both route components dynamically import

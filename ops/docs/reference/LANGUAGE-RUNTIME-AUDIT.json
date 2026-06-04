@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-01T16:15:34.081Z",
+  "generatedAt": "2026-06-04T03:27:21.432Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -12,7 +12,7 @@
     "ops/config",
     "run"
   ],
-  "sourceFiles": 494,
+  "sourceFiles": 507,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -22,11 +22,11 @@
   "languageCounts": [
     [
       "TypeScript",
-      355
+      367
     ],
     [
       "React TSX",
-      107
+      108
     ],
     [
       "Windows batch",
@@ -56,11 +56,11 @@
   "extensionCounts": [
     [
       ".ts",
-      355
+      367
     ],
     [
       ".tsx",
-      107
+      108
     ],
     [
       ".bat",
@@ -263,7 +263,7 @@
       "track": "Web Worker extraction",
       "firstCandidate": "frontend/src/api/importJobsTransport.ts",
       "score": 6,
-      "lines": 236,
+      "lines": 257,
       "requiredProof": [
         "npm.cmd --prefix frontend run test:utils",
         "npm.cmd --prefix frontend run build",
@@ -1876,7 +1876,7 @@
   "conversionCandidates": [
     {
       "file": "frontend/src/api/importJobsTransport.ts",
-      "lines": 236,
+      "lines": 257,
       "score": 6,
       "track": "Web Worker extraction",
       "rule": "Browser CPU/file parsing/media work candidate."

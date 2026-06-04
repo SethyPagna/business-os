@@ -21,6 +21,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { getReturns as fetchReturns } from '../../api/returnsTransport.ts'
 const ReturnDetailModal = lazy(() => import('./ReturnDetailModal'))
 const EditReturnModal = lazy(() => import('./EditReturnModal'))
 const NewReturnModal = lazy(() => import('./NewReturnModal'))
@@ -125,7 +126,6 @@ interface ReturnSection {
 }
 
 interface ReturnApi {
-  getReturns: (params: Record<string, unknown>) => Promise<unknown>
   getReturn: (id: number | string | null | undefined) => Promise<unknown>
   updateReturn: (id: number | string, payload: ReturnHistoryPayload) => Promise<unknown>
 }
@@ -321,7 +321,7 @@ export default function Returns() {
           ...(typeFilter !== 'all' ? { type: typeFilter } : {}),
           ...returnsDateRange,
         }
-        const result = await withLoaderTimeout(() => getReturnApi().getReturns(params), 'Returns', RETURNS_LOAD_TIMEOUT_MS)
+        const result = await withLoaderTimeout(() => fetchReturns(params), 'Returns', RETURNS_LOAD_TIMEOUT_MS)
         if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
         setRows(Array.isArray(result) ? result as ReturnRow[] : [])
         loadedOnceRef.current = true

@@ -38,7 +38,7 @@
     "backendRuntimeVersionRoute": true,
     "backendFrontendBuildReader": true,
     "performanceBuildMetadataGuard": true,
-    "distBuildManifestPresent": true
+    "distBuildManifestPresent": false
   },
   "localVerificationCoverage": {
     "progressLabelCoverage": {

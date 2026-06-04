@@ -3443,6 +3443,51 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+- change: narrow Sales/Returns route-start reads and split API HTTP core
+- affected files:
+  `frontend/src/components/sales/Sales.tsx`,
+  `frontend/src/components/returns/Returns.tsx`,
+  `frontend/vite.config.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/reference/PERFORMANCE-SCAN.md`
+- route or API target: Sales and Returns normal read startup, admin
+  Cloudflare route traces, public Cloudflare portal check, and Phase 29 cleanup
+- keeper or rollback: keeper; focused read transports now share
+  `api-http-core`, while write/detail actions stay on the existing action API.
+  Rollback would be restoring broad route-start reads through `window.api`,
+  which would re-add `app-api-methods` to Sales startup.
+- bundle proof:
+  standalone output emits `api-http-core-BRrzV8AY.js` at 20.79 KB gzip
+  7.34 KB and `app-api-CJUW8tAi.js` at 4.41 KB gzip 1.72 KB. Docker image
+  `business-os:v6.0.0-202606041117` served frontend hash
+  `c4818ba473b05528`.
+- actual link proof:
+  local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-19-53-714Z.json` passed
+  Sales in 399 ms with 31 requests/26 scripts and Returns in 464 ms with
+  30 requests/25 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json` passed
+  Sales in 240 ms and Returns in 228 ms, with matching request/script counts.
+  Both traces had zero failures/errors and script-list inspection confirmed
+  `app-api-methods-present=False` and `csv-utils-present=False` for both
+  routes. Public portal Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T03-19-53-181Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- cleanup proof:
+  post-live hygiene passed with zero QA/smoke/action-history cleanup matches
+  and relationship orphan checks passing for 49 FK candidates. Storage prune
+  removed 30,592,188 bytes of old reports, 4,829,716 bytes of old local
+  Docker-release backup data, and 38.19 MB of Docker builder cache while
+  keeping protected data and the newest R2 backup. Generated-artifact cleanup
+  removed another 415,957,346 bytes from regenerable `release`,
+  `frontend/dist`, and `output` folders, then `npm.cmd --prefix ops run
+  phase29:audit` passed with zero failures.
+
 ## 2026-06-04 - Move 779 Users Action Surface Deferral
 
 - change: lazy-load Users profile/detail/permission editor surfaces and split
