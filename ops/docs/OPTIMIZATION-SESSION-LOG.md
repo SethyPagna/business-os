@@ -8,6 +8,30 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Settings media upload state/helper deferral
+  - route: `settings`
+  - result: kept
+  - note: split lightweight upload state logic into `mediaUploadState.ts`,
+    removed normal-route static imports of the full media upload helper and
+    favicon canvas helper from `Settings.tsx`, delayed circular favicon preview
+    work by 1800 ms plus idle scheduling, and dynamically loaded cache-busted
+    upload path logic only after an upload succeeds.
+  - proof: Docker release `business-os:v6.0.0-202606040958` is running;
+    standalone frontend build hash is `8517c0bf4c9e5cd9`. Local route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-353Z.json`
+    passed Dashboard, Products, Backup, and Settings with zero failures/errors;
+    Settings loaded in 193 ms with 25 requests and 20 scripts. Remote admin
+    trace `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-931Z.json`
+    passed the same routes with zero failures/errors; Settings loaded in
+    205 ms. Both traces show no normal-route `media-upload-utils`,
+    `favicon-utils`, `settings-otp-modal`, or `backup-reset-tools` request.
+    Public portal check
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-01-45-667Z/report.json`
+    rendered 20 products with portal bootstrap 200, AI status 200 after
+    interaction, and zero relevant console/page errors. Post-live hygiene
+    passed with zero QA cleanup matches and relationship orphan checks passing
+    for 49 FK candidates.
+
 - Public catalog translate-controller deferral
   - route: `public_catalog`
   - result: kept

@@ -2116,4 +2116,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   the same routes with zero failures/errors; Settings loaded in 216 ms. Both
   traces show no normal-route `settings-otp-modal`, `OtpModal`, or
   `backup-reset-tools` request.
+- Move 508 records roadmap Move 778: split Settings media upload state from
+  heavier media preview helpers. `Settings.tsx` now imports only
+  `mediaUploadState.ts`, delays the favicon canvas helper by 1800 ms plus idle
+  scheduling, and dynamically imports `mediaUpload.ts` only after an image
+  upload succeeds. Production output emits `media-upload-state-BR061biI.js` at
+  1.28 KB gzip 0.51 KB, `media-upload-utils` around 0.76 KB gzip 0.49 KB, and
+  `favicon-utils-BefJ4jdU.js` at 1.41 KB gzip 0.80 KB. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-353Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failures/errors; Settings
+  loaded in 193 ms with 25 requests and 20 scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-931Z.json` passed
+  the same routes with zero failures/errors; Settings loaded in 205 ms. Both
+  traces show no normal-route `media-upload-utils`, `favicon-utils`,
+  `settings-otp-modal`, or `backup-reset-tools` request.
 <!-- phase29-manual-notes:end -->

@@ -10905,3 +10905,54 @@ Move 777 status:
   51 completed organization moves; Phase 28 remains active with the R2 prune
   follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
   TypeScript, runtime, and performance sweeps.
+
+Move 778 status:
+- Move 778 trims normal Settings startup by splitting upload state from heavier
+  media upload utilities and deferring favicon canvas work. `Settings.tsx` now
+  imports only `mediaUploadState.ts` for reducer/state cleanup, delays the
+  circular favicon preview helper by 1800 ms plus idle scheduling, and
+  dynamically imports `buildCacheBustedMediaPath` from `mediaUpload.ts` only
+  after an image upload succeeds.
+- Vite now emits `media-upload-state` as its own tiny chunk and keeps
+  `media-upload-utils`, `favicon-utils`, `settings-otp-modal`, and
+  `backup-reset-tools` out of eager modulepreload during ordinary Settings
+  route load.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` rejects a
+  static Settings import of `mediaUpload.ts` or `favicon.ts`, requires the
+  small `mediaUploadState.ts` import, requires delayed/idle favicon loading,
+  requires the post-upload dynamic import, and verifies the state helper does
+  not pull in public asset URL resolution.
+- Verification proof: focused performance guard, frontend typecheck, source
+  syntax check, full frontend utility suite, production build, Docker release
+  build/start, local and remote route traces, public Cloudflare portal check,
+  Docker container inspection, and post-live hygiene passed.
+- Bundle/runtime proof: standalone production output emits
+  `media-upload-state-BR061biI.js` at 1.28 KB gzip 0.51 KB,
+  `media-upload-utils-nE-E7Ji8.js` at 0.76 KB gzip 0.49 KB, and
+  `favicon-utils-BefJ4jdU.js` at 1.41 KB gzip 0.80 KB. Docker release image
+  `business-os:v6.0.0-202606040958` is running; local health reports source
+  hash `5d419c030bf25d50`, and the standalone frontend build hash is
+  `8517c0bf4c9e5cd9`.
+- Actual-link proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-353Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failed requests and zero
+  console/page errors. Settings loaded in 193 ms with 25 requests and 20
+  scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-931Z.json` passed
+  the same routes with zero failures/errors; Settings loaded in 205 ms. Both
+  traces show no normal-route `media-upload-utils`, `favicon-utils`,
+  `settings-otp-modal`, or `backup-reset-tools` request. Public portal
+  Cloudflare check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-01-45-667Z/report.json`
+  rendered 20 products, confirmed portal bootstrap 200, confirmed AI status
+  200 after interaction, and recorded zero failed responses, zero relevant
+  console messages, and zero page errors.
+- Post-live hygiene: `npm.cmd --prefix ops run post-live-hygiene` passed with
+  loaded dataset status, zero broad QA cleanup matches, zero smoke/action
+  history cleanup matches, zero generated integrity matches, and relationship
+  orphan checks passing for 49 FK candidates.
+- Current plan position after Move 778: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps.

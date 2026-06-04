@@ -31,7 +31,6 @@ import Users from 'lucide-react/dist/esm/icons/users.js'
 import FontFamilyPicker from './FontFamilyPicker'
 import type { OtpModalProps } from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
-import { createCircularFaviconDataUrl } from '../../utils/favicon.ts'
 import PageHeader from '../shared/PageHeader'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
@@ -40,11 +39,11 @@ import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAct
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
 import type { SettingsConflictState } from './settingsConflict.ts'
 import {
-  buildCacheBustedMediaPath,
   createInitialUploadState,
   reduceUploadState,
   sanitizePersistedMediaPath,
-} from '../../utils/mediaUpload.ts'
+} from '../../utils/mediaUploadState.ts'
+import type { UploadAction } from '../../utils/mediaUploadState.ts'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -53,7 +52,6 @@ type SettingsRecord = Record<string, SettingValue>
 type SettingsSectionId = 'all' | 'business' | 'appearance' | 'security'
 type OtpModalMode = OtpModalProps['mode'] | null
 type ColorChoice = [string, string, string]
-type UploadAction = Record<string, unknown>
 type UploadState = ReturnType<typeof createInitialUploadState>
 type UploadStateMap = Record<string, UploadState>
 
@@ -151,6 +149,8 @@ function toNumberValue(value: unknown, fallback = 0): number {
 
 const SETTINGS_OTP_STATUS_TIMEOUT_MS = 8000
 const SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS = 8000
+const SETTINGS_FAVICON_PREVIEW_DELAY_MS = 1800
+const SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS = 7000
 const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
 const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
@@ -614,8 +614,11 @@ export default function Settings() {
     }
     const requestId = beginTrackedRequest(faviconPreviewRequestRef)
     setAppFaviconPreview(source)
+    let timeoutId = 0
+    let idleId = 0
     async function loadFaviconPreview() {
       try {
+        const { createCircularFaviconDataUrl } = await import('../../utils/favicon.ts')
         const preview = await withLoaderTimeout(
           () => createCircularFaviconDataUrl(source, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
           'Settings favicon preview',
@@ -628,9 +631,20 @@ export default function Settings() {
         setAppFaviconPreview(source)
       }
     }
-    loadFaviconPreview()
+    const scheduleIdlePreview = () => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(() => {
+          void loadFaviconPreview()
+        }, { timeout: SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS })
+        return
+      }
+      void loadFaviconPreview()
+    }
+    timeoutId = window.setTimeout(scheduleIdlePreview, SETTINGS_FAVICON_PREVIEW_DELAY_MS)
     return () => {
       invalidateTrackedRequest(faviconPreviewRequestRef)
+      if (timeoutId) window.clearTimeout(timeoutId)
+      if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
     }
   }, [form.ui_app_favicon_image, settings.ui_app_favicon_image])
 
@@ -845,6 +859,7 @@ export default function Settings() {
       )
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
       if (!aliveRef.current) return
+      const { buildCacheBustedMediaPath } = await import('../../utils/mediaUpload.ts')
       const nextPath = buildCacheBustedMediaPath(uploaded.public_path, uploaded.cache_version)
       setValue(key, nextPath)
       updateUploadState(key, {

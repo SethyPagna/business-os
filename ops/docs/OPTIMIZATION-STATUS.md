@@ -8,9 +8,9 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 777, lazy-load the Settings 2FA OTP modal so
-  normal Settings route load no longer fetches OTP setup/disable UI until the
-  user presses a 2FA action
+- Latest completed move: Move 778, defer Settings media preview helpers so
+  normal Settings route load fetches only small upload state logic, while
+  favicon canvas work and cache-busted upload paths load after idle/intent
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from `npm.cmd --prefix frontend run build`:
-  `4dc16c316e9b1246`
+  `8517c0bf4c9e5cd9`
 
 Latest verified reports:
 
@@ -32,11 +32,11 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T01-47-49-508Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T02-01-45-667Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-30-975Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-353Z.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T01-47-31-450Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-931Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
@@ -72,6 +72,29 @@ Latest cleanup run:
 
 Current honest pockets:
 
+- Move 778 is now served by Docker release image
+  `business-os:v6.0.0-202606040958`. `Settings.tsx` no longer statically
+  imports the full `mediaUpload.ts` helper or the favicon canvas helper during
+  normal route load. It imports only `mediaUploadState.ts`, sets the raw
+  favicon preview immediately, then delays the circular favicon canvas helper
+  by 1800 ms and idle time. Successful image uploads dynamically import
+  `buildCacheBustedMediaPath` only after upload response data is available.
+  Vite emits `media-upload-state-BR061biI.js` at 1.28 KB gzip 0.51 KB, keeps
+  `media-upload-utils-BmNZXeC2.js` and `favicon-utils-BefJ4jdU.js` out of
+  eager modulepreload, and normal Settings output remains 55.00 KB gzip
+  15.54 KB. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-353Z.json` passed
+  Dashboard, Products, Backup, and Settings with zero failed requests and zero
+  console/page errors; Settings loaded in 193 ms with 25 requests and 20
+  scripts. Remote admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T02-01-26-931Z.json` passed
+  the same routes with zero failures/errors; Settings loaded in 205 ms. Both
+  traces show no normal-route `media-upload-utils`, `favicon-utils`,
+  `settings-otp-modal`, or `backup-reset-tools` request. Public portal
+  Cloudflare check rendered 20 products, confirmed portal bootstrap 200,
+  confirmed AI status 200 after interaction, and recorded zero failed
+  responses, zero relevant console messages, and zero page errors. Post-live
+  hygiene passed with loaded dataset status and zero cleanup/integrity matches.
 - Move 777 is now served by Docker release image
   `business-os:v6.0.0-202606040944`. `Settings.tsx` no longer statically
   imports `OtpModal.tsx`; it imports only the modal props type and lazy-loads

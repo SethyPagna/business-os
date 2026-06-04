@@ -259,6 +259,9 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'csv-utils'
     }
+    if (normalized.endsWith('/src/utils/mediaUploadState.ts')) {
+      return 'media-upload-state'
+    }
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/products/shared/')

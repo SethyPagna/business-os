@@ -32,6 +32,8 @@ const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/Audit
 const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
 const otpModal = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.tsx', import.meta.url), 'utf8')
 const resetData = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
+const mediaUpload = fs.readFileSync(new URL('../src/utils/mediaUpload.ts', import.meta.url), 'utf8')
+const mediaUploadState = fs.readFileSync(new URL('../src/utils/mediaUploadState.ts', import.meta.url), 'utf8')
 const serverPage = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
 const receiptSettingsPage = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptSettings.tsx', import.meta.url), 'utf8')
 const receiptPreview = fs.readFileSync(new URL('../src/components/receipt-settings/ReceiptPreview.tsx', import.meta.url), 'utf8')
@@ -251,6 +253,7 @@ assert.match(viteConfig, /'assets\/app-local-db-',[\s\S]*'assets\/vendor-dexie-'
 assert.match(viteConfig, /'assets\/media-upload-utils-',[\s\S]*'assets\/notification-center-',/, 'favicon/media upload helpers should be excluded from eager modulepreload')
 assert.match(viteConfig, /'assets\/favicon-utils-',[\s\S]*'assets\/public-asset-urls-',/, 'favicon helpers should be split from media upload helpers')
 assert.match(viteConfig, /'assets\/public-asset-urls-',[\s\S]*'assets\/notification-center-',/, 'public asset URL helpers should not be eagerly modulepreloaded')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/mediaUploadState\.ts'\)\) \{[\s\S]*return 'media-upload-state'/, 'tiny media upload state helpers should not be owned by the heavier URL helper chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/publicAssetUrls\.ts'\)\) \{[\s\S]*return 'public-asset-urls'/, 'public asset URL helper should not be grouped with FilePickerModal')
 assert.match(viteConfig, /normalized\.includes\('\/src\/utils\/favicon'\)\) \{[\s\S]*return 'favicon-utils'[\s\S]*normalized\.includes\('\/src\/utils\/mediaUpload\.ts'\)\) \{[\s\S]*return 'media-upload-utils'/, 'favicon helpers should be evaluated before the media upload chunk rule')
 assert.doesNotMatch(viteConfig, /PortalMenu\.tsx'\)\) return 'portal-tools'/, 'shared PortalMenu should not be grouped with catalog portal tools')
@@ -1904,6 +1907,46 @@ assert.match(
   settingsPage,
   /withLoaderTimeout\(\s*\(\) => getSettingsApi\(\)\.uploadFileAsset\?\.\(\{[\s\S]*signal: controller\.signal,[\s\S]*onProgress: \(\{ percent \}\) => updateUploadState\(key, \{ type: 'progress', progress: percent \}\),[\s\S]*\}\),\s*'Upload settings image',\s*SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS,\s*\)/,
   'settings image uploads should timeout slow file uploads',
+)
+assert.doesNotMatch(
+  settingsPage,
+  /import \{ createCircularFaviconDataUrl \} from '\.\.\/\.\.\/utils\/favicon\.ts'/,
+  'Settings should not statically import favicon canvas helpers during route load',
+)
+assert.match(
+  settingsPage,
+  /const SETTINGS_FAVICON_PREVIEW_DELAY_MS = 1800[\s\S]*const SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS = 7000/,
+  'Settings favicon preview should be delayed past route-ready and bounded by an idle timeout',
+)
+assert.match(
+  settingsPage,
+  /const \{ createCircularFaviconDataUrl \} = await import\('\.\.\/\.\.\/utils\/favicon\.ts'\)/,
+  'Settings should load favicon canvas helpers only inside the delayed preview task',
+)
+assert.doesNotMatch(
+  settingsPage,
+  /from '\.\.\/\.\.\/utils\/mediaUpload\.ts'/,
+  'Settings should not statically import the heavier media upload URL helper chunk during route load',
+)
+assert.match(
+  settingsPage,
+  /from '\.\.\/\.\.\/utils\/mediaUploadState\.ts'/,
+  'Settings should statically use only the tiny upload-state helpers during route load',
+)
+assert.match(
+  settingsPage,
+  /const \{ buildCacheBustedMediaPath \} = await import\('\.\.\/\.\.\/utils\/mediaUpload\.ts'\)/,
+  'Settings should load the media URL cache-buster only after an image upload succeeds',
+)
+assert.match(
+  mediaUpload,
+  /from '\.\/mediaUploadState\.ts'/,
+  'mediaUpload should re-export shared upload state helpers for existing callers',
+)
+assert.doesNotMatch(
+  mediaUploadState,
+  /publicAssetUrls|resolvePublicAssetUrl/,
+  'mediaUploadState should stay independent of public asset URL helpers',
 )
 assert.doesNotMatch(
   settingsPage,
