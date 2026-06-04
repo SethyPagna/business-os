@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 
 ## Phase Board
 
@@ -8,9 +8,9 @@ Last updated: 2026-06-04
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 785, remove the Products/Inventory product detail
-  modal chunk from first-window route loading while preserving lazy detail
-  click behavior
+- Latest completed move: Move 786, split Audit Log startup onto a focused
+  audit transport and defer CSV/local mirror/local DB work until export,
+  post-load mirror, or offline fallback intent
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `28fb39f953a5425c`
+  `5e26c07d0103d31f`
 
 Latest verified reports:
 
@@ -32,9 +32,9 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-03T22-44-22-296Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T12-52-46-457Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T19-26-46-628Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T12-52-46-933Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-04T19-19-51-914Z.json`
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
 - latest focused public-host route-load trace:
@@ -64,15 +64,15 @@ Latest verified reports:
 
 Latest cleanup run:
 
-- The Move 785 generated-artifact cleanup removed 412,450,532 bytes from
+- The Move 786 generated-artifact cleanup removed 412,453,034 bytes from
   regenerable `release` and `frontend/dist` folders after Docker image
-  `business-os:v6.0.0-202606042050` was already built and running. The
+  `business-os:v6.0.0-202606050317` was already built and running. The
   follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
   failures.
-- The Move 785 `npm.cmd --prefix ops run prune-storage` pass removed 594,838
+- The Move 786 `npm.cmd --prefix ops run prune-storage` pass removed 300,396
   bytes of old runtime reports and 38.2 MB of Docker builder cache. It kept
   uploads, secrets, env files, local backup retention roots, Docker images,
-  Docker volumes, and newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
+  Docker volumes, and newest R2 backup `datasync-2026-06-04T15-29-49-246Z`.
 
 - The Move 784 generated-artifact cleanup removed 380,729,941 bytes from the
   regenerable `release` folder after Docker image

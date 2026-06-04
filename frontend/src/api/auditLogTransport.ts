@@ -1,10 +1,36 @@
 import { apiFetch, route } from './http.ts'
-import { getLocalDb } from './lazyLocalDb.ts'
-import { mirrorTable } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 
 type AuditLogParams = QueryParams & {
   pageSize?: string | number
+}
+
+const AUDIT_LOG_MIRROR_IDLE_DELAY_MS = 10_000
+
+let localDbModulePromise: Promise<typeof import('./lazyLocalDb.ts')> | null = null
+let localMirrorsModulePromise: Promise<typeof import('./localMirrors.ts')> | null = null
+
+function getLocalDbModule(): Promise<typeof import('./lazyLocalDb.ts')> {
+  if (!localDbModulePromise) localDbModulePromise = import('./lazyLocalDb.ts')
+  return localDbModulePromise
+}
+
+function getLocalMirrorsModule(): Promise<typeof import('./localMirrors.ts')> {
+  if (!localMirrorsModulePromise) localMirrorsModulePromise = import('./localMirrors.ts')
+  return localMirrorsModulePromise
+}
+
+function scheduleAuditLogMirror(rows: unknown): void {
+  const run = (): void => {
+    getLocalMirrorsModule()
+      .then(({ mirrorTable }) => mirrorTable('audit_logs')(rows))
+      .catch(() => {})
+  }
+  if (typeof window === 'undefined') {
+    Promise.resolve().then(run).catch(() => {})
+    return
+  }
+  window.setTimeout(run, AUDIT_LOG_MIRROR_IDLE_DELAY_MS)
 }
 
 function normalizeAuditPageSize(params: AuditLogParams = {}): number {
@@ -20,10 +46,11 @@ export function getAuditLogs(params: AuditLogParams = {}): Promise<unknown> {
     async () => {
       const result = await apiFetch('GET', appendQuery('/api/system/audit-logs', query))
       const auditRows = Array.isArray(result) ? result : (result?.items || [])
-      await mirrorTable('audit_logs')(auditRows).catch(() => {})
+      scheduleAuditLogMirror(auditRows)
       return result
     },
     async () => {
+      const { getLocalDb } = await getLocalDbModule()
       const db = await getLocalDb()
       const rows = await db.table('audit_logs').orderBy('created_at').reverse().limit(pageSize).toArray()
       return {

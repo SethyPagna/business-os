@@ -11324,3 +11324,49 @@ Move 785 status:
   TypeScript, runtime, and performance sweeps. Next executable target: keep
   trimming first-window chunks only when route traces prove eager work and pair
   each deferral with a live interaction proof.
+
+Move 786 status:
+- Move 786 splits Audit Log first-window startup away from the broad legacy
+  API registry. The page now calls `auditLogTransport.ts` directly, exports
+  lazy-load `csv.ts` only after export intent, and the audit transport delays
+  mirror persistence while loading local DB only for offline fallback.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run build`, generated chunk inspection, Docker
+  release build/start, Docker health, and served route-load Playwright trace
+  passed.
+- Runtime proof: Docker release image `business-os:v6.0.0-202606050317` is
+  running. Health reports source hash `5d419c030bf25d50` and frontend hash
+  `5e26c07d0103d31f`.
+- Route proof: local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-04T19-19-51-914Z.json` passed
+  Audit Log in 185 ms with 27 requests/22 scripts, down from 41 requests/36
+  scripts before the split. The served first-window script list contains no
+  `app-api-methods`, `csv-utils`, `app-local-db`, `vendor-dexie`, or
+  `product-read-api`.
+- Phase 29 cleanup proof: deleted only regenerable generated output after the
+  Docker image was already built and healthy: `release` (380,730,965 bytes)
+  and `frontend/dist` (31,722,069 bytes), for 412,453,034 bytes removed.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed with zero
+  failures.
+- Live public proof: `node ops\scripts\runtime\live-checks\phase84-public-portal-cloudflare-check.ts`
+  passed against `https://leangcosmetics.dpdns.org/public`; 20 products
+  rendered, portal bootstrap returned 200, AI status returned 200 after
+  interaction, and there were zero relevant console messages, failed
+  responses, or page errors. Report:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T19-26-46-628Z/report.json`.
+- Storage hygiene proof: `node ops\scripts\runtime\storage\post-live-hygiene.ts`
+  found zero QA Smoke, QA Action History, broad QA, or generated-integrity
+  cleanup matches and confirmed the dataset remains loaded. `npm.cmd --prefix
+  ops run prune-storage` removed 300,396 bytes of old reports and 38.2 MB of
+  Docker builder cache while preserving uploads, secrets, env files, local
+  backup roots, Docker images, Docker volumes, and the newest R2 backup.
+- Current plan position after Move 786: Phase 8.4 remains active for live
+  route/control verification and measured load reductions; Phase 26 remains at
+  51 completed organization moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for whole-codebase schema, cleanup,
+  TypeScript, runtime, and performance sweeps. Next executable target: keep
+  splitting page startup off the broad API registry where route traces prove
+  loaded work, especially Files/Branches/Users if their normal first-window
+  paths still pull action-only transports.

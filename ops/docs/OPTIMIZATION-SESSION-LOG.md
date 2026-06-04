@@ -1,12 +1,38 @@
 # Business OS Optimization Session Log
 
-Last updated: 2026-06-04
+Last updated: 2026-06-05
 
 This is a concise running log of what actually happened in recent sessions.
 
 ## 2026-06-04
 
 ### Accepted
+
+- Audit Log focused startup transport
+  - route: Audit Log
+  - result: kept
+  - note: moved Audit Log reads/retention cleanup off `window.api` and the
+    broad `app-api-methods` registry. CSV helpers now load only after export
+    intent, audit mirror persistence is delayed, and local DB loads only for
+    offline fallback. Vite now emits a tiny `audit-log-api` chunk for this
+    path.
+  - proof: Docker release `business-os:v6.0.0-202606050317` is running with
+    frontend hash `5e26c07d0103d31f`. Route trace
+    `ops/runtime/reports/route-load-trace-2026-06-04T19-19-51-914Z.json`
+    passed Audit Log in 185 ms with 27 requests/22 scripts, down from
+    41 requests/36 scripts, with zero failed requests and zero console/page
+    errors.
+  - cleanup proof: removed 412,453,034 bytes from ignored/regenerable
+    `release` and `frontend/dist` after Docker health was verified; Phase 29
+    passed afterward with zero failures.
+  - public proof:
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T19-26-46-628Z/report.json`
+    passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+    products and zero relevant console messages, failed responses, or page
+    errors.
+  - chunk proof: the served first-window script list contained no
+    `app-api-methods`, `csv-utils`, `app-local-db`, `vendor-dexie`, or
+    `product-read-api`.
 
 - Product detail chunk first-window deferral
   - route: Products and Inventory

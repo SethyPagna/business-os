@@ -11,6 +11,7 @@ const appBootstrapTransport = fs.readFileSync(new URL('../src/api/appBootstrapTr
 const contactReadTransport = fs.readFileSync(new URL('../src/api/contactReadTransport.ts', import.meta.url), 'utf8')
 const contactWriteTransport = fs.readFileSync(new URL('../src/api/contactWriteTransport.ts', import.meta.url), 'utf8')
 const contactsTransport = fs.readFileSync(new URL('../src/api/contactsTransport.ts', import.meta.url), 'utf8')
+const auditLogTransport = fs.readFileSync(new URL('../src/api/auditLogTransport.ts', import.meta.url), 'utf8')
 const saleWriteTransport = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const productWriteTransport = fs.readFileSync(new URL('../src/api/productWriteTransport.ts', import.meta.url), 'utf8')
 const productImageUploadTransport = fs.readFileSync(new URL('../src/api/productImageUploadTransport.ts', import.meta.url), 'utf8')
@@ -408,6 +409,14 @@ assert.doesNotMatch(sales, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/cs
 assert.match(sales, /const handleExportSelected = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/csv\.ts'\)[\s\S]*const exportVisibleSales = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/csv\.ts'\)/, 'Sales export paths should load CSV helpers only after export intent')
 assert.doesNotMatch(returns, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Returns route should not load CSV export helpers before export intent')
 assert.match(returns, /const exportVisible = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/csv\.ts'\)/, 'Returns export should load CSV helpers only after export intent')
+assert.doesNotMatch(auditLog, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Audit Log route should not load CSV export helpers before export intent')
+assert.match(auditLog, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*const \{ downloadCSV \} = await loadCsvUtilsModule\(\)/, 'Audit Log export should lazy-load CSV helpers only after export intent')
+assert.match(auditLog, /deleteAuditLogsRetention as deleteAuditLogsRetentionRequest[\s\S]*getAuditLogs as getAuditLogsRequest[\s\S]*from '\.\.\/\.\.\/api\/auditLogTransport\.ts'/, 'Audit Log should use the focused audit transport instead of the broad window.api registry')
+assert.doesNotMatch(auditLog, /window\.api|getAuditApi\(\)|\.getAuditLogs\(|\.deleteAuditLogsRetention\(/, 'Audit Log route should not wake app-api-methods for reads or retention cleanup')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/auditLogTransport\.ts'\)\) return 'audit-log-api'/, 'Audit Log transport should own a tiny chunk instead of falling through to app-api-methods')
+assert.doesNotMatch(auditLogTransport, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'|import \{ mirrorTable \} from '\.\/localMirrors\.ts'/, 'Audit Log transport should not statically load local DB or mirror helpers during online startup')
+assert.match(auditLogTransport, /const AUDIT_LOG_MIRROR_IDLE_DELAY_MS = 10_000[\s\S]*getLocalMirrorsModule\(\)[\s\S]*window\.setTimeout\(run, AUDIT_LOG_MIRROR_IDLE_DELAY_MS\)/, 'Audit Log mirroring should run after startup instead of blocking the first read')
+assert.match(auditLogTransport, /const \{ getLocalDb \} = await getLocalDbModule\(\)[\s\S]*db\.table\('audit_logs'\)/, 'Audit Log local DB should load only for offline fallback reads')
 assert.doesNotMatch(products, /\(window as Window & \{ api\?: ProductApi \}\)\.api|window\.api\.(?:createProduct|updateProduct|deleteProduct|adjustStock|transferStock|uploadProductImage)/, 'Products route should not depend on window.api for product write or stock/image intent paths')
 assert.match(inventory, /function loadInventoryTransport\(\): Promise<InventoryTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/inventoryTransport\.ts'\)[\s\S]*function loadProductReadTransport\(\): Promise<ProductReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)[\s\S]*function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/, 'Inventory route should lazy-load focused inventory, product-read, and returns transports instead of the broad API registry')
 assert.match(inventory, /function loadUserReadTransport\(\): Promise<UserReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/userReadTransport\.ts'\)/, 'Inventory route should lazy-load the tiny user read transport for admin movement filters')
@@ -1858,12 +1867,12 @@ assert.match(
 )
 assert.match(
   auditLog,
-  /withLoaderTimeout\(\s*\(\) => getAuditApi\(\)\.getAuditLogs\(params\),\s*'Audit log',\s*AUDIT_LOG_LOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getAuditLogsRequest\(params\) as Promise<AuditLogResponse \| AuditLogRow\[\]>,\s*'Audit log',\s*AUDIT_LOG_LOAD_TIMEOUT_MS,\s*\)/,
   'audit log should timeout slow audit reads with the explicit constant',
 )
 assert.match(
   auditLog,
-  /withLoaderTimeout\(\s*\(\) => getAuditApi\(\)\.deleteAuditLogsRetention\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => deleteAuditLogsRetentionRequest\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/,
   'audit log retention cleanup should timeout slow delete actions',
 )
 assert.match(

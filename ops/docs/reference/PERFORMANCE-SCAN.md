@@ -35,7 +35,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/system/index.ts` | 65.6 | 1674 |
 | `backend/src/routes/sales.ts` | 65.2 | 1591 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
-| `frontend/src/components/utils-settings/AuditLog.tsx` | 59.6 | 1300 |
+| `frontend/src/components/utils-settings/AuditLog.tsx` | 59.9 | 1306 |
 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 58.0 | 1085 |
 | `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
 | `frontend/src/components/users/Users.tsx` | 56.1 | 1206 |
@@ -68,7 +68,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/portal.ts` | 1407 | 51.5 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 1315 | 67.9 |
-| `frontend/src/components/utils-settings/AuditLog.tsx` | 1300 | 59.6 |
+| `frontend/src/components/utils-settings/AuditLog.tsx` | 1306 | 59.9 |
 
 ## 4. Largest Built Chunks
 

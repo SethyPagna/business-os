@@ -233,6 +233,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
     if (normalized.endsWith('/src/api/contactWriteTransport.ts')) return 'contact-write-api'
     if (normalized.endsWith('/src/api/contactsTransport.ts')) return 'contacts-api'
+    if (normalized.endsWith('/src/api/auditLogTransport.ts')) return 'audit-log-api'
     if (normalized.endsWith('/src/api/salesTransport.ts')) return 'sales-read-api'
     if (normalized.endsWith('/src/api/saleWriteTransport.ts')) return 'sale-write-api'
     if (normalized.endsWith('/src/api/productWriteTransport.ts')) return 'product-write-api'

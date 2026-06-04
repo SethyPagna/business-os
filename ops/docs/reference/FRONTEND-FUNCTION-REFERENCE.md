@@ -15,7 +15,7 @@ Total files documented: **246**
 | 3 | `frontend/src/api/actorQuery.ts` | 0 |
 | 4 | `frontend/src/api/aiTransport.ts` | 0 |
 | 5 | `frontend/src/api/appBootstrapTransport.ts` | 5 |
-| 6 | `frontend/src/api/auditLogTransport.ts` | 1 |
+| 6 | `frontend/src/api/auditLogTransport.ts` | 4 |
 | 7 | `frontend/src/api/authTransport.ts` | 0 |
 | 8 | `frontend/src/api/branchTransport.ts` | 2 |
 | 9 | `frontend/src/api/browserDialogs.ts` | 0 |
@@ -293,7 +293,10 @@ Total files documented: **246**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `normalizeAuditPageSize` | function | 10 |
+| 1 | `getLocalDbModule` | function | 13 |
+| 2 | `getLocalMirrorsModule` | function | 18 |
+| 3 | `scheduleAuditLogMirror` | function | 23 |
+| 4 | `normalizeAuditPageSize` | function | 36 |
 
 ### 3.7 `frontend/src/api/authTransport.ts`
 
@@ -2590,24 +2593,24 @@ Total files documented: **246**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getAuditApi` | function | 102 |
-| 2 | `isRecord` | function | 106 |
-| 3 | `getErrorMessage` | function | 110 |
-| 4 | `toIso` | function | 142 |
-| 5 | `formatDateTime` | function | 149 |
-| 6 | `formatLogTime` | function | 170 |
-| 7 | `getLogEpoch` | function | 174 |
-| 8 | `formatJsonPretty` | function | 181 |
-| 9 | `parseLogJson` | function | 189 |
-| 10 | `flattenSummaryValue` | function | 197 |
-| 11 | `formatEntityName` | function | 216 |
-| 12 | `readableSummary` | function | 222 |
-| 13 | `normalizeFiniteIds` | function | 250 |
-| 14 | `countSelectedIds` | function | 254 |
-| 15 | `countActiveFlags` | function | 262 |
-| 16 | `DetailRow` | function | 270 |
-| 17 | `AuditLog` | component/function | 282 |
-| 18 | `sessionEntryLabel` | function | 676 |
+| 1 | `loadCsvUtilsModule` | function | 103 |
+| 2 | `isRecord` | function | 108 |
+| 3 | `getErrorMessage` | function | 112 |
+| 4 | `toIso` | function | 144 |
+| 5 | `formatDateTime` | function | 151 |
+| 6 | `formatLogTime` | function | 172 |
+| 7 | `getLogEpoch` | function | 176 |
+| 8 | `formatJsonPretty` | function | 183 |
+| 9 | `parseLogJson` | function | 191 |
+| 10 | `flattenSummaryValue` | function | 199 |
+| 11 | `formatEntityName` | function | 218 |
+| 12 | `readableSummary` | function | 224 |
+| 13 | `normalizeFiniteIds` | function | 252 |
+| 14 | `countSelectedIds` | function | 256 |
+| 15 | `countActiveFlags` | function | 264 |
+| 16 | `DetailRow` | function | 272 |
+| 17 | `AuditLog` | component/function | 284 |
+| 18 | `sessionEntryLabel` | function | 678 |
 
 ### 3.188 `frontend/src/components/utils-settings/Backup.tsx`
 

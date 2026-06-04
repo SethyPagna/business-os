@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 785 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 786 in this file.
 
 ## Goal
 
@@ -7317,6 +7317,40 @@ Decision rule:
   prune removed 594,838 bytes of old reports and 38.2 MB of Docker builder
   cache while preserving uploads, secrets, env files, backup roots, images,
   volumes, and newest R2 backup `datasync-2026-06-04T09-26-59-912Z`.
+
+### Move 786: Audit Log focused startup transport
+
+- Ownership evidence: Audit Log first-window route traces still loaded
+  `app-api-methods`, CSV helpers, local DB, Dexie, and product-read mirror
+  helpers even though normal startup only needed audit reads.
+- Change: Audit Log now uses the focused `auditLogTransport.ts`; CSV helpers
+  load only after export intent; audit mirror work is delayed; local DB is
+  loaded only for offline fallback. Vite now owns this path as
+  `audit-log-api` instead of the broad legacy registry.
+- Verification: focused performance guard, frontend typecheck, JSX/source
+  check, frontend build, generated chunk inspection, Docker release/start,
+  health, and served route-load trace passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606050317` is running
+  with frontend hash `5e26c07d0103d31f`.
+- Route proof: Audit Log startup dropped from 41 requests/36 scripts to
+  27 requests/22 scripts in
+  `ops/runtime/reports/route-load-trace-2026-06-04T19-19-51-914Z.json`, with
+  no `app-api-methods`, `csv-utils`, `app-local-db`, `vendor-dexie`, or
+  `product-read-api` in the served first-window script list.
+- Cleanup proof: deleted only ignored/regenerable output after Docker health
+  was verified: `release` (380,730,965 bytes) and `frontend/dist`
+  (31,722,069 bytes), for 412,453,034 bytes removed. Phase 29 audit then
+  passed with zero failures.
+- Live public proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T19-26-46-628Z/report.json`
+  passed with 20 rendered products, bootstrap 200, AI status 200 after
+  interaction, and zero relevant console messages/page errors.
+- Hygiene proof: post-live hygiene found zero leftover broad QA, smoke,
+  action-history, or generated-integrity cleanup matches. Prune storage removed
+  300,396 bytes of old reports and 38.2 MB of Docker builder cache while
+  preserving business uploads, secrets, env files, backups, images, and
+  volumes.
+  zero failed requests and zero console/page errors.
 
 ## Safety Gates
 

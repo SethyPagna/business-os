@@ -10,7 +10,6 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import User2 from 'lucide-react/dist/esm/icons/user-round.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
-import { downloadCSV } from '../../utils/csv'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { clampPage } from '../shared/PaginationControls'
@@ -23,6 +22,10 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import {
+  deleteAuditLogsRetention as deleteAuditLogsRetentionRequest,
+  getAuditLogs as getAuditLogsRequest,
+} from '../../api/auditLogTransport.ts'
 
 type SortDirection = 'asc' | 'desc'
 type AuditGroupMode = 'time' | 'time+action'
@@ -59,6 +62,7 @@ interface AuditLogResponse {
 }
 
 interface AuditLogParams {
+  [key: string]: string | number | undefined
   page: number
   pageSize: number
   search?: string
@@ -66,11 +70,6 @@ interface AuditLogParams {
   userId?: string
   startDate?: string
   endDate?: string
-}
-
-interface AuditApi {
-  getAuditLogs(params: AuditLogParams): Promise<AuditLogResponse | AuditLogRow[]>
-  deleteAuditLogsRetention(olderThanDays: number): Promise<unknown>
 }
 
 interface AppContextValue {
@@ -89,18 +88,21 @@ interface DetailRowProps {
 }
 
 type AuditFallback = string | { en?: string; km?: string }
+type CsvUtilsModule = typeof import('../../utils/csv')
 
 interface ExportItem {
   label: string
-  onClick: () => void
+  onClick: () => void | Promise<void>
   color?: string
 }
 
 const useApp = useAppHook as () => AppContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+let csvUtilsModulePromise: Promise<CsvUtilsModule> | null = null
 
-function getAuditApi(): AuditApi {
-  return (window as unknown as { api: AuditApi }).api
+function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
+  if (!csvUtilsModulePromise) csvUtilsModulePromise = import('../../utils/csv')
+  return csvUtilsModulePromise
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -419,7 +421,7 @@ export default function AuditLog() {
         ...auditDateRange,
       }
       const data = await withLoaderTimeout(
-        () => getAuditApi().getAuditLogs(params),
+        () => getAuditLogsRequest(params) as Promise<AuditLogResponse | AuditLogRow[]>,
         'Audit log',
         AUDIT_LOG_LOAD_TIMEOUT_MS,
       )
@@ -677,7 +679,8 @@ export default function AuditLog() {
     return `#${Number(log?.id || 0)}`
   }
 
-  const exportRows = useCallback((rows: AuditLogRow[], prefix = 'audit-log') => {
+  const exportRows = useCallback(async (rows: AuditLogRow[], prefix = 'audit-log') => {
+    const { downloadCSV } = await loadCsvUtilsModule()
     downloadCSV(`${prefix}-${new Date().toISOString().slice(0, 10)}.csv`, rows.map((log) => ({
       Entry: sessionEntryLabel(log),
       Time: formatLogTime(log),
@@ -706,12 +709,15 @@ export default function AuditLog() {
     load(false)
   }, [load])
 
-  const exportItems = useMemo<ExportItem[]>(() => ([
-    { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
-    selectedLogs.length ? { label: copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស'), onClick: () => exportRows(selectedLogs, 'audit-log-selected'), color: 'blue' } : null,
-    actionFilter !== 'all' ? { label: copy('export_filtered_action', `Export ${actionLabel(actionFilter)}`, `នាំចេញតាមសកម្មភាព ${actionLabel(actionFilter)}`), onClick: () => exportRows(visibleLogs, `audit-log-${actionFilter}`) } : null,
-    yearFilter !== 'all' || monthFilter !== 'all' ? { label: copy('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportRows(visibleLogs, 'audit-log-filtered') } : null,
-  ].filter((item): item is ExportItem => Boolean(item))), [actionFilter, actionLabel, copy, exportRows, monthFilter, selectedLogs, selectedLogs.length, visibleLogs, yearFilter])
+  const exportItems = useMemo<ExportItem[]>(() => {
+    const items: Array<ExportItem | null> = [
+      { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
+      selectedLogs.length ? { label: copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស'), onClick: () => exportRows(selectedLogs, 'audit-log-selected'), color: 'blue' } : null,
+      actionFilter !== 'all' ? { label: copy('export_filtered_action', `Export ${actionLabel(actionFilter)}`, `នាំចេញតាមសកម្មភាព ${actionLabel(actionFilter)}`), onClick: () => exportRows(visibleLogs, `audit-log-${actionFilter}`) } : null,
+      yearFilter !== 'all' || monthFilter !== 'all' ? { label: copy('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportRows(visibleLogs, 'audit-log-filtered') } : null,
+    ]
+    return items.filter((item): item is ExportItem => Boolean(item))
+  }, [actionFilter, actionLabel, copy, exportRows, monthFilter, selectedLogs, selectedLogs.length, visibleLogs, yearFilter])
 
   const filterSections = useMemo(() => ([
     {
@@ -807,7 +813,7 @@ export default function AuditLog() {
       setClearingOldLogs(true)
       setLoading(true)
       await withLoaderTimeout(
-        () => getAuditApi().deleteAuditLogsRetention(30),
+        () => deleteAuditLogsRetentionRequest(30),
         'Clear old audit logs',
         AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,
       )

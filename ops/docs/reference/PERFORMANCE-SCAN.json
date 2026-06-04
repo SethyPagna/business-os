@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 416,
   "distAssets": 0,
-  "totalSourceBytes": 6792973,
-  "totalSourceLines": 155852,
+  "totalSourceBytes": 6794234,
+  "totalSourceLines": 155885,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -142,8 +142,8 @@
     },
     {
       "file": "frontend/src/components/utils-settings/AuditLog.tsx",
-      "size": 61035,
-      "lines": 1300
+      "size": 61381,
+      "lines": 1306
     },
     {
       "file": "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
@@ -284,8 +284,8 @@
     },
     {
       "file": "frontend/src/components/utils-settings/AuditLog.tsx",
-      "size": 61035,
-      "lines": 1300
+      "size": 61381,
+      "lines": 1306
     }
   ],
   "topBuiltChunks": [],
