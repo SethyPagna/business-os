@@ -104,35 +104,38 @@ export default function FilterMenu({
             </div>
           </div>
 
-          <div className="space-y-3">
+          <div className="space-y-2">
             {(sections.filter(Boolean) as FilterSection[]).map((section) => (
-              <div key={section.id} className="space-y-1.5 rounded-2xl bg-slate-50/70 p-2 dark:bg-slate-800/40">
-                <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                  {section.label}
-                </div>
-
-                {section.description ? (
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{section.description}</p>
-                ) : null}
-
-                {typeof section.render === 'function' ? (
-                  section.render({ closeMenu })
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {((section.options || []).filter(Boolean) as FilterOption[]).map((option) => (
-                      <button
-                        key={option.id}
-                        type="button"
-                        disabled={option.disabled}
-                        onClick={() => option.onClick?.()}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
-                        title={option.title || (typeof option.label === 'string' ? option.label : undefined)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
+              <div key={section.id} className="rounded-2xl bg-slate-50/70 p-2 dark:bg-slate-800/40">
+                <div className="grid grid-cols-[5.25rem_minmax(0,1fr)] items-center gap-2">
+                  <div className="min-w-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                    <span className="block truncate">{section.label}</span>
                   </div>
-                )}
+                  <div className="min-w-0">
+                    {section.description ? (
+                      <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">{section.description}</p>
+                    ) : null}
+
+                    {typeof section.render === 'function' ? (
+                      section.render({ closeMenu })
+                    ) : (
+                      <div className="flex min-w-0 flex-wrap gap-1.5">
+                        {((section.options || []).filter(Boolean) as FilterOption[]).map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            disabled={option.disabled}
+                            onClick={() => option.onClick?.()}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
+                            title={option.title || (typeof option.label === 'string' ? option.label : undefined)}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

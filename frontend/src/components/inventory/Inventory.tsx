@@ -529,8 +529,6 @@ export default function Inventory() {
   const [rfidSection, setRfidSection] = useState('all')
   const [movFilter,     setMovFilter]     = useState('all')
   const [movementUserFilter, setMovementUserFilter] = useState('all')
-  const [inventoryBrandPickerOpen, setInventoryBrandPickerOpen] = useState(false)
-  const [inventoryMovementUserPickerOpen, setInventoryMovementUserPickerOpen] = useState(false)
   const [userOptions, setUserOptions] = useState<InventoryUserOption[]>([])
   const [movementStartDate, setMovementStartDate] = useState('')
   const [movementEndDate, setMovementEndDate] = useState('')
@@ -2333,14 +2331,6 @@ export default function Inventory() {
       : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
     ).sort((a, b) => a.localeCompare(b))
   ), [inventoryProductFilters.brands, summary])
-  const selectedMovementUserLabel = useMemo(() => {
-    if (movementUserFilter === 'all') return t('all_users') || 'All users'
-    const match = userOptions.find((option) => String(option?.id || '') === movementUserFilter)
-    return match?.name || match?.username || `User ${movementUserFilter}`
-  }, [movementUserFilter, t, userOptions])
-  const selectedInventoryBrandLabel = brandFilter === 'all'
-    ? (t('all_brands') || 'All brands')
-    : brandFilter
   const apiInventoryInitialOptions = useMemo(
     () => aggregateInitialOptions(Array.isArray(inventoryInitials) ? inventoryInitials : []).filter((item) => (
       item?.type === 'latin' || item?.type === 'number' || item?.type === 'khmer'
@@ -3028,60 +3018,27 @@ export default function Inventory() {
           id: 'movement-user',
           label: t('user') || 'User',
           render: ({ closeMenu }: { closeMenu: () => void }) => (
-            inventoryMovementUserPickerOpen ? (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
-                    onClick={() => setInventoryMovementUserPickerOpen(false)}
-                  >
-                    {t('back') || 'Back'}
-                  </button>
-                  {movementUserFilter !== 'all' ? (
-                    <button
-                      type="button"
-                      className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
-                      onClick={() => {
-                        setMovementUserFilter('all')
-                        closeMenu()
-                      }}
-                    >
-                      {t('clear') || 'Clear'}
-                    </button>
-                  ) : null}
-                </div>
-                <AppSelect
-                  value={movementUserFilter}
-                  onChange={(nextValue) => {
-                    setMovementUserFilter(nextValue || 'all')
-                    closeMenu()
-                  }}
-                  ariaLabel={t('user') || 'User'}
-                  className="w-full"
-                  buttonClassName="w-full rounded-xl text-sm"
-                  options={[
-                    { value: 'all', label: t('all_users') || 'All users' },
-                    ...userOptions.map((option) => {
-                      const id = String(option?.id || '')
-                      return id ? {
-                        value: id,
-                        label: option?.name || option?.username || `User ${id}`,
-                      } : null
-                    }).filter(Boolean) as Array<{ value: string; label: string }>,
-                  ]}
-                />
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
-                onClick={() => setInventoryMovementUserPickerOpen(true)}
-              >
-                <span className="truncate">{selectedMovementUserLabel}</span>
-                <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
-              </button>
-            )
+            <AppSelect
+              value={movementUserFilter}
+              onChange={(nextValue) => {
+                setMovementUserFilter(nextValue || 'all')
+                closeMenu()
+              }}
+              ariaLabel={t('user') || 'User'}
+              className="w-full"
+              buttonClassName="h-9 w-full rounded-xl px-3 py-1.5 text-sm"
+              menuClassName="min-w-[10rem]"
+              options={[
+                { value: 'all', label: t('all_users') || 'All users' },
+                ...userOptions.map((option) => {
+                  const id = String(option?.id || '')
+                  return id ? {
+                    value: id,
+                    label: option?.name || option?.username || `User ${id}`,
+                  } : null
+                }).filter(Boolean) as Array<{ value: string; label: string }>,
+              ]}
+            />
           ),
         } : null,
         {
@@ -3205,54 +3162,21 @@ export default function Inventory() {
         id: 'brand',
         label: t('brand') || 'Brand',
         render: ({ closeMenu }: { closeMenu: () => void }) => (
-          inventoryBrandPickerOpen ? (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  className="text-xs font-medium text-slate-500 transition hover:text-slate-700 dark:text-slate-300 dark:hover:text-white"
-                  onClick={() => setInventoryBrandPickerOpen(false)}
-                >
-                  {t('back') || 'Back'}
-                </button>
-                {brandFilter !== 'all' ? (
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300 dark:hover:text-blue-200"
-                    onClick={() => {
-                      setBrandFilter('all')
-                      closeMenu()
-                    }}
-                  >
-                    {t('clear') || 'Clear'}
-                  </button>
-                ) : null}
-              </div>
-              <AppSelect
-                value={brandFilter}
-                onChange={(nextValue) => {
-                  setBrandFilter(nextValue || 'all')
-                  closeMenu()
-                }}
-                ariaLabel={t('brand') || 'Brand'}
-                className="w-full"
-                buttonClassName="w-full rounded-xl text-sm"
-                options={[
-                  { value: 'all', label: t('all_brands') || 'All brands' },
-                  ...inventoryBrands.map((brand) => ({ value: brand, label: brand })),
-                ]}
-              />
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-300 bg-white px-3 py-2 text-left text-sm text-slate-700 shadow-sm transition hover:border-blue-400 hover:bg-blue-50/50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-500 dark:hover:bg-slate-700/80"
-              onClick={() => setInventoryBrandPickerOpen(true)}
-            >
-              <span className="truncate">{selectedInventoryBrandLabel}</span>
-              <ChevronDown className="h-4 w-4 shrink-0 text-slate-400 dark:text-slate-300" />
-            </button>
-          )
+          <AppSelect
+            value={brandFilter}
+            onChange={(nextValue) => {
+              setBrandFilter(nextValue || 'all')
+              closeMenu()
+            }}
+            ariaLabel={t('brand') || 'Brand'}
+            className="w-full"
+            buttonClassName="h-9 w-full rounded-xl px-3 py-1.5 text-sm"
+            menuClassName="min-w-[12rem]"
+            options={[
+              { value: 'all', label: t('all_brands') || 'All brands' },
+              ...inventoryBrands.map((brand) => ({ value: brand, label: brand })),
+            ]}
+          />
         ),
       } : null,
     ].filter(Boolean)
@@ -3317,8 +3241,6 @@ export default function Inventory() {
     setMovementMonthFilter('all')
     setMovementGroupMode('time')
     setMovementSortDirection('desc')
-    setInventoryBrandPickerOpen(false)
-    setInventoryMovementUserPickerOpen(false)
   }, [])
 
   const isMovementScopeFullySelected = useCallback(
@@ -3489,11 +3411,6 @@ export default function Inventory() {
               activeCount={activeInventoryFilterCount}
               sections={inventoryFilterSections}
               onClear={clearInventoryFilters}
-              onOpenChange={(open) => {
-                if (open) return
-                setInventoryBrandPickerOpen(false)
-                setInventoryMovementUserPickerOpen(false)
-              }}
               compact
             />
           ) : null}
@@ -3508,11 +3425,6 @@ export default function Inventory() {
           activeCount={activeInventoryFilterCount}
           sections={inventoryFilterSections}
           onClear={clearInventoryFilters}
-          onOpenChange={(open) => {
-            if (open) return
-            setInventoryBrandPickerOpen(false)
-            setInventoryMovementUserPickerOpen(false)
-          }}
           compact
         />
       </div>

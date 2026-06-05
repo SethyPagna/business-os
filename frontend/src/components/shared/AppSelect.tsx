@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 
 export type AppSelectOption = {
   value: string | number
@@ -176,7 +177,7 @@ export default function AppSelect({
         onKeyDown={handleKeyDown}
       >
         <span className="min-w-0 flex-1 truncate">{selectedOption?.label ?? selectedValue}</span>
-        <span className={`shrink-0 text-[10px] leading-none text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`}>▼</span>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
 
       {open && createPortal(
