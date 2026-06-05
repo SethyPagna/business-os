@@ -380,6 +380,16 @@ assert.doesNotMatch(
   /window\.api|\(window as Window & \{ api\?:|contactsTransport\.ts/,
   'Contacts route shell should not wake broad or mixed contact transports for contact export',
 )
+assert.doesNotMatch(
+  contacts,
+  /from '\.\/CustomersTab'/,
+  'Contacts route shell should not eagerly import the default Customers tab chunk',
+)
+assert.match(
+  contacts,
+  /const loadCustomersTab = async \(\): Promise<\{ CustomersTab: ComponentType<ContactTabProps> \}>[\s\S]*import\('\.\/CustomersTab'\)[\s\S]*const CustomersTab = lazy\(\(\) => loadCustomersTab\(\)/,
+  'Contacts route should lazy-load the default Customers tab behind the route shell',
+)
 for (const [name, source] of [
   ['Customers', customers],
   ['Suppliers', suppliers],

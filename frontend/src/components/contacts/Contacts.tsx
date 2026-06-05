@@ -8,7 +8,6 @@ import Users from 'lucide-react/dist/esm/icons/users.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
-import { CustomersTab as CustomersTabBase } from './CustomersTab'
 import Modal from '../shared/Modal'
 import PageHeader from '../shared/PageHeader'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -132,18 +131,21 @@ const TABS = (t: TranslateFn): ContactTabDefinition[] => [
   { id: 'delivery', label: t('pos_delivery') || 'Delivery', icon: Truck },
 ]
 
-const CustomersTab = CustomersTabBase as ComponentType<ContactTabProps>
 const ContactImportModal = lazy(() => (
   import('./ContactImportModal').then((module) => ({
     default: module.default as ComponentType<ContactImportModalProps>,
   }))
 ))
+const loadCustomersTab = async (): Promise<{ CustomersTab: ComponentType<ContactTabProps> }> => (
+  await import('./CustomersTab') as unknown as { CustomersTab: ComponentType<ContactTabProps> }
+)
 const loadSuppliersTab = async (): Promise<{ SuppliersTab: ComponentType<ContactTabProps> }> => (
   await import('./SuppliersTab') as unknown as { SuppliersTab: ComponentType<ContactTabProps> }
 )
 const loadDeliveryTab = async (): Promise<{ DeliveryTab: ComponentType<ContactTabProps> }> => (
   await import('./DeliveryTab') as unknown as { DeliveryTab: ComponentType<ContactTabProps> }
 )
+const CustomersTab = lazy(() => loadCustomersTab().then((module) => ({ default: module.CustomersTab })))
 const SuppliersTab = lazy(() => loadSuppliersTab().then((module) => ({ default: module.SuppliersTab })))
 const DeliveryTab = lazy(() => loadDeliveryTab().then((module) => ({ default: module.DeliveryTab })))
 
@@ -245,7 +247,9 @@ export default function Contacts() {
   const [reloadKey, setReloadKey] = useState(0)
 
   const prefetchTab = (tabId: ContactTabId): void => {
-    if (tabId === 'suppliers') {
+    if (tabId === 'customers') {
+      void loadCustomersTab()
+    } else if (tabId === 'suppliers') {
       void loadSuppliersTab()
     } else if (tabId === 'delivery') {
       void loadDeliveryTab()
@@ -407,7 +411,11 @@ export default function Contacts() {
         ))}
       </div>
 
-      {tab === 'customers' && <CustomersTab key={`c-${reloadKey}`} t={t} notify={notify} active={isActive} />}
+      {tab === 'customers' ? (
+        <Suspense fallback={<ContactTabFallback t={t} label={t('customers') || 'customers'} />}>
+          <CustomersTab key={`c-${reloadKey}`} t={t} notify={notify} active={isActive} />
+        </Suspense>
+      ) : null}
       {tab === 'suppliers' ? (
         <Suspense fallback={<ContactTabFallback t={t} label={t('suppliers') || 'suppliers'} />}>
           <SuppliersTab key={`s-${reloadKey}`} t={t} notify={notify} active={isActive} />
