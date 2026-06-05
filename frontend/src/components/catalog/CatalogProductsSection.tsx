@@ -10,8 +10,8 @@ import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Trophy from 'lucide-react/dist/esm/icons/trophy.js'
 import type { LucideIcon } from 'lucide-react'
-import { ProductImg } from '../products/shared/primitives'
-import PaginationControls, { paginateItems } from '../shared/PaginationControls'
+import CatalogProductImage from './catalogImages'
+import CatalogPaginationControls, { paginateCatalogItems } from './catalogPagination'
 import { SectionShell, StatusPill } from './catalogUi'
 import { buildPortalHighlightBadges, buildPortalPricePresentation } from './portalCatalogDisplay.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
@@ -223,7 +223,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   ), [effectiveInitialFilter, filteredProducts, serverPaged])
 
   const pagedProducts = useMemo(
-    () => (serverPaged ? letterFilteredProducts : paginateItems(letterFilteredProducts, page, pageSize)),
+    () => (serverPaged ? letterFilteredProducts : paginateCatalogItems(letterFilteredProducts, page, pageSize)),
     [letterFilteredProducts, page, pageSize, serverPaged],
   )
   const totalProducts = serverPaged ? Number(productTotal || 0) : letterFilteredProducts.length
@@ -424,7 +424,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       ) : null}
 
-      <PaginationControls
+      <CatalogPaginationControls
         className="mb-4"
         page={effectivePage}
         pageSize={effectivePageSize}
@@ -482,7 +482,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 }}
               >
                 {primaryImage ? (
-                  <ProductImg src={primaryImage} alt={product.name || copy('products', 'Products')} className="h-full w-full object-cover" />
+                  <CatalogProductImage src={primaryImage} alt={product.name || copy('products', 'Products')} className="h-full w-full object-cover" />
                 ) : (
                   <div className="flex h-full items-center justify-center text-slate-300">
                     <ShoppingBag className="h-10 w-10" />
@@ -591,7 +591,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       </div>
 
       {totalProducts > effectivePageSize ? (
-        <PaginationControls
+        <CatalogPaginationControls
           className="mt-4"
           page={effectivePage}
           pageSize={effectivePageSize}

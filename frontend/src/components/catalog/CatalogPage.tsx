@@ -36,6 +36,8 @@ import {
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { SectionShell } from './catalogUi'
+import CatalogPreviewSurface from './CatalogPreviewSurface'
+import CatalogProductsSection from './CatalogProductsSection'
 import {
   createAboutBlock,
   createPromoItem,
@@ -60,14 +62,12 @@ import {
   normalizePortalTranslations,
   stringifyPortalTranslations,
 } from './portalTranslationData.ts'
-import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { CatalogPageProvider } from './CatalogPageContext'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
 const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
-const loadCatalogProductsSection = () => import('./CatalogProductsSection')
-const loadCatalogPreviewSurface = () => import('./CatalogPreviewSurface')
 type PortalTranslateControllerModule = typeof import('./portalTranslateController.ts')
 type PortalLanguagePacksModule = typeof import('./portalLanguagePacks.ts')
 type PortalContentI18nModule = typeof import('./portalContentI18n.ts')
@@ -95,8 +95,6 @@ function loadPortalContentI18nModule(): Promise<PortalContentI18nModule> {
 
 const CatalogEditorSurface = lazy(loadCatalogEditorSurface)
 const CatalogSecondaryTabs = lazy(loadCatalogSecondaryTabs)
-const CatalogProductsSection = lazy(loadCatalogProductsSection)
-const CatalogPreviewSurface = lazy(loadCatalogPreviewSurface)
 
 const CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS = 8000
 const CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS = 10000
@@ -291,7 +289,7 @@ function sanitizePersistedMediaPath(value: unknown, fallback = ''): string {
 }
 
 function buildCacheBustedMediaPath(path: unknown, version: unknown): string {
-  const rawPath = resolvePublicAssetUrl(path) || String(path || '').trim()
+  const rawPath = resolveCatalogAssetUrl(path) || String(path || '').trim()
   const rawVersion = String(version || '').trim()
   if (!rawPath || !rawVersion) return rawPath
   if (isTemporaryPreviewUrl(rawPath)) return rawPath
@@ -1364,7 +1362,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [portalProductInitials, setPortalProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
   const [portalConfigReady, setPortalConfigReady] = useState(() => !!cachedPortal?.config || !publicView)
-  const [publicProductsPanelPrimed, setPublicProductsPanelPrimed] = useState(false)
   const [publicSecondaryTabsPrimed, setPublicSecondaryTabsPrimed] = useState(false)
   const [publicChromeVisible, setPublicChromeVisible] = useState(true)
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
@@ -1455,27 +1452,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   useEffect(() => {
     setActiveTab((current) => resolvePortalActiveTab(previewConfig, null, current))
   }, [previewConfig])
-  useEffect(() => {
-    if (!publicView || !portalConfigReady) return undefined
-    const warmPublicProductsPanel = () => {
-      void loadCatalogProductsSection()
-      setPublicProductsPanelPrimed(true)
-    }
-    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      const productsIdleId = window.requestIdleCallback(() => {
-        warmPublicProductsPanel()
-      }, { timeout: 400 })
-      return () => {
-        window.cancelIdleCallback?.(productsIdleId)
-      }
-    }
-    const productsTimerId = window.setTimeout(() => {
-      warmPublicProductsPanel()
-    }, 120)
-    return () => {
-      window.clearTimeout(productsTimerId)
-    }
-  }, [portalConfigReady, publicView])
   const recommendedProductIds = useMemo(
     () => normalizeRecommendedProductIds(
       editorDraft.customer_portal_recommended_product_ids
@@ -3361,13 +3337,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   function renderCatalogSection() {
     if (!displayConfig.showCatalog) return null
     const visible = activeTab === 'products'
-    if (!visible && !(publicView && publicProductsPanelPrimed)) return null
+    if (!visible) return null
 
     return (
-      <div
-        aria-hidden={visible ? undefined : 'true'}
-        className={visible ? '' : 'pointer-events-none absolute left-0 top-0 h-0 w-full overflow-hidden opacity-0'}
-      >
+      <div>
         <Suspense fallback={(
           <SectionShell title={copy('loadingPortal', 'Loading customer portal...')}>
             <div className="text-sm text-slate-500">Loading...</div>
@@ -3444,9 +3417,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (key !== 'products') {
       void loadCatalogSecondaryTabs()
       setPublicSecondaryTabsPrimed(true)
-    } else {
-      void loadCatalogProductsSection()
-      setPublicProductsPanelPrimed(true)
     }
     setActiveTab(key)
   }

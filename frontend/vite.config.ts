@@ -143,7 +143,6 @@ const deferredModulePreloadPrefixes = [
   'assets/image-lightbox-',
   'assets/media-upload-utils-',
   'assets/favicon-utils-',
-  'assets/public-asset-urls-',
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
@@ -170,15 +169,11 @@ const deferredModulePreloadPrefixes = [
   'assets/sales-read-api-',
   'assets/shared-action-history-',
   'assets/catalog-',
-  'assets/catalog-preview-',
-  'assets/catalog-products-',
   'assets/catalog-secondary-tabs-',
   'assets/catalog-editor-',
   'assets/portal-language-options-',
-  'assets/portal-translation-data-',
   'assets/portal-language-packs-',
   'assets/portal-content-i18n-',
-  'assets/portal-editor-utils-',
   'assets/backup-reset-tools-',
   'assets/settings-otp-modal-',
   'assets/user-profile-modal-',
@@ -368,12 +363,6 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'catalog-editor'
     }
-    if (normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')) {
-      return 'catalog-preview'
-    }
-    if (normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')) {
-      return 'catalog-products'
-    }
     if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {
       return 'catalog-secondary-tabs'
     }
@@ -383,35 +372,17 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) {
       return 'script-typography'
     }
-    if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
-      return 'public-asset-urls'
-    }
-    if (normalized.includes('/src/components/catalog/catalogUi.tsx')) {
-      return 'catalog-ui'
-    }
-    if (normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')) {
-      return 'catalog-display'
-    }
-    if (normalized.includes('/src/components/catalog/CatalogPageContext.tsx')) {
-      return 'catalog-context'
-    }
     if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
       return 'portal-translate-controller'
     }
     if (normalized.includes('/src/components/catalog/portalLanguageOptions.ts')) {
       return 'portal-language-options'
     }
-    if (normalized.includes('/src/components/catalog/portalTranslationData.ts')) {
-      return 'portal-translation-data'
-    }
     if (normalized.includes('/src/components/catalog/portalLanguagePacks.ts')) {
       return 'portal-language-packs'
     }
     if (normalized.includes('/src/components/catalog/portalContentI18n.ts')) {
       return 'portal-content-i18n'
-    }
-    if (normalized.includes('/src/components/catalog/portalEditorUtils.ts')) {
-      return 'portal-editor-utils'
     }
     if (
       normalized.includes('/src/components/catalog/portalSubmissionHelpers.ts')

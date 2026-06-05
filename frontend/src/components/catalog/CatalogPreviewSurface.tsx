@@ -5,8 +5,8 @@ import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
-import { ProductImg } from '../products/shared/primitives'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import CatalogProductImage from './catalogImages'
 
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 
@@ -414,7 +414,7 @@ export default function CatalogPreviewSurface({
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
             }}
             renderImage={(src, alt, className) => (
-              <ProductImg src={src} alt={alt} className={className} />
+              <CatalogProductImage src={src} alt={alt} className={className} />
             )}
           />
         ) : null}
