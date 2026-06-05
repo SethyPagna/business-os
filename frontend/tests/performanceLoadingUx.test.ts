@@ -2499,8 +2499,13 @@ assert.doesNotMatch(
 )
 assert.match(
   viteConfig,
-  /fileTransport\.ts'\)[\s\S]*multipartHeaders\.ts'\)[\s\S]*return 'file-api'[\s\S]*aiTransport\.ts'\)\) return 'ai-api'/,
+  /fileTransport\.ts'\)[\s\S]*return 'file-api'[\s\S]*multipartHeaders\.ts'\)\) return 'multipart-headers-api'[\s\S]*aiTransport\.ts'\)\) return 'ai-api'/,
   'Vite should split Files focused transports away from app-api-methods',
+)
+assert.match(
+  viteConfig,
+  /importJobsTransport\.ts'\)[\s\S]*importTransport\.ts'\)[\s\S]*return 'import-jobs-api'/,
+  'Vite should keep import job uploads inside the deferred import-jobs API chunk',
 )
 assert.match(
   fileTransport,

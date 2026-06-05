@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 795 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 797 in this file.
 
 ## Goal
 
@@ -7676,6 +7676,56 @@ Decision rule:
   local packaged route trace, remote admin route trace, public portal
   Cloudflare check, all-pages control audit, reference generation,
   organization audit, schema audit, storage prune, and Phase 29 audit passed.
+
+### Move 797: Lazy-load legacy API bridge domain transports
+
+- Ownership evidence: after Move 796, remote POS still loaded action-only API
+  chunks through the legacy `window.api` bridge even when the first POS view
+  only needed product/catalog/cart reads.
+- Change: `frontend/src/api/methods.ts` now memoizes lazy import loaders for
+  AI, action history, audit log, contacts, dashboard, files, inventory writes,
+  import jobs, product writes, RFID, and sales read transports. The exported
+  bridge method names stay stable, but those domain transports now load only
+  when the matching action or page asks for them.
+- Chunk policy: `frontend/vite.config.ts` now keeps import-job uploads in the
+  deferred `import-jobs-api` chunk and moves shared multipart headers into a
+  tiny deferred `multipart-headers-api` chunk. The emitted
+  `app-api-methods` asset no longer statically imports `file-api`; import-job
+  upload helpers live in `import-jobs-api` and import only the 0.22 kB
+  multipart-header helper.
+- Guardrail proof: `frontend/tests/apiHttp.test.ts` verifies the lazy bridge
+  shape and keeps query-string ownership in the focused sales transport.
+  `frontend/tests/performanceLoadingUx.test.ts` verifies file transport,
+  import transport, and multipart-header chunk ownership.
+- Runtime proof: Docker release `business-os:v6.0.0-202606051156` is running
+  and healthy with frontend hash `a8074d3277060114`. The local packaged route
+  trace `ops/runtime/reports/route-load-trace-2026-06-05T03-59-28-364Z.json`
+  passed Dashboard, Products, Inventory, POS, Returns, Contacts, and public
+  catalog with zero failed requests or console/page errors.
+- Remote proof: the admin Cloudflare trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T03-59-58-547Z.json`
+  passed Dashboard, Products, Inventory, POS, Returns, and Contacts with zero
+  failed requests or console/page errors. POS dropped to 26 total requests and
+  20 script requests, compared with the pre-split remote POS baseline of 43
+  total requests and 37 script requests.
+- Public proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T04-01-01-571Z/report.json`
+  passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+  products, portal bootstrap 200, AI status 200 after interaction, enforced
+  CSP present, and zero failed responses, relevant console messages, or page
+  errors. The public route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T04-01-38-924Z.json`
+  passed with zero failures and ready text at 3432 ms through Cloudflare.
+- Verification: frontend utility suite, frontend production build, frontend
+  performance verifier, emitted asset inspection, Docker release build/start,
+  Docker health, local route-load trace, remote admin route-load trace, public
+  portal Cloudflare check, public route-load trace, generated reference
+  refresh, organization audit, schema audit, and diff whitespace checks
+  passed.
+- Cleanup proof: after runtime proof, ignored regenerable `frontend/dist`
+  (31,740,658 bytes) and `release` (380,757,896 bytes) were removed, for
+  412,498,554 bytes reclaimed. `npm.cmd --prefix ops run phase29:audit`
+  then passed all nine checks.
 
 ## Safety Gates
 

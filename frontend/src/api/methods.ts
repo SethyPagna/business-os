@@ -12,6 +12,17 @@ let localDbModulePromise = null
 let saleWriteTransportPromise = null
 let csvTemplatePromise = null
 let browserDialogsPromise = null
+let aiTransportPromise = null
+let actionHistoryTransportPromise = null
+let auditLogTransportPromise = null
+let contactsTransportPromise = null
+let dashboardTransportPromise = null
+let fileTransportPromise = null
+let inventoryWriteTransportPromise = null
+let importJobsTransportPromise = null
+let productWriteTransportPromise = null
+let rfidTransportPromise = null
+let salesTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -36,6 +47,61 @@ function loadCsvTemplateModule() {
 function loadBrowserDialogsModule() {
   if (!browserDialogsPromise) browserDialogsPromise = import('./browserDialogs.ts')
   return browserDialogsPromise
+}
+
+function loadAiTransport() {
+  if (!aiTransportPromise) aiTransportPromise = import('./aiTransport.ts')
+  return aiTransportPromise
+}
+
+function loadActionHistoryTransport() {
+  if (!actionHistoryTransportPromise) actionHistoryTransportPromise = import('./actionHistoryTransport.ts')
+  return actionHistoryTransportPromise
+}
+
+function loadAuditLogTransport() {
+  if (!auditLogTransportPromise) auditLogTransportPromise = import('./auditLogTransport.ts')
+  return auditLogTransportPromise
+}
+
+function loadContactsTransport() {
+  if (!contactsTransportPromise) contactsTransportPromise = import('./contactsTransport.ts')
+  return contactsTransportPromise
+}
+
+function loadDashboardTransport() {
+  if (!dashboardTransportPromise) dashboardTransportPromise = import('./dashboardTransport.ts')
+  return dashboardTransportPromise
+}
+
+function loadFileTransport() {
+  if (!fileTransportPromise) fileTransportPromise = import('./fileTransport.ts')
+  return fileTransportPromise
+}
+
+function loadInventoryWriteTransport() {
+  if (!inventoryWriteTransportPromise) inventoryWriteTransportPromise = import('./inventoryWriteTransport.ts')
+  return inventoryWriteTransportPromise
+}
+
+function loadImportJobsTransport() {
+  if (!importJobsTransportPromise) importJobsTransportPromise = import('./importJobsTransport.ts')
+  return importJobsTransportPromise
+}
+
+function loadProductWriteTransport() {
+  if (!productWriteTransportPromise) productWriteTransportPromise = import('./productWriteTransport.ts')
+  return productWriteTransportPromise
+}
+
+function loadRfidTransport() {
+  if (!rfidTransportPromise) rfidTransportPromise = import('./rfidTransport.ts')
+  return rfidTransportPromise
+}
+
+function loadSalesTransport() {
+  if (!salesTransportPromise) salesTransportPromise = import('./salesTransport.ts')
+  return salesTransportPromise
 }
 
 async function buildImportCsvTemplate(headers, filename) {
@@ -124,28 +190,6 @@ import {
   searchProducts as searchProductsRequest,
 } from './productReadTransport.ts'
 import {
-  bulkImportProducts as bulkImportProductsRequest,
-  createProduct as createProductRequest,
-  createProductVariant as createProductVariantRequest,
-  deleteProduct as deleteProductRequest,
-  updateProduct as updateProductRequest,
-} from './productWriteTransport.ts'
-import {
-  createAiProvider as createAiProviderRequest,
-  deleteAiProvider as deleteAiProviderRequest,
-  getAiProviders as getAiProvidersRequest,
-  getAiResponses as getAiResponsesRequest,
-  testAiProvider as testAiProviderRequest,
-  updateAiProvider as updateAiProviderRequest,
-} from './aiTransport.ts'
-import {
-  createActionHistory as createActionHistoryRequest,
-  getActionHistory as getActionHistoryRequest,
-  redoActionHistory as redoActionHistoryRequest,
-  undoActionHistory as undoActionHistoryRequest,
-  updateActionHistory as updateActionHistoryRequest,
-} from './actionHistoryTransport.ts'
-import {
   getInventoryBootstrap as getInventoryBootstrapRequest,
   getInventoryMovements as getInventoryMovementsRequest,
   getInventoryReasons as getInventoryReasonsRequest,
@@ -153,66 +197,6 @@ import {
   getInventorySummary as getInventorySummaryRequest,
   searchInventoryProducts as searchInventoryProductsRequest,
 } from './inventoryTransport.ts'
-import {
-  adjustStock as adjustStockRequest,
-  moveStockRow as moveStockRowRequest,
-  saveInventoryReasons as saveInventoryReasonsRequest,
-  transferInventoryStock as transferInventoryStockRequest,
-} from './inventoryWriteTransport.ts'
-import {
-  applyRfidSession as applyRfidSessionRequest,
-  createRfidSession as createRfidSessionRequest,
-  createRfidTag as createRfidTagRequest,
-  getRfidSessionReview as getRfidSessionReviewRequest,
-  getRfidStatus as getRfidStatusRequest,
-  recordRfidSessionEvents as recordRfidSessionEventsRequest,
-  searchRfidTags as searchRfidTagsRequest,
-} from './rfidTransport.ts'
-import {
-  approveImportJob as approveImportJobRequest,
-  cancelImportJob as cancelImportJobRequest,
-  createImportJob as createImportJobRequest,
-  deleteImportJob as deleteImportJobRequest,
-  downloadImportJobErrors as downloadImportJobErrorsRequest,
-  getImportJob as getImportJobRequest,
-  getImportJobReview as getImportJobReviewRequest,
-  getImportQueueStatus as getImportQueueStatusRequest,
-  listImportJobs as listImportJobsRequest,
-  preflightImportJob as preflightImportJobRequest,
-  retryImportJob as retryImportJobRequest,
-  startImportJob as startImportJobRequest,
-  updateImportJobDecisions as updateImportJobDecisionsRequest,
-  uploadImportJobCsv as uploadImportJobCsvRequest,
-  uploadImportJobImages as uploadImportJobImagesRequest,
-  uploadImportJobZip as uploadImportJobZipRequest,
-} from './importJobsTransport.ts'
-import {
-  deleteFileAsset as deleteFileAssetRequest,
-  getFiles as getFilesRequest,
-  uploadFileAsset as uploadFileAssetRequest,
-  uploadProductImage as uploadProductImageRequest,
-  uploadUserAvatar as uploadUserAvatarRequest,
-} from './fileTransport.ts'
-import {
-  bulkImportCustomers as bulkImportCustomersRequest,
-  bulkImportDeliveryContacts as bulkImportDeliveryContactsRequest,
-  bulkImportSuppliers as bulkImportSuppliersRequest,
-  createCustomer as createCustomerRequest,
-  createDeliveryContact as createDeliveryContactRequest,
-  createSupplier as createSupplierRequest,
-  deleteCustomer as deleteCustomerRequest,
-  deleteDeliveryContact as deleteDeliveryContactRequest,
-  deleteSupplier as deleteSupplierRequest,
-  downloadCustomerTemplate as downloadCustomerTemplateRequest,
-  downloadSupplierTemplate as downloadSupplierTemplateRequest,
-  getCustomerPointSummaries as getCustomerPointSummariesRequest,
-  getCustomers as getCustomersRequest,
-  getDeliveryContacts as getDeliveryContactsRequest,
-  getSuppliers as getSuppliersRequest,
-  updateCustomer as updateCustomerRequest,
-  updateDeliveryContact as updateDeliveryContactRequest,
-  updateSupplier as updateSupplierRequest,
-} from './contactsTransport.ts'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -236,17 +220,6 @@ import {
   insertCustomRow as insertCustomRowRequest,
   updateCustomRow as updateCustomRowRequest,
 } from './customTablesTransport.ts'
-import {
-  deleteAuditLogsRetention as deleteAuditLogsRetentionRequest,
-  getAuditLogs as getAuditLogsRequest,
-} from './auditLogTransport.ts'
-import {
-  getAnalytics as getAnalyticsRequest,
-  getDashboard as getDashboardRequest,
-} from './dashboardTransport.ts'
-import {
-  getSales as getSalesRequest,
-} from './salesTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
@@ -777,24 +750,42 @@ export const reviewPortalSubmission = async (id, payload) => {
   return module.reviewPortalSubmission(id, payload)
 }
 
-export const getAiProviders = () =>
-  getAiProvidersRequest()
-export const createAiProvider = (payload) =>
-  createAiProviderRequest(payload)
-export const updateAiProvider = (id, payload) =>
-  updateAiProviderRequest(id, payload)
-export const deleteAiProvider = (id, payload) =>
-  deleteAiProviderRequest(id, payload)
-export const testAiProvider = (id, payload) =>
-  testAiProviderRequest(id, payload)
-export const getAiResponses = (limit = 80) =>
-  getAiResponsesRequest(limit)
-export const createProduct = (payload) =>
-  createProductRequest(payload)
-export const updateProduct = (id, payload) =>
-  updateProductRequest(id, payload)
-export const deleteProduct = (id) =>
-  deleteProductRequest(id)
+export const getAiProviders = async () => {
+  const module = await loadAiTransport()
+  return module.getAiProviders()
+}
+export const createAiProvider = async (payload) => {
+  const module = await loadAiTransport()
+  return module.createAiProvider(payload)
+}
+export const updateAiProvider = async (id, payload) => {
+  const module = await loadAiTransport()
+  return module.updateAiProvider(id, payload)
+}
+export const deleteAiProvider = async (id, payload) => {
+  const module = await loadAiTransport()
+  return module.deleteAiProvider(id, payload)
+}
+export const testAiProvider = async (id, payload) => {
+  const module = await loadAiTransport()
+  return module.testAiProvider(id, payload)
+}
+export const getAiResponses = async (limit = 80) => {
+  const module = await loadAiTransport()
+  return module.getAiResponses(limit)
+}
+export const createProduct = async (payload) => {
+  const module = await loadProductWriteTransport()
+  return module.createProduct(payload)
+}
+export const updateProduct = async (id, payload) => {
+  const module = await loadProductWriteTransport()
+  return module.updateProduct(id, payload)
+}
+export const deleteProduct = async (id) => {
+  const module = await loadProductWriteTransport()
+  return module.deleteProduct(id)
+}
 
 // ─── OTP / 2FA ────────────────────────────────────────────────────────────────
 export const otpSetup = (payload) =>
@@ -809,59 +800,105 @@ export const otpStatus = (id) =>
   otpStatusRequest(id)
 
 // ─── Product Variants ─────────────────────────────────────────────────────────
-export const createProductVariant = payload =>
-  createProductVariantRequest(payload)
+export const createProductVariant = async payload => {
+  const module = await loadProductWriteTransport()
+  return module.createProductVariant(payload)
+}
 
-export const bulkImportProducts = payload =>
-  bulkImportProductsRequest(payload)
+export const bulkImportProducts = async payload => {
+  const module = await loadProductWriteTransport()
+  return module.bulkImportProducts(payload)
+}
 
-export const createImportJob = payload =>
-  createImportJobRequest(payload)
-export const listImportJobs = (params = {}) =>
-  listImportJobsRequest(params)
-export const getImportJob = id =>
-  getImportJobRequest(id)
-export const getImportJobReview = (id, params = {}) =>
-  getImportJobReviewRequest(id, params)
-export const updateImportJobDecisions = (id, decisions = {}) =>
-  updateImportJobDecisionsRequest(id, decisions)
-export const preflightImportJob = id =>
-  preflightImportJobRequest(id)
-export const startImportJob = (id, options = {}) =>
-  startImportJobRequest(id, options)
-export const approveImportJob = (id, options = {}) =>
-  approveImportJobRequest(id, options)
-export const cancelImportJob = (id, options = {}) =>
-  cancelImportJobRequest(id, options)
-export const retryImportJob = (id, options = {}) =>
-  retryImportJobRequest(id, options)
-export const deleteImportJob = (id, options = {}) =>
-  deleteImportJobRequest(id, options)
-export const getImportQueueStatus = () =>
-  getImportQueueStatusRequest()
-export const downloadImportJobErrors = jobId =>
-  downloadImportJobErrorsRequest(jobId)
-export const uploadImportJobCsv = payload =>
-  uploadImportJobCsvRequest(payload)
-export const uploadImportJobZip = payload =>
-  uploadImportJobZipRequest(payload)
-export const uploadImportJobImages = payload =>
-  uploadImportJobImagesRequest(payload)
+export const createImportJob = async payload => {
+  const module = await loadImportJobsTransport()
+  return module.createImportJob(payload)
+}
+export const listImportJobs = async (params = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.listImportJobs(params)
+}
+export const getImportJob = async id => {
+  const module = await loadImportJobsTransport()
+  return module.getImportJob(id)
+}
+export const getImportJobReview = async (id, params = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.getImportJobReview(id, params)
+}
+export const updateImportJobDecisions = async (id, decisions = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.updateImportJobDecisions(id, decisions)
+}
+export const preflightImportJob = async id => {
+  const module = await loadImportJobsTransport()
+  return module.preflightImportJob(id)
+}
+export const startImportJob = async (id, options = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.startImportJob(id, options)
+}
+export const approveImportJob = async (id, options = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.approveImportJob(id, options)
+}
+export const cancelImportJob = async (id, options = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.cancelImportJob(id, options)
+}
+export const retryImportJob = async (id, options = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.retryImportJob(id, options)
+}
+export const deleteImportJob = async (id, options = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.deleteImportJob(id, options)
+}
+export const getImportQueueStatus = async () => {
+  const module = await loadImportJobsTransport()
+  return module.getImportQueueStatus()
+}
+export const downloadImportJobErrors = async jobId => {
+  const module = await loadImportJobsTransport()
+  return module.downloadImportJobErrors(jobId)
+}
+export const uploadImportJobCsv = async payload => {
+  const module = await loadImportJobsTransport()
+  return module.uploadImportJobCsv(payload)
+}
+export const uploadImportJobZip = async payload => {
+  const module = await loadImportJobsTransport()
+  return module.uploadImportJobZip(payload)
+}
+export const uploadImportJobImages = async payload => {
+  const module = await loadImportJobsTransport()
+  return module.uploadImportJobImages(payload)
+}
 
-export const getFiles = (params = {}) =>
-  getFilesRequest(params)
+export const getFiles = async (params = {}) => {
+  const module = await loadFileTransport()
+  return module.getFiles(params)
+}
 
-export const uploadFileAsset = payload =>
-  uploadFileAssetRequest(payload)
+export const uploadFileAsset = async payload => {
+  const module = await loadFileTransport()
+  return module.uploadFileAsset(payload)
+}
 
-export const deleteFileAsset = (id, payload = {}) =>
-  deleteFileAssetRequest(id, payload)
+export const deleteFileAsset = async (id, payload = {}) => {
+  const module = await loadFileTransport()
+  return module.deleteFileAsset(id, payload)
+}
 
-export const uploadProductImage = payload =>
-  uploadProductImageRequest(payload)
+export const uploadProductImage = async payload => {
+  const module = await loadFileTransport()
+  return module.uploadProductImage(payload)
+}
 
-export const uploadUserAvatar = payload =>
-  uploadUserAvatarRequest(payload)
+export const uploadUserAvatar = async payload => {
+  const module = await loadFileTransport()
+  return module.uploadUserAvatar(payload)
+}
 // ─── CSV / file dialog (browser implementations) ──────────────────────────────
 /**
  * openCSVDialog — opens a file picker, reads the selected CSV, and returns
@@ -885,24 +922,39 @@ export const uploadUserAvatar = payload =>
 export { getSyncServerUrl }
 
 // ─── Inventory ────────────────────────────────────────────────────────────────
-export const adjustStock = d =>
-  adjustStockRequest(d)
-export const transferInventoryStock = d =>
-  transferInventoryStockRequest(d)
-export const moveStockRow = d =>
-  moveStockRowRequest(d)
-
-export const getActionHistory = (scope = 'global', limit = 10, params = {}) => {
-  return getActionHistoryRequest(scope, limit, params)
+export const adjustStock = async d => {
+  const module = await loadInventoryWriteTransport()
+  return module.adjustStock(d)
 }
-export const createActionHistory = payload =>
-  createActionHistoryRequest(payload)
-export const updateActionHistory = (id, payload) =>
-  updateActionHistoryRequest(id, payload)
-export const undoActionHistory = id =>
-  undoActionHistoryRequest(id)
-export const redoActionHistory = id =>
-  redoActionHistoryRequest(id)
+export const transferInventoryStock = async d => {
+  const module = await loadInventoryWriteTransport()
+  return module.transferInventoryStock(d)
+}
+export const moveStockRow = async d => {
+  const module = await loadInventoryWriteTransport()
+  return module.moveStockRow(d)
+}
+
+export const getActionHistory = async (scope = 'global', limit = 10, params = {}) => {
+  const module = await loadActionHistoryTransport()
+  return module.getActionHistory(scope, limit, params)
+}
+export const createActionHistory = async payload => {
+  const module = await loadActionHistoryTransport()
+  return module.createActionHistory(payload)
+}
+export const updateActionHistory = async (id, payload) => {
+  const module = await loadActionHistoryTransport()
+  return module.updateActionHistory(id, payload)
+}
+export const undoActionHistory = async id => {
+  const module = await loadActionHistoryTransport()
+  return module.undoActionHistory(id)
+}
+export const redoActionHistory = async id => {
+  const module = await loadActionHistoryTransport()
+  return module.redoActionHistory(id)
+}
 export const getInventorySummary = (params = {}) =>
   getInventorySummaryRequest(params)
 export const getInventoryStats = (params = {}) =>
@@ -915,25 +967,39 @@ export const getInventoryMovements = (params = {}) =>
   getInventoryMovementsRequest(params)
 export const getInventoryReasons = () =>
   getInventoryReasonsRequest()
-export const saveInventoryReasons = (items = []) =>
-  saveInventoryReasonsRequest(items)
+export const saveInventoryReasons = async (items = []) => {
+  const module = await loadInventoryWriteTransport()
+  return module.saveInventoryReasons(items)
+}
 
-export const getRfidStatus = (params = {}) => {
-  return getRfidStatusRequest(params)
+export const getRfidStatus = async (params = {}) => {
+  const module = await loadRfidTransport()
+  return module.getRfidStatus(params)
 }
-export const createRfidTag = payload =>
-  createRfidTagRequest(payload)
-export const searchRfidTags = (params = {}) => {
-  return searchRfidTagsRequest(params)
+export const createRfidTag = async payload => {
+  const module = await loadRfidTransport()
+  return module.createRfidTag(payload)
 }
-export const createRfidSession = payload =>
-  createRfidSessionRequest(payload)
-export const recordRfidSessionEvents = (id, payload) =>
-  recordRfidSessionEventsRequest(id, payload)
-export const getRfidSessionReview = id =>
-  getRfidSessionReviewRequest(id)
-export const applyRfidSession = (id, payload = {}) =>
-  applyRfidSessionRequest(id, payload)
+export const searchRfidTags = async (params = {}) => {
+  const module = await loadRfidTransport()
+  return module.searchRfidTags(params)
+}
+export const createRfidSession = async payload => {
+  const module = await loadRfidTransport()
+  return module.createRfidSession(payload)
+}
+export const recordRfidSessionEvents = async (id, payload) => {
+  const module = await loadRfidTransport()
+  return module.recordRfidSessionEvents(id, payload)
+}
+export const getRfidSessionReview = async id => {
+  const module = await loadRfidTransport()
+  return module.getRfidSessionReview(id)
+}
+export const applyRfidSession = async (id, payload = {}) => {
+  const module = await loadRfidTransport()
+  return module.applyRfidSession(id, payload)
+}
 
 // ─── Sales ────────────────────────────────────────────────────────────────────
 export async function createSale(d) {
@@ -941,68 +1007,98 @@ export async function createSale(d) {
   return createSaleRequest(d)
 }
 
-export const getSales   = (params) => {
-  return getSalesRequest(params)
+export const getSales = async (params) => {
+  const module = await loadSalesTransport()
+  return module.getSales(params)
 }
 
 // ─── Dashboard & analytics ────────────────────────────────────────────────────
-export const getDashboard = ()       => getDashboardRequest()
-export const getAnalytics = (params) => getAnalyticsRequest(params)
+export const getDashboard = async () => {
+  const module = await loadDashboardTransport()
+  return module.getDashboard()
+}
+export const getAnalytics = async (params) => {
+  const module = await loadDashboardTransport()
+  return module.getAnalytics(params)
+}
 
 // ─── Customers ────────────────────────────────────────────────────────────────
-export const getCustomers = (params = {}) => {
-  return getCustomersRequest(params)
+export const getCustomers = async (params = {}) => {
+  const module = await loadContactsTransport()
+  return module.getCustomers(params)
 }
-export const getCustomerPointSummaries = (params = {}) => {
-  return getCustomerPointSummariesRequest(params)
+export const getCustomerPointSummaries = async (params = {}) => {
+  const module = await loadContactsTransport()
+  return module.getCustomerPointSummaries(params)
 }
 export async function createCustomer(d) {
-  return createCustomerRequest(d)
+  const module = await loadContactsTransport()
+  return module.createCustomer(d)
 }
 export const updateCustomer = async (id, d) => {
-  return updateCustomerRequest(id, d)
+  const module = await loadContactsTransport()
+  return module.updateCustomer(id, d)
 }
 export const deleteCustomer = async (id) => {
-  return deleteCustomerRequest(id)
+  const module = await loadContactsTransport()
+  return module.deleteCustomer(id)
 }
-export const bulkImportCustomers = d =>
-  bulkImportCustomersRequest(d)
-export const downloadCustomerTemplate = () =>
-  downloadCustomerTemplateRequest()
+export const bulkImportCustomers = async d => {
+  const module = await loadContactsTransport()
+  return module.bulkImportCustomers(d)
+}
+export const downloadCustomerTemplate = async () => {
+  const module = await loadContactsTransport()
+  return module.downloadCustomerTemplate()
+}
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
-export const getSuppliers = (params = {}) => {
-  return getSuppliersRequest(params)
+export const getSuppliers = async (params = {}) => {
+  const module = await loadContactsTransport()
+  return module.getSuppliers(params)
 }
 export async function createSupplier(d) {
-  return createSupplierRequest(d)
+  const module = await loadContactsTransport()
+  return module.createSupplier(d)
 }
 export const updateSupplier = async (id, d) => {
-  return updateSupplierRequest(id, d)
+  const module = await loadContactsTransport()
+  return module.updateSupplier(id, d)
 }
 export const deleteSupplier = async (id) => {
-  return deleteSupplierRequest(id)
+  const module = await loadContactsTransport()
+  return module.deleteSupplier(id)
 }
-export const bulkImportSuppliers = d =>
-  bulkImportSuppliersRequest(d)
-export const downloadSupplierTemplate = () =>
-  downloadSupplierTemplateRequest()
+export const bulkImportSuppliers = async d => {
+  const module = await loadContactsTransport()
+  return module.bulkImportSuppliers(d)
+}
+export const downloadSupplierTemplate = async () => {
+  const module = await loadContactsTransport()
+  return module.downloadSupplierTemplate()
+}
 
 // ─── Delivery contacts ────────────────────────────────────────────────────────
-export const getDeliveryContacts = (params = {}) => {
-  return getDeliveryContactsRequest(params)
+export const getDeliveryContacts = async (params = {}) => {
+  const module = await loadContactsTransport()
+  return module.getDeliveryContacts(params)
 }
 export async function createDeliveryContact(d) {
-  return createDeliveryContactRequest(d)
+  const module = await loadContactsTransport()
+  return module.createDeliveryContact(d)
 }
 export const updateDeliveryContact = async (id, d) => {
-  return updateDeliveryContactRequest(id, d)
+  const module = await loadContactsTransport()
+  return module.updateDeliveryContact(id, d)
 }
 export const deleteDeliveryContact = async (id) => {
-  return deleteDeliveryContactRequest(id)
+  const module = await loadContactsTransport()
+  return module.deleteDeliveryContact(id)
 }
-export const bulkImportDeliveryContacts = d =>
-  bulkImportDeliveryContactsRequest(d)
+export const bulkImportDeliveryContacts = async d => {
+  const module = await loadContactsTransport()
+  return module.bulkImportDeliveryContacts(d)
+}
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const getUsers      = ()       => getUsersRequest()
@@ -1034,11 +1130,15 @@ export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) =
 export const deleteCustomRow    = ({ tableName, id, payload })     => deleteCustomRowRequest({ tableName, id, payload })
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
-export const getAuditLogs = (params = {}) =>
-  getAuditLogsRequest(params)
+export const getAuditLogs = async (params = {}) => {
+  const module = await loadAuditLogTransport()
+  return module.getAuditLogs(params)
+}
 
-export const deleteAuditLogsRetention = (olderThanDays = 30) =>
-  deleteAuditLogsRetentionRequest(olderThanDays)
+export const deleteAuditLogsRetention = async (olderThanDays = 30) => {
+  const module = await loadAuditLogTransport()
+  return module.deleteAuditLogsRetention(olderThanDays)
+}
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
 export async function getSystemJob(id) {

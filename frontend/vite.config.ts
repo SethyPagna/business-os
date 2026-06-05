@@ -162,6 +162,8 @@ const deferredModulePreloadPrefixes = [
   'assets/dashboard-api-',
   'assets/file-api-',
   'assets/inventory-write-api-',
+  'assets/import-jobs-api-',
+  'assets/multipart-headers-api-',
   'assets/product-write-api-',
   'assets/rfid-api-',
   'assets/sale-write-api-',
@@ -287,8 +289,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/auditLogTransport.ts')) return 'audit-log-api'
     if (
       normalized.endsWith('/src/api/fileTransport.ts')
-      || normalized.endsWith('/src/api/multipartHeaders.ts')
     ) return 'file-api'
+    if (normalized.endsWith('/src/api/multipartHeaders.ts')) return 'multipart-headers-api'
     if (normalized.endsWith('/src/api/aiTransport.ts')) return 'ai-api'
     if (normalized.endsWith('/src/api/salesTransport.ts')) return 'sales-read-api'
     if (normalized.endsWith('/src/api/saleWriteTransport.ts')) return 'sale-write-api'
@@ -297,6 +299,10 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
     if (normalized.endsWith('/src/api/inventoryTransport.ts')) return 'inventory-api'
     if (normalized.endsWith('/src/api/inventoryWriteTransport.ts')) return 'inventory-write-api'
+    if (
+      normalized.endsWith('/src/api/importJobsTransport.ts')
+      || normalized.endsWith('/src/api/importTransport.ts')
+    ) return 'import-jobs-api'
     if (normalized.endsWith('/src/api/userAdminTransport.ts')) return 'user-admin-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'

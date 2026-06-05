@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 420,
   "distAssets": 0,
-  "totalSourceBytes": 6813887,
-  "totalSourceLines": 156328,
+  "totalSourceBytes": 6816541,
+  "totalSourceLines": 156428,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -273,6 +273,11 @@
       "lines": 1407
     },
     {
+      "file": "frontend/src/api/methods.ts",
+      "size": 56437,
+      "lines": 1390
+    },
+    {
       "file": "frontend/src/components/catalog/portalLanguagePacks.ts",
       "size": 64016,
       "lines": 1349
@@ -281,11 +286,6 @@
       "file": "frontend/src/components/users/UserProfileModal.tsx",
       "size": 69508,
       "lines": 1315
-    },
-    {
-      "file": "frontend/src/components/utils-settings/AuditLog.tsx",
-      "size": 61381,
-      "lines": 1306
     }
   ],
   "topBuiltChunks": [],

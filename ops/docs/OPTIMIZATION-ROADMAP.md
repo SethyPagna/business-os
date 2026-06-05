@@ -11846,3 +11846,63 @@ Move 796 status:
   guardrail. Next executable target: continue measured startup reductions on
   routes whose live traces still show high tunnel latency, while keeping
   destructive/settings/print controls behind seeded rollback harnesses.
+
+Move 797 status:
+- Move 797 reduces first-window script pressure from the legacy API bridge by
+  lazy-loading action/page domain transports instead of importing them into
+  `frontend/src/api/methods.ts` at startup. AI providers/responses, action
+  history, audit logs, contacts, dashboard analytics, file uploads/library
+  reads, inventory writes, import jobs, product writes, RFID, and sales reads
+  now use memoized dynamic transport loaders while preserving the same
+  `window.api` method names.
+- Chunk proof: `frontend/vite.config.ts` now pins import-job upload transport
+  into the deferred `import-jobs-api` chunk and gives shared multipart headers
+  a tiny deferred `multipart-headers-api` chunk. Production build emitted
+  `multipart-headers-api-*.js` at 0.22 kB and `import-jobs-api-*.js` at 5.16
+  kB. Inspection of `app-api-methods-*.js` confirmed it no longer statically
+  imports `file-api`; import-job upload helpers import only the small
+  multipart-header chunk when the import action runs.
+- Guardrail proof: `frontend/tests/apiHttp.test.ts` now verifies the lazy
+  bridge method shape and keeps sales query-string ownership in
+  `salesTransport.ts`. `frontend/tests/performanceLoadingUx.test.ts` now
+  verifies that file transport, import transport, and multipart headers stay in
+  their focused chunks.
+- Verification proof: `npm.cmd --prefix frontend run test:utils`,
+  `git diff --check`, `npm.cmd --prefix frontend run build`, and
+  `npm.cmd --prefix frontend run verify:performance` passed before packaging.
+  Docker release `business-os:v6.0.0-202606051156` then built and started
+  successfully. Health reported frontend hash `a8074d3277060114`, R2 object
+  storage, Redis queue/cache, Postgres, and DuckDB analytics ready.
+- Local runtime proof: the packaged local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T03-59-28-364Z.json`
+  passed Dashboard, Products, Inventory, POS, Returns, Contacts, and public
+  catalog with ready times from 209 ms to 391 ms for admin pages, zero failed
+  requests, and zero console/page errors.
+- Remote admin proof: the Cloudflare admin route trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T03-59-58-547Z.json`
+  passed Dashboard, Products, Inventory, POS, Returns, and Contacts with zero
+  failed requests and zero console/page errors. POS dropped from the earlier
+  pre-split remote baseline of 43 requests and 37 scripts to 26 requests and
+  20 scripts.
+- Remote public proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T04-01-01-571Z/report.json`
+  passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+  products, portal bootstrap 200, AI status 200 after interaction, enforced
+  CSP present, and zero failed responses, relevant console messages, or page
+  errors. The public route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T04-01-38-924Z.json`
+  passed with zero failures and zero console/page errors.
+- Cleanup and Phase 29 proof: after runtime proof, ignored regenerable
+  `frontend/dist` (31,740,658 bytes) and `release` (380,757,896 bytes) were
+  removed, for 412,498,554 bytes reclaimed. `npm.cmd --prefix ops run
+  phase29:audit` then passed all nine generated bulk, schema,
+  performance/code-flow, language/runtime, runtime JavaScript inventory,
+  Docker release, runtime dependency, PM2 ecosystem, and organization checks.
+- Current plan position after Move 797: Phase 8.4 remains active for live
+  browser checks and route startup reductions; Phase 26 stays at 51 completed
+  organization moves; Phase 28 remains active with R2/access follow-up open;
+  Phase 29 remains active as the repeated whole-codebase/schema/cleanup
+  guardrail. Next executable target: inspect the remaining first-window route
+  chunks that are still genuinely needed, especially `app-api-methods`,
+  route-local Inventory/Products code size, language packs, and public portal
+  catalog tooling.
