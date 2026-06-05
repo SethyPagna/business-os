@@ -236,7 +236,9 @@ const routeSharedIconNames = new Set([
   'sparkles',
   'store',
   'trash-2',
+  'truck',
   'upload',
+  'warehouse',
   'x',
 ])
 

@@ -96,6 +96,7 @@ const viteConfig = read(path.join(FRONTEND_ROOT, 'vite.config.ts'))
 assert(viteConfig.includes('vendor-zxing'), 'Heavy barcode scanner dependencies must be split out of the startup vendor chunk.')
 assert(viteConfig.includes('inlinePublicRuntimeScripts'), 'Public runtime guards must be inlined at build time to avoid cold-start script round trips.')
 assert(viteConfig.includes('data-business-os-runtime'), 'Inlined public runtime guards must keep traceable data attributes in built HTML.')
+assert(viteConfig.includes("'truck'") && viteConfig.includes("'warehouse'"), 'Contacts route icons should stay in shared-icons instead of separate startup chunks.')
 
 const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.ts'))
 assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch uploader is missing.')

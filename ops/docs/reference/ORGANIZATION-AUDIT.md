@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-05T00:24:39.085Z
+Generated: 2026-06-05T00:55:52.839Z
 
 ## Summary
 
@@ -63,15 +63,15 @@ Generated: 2026-06-05T00:24:39.085Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 11721 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 11748 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7643 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7622 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4404 | frontend/components/inventory |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4132 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4156 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
-| ops/docs/reference/PHASE29-AUDIT.json | 3427 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3236 | ops/docs/reference |
 | frontend/tests/performanceLoadingUx.test.ts | 3032 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
@@ -84,7 +84,7 @@ Generated: 2026-06-05T00:24:39.085Z
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2147 | frontend/components/products |
-| ops/docs/OPTIMIZATION-STATUS.md | 1975 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 1993 | ops/docs |
 | backend/src/routes/inventory.ts | 1902 | backend/routes |
 | frontend/src/App.tsx | 1901 | frontend/src/App.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1890 | frontend/components/utils-settings |

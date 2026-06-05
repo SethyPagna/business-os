@@ -8,10 +8,10 @@ Last updated: 2026-06-05
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 793, inline the tiny public runtime guard scripts
-  at Vite HTML-transform time so cold admin/public page loads no longer spend
-  separate parser-blocking requests on `/runtime-noise-guard.js` and
-  `/theme-bootstrap.js`
+- Latest completed move: Move 794, fold Contacts-only `truck` and
+  `warehouse` lucide icons into the existing shared icon chunk so the
+  Contacts cold-start path no longer spends two extra script requests on tiny
+  route-local icon chunks
 
 ## Current Baseline
 
@@ -35,7 +35,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T00-20-09-999Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-05T00-19-57-544Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-05T00-47-32-343Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -67,6 +67,24 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 794 built and started Docker release `business-os:v6.0.0-202606050831`
+  for the Contacts icon-chunk startup optimization. The focused local
+  route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T00-47-32-343Z.json`
+  loaded Contacts with 30 total requests, 25 script requests, 2 API requests,
+  ready text at 215 ms, and zero failed requests or page errors. Compared with
+  Move 793's Contacts baseline, this removes two requests and two script
+  fetches while keeping the shared icon chunk bounded at 11,651 bytes. After
+  live proof, ignored regenerable output was removed again: `release`
+  (380,754,312 bytes) and `frontend/dist` (31,738,200 bytes), for
+  412,492,512 bytes reclaimed. Uploads, secrets, env files, databases,
+  volumes, backups, and the active Docker image were not touched. The follow-up
+  `prune-storage` removed 770 bytes of stale report metadata, 38.22 MB of
+  Docker builder cache, and only the old rollback tag
+  `business-os:v6.0.0-202606050450`, while preserving active image
+  `business-os:v6.0.0-202606050831`, `business-os:latest`, and rollback tags
+  `v6.0.0-202606050809`, `v6.0.0-202606050737`,
+  `v6.0.0-202606050515`, and `v6.0.0-202606050504`.
 - Move 793 built and started Docker release `business-os:v6.0.0-202606050809`
   for the inline-runtime-guard optimization, then removed ignored/regenerable
   output after live verification: `release` (380,754,312 bytes) and

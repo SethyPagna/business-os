@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 790 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 794 in this file.
 
 ## Goal
 
@@ -7600,6 +7600,27 @@ Decision rule:
   output was removed after live proof, reclaiming 412,493,083 bytes, and
   guarded storage prune removed only old reports, builder cache, and the oldest
   rollback image tag.
+
+### Move 794: Fold Contacts icon-only startup chunks into shared icons
+
+- Ownership evidence: the post-Move-793 Contacts route trace still loaded two
+  tiny route-local lucide icon chunks, `truck-*` and `warehouse-*`, even though
+  Contacts already paid for the shared icon chunk during the same cold start.
+- Change: `frontend/vite.config.ts` adds `truck` and `warehouse` to the
+  route-shared lucide icon set, and `ops/scripts/frontend/verify-performance.ts`
+  now guards that policy so future chunk rewires do not quietly split those
+  icons back out.
+- Performance proof: after production build, `frontend/dist/assets` contains
+  no `truck-*.js` or `warehouse-*.js` output, and `shared-icons-bqdPMMqK.js`
+  stays bounded at 11,651 bytes.
+- Runtime proof: Docker release `business-os:v6.0.0-202606050831` is running
+  and healthy. The focused Contacts route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T00-47-32-343Z.json`
+  passed with 30 total requests, 25 script requests, 2 API requests, ready
+  text at 215 ms, and zero failed requests or page errors.
+- Verification: frontend production build, frontend utility suite, frontend
+  performance verifier, Docker health, container image inspection, and focused
+  Contacts live route trace passed.
 
 ## Safety Gates
 

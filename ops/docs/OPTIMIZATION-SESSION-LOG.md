@@ -8,6 +8,30 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Fold Contacts icon-only startup chunks into shared icons
+  - area: frontend startup performance
+  - result: kept
+  - note: `frontend/vite.config.ts` now keeps the Contacts `truck` and
+    `warehouse` lucide icons in `shared-icons` instead of emitting separate
+    tiny route-local startup chunks.
+  - performance proof: after production build, no `truck-*.js` or
+    `warehouse-*.js` chunks exist in `frontend/dist/assets`; the shared icon
+    chunk remains bounded at 11,651 bytes.
+  - runtime proof: Docker release `business-os:v6.0.0-202606050831` is
+    running. The focused Contacts route trace
+    `ops/runtime/reports/route-load-trace-2026-06-05T00-47-32-343Z.json`
+    loaded with 30 total requests, 25 script requests, ready text at 215 ms,
+    and zero failed requests or page errors, down from the Move 793 Contacts
+    baseline of 32 total requests and 27 script requests.
+  - verification: frontend production build, frontend utility suite, frontend
+    performance verifier, Docker health, and focused Contacts live route trace
+    passed.
+  - cleanup proof: after Docker health and live route proof, removed only
+    ignored/regenerable `release` and `frontend/dist` output for 412,492,512
+    bytes reclaimed. Guarded storage prune then removed 770 bytes of stale
+    report metadata, 38.22 MB of builder cache, and only the old rollback tag
+    `business-os:v6.0.0-202606050450`.
+
 - Inline public runtime guard scripts
   - area: frontend startup performance
   - result: kept
