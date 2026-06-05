@@ -256,7 +256,7 @@ Total files documented: **248**
 | 244 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 245 | `ops/scripts/frontend/verify-performance.ts` | 4 |
 | 246 | `ops/scripts/frontend/verify-ui.ts` | 11 |
-| 247 | `frontend/vite.config.ts` | 5 |
+| 247 | `frontend/vite.config.ts` | 7 |
 | 248 | `frontend/tailwind.config.ts` | 0 |
 
 ## 3. Detailed Function Commentary
@@ -3222,10 +3222,12 @@ Total files documented: **248**
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `readGitRevision` | function | 11 |
-| 2 | `fixCrossorigin` | function | 49 |
-| 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 208 |
-| 5 | `manualChunks` | function | 212 |
+| 2 | `escapeInlineScript` | function | 53 |
+| 3 | `inlinePublicRuntimeScripts` | function | 59 |
+| 4 | `fixCrossorigin` | function | 84 |
+| 5 | `emitBuildManifest` | function | 109 |
+| 6 | `shouldDeferModulePreload` | function | 243 |
+| 7 | `manualChunks` | function | 247 |
 
 ### 3.248 `frontend/tailwind.config.ts`
 

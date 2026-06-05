@@ -92,7 +92,10 @@ assert(appShell.includes('INTENT_CHUNK_IMPORT_TIMEOUT_MS'), 'Route intent chunk 
 assert(appShell.includes('shouldSkipIntentWarmup'), 'Route intent chunk warmup must respect slow-network and visibility signals.')
 assert(sidebar.includes('announcePageIntent') && sidebar.includes('onPointerEnter') && sidebar.includes('onTouchStart'), 'Navigation must publish pointer/touch intent before route clicks.')
 assert(!/from ['"]\.\.\/\.\.\/lang\/(?:en|km)\.json['"]/.test(catalogPage), 'Catalog route must not import full app language JSON packs; use portalLanguagePacks plus local fallbacks.')
-assert(read(path.join(FRONTEND_ROOT, 'vite.config.ts')).includes('vendor-zxing'), 'Heavy barcode scanner dependencies must be split out of the startup vendor chunk.')
+const viteConfig = read(path.join(FRONTEND_ROOT, 'vite.config.ts'))
+assert(viteConfig.includes('vendor-zxing'), 'Heavy barcode scanner dependencies must be split out of the startup vendor chunk.')
+assert(viteConfig.includes('inlinePublicRuntimeScripts'), 'Public runtime guards must be inlined at build time to avoid cold-start script round trips.')
+assert(viteConfig.includes('data-business-os-runtime'), 'Inlined public runtime guards must keep traceable data attributes in built HTML.')
 
 const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.ts'))
 assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch uploader is missing.')

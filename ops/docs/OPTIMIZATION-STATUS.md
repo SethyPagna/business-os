@@ -8,10 +8,10 @@ Last updated: 2026-06-05
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 792, add guarded Docker release-image retention
-  to `prune-storage` so cleanup keeps `business-os:latest`, the active release
-  image, running image IDs, and the newest rollback tags while removing only
-  older `business-os:v*` release tags
+- Latest completed move: Move 793, inline the tiny public runtime guard scripts
+  at Vite HTML-transform time so cold admin/public page loads no longer spend
+  separate parser-blocking requests on `/runtime-noise-guard.js` and
+  `/theme-bootstrap.js`
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
 - latest production build hash from Docker-served live check:
-  `2881516323e52066`
+  `b95ab65d20e981cf`
 
 Latest verified reports:
 
@@ -33,9 +33,9 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-04T22-48-17-381Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-04T23-52-38-129Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T00-20-09-999Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T23-48-08-028Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-05T00-19-57-544Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -67,6 +67,17 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 793 built and started Docker release `business-os:v6.0.0-202606050809`
+  for the inline-runtime-guard optimization, then removed ignored/regenerable
+  output after live verification: `release` (380,754,312 bytes) and
+  `frontend/dist` (31,738,771 bytes), for 412,493,083 bytes removed. The
+  follow-up `prune-storage` removed 311,268 bytes of old live-check report
+  folders, 38.22 MB of Docker builder cache, and only the oldest rollback
+  image tag `business-os:v6.0.0-202606050445`. It preserved uploads, secrets,
+  env files, databases, volumes, backup roots, active image
+  `business-os:v6.0.0-202606050809`, `business-os:latest`, and rollback tags
+  `v6.0.0-202606050737`, `v6.0.0-202606050515`,
+  `v6.0.0-202606050504`, and `v6.0.0-202606050450`.
 - Move 792 added policy-backed Docker image retention to
   `ops/scripts/runtime/storage/prune-storage.ts`. The dry-run preview planned
   one deletion, `business-os:v6.0.0-202606050440`, while protecting

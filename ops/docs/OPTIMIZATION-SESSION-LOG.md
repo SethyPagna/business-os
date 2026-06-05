@@ -8,6 +8,37 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Inline public runtime guard scripts
+  - area: frontend startup performance
+  - result: kept
+  - note: `frontend/vite.config.ts` now inlines the generated
+    `runtime-noise-guard.js` and `theme-bootstrap.js` public runtime outputs
+    into built HTML. The source remains TypeScript-owned under
+    `frontend/src/public-runtime`, and the public `.js` files remain as
+    compatibility assets.
+  - performance proof: built `frontend/dist/index.html` contains traceable
+    `data-business-os-runtime` inline blocks for both guards and no external
+    `src="/runtime-noise-guard.js"` or `src="/theme-bootstrap.js"` startup
+    tags, removing two parser-blocking cold-start requests from admin/public
+    app shell pages.
+  - verification: frontend utility suite, frontend build, and frontend
+    performance verifier passed after the build regenerated
+    `business-os-build.json`.
+  - runtime proof: Docker release `business-os:v6.0.0-202606050809` is running
+    with frontend hash `b95ab65d20e981cf`. The local route trace passed
+    Products, Inventory, Contacts, and Loyalty Points with zero failed
+    requests and zero page/console errors; each route dropped by two total
+    requests and two script requests compared with the prior trace.
+  - public proof: the live Cloudflare public portal check passed against
+    `https://leangcosmetics.dpdns.org/public` with portal bootstrap 200, AI
+    status 200 after interaction, 20 rendered products, enforced CSP present,
+    and no relevant console messages or page errors.
+  - cleanup proof: removed generated `release` and `frontend/dist` output for
+    412,493,083 bytes reclaimed. Storage prune removed 311,268 bytes of old
+    reports, 38.22 MB of Docker builder cache, and only the oldest rollback
+    image tag `business-os:v6.0.0-202606050445` while keeping the active image
+    and recent rollback tags.
+
 - Guarded Docker release-image retention
   - area: runtime cleanup
   - result: kept

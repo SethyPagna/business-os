@@ -20,6 +20,10 @@ function readGitRevision(): string {
 const buildRevision = readGitRevision()
 const buildHash = process.env.BUSINESS_OS_BUILD_HASH
   || createHash('sha256').update(`frontend:${buildRevision}:${Date.now()}`).digest('hex').slice(0, 16)
+const publicRuntimeScripts = [
+  'runtime-noise-guard.js',
+  'theme-bootstrap.js',
+]
 
 /**
  * vite.config.ts
@@ -34,9 +38,9 @@ const buildHash = process.env.BUSINESS_OS_BUILD_HASH
  *    sub-resources. The fixCrossorigin plugin below strips the attribute from
  *    the compiled index.html.
  *
- * 2. The inline suppressor script in index.html (added to template) runs
- *    before vendor.js is parsed, so it catches the Capacitor unhandledrejection
- *    BEFORE React's scheduler can pick it up.
+ * 2. Public runtime guards are authored in TypeScript, emitted to public/*.js,
+ *    and inlined into built HTML. They must run before vendor.js is parsed, but
+ *    they are too small and too critical to spend separate cold-start requests.
  *
  * 3. Every JS/CSS chunk uses a content hash. This prevents Funnel/mobile
  *    browsers from combining a fresh entry bundle with an older cached shared
@@ -45,6 +49,37 @@ const buildHash = process.env.BUSINESS_OS_BUILD_HASH
  * 4. assetsInlineLimit = 0 prevents base64-inlining of small assets, which
  *    can cause "data:..." URLs to be treated as cross-origin by strict browsers.
  */
+
+function escapeInlineScript(source: string): string {
+  return source
+    .replace(/<\/script/gi, '<\\/script')
+    .replace(/<!--/g, '<\\!--')
+}
+
+function inlinePublicRuntimeScripts(): Plugin {
+  return {
+    name: 'inline-public-runtime-scripts',
+    transformIndexHtml(html: string, _ctx?: IndexHtmlTransformContext): string {
+      let nextHtml = html
+      for (const fileName of publicRuntimeScripts) {
+        const scriptPath = path.join(__dirname, 'public', fileName)
+        let source = ''
+        try {
+          source = readFileSync(scriptPath, 'utf8').trim()
+        } catch {
+          continue
+        }
+        if (!source) continue
+        const inlineTag = `<script data-business-os-runtime="${fileName}">${escapeInlineScript(source)}</script>`
+        nextHtml = nextHtml.replace(
+          new RegExp(`<script\\s+src=["']/${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']\\s*>\\s*</script>`, 'i'),
+          inlineTag,
+        )
+      }
+      return nextHtml
+    },
+  }
+}
 
 function fixCrossorigin(): Plugin {
   return {
@@ -401,7 +436,7 @@ function manualChunks(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), fixCrossorigin(), emitBuildManifest()],
+  plugins: [react(), inlinePublicRuntimeScripts(), fixCrossorigin(), emitBuildManifest()],
 
   build: {
     outDir: 'dist',

@@ -7572,6 +7572,35 @@ Decision rule:
   prune preview/apply, Docker image/container inspection, generated reference
   refresh, and Phase 29 audit passed.
 
+### Move 793: Inline generated public runtime guards
+
+- Ownership evidence: the route-load traces showed every cold admin route paid
+  separate startup requests for `/runtime-noise-guard.js` and
+  `/theme-bootstrap.js`, even though both files are tiny, TypeScript-owned
+  public runtime guards that must execute before React/vendor parsing.
+- Change: `frontend/vite.config.ts` now owns an
+  `inlinePublicRuntimeScripts` transform that reads the generated public guard
+  files and replaces their external HTML script tags with escaped inline
+  blocks at build time.
+- Compatibility proof: `frontend/public/runtime-noise-guard.js` and
+  `frontend/public/theme-bootstrap.js` stay in place, and
+  `npm.cmd --prefix frontend run verify:public-runtime` continues to prove
+  those generated files match `frontend/src/public-runtime/*.ts`.
+- Performance proof: built `frontend/dist/index.html` contains
+  `data-business-os-runtime` blocks for both guards and no longer contains
+  external guard `src` tags, cutting two parser-blocking startup requests from
+  every built app-shell page without changing route code.
+- Verification: frontend utility suite, frontend production build, and
+  frontend performance verification passed. The next live verification slice
+  ran against Docker release `business-os:v6.0.0-202606050809` with frontend
+  hash `b95ab65d20e981cf`. Products, Inventory, Contacts, and Loyalty Points
+  each dropped by two total requests and two script fetches, with zero failed
+  requests and zero console/page errors. The public Cloudflare portal check
+  also passed after release startup. Generated `release` and `frontend/dist`
+  output was removed after live proof, reclaiming 412,493,083 bytes, and
+  guarded storage prune removed only old reports, builder cache, and the oldest
+  rollback image tag.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

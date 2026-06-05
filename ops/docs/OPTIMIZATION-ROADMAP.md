@@ -11667,3 +11667,54 @@ Move 792 status:
   guardrail. Next executable target: return to measured page-load optimization
   slices, starting from the route trace pages with the highest first-window
   request/script counts.
+
+Move 793 status:
+- Move 793 removes two cold-start network round trips from every built admin
+  and public app shell page. `frontend/vite.config.ts` now inlines the
+  TypeScript-owned public runtime guard outputs, `runtime-noise-guard.js` and
+  `theme-bootstrap.js`, during Vite `transformIndexHtml`.
+- Safety proof: the public `.js` files remain in `frontend/public` as
+  compatibility assets and are still generated/checked from
+  `frontend/src/public-runtime/*.ts`. The inline transform escapes closing
+  script tokens and keeps `data-business-os-runtime` attributes so built HTML
+  remains auditable.
+- Performance proof: `frontend/dist/index.html` now contains inline
+  `data-business-os-runtime="runtime-noise-guard.js"` and
+  `data-business-os-runtime="theme-bootstrap.js"` blocks and no longer
+  contains external `src="/runtime-noise-guard.js"` or
+  `src="/theme-bootstrap.js"` tags. This preserves pre-React noise/theme
+  behavior while cutting the two parser-blocking startup fetches visible in the
+  Move 791/792 route traces.
+- Verification proof: `npm.cmd --prefix frontend run test:utils`,
+  `npm.cmd --prefix frontend run build`, and `npm.cmd --prefix frontend run
+  verify:performance` passed. The first verifier attempt before build failed
+  only because `frontend/dist` had been intentionally cleaned; it passed after
+  the build regenerated `business-os-build.json`.
+- Runtime proof: Docker release `business-os:v6.0.0-202606050809` is running
+  with frontend hash `b95ab65d20e981cf`. The route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T00-19-57-544Z.json`
+  passed Products, Inventory, Contacts, and Loyalty Points with zero failed
+  requests and zero console/page errors. Compared with the prior trace, each
+  route dropped by two requests and two script fetches: Products 35/27 to
+  33/25, Inventory 38/31 to 36/29, Contacts 34/29 to 32/27, and Loyalty Points
+  22/17 to 20/15.
+- Public proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T00-20-09-999Z/report.json`
+  passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+  products, portal bootstrap 200, AI status 200 after interaction, enforced
+  CSP present, and zero failed responses, relevant console messages, or page
+  errors.
+- Cleanup proof: after Docker health and live checks passed, ignored
+  regenerable output was removed: `release` (380,754,312 bytes) and
+  `frontend/dist` (31,738,771 bytes), for 412,493,083 bytes reclaimed.
+  `npm.cmd --prefix ops run prune-storage` then removed 311,268 bytes of old
+  live-check reports, 38.22 MB of Docker builder cache, and only the oldest
+  rollback image tag `business-os:v6.0.0-202606050445`, while preserving the
+  active image, `latest`, recent rollback tags, uploads, secrets, env files,
+  databases, volumes, and backup roots.
+- Current plan position after Move 793: Phase 8.4 remains active for live
+  browser checks and route startup reductions; Phase 26 stays at 51 completed
+  organization moves; Phase 28 remains active with R2/access follow-up open;
+  Phase 29 remains active as the repeated whole-codebase/schema/cleanup
+  guardrail. Next executable target: continue with the next measured page-load
+  slice.
