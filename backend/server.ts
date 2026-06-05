@@ -96,6 +96,30 @@ const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'Receipt-',
   'CustomersTab-',
 ]
+const SPA_GLOBAL_MODULE_PRELOAD_CHUNKS = ['app-bootstrap']
+const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
+  { match: (routePath) => routePath === '/' || routePath === '/index.html' || routePath.startsWith('/dashboard'), chunks: ['Dashboard'] },
+  { match: (routePath) => routePath.startsWith('/pos'), chunks: ['POS'] },
+  { match: (routePath) => routePath.startsWith('/products'), chunks: ['Products'] },
+  { match: (routePath) => routePath.startsWith('/inventory'), chunks: ['Inventory'] },
+  { match: (routePath) => routePath.startsWith('/sales'), chunks: ['Sales'] },
+  { match: (routePath) => routePath.startsWith('/returns'), chunks: ['Returns'] },
+  { match: (routePath) => routePath.startsWith('/contacts'), chunks: ['Contacts'] },
+  { match: (routePath) => routePath.startsWith('/branches'), chunks: ['Branches'] },
+  { match: (routePath) => routePath.startsWith('/audit-log'), chunks: ['AuditLog'] },
+  { match: (routePath) => routePath.startsWith('/receipt-settings'), chunks: ['ReceiptSettings'] },
+  { match: (routePath) => routePath.startsWith('/backup'), chunks: ['Backup'] },
+  { match: (routePath) => routePath.startsWith('/settings'), chunks: ['Settings'] },
+  { match: (routePath) => routePath.startsWith('/files'), chunks: ['FilesPage'] },
+  { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
+  { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
+  { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users'] },
+  { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog'] },
+]
+const FRONTEND_CHUNK_BASE_COLLISIONS = {
+  catalog: ['context', 'display', 'editor', 'preview', 'products', 'secondary-tabs', 'ui'],
+}
+const frontendModulePreloadCache = new Map()
 
 function listFrontendAssetFiles() {
   if (!FRONTEND_DIST_EXISTS) return []
@@ -128,6 +152,60 @@ function resolveFrontendAssetPath(assetName = '') {
   }
 
   return ''
+}
+
+function resolveFrontendChunkAssetName(chunkBase = '') {
+  if (!FRONTEND_DIST_EXISTS) return ''
+  const normalized = String(chunkBase || '').trim()
+  if (!normalized) return ''
+  if (frontendModulePreloadCache.has(normalized)) {
+    return frontendModulePreloadCache.get(normalized)
+  }
+
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const exactChunkPattern = new RegExp(`^${escaped}-[A-Za-z0-9_-]+\\.js$`)
+  const collisionPattern = FRONTEND_CHUNK_BASE_COLLISIONS[normalized]
+    ? new RegExp(`^${escaped}-(${FRONTEND_CHUNK_BASE_COLLISIONS[normalized].map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})-`)
+    : null
+  const assetName = listFrontendAssetFiles()
+    .filter((name) => exactChunkPattern.test(name) && !(collisionPattern && collisionPattern.test(name)))
+    .sort()
+    .at(-1) || ''
+  frontendModulePreloadCache.set(normalized, assetName)
+  return assetName
+}
+
+function getSpaModulePreloadChunks(routePath = '/') {
+  const normalizedPath = String(routePath || '/').split('?')[0] || '/'
+  const routeChunks = SPA_ROUTE_MODULE_PRELOAD_CHUNKS
+    .filter((entry) => entry.match(normalizedPath))
+    .flatMap((entry) => entry.chunks)
+  return [...new Set([...SPA_GLOBAL_MODULE_PRELOAD_CHUNKS, ...routeChunks])]
+}
+
+function appendLinkHeader(res, value) {
+  if (typeof res.append === 'function') {
+    res.append('Link', value)
+    return
+  }
+  const existing = typeof res.getHeader === 'function' ? res.getHeader('Link') : ''
+  const nextValue = existing ? `${existing}, ${value}` : value
+  res.setHeader('Link', nextValue)
+}
+
+function appendSpaModulePreloadHeaders(req, res) {
+  const routePath = req?.path || '/'
+  for (const chunkBase of getSpaModulePreloadChunks(routePath)) {
+    const assetName = resolveFrontendChunkAssetName(chunkBase)
+    if (!assetName) continue
+    appendLinkHeader(res, `</assets/${assetName}>; rel=modulepreload`)
+  }
+}
+
+function sendSpaIndex(req, res) {
+  setAdminSpaHtmlHeaders(req, res)
+  appendSpaModulePreloadHeaders(req, res)
+  return res.sendFile(path.join(FRONTEND_DIST, 'index.html'))
 }
 
 function loadCompressionMiddleware() {
@@ -320,9 +398,11 @@ function mountStaticAssets(target) {
   if (!FRONTEND_DIST_EXISTS) return
 
   target.get(['/', '/index.html'], (req, res, next) => {
-    if (!isConfiguredCustomerPortalHost(req)) return next()
-    setNoStoreHeaders(res)
-    return res.redirect(302, '/public')
+    if (isConfiguredCustomerPortalHost(req)) {
+      setNoStoreHeaders(res)
+      return res.redirect(302, '/public')
+    }
+    return sendSpaIndex(req, res)
   })
 
   target.get('/assets/:assetName', (req, res, next) => {
@@ -435,8 +515,7 @@ function mountSpaFallback(target) {
 
   target.get('*', (req, res, next) => {
     if (!isSpaFallbackEligible(req.path)) return next()
-    setAdminSpaHtmlHeaders(req, res)
-    res.sendFile(path.join(FRONTEND_DIST, 'index.html'))
+    return sendSpaIndex(req, res)
   })
 }
 

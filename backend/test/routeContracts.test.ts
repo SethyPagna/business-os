@@ -119,6 +119,19 @@ runTest('sales router registers combined dashboard startup route', () => {
   assert.match(source, /analytics: buildDashboardAnalytics\(startDate, endDate, granularity\)/)
 })
 
+runTest('SPA shell sends route-owned modulepreload hints for direct visits', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../server.ts'), 'utf8')
+  assert.match(source, /const SPA_GLOBAL_MODULE_PRELOAD_CHUNKS = \['app-bootstrap'\]/)
+  assert.match(source, /routePath\.startsWith\('\/pos'\), chunks: \['POS'\]/)
+  assert.match(source, /routePath\.startsWith\('\/products'\), chunks: \['Products'\]/)
+  assert.match(source, /routePath\.startsWith\('\/audit-log'\), chunks: \['AuditLog'\]/)
+  assert.match(source, /routePath\.startsWith\('\/public'\)[\s\S]*chunks: \['app-portal', 'catalog'\]/)
+  assert.match(source, /const FRONTEND_CHUNK_BASE_COLLISIONS = \{[\s\S]*catalog: \['context', 'display', 'editor', 'preview', 'products', 'secondary-tabs', 'ui'\]/)
+  assert.match(source, /function resolveFrontendChunkAssetName\(chunkBase = ''\)/)
+  assert.match(source, /function appendSpaModulePreloadHeaders\(req, res\)/)
+  assert.match(source, /return sendSpaIndex\(req, res\)/)
+})
+
 runTest('files router registers list, upload, and delete routes', () => {
   const router = require('../src/routes/files.ts')
   const paths = getRoutePaths(router)
