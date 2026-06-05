@@ -573,7 +573,7 @@ function buildLookupUsageEntries({ libraryRows = [], productRows = [], type = 'l
     const key = normalizeLookup(normalizedValue)
     const fallbackKey = normalizeLookup(rawValue)
     const resolvedKey = key || fallbackKey
-    if (!resolvedKey) return
+    if (!resolvedKey) continue
     if (!usageMap.has(resolvedKey)) {
       usageMap.set(resolvedKey, {
         key: resolvedKey,

@@ -161,6 +161,12 @@ function getBrandReviewRule(name: unknown): BrandReviewRule | null {
   return BRAND_REVIEW_RULES[normalizeLookup(name)] || null
 }
 
+function hasActiveBrandUsage(entry: BrandUsageEntry | null | undefined): boolean {
+  return Number(entry?.usage_count || 0) > 0 ||
+    Number(entry?.unresolved_count || 0) > 0 ||
+    (Array.isArray(entry?.sample_products) && entry.sample_products.length > 0)
+}
+
 function getBrandSortScore(entry: Pick<BrandWithUsage, 'reviewRule'> | null | undefined): number {
   if (entry?.reviewRule?.tone === 'review') return 0
   if (entry?.reviewRule?.tone === 'safe') return 1
@@ -245,13 +251,14 @@ export default function ManageBrandsModal({
       .filter(Boolean)
       .map((name): BrandWithUsage => {
         const usage = usageMap.get(normalizeLookup(name))
+        const hasUsage = hasActiveBrandUsage(usage)
         return {
           name,
           usage: Number(usage?.usage_count || 0),
           unresolvedCount: Number(usage?.unresolved_count || 0),
           sampleProducts: Array.isArray(usage?.sample_products) ? usage.sample_products : [],
           color: brandColorMap[normalizeLookup(name)] || DEFAULT_BRAND_COLOR,
-          reviewRule: getBrandReviewRule(name),
+          reviewRule: hasUsage ? getBrandReviewRule(name) : null,
         }
       })
       .sort((a, b) => {

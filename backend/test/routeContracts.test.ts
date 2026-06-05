@@ -35,6 +35,7 @@ runTest('product router registers required paged search routes', () => {
   assert.match(source, /COALESCE\(p\.name,\s*''\)/, 'initial search must use a SQL string literal fallback')
   assert.doesNotMatch(source, /COALESCE\(p\.name,\s*""\)/, 'initial search must not use double-quoted identifiers')
   assert.match(source, /\['brand', 'category', 'unit', 'supplier'\]/, 'product search should support unit lookup filtering')
+  assert.doesNotMatch(source, /if \(!resolvedKey\) return/, 'lookup usage must skip blank product values without aborting the whole usage scan')
 })
 
 runTest('inventory router registers required paged product search route', () => {

@@ -24,9 +24,17 @@ type RuntimeHealth = {
     sourceHash?: string
   }
 }
+type LookupUsageEntry = {
+  name?: string
+  usage_count?: number
+  sample_products?: unknown[]
+}
+type LookupUsagePayload = {
+  brands?: LookupUsageEntry[]
+}
 type RequestContext = {
   request: {
-    get: (url: string, options: { timeout: number }) => Promise<{ status: () => number }>
+    get: (url: string, options: { timeout: number }) => Promise<{ status: () => number; json: () => Promise<unknown> }>
   }
 }
 
@@ -40,6 +48,12 @@ async function verifiedContextGet(context: RequestContext, url: string, label: s
   const response = await context.request.get(url, { timeout: 20_000 })
   assert(response.status() === 200, `${label} returned HTTP ${response.status()}`)
   return response.status()
+}
+
+async function verifiedContextJson<T>(context: RequestContext, url: string, label: string): Promise<T> {
+  const response = await context.request.get(url, { timeout: 20_000 })
+  assert(response.status() === 200, `${label} returned HTTP ${response.status()}`)
+  return await response.json() as T
 }
 
 
@@ -76,7 +90,11 @@ async function main(): Promise<void> {
     await page.getByRole('button', { name: /^Brand$/i }).click()
     const modal = page.locator('.fixed.inset-0').last()
     await modal.getByRole('heading', { name: /Brand\s+Manage|Manage\s+Brand/i }).waitFor({ state: 'visible', timeout: 20_000 })
-    const lookupUsageStatus = await verifiedContextGet(context, `${BASE_URL}/api/products/lookups/usage`, 'Product lookup usage direct read')
+    const lookupUsage = await verifiedContextJson<LookupUsagePayload>(context, `${BASE_URL}/api/products/lookups/usage`, 'Product lookup usage direct read')
+    const positiveBrandUsage = (lookupUsage.brands || []).filter((entry) => Number(entry?.usage_count || 0) > 0)
+    const sampledBrandUsage = positiveBrandUsage.filter((entry) => Array.isArray(entry?.sample_products) && entry.sample_products.length > 0)
+    assert(positiveBrandUsage.length > 0, 'Product lookup usage returned no active brands with positive product counts')
+    assert(sampledBrandUsage.length > 0, 'Product lookup usage returned positive brands without sample products')
     const actionHistoryStatus = await verifiedContextGet(context, `${BASE_URL}/api/action-history?scope=product-brands&limit=5&all=1`, 'Brand action-history direct read')
 
     await modal.getByPlaceholder("e.g. L'Oreal").waitFor({ state: 'visible', timeout: 15_000 })
@@ -108,7 +126,9 @@ async function main(): Promise<void> {
       checks: {
         productsPageVisible: true,
         productsStatus,
-        lookupUsageStatus,
+        lookupUsageStatus: 200,
+        positiveBrandUsage: positiveBrandUsage.length,
+        sampledBrandUsage: sampledBrandUsage.length,
         actionHistoryStatus,
         observedLookupUsageStatus: latestObservedStatus(observedRequests, /\/api\/products\/lookups\/usage/i),
         observedActionHistoryStatus: latestObservedStatus(observedRequests, /\/api\/action-history\?scope=product-brands/i),
