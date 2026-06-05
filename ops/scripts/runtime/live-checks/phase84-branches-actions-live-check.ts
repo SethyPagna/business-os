@@ -24,13 +24,25 @@ type RuntimeHealth = {
     sourceHash?: string
   }
 }
+type BranchForSelect = {
+  id?: number | string
+  name?: string
+  is_active?: boolean
+}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
-
-
+async function readFirstActiveBranch(page: { evaluate: <T>(callback: () => Promise<T>) => Promise<T> }): Promise<{ id: string; name: string }> {
+  const branch = await page.evaluate(async () => {
+    const api = (window as Window & { api?: { getBranches?: () => Promise<BranchForSelect[]> } }).api
+    const rows = await api?.getBranches?.()
+    return (rows || []).find((item) => item?.is_active !== false && item?.id != null && String(item?.name || '').trim())
+  })
+  assert(branch?.id != null && branch?.name, 'No active branch was available for the transfer select check')
+  return { id: String(branch.id), name: String(branch.name) }
+}
 
 
 async function main(): Promise<void> {
@@ -81,12 +93,10 @@ async function main(): Promise<void> {
 
     await page.getByRole('button', { name: /^Transfer$/i }).first().click()
     await page.locator('#transfer-from-branch').waitFor({ state: 'visible', timeout: 15_000 })
-    const sourceBranch = await page.locator('#transfer-from-branch').evaluate((select) => (
-      Array.from(select.options).find((option) => option.value)?.value || ''
-    ))
-    assert(sourceBranch, 'No transfer source branch option was available')
-    const branchStockRead = waitForRead(page, observedRequests, new RegExp(`/api/branches/${sourceBranch}/stock`, 'i'), 'Transfer source stock read')
-    await page.locator('#transfer-from-branch').selectOption(sourceBranch)
+    const sourceBranch = await readFirstActiveBranch(page)
+    const branchStockRead = waitForRead(page, observedRequests, new RegExp(`/api/branches/${sourceBranch.id}/stock`, 'i'), 'Transfer source stock read')
+    await page.locator('#transfer-from-branch').click()
+    await page.getByRole('option', { name: sourceBranch.name, exact: true }).click()
     const branchStockStatus = await branchStockRead
     await page.locator('#transfer-product-search').waitFor({ state: 'visible', timeout: 15_000 })
     const transferModal = page.locator('.fixed.inset-0').last()

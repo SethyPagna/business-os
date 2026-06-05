@@ -8,6 +8,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS = 12000
@@ -16,6 +17,8 @@ const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000
 type NoticeKind = 'success' | 'error' | 'info' | 'warning' | string
 type MoneyFormatter = (value: number | string) => string
 type SettlementMethod = 'refund' | 'credit' | 'replacement' | 'writeoff'
+
+const SUPPLIER_RETURN_SETTLEMENT_VALUES: SettlementMethod[] = ['refund', 'credit', 'replacement', 'writeoff']
 
 interface AppUser {
   id?: number | string
@@ -254,6 +257,23 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const effectiveCompensationKhr = compensationKhr === '' ? (defaultCompensationEnabled ? totals.totalKhr : 0) : Number(compensationKhr || 0)
   const lossUsd = Math.max(0, totals.totalUsd - effectiveCompensationUsd)
   const lossKhr = Math.max(0, totals.totalKhr - effectiveCompensationKhr)
+  const branchOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: tr('select_branch', 'Select branch') },
+    ...branches.map((item) => ({ value: item.id, label: item.name || String(item.id) })),
+  ], [branches, t])
+  const supplierOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: tr('select_supplier', 'Select supplier') },
+    ...suppliers.map((item) => ({ value: item.id, label: item.name || String(item.id) })),
+  ], [suppliers, t])
+  const settlementOptions = useMemo<AppSelectOption[]>(() => SUPPLIER_RETURN_SETTLEMENT_VALUES.map((value) => ({
+    value,
+    label: {
+      refund: tr('settlement_refund', 'Refund'),
+      credit: tr('settlement_credit', 'Store credit'),
+      replacement: tr('settlement_replacement', 'Replacement'),
+      writeoff: tr('settlement_writeoff', 'No compensation'),
+    }[value],
+  })), [t])
 
   const updateQty = (productId: number | string, nextValue: string, max: number) => {
     const parsed = Number(nextValue || 0)
@@ -323,30 +343,43 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div>
                 <label htmlFor="supplier-return-branch" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('branch', 'Branch')}</label>
-                <select id="supplier-return-branch" className="input text-sm" value={branchId} onChange={(event) => setBranchId(event.target.value)}>
-                  <option value="">{tr('select_branch', 'Select branch')}</option>
-                  {branches.map((item) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
-                </select>
+                <AppSelect
+                  id="supplier-return-branch"
+                  className="w-full"
+                  buttonClassName="w-full text-sm"
+                  value={branchId}
+                  options={branchOptions}
+                  onChange={setBranchId}
+                  ariaLabel={tr('branch', 'Branch')}
+                />
               </div>
               <div>
                 <label htmlFor="supplier-return-supplier" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('supplier', 'Supplier')}</label>
-                <select id="supplier-return-supplier" className="input text-sm" value={supplierId} onChange={(event) => setSupplierId(event.target.value)}>
-                  <option value="">{tr('select_supplier', 'Select supplier')}</option>
-                  {suppliers.map((item) => (
-                    <option key={item.id} value={item.id}>{item.name}</option>
-                  ))}
-                </select>
+                <AppSelect
+                  id="supplier-return-supplier"
+                  className="w-full"
+                  buttonClassName="w-full text-sm"
+                  value={supplierId}
+                  options={supplierOptions}
+                  onChange={setSupplierId}
+                  ariaLabel={tr('supplier', 'Supplier')}
+                />
               </div>
               <div>
                 <label htmlFor="supplier-return-settlement" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('settlement_method', 'Settlement')}</label>
-                <select id="supplier-return-settlement" className="input text-sm" value={settlement} onChange={(event) => setSettlement(event.target.value as SettlementMethod)}>
-                  <option value="refund">{tr('settlement_refund', 'Refund')}</option>
-                  <option value="credit">{tr('settlement_credit', 'Store credit')}</option>
-                  <option value="replacement">{tr('settlement_replacement', 'Replacement')}</option>
-                  <option value="writeoff">{tr('settlement_writeoff', 'No compensation')}</option>
-                </select>
+                <AppSelect
+                  id="supplier-return-settlement"
+                  className="w-full"
+                  buttonClassName="w-full text-sm"
+                  value={settlement}
+                  options={settlementOptions}
+                  onChange={(nextValue) => {
+                    if (SUPPLIER_RETURN_SETTLEMENT_VALUES.includes(nextValue as SettlementMethod)) {
+                      setSettlement(nextValue as SettlementMethod)
+                    }
+                  }}
+                  ariaLabel={tr('settlement_method', 'Settlement')}
+                />
               </div>
               <div>
                 <label htmlFor="supplier-return-reason" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('reason', 'Reason')}</label>

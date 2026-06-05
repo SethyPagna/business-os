@@ -11,6 +11,7 @@ import {
   getBranchStock as getBranchStockRequest,
   transferStock as transferStockRequest,
 } from '../../api/branchTransport.ts'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 
 const TRANSFER_STOCK_LOAD_TIMEOUT_MS = 12000
 const TRANSFER_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -122,6 +123,18 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     aliveRef.current = false
     invalidateTrackedRequest(stockRequestRef)
   }, [])
+
+  const branchOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: t('select_source') || 'Select source branch' },
+    ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
+  ], [branches, t])
+
+  const destinationBranchOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: t('select_destination') || 'Select destination branch' },
+    ...branches
+      .filter((branch) => String(branch.id) !== String(fromBranch))
+      .map((branch) => ({ value: branch.id, label: branch.name })),
+  ], [branches, fromBranch, t])
 
   const invalidQuantityText = settings?.language === 'km'
     ? 'ចំនួនផ្ទេរត្រូវតែធំជាងសូន្យ។'
@@ -271,30 +284,32 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               <label htmlFor="transfer-from-branch" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t('from_branch') || 'From Branch'}
               </label>
-              <select id="transfer-from-branch" name="from_branch" className="input" value={fromBranch} onChange={(event) => setFromBranch(event.target.value)}>
-                <option value="">{t('select_source') || 'Select source branch'}</option>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </option>
-                ))}
-              </select>
+              <AppSelect
+                id="transfer-from-branch"
+                name="from_branch"
+                className="w-full"
+                buttonClassName="w-full"
+                value={fromBranch}
+                options={branchOptions}
+                onChange={setFromBranch}
+                ariaLabel={t('from_branch') || 'From Branch'}
+              />
             </div>
 
             <div>
               <label htmlFor="transfer-to-branch" className="mb-1 block text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {t('to_branch') || 'To Branch'}
               </label>
-              <select id="transfer-to-branch" name="to_branch" className="input" value={toBranch} onChange={(event) => setToBranch(event.target.value)}>
-                <option value="">{t('select_destination') || 'Select destination branch'}</option>
-                {branches
-                  .filter((branch) => String(branch.id) !== String(fromBranch))
-                  .map((branch) => (
-                    <option key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </option>
-                  ))}
-              </select>
+              <AppSelect
+                id="transfer-to-branch"
+                name="to_branch"
+                className="w-full"
+                buttonClassName="w-full"
+                value={toBranch}
+                options={destinationBranchOptions}
+                onChange={setToBranch}
+                ariaLabel={t('to_branch') || 'To Branch'}
+              />
             </div>
           </div>
 

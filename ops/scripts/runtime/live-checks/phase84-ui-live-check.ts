@@ -25,12 +25,25 @@ type RuntimeHealth = {
     sourceHash?: string
   }
 }
+type BranchForSelect = {
+  id?: number | string
+  name?: string
+  is_active?: boolean
+}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
-
+async function readFirstActiveBranch(page: { evaluate: <T>(callback: () => Promise<T>) => Promise<T> }): Promise<{ id: string; name: string }> {
+  const branch = await page.evaluate(async () => {
+    const api = (window as Window & { api?: { getBranches?: () => Promise<BranchForSelect[]> } }).api
+    const rows = await api?.getBranches?.()
+    return (rows || []).find((item) => item?.is_active !== false && item?.id != null && String(item?.name || '').trim())
+  })
+  assert(branch?.id != null && branch?.name, 'No active branch was available for the transfer select check')
+  return { id: String(branch.id), name: String(branch.name) }
+}
 
 
 async function main(): Promise<void> {
@@ -149,22 +162,19 @@ async function main(): Promise<void> {
     await page.getByRole('heading', { name: 'Stock Transfer', exact: true }).waitFor({ state: 'visible', timeout: 10_000 })
     const sourceBranchSelect = page.locator('#transfer-from-branch')
     await sourceBranchSelect.waitFor({ state: 'visible', timeout: 10_000 })
-    const firstSourceBranch = await sourceBranchSelect.evaluate((select) => {
-      const option = Array.from(select.options).find((item) => item.value)
-      return option?.value || ''
-    })
-    assert(firstSourceBranch, 'No source branch option was available in the transfer modal')
+    const firstSourceBranch = await readFirstActiveBranch(page)
     const transferStockResponse = page.waitForResponse(
-      (response) => response.url().includes(`/api/branches/${firstSourceBranch}/stock`)
+      (response) => response.url().includes(`/api/branches/${firstSourceBranch.id}/stock`)
         && response.url().includes('pageSize=50')
         && response.status() < 500,
       { timeout: 20_000 },
     ).catch(() => null)
-    await sourceBranchSelect.selectOption(firstSourceBranch)
+    await sourceBranchSelect.click()
+    await page.getByRole('option', { name: firstSourceBranch.name, exact: true }).click()
     const transferStock = await transferStockResponse
     const transferStockStatus = transferStock?.status?.()
-      || latestObservedStatus(chunkRequests, new RegExp(`/api/branches/${firstSourceBranch}/stock.*pageSize=50`, 'i'))
-      || await readJsonStatus(`${BASE_URL}/api/branches/${firstSourceBranch}/stock?page=1&pageSize=50`, authedRequest)
+      || latestObservedStatus(chunkRequests, new RegExp(`/api/branches/${firstSourceBranch.id}/stock.*pageSize=50`, 'i'))
+      || await readJsonStatus(`${BASE_URL}/api/branches/${firstSourceBranch.id}/stock?page=1&pageSize=50`, authedRequest)
     assert(transferStockStatus === 200, `Transfer source branch stock read returned HTTP ${transferStockStatus}`)
     await page.locator('#transfer-product-search').waitFor({ state: 'visible', timeout: 10_000 })
     const visibleCloseButtons = page.getByRole('button', { name: /Close|Cancel/i }).filter({ visible: true })
@@ -293,8 +303,12 @@ async function main(): Promise<void> {
     const supplierReturnInventory = await supplierReturnInventoryResponse
     const supplierReturnSetupStatus = supplierReturnSetup?.status?.() || null
     const supplierReturnInventoryStatus = supplierReturnInventory?.status?.() || null
-    const supplierReturnBranchOptions = await page.locator('#supplier-return-branch option').count()
-    const supplierReturnSupplierOptions = await page.locator('#supplier-return-supplier option').count()
+    await page.locator('#supplier-return-branch').click()
+    const supplierReturnBranchOptions = await page.getByRole('option').count()
+    await page.keyboard.press('Escape')
+    await page.locator('#supplier-return-supplier').click()
+    const supplierReturnSupplierOptions = await page.getByRole('option').count()
+    await page.keyboard.press('Escape')
     assert(supplierReturnBranchOptions > 1, 'Supplier return branch options did not render')
     assert(supplierReturnSupplierOptions >= 1, 'Supplier return supplier selector did not render')
     if (supplierReturnSetupStatus != null) {
