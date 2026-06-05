@@ -712,9 +712,40 @@ input:focus, select:focus, textarea:focus {
 }
 input[type="checkbox"]:checked, input[type="radio"]:checked { accent-color: var(--ui-accent,#2563eb); }
 
+select.input,
+select.btn-secondary {
+  appearance: none;
+  min-height: 2.5rem;
+  padding-right: 2.25rem !important;
+  border-radius: max(var(--ui-radius, 8px), 12px) !important;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 1rem) 50%,
+    calc(100% - .7rem) 50%;
+  background-size: .34rem .34rem, .34rem .34rem;
+  background-repeat: no-repeat;
+}
+
+select.input:hover,
+select.btn-secondary:hover {
+  border-color: color-mix(in srgb, var(--ui-accent,#2563eb) 38%, #94a3b8 62%) !important;
+}
+
+select.input[multiple],
+select.input[size],
+select.btn-secondary[multiple],
+select.btn-secondary[size] {
+  padding-right: .75rem !important;
+  background-image: none;
+}
+
 /* Border radius via CSS var */
 .card, .badge-green, .badge-red, .badge-yellow, .badge-blue { border-radius: var(--ui-radius,8px) !important; }
 .btn-primary, .btn-secondary, .btn-danger, .btn-success, .input { border-radius: var(--ui-radius,8px) !important; }
+select.input,
+select.btn-secondary { border-radius: max(var(--ui-radius, 8px), 12px) !important; }
 
 /* Font/size inheritance */
 th, td, label, p, span, div, button, select, input, textarea { font-size:inherit; font-family:inherit; }

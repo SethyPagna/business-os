@@ -311,7 +311,7 @@ function buildPdfStream(dict: string, bodyBytes: ByteChunk): ByteChunk {
 function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, title = 'Receipt' }: ImagePdfInput): ByteChunk {
   const encoder = new TextEncoder()
   const pageHeightPt = Math.max(36, pageWidthPt * (imageHeightPx / imageWidthPx))
-  const safeTitle = String(title || 'Receipt').replace(/[()\\]/g, '')
+  const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
   const content = encoder.encode(`q\n${pageWidthPt.toFixed(2)} 0 0 ${pageHeightPt.toFixed(2)} 0 0 cm\n/Im0 Do\nQ`)
 
   const objects = [
@@ -374,7 +374,7 @@ function wrapTextLine(text: unknown, maxChars = 54): string[] {
 
 function buildTextOnlyPdf({ lines, pageWidthPt, title = 'Receipt' }: TextPdfInput): ByteChunk {
   const encoder = new TextEncoder()
-  const safeTitle = String(title || 'Receipt').replace(/[()\\]/g, '')
+  const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
   const margin = 18
   const fontSize = 9
   const lineHeight = 12
@@ -675,7 +675,8 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
 function buildPrintablePreviewDocument(markup: string, options: ReceiptPrintOptions = {}): string {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
-  const title = options.title || 'Receipt'
+  const title = options.title === '' ? '' : (options.title || 'Receipt')
+  const toolbarTitle = title || 'Receipt Preview'
   const note = options.note ? `<div class="receipt-note">${escapeHtml(options.note)}</div>` : ''
 
   return `<!doctype html>
@@ -786,7 +787,12 @@ function buildPrintablePreviewDocument(markup: string, options: ReceiptPrintOpti
         word-break: break-word;
       }
       @media print {
-        body { background: #ffffff; }
+        @page { margin: 0; }
+        body {
+          background: #ffffff;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
         .receipt-shell { padding: 0; }
         .receipt-toolbar, .receipt-note { display: none !important; }
         .receipt-frame {
@@ -802,7 +808,7 @@ function buildPrintablePreviewDocument(markup: string, options: ReceiptPrintOpti
     <div class="receipt-shell">
       <div class="receipt-toolbar">
         <div class="receipt-toolbar-copy">
-          <h1 class="receipt-toolbar-title">${escapeHtml(title)}</h1>
+          <h1 class="receipt-toolbar-title">${escapeHtml(toolbarTitle)}</h1>
           <p class="receipt-toolbar-subtitle">Printable receipt preview. Use Print to print now or Save as PDF from your browser.</p>
         </div>
         <div class="receipt-toolbar-actions">
@@ -893,7 +899,7 @@ export function getPaperWidthMm(settings: ReceiptPrintSettings = getPrintSetting
 export async function createReceiptPdfBlob(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<Blob> {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
-  const title = options.title || 'Receipt'
+  const title = options.title === '' ? '' : (options.title || 'Receipt')
   const pageWidthPt = mmToPt(widthMm)
   const allowTextFallback = Boolean(options.allowTextFallback || options.preferTextOnly)
   const buildTextOnlyReceiptBlob = () => {
@@ -1118,7 +1124,7 @@ export function printReceipt(content: ReceiptContent, options: ReceiptPrintOptio
   return openPrintableReceiptPreview(content, {
     ...options,
     printSettings: options.printSettings || getPrintSettings(),
-    title: options.title || 'Receipt',
+    title: options.title === undefined ? 'Receipt' : options.title,
     autoPrint: true,
   })
 }

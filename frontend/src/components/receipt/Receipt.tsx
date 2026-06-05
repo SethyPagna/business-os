@@ -5,7 +5,6 @@ import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { parseReceiptTemplate } from '../receipt-settings/template'
-import { getStatusLabel } from '../sales/StatusBadge'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 
 type LanguageMode = 'en' | 'km' | 'both'
@@ -325,7 +324,6 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const changeKhr = toNumber(sale.change_khr)
   const refundUsd = toNumber(sale.refund_usd)
   const refundKhr = toNumber(sale.refund_khr)
-  const saleStatus = sale.sale_status || 'completed'
   const actualFont =
     lang === 'km' || lang === 'both'
       ? `"Khmer OS", "Noto Sans Khmer", "Segoe UI", sans-serif`
@@ -365,7 +363,6 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
         {tpl.show_cashier ? <Row label={labelFor(lang, 'cashier')} value={sale.cashier_name || '-'} /> : null}
         {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} /> : null}
-        <Row label={labelFor(lang, 'status')} value={getStatusLabel(saleStatus)} />
         {tpl.show_exchange_rate ? <Row label={labelFor(lang, 'rate')} value={`1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}`} /> : null}
       </div>
     ),
@@ -387,9 +384,9 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ) : null,
     items: (
       <div key="items" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        <div data-receipt-line="true" className="mb-1 grid grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.4rem,auto)] gap-x-2 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
+        <div data-receipt-line="true" className="mb-1 grid grid-cols-[minmax(0,1fr)_minmax(3.9rem,4.8rem)_minmax(4.8rem,auto)] gap-x-2 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
           <span>Name</span>
-          <span className="text-center">{labelFor(lang, 'qty')}</span>
+          <span className="whitespace-nowrap text-center text-[9px] leading-tight">{labelFor(lang, 'qty')}</span>
           <span className="text-right">Price</span>
         </div>
         {items.map((item, index) => {
@@ -400,13 +397,12 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
           const lineKhr = unitKhr * qty
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="my-1">
-              <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.4rem,auto)] items-start gap-x-2">
+              <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_minmax(3.9rem,4.8rem)_minmax(4.8rem,auto)] items-start gap-x-2">
                 <div data-receipt-cell="name" className="min-w-0 overflow-hidden break-words font-semibold">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
-                  {tpl.show_item_unit_price ? <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">@ {fmtUSD(unitUsd)}</div> : null}
                 </div>
                 <div data-receipt-cell="qty" className="text-center">{tpl.show_item_qty ? qty : ''}</div>
                 <div data-receipt-cell="price" className="min-w-0 text-right font-semibold">
@@ -516,12 +512,12 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         })
       } else if (mode === 'print') {
         await printTools.printReceipt(printRef.current, {
-          title: receiptTitle,
+          title: '',
           printSettings: appliedPrintSettings,
         })
       } else {
         await printTools.openReceiptPdf(printRef.current, {
-          title: receiptTitle,
+          title: '',
           fileName: receiptTitle,
           printSettings: appliedPrintSettings,
           previewFallback: true,

@@ -35,7 +35,7 @@ type FilterMenuProps = {
 function sectionButtonClass(active: boolean): string {
   return active
     ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
-    : 'bg-white text-slate-700 border-slate-200 shadow-sm hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 dark:bg-slate-800/90 dark:text-slate-200 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:text-blue-300 dark:hover:bg-slate-700/80'
+    : 'bg-white/95 text-slate-700 border-slate-200 shadow-sm hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 dark:bg-slate-800/90 dark:text-slate-200 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:text-blue-300 dark:hover:bg-slate-700/80'
 }
 
 export default function FilterMenu({
@@ -53,12 +53,12 @@ export default function FilterMenu({
   return (
     <LazyPortalMenu
       align="right"
-      menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+      menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-[1.35rem] border border-slate-200 bg-white p-0 shadow-xl shadow-slate-900/10 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/30"
       onOpenChange={onOpenChange}
       trigger={(
         <button
           type="button"
-          className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm ${
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm ${
             activeCount > 0
               ? 'border-blue-700 bg-blue-600 text-white shadow-sm'
               : 'border-slate-300 bg-white text-slate-700 shadow-sm hover:border-blue-400 hover:text-blue-700 hover:bg-blue-50/60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-300 dark:hover:bg-slate-700/80'
@@ -76,7 +76,7 @@ export default function FilterMenu({
         </button>
       )}
       content={({ closeMenu }) => (
-        <div className="max-h-[min(32rem,70vh)] overflow-auto p-3">
+        <div className="max-h-[min(32rem,70vh)] overflow-auto rounded-[1.35rem] p-3">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold text-gray-900 dark:text-white">{label}</div>
             <div className="flex items-center gap-2">
@@ -106,7 +106,7 @@ export default function FilterMenu({
 
           <div className="space-y-3">
             {(sections.filter(Boolean) as FilterSection[]).map((section) => (
-              <div key={section.id} className="space-y-1.5">
+              <div key={section.id} className="space-y-1.5 rounded-2xl bg-slate-50/70 p-2 dark:bg-slate-800/40">
                 <div className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                   {section.label}
                 </div>
@@ -125,7 +125,7 @@ export default function FilterMenu({
                         type="button"
                         disabled={option.disabled}
                         onClick={() => option.onClick?.()}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
                         title={option.title || (typeof option.label === 'string' ? option.label : undefined)}
                       >
                         {option.label}

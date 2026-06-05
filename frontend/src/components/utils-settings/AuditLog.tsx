@@ -173,6 +173,22 @@ function formatLogTime(log: AuditLogRow): string {
   return formatDateTime(log.client_time || log.created_at)
 }
 
+function auditDeviceLabel(log: AuditLogRow | null | undefined): string {
+  const captured = String(log?.device_name || '').trim()
+  if (captured) return captured
+  const action = String(log?.action || '').toLowerCase()
+  if (action.includes('login')) return 'Web login'
+  return 'Web session'
+}
+
+function auditTimezoneLabel(log: AuditLogRow | null | undefined): string {
+  const captured = String(log?.device_tz || '').trim()
+  if (captured) return captured
+  const rawTime = String(log?.client_time || log?.created_at || '')
+  if (/[+-]00(?::?00)?$/.test(rawTime) || rawTime.endsWith('Z')) return 'UTC'
+  return 'Server time'
+}
+
 function getLogEpoch(log: AuditLogRow | null | undefined): number {
   const iso = toIso(log?.client_time || log?.created_at)
   if (!iso) return 0
@@ -687,8 +703,8 @@ export default function AuditLog() {
       Entity: formatEntityName(log),
       User: log.user_name || '',
       Action: actionLabel(log.action),
-      Device: log.device_name || '',
-      Timezone: log.device_tz || '',
+      Device: auditDeviceLabel(log),
+      Timezone: auditTimezoneLabel(log),
       Summary: readableSummary(log) || '',
     })))
   }, [actionLabel])
@@ -1050,10 +1066,10 @@ export default function AuditLog() {
                             </span>
                           </td>
                           <td className="px-3 py-2">
-                            <div className="max-w-[170px] truncate text-xs text-gray-700 dark:text-gray-300" title={log.device_name || ''}>
-                              {log.device_name || '--'}
+                            <div className="max-w-[170px] truncate text-xs text-gray-700 dark:text-gray-300" title={auditDeviceLabel(log)}>
+                              {auditDeviceLabel(log)}
                             </div>
-                            <div className="text-xs font-mono text-blue-500 dark:text-blue-400">{log.device_tz || '--'}</div>
+                            <div className="text-xs font-mono text-blue-500 dark:text-blue-400">{auditTimezoneLabel(log)}</div>
                           </td>
                           <td className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400 truncate">
                             {readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}
@@ -1263,8 +1279,8 @@ export default function AuditLog() {
                 <div className="flex items-start gap-2">
                   <MonitorSmartphone className="mt-0.5 h-4 w-4 text-blue-500" />
                   <div className="space-y-2">
-                    <DetailRow label={t('device') || 'Device'} value={detailLog.device_name || '--'} />
-                    <DetailRow label={t('timezone') || 'Timezone'} value={detailLog.device_tz || '--'} mono />
+                    <DetailRow label={t('device') || 'Device'} value={auditDeviceLabel(detailLog)} />
+                    <DetailRow label={t('timezone') || 'Timezone'} value={auditTimezoneLabel(detailLog)} mono />
                   </div>
                 </div>
                 <div className="flex items-start gap-2">

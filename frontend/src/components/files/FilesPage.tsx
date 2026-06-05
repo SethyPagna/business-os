@@ -1007,56 +1007,45 @@ export default function FilesPage() {
       {activeTab === 'assets' ? (
         <>
           <div className="card p-3 sm:p-4">
-            <div className="flex flex-col gap-2.5 lg:flex-row lg:items-center lg:justify-between">
-              <div className="grid gap-2.5 sm:grid-cols-[1fr_180px] lg:flex-1">
-                <div>
-                  <label htmlFor="library-search" className="sr-only">{tr('search_files', 'Search files')}</label>
-                  <input id="library-search" name="library_search" className="input" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr('search_files', 'Search files')} />
-                </div>
-                <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-2 sm:contents">
-                  <label htmlFor="library-media-type" className="sr-only">{tr('filter_media_type', 'Filter by media type')}</label>
-                  <select id="library-media-type" name="library_media_type" className="input h-9 min-w-0 px-2 text-sm sm:h-auto sm:px-3" value={mediaType} onChange={(event) => setMediaType(event.target.value)}>
-                  <option value="all">{tr('all', 'All')}</option>
-                  <option value="image">{tr('images', 'Images')}</option>
-                  <option value="video">{tr('videos', 'Videos')}</option>
-                  <option value="document">{tr('documents', 'Documents')}</option>
-                  </select>
-                  <label htmlFor="library-page-size-mobile" className="sr-only">{tr('rows_per_page', 'Rows per page')}</label>
-                  <select
-                    id="library-page-size-mobile"
-                    name="library_page_size"
-                    className="input h-9 min-w-0 px-2 text-sm sm:hidden"
-                    value={pageSize}
-                    onChange={(event) => setPageSize(Number(event.target.value || 24))}
-                  >
-                    {[12, 24, 48].map((value) => (
-                      <option key={value} value={value}>{value}</option>
-                    ))}
-                  </select>
-                  <label htmlFor="library-upload-file-mobile" className="btn-primary h-9 cursor-pointer whitespace-nowrap px-3 py-2 text-xs sm:hidden">
-                    {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
-                    <input id="library-upload-file-mobile" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
-                  </label>
-                </div>
-              </div>
-              <div className="hidden flex-wrap items-center gap-2 sm:flex">
-                <label htmlFor="library-page-size" className="sr-only">{tr('rows_per_page', 'Rows per page')}</label>
-                <select
-                  id="library-page-size"
-                  name="library_page_size"
-                  className="input min-w-[7.5rem]"
-                  value={pageSize}
-                  onChange={(event) => setPageSize(Number(event.target.value || 24))}
-                >
-                  {[12, 24, 48].map((value) => (
-                    <option key={value} value={value}>{value}</option>
-                  ))}
-                </select>
-                <label htmlFor="library-upload-file" className="btn-primary cursor-pointer text-sm">
-                  {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
-                  <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
-                </label>
-              </div>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(14rem,1fr)_minmax(9rem,180px)_minmax(5.25rem,7rem)_auto] md:items-center">
+              <label htmlFor="library-search" className="sr-only">{tr('search_files', 'Search files')}</label>
+              <input
+                id="library-search"
+                name="library_search"
+                className="input h-10 min-w-0 rounded-xl text-sm"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={tr('search_files', 'Search files')}
+              />
+              <label htmlFor="library-media-type" className="sr-only">{tr('filter_media_type', 'Filter by media type')}</label>
+              <select
+                id="library-media-type"
+                name="library_media_type"
+                className="input h-10 min-w-0 rounded-xl text-sm"
+                value={mediaType}
+                onChange={(event) => setMediaType(event.target.value)}
+              >
+                <option value="all">{tr('all', 'All')}</option>
+                <option value="image">{tr('images', 'Images')}</option>
+                <option value="video">{tr('videos', 'Videos')}</option>
+                <option value="document">{tr('documents', 'Documents')}</option>
+              </select>
+              <label htmlFor="library-page-size" className="sr-only">{tr('rows_per_page', 'Rows per page')}</label>
+              <select
+                id="library-page-size"
+                name="library_page_size"
+                className="input h-10 min-w-0 rounded-xl text-sm"
+                value={pageSize}
+                onChange={(event) => setPageSize(Number(event.target.value || 24))}
+              >
+                {[12, 24, 48].map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+              <label htmlFor="library-upload-file" className="btn-primary inline-flex h-10 cursor-pointer items-center justify-center whitespace-nowrap px-4 text-sm">
+                {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
+                <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
+              </label>
             </div>
             {files.length || totalFiles ? (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700">
