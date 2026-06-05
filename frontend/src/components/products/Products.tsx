@@ -2,13 +2,13 @@
 // Main Products page; all sub-modals are imported from sibling files.
 
 import { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import Modal from '../shared/Modal'
 import FilterMenu from '../shared/FilterMenu'
+import AppSelect from '../shared/AppSelect'
 import { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface from './surfaces/ProductsListSurface'
@@ -2117,21 +2117,19 @@ export default function Products() {
             <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
               {productSummaryLabel}
             </span>
-            <label className="relative inline-flex h-7 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-                <span className="sr-only">{t('per_page') || 'per page'}</span>
-                <select
-                  className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                  value={productSafePageSize}
-                  onChange={(event) => {
-                    setProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
-                    setProductPage(1)
-                  }}
-                  aria-label={`${t('per_page') || 'per page'} ${productSafePageSize}`}
-                >
-                  {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
-            </label>
+            <AppSelect
+              value={productSafePageSize}
+              options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: size }))}
+              onChange={(nextValue) => {
+                setProductPageSize(Number(nextValue) || PAGE_SIZE_OPTIONS[0])
+                setProductPage(1)
+              }}
+              ariaLabel={`${t('per_page') || 'per page'} ${productSafePageSize}`}
+              className="h-7 w-full min-w-0"
+              buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-[10px] font-semibold shadow-none"
+              menuClassName="min-w-[4rem]"
+              optionClassName="text-xs"
+            />
             <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
               <button
                 type="button"
@@ -2235,16 +2233,38 @@ export default function Products() {
             <p className="text-xs text-gray-500 mb-2">Update basic info for <strong>{selectedVisibleCount}</strong> products</p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               <div><label className="text-xs text-gray-500 block mb-1">Category</label>
-                <select className="input text-xs py-1" value={bulkEditForm.category||''} onChange={e=>setBulkEditForm(f=>({...f,category:e.target.value}))}>
-                  <option value="">Keep current</option>
-                  {categories.map(c=><option key={c.id} value={c.name}>{c.name}</option>)}
-                </select>
+                <AppSelect
+                  value={bulkEditForm.category || ''}
+                  onChange={(nextValue) => setBulkEditForm(f => ({ ...f, category: nextValue }))}
+                  ariaLabel="Category"
+                  className="w-full"
+                  buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
+                  optionClassName="text-xs"
+                  options={[
+                    { value: '', label: 'Keep current' },
+                    ...categories
+                      .map(c => String(c.name || '').trim())
+                      .filter(Boolean)
+                      .map(name => ({ value: name, label: name })),
+                  ]}
+                />
               </div>
               <div><label className="text-xs text-gray-500 block mb-1">Unit</label>
-                <select className="input text-xs py-1" value={bulkEditForm.unit||''} onChange={e=>setBulkEditForm(f=>({...f,unit:e.target.value}))}>
-                  <option value="">Keep current</option>
-                  {units.map(u=><option key={u.id} value={u.name}>{u.name}</option>)}
-                </select>
+                <AppSelect
+                  value={bulkEditForm.unit || ''}
+                  onChange={(nextValue) => setBulkEditForm(f => ({ ...f, unit: nextValue }))}
+                  ariaLabel="Unit"
+                  className="w-full"
+                  buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
+                  optionClassName="text-xs"
+                  options={[
+                    { value: '', label: 'Keep current' },
+                    ...units
+                      .map(u => String(u.name || '').trim())
+                      .filter(Boolean)
+                      .map(name => ({ value: name, label: name })),
+                  ]}
+                />
               </div>
               <div><label className="text-xs text-gray-500 block mb-1">Supplier</label>
                 <input className="input text-xs py-1" value={bulkEditForm.supplier||''} onChange={e=>setBulkEditForm(f=>({...f,supplier:e.target.value}))} placeholder="Leave blank to keep" />
@@ -2310,10 +2330,20 @@ export default function Products() {
               <p className="text-xs text-gray-500 mb-2">Move stock to a branch for <strong>{selectedVisibleCount}</strong> products</p>
               <div className="flex gap-2 flex-wrap items-end">
                 <div><label className="text-xs text-gray-500 block mb-1">Target Branch</label>
-                  <select className="input text-xs py-1" value={bulkEditForm.branchId||''} onChange={e=>setBulkEditForm(f=>({...f,branchId:e.target.value}))}>
-                    <option value="">Select branch</option>
-                    {branches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
+                  <AppSelect
+                    value={bulkEditForm.branchId || ''}
+                    onChange={(nextValue) => setBulkEditForm(f => ({ ...f, branchId: nextValue }))}
+                    ariaLabel="Target Branch"
+                    className="w-full min-w-[10rem]"
+                    buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
+                    optionClassName="text-xs"
+                    options={[
+                      { value: '', label: 'Select branch' },
+                      ...branches
+                        .filter(b => b.id != null && b.name)
+                        .map(b => ({ value: b.id as string | number, label: String(b.name) })),
+                    ]}
+                  />
                 </div>
                 <button disabled={bulkActionBusy} className="btn-primary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={() => { if (bulkEditForm.branchId) { handleBulkChangeBranch(bulkEditForm.branchId) } else notify('Select a branch first','error') }}>Move Stock</button>
               </div>

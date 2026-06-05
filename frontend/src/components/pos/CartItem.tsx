@@ -1,5 +1,6 @@
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import AppSelect from '../shared/AppSelect'
 
 type Translate = (key: string) => string | undefined
 type CurrencyFormatter = (value: number) => string
@@ -95,19 +96,20 @@ export default function CartItem({
 
       {branches.length > 1 ? (
         <div className="mb-2">
-          <select
-            className="input py-1 text-xs"
+          <AppSelect
+            className="w-full"
+            buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
             value={item.branch_id || ''}
-            onChange={(event) => onBranchChange(lineId, event.target.value)}
-          >
-            <option value="">{translate(t, 'select_branch_placeholder', 'Select branch')}</option>
-            {branches.map((branch) => (
-              <option key={branch.id} value={branch.id}>
-                {branch.name}
-                {branch.is_default ? ' *' : ''}
-              </option>
-            ))}
-          </select>
+            onChange={(nextValue) => onBranchChange(lineId, nextValue)}
+            ariaLabel={translate(t, 'select_branch_placeholder', 'Select branch')}
+            options={[
+              { value: '', label: translate(t, 'select_branch_placeholder', 'Select branch') },
+              ...branches.map((branch) => ({
+                value: branch.id,
+                label: `${branch.name}${branch.is_default ? ' *' : ''}`,
+              })),
+            ]}
+          />
         </div>
       ) : null}
 

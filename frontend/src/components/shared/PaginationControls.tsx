@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import AppSelect from './AppSelect'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
@@ -63,6 +64,7 @@ export default function PaginationControls({
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
   const [pageDraft, setPageDraft] = useState(String(safePage))
+  const pageSizeSelectOptions = pageSizeOptions.map((option) => ({ value: option, label: option }))
 
   useEffect(() => {
     setPageDraft(String(safePage))
@@ -99,19 +101,16 @@ export default function PaginationControls({
           <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
             {start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}
           </span>
-          <label className="relative inline-flex h-7 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-            <span className="sr-only">{perPageLabel}</span>
-            <select
-              className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
-              value={safePageSize}
-              onChange={(event) => onPageSizeChange?.(Number(event.target.value))}
-            >
-              {pageSizeOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-            <ChevronRight className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 rotate-90 text-slate-500 dark:text-slate-300" />
-          </label>
+          <AppSelect
+            value={safePageSize}
+            options={pageSizeSelectOptions}
+            onChange={(nextValue) => onPageSizeChange?.(Number(nextValue))}
+            ariaLabel={perPageLabel}
+            className="h-7 w-full min-w-0"
+            buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-xs font-semibold shadow-none"
+            menuClassName="min-w-[4rem]"
+            optionClassName="text-xs"
+          />
           <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
             <button
               type="button"
@@ -166,15 +165,15 @@ export default function PaginationControls({
       <div className="flex flex-wrap items-center gap-2">
         <label className="inline-flex items-center gap-2">
           <span>{perPageLabel}</span>
-          <select
-            className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100"
+          <AppSelect
             value={safePageSize}
-            onChange={(event) => onPageSizeChange?.(Number(event.target.value))}
-          >
-            {pageSizeOptions.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
+            options={pageSizeSelectOptions}
+            onChange={(nextValue) => onPageSizeChange?.(Number(nextValue))}
+            ariaLabel={perPageLabel}
+            buttonClassName="h-8 min-w-[4.25rem] rounded-lg px-2 py-1 text-xs font-semibold shadow-none"
+            menuClassName="min-w-[4.25rem]"
+            optionClassName="text-xs"
+          />
         </label>
         <div className="inline-flex items-center overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700">
           <button

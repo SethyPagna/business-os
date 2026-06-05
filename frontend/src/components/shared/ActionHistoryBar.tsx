@@ -3,6 +3,7 @@ import CornerDownLeft from 'lucide-react/dist/esm/icons/corner-down-left.js'
 import CornerDownRight from 'lucide-react/dist/esm/icons/corner-down-right.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { useApp as useAppFromContext } from '../../AppContext.tsx'
+import AppSelect from './AppSelect'
 
 type Translate = (key: string, fallback: string) => string
 
@@ -105,17 +106,22 @@ export default function ActionHistoryBar({
           <span className="hidden sm:inline">{T('history', 'History')}</span>
         </button>
         {history.isAdmin ? (
-          <select
-            className="max-w-[7.5rem] rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 sm:max-w-32"
+          <AppSelect
+            className="max-w-[7.5rem] sm:max-w-32"
+            buttonClassName="h-8 max-w-[7.5rem] rounded-lg px-2 py-1 text-xs font-medium shadow-none sm:max-w-32"
+            menuClassName="min-w-[7.5rem]"
+            optionClassName="text-xs"
             value={history.userFilter || 'all'}
-            onChange={(event) => history.setUserFilter?.(event.target.value)}
-            title={T('filter_by_user', 'Filter by user')}
-          >
-            <option value="all">{T('all_users', 'All users')}</option>
-            {(Array.isArray(history.userOptions) ? history.userOptions : []).map((option) => (
-              <option key={option.id} value={option.id}>{option.name || option.username || `User ${option.id}`}</option>
-            ))}
-          </select>
+            onChange={(nextValue) => history.setUserFilter?.(nextValue)}
+            ariaLabel={T('filter_by_user', 'Filter by user')}
+            options={[
+              { value: 'all', label: T('all_users', 'All users') },
+              ...(Array.isArray(history.userOptions) ? history.userOptions : []).map((option) => ({
+                value: option.id,
+                label: option.name || option.username || `User ${option.id}`,
+              })),
+            ]}
+          />
         ) : null}
         <div className="hidden min-w-0 items-center gap-2 md:flex">
           {summaryMode === 'compact' ? (

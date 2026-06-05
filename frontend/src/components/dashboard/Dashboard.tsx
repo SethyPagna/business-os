@@ -12,6 +12,7 @@ import { fmtTime } from '../../utils/formatters'
 import { formatPriceNumber } from '../../utils/pricing.ts'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
+import AppSelect from '../shared/AppSelect'
 import { useIsPageActive } from '../shared/pageActivity'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
@@ -1604,18 +1605,21 @@ export default function Dashboard() {
                 value={customEnd}
                 onChange={e => setCustomEnd(e.target.value)}
               />
-              <select
+              <AppSelect
                 id="dashboard-granularity"
                 name="dashboard_granularity"
-                aria-label="Dashboard period granularity"
-                className="input min-h-10 w-full py-2 text-sm sm:w-28"
+                ariaLabel="Dashboard period granularity"
+                className="w-full sm:w-28"
+                buttonClassName="min-h-10 w-full rounded-xl py-2 text-sm"
+                menuClassName="min-w-[7rem]"
                 value={granularity}
-                onChange={e => setGranularity(normalizeDashboardGranularity(e.target.value))}
-              >
-                <option value="day">{dayLabel}</option>
-                <option value="week">{t('this_week')}</option>
-                <option value="month">{t('this_month')}</option>
-              </select>
+                onChange={nextValue => setGranularity(normalizeDashboardGranularity(nextValue))}
+                options={[
+                  { value: 'day', label: dayLabel },
+                  { value: 'week', label: t('this_week') },
+                  { value: 'month', label: t('this_month') },
+                ]}
+              />
             </div>
           )}
         </div>

@@ -13,6 +13,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import AppSelect from '../shared/AppSelect'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
@@ -1017,31 +1018,35 @@ export default function FilesPage() {
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={tr('search_files', 'Search files')}
               />
-              <label htmlFor="library-media-type" className="sr-only">{tr('filter_media_type', 'Filter by media type')}</label>
-              <select
+              <label id="library-media-type-label" htmlFor="library-media-type" className="sr-only">{tr('filter_media_type', 'Filter by media type')}</label>
+              <AppSelect
                 id="library-media-type"
                 name="library_media_type"
-                className="input h-10 min-w-0 rounded-xl text-sm"
+                className="h-10 min-w-0"
+                buttonClassName="h-10 w-full rounded-xl text-sm"
+                menuClassName="min-w-[11rem]"
                 value={mediaType}
-                onChange={(event) => setMediaType(event.target.value)}
-              >
-                <option value="all">{tr('all', 'All')}</option>
-                <option value="image">{tr('images', 'Images')}</option>
-                <option value="video">{tr('videos', 'Videos')}</option>
-                <option value="document">{tr('documents', 'Documents')}</option>
-              </select>
-              <label htmlFor="library-page-size" className="sr-only">{tr('rows_per_page', 'Rows per page')}</label>
-              <select
+                onChange={setMediaType}
+                ariaLabel={tr('filter_media_type', 'Filter by media type')}
+                options={[
+                  { value: 'all', label: tr('all', 'All') },
+                  { value: 'image', label: tr('images', 'Images') },
+                  { value: 'video', label: tr('videos', 'Videos') },
+                  { value: 'document', label: tr('documents', 'Documents') },
+                ]}
+              />
+              <label id="library-page-size-label" htmlFor="library-page-size" className="sr-only">{tr('rows_per_page', 'Rows per page')}</label>
+              <AppSelect
                 id="library-page-size"
                 name="library_page_size"
-                className="input h-10 min-w-0 rounded-xl text-sm"
+                className="h-10 min-w-0"
+                buttonClassName="h-10 w-full rounded-xl text-sm"
+                menuClassName="min-w-[6rem]"
                 value={pageSize}
-                onChange={(event) => setPageSize(Number(event.target.value || 24))}
-              >
-                {[12, 24, 48].map((value) => (
-                  <option key={value} value={value}>{value}</option>
-                ))}
-              </select>
+                onChange={(nextValue) => setPageSize(Number(nextValue || 24))}
+                ariaLabel={tr('rows_per_page', 'Rows per page')}
+                options={[12, 24, 48].map((nextPageSize) => ({ value: nextPageSize, label: nextPageSize }))}
+              />
               <label htmlFor="library-upload-file" className="btn-primary inline-flex h-10 cursor-pointer items-center justify-center whitespace-nowrap px-4 text-sm">
                 {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
                 <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />

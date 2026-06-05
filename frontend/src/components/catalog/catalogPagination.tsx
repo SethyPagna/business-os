@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
+import AppSelect from '../shared/AppSelect'
 
 const CATALOG_PAGE_SIZE_OPTIONS = [20, 50, 100]
 
@@ -52,6 +53,7 @@ export default function CatalogPaginationControls({
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
   const [pageDraft, setPageDraft] = useState(String(safePage))
+  const pageSizeSelectOptions = CATALOG_PAGE_SIZE_OPTIONS.map((option) => ({ value: option, label: option }))
 
   useEffect(() => {
     setPageDraft(String(safePage))
@@ -87,19 +89,16 @@ export default function CatalogPaginationControls({
         <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1.5 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
           {showingLabel} {start.toLocaleString()}-{end.toLocaleString()} {ofLabel} {total.toLocaleString()} {label}
         </span>
-        <label className="relative inline-flex h-8 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-          <span className="sr-only">{perPageLabel}</span>
-          <select
-            className="h-full w-full appearance-none bg-transparent pl-3 pr-5 text-xs font-semibold text-slate-700 outline-none dark:text-slate-100"
-            value={safePageSize}
-            onChange={(event) => onPageSizeChange?.(Number(event.target.value))}
-          >
-            {CATALOG_PAGE_SIZE_OPTIONS.map((option) => (
-              <option key={option} value={option}>{option}</option>
-            ))}
-          </select>
-          <span className="pointer-events-none absolute right-2 text-[10px] text-slate-500 dark:text-slate-300">v</span>
-        </label>
+        <AppSelect
+          value={safePageSize}
+          options={pageSizeSelectOptions}
+          onChange={(nextValue) => onPageSizeChange?.(Number(nextValue))}
+          ariaLabel={perPageLabel}
+          className="h-8 w-full min-w-0"
+          buttonClassName="h-8 w-full rounded-full px-3 py-0 pr-2 text-xs font-semibold shadow-none"
+          menuClassName="min-w-[4rem]"
+          optionClassName="text-xs"
+        />
         <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
           <button
             type="button"

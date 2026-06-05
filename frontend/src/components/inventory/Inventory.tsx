@@ -17,6 +17,7 @@ import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import AppSelect from '../shared/AppSelect'
 import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
@@ -3050,31 +3051,26 @@ export default function Inventory() {
                     </button>
                   ) : null}
                 </div>
-                <label className="block">
-                  <span className="sr-only">{t('user') || 'User'}</span>
-                  <select
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-                    value={movementUserFilter}
-                    onChange={(event) => {
-                      setMovementUserFilter(event.target.value || 'all')
-                      closeMenu()
-                    }}
-                    aria-label={t('user') || 'User'}
-                  >
-                    <option value="all">{t('all_users') || 'All users'}</option>
-                    {userOptions
-                      .map((option) => {
-                        const id = String(option?.id || '')
-                        if (!id) return null
-                        return (
-                          <option key={`user-${id}`} value={id}>
-                            {option?.name || option?.username || `User ${id}`}
-                          </option>
-                        )
-                      })
-                      .filter(Boolean)}
-                  </select>
-                </label>
+                <AppSelect
+                  value={movementUserFilter}
+                  onChange={(nextValue) => {
+                    setMovementUserFilter(nextValue || 'all')
+                    closeMenu()
+                  }}
+                  ariaLabel={t('user') || 'User'}
+                  className="w-full"
+                  buttonClassName="w-full rounded-xl text-sm"
+                  options={[
+                    { value: 'all', label: t('all_users') || 'All users' },
+                    ...userOptions.map((option) => {
+                      const id = String(option?.id || '')
+                      return id ? {
+                        value: id,
+                        label: option?.name || option?.username || `User ${id}`,
+                      } : null
+                    }).filter(Boolean) as Array<{ value: string; label: string }>,
+                  ]}
+                />
               </div>
             ) : (
               <button
@@ -3146,68 +3142,63 @@ export default function Inventory() {
         id: 'branch',
         label: t('branch') || 'Branch',
         render: ({ closeMenu }: { closeMenu: () => void }) => (
-          <label className="block">
-            <span className="sr-only">{t('branch') || 'Branch'}</span>
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-              value={branchFilter}
-              onChange={(event) => {
-                setBranchFilter(event.target.value || 'all')
-                closeMenu()
-              }}
-              aria-label={t('branch') || 'Branch'}
-            >
-              <option value="all">{t('all_branches') || 'All branches'}</option>
-              {branches.map((branch) => (
-                <option key={`branch-${branch.id}`} value={String(branch.id)}>{branch.name}</option>
-              ))}
-            </select>
-          </label>
+          <AppSelect
+            value={branchFilter}
+            onChange={(nextValue) => {
+              setBranchFilter(nextValue || 'all')
+              closeMenu()
+            }}
+            ariaLabel={t('branch') || 'Branch'}
+            className="w-full"
+            buttonClassName="w-full rounded-xl text-sm"
+            options={[
+              { value: 'all', label: t('all_branches') || 'All branches' },
+              ...branches.map((branch) => ({ value: String(branch.id), label: branch.name })),
+            ]}
+          />
         ),
       } : null,
       {
         id: 'group',
         label: t('groups') || 'Groups',
         render: ({ closeMenu }: { closeMenu: () => void }) => (
-          <label className="block">
-            <span className="sr-only">{t('groups') || 'Groups'}</span>
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-              value={groupFilter}
-              onChange={(event) => {
-                setGroupFilter(event.target.value || 'all')
-                closeMenu()
-              }}
-              aria-label={t('groups') || 'Groups'}
-            >
-              <option value="all">{t('all') || 'All'}</option>
-              <option value="group">{t('groups') || 'Groups'}</option>
-              <option value="standalone">{t('standalone') || 'Standalone'}</option>
-            </select>
-          </label>
+          <AppSelect
+            value={groupFilter}
+            onChange={(nextValue) => {
+              setGroupFilter(nextValue || 'all')
+              closeMenu()
+            }}
+            ariaLabel={t('groups') || 'Groups'}
+            className="w-full"
+            buttonClassName="w-full rounded-xl text-sm"
+            options={[
+              { value: 'all', label: t('all') || 'All' },
+              { value: 'group', label: t('groups') || 'Groups' },
+              { value: 'standalone', label: t('standalone') || 'Standalone' },
+            ]}
+          />
         ),
       },
       {
         id: 'stock',
         label: t('stock_status') || 'Stock',
         render: ({ closeMenu }: { closeMenu: () => void }) => (
-          <label className="block">
-            <span className="sr-only">{t('stock_status') || 'Stock'}</span>
-            <select
-              className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-              value={stockFilter}
-              onChange={(event) => {
-                setStockFilter(event.target.value || 'all')
-                closeMenu()
-              }}
-              aria-label={t('stock_status') || 'Stock'}
-            >
-              <option value="all">{t('all') || 'All'}</option>
-              <option value="in_stock">{t('in_stock') || 'In stock'}</option>
-              <option value="low">{t('low_stock') || 'Low stock'}</option>
-              <option value="out">{t('out_of_stock') || 'Out of stock'}</option>
-            </select>
-          </label>
+          <AppSelect
+            value={stockFilter}
+            onChange={(nextValue) => {
+              setStockFilter(nextValue || 'all')
+              closeMenu()
+            }}
+            ariaLabel={t('stock_status') || 'Stock'}
+            className="w-full"
+            buttonClassName="w-full rounded-xl text-sm"
+            options={[
+              { value: 'all', label: t('all') || 'All' },
+              { value: 'in_stock', label: t('in_stock') || 'In stock' },
+              { value: 'low', label: t('low_stock') || 'Low stock' },
+              { value: 'out', label: t('out_of_stock') || 'Out of stock' },
+            ]}
+          />
         ),
       },
       inventoryBrands.length ? {
@@ -3237,23 +3228,20 @@ export default function Inventory() {
                   </button>
                 ) : null}
               </div>
-              <label className="block">
-                <span className="sr-only">{t('brand') || 'Brand'}</span>
-                <select
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:focus:border-blue-400 dark:focus:ring-blue-500/30"
-                  value={brandFilter}
-                  onChange={(event) => {
-                    setBrandFilter(event.target.value || 'all')
-                    closeMenu()
-                  }}
-                  aria-label={t('brand') || 'Brand'}
-                >
-                  <option value="all">{t('all_brands') || 'All brands'}</option>
-                  {inventoryBrands.map((brand) => (
-                    <option key={`brand-${brand}`} value={brand}>{brand}</option>
-                  ))}
-                </select>
-              </label>
+              <AppSelect
+                value={brandFilter}
+                onChange={(nextValue) => {
+                  setBrandFilter(nextValue || 'all')
+                  closeMenu()
+                }}
+                ariaLabel={t('brand') || 'Brand'}
+                className="w-full"
+                buttonClassName="w-full rounded-xl text-sm"
+                options={[
+                  { value: 'all', label: t('all_brands') || 'All brands' },
+                  ...inventoryBrands.map((brand) => ({ value: brand, label: brand })),
+                ]}
+              />
             </div>
           ) : (
             <button
@@ -3548,21 +3536,19 @@ export default function Inventory() {
                   <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
                     {inventoryProductSummaryLabel}
                   </span>
-                  <label className="relative inline-flex h-7 w-full min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-                    <span className="sr-only">{t('per_page') || 'per page'}</span>
-                    <select
-                      className="h-full w-full appearance-none bg-transparent pl-2 pr-5 text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                      value={inventoryProductSafePageSize}
-                      onChange={(event) => {
-                        setInventoryProductPageSize(Number(event.target.value) || PAGE_SIZE_OPTIONS[0])
-                        setInventoryProductPage(1)
-                      }}
-                      aria-label={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
-                    >
-                      {PAGE_SIZE_OPTIONS.map((size) => <option key={size} value={size}>{size}</option>)}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-1.5 h-3.5 w-3.5 text-slate-500 dark:text-slate-300" />
-                  </label>
+                  <AppSelect
+                    value={inventoryProductSafePageSize}
+                    options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: size }))}
+                    onChange={(nextValue) => {
+                      setInventoryProductPageSize(Number(nextValue) || PAGE_SIZE_OPTIONS[0])
+                      setInventoryProductPage(1)
+                    }}
+                    ariaLabel={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
+                    className="h-7 w-full min-w-0"
+                    buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-[10px] font-semibold shadow-none"
+                    menuClassName="min-w-[4rem]"
+                    optionClassName="text-xs"
+                  />
                   <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
                     <button
                       type="button"
