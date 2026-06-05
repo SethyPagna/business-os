@@ -441,13 +441,13 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
   const lines = extractReceiptLines(content)
   const scale = 2
-  const widthPx = Math.max(320, Math.round(widthMm * 8))
+  const widthPx = Math.max(320, Math.round(widthMm * 4.2))
   const paddingX = 18
   const paddingY = 20
-  const lineHeight = 18
-  const fontSize = 14
-  const maxChars = Math.max(24, Math.floor((widthPx - paddingX * 2) / 7))
-  const wrappedLines = lines.flatMap((line) => wrapTextLine(line, maxChars))
+  const lineHeight = 17
+  const fontSize = 12
+  const maxChars = Math.max(28, Math.floor((widthPx - paddingX * 2) / 6.5))
+  const wrappedLines = lines.flatMap((line) => String(line).includes('\t') ? [line] : wrapTextLine(line, maxChars))
   const heightPx = Math.max(220, paddingY * 2 + wrappedLines.length * lineHeight)
 
   const canvas = document.createElement('canvas')
@@ -460,17 +460,36 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, widthPx, heightPx)
   context.fillStyle = '#111827'
-  context.font = `${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+  context.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
   context.textBaseline = 'top'
 
   let y = paddingY
   wrappedLines.forEach((line, index) => {
     if (index === 0) {
-      context.font = `600 ${fontSize + 2}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+      context.font = `600 ${fontSize + 2}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
     } else {
-      context.font = `${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`
+      context.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
     }
-    context.fillText(String(line || ''), paddingX, y)
+    const textLine = String(line || '')
+    if (textLine.includes('\t')) {
+      const parts = textLine.split('\t')
+      if (parts.length >= 3) {
+        context.textAlign = 'left'
+        context.fillText(parts[0] || '', paddingX, y)
+        context.textAlign = 'center'
+        context.fillText(parts[1] || '', widthPx - paddingX - 84, y)
+        context.textAlign = 'right'
+        context.fillText(parts.slice(2).join(' ') || '', widthPx - paddingX, y)
+      } else {
+        context.textAlign = 'left'
+        context.fillText(parts[0] || '', paddingX, y)
+        context.textAlign = 'right'
+        context.fillText(parts[1] || '', widthPx - paddingX, y)
+      }
+      context.textAlign = 'left'
+    } else {
+      context.fillText(textLine, paddingX, y)
+    }
     y += lineHeight
   })
 
@@ -638,6 +657,14 @@ async function createPrintableReceiptMarkup(content: ReceiptContent, options: Re
     const clone = normalizePrintableRoot(cloneElementWithInlineStyles(host), widthMm)
     if (!clone) throw new Error('Receipt preview element is unavailable')
     normalizeReceiptContentWidth(clone)
+    clone.style.padding = '0'
+    clone.style.width = `${widthMm}mm`
+    clone.style.maxWidth = `${widthMm}mm`
+    clone.querySelectorAll('[data-receipt-export-root="true"]').forEach((node) => {
+      if (!(node instanceof HTMLElement)) return
+      node.style.width = `${widthMm}mm`
+      node.style.maxWidth = `${widthMm}mm`
+    })
     clone.querySelectorAll('canvas, video').forEach((node) => node.remove())
     await inlineImageNodeSources(clone)
     await inlineStyleAssetUrls(clone)
@@ -669,7 +696,7 @@ function buildPrintablePreviewDocument(markup: string, options: ReceiptPrintOpti
       .receipt-shell {
         min-height: 100vh;
         padding: 24px 12px 40px;
-        overflow-x: hidden;
+        overflow-x: auto;
       }
       .receipt-toolbar {
         position: sticky;
@@ -744,7 +771,9 @@ function buildPrintablePreviewDocument(markup: string, options: ReceiptPrintOpti
         padding-bottom: 8px;
       }
       .receipt-frame {
-        width: min(calc(${widthMm}mm + 32px), calc(100vw - 24px));
+        width: calc(${widthMm}mm + 32px);
+        max-width: none;
+        flex: 0 0 auto;
         padding: 16px;
         border-radius: 14px;
         background: #ffffff;
@@ -947,6 +976,86 @@ function extractReceiptLines(content: ReceiptContent): string[] {
     holder.innerHTML = String(content || '')
     root = holder
   }
+  const textOf = (node: Element | ChildNode | null | undefined): string => String(node?.textContent || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const elementLines = (element: HTMLElement): string[] => {
+    const main = element.querySelector('[data-receipt-main="true"]')
+    const sublines = Array.from(element.querySelectorAll('[data-receipt-subline="true"]'))
+      .map((child) => textOf(child))
+      .filter(Boolean)
+    if (main || sublines.length) return [textOf(main || element.firstChild), ...sublines].filter(Boolean)
+
+    const blockChildren = Array.from(element.children) as HTMLElement[]
+    if (blockChildren.length) {
+      const childLines = blockChildren
+        .flatMap((child) => elementLines(child))
+        .filter(Boolean)
+      if (childLines.length) return childLines
+    }
+
+    return textOf(element)
+      .split(/\r?\n+/)
+      .map((line) => line.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+  }
+  const joinColumns = (values: string[]): string => {
+    const compactValues = values.map((value) => String(value || '').trim())
+    if (compactValues.length >= 3) {
+      const [name, qty, price] = compactValues
+      return [name, qty, price].join('\t')
+    }
+    if (compactValues.length === 2) {
+      const [label, value] = compactValues
+      return [label, value].join('\t')
+    }
+    return compactValues.filter(Boolean).join('    ')
+  }
+
+  const markedLines = Array.from(root?.querySelectorAll?.('[data-receipt-line="true"]') || [])
+    .flatMap((node) => {
+      const element = node as HTMLElement
+      const cells = Array.from(element.querySelectorAll(':scope > [data-receipt-cell]')) as HTMLElement[]
+      if (cells.length === 3) {
+        const [nameCell, qtyCell, priceCell] = cells
+        const nameLines = elementLines(nameCell)
+        const qtyLines = elementLines(qtyCell)
+        const priceLines = elementLines(priceCell)
+        return [
+          joinColumns([nameLines[0] || '', qtyLines[0] || '', priceLines[0] || '']),
+          ...nameLines.slice(1).map((line) => `  ${line}`),
+          ...priceLines.slice(1).map((line) => `\t\t${line}`),
+        ].filter(Boolean)
+      }
+      const childLines = Array.from(element.children)
+        .map((child) => elementLines(child as HTMLElement))
+        .filter((lines) => lines.length > 0)
+      if (childLines.length === 3) {
+        const [nameLines, qtyLines, priceLines] = childLines
+        return [
+          joinColumns([nameLines[0] || '', qtyLines[0] || '', priceLines[0] || '']),
+          ...nameLines.slice(1).map((line) => `  ${line}`),
+          ...priceLines.slice(1).map((line) => `\t\t${line}`),
+        ]
+      }
+      if (childLines.length === 2) {
+        const [labelLines, valueLines] = childLines
+        const firstLabel = labelLines[0] || ''
+        const firstValue = valueLines[0] || ''
+        const firstLines = firstLabel.length + firstValue.length > 42
+          ? [firstLabel, `\t${firstValue}`]
+          : [joinColumns([firstLabel, firstValue])]
+        return [
+          ...firstLines,
+          ...labelLines.slice(1).map((line) => `  ${line}`),
+          ...valueLines.slice(1).map((line) => `\t${line}`),
+        ]
+      }
+      if (childLines.length > 1) return [joinColumns(childLines.map((lines) => lines.join(' ')))]
+      return elementLines(element)
+    })
+    .filter(Boolean)
+  if (markedLines.length) return markedLines
   const text = String(root?.innerText || root?.textContent || '')
   const lines = text
     .split(/\r?\n+/)

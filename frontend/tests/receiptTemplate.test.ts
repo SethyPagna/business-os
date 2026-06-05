@@ -67,6 +67,17 @@ await runTest('receipt export supports PNG image download from the same rendered
   assert.match(receiptSource, /receipt_image_short|saving_image/)
 })
 
+await runTest('receipt layout keeps Khmer labels, item columns, and row-aware image fallback', () => {
+  const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  assert.match(receiptSource, /const KHMER_RECEIPT_LABELS/)
+  assert.match(receiptSource, /បង្កាន់ដៃ/)
+  assert.match(receiptSource, /grid-cols-\[minmax\(0,1fr\)_2\.2rem_minmax\(4\.4rem,auto\)\]/)
+  assert.match(receiptSource, /data-receipt-line="true"/)
+  assert.match(utilSource, /querySelectorAll\?\.\('\[data-receipt-line="true"\]'\)/)
+  assert.match(utilSource, /if \(markedLines\.length\) return markedLines/)
+})
+
 await runTest('receipt asset inlining uses bounded workers', () => {
   const utilSource = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.match(utilSource, /const RECEIPT_ASSET_INLINE_CONCURRENCY = 3/)

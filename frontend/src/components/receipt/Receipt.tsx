@@ -147,6 +147,44 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+function getReceiptPaperWidthMm(printSettings: { paperSize?: unknown; customWidth?: unknown }, fallback = 80): number {
+  const paperSize = String(printSettings.paperSize || '').toLowerCase()
+  if (paperSize === 'custom') return Math.max(40, Number.parseFloat(String(printSettings.customWidth || fallback)) || fallback)
+  if (paperSize === '58mm') return 58
+  if (paperSize === '72mm') return 72
+  if (paperSize === '80mm') return 80
+  if (paperSize === 'a4') return 210
+  if (paperSize === 'letter') return 216
+  return Math.max(40, fallback)
+}
+
+const KHMER_RECEIPT_LABELS = {
+  receipt: 'បង្កាន់ដៃ',
+  receiptNum: 'លេខបង្កាន់ដៃ:',
+  date: 'កាលបរិច្ឆេទ:',
+  cashier: 'អ្នកគិតលុយ:',
+  payment: 'ការទូទាត់:',
+  rate: 'អត្រាប្តូរ:',
+  status: 'ស្ថានភាព:',
+  customer: 'អតិថិជន:',
+  phone: 'ទូរស័ព្ទ:',
+  address: 'អាសយដ្ឋាន:',
+  membership: 'សមាជិកភាព:',
+  delivery: 'ការដឹកជញ្ជូន:',
+  driver: 'អ្នកដឹកជញ្ជូន:',
+  subtotal: 'សរុបរង:',
+  discount: 'បញ្ចុះតម្លៃ:',
+  membershipDiscount: 'បញ្ចុះតម្លៃសមាជិក:',
+  pointsRedeemed: 'ពិន្ទុបានប្រើ:',
+  tax: 'ពន្ធ:',
+  total: 'សរុប',
+  paid: 'បានបង់:',
+  change: 'ប្រាក់អាប់:',
+  refunded: 'បានសងវិញ:',
+  thankYou: 'សូមអរគុណសម្រាប់ការគាំទ្រ!',
+  qty: 'ចំនួន',
+}
+
 const LABELS = {
   en: {
     receipt: 'RECEIPT',
@@ -230,15 +268,15 @@ const CLEAN_KHMER_LABELS = {
 }
 
 function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
-  if (mode === 'both') return `${LABELS.en[key]} / ${CLEAN_KHMER_LABELS[key]}`
-  return (mode === 'km' ? CLEAN_KHMER_LABELS : LABELS.en)[key]
+  if (mode === 'both') return `${LABELS.en[key]} / ${KHMER_RECEIPT_LABELS[key]}`
+  return (mode === 'km' ? KHMER_RECEIPT_LABELS : LABELS.en)[key]
 }
 
 function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
   return (
-    <div className={`my-1 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1 ${tone}`}>
-      <span className={`min-w-0 break-words pr-2 ${bold ? 'font-semibold' : ''}`}>{label}</span>
-      <div className="min-w-[5.5rem] text-right">
+    <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.4rem,auto)] items-start gap-x-2 gap-y-1 ${tone}`}>
+      <span className={`min-w-0 overflow-hidden break-words pr-1 ${bold ? 'font-semibold' : ''}`}>{label}</span>
+      <div className="min-w-0 text-right">
         <div className={`${bold ? 'font-semibold' : ''}`}>{value}</div>
         {subValue ? <div className="text-[10px] text-gray-500">{subValue}</div> : null}
       </div>
@@ -253,6 +291,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
   const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
+  const receiptWidthMm = getReceiptPaperWidthMm(appliedPrintSettings, tpl.width || 80)
   const [lang, setLang] = useState<LanguageMode>((tpl.receipt_language as LanguageMode) || 'en')
   const [pdfBusy, setPdfBusy] = useState<ReceiptExportMode | ''>('')
 
@@ -310,13 +349,13 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const sectionMap: Record<string, ReactNode> = {
     header: (
       <div key="header">
-        {tpl.custom_header ? <div className={`${headerAlignClass} font-semibold`}>{em(tpl.custom_header)}</div> : null}
+        {tpl.custom_header ? <div data-receipt-line="true" className={`${headerAlignClass} font-semibold`}>{em(tpl.custom_header)}</div> : null}
         <div className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
-        {tpl.show_business_name && settings?.business_name ? <div className={`${headerAlignClass} break-words text-lg font-bold`}>{settings.business_name}</div> : null}
-        {tpl.show_address && settings?.business_address ? <div className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_address}</div> : null}
-        {tpl.show_phone && settings?.business_phone ? <div className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_phone}</div> : null}
-        {tpl.show_email && settings?.business_email ? <div className={`${headerAlignClass} break-all text-[11px]`}>{settings.business_email}</div> : null}
-        {tpl.show_tax_id && settings?.tax_id ? <div className={`${headerAlignClass} break-words text-[11px]`}>Tax ID: {settings.tax_id}</div> : null}
+        {tpl.show_business_name && settings?.business_name ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-lg font-bold`}>{settings.business_name}</div> : null}
+        {tpl.show_address && settings?.business_address ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_address}</div> : null}
+        {tpl.show_phone && settings?.business_phone ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_phone}</div> : null}
+        {tpl.show_email && settings?.business_email ? <div data-receipt-line="true" className={`${headerAlignClass} break-all text-[11px]`}>{settings.business_email}</div> : null}
+        {tpl.show_tax_id && settings?.tax_id ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>Tax ID: {settings.tax_id}</div> : null}
         <div className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
       </div>
     ),
@@ -348,6 +387,11 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ) : null,
     items: (
       <div key="items" className="mt-2 border-t border-dashed border-gray-300 pt-2">
+        <div data-receipt-line="true" className="mb-1 grid grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.4rem,auto)] gap-x-2 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
+          <span>Name</span>
+          <span className="text-center">{labelFor(lang, 'qty')}</span>
+          <span className="text-right">Price</span>
+        </div>
         {items.map((item, index) => {
           const qty = toNumber(item.quantity) || 1
           const unitUsd = toNumber(item.applied_price_usd ?? item.price_usd ?? item.price)
@@ -356,18 +400,20 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
           const lineKhr = unitKhr * qty
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="my-1">
-              <div className="font-semibold">
-                {item.product_name || item.name}
-                {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
+              <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.2rem_minmax(4.4rem,auto)] items-start gap-x-2">
+                <div data-receipt-cell="name" className="min-w-0 overflow-hidden break-words font-semibold">
+                  <div data-receipt-main="true">
+                    {item.product_name || item.name}
+                    {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
+                  </div>
+                  {tpl.show_item_unit_price ? <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">@ {fmtUSD(unitUsd)}</div> : null}
+                </div>
+                <div data-receipt-cell="qty" className="text-center">{tpl.show_item_qty ? qty : ''}</div>
+                <div data-receipt-cell="price" className="min-w-0 text-right font-semibold">
+                  <div>{fmtUSD(lineUsd)}</div>
+                  {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
+                </div>
               </div>
-              <Row
-                label={[
-                  tpl.show_item_qty ? `${labelFor(lang, 'qty')} ${qty}` : '',
-                  tpl.show_item_unit_price ? `@ ${fmtUSD(unitUsd)}` : '',
-                ].filter(Boolean).join(' ')}
-                value={fmtUSD(lineUsd)}
-                subValue={tpl.show_item_khr && lineKhr > 0 ? fmtKHR(lineKhr) : ''}
-              />
               {tpl.item_separator && index < items.length - 1 ? <div className="text-center text-[11px] text-gray-400">{divider}</div> : null}
             </div>
           )
@@ -416,7 +462,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     footer: (
       <div key="footer" className="mt-2">
         <div className="text-center text-[11px] text-gray-500">{footerDivider}</div>
-        <div className="mt-1 text-center text-[11px]">
+        <div data-receipt-line="true" className="mt-1 text-center text-[11px]">
           {tpl.custom_footer || settings?.receipt_footer || labelFor(lang, 'thankYou')}
         </div>
         <div className="text-center text-[11px] text-gray-500">{footerDivider}</div>
@@ -492,11 +538,16 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const shellStyle: CSSProperties = {
     fontFamily: actualFont,
     fontSize: fs,
+    width: `${receiptWidthMm}mm`,
+    maxWidth: '100%',
+    minWidth: 0,
     background: '#ffffff',
     color: '#111827',
     padding: '18px 16px 20px',
     borderRadius: 12,
     lineHeight: 1.55,
+    whiteSpace: 'normal',
+    overflow: 'hidden',
     overflowWrap: 'anywhere',
     wordBreak: 'break-word',
     boxSizing: 'border-box',
@@ -571,7 +622,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       </div>
 
       <div className="flex flex-1 justify-center overflow-auto p-4">
-        <div style={{ width: '100%', maxWidth: 520 }}>
+        <div style={{ width: '100%', maxWidth: `calc(${receiptWidthMm}mm + 32px)` }}>
           <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
           <div ref={printRef} data-receipt-export-root="true" style={shellStyle}>
             {renderedSections}
