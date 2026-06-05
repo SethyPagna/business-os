@@ -11745,3 +11745,31 @@ Move 794 status:
   Phase 29 remains active as the repeated whole-codebase/schema/cleanup
   guardrail. Next executable target: continue route-load reductions where
   traces show single-use startup chunks or avoidable first-window reads.
+
+Move 795 status:
+- Move 795 removes one Returns cold-start script request by folding the
+  `undo-2` lucide icon into the existing `shared-icons` chunk. Returns already
+  loads that chunk, so this avoids one separate tiny route-local icon file
+  without adding a new startup dependency.
+- Guardrail proof: `ops/scripts/frontend/verify-performance.ts` now asserts
+  that `undo-2` remains in the shared route icon policy.
+- Performance proof: `npm.cmd --prefix frontend run build` produced no
+  `undo-2-*.js` file under `frontend/dist/assets`, and
+  `shared-icons-D3dQaoBv.js` stayed bounded at 11,985 bytes.
+- Verification proof: `npm.cmd --prefix frontend run test:utils`,
+  `npm.cmd --prefix frontend run build`, and `npm.cmd --prefix frontend run
+  verify:performance` passed.
+- Runtime proof: Docker release `business-os:v6.0.0-202606050903` is running
+  and healthy. The focused Returns route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T01-14-26-794Z.json`
+  passed with 27 total requests, 22 script requests, 2 API requests, ready
+  text at 190 ms, and zero failed requests or page errors. Compared with the
+  previous Returns baseline, Returns dropped from 28/23 to 27/22 total/script
+  requests.
+- Current plan position after Move 795: Phase 8.4 remains active for live
+  browser checks and route startup reductions; Phase 26 stays at 51 completed
+  organization moves; Phase 28 remains active with R2/access follow-up open;
+  Phase 29 remains active as the repeated whole-codebase/schema/cleanup
+  guardrail. Next executable target: inspect Inventory and Products for
+  avoidable first-window reads or shared chunks whose cost now outweighs their
+  request-count benefit.

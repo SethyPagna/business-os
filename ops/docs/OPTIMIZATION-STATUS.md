@@ -8,10 +8,9 @@ Last updated: 2026-06-05
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 794, fold Contacts-only `truck` and
-  `warehouse` lucide icons into the existing shared icon chunk so the
-  Contacts cold-start path no longer spends two extra script requests on tiny
-  route-local icon chunks
+- Latest completed move: Move 795, fold the Returns `undo-2` lucide icon into
+  the existing shared icon chunk so Returns no longer spends a separate
+  startup request on a tiny route-local undo icon chunk
 
 ## Current Baseline
 
@@ -35,7 +34,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T00-20-09-999Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-05T00-47-32-343Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-05T01-14-26-794Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -67,6 +66,24 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 795 built and started Docker release `business-os:v6.0.0-202606050903`
+  for the Returns icon-chunk startup optimization. The focused local
+  route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T01-14-26-794Z.json`
+  loaded Returns with 27 total requests, 22 script requests, 2 API requests,
+  ready text at 190 ms, and zero failed requests or page errors. Compared with
+  the previous Returns baseline, this removes one request and one script fetch
+  while keeping the shared icon chunk bounded at 11,985 bytes. After live
+  proof, ignored regenerable output was removed again: `release` (380,751,752
+  bytes) and `frontend/dist` (31,738,016 bytes), for 412,489,768 bytes
+  reclaimed. Uploads, secrets, env files, databases, volumes, backups, and the
+  active Docker image were not touched. The follow-up `prune-storage` removed
+  1,563 bytes of stale report metadata, 1.269 GB of Docker builder cache, and
+  only the old rollback tag `business-os:v6.0.0-202606050504`, while
+  preserving active image `business-os:v6.0.0-202606050903`,
+  `business-os:latest`, and rollback tags `v6.0.0-202606050831`,
+  `v6.0.0-202606050809`, `v6.0.0-202606050737`, and
+  `v6.0.0-202606050515`.
 - Move 794 built and started Docker release `business-os:v6.0.0-202606050831`
   for the Contacts icon-chunk startup optimization. The focused local
   route-load trace

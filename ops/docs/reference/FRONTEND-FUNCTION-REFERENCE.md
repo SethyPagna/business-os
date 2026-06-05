@@ -3226,8 +3226,8 @@ Total files documented: **248**
 | 3 | `inlinePublicRuntimeScripts` | function | 59 |
 | 4 | `fixCrossorigin` | function | 84 |
 | 5 | `emitBuildManifest` | function | 109 |
-| 6 | `shouldDeferModulePreload` | function | 245 |
-| 7 | `manualChunks` | function | 249 |
+| 6 | `shouldDeferModulePreload` | function | 246 |
+| 7 | `manualChunks` | function | 250 |
 
 ### 3.248 `frontend/tailwind.config.ts`
 

@@ -8,6 +8,30 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Fold Returns undo icon startup chunk into shared icons
+  - area: frontend startup performance
+  - result: kept
+  - note: `frontend/vite.config.ts` now keeps the Returns `undo-2` lucide icon
+    in `shared-icons` instead of emitting a separate tiny route-local startup
+    chunk.
+  - performance proof: after production build, no `undo-2-*.js` chunk exists
+    in `frontend/dist/assets`; the shared icon chunk remains bounded at 11,985
+    bytes.
+  - runtime proof: Docker release `business-os:v6.0.0-202606050903` is
+    running. The focused Returns route trace
+    `ops/runtime/reports/route-load-trace-2026-06-05T01-14-26-794Z.json`
+    loaded with 27 total requests, 22 script requests, ready text at 190 ms,
+    and zero failed requests or page errors, down from the previous Returns
+    baseline of 28 total requests and 23 script requests.
+  - verification: frontend production build, frontend utility suite, frontend
+    performance verifier, Docker health, and focused Returns live route trace
+    passed.
+  - cleanup proof: after Docker health and live route proof, removed only
+    ignored/regenerable `release` and `frontend/dist` output for 412,489,768
+    bytes reclaimed. Guarded storage prune then removed 1,563 bytes of stale
+    report metadata, 1.269 GB of builder cache, and only the old rollback tag
+    `business-os:v6.0.0-202606050504`.
+
 - Fold Contacts icon-only startup chunks into shared icons
   - area: frontend startup performance
   - result: kept

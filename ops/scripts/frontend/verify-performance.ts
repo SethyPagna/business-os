@@ -97,6 +97,7 @@ assert(viteConfig.includes('vendor-zxing'), 'Heavy barcode scanner dependencies 
 assert(viteConfig.includes('inlinePublicRuntimeScripts'), 'Public runtime guards must be inlined at build time to avoid cold-start script round trips.')
 assert(viteConfig.includes('data-business-os-runtime'), 'Inlined public runtime guards must keep traceable data attributes in built HTML.')
 assert(viteConfig.includes("'truck'") && viteConfig.includes("'warehouse'"), 'Contacts route icons should stay in shared-icons instead of separate startup chunks.')
+assert(viteConfig.includes("'undo-2'"), 'Returns undo icon should stay in shared-icons instead of a separate startup chunk.')
 
 const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.ts'))
 assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch uploader is missing.')

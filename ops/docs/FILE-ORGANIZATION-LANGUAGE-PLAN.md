@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 794 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 795 in this file.
 
 ## Goal
 
@@ -7621,6 +7621,27 @@ Decision rule:
 - Verification: frontend production build, frontend utility suite, frontend
   performance verifier, Docker health, container image inspection, and focused
   Contacts live route trace passed.
+
+### Move 795: Fold Returns undo icon startup chunk into shared icons
+
+- Ownership evidence: the broad post-Move-794 route trace still showed Returns
+  loading a standalone `undo-2-*` lucide icon chunk before the page was ready,
+  while Returns already loaded the shared icon chunk in the same cold-start
+  path.
+- Change: `frontend/vite.config.ts` adds `undo-2` to the route-shared lucide
+  icon set, and `ops/scripts/frontend/verify-performance.ts` now guards that
+  policy.
+- Performance proof: after production build, `frontend/dist/assets` contains
+  no `undo-2-*.js` output, and the shared icon chunk stays bounded at 11,985
+  bytes.
+- Runtime proof: Docker release `business-os:v6.0.0-202606050903` is running
+  and healthy. The focused Returns route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T01-14-26-794Z.json`
+  passed with 27 total requests, 22 script requests, 2 API requests, ready
+  text at 190 ms, and zero failed requests or page errors.
+- Verification: frontend production build, frontend utility suite, frontend
+  performance verifier, Docker health, container image inspection, and focused
+  Returns live route trace passed.
 
 ## Safety Gates
 
