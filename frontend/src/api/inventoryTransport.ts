@@ -1,11 +1,7 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
-import { ensureClientRequestId } from './requestIds.ts'
 import { readCachedQueryResult, writeCachedQueryResult } from './queryCache.ts'
 import { routeMirrored } from './localMirrors.ts'
-import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
-
-type InventoryPayload = Record<string, unknown>
 
 type InventoryMovementParams = {
   branchId?: string | number | null
@@ -16,41 +12,6 @@ type InventoryMovementParams = {
   endDate?: string | null
   page?: string | number | null
   pageSize?: string | number | null
-}
-
-function getDevicePayload(): InventoryPayload {
-  return { ...getClientDeviceInfo() }
-}
-
-export function adjustStock(payload: InventoryPayload = {}): Promise<unknown> {
-  return route(
-    'products:adjustStock',
-    () => apiFetch('POST', '/api/inventory/adjust', { ...getDevicePayload(), ...(payload || {}) }),
-    null,
-    true,
-  )
-}
-
-export function transferInventoryStock(payload: InventoryPayload = {}): Promise<unknown> {
-  return route(
-    'inventory:transfer',
-    () => apiFetch(
-      'POST',
-      '/api/inventory/transfer',
-      ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'transfer'),
-    ),
-    null,
-    true,
-  )
-}
-
-export function moveStockRow(payload: InventoryPayload = {}): Promise<unknown> {
-  return route(
-    'inventory:moveRow',
-    () => apiFetch('POST', '/api/inventory/move-row', { ...getDevicePayload(), ...(payload || {}) }),
-    null,
-    true,
-  )
 }
 
 export function getInventorySummary({ branchId }: { branchId?: string | number | null } = {}): Promise<unknown> {
@@ -130,13 +91,4 @@ export function getInventoryMovements({
 
 export function getInventoryReasons(): Promise<unknown> {
   return route('inventory:reasons:get', () => apiFetch('GET', '/api/inventory/reasons'), () => ({ items: [] }))
-}
-
-export function saveInventoryReasons(items: unknown[] = []): Promise<unknown> {
-  return route(
-    'inventory:reasons:save',
-    () => apiFetch('PUT', '/api/inventory/reasons', { ...getDevicePayload(), items }),
-    null,
-    true,
-  )
 }

@@ -280,7 +280,7 @@ type ProductReadModule = typeof import('../../api/productReadTransport.ts')
 type ProductWriteModule = typeof import('../../api/productWriteTransport.ts')
 type LookupModule = typeof import('../../api/lookupTransport.ts')
 type BranchModule = typeof import('../../api/branchTransport.ts')
-type InventoryModule = typeof import('../../api/inventoryTransport.ts')
+type InventoryWriteModule = typeof import('../../api/inventoryWriteTransport.ts')
 type ProductImageUploadModule = typeof import('../../api/productImageUploadTransport.ts')
 
 type ProductApi = {
@@ -344,7 +344,7 @@ let productReadModulePromise: Promise<ProductReadModule> | null = null
 let productWriteModulePromise: Promise<ProductWriteModule> | null = null
 let lookupModulePromise: Promise<LookupModule> | null = null
 let branchModulePromise: Promise<BranchModule> | null = null
-let inventoryModulePromise: Promise<InventoryModule> | null = null
+let inventoryWriteModulePromise: Promise<InventoryWriteModule> | null = null
 let productImageUploadModulePromise: Promise<ProductImageUploadModule> | null = null
 
 function loadProductReadModule(): Promise<ProductReadModule> {
@@ -367,9 +367,9 @@ function loadBranchModule(): Promise<BranchModule> {
   return branchModulePromise
 }
 
-function loadInventoryModule(): Promise<InventoryModule> {
-  if (!inventoryModulePromise) inventoryModulePromise = import('../../api/inventoryTransport.ts')
-  return inventoryModulePromise
+function loadInventoryWriteModule(): Promise<InventoryWriteModule> {
+  if (!inventoryWriteModulePromise) inventoryWriteModulePromise = import('../../api/inventoryWriteTransport.ts')
+  return inventoryWriteModulePromise
 }
 
 function loadProductImageUploadModule(): Promise<ProductImageUploadModule> {
@@ -378,7 +378,7 @@ function loadProductImageUploadModule(): Promise<ProductImageUploadModule> {
 }
 
 const productApi: ProductApi = {
-  adjustStock: async (payload) => toProductApiResponse(await (await loadInventoryModule()).adjustStock(payload)),
+  adjustStock: async (payload) => toProductApiResponse(await (await loadInventoryWriteModule()).adjustStock(payload)),
   createProduct: async (payload) => toProductApiResponse(await (await loadProductWriteModule()).createProduct(payload)),
   deleteProduct: async (id) => toProductApiResponse(await (await loadProductWriteModule()).deleteProduct(id)),
   getBranches: async () => (await (await loadBranchModule()).getBranches()) as BranchRecord[],

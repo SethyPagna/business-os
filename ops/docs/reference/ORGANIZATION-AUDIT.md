@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-05T01:21:40.674Z
+Generated: 2026-06-05T02:34:54.048Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 617
+- Files scanned: 618
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-05T01:21:40.674Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 417 |
+| .ts | 418 |
 | .tsx | 108 |
 | .md | 45 |
 | .json | 17 |
@@ -28,7 +28,7 @@ Generated: 2026-06-05T01:21:40.674Z
 
 | Area | Files |
 | --- | --- |
-| frontend/api | 51 |
+| frontend/api | 52 |
 | frontend/utils | 34 |
 | frontend/components/products | 32 |
 | ops/docs/reference | 32 |
@@ -63,17 +63,17 @@ Generated: 2026-06-05T01:21:40.674Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 11776 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 11837 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7664 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7692 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| frontend/src/components/inventory/Inventory.tsx | 4404 | frontend/components/inventory |
+| frontend/src/components/inventory/Inventory.tsx | 4411 | frontend/components/inventory |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
-| ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3236 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3032 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/reference/PHASE29-AUDIT.json | 3427 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3242 | ops/docs/reference |
+| frontend/tests/performanceLoadingUx.test.ts | 3033 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2521 | frontend/components/products |
@@ -99,8 +99,8 @@ Generated: 2026-06-05T01:21:40.674Z
 | File | Relative imports | Area |
 | --- | --- | --- |
 | frontend/src/components/products/Products.tsx | 53 | frontend/components/products |
-| frontend/src/components/inventory/Inventory.tsx | 44 | frontend/components/inventory |
-| frontend/src/api/methods.ts | 40 | frontend/api |
+| frontend/src/components/inventory/Inventory.tsx | 46 | frontend/components/inventory |
+| frontend/src/api/methods.ts | 41 | frontend/api |
 | frontend/src/components/pos/POS.tsx | 36 | frontend/components/pos |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/contacts/CustomersTab.tsx | 24 | frontend/components/contacts |

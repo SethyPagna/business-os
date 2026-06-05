@@ -7643,6 +7643,40 @@ Decision rule:
   performance verifier, Docker health, container image inspection, and focused
   Returns live route trace passed.
 
+### Move 796: Split Inventory read/write transports and defer action-only preloads
+
+- Ownership evidence: live remote Inventory traces still showed many
+  action-only API/tool chunks entering the first-window load even when the
+  default product view only needed read bootstrap data.
+- Change: inventory reads remain in `frontend/src/api/inventoryTransport.ts`;
+  stock mutations, transfers, row moves, and reason saves now live in
+  `frontend/src/api/inventoryWriteTransport.ts`. Inventory, Products, and the
+  legacy API facade were rewired to call the write transport only on mutation
+  intent.
+- Preload policy: `frontend/vite.config.ts` now names
+  `inventory-write-api` and defers modulepreload for action-only API/tool
+  chunks so Cloudflare first paint does not compete with edit/history/import
+  code before the user asks for those flows.
+- Performance proof: remote Inventory dropped from 42 total requests and 37
+  script requests in the pre-move trace to 24 total requests and 19 script
+  requests in
+  `ops/runtime/reports/route-load-trace-2026-06-05T02-19-04-186Z.json`, with
+  zero failed requests and zero console/page errors.
+- Live QA proof: the all-pages Playwright control audit passed 375 of 375
+  tested controls across 34 desktop/mobile routes, with zero findings. The
+  broad audit intentionally skipped destructive, print/download, and
+  seeded-rollback-only settings actions.
+- Cleanup proof: after live proof, regenerable `release` and `frontend/dist`
+  output was removed, reclaiming 412,490,897 bytes. Guarded storage prune
+  removed old reports, builder cache, and only the oldest rollback image tag
+  while preserving the active image, recent rollbacks, uploads, secrets, env
+  files, databases, volumes, and backup roots.
+- Verification: frontend utility suite, frontend production build, frontend
+  performance verifier, backend utility suite, Docker release build/start,
+  local packaged route trace, remote admin route trace, public portal
+  Cloudflare check, all-pages control audit, reference generation,
+  organization audit, schema audit, storage prune, and Phase 29 audit passed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

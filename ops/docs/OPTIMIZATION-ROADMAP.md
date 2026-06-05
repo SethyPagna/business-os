@@ -11773,3 +11773,76 @@ Move 795 status:
   guardrail. Next executable target: inspect Inventory and Products for
   avoidable first-window reads or shared chunks whose cost now outweighs their
   request-count benefit.
+
+Move 796 status:
+- Move 796 reduces live Cloudflare Inventory startup pressure by splitting the
+  combined inventory transport into read and write paths. `frontend/src/api/
+  inventoryTransport.ts` now owns read/search/bootstrap/movement/reason reads
+  only, while the new `frontend/src/api/inventoryWriteTransport.ts` owns
+  stock adjustments, transfers, row moves, and reason saves with device and
+  client-request-id write metadata.
+- Route wiring proof: Inventory and Products now lazy-load the write transport
+  only when a stock/reason mutation is actually invoked. `frontend/src/api/
+  methods.ts` imports read and write inventory requests from their focused
+  modules so the legacy `window.api` facade still exposes the same method
+  names without recombining first-load read dependencies.
+- Preload proof: `frontend/vite.config.ts` now has an
+  `inventory-write-api` manual chunk and defers modulepreload for action-only
+  API/tool chunks such as inventory writes, product writes, action history, AI,
+  audit, file, contacts, dashboard, sales, returns, and RFID helpers. The app
+  can still fetch the real route bootstrap immediately, but edit/history/tool
+  code waits for the route or action that needs it.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now verifies
+  Products stock writes use `inventoryWriteTransport.ts` instead of the
+  read-heavy inventory transport. `frontend/tests/apiHttp.test.ts` now verifies
+  the read transport does not carry mutation-only dependencies and that the
+  write transport owns `saveInventoryReasons`, `adjustStock`, and
+  `ensureClientRequestId`.
+- Verification proof: `npm.cmd --prefix frontend run test:utils`,
+  `npm.cmd --prefix frontend run build`, `npm.cmd --prefix frontend run
+  verify:performance`, `npm.cmd --prefix backend run test:utils`, and
+  `git diff --check` passed. Docker release
+  `business-os:v6.0.0-202606051007` is running and healthy.
+- Runtime proof: local packaged route trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T02-19-04-184Z.json`
+  passed Dashboard, Products, Inventory, POS, Returns, and Contacts with
+  ready times from 192 ms to 299 ms and zero failed requests or console/page
+  errors. The live admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T02-19-04-186Z.json`
+  passed the same routes with zero failed requests or console/page errors.
+  Inventory dropped from the pre-move remote baseline of 42 total requests and
+  37 script requests to 24 total requests and 19 script requests on the first
+  post-move remote trace.
+- Interaction proof: the broad Playwright all-pages control audit completed
+  successfully in
+  `ops/runtime/reports/all-pages-control-audit-2026-06-05T02-22-04-006Z`.
+  It covered 34 desktop/mobile routes, found 519 controls, tested 375
+  buttons/inputs/selects, passed all 375, produced 68 screenshots, and found
+  zero failures or findings. The 144 skipped controls were documented as
+  disabled, hidden, low-value, long-label, destructive, print/download, or
+  seeded-rollback-only actions.
+- Public proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T02-19-04-190Z/report.json`
+  passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+  products, portal bootstrap 200, AI status 200 after interaction, enforced
+  CSP present, and zero failed responses, relevant console messages, or page
+  errors.
+- Cleanup proof: after live local/remote proof, ignored regenerable output was
+  removed: `release` (380,753,800 bytes) and `frontend/dist` (31,737,097
+  bytes), for 412,490,897 bytes reclaimed. `npm.cmd --prefix ops run
+  prune-storage` then removed 494,517 bytes of old reports, 38.22 MB of
+  Docker builder cache, and only the oldest rollback image tag
+  `business-os:v6.0.0-202606050515`, while preserving the active image
+  `business-os:v6.0.0-202606051007`, `latest`, recent rollback tags, uploads,
+  secrets, env files, databases, volumes, and backup roots.
+- Phase 29 proof: after cleanup, `npm.cmd --prefix ops run phase29:audit`
+  passed all nine generated bulk, schema, performance/code-flow,
+  language/runtime, runtime JavaScript inventory, Docker release, runtime
+  dependency, PM2 ecosystem, and organization checks with zero failures.
+- Current plan position after Move 796: Phase 8.4 remains active for live
+  browser checks and route startup reductions; Phase 26 stays at 51 completed
+  organization moves; Phase 28 remains active with R2/access follow-up open;
+  Phase 29 remains active as the repeated whole-codebase/schema/cleanup
+  guardrail. Next executable target: continue measured startup reductions on
+  routes whose live traces still show high tunnel latency, while keeping
+  destructive/settings/print controls behind seeded rollback harnesses.

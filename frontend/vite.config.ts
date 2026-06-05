@@ -155,6 +155,18 @@ const deferredModulePreloadPrefixes = [
   'assets/app-auth-',
   'assets/app-portal-',
   'assets/app-system-',
+  'assets/action-history-api-',
+  'assets/ai-api-',
+  'assets/audit-log-api-',
+  'assets/contacts-api-',
+  'assets/dashboard-api-',
+  'assets/file-api-',
+  'assets/inventory-write-api-',
+  'assets/product-write-api-',
+  'assets/rfid-api-',
+  'assets/sale-write-api-',
+  'assets/sales-read-api-',
+  'assets/shared-action-history-',
   'assets/catalog-',
   'assets/catalog-preview-',
   'assets/catalog-products-',
@@ -284,6 +296,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/productImageUploadTransport.ts')) return 'product-image-upload-api'
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
     if (normalized.endsWith('/src/api/inventoryTransport.ts')) return 'inventory-api'
+    if (normalized.endsWith('/src/api/inventoryWriteTransport.ts')) return 'inventory-write-api'
     if (normalized.endsWith('/src/api/userAdminTransport.ts')) return 'user-admin-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'

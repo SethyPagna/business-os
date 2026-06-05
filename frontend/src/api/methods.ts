@@ -146,17 +146,19 @@ import {
   updateActionHistory as updateActionHistoryRequest,
 } from './actionHistoryTransport.ts'
 import {
-  adjustStock as adjustStockRequest,
   getInventoryBootstrap as getInventoryBootstrapRequest,
   getInventoryMovements as getInventoryMovementsRequest,
   getInventoryReasons as getInventoryReasonsRequest,
   getInventoryStats as getInventoryStatsRequest,
   getInventorySummary as getInventorySummaryRequest,
+  searchInventoryProducts as searchInventoryProductsRequest,
+} from './inventoryTransport.ts'
+import {
+  adjustStock as adjustStockRequest,
   moveStockRow as moveStockRowRequest,
   saveInventoryReasons as saveInventoryReasonsRequest,
-  searchInventoryProducts as searchInventoryProductsRequest,
   transferInventoryStock as transferInventoryStockRequest,
-} from './inventoryTransport.ts'
+} from './inventoryWriteTransport.ts'
 import {
   applyRfidSession as applyRfidSessionRequest,
   createRfidSession as createRfidSessionRequest,

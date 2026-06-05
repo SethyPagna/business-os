@@ -191,6 +191,7 @@ type ProductReadTransportModule = typeof import('../../api/productReadTransport.
 type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
 type RfidTransportModule = typeof import('../../api/rfidTransport.ts')
 type UserReadTransportModule = typeof import('../../api/userReadTransport.ts')
+type InventoryWriteTransportModule = typeof import('../../api/inventoryWriteTransport.ts')
 
 type LoadOptions = {
   force?: boolean
@@ -203,6 +204,7 @@ let productReadTransportPromise: Promise<ProductReadTransportModule> | null = nu
 let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
 let rfidTransportPromise: Promise<RfidTransportModule> | null = null
 let userReadTransportPromise: Promise<UserReadTransportModule> | null = null
+let inventoryWriteTransportPromise: Promise<InventoryWriteTransportModule> | null = null
 
 function loadBranchTransport(): Promise<BranchTransportModule> {
   if (!branchTransportPromise) branchTransportPromise = import('../../api/branchTransport.ts')
@@ -217,6 +219,11 @@ function loadDashboardTransport(): Promise<DashboardTransportModule> {
 function loadInventoryTransport(): Promise<InventoryTransportModule> {
   if (!inventoryTransportPromise) inventoryTransportPromise = import('../../api/inventoryTransport.ts')
   return inventoryTransportPromise
+}
+
+function loadInventoryWriteTransport(): Promise<InventoryWriteTransportModule> {
+  if (!inventoryWriteTransportPromise) inventoryWriteTransportPromise = import('../../api/inventoryWriteTransport.ts')
+  return inventoryWriteTransportPromise
 }
 
 function loadProductReadTransport(): Promise<ProductReadTransportModule> {
@@ -251,11 +258,11 @@ function getInventoryApi(): InventoryApi {
     getReturns: async (params: QueryParams = {}) => (await loadReturnsTransport()).getReturns(params),
     getRfidStatus: async (params: QueryParams = {}) => (await loadRfidTransport()).getRfidStatus(params),
     getUsers: async () => (await loadUserReadTransport()).getUsers(),
-    saveInventoryReasons: async (items: unknown[] = []) => (await loadInventoryTransport()).saveInventoryReasons(items),
+    saveInventoryReasons: async (items: unknown[] = []) => (await loadInventoryWriteTransport()).saveInventoryReasons(items),
     searchInventoryProducts: async (params: QueryParams = {}) => (await loadInventoryTransport()).searchInventoryProducts(params),
-    adjustStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryTransport()).adjustStock(payload),
-    moveStockRow: async (payload: Record<string, unknown> = {}) => (await loadInventoryTransport()).moveStockRow(payload),
-    transferInventoryStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryTransport()).transferInventoryStock(payload),
+    adjustStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryWriteTransport()).adjustStock(payload),
+    moveStockRow: async (payload: Record<string, unknown> = {}) => (await loadInventoryWriteTransport()).moveStockRow(payload),
+    transferInventoryStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryWriteTransport()).transferInventoryStock(payload),
   }
 }
 
