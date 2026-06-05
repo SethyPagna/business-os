@@ -157,33 +157,6 @@ function getReceiptPaperWidthMm(printSettings: { paperSize?: unknown; customWidt
   return Math.max(40, fallback)
 }
 
-const KHMER_RECEIPT_LABELS = {
-  receipt: 'បង្កាន់ដៃ',
-  receiptNum: 'លេខបង្កាន់ដៃ:',
-  date: 'កាលបរិច្ឆេទ:',
-  cashier: 'អ្នកគិតលុយ:',
-  payment: 'ការទូទាត់:',
-  rate: 'អត្រាប្តូរ:',
-  status: 'ស្ថានភាព:',
-  customer: 'អតិថិជន:',
-  phone: 'ទូរស័ព្ទ:',
-  address: 'អាសយដ្ឋាន:',
-  membership: 'សមាជិកភាព:',
-  delivery: 'ការដឹកជញ្ជូន:',
-  driver: 'អ្នកដឹកជញ្ជូន:',
-  subtotal: 'សរុបរង:',
-  discount: 'បញ្ចុះតម្លៃ:',
-  membershipDiscount: 'បញ្ចុះតម្លៃសមាជិក:',
-  pointsRedeemed: 'ពិន្ទុបានប្រើ:',
-  tax: 'ពន្ធ:',
-  total: 'សរុប',
-  paid: 'បានបង់:',
-  change: 'ប្រាក់អាប់:',
-  refunded: 'បានសងវិញ:',
-  thankYou: 'សូមអរគុណសម្រាប់ការគាំទ្រ!',
-  qty: 'ចំនួន',
-}
-
 const LABELS = {
   en: {
     receipt: 'RECEIPT',
@@ -239,7 +212,7 @@ const LABELS = {
   },
 }
 
-const CLEAN_KHMER_LABELS = {
+const RECEIPT_KHMER_LABELS = {
   receipt: 'បង្កាន់ដៃ',
   receiptNum: 'លេខបង្កាន់ដៃ:',
   date: 'កាលបរិច្ឆេទ:',
@@ -264,18 +237,18 @@ const CLEAN_KHMER_LABELS = {
   refunded: 'បានសងវិញ:',
   thankYou: 'សូមអរគុណសម្រាប់ការគាំទ្រ!',
   qty: 'ចំនួន',
-}
+} satisfies Record<ReceiptLabelKey, string>
 
 function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
-  if (mode === 'both') return `${LABELS.en[key]} / ${KHMER_RECEIPT_LABELS[key]}`
-  return (mode === 'km' ? KHMER_RECEIPT_LABELS : LABELS.en)[key]
+  if (mode === 'both') return `${LABELS.en[key]} / ${RECEIPT_KHMER_LABELS[key]}`
+  return (mode === 'km' ? RECEIPT_KHMER_LABELS : LABELS.en)[key]
 }
 
 function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
   return (
-    <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.4rem,auto)] items-start gap-x-2 gap-y-1 ${tone}`}>
-      <span className={`min-w-0 overflow-hidden break-words pr-1 ${bold ? 'font-semibold' : ''}`}>{label}</span>
-      <div className="min-w-0 text-right">
+    <div data-receipt-line="true" className={`my-1 grid grid-cols-[minmax(0,1fr)_minmax(4.6rem,auto)] items-start gap-x-3 gap-y-1 ${tone}`}>
+      <span className={`min-w-0 overflow-hidden whitespace-normal break-words pr-1 leading-snug ${bold ? 'font-semibold' : ''}`}>{label}</span>
+      <div className="min-w-0 whitespace-normal break-words text-right leading-snug">
         <div className={`${bold ? 'font-semibold' : ''}`}>{value}</div>
         {subValue ? <div className="text-[10px] text-gray-500">{subValue}</div> : null}
       </div>
@@ -384,10 +357,10 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ) : null,
     items: (
       <div key="items" className="mt-2 border-t border-dashed border-gray-300 pt-2">
-        <div data-receipt-line="true" className="mb-1 grid grid-cols-[minmax(0,1fr)_minmax(3.9rem,4.8rem)_minmax(4.8rem,auto)] gap-x-2 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
-          <span>Name</span>
-          <span className="whitespace-nowrap text-center text-[9px] leading-tight">{labelFor(lang, 'qty')}</span>
-          <span className="text-right">Price</span>
+        <div data-receipt-line="true" className="mb-1 grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] gap-x-2 border-b border-dashed border-gray-300 pb-1 text-[10px] font-semibold text-gray-500">
+          <span data-receipt-cell="name">Name</span>
+          <span data-receipt-cell="qty" className="whitespace-normal text-center leading-tight">{labelFor(lang, 'qty')}</span>
+          <span data-receipt-cell="price" className="text-right">Price</span>
         </div>
         {items.map((item, index) => {
           const qty = toNumber(item.quantity) || 1
@@ -397,15 +370,15 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
           const lineKhr = unitKhr * qty
           return (
             <div key={`${item.product_id || item.id || index}-${index}`} className="my-1">
-              <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_minmax(3.9rem,4.8rem)_minmax(4.8rem,auto)] items-start gap-x-2">
-                <div data-receipt-cell="name" className="min-w-0 overflow-hidden break-words font-semibold">
+              <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] items-start gap-x-2">
+                <div data-receipt-cell="name" className="min-w-0 overflow-hidden whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
                 </div>
-                <div data-receipt-cell="qty" className="text-center">{tpl.show_item_qty ? qty : ''}</div>
-                <div data-receipt-cell="price" className="min-w-0 text-right font-semibold">
+                <div data-receipt-cell="qty" className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
+                <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
                   <div>{fmtUSD(lineUsd)}</div>
                   {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
@@ -541,11 +514,11 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     color: '#111827',
     padding: '18px 16px 20px',
     borderRadius: 12,
-    lineHeight: 1.55,
+    lineHeight: 1.45,
     whiteSpace: 'normal',
     overflow: 'hidden',
-    overflowWrap: 'anywhere',
-    wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+    wordBreak: 'normal',
     boxSizing: 'border-box',
   }
 

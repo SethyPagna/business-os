@@ -436,6 +436,33 @@ function buildReceiptFileName(title = 'receipt', extension = 'pdf'): string {
   return `${safeBase || 'receipt'}.${safeExtension}`
 }
 
+function wrapReceiptFallbackLine(line: unknown, maxChars: number): string[] {
+  const textLine = String(line || '').replace(/\s+/g, ' ').trim()
+  if (!textLine) return ['']
+  if (!textLine.includes('\t')) return wrapTextLine(textLine, maxChars)
+
+  const parts = textLine.split('\t').map((part) => part.trim())
+  if (parts.length >= 3) {
+    const [name, qty, ...priceParts] = parts
+    const price = priceParts.join(' ')
+    const nameWidth = Math.max(12, maxChars - 16)
+    const nameLines = wrapTextLine(name, nameWidth)
+    const firstLine = [nameLines[0] || '', qty || '', price || ''].join('\t')
+    return [
+      firstLine,
+      ...nameLines.slice(1).map((continuation) => `  ${continuation}`),
+    ]
+  }
+
+  const [label, value] = parts
+  const labelWidth = Math.max(12, maxChars - 12)
+  const labelLines = wrapTextLine(label, labelWidth)
+  return [
+    [labelLines[0] || '', value || ''].join('\t'),
+    ...labelLines.slice(1).map((continuation) => `  ${continuation}`),
+  ]
+}
+
 function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPrintOptions = {}): HTMLCanvasElement {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
@@ -447,7 +474,7 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   const lineHeight = 17
   const fontSize = 12
   const maxChars = Math.max(28, Math.floor((widthPx - paddingX * 2) / 6.5))
-  const wrappedLines = lines.flatMap((line) => String(line).includes('\t') ? [line] : wrapTextLine(line, maxChars))
+  const wrappedLines = lines.flatMap((line) => wrapReceiptFallbackLine(line, maxChars))
   const heightPx = Math.max(220, paddingY * 2 + wrappedLines.length * lineHeight)
 
   const canvas = document.createElement('canvas')
