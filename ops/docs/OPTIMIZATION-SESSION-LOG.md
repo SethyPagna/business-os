@@ -8,6 +8,27 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Guarded Docker release-image retention
+  - area: runtime cleanup
+  - result: kept
+  - note: `prune-storage` now has policy-backed Docker image retention. It
+    keeps `business-os:latest`, the active `BUSINESS_OS_IMAGE`, running image
+    refs/IDs, and the newest rollback release tags, and removes only older
+    `business-os:v*` release tags.
+  - safety proof: the implementation never calls `docker image prune`,
+    `docker system prune`, or `docker volume prune`; it uses exact
+    `docker image rm business-os:<tag>` entries selected by the guarded
+    planner.
+  - cleanup proof: preview planned only
+    `business-os:v6.0.0-202606050440`; apply removed only that stale tag and
+    176,008 bytes of old route-trace reports. Final retained images are
+    `latest`, `v6.0.0-202606050737`, `v6.0.0-202606050515`,
+    `v6.0.0-202606050504`, `v6.0.0-202606050450`, and
+    `v6.0.0-202606050445`.
+  - runtime proof: Docker containers remained healthy on
+    `business-os:v6.0.0-202606050737`; uploads, secrets, env files,
+    databases, volumes, backups, and rollback tags were preserved.
+
 - Inventory persisted-section startup gate
   - route: Inventory
   - result: kept

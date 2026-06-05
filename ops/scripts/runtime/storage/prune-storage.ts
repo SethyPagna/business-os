@@ -33,6 +33,8 @@ function parseArgs(argv) {
     remote: true,
     deleteDemo: false,
     dockerSafePrune: false,
+    dockerImageRetention: false,
+    dockerImageKeepLatest: 5,
     logFileMaxBytes: 1024 * 1024,
     outputPath: '',
   }
@@ -65,6 +67,15 @@ function parseArgs(argv) {
     } else if (value === '--docker-safe-prune') {
       explicit.add('dockerSafePrune')
       args.dockerSafePrune = true
+    } else if (value === '--docker-image-retention') {
+      explicit.add('dockerImageRetention')
+      args.dockerImageRetention = true
+    } else if (value === '--skip-docker-image-retention') {
+      explicit.add('dockerImageRetention')
+      args.dockerImageRetention = false
+    } else if (value === '--docker-image-keep-latest') {
+      explicit.add('dockerImageKeepLatest')
+      args.dockerImageKeepLatest = Number(argv[++index] || args.dockerImageKeepLatest)
     } else if (value === '--log-file-max-bytes') {
       explicit.add('logFileMaxBytes')
       args.logFileMaxBytes = Number(argv[++index] || args.logFileMaxBytes)
@@ -80,11 +91,14 @@ function parseArgs(argv) {
   if (!explicit.has('remoteBackupsKeep')) args.remoteBackupsKeep = numberFromPolicy(policy?.backups?.cloudflareR2KeepLatest, args.remoteBackupsKeep)
   if (!explicit.has('deleteDemo')) args.deleteDemo = policy?.cleanup?.deleteIgnoredDemoArtifacts === true
   if (!explicit.has('dockerSafePrune')) args.dockerSafePrune = policy?.cleanup?.dockerSafePrune === true
+  if (!explicit.has('dockerImageRetention')) args.dockerImageRetention = policy?.cleanup?.dockerImageRetention === true
+  if (!explicit.has('dockerImageKeepLatest')) args.dockerImageKeepLatest = numberFromPolicy(policy?.cleanup?.dockerImageKeepLatest, args.dockerImageKeepLatest)
   if (!explicit.has('logFileMaxBytes')) args.logFileMaxBytes = numberFromPolicy(policy?.cleanup?.runtimeLogFileMaxBytes, args.logFileMaxBytes)
   args.reportsKeep = Math.max(1, Math.min(200, Number(args.reportsKeep || 20) || 20))
   args.recoveryReportsKeep = Math.max(1, Math.min(100, Number(args.recoveryReportsKeep || 5) || 5))
   args.localBackupsKeep = Math.max(1, Math.min(50, Number(args.localBackupsKeep || 3) || 3))
   args.remoteBackupsKeep = Math.max(1, Math.min(50, Number(args.remoteBackupsKeep || 1) || 1))
+  args.dockerImageKeepLatest = Math.max(1, Math.min(25, Number(args.dockerImageKeepLatest || 5) || 5))
   args.logFileMaxBytes = Math.max(64 * 1024, Math.min(50 * 1024 * 1024, Number(args.logFileMaxBytes || 1024 * 1024) || 1024 * 1024))
   args.policy = {
     path: args.policyPath,
@@ -149,6 +163,91 @@ function pruneDockerSafe({ dryRun }) {
     result.systemDfAfter = runDockerCommand(['system', 'df'])
   } catch (error) {
     result.systemDfAfterError = error?.message || String(error)
+  }
+  return result
+}
+
+function parseDockerImageRows(text) {
+  return String(text || '').split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [repository = '', tag = '', id = '', createdAt = '', size = ''] = line.split('\t')
+      return {
+        repository,
+        tag,
+        id,
+        createdAt,
+        size,
+        ref: `${repository}:${tag}`,
+        versionStamp: String(tag || '').match(/^v\d+\.\d+\.\d+-(\d{12})$/)?.[1] || '',
+      }
+    })
+    .filter((row) => row.repository === 'business-os' && row.tag && row.tag !== '<none>')
+}
+
+function parseDockerRunningImageRefs(text) {
+  return new Set(String(text || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean))
+}
+
+function pruneDockerBusinessOsImages({ dryRun, keepLatest }) {
+  const result = {
+    enabled: true,
+    dryRun,
+    keepLatest,
+    policy: 'Removes only old tagged business-os:v* release tags. Protects business-os:latest, the release env image, running container image refs, running image ids, and the newest rollback tags. It never runs docker image prune, docker system prune, or docker volume prune.',
+    activeImage: process.env.BUSINESS_OS_IMAGE || '',
+    kept: [],
+    removed: [],
+    planned: [],
+    errors: [],
+    error: null,
+  }
+  let rows = []
+  let runningRefs = new Set()
+  try {
+    rows = parseDockerImageRows(runDockerCommand(['images', '--format', '{{.Repository}}\t{{.Tag}}\t{{.ID}}\t{{.CreatedAt}}\t{{.Size}}', 'business-os']))
+    runningRefs = parseDockerRunningImageRefs(runDockerCommand(['ps', '--format', '{{.Image}}']))
+  } catch (error) {
+    result.error = error?.message || String(error)
+    return result
+  }
+
+  const latestRows = rows.filter((row) => row.tag === 'latest')
+  const latestIds = new Set(latestRows.map((row) => row.id).filter(Boolean))
+  const runningIds = new Set(rows.filter((row) => runningRefs.has(row.ref)).map((row) => row.id).filter(Boolean))
+  const versionRows = rows
+    .filter((row) => row.versionStamp)
+    .sort((a, b) => {
+      const stampDelta = b.versionStamp.localeCompare(a.versionStamp)
+      if (stampDelta !== 0) return stampDelta
+      return b.id.localeCompare(a.id)
+    })
+  const newestVersionRefs = new Set(versionRows.slice(0, keepLatest).map((row) => row.ref))
+  const protectedRefs = new Set([
+    'business-os:latest',
+    process.env.BUSINESS_OS_IMAGE || '',
+    ...runningRefs,
+    ...newestVersionRefs,
+  ].filter(Boolean))
+
+  for (const row of versionRows) {
+    const reasons = []
+    if (protectedRefs.has(row.ref)) reasons.push('protected-ref')
+    if (latestIds.has(row.id)) reasons.push('shares-latest-image-id')
+    if (runningIds.has(row.id)) reasons.push('running-image-id')
+    if (reasons.length) {
+      result.kept.push({ ref: row.ref, id: row.id, tag: row.tag, size: row.size, reasons })
+      continue
+    }
+    const entry = { ref: row.ref, id: row.id, tag: row.tag, size: row.size, command: `docker image rm ${row.ref}` }
+    result.planned.push(entry)
+    if (dryRun) continue
+    try {
+      result.removed.push({ ...entry, output: runDockerCommand(['image', 'rm', row.ref]) })
+    } catch (error) {
+      result.errors.push({ ...entry, error: error?.message || String(error) })
+    }
   }
   return result
 }
@@ -437,6 +536,9 @@ async function main() {
   const dockerSafePrune = args.dockerSafePrune
     ? pruneDockerSafe({ dryRun: args.dryRun })
     : null
+  const dockerImageRetention = args.dockerImageRetention
+    ? pruneDockerBusinessOsImages({ dryRun: args.dryRun, keepLatest: args.dockerImageKeepLatest })
+    : null
 
   const summary = {
     policy: args.policy,
@@ -449,6 +551,7 @@ async function main() {
     remoteBackups,
     demo,
     dockerSafePrune,
+    dockerImageRetention,
   }
   if (args.outputPath) {
     fs.mkdirSync(path.dirname(args.outputPath), { recursive: true })

@@ -45,6 +45,8 @@
     "runtimeLogFileMaxBytes": 1048576,
     "deleteIgnoredDemoArtifacts": false,
     "dockerSafePrune": true,
+    "dockerImageRetention": true,
+    "dockerImageKeepLatest": 5,
     "generatedBulkCandidateMaxBytes": 536870912
   },
   "media": {

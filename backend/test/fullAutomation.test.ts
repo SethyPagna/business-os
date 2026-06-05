@@ -48,6 +48,8 @@ runTest('full automation launcher and policy are present', () => {
   assert.equal(policy.cleanup.recoveryReportsKeepLatest, 5)
   assert.equal(policy.cleanup.runtimeLogFileMaxBytes, 1048576)
   assert.equal(policy.cleanup.dockerSafePrune, true)
+  assert.equal(policy.cleanup.dockerImageRetention, true)
+  assert.equal(policy.cleanup.dockerImageKeepLatest, 5)
   assert.equal(policy.cleanup.generatedBulkCandidateMaxBytes, 536870912)
   assert.equal(policy.media.objectStorage, 'r2')
 
@@ -156,6 +158,7 @@ runTest('docker release verification protects generated cleanup boundaries', () 
   const actionHistoryCheck = read('ops/scripts/runtime/audits/action-history-undo-redo-check.ts')
   const fullAppAudit = read('ops/scripts/runtime/audits/full-app-audit.ts')
   const liveSmoke = read('ops/scripts/runtime/smoke/live-smoke.ts')
+  const pruneStorage = read('ops/scripts/runtime/storage/prune-storage.ts')
   const opsPackage = JSON.parse(read('ops/package.json'))
   assert.equal(opsPackage.scripts['cleanup-test-data'], 'node scripts/runtime/storage/cleanup-test-data.ts')
   assert.equal(opsPackage.scripts['action-history:check'], 'node scripts/runtime/audits/action-history-undo-redo-check.ts')
@@ -269,6 +272,22 @@ runTest('docker release verification protects generated cleanup boundaries', () 
     'verify-local-post-start-diagnostics.json',
     '--skip-if-unavailable',
   ].forEach((token) => assert.match(verifier, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))))
+
+  ;[
+    'dockerImageRetention',
+    'dockerImageKeepLatest',
+    '--docker-image-retention',
+    '--skip-docker-image-retention',
+    '--docker-image-keep-latest',
+    'pruneDockerBusinessOsImages',
+    'business-os:latest',
+    'BUSINESS_OS_IMAGE',
+    'running-image-id',
+    'shares-latest-image-id',
+    'docker image rm',
+    'docker image prune',
+    'It never runs docker image prune, docker system prune, or docker volume prune.',
+  ].forEach((token) => assert.match(pruneStorage, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))))
 
   ;[
     '--all-qa',

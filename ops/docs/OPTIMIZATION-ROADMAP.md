@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 791.
+- Latest completed implementation move in this roadmap: Move 792.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -11633,3 +11633,37 @@ Move 791 status:
   guardrail. Next executable target: continue with a measured route/startup
   slice or formalize Docker image-retention automation without touching
   uploads, secrets, env files, databases, or volumes.
+
+Move 792 status:
+- Move 792 formalizes the Docker image-retention cleanup used manually in
+  Move 790. `ops/scripts/runtime/storage/prune-storage.ts` now supports
+  policy-backed `dockerImageRetention`, `dockerImageKeepLatest`,
+  `--docker-image-retention`, `--skip-docker-image-retention`, and
+  `--docker-image-keep-latest`.
+- Safety proof: the retention path removes only old tagged
+  `business-os:v*` release tags. It protects `business-os:latest`, the active
+  `BUSINESS_OS_IMAGE` from the Docker release env, running container image
+  refs, running image IDs, and the newest rollback tags. It never runs
+  `docker image prune`, `docker system prune`, or `docker volume prune`.
+- Cleanup proof: `npm.cmd --prefix ops run prune-storage:preview` planned one
+  stale tag deletion, `business-os:v6.0.0-202606050440`, while keeping active
+  image `business-os:v6.0.0-202606050737` and rollback tags
+  `v6.0.0-202606050515`, `v6.0.0-202606050504`,
+  `v6.0.0-202606050450`, and `v6.0.0-202606050445`.
+- Apply proof: `npm.cmd --prefix ops run prune-storage` removed only
+  `business-os:v6.0.0-202606050440` plus 176,008 bytes of old route-trace
+  reports. Docker containers remained healthy on
+  `business-os:v6.0.0-202606050737`; uploads, secrets, env files, databases,
+  volumes, backups, and rollback tags were preserved.
+- Verification proof: `node --check
+  ops\scripts\runtime\storage\prune-storage.ts`, `node
+  backend\test\fullAutomation.test.ts`, prune preview/apply, Docker image and
+  container inspections, generated reference refresh, and `npm.cmd --prefix
+  ops run phase29:audit` passed.
+- Current plan position after Move 792: Phase 8.4 remains active for live
+  browser checks and route startup reductions; Phase 26 stays at 51 completed
+  organization moves; Phase 28 remains active with R2/access follow-up open;
+  Phase 29 remains active as the repeated whole-codebase/schema/cleanup
+  guardrail. Next executable target: return to measured page-load optimization
+  slices, starting from the route trace pages with the highest first-window
+  request/script counts.

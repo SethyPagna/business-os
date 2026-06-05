@@ -8,10 +8,10 @@ Last updated: 2026-06-05
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 791, keep Inventory products-first on startup
-  even when an older session persisted the heavy `All` section, so Inventory
-  does not resurrect stats, movements, RFID, dashboard, or returns reads before
-  the user asks for those sections
+- Latest completed move: Move 792, add guarded Docker release-image retention
+  to `prune-storage` so cleanup keeps `business-os:latest`, the active release
+  image, running image IDs, and the newest rollback tags while removing only
+  older `business-os:v*` release tags
 
 ## Current Baseline
 
@@ -67,6 +67,18 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 792 added policy-backed Docker image retention to
+  `ops/scripts/runtime/storage/prune-storage.ts`. The dry-run preview planned
+  one deletion, `business-os:v6.0.0-202606050440`, while protecting
+  `business-os:latest`, active image `business-os:v6.0.0-202606050737`, the
+  running image ID, and four newest rollback tags. The apply run removed only
+  that stale tag plus 176,008 bytes of old route-trace reports; it did not run
+  `docker image prune`, `docker system prune`, or `docker volume prune`, and
+  preserved uploads, secrets, env files, databases, volumes, backups, active
+  image, and rollback images. Final Docker image set is `latest`,
+  `v6.0.0-202606050737`, `v6.0.0-202606050515`,
+  `v6.0.0-202606050504`, `v6.0.0-202606050450`, and
+  `v6.0.0-202606050445`.
 - The Move 791 generated-artifact cleanup removed 412,470,343 bytes from
   regenerable `release` and `frontend/dist` folders after Docker image
   `business-os:v6.0.0-202606050737` was built and verified healthy. The

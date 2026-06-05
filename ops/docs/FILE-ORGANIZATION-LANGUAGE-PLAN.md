@@ -7541,6 +7541,37 @@ Decision rule:
   utility suite, storage prune, schema audit, organization audit, generated
   reference refresh, `git diff --check`, and Phase 29 audit passed.
 
+### Move 792: Guarded Docker release-image retention
+
+- Ownership evidence: Move 790 manually removed stale `business-os:v6.0.0-*`
+  image tags after repeated release/test cycles. The plan called for
+  formalizing that safe image-tag policy so future cleanups stay repeatable
+  and do not drift into broad Docker pruning.
+- Change: `ops/scripts/runtime/storage/prune-storage.ts` now owns Docker
+  release-image retention under the existing cleanup command. Policy fields
+  `cleanup.dockerImageRetention` and `cleanup.dockerImageKeepLatest` default
+  to enabled with five kept release tags. CLI flags
+  `--docker-image-retention`, `--skip-docker-image-retention`, and
+  `--docker-image-keep-latest` allow explicit operator control.
+- Safety proof: the retention function only removes old tagged
+  `business-os:v*` release images. It protects `business-os:latest`, the
+  active `BUSINESS_OS_IMAGE`, running image refs, running image IDs, and newest
+  rollback tags. It does not call `docker image prune`, `docker system prune`,
+  or `docker volume prune`.
+- Cleanup proof: preview planned only
+  `business-os:v6.0.0-202606050440`; apply removed only that tag and 176,008
+  bytes of old route-trace reports. The final local Business OS image set is
+  `latest`, `v6.0.0-202606050737`, `v6.0.0-202606050515`,
+  `v6.0.0-202606050504`, `v6.0.0-202606050450`, and
+  `v6.0.0-202606050445`.
+- Runtime proof: Docker containers stayed healthy on
+  `business-os:v6.0.0-202606050737` after cleanup. Uploads, secrets, env
+  files, databases, volumes, backups, active image, and rollback tags were
+  preserved.
+- Verification: prune-storage syntax check, full automation guardrail test,
+  prune preview/apply, Docker image/container inspection, generated reference
+  refresh, and Phase 29 audit passed.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
