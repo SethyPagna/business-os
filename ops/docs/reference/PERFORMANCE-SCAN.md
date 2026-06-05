@@ -15,18 +15,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Size (KB) | Lines |
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
-| `frontend/src/components/inventory/Inventory.tsx` | 223.0 | 4411 |
+| `frontend/src/components/inventory/Inventory.tsx` | 223.0 | 4414 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 157.7 | 3630 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
-| `frontend/src/components/pos/POS.tsx` | 127.3 | 2455 |
+| `frontend/src/components/pos/POS.tsx` | 127.2 | 2453 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 118.1 | 2376 |
 | `frontend/src/components/products/Products.tsx` | 117.5 | 2521 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 103.0 | 1488 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 101.2 | 2147 |
-| `backend/src/routes/products.ts` | 99.4 | 2238 |
+| `backend/src/routes/products.ts` | 99.5 | 2238 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 87.4 | 1890 |
-| `backend/src/routes/inventory.ts` | 84.1 | 1902 |
+| `backend/src/routes/inventory.ts` | 84.2 | 1902 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 80.1 | 1775 |
 | `frontend/src/AppContext.tsx` | 75.3 | 1872 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
@@ -44,17 +44,17 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 | File | Lines | Size (KB) |
 |---|---:|---:|
-| `frontend/src/components/inventory/Inventory.tsx` | 4411 | 223.0 |
+| `frontend/src/components/inventory/Inventory.tsx` | 4414 | 223.0 |
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 3630 | 157.7 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
 | `frontend/src/components/products/Products.tsx` | 2521 | 117.5 |
-| `frontend/src/components/pos/POS.tsx` | 2455 | 127.3 |
+| `frontend/src/components/pos/POS.tsx` | 2453 | 127.2 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 2376 | 118.1 |
-| `backend/src/routes/products.ts` | 2238 | 99.4 |
+| `backend/src/routes/products.ts` | 2238 | 99.5 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2147 | 101.2 |
-| `backend/src/routes/inventory.ts` | 1902 | 84.1 |
+| `backend/src/routes/inventory.ts` | 1902 | 84.2 |
 | `frontend/src/App.tsx` | 1901 | 71.4 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1890 | 87.4 |
 | `frontend/src/AppContext.tsx` | 1872 | 75.3 |

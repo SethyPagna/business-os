@@ -35,7 +35,7 @@ type FilterMenuProps = {
 function sectionButtonClass(active: boolean): string {
   return active
     ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
-    : 'bg-slate-50 text-slate-700 border-slate-300 hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:text-blue-300 dark:hover:bg-slate-700/80'
+    : 'bg-white text-slate-700 border-slate-200 shadow-sm hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 dark:bg-slate-800/90 dark:text-slate-200 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:text-blue-300 dark:hover:bg-slate-700/80'
 }
 
 export default function FilterMenu({
@@ -53,7 +53,7 @@ export default function FilterMenu({
   return (
     <LazyPortalMenu
       align="right"
-      menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] p-0"
+      menuClassName="w-[min(22rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-0 shadow-xl dark:border-slate-700 dark:bg-slate-900"
       onOpenChange={onOpenChange}
       trigger={(
         <button
@@ -125,7 +125,7 @@ export default function FilterMenu({
                         type="button"
                         disabled={option.disabled}
                         onClick={() => option.onClick?.()}
-                        className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
                         title={option.title || (typeof option.label === 'string' ? option.label : undefined)}
                       >
                         {option.label}

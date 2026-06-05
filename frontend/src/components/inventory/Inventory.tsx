@@ -502,7 +502,7 @@ export default function Inventory() {
   const deferredSearch = String(search || '').trim()
   const [brandFilter,   setBrandFilter]   = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
-  const [groupFilter,   setGroupFilter]   = useState('grouped') // grouped | parent | variant | standalone
+  const [groupFilter,   setGroupFilter]   = useState('all') // all | group | standalone
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
   const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
   const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
@@ -838,12 +838,14 @@ export default function Inventory() {
             setInventoryProductTotal(Number(sumResult.total || 0))
             setInventoryProductPage(Number(sumResult.page || inventoryProductPage) || 1)
             setInventoryProductPageSize(Number(sumResult.pageSize || inventoryProductPageSize) || inventoryProductPageSize)
-            setInventoryInitials(Array.isArray(sumResult.initials) ? sumResult.initials : [])
-            setInventoryProductFilters(sumResult.filters && typeof sumResult.filters === 'object' ? sumResult.filters : { brands: [] })
+            if (Array.isArray(sumResult.initials)) {
+              setInventoryInitials(sumResult.initials)
+            }
+            if (sumResult.filters && typeof sumResult.filters === 'object') {
+              setInventoryProductFilters(sumResult.filters)
+            }
           } else {
             setInventoryProductTotal(sum.length)
-            setInventoryInitials([])
-            setInventoryProductFilters({ brands: [] })
           }
         }
         if (needsStatsData && statsResult?.item) {
@@ -1465,12 +1467,15 @@ export default function Inventory() {
   const hasServerBackedProductSearch = !!searchTerms.length
   const filteredSummary = useMemo(() => summary.filter((p: InventoryProduct) => {
     if (!hasServerBackedProductSearch && !matchesSearch(productHay(p))) return false
-    if (brandFilter !== 'all' && String(p.brand || '').toLowerCase() !== brandFilter.toLowerCase()) return false
+    const normalizedBrandFilter = String(brandFilter || '').trim().replace(/\s+/g, ' ').toLowerCase()
+    const normalizedProductBrand = String(p.brand || '').trim().replace(/\s+/g, ' ').toLowerCase()
+    if (normalizedBrandFilter !== 'all' && normalizedProductBrand !== normalizedBrandFilter) return false
     const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
     const isVariant = Boolean(p.parent_id)
-    if (groupFilter === 'parent' && (!isParent || isVariant)) return false
-    if (groupFilter === 'variant' && !isVariant) return false
-    if (groupFilter === 'standalone' && (isParent || isVariant)) return false
+    const normalizedGroupFilter = String(groupFilter || 'all').toLowerCase()
+    const isGroupedFamilyMember = isParent || isVariant
+    if (['group', 'groups', 'grouped', 'parent', 'variant'].includes(normalizedGroupFilter) && !isGroupedFamilyMember) return false
+    if (normalizedGroupFilter === 'standalone' && isGroupedFamilyMember) return false
     const qty = getStockQty(p)
     if (stockFilter === 'low')      return qty > 0 && qty <= p.low_stock_threshold
     if (stockFilter === 'out')      return qty <= (p.out_of_stock_threshold || 0)
@@ -3176,9 +3181,7 @@ export default function Inventory() {
               aria-label={t('groups') || 'Groups'}
             >
               <option value="all">{t('all') || 'All'}</option>
-              <option value="grouped">{t('groups') || 'Groups'}</option>
-              <option value="parent">{t('parents') || 'Parents'}</option>
-              <option value="variant">{t('variants') || 'Variants'}</option>
+              <option value="group">{t('groups') || 'Groups'}</option>
               <option value="standalone">{t('standalone') || 'Standalone'}</option>
             </select>
           </label>
@@ -3308,7 +3311,7 @@ export default function Inventory() {
     return countActiveFlags([
       branchFilter !== 'all',
       brandFilter !== 'all',
-      groupFilter !== 'grouped',
+      groupFilter !== 'all',
       stockFilter !== 'all',
       inventoryInitialFilter !== 'all',
     ])
@@ -3317,7 +3320,7 @@ export default function Inventory() {
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
     setBrandFilter('all')
-    setGroupFilter('grouped')
+    setGroupFilter('all')
     setStockFilter('all')
     setInventoryInitialFilter('all')
     setMovFilter('all')

@@ -86,13 +86,14 @@ export default function POSFilterPanel({
 }: POSFilterPanelProps) {
   if (!open) return null
   const T = (key: string, fallback: string): string => t?.(key) || fallback
+  const normalizedGroupFilter = ['grouped', 'parent', 'variant'].includes(groupFilter) ? 'group' : groupFilter
 
   const activeCount = countActiveFlags([
     categoryFilter !== 'all',
     brandFilter !== 'all',
     branchFilter !== 'all',
     stockFilter !== 'all',
-    groupFilter !== 'all',
+    normalizedGroupFilter !== 'all',
     supplierFilter !== 'all',
   ])
 
@@ -151,14 +152,14 @@ export default function POSFilterPanel({
         <div className="flex flex-wrap gap-1">
           {[
             ['all', T('all', 'All')],
-            ['grouped', T('groups', 'Groups')],
+            ['group', T('groups', 'Groups')],
             ['standalone', T('standalone', 'Standalone')],
           ].map(([value, label]) => (
             <button
               key={`group-${value}`}
               type="button"
-              onClick={() => setGroupFilter?.(groupFilter === value && value !== 'all' ? 'all' : value)}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(groupFilter === value)}`}
+              onClick={() => setGroupFilter?.(normalizedGroupFilter === value && value !== 'all' ? 'all' : value)}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(normalizedGroupFilter === value)}`}
             >
               {label}
             </button>

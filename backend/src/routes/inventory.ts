@@ -250,8 +250,8 @@ function appendInventoryProductFilters(query = {}) {
   }
   const brand = String(query.brand || '').normalize('NFC').trim()
   if (brand && brand.toLowerCase() !== 'all') {
-    params.brand = brand
-    where.push('p.brand = @brand')
+    params.brand = brand.toLowerCase()
+    where.push("lower(trim(COALESCE(p.brand, ''))) = @brand")
   }
   const stockExpr = params.branchId ? 'COALESCE(selected_bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockState = String(query.stockState || query.stock_state || '').toLowerCase()
@@ -261,7 +261,7 @@ function appendInventoryProductFilters(query = {}) {
   const groupState = String(query.groupState || query.group_state || '').toLowerCase()
   if (groupState === 'parent') where.push('(COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0)')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
-  if (['parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
+  if (['group', 'groups', 'grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
     where.push('((COALESCE(p.is_group, 0) = 1 AND COALESCE(p.parent_id, 0) = 0) OR COALESCE(p.parent_id, 0) > 0)')
   }
   if (groupState === 'standalone') where.push('(COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0)')

@@ -1310,9 +1310,7 @@ export default function POS() {
       const meta: ProductGroupMeta = product.__groupMeta || {}
       const isVariantGroup = meta.groupKind === 'variant' || Boolean(product.parent_id)
       const isParentGroup = Boolean(product.is_group || meta.hasExplicitGroup || meta.hasMultipleItems)
-      if (groupFilter === 'grouped') return isParentGroup || isVariantGroup
-      if (groupFilter === 'variant') return isVariantGroup
-      if (groupFilter === 'parent') return isParentGroup && !isVariantGroup
+      if (['group', 'groups', 'grouped', 'variant', 'parent'].includes(groupFilter)) return isParentGroup || isVariantGroup
       return !isParentGroup && !isVariantGroup
     })
   }, [filteredProducts, groupFilter, productsById])

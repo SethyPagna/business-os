@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-05T04:11:19.938Z
+Generated: 2026-06-05T05:13:20.340Z
 
 ## Summary
 
@@ -63,21 +63,21 @@ Generated: 2026-06-05T04:11:19.938Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 11909 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 11961 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7748 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7776 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
-| frontend/src/components/inventory/Inventory.tsx | 4411 | frontend/components/inventory |
+| frontend/src/components/inventory/Inventory.tsx | 4414 | frontend/components/inventory |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3630 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3253 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3038 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 3048 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2521 | frontend/components/products |
-| frontend/src/components/pos/POS.tsx | 2455 | frontend/components/pos |
+| frontend/src/components/pos/POS.tsx | 2453 | frontend/components/pos |
 | frontend/src/components/dashboard/Dashboard.tsx | 2376 | frontend/components/dashboard |
 | backend/src/routes/products.ts | 2238 | backend/routes |
 | ops/docs/reference/PERFORMANCE-SCAN.md | 2179 | ops/docs/reference |

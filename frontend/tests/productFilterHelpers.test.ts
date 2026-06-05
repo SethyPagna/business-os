@@ -61,7 +61,7 @@ assert.deepEqual(
   filterProductsForPage(products, {
     searchTerms: buildProductSearchTerms('rose,serum'),
     searchMode: 'AND',
-    brandFilter: 'Glow',
+    brandFilter: '  glow  ',
     catFilter: 'Skin',
     branchFilter: 'all',
     supplierFilter: 'all',
@@ -87,11 +87,20 @@ assert.deepEqual(
 
 assert.deepEqual(
   filterProductsForPage(products, {
+    groupFilter: 'group',
+    parentProductIds: new Set([1]),
+  }).map((product) => product.id),
+  [1, 3],
+  'group filtering selects parent and variant family members together',
+)
+
+assert.deepEqual(
+  filterProductsForPage(products, {
     groupFilter: 'variant',
     parentProductIds: new Set([1]),
   }).map((product) => product.id),
-  [3],
-  'group filtering can select variants only',
+  [1, 3],
+  'legacy variant filter values map to the unified group filter',
 )
 
 const [row] = buildProductExportRows([products[0]])

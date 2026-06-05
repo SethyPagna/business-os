@@ -496,7 +496,7 @@ export default function Products() {
   const [branches,     setBranches]     = useState<BranchRecord[]>([])
   const [branchFilter, setBranchFilter] = useState('all')
   const [stockFilter,  setStockFilter]  = useState('all') // all | in_stock | low | out
-  const [groupFilter, setGroupFilter] = useState('all') // all | grouped | parent | variant | standalone
+  const [groupFilter, setGroupFilter] = useState('all') // all | group | standalone
   const [createdYearFilter, setCreatedYearFilter] = useState('all')
   const [createdMonthFilter, setCreatedMonthFilter] = useState('all')
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('desc')

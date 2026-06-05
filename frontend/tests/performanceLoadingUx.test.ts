@@ -3033,5 +3033,15 @@ assert.doesNotMatch(
   /catch \(loadError\) \{[\s\S]{0,260}setUsageSummary\(\[\]\)/,
   'brand lookup manager should keep previous usage visible when a refresh fails',
 )
+assert.match(
+  manageBrandsModal,
+  /const unusedLibraryBrands = useMemo/,
+  'brand lookup manager should separate unused saved brands from active product usage',
+)
+assert.doesNotMatch(
+  manageBrandsModal,
+  /const merged = new Set\(\[[\s\S]*\.\.\.libraryBrands/,
+  'brand lookup manager should not merge zero-usage saved brands into review suggestions',
+)
 
 console.log('PASS performance loading UX guards')

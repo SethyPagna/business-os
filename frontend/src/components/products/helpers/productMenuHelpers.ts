@@ -86,6 +86,10 @@ function asString(value: unknown): string {
   return String(value)
 }
 
+function normalizeOptionValue(value: unknown): string {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 export function buildProductExportItems({
   brandFilter = 'all',
   branchFilter = 'all',
@@ -234,7 +238,7 @@ export function buildProductFilterSections({
       label: t('groups') || 'Groups',
       options: [
         { id: 'group-all', label: t('all') || 'All', active: groupFilter === 'all', onClick: () => setGroupFilter('all') },
-        { id: 'group-grouped', label: t('groups') || 'Groups', active: groupFilter === 'grouped', onClick: () => setGroupFilter(groupFilter === 'grouped' ? 'all' : 'grouped') },
+        { id: 'group-grouped', label: t('groups') || 'Groups', active: groupFilter === 'group', onClick: () => setGroupFilter(groupFilter === 'group' ? 'all' : 'group') },
         { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
       ],
     },
@@ -269,8 +273,8 @@ export function buildProductFilterSections({
         ...brandOptions.map((brand) => ({
           id: `brand-${brand}`,
           label: String(brand),
-          active: brandFilter === brand,
-          onClick: () => setBrandFilter(brandFilter === brand ? 'all' : asString(brand)),
+          active: normalizeOptionValue(brandFilter) === normalizeOptionValue(brand),
+          onClick: () => setBrandFilter(normalizeOptionValue(brandFilter) === normalizeOptionValue(brand) ? 'all' : asString(brand)),
         })),
       ],
     } : null,

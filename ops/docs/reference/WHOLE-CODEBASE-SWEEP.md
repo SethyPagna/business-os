@@ -907,3 +907,21 @@ is 60,808 bytes and contains no portal endpoint strings; `app-portal-DTjuMQBz.js
 owns the portal endpoints at 2,747 bytes. The public report rendered 20
 products with enforced CSP and zero relevant console/page errors, while the
 broad report kept all checked admin/helper routes at HTTP 200.
+
+Move 198 records roadmap Move 798: brand/group filter correctness and live
+control proof. The repeated sweep found a product-management data-flow issue:
+saved brand library entries with zero matching products were being merged into
+active brand usage, which made manual-review and safe-normalization counts look
+wrong. The accepted rewire keeps the current TypeScript/React/Node/Postgres
+stack and changes ownership instead: active brand review now comes from live
+lookup usage, unused saved brands render separately, Product/POS/Inventory
+group filters expose `All / Groups / Standalone`, and legacy `grouped`,
+`parent`, and `variant` values remain compatibility aliases for the unified
+group behavior. Product and Inventory server routes normalize lookup equality
+with lower-trimmed SQL comparisons, and Inventory preserves prior filter
+metadata on partial refreshes to avoid blank revisit flashes. Live proof on
+Docker release `business-os:v6.0.0-202606051251` showed local checked routes
+ready in 178-259 ms, remote admin routes ready in 186-276 ms, remote public
+catalog ready in 365 ms, zero failed requests, zero relevant console/page
+errors, Phase 8.4 live suite passing, and all-pages control audit passing 34
+desktop/mobile routes with 374 safe controls exercised and 0 failed controls.

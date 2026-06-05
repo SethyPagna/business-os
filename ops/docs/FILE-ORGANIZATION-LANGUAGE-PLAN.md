@@ -7727,6 +7727,34 @@ Decision rule:
   412,498,554 bytes reclaimed. `npm.cmd --prefix ops run phase29:audit`
   then passed all nine checks.
 
+### Move 798: Correct brand/group filters, refresh metadata, and dark/filter polish
+
+- Ownership evidence: live product-management review showed saved brand
+  library entries with `0 product(s)` being mixed into active review and
+  normalization suggestions. Product/POS/Inventory group filters still carried
+  redundant parent/variant states, and exact brand comparisons made valid
+  filters brittle when casing or whitespace differed.
+- Change: `ManageBrandsModal` now separates active brand usage from unused
+  saved library brands. Product, POS, and Inventory use the `All / Groups /
+  Standalone` group model, while legacy `grouped`, `parent`, and `variant`
+  values remain compatible. Product and inventory server routes compare
+  normalized lower-trimmed lookup fields. Inventory keeps previous filter
+  metadata when refresh responses do not include replacement metadata.
+- UI policy: the shared filter menu now uses rounded popovers and pill
+  controls. Dark mode global surfaces were softened to a neutral dark palette
+  with clearer borders and less heavy navy block styling.
+- Verification: frontend utility suite, backend utility suite, frontend
+  production build, backend server-entry verification, Docker release
+  build/start, local route-load trace, remote admin route-load trace, remote
+  public route-load trace, Phase 8.4 live suite, all-pages control audit, and
+  `git diff --check` passed. Root `npm.cmd run build` remains intentionally
+  unavailable; package-level build scripts are the accepted verification path.
+- Runtime proof: Docker release `business-os:v6.0.0-202606051251` is running
+  healthy. Local ready times were 178-259 ms for the checked routes. Remote
+  admin ready times were 186-276 ms; remote public catalog was 365 ms. The
+  all-pages control audit covered 34 desktop/mobile routes, 519 discovered
+  controls, 374 safely exercised controls, and 0 failed controls.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

@@ -240,11 +240,9 @@ export default function ManageBrandsModal({
 
   const brandsWithUsage = useMemo(() => {
     const usageMap = new Map((usageSummary || []).map((entry) => [normalizeLookup(entry?.name), entry]))
-    const merged = new Set([
-      ...libraryBrands,
-      ...Array.from(usageMap.values()).map((entry) => String(entry?.name || '').trim()).filter(Boolean),
-    ])
-    return Array.from(merged)
+    return Array.from(usageMap.values())
+      .map((entry) => String(entry?.name || '').trim())
+      .filter(Boolean)
       .map((name): BrandWithUsage => {
         const usage = usageMap.get(normalizeLookup(name))
         return {
@@ -264,6 +262,18 @@ export default function ManageBrandsModal({
         return a.name.localeCompare(b.name)
       })
   }, [brandColorMap, libraryBrands, usageSummary])
+
+  const unusedLibraryBrands = useMemo(() => {
+    const activeLookups = new Set(brandsWithUsage.map((entry) => normalizeLookup(entry.name)))
+    return libraryBrands
+      .filter((name) => !activeLookups.has(normalizeLookup(name)))
+      .sort((a, b) => a.localeCompare(b))
+  }, [brandsWithUsage, libraryBrands])
+
+  const allKnownBrandNames = useMemo(() => ([
+    ...brandsWithUsage.map((entry) => entry.name),
+    ...unusedLibraryBrands,
+  ]), [brandsWithUsage, unusedLibraryBrands])
 
   const reviewSummary = useMemo(() => {
     return brandsWithUsage.reduce((acc, entry) => {
@@ -328,7 +338,7 @@ export default function ManageBrandsModal({
     const clean = toTitleCase(newBrand)
     if (!clean) return
     if (!beginNamedAction(actionInFlightRef, 'add-brand', { blocked: busy })) return
-    if (brandsWithUsage.some((entry) => normalizeLookup(entry.name) === normalizeLookup(clean))) {
+    if (allKnownBrandNames.some((entry) => normalizeLookup(entry) === normalizeLookup(clean))) {
       setError(t('brand_already_exists') || 'Brand already exists')
       finishNamedAction(actionInFlightRef, 'add-brand')
       return
@@ -387,7 +397,7 @@ export default function ManageBrandsModal({
     setBusy(true)
     setError('')
     try {
-      const targetAlreadyExists = brandsWithUsage.some((entry) => normalizeLookup(entry.name) === toLookup && normalizeLookup(entry.name) !== fromLookup)
+      const targetAlreadyExists = allKnownBrandNames.some((entry) => normalizeLookup(entry) === toLookup && normalizeLookup(entry) !== fromLookup)
       const previousLibrary = [...libraryBrands]
       const previousColorMap = { ...brandColorMap }
       const productSnapshots = await fetchLookupProductSnapshots({
@@ -603,7 +613,7 @@ export default function ManageBrandsModal({
         </div>
 
         <div className="max-h-80 space-y-2 overflow-auto pr-1">
-          {brandsWithUsage.length === 0 ? (
+          {brandsWithUsage.length === 0 && unusedLibraryBrands.length === 0 ? (
             <div className="rounded-lg border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-400">
               {t('no_brands_yet') || 'No brands yet'}
             </div>
@@ -641,6 +651,11 @@ export default function ManageBrandsModal({
                   {t('delete_selected') || 'Delete selected'}
                 </button>
               </div>
+              {brandsWithUsage.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/70 px-3 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
+                  No active product brands found. Saved library brands are listed below.
+                </div>
+              ) : null}
               {brandsWithUsage.map((entry) => {
             const isEditing = renamingBrand === entry.name
             return (
@@ -767,6 +782,45 @@ export default function ManageBrandsModal({
               </div>
             )
           })}
+              {unusedLibraryBrands.length ? (
+                <details className="rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
+                  <summary className="cursor-pointer font-semibold">
+                    {unusedLibraryBrands.length} saved brand{unusedLibraryBrands.length === 1 ? '' : 's'} with no matching products
+                  </summary>
+                  <div className="mt-2 space-y-1.5">
+                    {unusedLibraryBrands.map((name) => (
+                      <div key={name} className="flex items-center gap-2 rounded-lg bg-white/80 px-2 py-1.5 dark:bg-slate-950/60">
+                        <span
+                          className="h-2.5 w-2.5 shrink-0 rounded-full border border-black/10 dark:border-white/20"
+                          style={{ backgroundColor: brandColorMap[normalizeLookup(name)] || DEFAULT_BRAND_COLOR }}
+                          aria-hidden="true"
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium">{name}</span>
+                        <button
+                          type="button"
+                          className="text-blue-600 hover:underline dark:text-blue-300"
+                          onClick={() => {
+                            setRenamingBrand(name)
+                            setRenameValue(name)
+                            setRenameColor(brandColorMap[normalizeLookup(name)] || DEFAULT_BRAND_COLOR)
+                          }}
+                          disabled={busy}
+                        >
+                          {t('edit') || 'Edit'}
+                        </button>
+                        <button
+                          type="button"
+                          className="text-red-500 hover:underline"
+                          onClick={() => removeBrand(name)}
+                          disabled={busy}
+                        >
+                          {t('delete') || 'Delete'}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
             </>
           )}
         </div>

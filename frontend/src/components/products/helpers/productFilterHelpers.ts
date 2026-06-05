@@ -72,6 +72,10 @@ function getImageGallery(product: ProductRecord): unknown[] {
   return Array.isArray(product?.image_gallery) ? product.image_gallery : []
 }
 
+function normalizeFilterValue(value: unknown): string {
+  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 export function buildProductSearchTerms(search: unknown): string[] {
   const raw = String(search || '').trim()
   if (!raw) return []
@@ -117,23 +121,22 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
     )
     const createdYear = String(createdYearFilter || 'all')
     const createdMonth = String(createdMonthFilter || 'all')
+    const normalizedBrandFilter = normalizeFilterValue(brandFilter)
     const matchCat = catFilter === 'all' || product.category === catFilter
-    const matchBrand = brandFilter === 'all' || String(product.brand || '').toLowerCase() === String(brandFilter).toLowerCase()
+    const matchBrand = normalizedBrandFilter === 'all' || normalizeFilterValue(product.brand) === normalizedBrandFilter
     const matchBranch = branchFilter === 'all' || (product.branch_stock || []).some((stock) => String(stock.branch_id) === String(branchFilter))
     const matchSupplier = supplierFilter === 'all' || String(product.supplier || '').toLowerCase() === String(supplierFilter).toLowerCase()
     const matchCreated = matchesYearMonthFilters(product.created_at, { year: createdYear, month: createdMonth })
     const isParent = Boolean(product.is_group || parentProductIds.has(Number(product.id)))
     const isVariant = Boolean(product.parent_id)
+    const normalizedGroupFilter = normalizeFilterValue(groupFilter)
+    const isGroupedFamilyMember = isParent || isVariant
     const matchGroup =
-      groupFilter === 'all'
+      normalizedGroupFilter === 'all'
         ? true
-        : groupFilter === 'grouped'
-          ? isParent || isVariant
-          : groupFilter === 'parent'
-            ? isParent && !isVariant
-            : groupFilter === 'variant'
-              ? isVariant
-              : !isParent && !isVariant
+        : ['group', 'groups', 'grouped', 'parent', 'variant'].includes(normalizedGroupFilter)
+          ? isGroupedFamilyMember
+          : !isGroupedFamilyMember
     const qty = branchFilter !== 'all' ? getProductBranchQuantity(product, branchFilter) : product.stock_quantity
     const outOfStockThreshold = toNumber(product.out_of_stock_threshold)
     const lowStockThreshold = toNumber(product.low_stock_threshold, 10)

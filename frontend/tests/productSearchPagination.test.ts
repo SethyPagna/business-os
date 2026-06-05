@@ -133,7 +133,7 @@ assert.match(
 )
 assert.match(
   posPage,
-  /groupFilter === 'grouped'[\s\S]*isParentGroup \|\| isVariantGroup/,
+  /\['group', 'groups', 'grouped', 'variant', 'parent'\]\.includes\(groupFilter\)[\s\S]*isParentGroup \|\| isVariantGroup/,
   'POS group filter should show grouped parent and variant families under Groups',
 )
 assert.doesNotMatch(

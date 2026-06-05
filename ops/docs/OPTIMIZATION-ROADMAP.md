@@ -11906,3 +11906,55 @@ Move 797 status:
   chunks that are still genuinely needed, especially `app-api-methods`,
   route-local Inventory/Products code size, language packs, and public portal
   catalog tooling.
+
+Move 798 status:
+- Move 798 fixes the brand/filter correctness issues found during live product
+  management review. `ManageBrandsModal` now treats product lookup usage as
+  the active brand source of truth and moves saved zero-usage library entries
+  into a separate unused-library section, so stale saved labels no longer
+  inflate manual-review and safe-normalization counts. Product, Inventory, and
+  POS group filters now expose the cleaner `All / Groups / Standalone` model,
+  while legacy `grouped`, `parent`, and `variant` values remain compatible and
+  map to the unified parent-plus-variant group behavior.
+- Filter correctness proof: frontend filtering now normalizes brand whitespace
+  and case before comparison; product and inventory server routes now compare
+  lookup fields with normalized lower-trimmed SQL predicates. Product filter
+  menu active states use the same normalized comparison, and Inventory keeps
+  existing brand/initial metadata when a partial refresh does not include new
+  filter metadata, avoiding blank filter flashes during route revisits.
+- UI polish proof: shared `FilterMenu` popovers now use rounded, softer panels
+  and pill controls. The global dark palette was softened away from near-black
+  navy blocks while preserving contrast, active-state visibility, and light
+  mode behavior.
+- Verification proof: `npm.cmd --prefix frontend run test:utils` and
+  `npm.cmd --prefix backend run test:utils` passed. Root `npm.cmd run build`
+  is not a valid repo script, so package-level verification was used:
+  `npm.cmd --prefix frontend run build` and `npm.cmd --prefix backend run
+  verify:server-entry` passed. `git diff --check` passed with only Windows
+  line-ending notices.
+- Packaged runtime proof: Docker release `business-os:v6.0.0-202606051251`
+  built and started healthy. Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T04-55-14-216Z.json`
+  passed Dashboard, Products, Inventory, POS, Branches, and public catalog
+  with ready times from 178 ms to 259 ms and zero failed requests or
+  console/page errors.
+- Remote proof: Cloudflare admin trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T04-56-17-875Z.json`
+  passed Dashboard, Products, Inventory, POS, and Branches with ready times
+  from 186 ms to 276 ms and zero failed requests or console/page errors.
+  Cloudflare public trace
+  `ops/runtime/reports/route-load-trace-2026-06-05T04-56-17-945Z.json`
+  passed public catalog at 365 ms ready with zero failed requests or
+  console/page errors. Full Phase 8.4 live suite passed with frontend hash
+  `df741b60763d9eef`, 66 checked UI signals, 20 rendered public products,
+  enforced CSP, zero relevant console messages, zero page errors, and a loaded
+  post-live hygiene dataset. The all-pages control audit then passed 34
+  desktop/mobile routes, discovered 519 controls, exercised 374 safe controls,
+  and found 0 failed controls.
+- Current plan position after Move 798: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail. Next executable target: inspect
+  remaining route-local Products/Inventory code size, language-pack cost, and
+  any real dark-mode contrast misses found by manual review.

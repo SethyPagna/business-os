@@ -653,14 +653,14 @@ function appendProductSearchFilters(query = {}) {
   for (const field of ['brand', 'category', 'unit', 'supplier']) {
     const raw = String(query[field] || '').normalize('NFC').trim()
     if (raw && raw.toLowerCase() !== 'all') {
-      params[field] = raw
-      where.push(`p.${field} = @${field}`)
+      params[field] = raw.toLowerCase()
+      where.push(`lower(trim(COALESCE(p.${field}, ''))) = @${field}`)
     }
   }
   const groupState = String(query.groupState || query.group_state || 'all').toLowerCase()
   if (groupState === 'parent') where.push('COALESCE(p.is_group, 0) = 1')
   if (groupState === 'variant') where.push('COALESCE(p.parent_id, 0) > 0')
-  if (['grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
+  if (['group', 'groups', 'grouped', 'parents_variants', 'parent_variant', 'parents-and-variants'].includes(groupState)) {
     where.push('(COALESCE(p.is_group, 0) = 1 OR COALESCE(p.parent_id, 0) > 0)')
   }
   if (groupState === 'standalone') where.push('COALESCE(p.is_group, 0) = 0 AND COALESCE(p.parent_id, 0) = 0')

@@ -3,12 +3,12 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 420,
   "distAssets": 0,
-  "totalSourceBytes": 6816541,
-  "totalSourceLines": 156428,
+  "totalSourceBytes": 6820259,
+  "totalSourceLines": 156491,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
-  "largestSourceLines": 4411,
+  "largestSourceLines": 4414,
   "largestBuiltChunk": null,
   "largestBuiltChunkBytes": 0,
   "oversizedSourceFiles": [
@@ -42,8 +42,8 @@
     },
     {
       "file": "frontend/src/components/inventory/Inventory.tsx",
-      "size": 228322,
-      "lines": 4411
+      "size": 228401,
+      "lines": 4414
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.tsx",
@@ -62,8 +62,8 @@
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 130315,
-      "lines": 2455
+      "size": 130225,
+      "lines": 2453
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.tsx",
@@ -72,7 +72,7 @@
     },
     {
       "file": "frontend/src/components/products/Products.tsx",
-      "size": 120337,
+      "size": 120315,
       "lines": 2521
     },
     {
@@ -87,7 +87,7 @@
     },
     {
       "file": "backend/src/routes/products.ts",
-      "size": 101798,
+      "size": 101850,
       "lines": 2238
     },
     {
@@ -97,7 +97,7 @@
     },
     {
       "file": "backend/src/routes/inventory.ts",
-      "size": 86116,
+      "size": 86181,
       "lines": 1902
     },
     {
@@ -164,8 +164,8 @@
   "topSourceByLines": [
     {
       "file": "frontend/src/components/inventory/Inventory.tsx",
-      "size": 228322,
-      "lines": 4411
+      "size": 228401,
+      "lines": 4414
     },
     {
       "file": "backend/src/services/importJobs.ts",
@@ -189,13 +189,13 @@
     },
     {
       "file": "frontend/src/components/products/Products.tsx",
-      "size": 120337,
+      "size": 120315,
       "lines": 2521
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 130315,
-      "lines": 2455
+      "size": 130225,
+      "lines": 2453
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.tsx",
@@ -204,7 +204,7 @@
     },
     {
       "file": "backend/src/routes/products.ts",
-      "size": 101798,
+      "size": 101850,
       "lines": 2238
     },
     {
@@ -214,7 +214,7 @@
     },
     {
       "file": "backend/src/routes/inventory.ts",
-      "size": 86116,
+      "size": 86181,
       "lines": 1902
     },
     {
