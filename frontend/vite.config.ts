@@ -234,6 +234,7 @@ const routeSharedIconNames = new Set([
   'facebook',
   'globe',
   'help-circle',
+  'image-off',
   'images',
   'info',
   'instagram',
@@ -371,6 +372,9 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) {
       return 'script-typography'
+    }
+    if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
+      return 'app-shared'
     }
     if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
       return 'portal-translate-controller'

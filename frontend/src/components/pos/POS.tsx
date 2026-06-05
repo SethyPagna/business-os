@@ -43,7 +43,6 @@ import {
   getCartLineId,
   findMatchingCartLineIndex,
 } from './posCore.ts'
-import { getStatusLabel } from '../sales/StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import {
   beginTrackedRequest,
@@ -83,6 +82,26 @@ import type { ContactOption } from '../contacts/contactOptionUtils'
 type ContactOptionUtilsModule = typeof import('../contacts/contactOptionUtils')
 
 let contactOptionUtilsModulePromise: Promise<ContactOptionUtilsModule> | null = null
+
+type PosSaleStatus = 'completed' | 'awaiting_payment' | 'awaiting_delivery'
+
+const POS_STATUS_LABELS: Record<PosSaleStatus, string> = {
+  completed: 'Completed',
+  awaiting_payment: 'Awaiting Payment',
+  awaiting_delivery: 'Awaiting Delivery',
+}
+
+const POS_STATUS_TRANSLATION_KEYS: Record<PosSaleStatus, string> = {
+  completed: 'status_completed',
+  awaiting_payment: 'status_awaiting_payment',
+  awaiting_delivery: 'status_awaiting_delivery',
+}
+
+function getPosStatusLabel(status: PosSaleStatus, t?: (key: string) => string): string {
+  const key = POS_STATUS_TRANSLATION_KEYS[status]
+  const translated = typeof t === 'function' ? t(key) : ''
+  return translated && translated !== key ? translated : POS_STATUS_LABELS[status]
+}
 
 function loadContactOptionUtilsModule(): Promise<ContactOptionUtilsModule> {
   if (!contactOptionUtilsModulePromise) contactOptionUtilsModulePromise = import('../contacts/contactOptionUtils')
@@ -2265,9 +2284,9 @@ export default function POS() {
             <div className="p-4 space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
               {([
-                ['completed',         getStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
-                ['awaiting_payment',  getStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Order placed, payment pending - stock held'],
-                ['awaiting_delivery', getStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
+                ['completed',         getPosStatusLabel('completed',         t), t('pos_status_completed_desc')||'Payment received - stock deducted now'],
+                ['awaiting_payment',  getPosStatusLabel('awaiting_payment',  t), t('pos_status_awaiting_payment_desc')||'Order placed, payment pending - stock held'],
+                ['awaiting_delivery', getPosStatusLabel('awaiting_delivery', t), t('pos_status_awaiting_delivery_desc')||'Paid, not yet delivered - stock deducted'],
               ] as const).map(([status, label, desc]) => (
                 <button key={status}
                   onClick={() => { closeStatusPicker(); void handleCheckout(status) }}
