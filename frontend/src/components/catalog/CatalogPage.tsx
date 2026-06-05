@@ -53,16 +53,13 @@ import {
 } from './portalCatalogDisplay.ts'
 import {
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
-  getPortalLanguageText,
   isFirstPartyPortalLanguage,
   normalizeFirstPartyPortalLanguage,
-} from './portalLanguagePacks.ts'
+} from './portalLanguageOptions.ts'
 import {
-  localizePortalConfig,
-  localizePortalProducts,
   normalizePortalTranslations,
   stringifyPortalTranslations,
-} from './portalContentI18n.ts'
+} from './portalTranslationData.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { CatalogPageProvider } from './CatalogPageContext'
@@ -72,12 +69,28 @@ const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const loadCatalogPreviewSurface = () => import('./CatalogPreviewSurface')
 type PortalTranslateControllerModule = typeof import('./portalTranslateController.ts')
+type PortalLanguagePacksModule = typeof import('./portalLanguagePacks.ts')
+type PortalContentI18nModule = typeof import('./portalContentI18n.ts')
 let portalTranslateControllerModulePromise: Promise<PortalTranslateControllerModule> | null = null
+let portalLanguagePacksModulePromise: Promise<PortalLanguagePacksModule> | null = null
+let portalContentI18nModulePromise: Promise<PortalContentI18nModule> | null = null
 function loadPortalTranslateControllerModule(): Promise<PortalTranslateControllerModule> {
   if (!portalTranslateControllerModulePromise) {
     portalTranslateControllerModulePromise = import('./portalTranslateController.ts')
   }
   return portalTranslateControllerModulePromise
+}
+function loadPortalLanguagePacksModule(): Promise<PortalLanguagePacksModule> {
+  if (!portalLanguagePacksModulePromise) {
+    portalLanguagePacksModulePromise = import('./portalLanguagePacks.ts')
+  }
+  return portalLanguagePacksModulePromise
+}
+function loadPortalContentI18nModule(): Promise<PortalContentI18nModule> {
+  if (!portalContentI18nModulePromise) {
+    portalContentI18nModulePromise = import('./portalContentI18n.ts')
+  }
+  return portalContentI18nModulePromise
 }
 
 const CatalogEditorSurface = lazy(loadCatalogEditorSurface)
@@ -413,8 +426,14 @@ function sanitizePortalMediaValue(value: unknown, fallback = ''): string {
  * Public mode: Read-only customer portal catalog/membership experience.
  */
 /** Resolve a portal-localized string from the shared language packs. */
-function tt(lang: unknown, key: string, fallback: string, fallbackKm = fallback): string {
-  const localized = getPortalResourceText(lang, key)
+function tt(
+  lang: unknown,
+  key: string,
+  fallback: string,
+  fallbackKm = fallback,
+  languagePacksModule?: PortalLanguagePacksModule | null,
+): string {
+  const localized = languagePacksModule?.getPortalLanguageText(lang, key) || ''
   if (localized && !isBrokenLocalizedString(localized)) return localized
   if (lang === 'km' && fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
   return fallback
@@ -1112,12 +1131,6 @@ function replaceVars(template: unknown, values: Record<string, unknown>): string
   return String(template || '').replace(/\{(\w+)\}/g, (_match: string, key: string) => String(values?.[key] ?? ''))
 }
 
-function getPortalResourceText(lang: unknown, key: string): string {
-  const packed = getPortalLanguageText(lang, key)
-  if (packed) return packed
-  return ''
-}
-
 const FIRST_PARTY_TRANSLATE_LANG_OPTIONS = [
   { value: 'original', label: 'Original', kind: 'first_party' },
   ...FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => ({
@@ -1357,6 +1370,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [publicScrollButtonsVisible, setPublicScrollButtonsVisible] = useState(false)
   const [publicPortalNavPinned, setPublicPortalNavPinned] = useState(false)
   const [publicPortalNavMetrics, setPublicPortalNavMetrics] = useState({ left: 0, width: 0, height: 0 })
+  const [portalLanguagePacksModule, setPortalLanguagePacksModule] = useState<PortalLanguagePacksModule | null>(null)
+  const [portalContentI18nModule, setPortalContentI18nModule] = useState<PortalContentI18nModule | null>(null)
   const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
   const [brands, setBrands] = useState<string[]>(() => normalizeBrandOptions(cachedPortal?.brands))
   const [branches, setBranches] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.branches))
@@ -1515,23 +1530,63 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   ])
   const editorLanguage = normalizeFirstPartyPortalLanguage(appLanguage) || 'en'
   const activeCopyLanguage = publicView ? language : editorLanguage
+  const shouldLoadFirstPartyPortalText = activeCopyLanguage !== 'en'
+  const shouldLocalizePortalContent = publicView && language !== 'en'
+  useEffect(() => {
+    if (!shouldLoadFirstPartyPortalText) {
+      setPortalLanguagePacksModule(null)
+      return undefined
+    }
+    let cancelled = false
+    void loadPortalLanguagePacksModule().then((module) => {
+      if (!cancelled) setPortalLanguagePacksModule(module)
+    }).catch(() => {
+      if (!cancelled) setPortalLanguagePacksModule(null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [shouldLoadFirstPartyPortalText])
+  useEffect(() => {
+    if (!shouldLocalizePortalContent) {
+      setPortalContentI18nModule(null)
+      return undefined
+    }
+    let cancelled = false
+    void loadPortalContentI18nModule().then((module) => {
+      if (!cancelled) setPortalContentI18nModule(module)
+    }).catch(() => {
+      if (!cancelled) setPortalContentI18nModule(null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [shouldLocalizePortalContent])
   const copy: CopyFunction = (key, fallback, fallbackKm = fallback) => {
     const safeFallback = fallback || key
     const safeFallbackKm = fallbackKm || safeFallback
-    const portalResource = getPortalResourceText(activeCopyLanguage, key)
+    const portalResource = portalLanguagePacksModule?.getPortalLanguageText(activeCopyLanguage, key) || ''
     if (portalResource) return portalResource
-    if (publicView) return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm)
+    if (publicView) return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm, portalLanguagePacksModule)
     const global = typeof t === 'function' ? t(key) : ''
     if (global && global !== key && !isBrokenLocalizedString(global)) return global
-    return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm)
+    return tt(activeCopyLanguage, key, safeFallback, safeFallbackKm, portalLanguagePacksModule)
   }
   const displayConfig = useMemo<PortalConfig>(
-    () => (publicView ? localizePortalConfig(previewConfig, language) : previewConfig) as PortalConfig,
-    [language, previewConfig, publicView]
+    () => (
+      shouldLocalizePortalContent && portalContentI18nModule
+        ? portalContentI18nModule.localizePortalConfig(previewConfig, language)
+        : previewConfig
+    ) as PortalConfig,
+    [language, portalContentI18nModule, previewConfig, shouldLocalizePortalContent]
   )
   const displayProducts = useMemo<CatalogProduct[]>(
-    () => (publicView ? localizePortalProducts(products, language, previewConfig.translations) : products) as CatalogProduct[],
-    [language, previewConfig.translations, products, publicView]
+    () => (
+      shouldLocalizePortalContent && portalContentI18nModule
+        ? portalContentI18nModule.localizePortalProducts(products, language, previewConfig.translations)
+        : products
+    ) as CatalogProduct[],
+    [language, portalContentI18nModule, previewConfig.translations, products, shouldLocalizePortalContent]
   )
   const portalBackground = theme === 'dark'
     ? 'radial-gradient(circle at top, #1f2937 0%, #0f172a 38%, #020617 100%)'

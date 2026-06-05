@@ -14,7 +14,7 @@
  */
 
 import { apiFetch, setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll, pingServerHealth } from './api/http.ts'
-import { connectWS, disconnectWS, reconnectWS, resumeWS } from './api/websocket.ts'
+import { connectWS, disconnectWS, reconnectWS, resumeWS, scheduleConnectWS } from './api/websocket.ts'
 import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,
@@ -929,7 +929,7 @@ const staticApi = {
       }
       if (hasStoredUserSession()) {
         ensureSessionRecoveryListeners()
-        connectWS()
+        scheduleConnectWS()
         startHealthCheck()
       }
       if (syncServerChanged && hasStoredUserSession()) {
@@ -1072,7 +1072,7 @@ if (typeof window !== 'undefined') {
       setSyncServerUrl(url)
       if (hasStoredUserSession()) {
         ensureSessionRecoveryListeners()
-        connectWS()
+        scheduleConnectWS()
         startHealthCheck()
         scheduleInitialOfflineMaintenance()
       }

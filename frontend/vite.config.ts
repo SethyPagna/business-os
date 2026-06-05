@@ -174,7 +174,11 @@ const deferredModulePreloadPrefixes = [
   'assets/catalog-products-',
   'assets/catalog-secondary-tabs-',
   'assets/catalog-editor-',
-  'assets/portal-tools-',
+  'assets/portal-language-options-',
+  'assets/portal-translation-data-',
+  'assets/portal-language-packs-',
+  'assets/portal-content-i18n-',
+  'assets/portal-editor-utils-',
   'assets/backup-reset-tools-',
   'assets/settings-otp-modal-',
   'assets/user-profile-modal-',
@@ -394,10 +398,24 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
       return 'portal-translate-controller'
     }
+    if (normalized.includes('/src/components/catalog/portalLanguageOptions.ts')) {
+      return 'portal-language-options'
+    }
+    if (normalized.includes('/src/components/catalog/portalTranslationData.ts')) {
+      return 'portal-translation-data'
+    }
+    if (normalized.includes('/src/components/catalog/portalLanguagePacks.ts')) {
+      return 'portal-language-packs'
+    }
+    if (normalized.includes('/src/components/catalog/portalContentI18n.ts')) {
+      return 'portal-content-i18n'
+    }
+    if (normalized.includes('/src/components/catalog/portalEditorUtils.ts')) {
+      return 'portal-editor-utils'
+    }
     if (
-      normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
-      || normalized.includes('/src/components/catalog/portalContentI18n.ts')
-      || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+      normalized.includes('/src/components/catalog/portalSubmissionHelpers.ts')
+      || normalized.includes('/src/components/catalog/portalAssistantHelpers.ts')
     ) {
       return 'portal-tools'
     }

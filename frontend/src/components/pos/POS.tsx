@@ -1694,6 +1694,8 @@ export default function POS() {
   }
 
 // Render
+  const catalogControlsDisabled = catalogRefreshing
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
 
@@ -1729,7 +1731,8 @@ export default function POS() {
                 <div className="flex flex-1 rounded-lg border border-gray-300 dark:border-zinc-600 overflow-hidden sm:flex-none">
                   {(['AND', 'OR'] as const).map(m => (
                     <button key={m} onClick={() => setSearchMode(m)}
-                      className={`flex-1 px-2 py-1.5 text-xs font-bold transition-colors sm:flex-none ${searchMode===m ? 'bg-blue-600 text-white' : 'bg-white dark:bg-zinc-800 text-gray-500 dark:text-gray-400'}`}>
+                      disabled={catalogControlsDisabled}
+                      className={`flex-1 px-2 py-1.5 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none ${searchMode===m ? 'bg-blue-600 text-white' : 'bg-white dark:bg-zinc-800 text-gray-500 dark:text-gray-400'}`}>
                       {m}
                     </button>
                   ))}
@@ -1748,11 +1751,12 @@ export default function POS() {
                   return (
                     <button
                       onClick={() => setFilterOpen(v => !v)}
+                      disabled={catalogControlsDisabled}
                       className={`flex flex-1 items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors sm:flex-none ${
                         filterOpen || activeFilters > 0
                           ? 'bg-blue-600 text-white border-blue-600'
                           : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-blue-400'
-                      }`}
+                      } disabled:cursor-not-allowed disabled:opacity-60`}
                     >
                       {activeFilters > 0 ? (t('filters_active') || `Filters (${activeFilters})`).replace('{n}', String(activeFilters)) : (t('filters') || 'Filters')}
                     </button>

@@ -18,6 +18,9 @@ let wsFailureStreak = 0
 let wsSuppressReconnectUntil = 0
 let wsIntentionalClose = false
 let wsLifecycleListenersRegistered = false
+let wsDeferredConnectTimer: ReturnType<typeof setTimeout> | null = null
+
+const WS_BOOT_CONNECT_DELAY_MS = 1200
 
 function clearReconnectTimer(): void {
   if (!wsReconnectTimer) return
@@ -29,6 +32,12 @@ function clearPingTimer(): void {
   if (!wsPingTimer) return
   clearInterval(wsPingTimer)
   wsPingTimer = null
+}
+
+function clearDeferredConnectTimer(): void {
+  if (!wsDeferredConnectTimer) return
+  clearTimeout(wsDeferredConnectTimer)
+  wsDeferredConnectTimer = null
 }
 
 function hasStoredAuthSession(): boolean {
@@ -68,6 +77,7 @@ function logWs(level: 'debug' | 'warn', ...args: unknown[]): void {
 
 export function connectWS(): void {
   ensureWebSocketLifecycleListeners()
+  clearDeferredConnectTimer()
   const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) return
   if (isProtectedAdminHost() && !hasStoredAuthSession()) return
@@ -157,7 +167,18 @@ export function connectWS(): void {
   }
 }
 
+export function scheduleConnectWS(delayMs = WS_BOOT_CONNECT_DELAY_MS): void {
+  ensureWebSocketLifecycleListeners()
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return
+  clearDeferredConnectTimer()
+  wsDeferredConnectTimer = setTimeout(() => {
+    wsDeferredConnectTimer = null
+    connectWS()
+  }, Math.max(0, delayMs))
+}
+
 export function disconnectWS(): void {
+  clearDeferredConnectTimer()
   clearReconnectTimer()
   clearPingTimer()
   if (ws) {
