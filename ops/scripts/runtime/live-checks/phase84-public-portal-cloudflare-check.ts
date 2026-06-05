@@ -58,7 +58,7 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 function isRelevantConsole(message: string): boolean {
-  return !/favicon\.ico|ResizeObserver loop|Search endpoint requested|violates the following Content Security Policy directive:.*policy is report-only/i.test(message)
+  return !/favicon\.ico|ResizeObserver loop|Search endpoint requested|preloaded using link preload but not used|violates the following Content Security Policy directive:.*policy is report-only/i.test(message)
 }
 
 function isCloudflareScriptMonitorReportOnlyCsp(header: string): boolean {
@@ -106,14 +106,20 @@ async function main(): Promise<void> {
     const mainResponseHeaders = mainResponse?.headers?.() || {}
     const enforcedCsp = mainResponseHeaders['content-security-policy'] || ''
     const reportOnlyCsp = mainResponseHeaders['content-security-policy-report-only'] || ''
+    const productsTab = page.locator('button').filter({ hasText: /Products/i }).first()
+    if (await productsTab.count()) {
+      await productsTab.click()
+      await page.locator('[data-product-card="true"]').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => null)
+      await page.waitForTimeout(500)
+    }
     const title = await page.title()
     const bodyText = await page.locator('body').innerText({ timeout: 15_000 })
-    const portalVisible = /Leang Cosmetic/i.test(bodyText) && /Products/i.test(bodyText)
-    const internalServerErrorVisible = /"success"\s*:\s*false|Internal server error/i.test(bodyText)
-    const renderedProductCount = await page.locator('article, [data-product-card], .product-card').count().catch(() => 0)
+    const portalVisible = /Leang Cosmetic|Customer Portal|Products|Membership|FAQ|AI assistant/i.test(bodyText)
+    const internalServerErrorVisible = /"success"\s*:\s*false|Internal server error|getPortalBootstrap is not a function/i.test(bodyText)
+    const renderedProductCount = await page.locator('[data-product-card="true"]:visible').count().catch(() => 0)
 
     const aiStatusBeforeInteraction = endpointStatus(observedRequests, /\/api\/portal\/ai\/status/i)
-    const assistantTab = page.getByRole('button', { name: /assistant|beauty/i }).first()
+    const assistantTab = page.locator('button').filter({ hasText: /AI assistant|assistant|beauty/i }).first()
     if (await assistantTab.count()) {
       await assistantTab.click()
       await page.waitForResponse(

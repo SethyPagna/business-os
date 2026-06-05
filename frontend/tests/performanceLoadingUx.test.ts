@@ -91,7 +91,7 @@ const actionHistoryTransport = fs.readFileSync(new URL('../src/api/actionHistory
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 
 assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
-assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/appShellUtils\.ts'/, 'app context should be able to derive the initial route page before the shell mounts')
+assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/pathRouting\.ts'/, 'app context should derive the initial route page without importing the heavier admin shell utility chunk')
 assert.match(appContext, /function getInitialAdminPage\(publicMode: boolean\): string \{[\s\S]*getAdminPageFromPath\(window\.location\.pathname\) \|\| 'dashboard'[\s\S]*\}/, 'direct admin URLs should initialize the active page without briefly mounting Dashboard first')
 assert.match(appContext, /const \[page,\s+setPage\]\s+= useState\(\(\) => getInitialAdminPage\(publicMode\)\)/, 'initial active page state should come from the current URL')
 assert.match(app, /const NARROW_PAGE_ENTRY_WARMUP_IDS[\s\S]*'sales',[\s\S]*'returns',/, 'Sales and Returns should use narrow delayed page-entry warmup instead of pulling the later admin stack immediately')
@@ -176,7 +176,7 @@ assert.match(app, /function scheduleWarmupAfterLoad\(start: \(\) => CancelWarmup
 assert.match(app, /const importers = getWarmupImporters\(\)\s*\n\s*if \(!importers\.length\) return undefined[\s\S]*const cancelAfterLoad = scheduleWarmupAfterLoad/, 'primary route chunk warmup should skip empty work and schedule only after load')
 assert.match(app, /const loaders = getDataWarmupLoaders\(canAccessPage\)\s*\n\s*if \(!loaders\.length\) return undefined/, 'empty data warmup plans should not allocate timers')
 assert.match(app, /const cancelAfterLoad = scheduleWarmupAfterLoad\(\(\) => \{[\s\S]*shouldNarrowWarmup[\s\S]*window\.requestIdleCallback\(run, \{ timeout: 2500 \}\)/, 'page-entry chunk warmup should also wait until after load before scheduling idle imports')
-assert.match(appShellUtils, /export const APP_PAGE_INTENT_EVENT = 'bos:page-intent'/, 'navigation intent event should live in shared app shell utils')
+assert.match(appShellUtils, /APP_PAGE_INTENT_EVENT,[\s\S]*from '\.\/pathRouting\.ts'/, 'navigation intent event should be re-exported from shell utils while living in the lightweight path routing module')
 assert.match(sidebar, /APP_PAGE_INTENT_EVENT/, 'sidebar should publish navigation intent before route clicks')
 assert.doesNotMatch(sidebar, /import NotificationCenter from '\.\.\/shared\/NotificationCenter'/, 'mobile sidebar should not statically import the notification center chunk')
 assert.match(sidebar, /notificationSlot\?: ReactNode/, 'mobile sidebar should receive notification UI from the app-level lazy gate')

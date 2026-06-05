@@ -2,10 +2,6 @@ import { createContext, useContext, useState, useEffect, useCallback, useRef, us
 import type { ReactNode } from 'react'
 import en from './lang/en.json'
 import { STORAGE_KEYS, SYNC } from './constants'
-// web-api.ts installs window.api synchronously via static imports.
-// Importing it here (rather than dynamic import) ensures window.api
-// is available before any React render cycle runs.
-import './web-api.ts'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
@@ -16,7 +12,7 @@ import {
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
 import { isWSConnected, reconnectWS } from './api/websocket.ts'
-import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage } from './app/appShellUtils.ts'
+import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { parsePermissionMap } from './utils/permissions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'

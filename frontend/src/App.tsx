@@ -7,8 +7,6 @@ import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import { useApp as useAppHook } from './AppContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
-import Sidebar from './components/navigation/Sidebar'
-import QuickPreferenceToggles from './components/shared/QuickPreferenceToggles'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 
@@ -480,6 +478,8 @@ const Login = lazyWithRetry(asPageModule(() => import('./components/auth/Login')
 const NotificationCenter = lazyWithRetry(asPageModule(() => import('./components/shared/NotificationCenter')), 'notification-center')
 const BackgroundImportTracker = lazyWithRetry(asPageModule(() => import('./components/shared/BackgroundImportTracker')), 'background-import-tracker')
 const WriteConflictModal = lazyWithRetry(asPageModule(() => import('./components/shared/WriteConflictModal')), 'write-conflict-modal')
+const Sidebar = lazyWithRetry(asPageModule(() => import('./components/navigation/Sidebar')), 'sidebar')
+const QuickPreferenceToggles = lazyWithRetry(asPageModule(() => import('./components/shared/QuickPreferenceToggles')), 'quick-preference-toggles')
 const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   dashboard: Dashboard,
   products: Products,
@@ -1835,12 +1835,16 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           {desktopNotificationSlot}
-          <QuickPreferenceToggles />
+          <Suspense fallback={null}>
+            <QuickPreferenceToggles />
+          </Suspense>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Sidebar notificationSlot={mobileNotificationSlot} />
+        <Suspense fallback={null}>
+          <Sidebar notificationSlot={mobileNotificationSlot} />
+        </Suspense>
 
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 pb-16 md:pt-0 md:pb-0">
           <div className="flex min-w-0 items-center gap-3">

@@ -474,7 +474,11 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           const promotion = pricePresentation?.promotion
 
           return (
-            <article key={product.id} className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/90">
+            <article
+              key={product.id}
+              data-product-card="true"
+              className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-lg dark:border-slate-700 dark:bg-slate-900/90"
+            >
               <div
                 className={`relative ${compactTwoColumnMobile ? 'aspect-[5/4] sm:aspect-[4/3]' : 'aspect-[5/4]'} overflow-hidden bg-slate-100 dark:bg-slate-800 ${gallery.length ? 'cursor-zoom-in' : ''}`}
                 onClick={() => {

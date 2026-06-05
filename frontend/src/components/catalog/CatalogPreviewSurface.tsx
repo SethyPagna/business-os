@@ -345,8 +345,8 @@ export default function CatalogPreviewSurface({
                 className="portal-nav-shell overflow-hidden rounded-[24px] border border-slate-200/80 bg-white/96 p-2 shadow-[0_12px_28px_rgba(148,163,184,0.14)] backdrop-blur supports-[backdrop-filter]:bg-white/90 dark:border-slate-700/80 dark:bg-slate-900/92 dark:supports-[backdrop-filter]:bg-slate-900/86"
                 style={pinnedNavStyle}
               >
-                <div className="portal-nav-scroll overflow-x-auto" aria-label={copy('publicNavigation', 'Section navigation')}>
-                  <div className="portal-nav-track inline-flex min-w-full items-center gap-1 rounded-[20px] border border-slate-200/70 bg-slate-50/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:border-slate-700/70 dark:bg-slate-800/75 dark:shadow-none">
+                <div className="portal-nav-scroll overflow-visible" aria-label={copy('publicNavigation', 'Section navigation')}>
+                  <div className="portal-nav-track flex min-w-0 flex-wrap items-center gap-1 rounded-[20px] border border-slate-200/70 bg-slate-50/90 p-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] dark:border-slate-700/70 dark:bg-slate-800/75 dark:shadow-none">
                     {portalTabs.map((item) => {
                       const Icon = item.icon
                       const selected = activeTab === item.key
@@ -354,7 +354,7 @@ export default function CatalogPreviewSurface({
                         <button
                           key={item.key}
                           type="button"
-                          className={`inline-flex shrink-0 items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold transition sm:text-sm ${
+                          className={`inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-2xl px-2.5 py-2 text-xs font-semibold transition sm:gap-2 sm:px-3 sm:text-sm ${
                             selected
                               ? 'portal-nav-tab-active shadow-sm ring-1 ring-slate-200 dark:ring-sky-100/80'
                               : 'text-slate-600 hover:bg-white dark:text-slate-100 dark:hover:bg-slate-700/80'

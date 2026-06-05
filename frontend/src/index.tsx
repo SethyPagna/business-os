@@ -1,12 +1,10 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
-import type { ComponentType, ReactNode } from 'react'
+import type { ComponentType } from 'react'
 import '@fontsource/noto-sans-khmer/400.css'
 import '@fontsource/noto-sans-khmer/500.css'
 import '@fontsource/noto-sans-khmer/600.css'
-import App from './App.tsx'
-import { AppProvider as AppProviderBase } from './AppContext.tsx'
-import { isPublicCatalogPath } from './app/appShellUtils.ts'
+import { isPublicCatalogPath } from './app/pathRouting.ts'
 import './styles/main.css'
 import {
   isGuardableStyleSheetError,
@@ -16,8 +14,8 @@ import {
 
 type GuardedInsertRule = CSSStyleSheet['insertRule'] & { __businessOsGuarded?: boolean }
 type GuardedGetter = (() => CSSRuleList) & { __businessOsGuarded?: boolean }
-const BusinessOsApp = App as ComponentType
-const AppProvider = AppProviderBase as ComponentType<{ publicMode: boolean; children: ReactNode }>
+const AdminRoot = React.lazy(() => import('./AdminRoot.tsx')) as ComponentType
+const PublicCatalogRoot = React.lazy(() => import('./PublicCatalogRoot.tsx')) as ComponentType
 const SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS = 5000
 const SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS = 1200
 const FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS = 3000
@@ -213,12 +211,13 @@ const publicCatalogMode = typeof window !== 'undefined'
 
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('Missing root element')
+const RootComponent = publicCatalogMode ? PublicCatalogRoot : AdminRoot
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <AppProvider publicMode={publicCatalogMode}>
-      <BusinessOsApp />
-    </AppProvider>
+    <Suspense fallback={null}>
+      <RootComponent />
+    </Suspense>
   </React.StrictMode>
 )
 
