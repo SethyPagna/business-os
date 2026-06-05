@@ -2696,6 +2696,11 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => shouldLoadMetadata[\s\S]*loadPosProductBootstrap\(productQuery\)[\s\S]*searchPosCatalogProducts\(productQuery\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
   'POS catalog reads should timeout the combined first-window product and branch request',
 )
+assert.match(
+  pos,
+  /include: 'branch_stock,images,family',\s*\n\s*metadata: '0',/,
+  'POS first product bootstrap should skip full filter metadata and let the delayed filters request fill it',
+)
 assert.doesNotMatch(
   pos,
   /getCategories(?:\?\.)?\(\)[\s\S]{0,260}POS_CATALOG_LOAD_TIMEOUT_MS/,

@@ -722,6 +722,7 @@ export default function POS() {
           initial: initialFilter === 'all' ? '' : initialFilter,
           sort: 'name_asc',
           include: 'branch_stock,images,family',
+          metadata: '0',
         } satisfies QueryParams
         const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current)
         const [productPayload, metadataPayload] = await withLoaderTimeout(

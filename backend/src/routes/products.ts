@@ -14,6 +14,7 @@ const { normalizeClientRequestId } = require('../idempotency.ts')
 const { normalizePriceValue } = require('../money.ts')
 const { normalizeProductDiscount } = require('../productDiscounts.ts')
 const { hasColumn } = require('../schemaMetadata.ts')
+const { getOrSetJson } = require('../runtimeCache.ts')
 const { aggregateInitialRows, getInitialKey, getInitialType } = require('../initials.ts')
 const { getStockMetrics } = require('../businessMetrics.ts')
 const {
@@ -41,6 +42,10 @@ const {
 } = require('../productBatches.ts')
 
 const router = express.Router()
+
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
+}
 
 router.get('/stats', authToken, requirePermission('products'), (_req, res) => {
   try {
@@ -486,6 +491,36 @@ function getProductCatalogSnapshotVersion() {
   return String(row?.snapshot_version || '').trim() || new Date().toISOString()
 }
 
+function normalizeProductReadCacheValue(value) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry ?? '').trim()).sort()
+  return String(value ?? '').trim()
+}
+
+function buildProductReadCacheKey(kind, query = {}) {
+  const entries = []
+  for (const key of Object.keys(query || {}).sort()) {
+    const value = normalizeProductReadCacheValue(query[key])
+    if (Array.isArray(value)) {
+      entries.push([key, value])
+      continue
+    }
+    if (value) entries.push([key, value])
+  }
+  return `products:${kind}:${getProductCatalogSnapshotVersion()}:${JSON.stringify(entries)}`
+}
+
+function getCachedProductSearchPayload(query = {}) {
+  return getOrSetJson(buildProductReadCacheKey('search', query), 20, () => buildProductSearchPayload(query))
+}
+
+function getCachedProductFilters(query = {}) {
+  return getOrSetJson(buildProductReadCacheKey('filters', query), 20, () => {
+    const { brands, categories, suppliers, initials } = getProductSearchMetadata(query)
+    const total = db.prepare('SELECT COUNT(*) AS count FROM products WHERE is_active = 1').get()?.count || 0
+    return { brands, categories, suppliers, initials, total, snapshotVersion: getProductCatalogSnapshotVersion() }
+  })
+}
+
 function parseBrandOptionsSetting(rawValue) {
   const parsed = tryParse(rawValue, [])
   if (!Array.isArray(parsed)) return []
@@ -718,6 +753,11 @@ function getProductSearchMetadata(query = {}) {
   }
 }
 
+function shouldIncludeProductSearchMetadata(query = {}) {
+  const raw = String(query.metadata ?? query.includeMetadata ?? query.include_metadata ?? '1').trim().toLowerCase()
+  return !['0', 'false', 'no', 'off'].includes(raw)
+}
+
 function attachBranchStock(products = []) {
   const ids = collectUniquePositiveIds(products, { selector: (product) => product?.id })
   if (!ids.length) return products
@@ -881,7 +921,8 @@ function buildProductSearchPayload(query = {}) {
     }
     items = withBatches
   }
-  const filters = getProductSearchMetadata(query)
+  const includeMetadata = shouldIncludeProductSearchMetadata(query)
+  const filters = includeMetadata ? getProductSearchMetadata(query) : { brands: [], categories: [], suppliers: [], initials: [] }
   return {
     items,
     total,
@@ -901,36 +942,34 @@ function buildProductSearchPayload(query = {}) {
 }
 
 // GET /api/products/bootstrap - first POS/catalog route read with branch metadata
-router.get('/bootstrap', authToken, (req, res) => {
+router.get('/bootstrap', authToken, asyncRoute(async (req, res) => {
   try {
     ok(res, {
       branches: getBranchListForBootstrap(),
-      products: buildProductSearchPayload(req.query),
+      products: await getCachedProductSearchPayload(req.query),
     })
   } catch (error) {
     err(res, error?.message || 'Failed to bootstrap products')
   }
-})
+}))
 
 // GET /api/products/search - paged catalog read for large datasets
-router.get('/search', authToken, (req, res) => {
+router.get('/search', authToken, asyncRoute(async (req, res) => {
   try {
-    ok(res, buildProductSearchPayload(req.query))
+    ok(res, await getCachedProductSearchPayload(req.query))
   } catch (error) {
     err(res, error?.message || 'Failed to search products')
   }
-})
+}))
 
 // GET /api/products/filters - compact filter metadata without downloading all products
-router.get('/filters', authToken, (req, res) => {
+router.get('/filters', authToken, asyncRoute(async (req, res) => {
   try {
-    const { brands, categories, suppliers, initials } = getProductSearchMetadata(req.query)
-    const total = db.prepare('SELECT COUNT(*) AS count FROM products WHERE is_active = 1').get()?.count || 0
-    ok(res, { brands, categories, suppliers, initials, total, snapshotVersion: getProductCatalogSnapshotVersion() })
+    ok(res, await getCachedProductFilters(req.query))
   } catch (error) {
     err(res, error?.message || 'Failed to load product filters')
   }
-})
+}))
 
 router.get('/lookups/usage', authToken, requirePermission('products'), (_req, res) => {
   try {
