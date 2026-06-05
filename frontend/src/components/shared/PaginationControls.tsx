@@ -96,9 +96,9 @@ export default function PaginationControls({
 
   if (compact) {
     return (
-      <div className={`rounded-xl border border-slate-200 bg-white/80 px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
-        <div className="grid grid-cols-[minmax(5.5rem,auto)_3.35rem_minmax(6.8rem,9.5rem)] items-center gap-1.5">
-          <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+      <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-2 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
+        <div className="grid max-w-full grid-cols-[minmax(5.75rem,1fr)_3.25rem_minmax(6.25rem,8.75rem)] items-center gap-1">
+          <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
             {start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}
           </span>
           <AppSelect
@@ -107,7 +107,7 @@ export default function PaginationControls({
             onChange={(nextValue) => onPageSizeChange?.(Number(nextValue))}
             ariaLabel={perPageLabel}
             className="h-7 w-full min-w-0"
-            buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-xs font-semibold shadow-none"
+            buttonClassName="h-7 w-full rounded-full px-1.5 py-0 pl-1.5 pr-1 text-xs font-semibold shadow-none"
             menuClassName="min-w-[4rem]"
             optionClassName="text-xs"
           />
