@@ -47,7 +47,7 @@ if (!startRequestedWorkerRole()) {
     const { getObjectStream, isObjectStorageEnabled } = require('./src/objectStore.ts');
     const { getLegacyBatchBackfillStatus, scheduleLegacyBatchBackfill } = require('./src/productBatches.ts');
     const { getDefaultOrganization, ensureOrganizationFilesystemLayout } = require('./src/organizationContext/index.ts');
-    const { CORS_OPTIONS, sanitizeRequestPayload, isConfiguredCustomerPortalHost, isApiOrHealthPath, isSpaFallbackEligible, setNoStoreHeaders, setHtmlNoCacheHeaders, setTunnelSecurityHeaders, setFrontendStaticHeaders, setUploadStaticHeaders, mapServerError, } = require('./src/serverUtils.ts');
+    const { CORS_OPTIONS, sanitizeRequestPayload, isConfiguredCustomerPortalHost, isApiOrHealthPath, isSpaFallbackEligible, setNoStoreHeaders, setAdminSpaHtmlHeaders, setTunnelSecurityHeaders, setFrontendStaticHeaders, setUploadStaticHeaders, mapServerError, } = require('./src/serverUtils.ts');
     const { PORT, STORAGE_ROOT, DB_PATH, UPLOADS_PATH, FRONTEND_DIST, SYNC_TOKEN, DATABASE_DRIVER, OBJECT_STORAGE_DRIVER, JOB_QUEUE_DRIVER, RUNTIME_CACHE_ENABLED, ANALYTICS_ENGINE, PARQUET_STORE, S3_BUCKET, } = require('./src/config/index.ts');
     const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST);
     const app = express();
@@ -428,7 +428,7 @@ if (!startRequestedWorkerRole()) {
         target.get('*', (req, res, next) => {
             if (!isSpaFallbackEligible(req.path))
                 return next();
-            setHtmlNoCacheHeaders(res);
+            setAdminSpaHtmlHeaders(req, res);
             res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
         });
     }

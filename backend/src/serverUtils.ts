@@ -272,6 +272,20 @@ function isCustomerPortalRoutePath(reqPath) {
   return path === '/public' || path.startsWith('/public/') || path === '/customer-portal' || path.startsWith('/customer-portal/')
 }
 
+function setAdminSpaHtmlHeaders(req, res) {
+  setHtmlNoCacheHeaders(res)
+  const bootstrapPreload = isCustomerPortalRoutePath(req?.path)
+    ? '</api/portal/bootstrap>; rel=preload; as=fetch; crossorigin=anonymous'
+    : '</api/auth/bootstrap>; rel=preload; as=fetch; crossorigin=use-credentials'
+  if (typeof res.append === 'function') {
+    res.append('Link', bootstrapPreload)
+    return
+  }
+  const existingLink = typeof res.getHeader === 'function' ? res.getHeader('Link') : ''
+  const nextLink = existingLink ? `${existingLink}, ${bootstrapPreload}` : bootstrapPreload
+  res.setHeader('Link', nextLink)
+}
+
 function setTunnelSecurityHeaders(req, res) {
   const allowPortalTranslateEval = isCustomerPortalRoutePath(req?.path)
   const portalTranslateEvalSource = allowPortalTranslateEval ? " 'unsafe-eval'" : ''
@@ -425,6 +439,7 @@ module.exports = {
   isSpaFallbackEligible,
   setNoStoreHeaders,
   setHtmlNoCacheHeaders,
+  setAdminSpaHtmlHeaders,
   setTunnelSecurityHeaders,
   setFrontendStaticHeaders,
   setUploadStaticHeaders,

@@ -14,6 +14,7 @@ const {
   setTunnelSecurityHeaders,
   setFrontendStaticHeaders,
   setHtmlNoCacheHeaders,
+  setAdminSpaHtmlHeaders,
   isCustomerPortalRoutePath,
 } = require('../src/serverUtils.ts')
 
@@ -284,6 +285,38 @@ runTest('setHtmlNoCacheHeaders serves SPA shell in standards UTF-8 HTML mode', (
 
   assert.equal(headers.get('Content-Type'), 'text/html; charset=utf-8')
   assert.equal(headers.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
+})
+
+runTest('setAdminSpaHtmlHeaders preloads the route-owned bootstrap endpoint', () => {
+  const collectHeaders = (path) => {
+    const headers = new Map()
+    const res = {
+      setHeader(name, value) {
+        headers.set(String(name), String(value))
+      },
+      getHeader(name) {
+        return headers.get(String(name))
+      },
+      append(name, value) {
+        const key = String(name)
+        const existing = headers.get(key)
+        headers.set(key, existing ? `${existing}, ${value}` : String(value))
+      },
+    }
+    setAdminSpaHtmlHeaders({ path }, res)
+    return headers
+  }
+
+  const dashboardHeaders = collectHeaders('/dashboard')
+  assert.equal(dashboardHeaders.get('Content-Type'), 'text/html; charset=utf-8')
+  assert.match(dashboardHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
+  assert.match(dashboardHeaders.get('Link') || '', /crossorigin=use-credentials/)
+
+  const publicHeaders = collectHeaders('/public')
+  assert.equal(publicHeaders.get('Content-Type'), 'text/html; charset=utf-8')
+  assert.match(publicHeaders.get('Link') || '', /\/api\/portal\/bootstrap/)
+  assert.match(publicHeaders.get('Link') || '', /crossorigin=anonymous/)
+  assert.doesNotMatch(publicHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
 })
 
 if (failed > 0) {

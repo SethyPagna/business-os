@@ -56,7 +56,7 @@ const {
   isApiOrHealthPath,
   isSpaFallbackEligible,
   setNoStoreHeaders,
-  setHtmlNoCacheHeaders,
+  setAdminSpaHtmlHeaders,
   setTunnelSecurityHeaders,
   setFrontendStaticHeaders,
   setUploadStaticHeaders,
@@ -435,7 +435,7 @@ function mountSpaFallback(target) {
 
   target.get('*', (req, res, next) => {
     if (!isSpaFallbackEligible(req.path)) return next()
-    setHtmlNoCacheHeaders(res)
+    setAdminSpaHtmlHeaders(req, res)
     res.sendFile(path.join(FRONTEND_DIST, 'index.html'))
   })
 }
