@@ -39,9 +39,12 @@ async function openFirstVariantModal(page: Page): Promise<number> {
   assert(count > 0, 'No product row action buttons rendered')
 
   for (let index = 0; index < Math.min(count, 20); index += 1) {
-    await actionButtons.nth(index).click()
+    await page.keyboard.press('Escape').catch(() => {})
+    await actionButtons.nth(index).evaluate((button) => {
+      if (button instanceof HTMLElement) button.click()
+    })
     const addVariant = page.getByRole('button', { name: /Add Variant/i })
-    if (await addVariant.count()) {
+    if (await addVariant.first().isVisible().catch(() => false)) {
       await addVariant.first().click()
       return index
     }
@@ -91,6 +94,14 @@ async function main(): Promise<void> {
     const addVariantButtonVisible = await modal.getByRole('button', { name: /^Add Variant$/i }).isVisible()
     assert(variantNameVisible, 'Variant name input did not render')
     assert(addVariantButtonVisible, 'Add Variant submit button did not render')
+    await modal.locator('#variant-form-unit').click()
+    const unitOptionCount = await page.getByRole('option').count()
+    await page.keyboard.press('Escape')
+    await modal.locator('#variant-form-branch').click()
+    const branchOptionCount = await page.getByRole('option').count()
+    await page.keyboard.press('Escape')
+    assert(unitOptionCount > 0, 'Variant unit options did not render')
+    assert(branchOptionCount > 0, 'Variant branch options did not render')
 
     const frameworkOverlayVisible = await page.locator('#vite-error-overlay, [data-nextjs-dialog-overlay]').count()
     assert(frameworkOverlayVisible === 0, 'A framework error overlay is visible')
@@ -116,6 +127,8 @@ async function main(): Promise<void> {
         barcodeVisible,
         unitVisible,
         branchVisible,
+        unitOptionCount,
+        branchOptionCount,
         addVariantButtonVisible,
         frameworkOverlayVisible: false,
         relevantConsoleMessages: relevantConsole.length,

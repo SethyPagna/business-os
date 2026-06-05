@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../../AppContext.tsx'
 import Modal from '../../shared/Modal'
 import { parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
@@ -6,6 +6,7 @@ import { formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.t
 import { extractHistoryResultId } from '../../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
+import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
 
@@ -145,6 +146,20 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   const runVariantMutation = useCallback((loader: () => Promise<VariantMutationResponse | undefined>, label: string) => (
     withLoaderTimeout(loader, label, PRODUCT_VARIANT_MUTATION_TIMEOUT_MS)
   ), [])
+  const unitOptions = useMemo<AppSelectOption[]>(() => {
+    const options = units.map((unit) => ({ value: unit.name, label: unit.name }))
+    if (form.unit && !options.some((option) => String(option.value) === String(form.unit))) {
+      return [{ value: form.unit, label: form.unit }, ...options]
+    }
+    return options
+  }, [form.unit, units])
+  const branchOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: tr('default_branch_option', 'Default branch') },
+    ...branches.map((branch) => ({
+      value: branch.id,
+      label: branch.is_default ? `${branch.name} (${t('default_label') || 'Default'})` : branch.name,
+    })),
+  ], [branches, t])
 
   const handleSave = async (): Promise<void> => {
     if (saving) return
@@ -262,9 +277,16 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             <label htmlFor="variant-form-unit" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {t('unit') || 'Unit'}
             </label>
-            <select id="variant-form-unit" name="variant_unit" className="input" value={form.unit} onChange={(event) => setField('unit', event.target.value)}>
-              {units.map((unit) => <option key={unit.id} value={unit.name}>{unit.name}</option>)}
-            </select>
+            <AppSelect
+              id="variant-form-unit"
+              name="variant_unit"
+              className="w-full"
+              buttonClassName="w-full"
+              value={form.unit}
+              options={unitOptions}
+              onChange={(value) => setField('unit', value)}
+              ariaLabel={t('unit') || 'Unit'}
+            />
           </div>
 
           <div>
@@ -351,15 +373,16 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             <label htmlFor="variant-form-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               {tr('assign_to_branch', 'Assign to Branch', 'កំណត់ទៅសាខា')}
             </label>
-            <select id="variant-form-branch" name="variant_branch_id" className="input" value={form.branch_id || ''} onChange={(event) => setField('branch_id', event.target.value)}>
-              <option value="">{tr('default_branch_option', 'Default branch', 'សាខាលំនាំដើម')}</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                  {branch.is_default ? ` (${t('default_label') || 'Default'})` : ''}
-                </option>
-              ))}
-            </select>
+            <AppSelect
+              id="variant-form-branch"
+              name="variant_branch_id"
+              className="w-full"
+              buttonClassName="w-full"
+              value={form.branch_id || ''}
+              options={branchOptions}
+              onChange={(value) => setField('branch_id', value)}
+              ariaLabel={tr('assign_to_branch', 'Assign to Branch')}
+            />
           </div>
         </div>
 

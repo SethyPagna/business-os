@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
+import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 
 const BULK_ADD_STOCK_MUTATION_TIMEOUT_MS = 12000
 
@@ -97,6 +98,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   const runBulkStockMutation = useCallback((loader: () => Promise<ApiResult | undefined>, label: string) => (
     withLoaderTimeout(loader, label, BULK_ADD_STOCK_MUTATION_TIMEOUT_MS)
   ), [])
+  const branchOptions = useMemo<AppSelectOption[]>(() => [
+    { value: '', label: 'Global (no branch)' },
+    ...branches.map((branch) => ({
+      value: branch.id,
+      label: branch.is_default ? `${branch.name} (default)` : branch.name,
+    })),
+  ], [branches])
 
   const handleSave = async () => {
     if (!beginSingleAction(saveInFlightRef, { blocked: saving })) return
@@ -154,11 +162,16 @@ export default function BulkAddStockModal({ productIds, products, branches, user
         <div className="space-y-4">
           {branches.length > 0 ? (
             <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Branch</label>
-              <select className="input" value={branchId} onChange={(event) => setBranchId(event.target.value)}>
-                <option value="">Global (no branch)</option>
-                {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}{branch.is_default ? ' (default)' : ''}</option>)}
-              </select>
+              <label htmlFor="bulk-add-stock-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Branch</label>
+              <AppSelect
+                id="bulk-add-stock-branch"
+                className="w-full"
+                buttonClassName="w-full"
+                value={branchId}
+                options={branchOptions}
+                onChange={setBranchId}
+                ariaLabel="Branch"
+              />
             </div>
           ) : null}
           <div>
