@@ -94,7 +94,7 @@ function safeFilterLabel(t: (key: string) => string, key: string, fallback: stri
   const value = t(key)
   const normalized = String(value || '').trim().toLowerCase()
   if (!value || value === key) return fallback
-  if (key === 'brand' && normalized === 'back') return fallback
+  if (normalized === 'back') return fallback
   return value
 }
 

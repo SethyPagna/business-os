@@ -61,12 +61,12 @@ export default function AppSelect({
       return
     }
     const rect = root.getBoundingClientRect()
-    const menuHeight = menuRef.current?.offsetHeight || Math.min(260, 40 * Math.max(1, options.length))
+    const menuHeight = menuRef.current?.offsetHeight || Math.min(272, 40 * Math.max(1, options.length))
     const viewportHeight = window.innerHeight
     const viewportWidth = window.innerWidth
-    let top = rect.bottom + 4
-    if (top + menuHeight > viewportHeight - 8) top = Math.max(8, rect.top - menuHeight - 4)
-    const width = Math.max(rect.width, 96)
+    let top = rect.bottom + 6
+    if (top + menuHeight > viewportHeight - 8) top = Math.max(8, rect.top - menuHeight - 6)
+    const width = Math.max(rect.width, 112)
     const left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8))
     setPosition({ top, left, width })
   }, [options.length])
@@ -157,12 +157,12 @@ export default function AppSelect({
   }
 
   return (
-    <div ref={rootRef} className={`relative inline-flex min-w-0 ${className}`.trim()}>
+    <div ref={rootRef} className={`relative inline-flex min-w-0 ${className}`.trim()} data-app-select-root="true">
       {name ? <input type="hidden" name={name} value={selectedValue} /> : null}
       <button
         id={id}
         type="button"
-        className={`inline-flex min-w-0 items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-900 dark:focus:border-blue-500 dark:focus:ring-blue-950 ${buttonClassName}`.trim()}
+        className={`inline-flex min-w-0 items-center justify-between gap-2 rounded-[0.95rem] border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-900 dark:focus:border-blue-500 dark:focus:ring-blue-950 ${buttonClassName}`.trim()}
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -185,7 +185,8 @@ export default function AppSelect({
           ref={menuRef}
           role="listbox"
           aria-label={ariaLabel}
-          className={`max-h-72 overflow-y-auto rounded-2xl border border-slate-200 bg-white p-1 shadow-2xl shadow-slate-900/12 ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/35 ${menuClassName}`.trim()}
+          className={`max-h-72 overflow-y-auto rounded-[1.05rem] border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/12 ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/35 ${menuClassName}`.trim()}
+          data-app-select-menu="true"
           style={{ position: 'fixed', top: position.top, left: position.left, width: position.width, zIndex: 10000 }}
         >
           {options.map((option, index) => {
@@ -199,13 +200,14 @@ export default function AppSelect({
                 role="option"
                 aria-selected={selected}
                 disabled={option.disabled}
-                className={`flex w-full min-w-0 items-center rounded-xl px-3 py-2 text-left text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+                className={`flex w-full min-w-0 items-center rounded-[0.85rem] px-3 py-2 text-left text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
                   selected
                     ? 'bg-blue-600 text-white shadow-sm'
                     : active
                       ? 'bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-slate-100'
                       : 'text-slate-700 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800'
                 } ${optionClassName}`.trim()}
+                data-app-select-option={optionStringValue}
                 onMouseEnter={() => setActiveIndex(index)}
                 onClick={() => chooseOption(option)}
               >

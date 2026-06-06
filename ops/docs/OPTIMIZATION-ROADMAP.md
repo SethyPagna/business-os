@@ -11958,3 +11958,39 @@ Move 798 status:
   schema, cleanup, and performance guardrail. Next executable target: inspect
   remaining route-local Products/Inventory code size, language-pack cost, and
   any real dark-mode contrast misses found by manual review.
+
+Move 799 status:
+- Move 799 polishes the shared filter/dropdown surfaces raised in manual UI
+  review. `AppSelect` now renders rounded app-native menu and option surfaces
+  with stable live-test hooks, while `FilterMenu`, Product labels, and
+  Inventory labels defensively replace any translated `Back` string with the
+  intended fallback section label. POS filter sections now use compact
+  label-plus-chip rows and rounded chips instead of stacked square controls.
+- Verification proof: `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`, and
+  `npm.cmd --prefix frontend run build` passed. Docker release
+  `business-os:v6.0.0-202606061544` built and started healthy with frontend
+  hash `66c6408cdb3475b0` and source hash `9e29b055b17fc325`.
+- Focused live proof:
+  `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
+  passed Products, Inventory, Audit, Library, Dashboard, and POS with no
+  `Back` labels, rounded filter sections, rounded select menus/options,
+  compact POS filter rows, HTTP 200 filter reads, no framework overlay, and
+  zero relevant console messages.
+- Runtime/public proof:
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T07-46-47-867Z/report.json`
+  passed the broad Docker-served Phase 8.4 local flow with all probed route/API
+  signals at HTTP 200. The public Cloudflare portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T07-47-54-599Z/report.json`
+  passed against `https://leangcosmetics.dpdns.org/public` with 20 rendered
+  products, portal bootstrap 200, AI status 200 after interaction, enforced
+  CSP, no internal server error, zero failed responses, zero relevant console
+  messages, and zero page errors.
+- Current plan position after Move 799: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail. Next executable target: continue
+  measured route-local Products/Inventory code-size and language-pack checks,
+  then fold any remaining dark-mode contrast misses into focused Playwright
+  screenshots before broader refactors.

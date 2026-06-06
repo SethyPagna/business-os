@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 797 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 799 in this file.
 
 ## Goal
 
@@ -7754,6 +7754,38 @@ Decision rule:
   admin ready times were 186-276 ms; remote public catalog was 365 ms. The
   all-pages control audit covered 34 desktop/mobile routes, 519 discovered
   controls, 374 safely exercised controls, and 0 failed controls.
+
+### Move 799: Compact shared filter dropdowns and verify live controls
+
+- Ownership evidence: after Move 798, native `select` popovers in Dashboard,
+  Products, Library, and related filter controls still rendered as square
+  browser dropdowns, while Inventory could expose a stale translated `Back`
+  label in the Brand section. POS filter chips also used stacked labels that
+  wasted vertical space on smaller screens.
+- Change: `AppSelect` now exposes rounded app-native popup and option surfaces
+  with stable test hooks. `FilterMenu` and the Product/Inventory label helpers
+  replace any translated `Back` label with the intended fallback label and use
+  compact one-row section layouts. POS filter sections now use compact
+  label-plus-chip rows with rounded chips and stable Playwright hooks.
+- Verification: `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`, and
+  `npm.cmd --prefix frontend run build` passed. Docker release
+  `business-os:v6.0.0-202606061544` built and started healthy with frontend
+  hash `66c6408cdb3475b0` and source hash `9e29b055b17fc325`.
+- Live proof: the focused Playwright check
+  `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
+  passed Products, Inventory, Audit, Library, Dashboard, and POS. It verified
+  no `Back` labels, rounded filter sections, rounded select menus/options,
+  compact POS filter rows, HTTP 200 reads, no framework overlay, and zero
+  relevant console messages.
+- Runtime proof: the broad Phase 8.4 UI live check
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T07-46-47-867Z/report.json`
+  passed all probed local route/API signals at HTTP 200. The public Cloudflare
+  portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T07-47-54-599Z/report.json`
+  rendered 20 products with portal bootstrap 200, AI status 200 after
+  interaction, enforced CSP, no internal server error, zero failed responses,
+  zero relevant console messages, and zero page errors.
 
 ## Safety Gates
 

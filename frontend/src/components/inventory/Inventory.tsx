@@ -487,7 +487,7 @@ export default function Inventory() {
     const value = typeof t === 'function' ? t(key) : ''
     const normalized = String(value || '').trim().toLowerCase()
     if (!value || value === key || isBrokenLocalizedString(value)) return fallback
-    if (key === 'brand' && normalized === 'back') return fallback
+    if (normalized === 'back') return fallback
     return value
   }, [t])
   const [summary,       setSummary]       = useState<InventoryProduct[]>([])

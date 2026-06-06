@@ -54,10 +54,10 @@ function countActiveFlags(flags: boolean[] = []): number {
 
 function SectionLabel({ icon: Icon, children }: SectionLabelProps) {
   return (
-    <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
-      <span className="inline-flex items-center gap-1.5">
+    <div className="min-w-0 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+      <span className="inline-flex min-w-0 items-center gap-1.5">
         <Icon className="h-3.5 w-3.5" />
-        {children}
+        <span className="truncate">{children}</span>
       </span>
     </div>
   )
@@ -108,12 +108,12 @@ export default function POSFilterPanel({
 
   const chip = (active: boolean) => (
     active
-      ? 'bg-blue-600 text-white'
-      : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-400 dark:hover:bg-gray-600'
+      ? 'border-blue-700 bg-blue-600 text-white shadow-sm'
+      : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300'
   )
 
   return (
-    <div className="pointer-events-auto card mb-2 max-h-[min(26rem,48vh)] space-y-3 overflow-y-auto overscroll-contain border border-blue-100 p-3 shadow-lg touch-pan-y dark:border-blue-800">
+    <div className="pointer-events-auto card mb-2 max-h-[min(26rem,48vh)] space-y-2 overflow-y-auto overscroll-contain border border-blue-100 p-2.5 shadow-lg touch-pan-y dark:border-blue-800">
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm font-semibold text-gray-900 dark:text-white">{T('filters', 'Filters')}</div>
         <button
@@ -126,7 +126,7 @@ export default function POSFilterPanel({
         </button>
       </div>
 
-      <div>
+      <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="stock">
         <SectionLabel icon={Boxes}>{T('stock_status', 'Stock Status')}</SectionLabel>
         <div className="flex flex-wrap gap-1">
           {[
@@ -139,7 +139,8 @@ export default function POSFilterPanel({
               key={value}
               type="button"
               onClick={() => setStockFilter(value)}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(stockFilter === value)}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(stockFilter === value)}`}
+              data-pos-filter-chip={value}
             >
               {label}
             </button>
@@ -147,7 +148,7 @@ export default function POSFilterPanel({
         </div>
       </div>
 
-      <div>
+      <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="group">
         <SectionLabel icon={Package}>{T('groups', 'Groups')}</SectionLabel>
         <div className="flex flex-wrap gap-1">
           {[
@@ -159,7 +160,8 @@ export default function POSFilterPanel({
               key={`group-${value}`}
               type="button"
               onClick={() => setGroupFilter?.(normalizedGroupFilter === value && value !== 'all' ? 'all' : value)}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${chip(normalizedGroupFilter === value)}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(normalizedGroupFilter === value)}`}
+              data-pos-filter-chip={`group-${value}`}
             >
               {label}
             </button>
@@ -168,13 +170,14 @@ export default function POSFilterPanel({
       </div>
 
       {categories.length > 0 ? (
-        <div>
+        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="category">
           <SectionLabel icon={Package}>{T('category', 'Category')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
               onClick={() => setCategoryFilter('all')}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(categoryFilter === 'all')}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(categoryFilter === 'all')}`}
+              data-pos-filter-chip="category-all"
             >
               {T('all', 'All')}
             </button>
@@ -183,11 +186,12 @@ export default function POSFilterPanel({
                 key={category.id || category.name}
                 type="button"
                 onClick={() => setCategoryFilter(categoryFilter === category.name ? 'all' : category.name)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
                   categoryFilter === category.name
-                    ? 'text-white'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                    ? 'border-transparent text-white shadow-sm'
+                    : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200'
                 }`}
+                data-pos-filter-chip={`category-${category.id || category.name}`}
                 style={categoryFilter === category.name ? { background: category.color || '#2563eb' } : {}}
               >
                 {category.name}
@@ -198,13 +202,14 @@ export default function POSFilterPanel({
       ) : null}
 
       {branches.length > 1 ? (
-        <div>
+        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="branch">
           <SectionLabel icon={Building2}>{T('branch', 'Branch')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
               onClick={() => setBranchFilter('all')}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === 'all')}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(branchFilter === 'all')}`}
+              data-pos-filter-chip="branch-all"
             >
               {T('all', 'All')}
             </button>
@@ -213,7 +218,8 @@ export default function POSFilterPanel({
                 key={branch.id || branch.name}
                 type="button"
                 onClick={() => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id))}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(branchFilter === String(branch.id))}`}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(branchFilter === String(branch.id))}`}
+                data-pos-filter-chip={`branch-${branch.id || branch.name}`}
               >
                 {branch.name}{branch.is_default ? ' (Default)' : ''}
               </button>
@@ -223,13 +229,14 @@ export default function POSFilterPanel({
       ) : null}
 
       {brands.length > 0 ? (
-        <div>
+        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="brand">
           <SectionLabel icon={Tags}>{T('brand', 'Brand')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
               onClick={() => setBrandFilter('all')}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(brandFilter === 'all')}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(brandFilter === 'all')}`}
+              data-pos-filter-chip="brand-all"
             >
               {T('all', 'All')}
             </button>
@@ -238,11 +245,12 @@ export default function POSFilterPanel({
                 key={brand}
                 type="button"
                 onClick={() => setBrandFilter(brandFilter === brand ? 'all' : brand)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
                   brandFilter === brand
-                    ? 'bg-cyan-600 text-white'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                    ? 'border-cyan-700 bg-cyan-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200'
                 }`}
+                data-pos-filter-chip={`brand-${brand}`}
               >
                 {brand}
               </button>
@@ -252,13 +260,14 @@ export default function POSFilterPanel({
       ) : null}
 
       {suppliers.length > 0 ? (
-        <div>
+        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="supplier">
           <SectionLabel icon={Truck}>{T('supplier', 'Supplier')}</SectionLabel>
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
               onClick={() => setSupplierFilter('all')}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium ${chip(supplierFilter === 'all')}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(supplierFilter === 'all')}`}
+              data-pos-filter-chip="supplier-all"
             >
               {T('suppliers', T('all', 'All'))}
             </button>
@@ -267,11 +276,12 @@ export default function POSFilterPanel({
                 key={supplier}
                 type="button"
                 onClick={() => setSupplierFilter(supplierFilter === supplier ? 'all' : supplier)}
-                className={`rounded-lg px-2.5 py-1 text-xs font-medium ${
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
                   supplierFilter === supplier
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                    ? 'border-indigo-700 bg-indigo-600 text-white shadow-sm'
+                    : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200'
                 }`}
+                data-pos-filter-chip={`supplier-${supplier}`}
               >
                 {supplier}
               </button>

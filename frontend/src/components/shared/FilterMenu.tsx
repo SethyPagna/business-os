@@ -35,12 +35,19 @@ type FilterMenuProps = {
 const SECTION_LABEL_FALLBACKS: Record<string, string> = {
   action: 'Action',
   brand: 'Brand',
+  brands: 'Brand',
   branch: 'Branch',
+  branches: 'Branch',
   category: 'Category',
+  createdmonth: 'Month',
+  createdyear: 'Year',
+  groupby: 'Group by',
   group: 'Groups',
+  groups: 'Groups',
   month: 'Month',
   sort: 'Sort',
   stock: 'Stock',
+  stockstatus: 'Stock',
   supplier: 'Supplier',
   user: 'User',
   year: 'Year',
@@ -53,8 +60,14 @@ function sectionButtonClass(active: boolean): string {
 }
 
 function getSectionFallbackLabel(sectionId: string | number): string {
-  const normalizedId = String(sectionId || '').trim().toLowerCase()
-  return SECTION_LABEL_FALLBACKS[normalizedId] || ''
+  const rawId = String(sectionId || '').trim()
+  const normalizedId = rawId.toLowerCase()
+  const compactId = normalizedId.replace(/[^a-z0-9]+/g, '')
+  if (SECTION_LABEL_FALLBACKS[normalizedId]) return SECTION_LABEL_FALLBACKS[normalizedId]
+  if (SECTION_LABEL_FALLBACKS[compactId]) return SECTION_LABEL_FALLBACKS[compactId]
+  return rawId
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
 
 function resolveSectionLabel(section: FilterSection): ReactNode {
@@ -62,7 +75,7 @@ function resolveSectionLabel(section: FilterSection): ReactNode {
   const label = section.label.trim()
   const fallback = getSectionFallbackLabel(section.id)
   if (!label) return fallback || section.label
-  if (fallback && label.toLowerCase() === 'back') return fallback
+  if (label.toLowerCase() === 'back') return fallback || section.label
   return section.label
 }
 
@@ -104,7 +117,7 @@ export default function FilterMenu({
         </button>
       )}
       content={({ closeMenu }) => (
-        <div className="max-h-[min(32rem,70vh)] overflow-auto rounded-[1.35rem] p-3">
+        <div className="max-h-[min(32rem,70vh)] overflow-auto rounded-[1.35rem] p-2.5">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div className="text-sm font-semibold text-gray-900 dark:text-white">{label}</div>
             <div className="flex items-center gap-2">
@@ -136,16 +149,16 @@ export default function FilterMenu({
             {(sections.filter(Boolean) as FilterSection[]).map((section) => (
               <div
                 key={section.id}
-                className="rounded-2xl bg-slate-50/70 p-1.5 dark:bg-slate-800/40"
+                className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700"
                 data-filter-menu-section={String(section.id)}
               >
-                <div className="grid grid-cols-[4.85rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[5.25rem_minmax(0,1fr)]">
-                  <div className="min-w-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)]">
+                  <div className="min-w-0 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     <span className="block truncate" data-filter-menu-section-label={String(section.id)}>{resolveSectionLabel(section)}</span>
                   </div>
                   <div className="min-w-0">
                     {section.description ? (
-                      <p className="mb-1 text-xs text-gray-500 dark:text-gray-400">{section.description}</p>
+                      <p className="mb-1 text-[11px] leading-snug text-gray-500 dark:text-gray-400">{section.description}</p>
                     ) : null}
 
                     {typeof section.render === 'function' ? (
@@ -158,7 +171,7 @@ export default function FilterMenu({
                             type="button"
                             disabled={option.disabled}
                             onClick={() => option.onClick?.()}
-                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
+                            className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors disabled:opacity-50 ${sectionButtonClass(!!option.active)}`}
                             title={option.title || (typeof option.label === 'string' ? option.label : undefined)}
                           >
                             {option.label}
