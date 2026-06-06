@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 812 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 813 in this file.
 
 ## Goal
 
@@ -8561,6 +8561,67 @@ Decision rule:
   `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070530` were not touched.
 - Current plan position after Move 812: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 813: Share public catalog search-term normalization
+
+- Ownership evidence: Move 812 proved the backend portal search already returns
+  the correct `AHC, Mask` payload (`total=4`) while the public UI still carried
+  an ad hoc `deferredSearch.toLowerCase().split(...)` parser and sent the raw
+  deferred input as the portal query string.
+- Change: `frontend/src/components/catalog/CatalogPage.tsx` now imports
+  `buildProductSearchTerms`, derives `portalSearchTerms` from the deferred
+  input, sends the stable comma-normalized `portalSearchQuery` to
+  `/api/portal/catalog/products/search`, resets pagination from that normalized
+  query, and uses the same terms for the client-side visible-product pass.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` now requires the
+  public catalog shared helper import, the `portalSearchTerms` and
+  `portalSearchQuery` memoization, and blocks the old ad hoc
+  `deferredSearch.toLowerCase().split(...)` parser.
+- Verification: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productFilterHelpers.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build emits
+  `assets/catalog-C8_xENBV.js` at 126.96 kB / 37.33 kB gzip,
+  `assets/product-shared-CxPCJhYy.js` at 6.83 kB / 2.62 kB gzip, and keeps
+  `PublicCatalogRoot` small at 1.61 kB / 0.80 kB gzip.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070604` was built and
+  deployed after backup `ops/runtime/docker-release/backups/20260607-061341`;
+  `business-os-app-1`, workers, Postgres, Redis, and Cloudflare containers are
+  healthy on that image.
+- Live browser proof: standalone Playwright on the deployed Docker runtime
+  loaded `http://127.0.0.1:4000/public` in 346 ms, typed `AHC, Mask`, observed
+  the request URL `query=ahc%2Cmask`, received `total=4` and 4 items, rendered
+  `4 result(s)` plus `Showing 1-4 of 4`, and reported zero relevant console
+  messages or page errors.
+- Live suite proof: `npm.cmd --prefix ops run phase84:live-suite` passed. The
+  broad UI check covered 66 signals on frontend hash `92a899e0a7b2462c` with
+  zero relevant console messages; the public Cloudflare portal check rendered
+  20 products with zero failed responses, zero page errors, zero relevant
+  console messages, and enforced CSP present; post-live hygiene passed with
+  loaded dataset status.
+- Route proof: the standard route-load trace passed with zero failed requests
+  and zero console errors: Dashboard 195 ms, Inventory 209 ms, Sales 235 ms,
+  and Audit Log 227 ms.
+- Cleanup: ignored regenerable `frontend/dist` (31,826,528 bytes) and
+  `release` (380,877,464 bytes) were removed for 412,703,992 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 299,344
+  bytes of stale runtime reports, Docker-release backup `20260607-044957`
+  (5,049,651 bytes) beyond the latest-three policy, old Docker rollback tag
+  `business-os:v6.0.0-202606070343`, and 1.269 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070604` were not touched.
+- Phase 29 proof: `node ops\scripts\architecture\phase29-audit.ts` passed
+  after cleanup with 9 checks and 0 failures.
+- Follow-up cleared: the Move 812 public catalog comma-search synchronization
+  finding is resolved for the deployed local runtime.
+- Current plan position after Move 813: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

@@ -8,8 +8,8 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 812, share POS comma search-term normalization
-  with the Products helper layer.
+- Latest completed move: Move 813, share public catalog comma search-term
+  normalization with the Products helper layer.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `0dd2009439038702`
+  `92a899e0a7b2462c`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -30,15 +30,15 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T21-41-56-700Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T22-15-06-108Z/report.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T21-42-34-043Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T22-15-44-427Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T21-41-34-607Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T22-16-27-500Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -2487,7 +2487,7 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 812
+## Recent Move 812
 
 - POS comma search-term parsing now reuses the Products helper layer.
   `frontend/src/components/pos/POS.tsx` calls `buildProductSearchTerms` from
@@ -2530,6 +2530,56 @@ Recent route-level win:
   R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
   active image `business-os:v6.0.0-202606070530` were preserved.
 - Current plan position after Move 812: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Latest Move 813
+
+- Public catalog comma search-term parsing now reuses the Products helper
+  layer. `frontend/src/components/catalog/CatalogPage.tsx` calls
+  `buildProductSearchTerms`, sends the stable comma-normalized
+  `portalSearchQuery` to the portal product search API, resets pagination from
+  that normalized query, and uses the same terms for the local visible-product
+  pass.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` requires the public
+  catalog shared helper import, `portalSearchTerms` and `portalSearchQuery`
+  memoization, and blocks the old ad hoc
+  `deferredSearch.toLowerCase().split(...)` parser.
+- Source checks passed: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productFilterHelpers.test.ts`, frontend typecheck,
+  JSX/source check, frontend utility suite, and frontend production build. The
+  public catalog chunk is `126.96 kB` / `37.33 kB` gzip, `product-shared` is
+  `6.83 kB` / `2.62 kB` gzip, and `PublicCatalogRoot` is `1.61 kB` /
+  `0.80 kB` gzip.
+- Docker/runtime proof: `business-os:v6.0.0-202606070604` is running healthy
+  after backup `ops/runtime/docker-release/backups/20260607-061341`; runtime
+  health reports frontend hash `92a899e0a7b2462c` and source hash
+  `9e29b055b17fc325`.
+- Browser/Playwright proof: standalone Playwright loaded the deployed public
+  catalog in 346 ms, typed `AHC, Mask`, saw the API request
+  `query=ahc%2Cmask`, received `total=4` and 4 items, rendered `4 result(s)`
+  and `Showing 1-4 of 4`, and found zero relevant console/page errors.
+- Full live suite passed: broad UI 66 signals on frontend hash
+  `92a899e0a7b2462c`, public Cloudflare portal 20 products, zero failed
+  responses, zero page errors, zero relevant console messages, CSP present, and
+  post-live hygiene loaded.
+- Route trace proof: Dashboard 195 ms, Inventory 209 ms, Sales 235 ms, and
+  Audit Log 227 ms, all with zero failed requests and zero console errors.
+- Cleanup reclaimed 412,703,992 bytes from ignored regenerable artifacts:
+  `frontend/dist` (31,826,528 bytes) and `release` (380,877,464 bytes). No
+  source or business data was deleted.
+- Standard retention cleanup then removed 299,344 bytes of stale runtime
+  reports, Docker-release backup `20260607-044957` (5,049,651 bytes) beyond the
+  latest-three retention policy, old Docker rollback tag
+  `business-os:v6.0.0-202606070343`, and 1.269 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070604` were preserved.
+- Phase 29 audit passed after cleanup with 9 checks and 0 failures.
+- Follow-up cleared: the Move 812 public catalog comma-search synchronization
+  issue is resolved for the deployed local runtime.
+- Current plan position after Move 813: Phase 8.4 active; Phase 26 at 51
   completed organization moves; Phase 28 active with R2/access follow-up open;
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.

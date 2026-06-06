@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 442,
   "distAssets": 0,
-  "totalSourceBytes": 6975986,
-  "totalSourceLines": 160422,
+  "totalSourceBytes": 6976155,
+  "totalSourceLines": 160423,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -46,14 +46,14 @@
       "lines": 4006
     },
     {
+      "file": "frontend/src/components/catalog/CatalogPage.tsx",
+      "size": 160935,
+      "lines": 3603
+    },
+    {
       "file": "backend/src/services/importJobs.ts",
       "size": 160917,
       "lines": 3880
-    },
-    {
-      "file": "frontend/src/components/catalog/CatalogPage.tsx",
-      "size": 160766,
-      "lines": 3602
     },
     {
       "file": "frontend/src/lang/en.json",
@@ -174,8 +174,8 @@
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.tsx",
-      "size": 160766,
-      "lines": 3602
+      "size": 160935,
+      "lines": 3603
     },
     {
       "file": "frontend/src/lang/km.json",

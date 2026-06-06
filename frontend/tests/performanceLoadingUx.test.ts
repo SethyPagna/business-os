@@ -337,6 +337,26 @@ assert.match(viteConfig, /portalTranslateController\.ts'[\s\S]*return 'portal-tr
 assert.match(catalogPage, /import CatalogPreviewSurface from '\.\/CatalogPreviewSurface'/, 'public catalog should directly import its first-viewport preview shell')
 assert.match(catalogPage, /import CatalogProductsSection from '\.\/CatalogProductsSection'/, 'public catalog should directly import its default first-viewport product list')
 assert.match(catalogPage, /import \{ resolveCatalogAssetUrl \} from '\.\/catalogAssetUrls'/, 'public catalog should use its local asset resolver instead of the broader file/media helper graph')
+assert.match(
+  catalogPage,
+  /import \{ buildProductSearchTerms \} from '\.\.\/products\/helpers\/productFilterHelpers\.ts'/,
+  'public catalog should share Products search-term normalization',
+)
+assert.match(
+  catalogPage,
+  /const portalSearchTerms = useMemo\(\(\) => buildProductSearchTerms\(deferredSearch\), \[deferredSearch\]\)/,
+  'public catalog should memoize shared search terms from deferred input',
+)
+assert.match(
+  catalogPage,
+  /const portalSearchQuery = useMemo\(\(\) => portalSearchTerms\.join\(','\), \[portalSearchTerms\]\)/,
+  'public catalog should send a stable comma-normalized search query to the API',
+)
+assert.doesNotMatch(
+  catalogPage,
+  /deferredSearch\.toLowerCase\(\)\.split\(/,
+  'public catalog should not keep an ad hoc whitespace/comma search parser',
+)
 assert.match(catalogImages, /import \{ resolveCatalogAssetUrl \} from '\.\/catalogAssetUrls'/, 'public catalog images should use the local asset resolver')
 assert.doesNotMatch(catalogPage, /utils\/publicAssetUrls/, 'public catalog startup should not import the shared publicAssetUrls helper')
 assert.doesNotMatch(catalogImages, /utils\/publicAssetUrls/, 'public catalog image startup should not import the shared publicAssetUrls helper')

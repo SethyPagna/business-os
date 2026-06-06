@@ -53,6 +53,7 @@ import {
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
 } from './portalCatalogDisplay.ts'
+import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
 import {
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
   isFirstPartyPortalLanguage,
@@ -1412,6 +1413,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [recommendedProductSearchInput, setRecommendedProductSearchInput] = useState('')
   const [recommendedProductSearchTerm, setRecommendedProductSearchTerm] = useState('')
   const deferredSearch = useDeferredValue(search)
+  const portalSearchTerms = useMemo(() => buildProductSearchTerms(deferredSearch), [deferredSearch])
+  const portalSearchQuery = useMemo(() => portalSearchTerms.join(','), [portalSearchTerms])
   const loadRequestRef = useRef(0)
   const syncReloadTimerRef = useRef<number | null>(null)
   const previewSectionRef = useRef<HTMLDivElement | null>(null)
@@ -1977,7 +1980,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     setPortalProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, portalProductInitial, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, portalProductInitial, portalSearchQuery, stockFilter])
 
   useEffect(() => {
     if (!isPageActive || !previewConfig.showCatalog || (publicView && !portalConfigReady)) return undefined
@@ -1991,7 +1994,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const params = {
       page: portalProductPage,
       pageSize: portalProductPageSize,
-      query: deferredSearch,
+      query: portalSearchQuery,
       brand: brandFilter.join(','),
       category: categoryFilter.join(','),
       branchId: branchFilter.join(','),
@@ -2052,11 +2055,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     brandFilter,
     branchFilter,
     categoryFilter,
-    deferredSearch,
     isPageActive,
     portalProductInitial,
     portalProductPage,
     portalProductPageSize,
+    portalSearchQuery,
     previewConfig.showCatalog,
     portalConfigReady,
     stockFilter,
@@ -2381,8 +2384,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   ])
 
   const filteredProducts = useMemo(() => {
-    const terms = deferredSearch.toLowerCase().split(/[\s,]+/).map((term) => term.trim()).filter(Boolean)
-
     return displayProducts.filter((product) => {
       const haystack = [
         product.name,
@@ -2391,7 +2392,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         product.description,
       ].join(' ').toLowerCase()
 
-      if (terms.length > 0 && !terms.every((term) => haystack.includes(term))) return false
+      if (portalSearchTerms.length > 0 && !portalSearchTerms.every((term) => haystack.includes(term))) return false
       if (categoryFilter.length && !categoryFilter.includes(product.category || '')) return false
       if (brandFilter.length && !brandFilter.includes(product.brand || '')) return false
 
@@ -2405,7 +2406,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
       return true
     })
-  }, [displayProducts, deferredSearch, categoryFilter, brandFilter, branchFilter, stockFilter, displayConfig])
+  }, [displayProducts, portalSearchTerms, categoryFilter, brandFilter, branchFilter, stockFilter, displayConfig])
 
   function toggleFilterValue(values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) {
     setter((current) => (
