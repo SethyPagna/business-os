@@ -18,6 +18,7 @@ import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { SectionShell, StatusPill, SummaryTile } from './catalogUi'
 
 type IdValue = string | number
@@ -198,6 +199,13 @@ interface AssistantProfile {
   shoppingFor: string
   goal: string
   concerns: string
+}
+
+function toAssistantSelectOptions(values: string[], allLabel: string): AppSelectOption[] {
+  return [
+    { value: '', label: allLabel },
+    ...values.map((value) => ({ value, label: value })),
+  ]
 }
 
 interface AiUsageSummary {
@@ -929,31 +937,53 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <label htmlFor="portal-assistant-brand" className="block text-sm font-medium text-slate-700">{copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}</label>
-                <select id="portal-assistant-brand" name="portal_assistant_brand" className="input mt-1" value={assistantProfile.brand} onChange={(event) => setAssistantProfile((current) => ({ ...current, brand: event.target.value }))}>
-                  <option value="">{copy('all', 'All')}</option>
-                  {brands.map((brand) => <option key={brand} value={brand}>{brand}</option>)}
-                </select>
+                <AppSelect
+                  id="portal-assistant-brand"
+                  name="portal_assistant_brand"
+                  value={assistantProfile.brand}
+                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, brand: nextValue }))}
+                  ariaLabel={copy('assistantBrand', 'Preferred brand', 'ម៉ាកដែលចូលចិត្ត')}
+                  className="mt-1 w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[12rem]"
+                  options={toAssistantSelectOptions(brands, copy('all', 'All'))}
+                />
               </div>
               <div>
                 <label htmlFor="portal-assistant-skin-type" className="block text-sm font-medium text-slate-700">{copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}</label>
-                <select id="portal-assistant-skin-type" name="portal_assistant_skin_type" className="input mt-1" value={assistantProfile.skinType} onChange={(event) => setAssistantProfile((current) => ({ ...current, skinType: event.target.value }))}>
-                  <option value="">{copy('all', 'All')}</option>
-                  {[
-                    ['Dry', copy('skinDry', 'Dry', 'ស្ងួត')],
-                    ['Oily', copy('skinOily', 'Oily', 'ខ្លាញ់')],
-                    ['Combination', copy('skinCombination', 'Combination', 'ចម្រុះ')],
-                    ['Sensitive', copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម')],
-                    ['Normal', copy('skinNormal', 'Normal', 'ធម្មតា')],
-                    ['Acne-prone', copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន')],
-                  ].map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
+                <AppSelect
+                  id="portal-assistant-skin-type"
+                  name="portal_assistant_skin_type"
+                  value={assistantProfile.skinType}
+                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, skinType: nextValue }))}
+                  ariaLabel={copy('assistantSkinType', 'Skin type', 'ប្រភេទស្បែក')}
+                  className="mt-1 w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[12rem]"
+                  options={[
+                    { value: '', label: copy('all', 'All') },
+                    { value: 'Dry', label: copy('skinDry', 'Dry', 'ស្ងួត') },
+                    { value: 'Oily', label: copy('skinOily', 'Oily', 'ខ្លាញ់') },
+                    { value: 'Combination', label: copy('skinCombination', 'Combination', 'ចម្រុះ') },
+                    { value: 'Sensitive', label: copy('skinSensitive', 'Sensitive', 'ងាយប្រតិកម្ម') },
+                    { value: 'Normal', label: copy('skinNormal', 'Normal', 'ធម្មតា') },
+                    { value: 'Acne-prone', label: copy('skinAcneProne', 'Acne-prone', 'ងាយកើតមុន') },
+                  ]}
+                />
               </div>
               <div>
                 <label htmlFor="portal-assistant-shopping-for" className="block text-sm font-medium text-slate-700">{copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}</label>
-                <select id="portal-assistant-shopping-for" name="portal_assistant_shopping_for" className="input mt-1" value={assistantProfile.shoppingFor} onChange={(event) => setAssistantProfile((current) => ({ ...current, shoppingFor: event.target.value }))}>
-                  <option value="">{copy('all', 'All')}</option>
-                  {assistantCategoryOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
+                <AppSelect
+                  id="portal-assistant-shopping-for"
+                  name="portal_assistant_shopping_for"
+                  value={assistantProfile.shoppingFor}
+                  onChange={(nextValue) => setAssistantProfile((current) => ({ ...current, shoppingFor: nextValue }))}
+                  ariaLabel={copy('assistantShoppingFor', 'Shopping for', 'កំពុងរកទិញ')}
+                  className="mt-1 w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[12rem]"
+                  options={toAssistantSelectOptions(assistantCategoryOptions, copy('all', 'All'))}
+                />
               </div>
               <div>
                 <label htmlFor="portal-assistant-goal" className="block text-sm font-medium text-slate-700">{copy('assistantGoal', 'Goal / use case', 'គោលបំណងប្រើប្រាស់')}</label>
