@@ -11,6 +11,7 @@ import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import AppSelect from '../shared/AppSelect.tsx'
 import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
@@ -984,17 +985,27 @@ export default function Login() {
                 <KeyRound className="h-4 w-4 text-gray-400" />
                 <span>{tr('keep_me_logged_in', 'Keep me logged in')}</span>
               </label>
-              <select id="session-duration" name="session-duration" value={sessionDuration} onChange={(event) => {
+              <AppSelect
+                id="session-duration"
+                name="session-duration"
+                value={sessionDuration}
+                onChange={(nextValue) => {
                   sessionDurationTouchedRef.current = true
-                  setSessionDuration(event.target.value)
-                }} className="input">
-                <option value="session">{tr('until_close_browser', 'Until I close the browser')}</option>
-                <option value="1d">{tr('for_1_day', 'For 1 day')}</option>
-                <option value="3d">{tr('for_3_days', 'For 3 days')}</option>
-                <option value="7d">{tr('for_7_days', 'For 7 days')}</option>
-                <option value="14d">{tr('for_14_days', 'For 14 days')}</option>
-                <option value="30d">{tr('for_30_days', 'For 30 days')}</option>
-              </select>
+                  setSessionDuration(nextValue)
+                }}
+                ariaLabel={tr('keep_me_logged_in', 'Keep me logged in')}
+                className="w-full"
+                buttonClassName="h-11 w-full"
+                menuClassName="min-w-[14rem]"
+                options={[
+                  { value: 'session', label: tr('until_close_browser', 'Until I close the browser') },
+                  { value: '1d', label: tr('for_1_day', 'For 1 day') },
+                  { value: '3d', label: tr('for_3_days', 'For 3 days') },
+                  { value: '7d', label: tr('for_7_days', 'For 7 days') },
+                  { value: '14d', label: tr('for_14_days', 'For 14 days') },
+                  { value: '30d', label: tr('for_30_days', 'For 30 days') },
+                ]}
+              />
               <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                 {tr('shared_device_security_note', 'On shared devices, choose "Until I close the browser" for better security.')}
               </p>

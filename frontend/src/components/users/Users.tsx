@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import type { MutableRefObject } from 'react'
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
+import AppSelect from '../shared/AppSelect.tsx'
 import Modal from '../shared/Modal'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -1110,17 +1111,37 @@ export default function Users() {
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="user-role" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role', 'Role')}</label>
-                <select id="user-role" name="role_id" className="input" value={userForm.role_id || ''} onChange={(e) => setUserForm((prev) => ({ ...prev, role_id: e.target.value }))}>
-                  <option value="">{t('no_role') || 'No role'}</option>
-                  {roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}
-                </select>
+                <AppSelect
+                  id="user-role"
+                  name="role_id"
+                  value={userForm.role_id || ''}
+                  onChange={(nextValue) => setUserForm((prev) => ({ ...prev, role_id: nextValue }))}
+                  ariaLabel={tr('role', 'Role')}
+                  className="w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[12rem]"
+                  options={[
+                    { value: '', label: t('no_role') || 'No role' },
+                    ...roles.map((role) => ({ value: role.id, label: role.name || String(role.id) })),
+                  ]}
+                />
               </div>
               <div>
                 <label htmlFor="user-status" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('status', 'Status')}</label>
-                <select id="user-status" name="is_active" className="input" value={userForm.is_active} onChange={(e) => setUserForm((prev) => ({ ...prev, is_active: Number(e.target.value) }))}>
-                  <option value={1}>{t('active') || 'Active'}</option>
-                  <option value={0}>{t('inactive') || 'Inactive'}</option>
-                </select>
+                <AppSelect
+                  id="user-status"
+                  name="is_active"
+                  value={userForm.is_active}
+                  onChange={(nextValue) => setUserForm((prev) => ({ ...prev, is_active: Number(nextValue) }))}
+                  ariaLabel={tr('status', 'Status')}
+                  className="w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[10rem]"
+                  options={[
+                    { value: 1, label: t('active') || 'Active' },
+                    { value: 0, label: t('inactive') || 'Inactive' },
+                  ]}
+                />
               </div>
             </div>
             <div className="flex justify-end gap-3 pt-2">

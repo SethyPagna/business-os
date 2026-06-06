@@ -6,6 +6,7 @@ import Save from 'lucide-react/dist/esm/icons/save.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
+import AppSelect from '../shared/AppSelect.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
@@ -444,16 +445,20 @@ export default function LoyaltyPointsPage() {
               <div className="mt-5 grid gap-4 md:grid-cols-2">
                 <div>
                   <label htmlFor="points-basis" className="block text-sm font-medium text-gray-700 dark:text-gray-300">{copy('earningBasis', 'Earning basis')}</label>
-                  <select
+                  <AppSelect
                     id="points-basis"
                     name="customer_portal_points_basis"
-                    className="input mt-1"
                     value={basis}
-                    onChange={(event: ChangeEvent<HTMLSelectElement>) => setValue('customer_portal_points_basis', event.target.value === 'khr' ? 'khr' : 'usd')}
-                  >
-                    <option value="usd">{copy('basisUsd', 'Based on USD sales')}</option>
-                    <option value="khr">{copy('basisKhr', 'Based on KHR sales')}</option>
-                  </select>
+                    onChange={(nextValue) => setValue('customer_portal_points_basis', nextValue === 'khr' ? 'khr' : 'usd')}
+                    ariaLabel={copy('earningBasis', 'Earning basis')}
+                    className="mt-1 w-full"
+                    buttonClassName="h-10 w-full"
+                    menuClassName="min-w-[14rem]"
+                    options={[
+                      { value: 'usd', label: copy('basisUsd', 'Based on USD sales') },
+                      { value: 'khr', label: copy('basisKhr', 'Based on KHR sales') },
+                    ]}
+                  />
                 </div>
 
                 {basis === 'usd' ? (

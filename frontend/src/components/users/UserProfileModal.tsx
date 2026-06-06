@@ -5,6 +5,7 @@ import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
+import AppSelect from '../shared/AppSelect.tsx'
 import Modal from '../shared/Modal'
 import OtpModal from '../utils-settings/OtpModal'
 import FilePickerModal from '../files/FilePickerModal'
@@ -1191,14 +1192,24 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
               <div className="grid gap-3 rounded-xl bg-gray-50 p-4 dark:bg-zinc-800/70 sm:grid-cols-[1fr_auto] sm:items-end">
                 <div>
                   <label htmlFor="session-duration-profile" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('session_duration', 'Default login duration')}</label>
-                  <select id="session-duration-profile" name="session_duration" className="input" value={sessionDuration} onChange={(e) => setSessionDuration(e.target.value)}>
-                    <option value="session">{tr('until_browser_closes', 'Until browser closes')}</option>
-                    <option value="1d">{tr('for_1_day', 'For 1 day')}</option>
-                    <option value="3d">{tr('for_3_days', 'For 3 days')}</option>
-                    <option value="7d">{tr('for_7_days', 'For 7 days')}</option>
-                    <option value="14d">{tr('for_14_days', 'For 14 days')}</option>
-                    <option value="30d">{tr('for_30_days', 'For 30 days')}</option>
-                  </select>
+                  <AppSelect
+                    id="session-duration-profile"
+                    name="session_duration"
+                    value={sessionDuration}
+                    onChange={(nextValue) => setSessionDuration(nextValue)}
+                    ariaLabel={tr('session_duration', 'Default login duration')}
+                    className="w-full"
+                    buttonClassName="h-10 w-full"
+                    menuClassName="min-w-[13rem]"
+                    options={[
+                      { value: 'session', label: tr('until_browser_closes', 'Until browser closes') },
+                      { value: '1d', label: tr('for_1_day', 'For 1 day') },
+                      { value: '3d', label: tr('for_3_days', 'For 3 days') },
+                      { value: '7d', label: tr('for_7_days', 'For 7 days') },
+                      { value: '14d', label: tr('for_14_days', 'For 14 days') },
+                      { value: '30d', label: tr('for_30_days', 'For 30 days') },
+                    ]}
+                  />
                 </div>
                 <button className="btn-secondary" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
               </div>
