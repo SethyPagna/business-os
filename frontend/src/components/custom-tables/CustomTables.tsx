@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
 import { useApp, useSync } from '../../AppContext.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import AppSelect from '../shared/AppSelect.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import {
@@ -633,15 +634,18 @@ export default function CustomTables() {
                         value={column.name}
                         onChange={(event) => updateColumn(index, 'name', event.target.value)}
                       />
-                      <select
+                      <AppSelect
                         id={`custom-table-column-type-${index}`}
                         name={`custom_table_column_type_${index}`}
-                        className="input w-36"
                         value={column.type}
-                        onChange={(event) => updateColumn(index, 'type', event.target.value)}
-                      >
-                        {COLUMN_TYPES.map((type) => <option key={type}>{type}</option>)}
-                      </select>
+                        onChange={(nextValue) => updateColumn(index, 'type', nextValue)}
+                        ariaLabel="Column type"
+                        className="w-36"
+                        buttonClassName="h-10 w-full text-sm"
+                        menuClassName="min-w-[9rem]"
+                        optionClassName="text-sm"
+                        options={COLUMN_TYPES.map((type) => ({ value: type, label: type }))}
+                      />
                       <button onClick={() => removeColumn(index)} className="text-xl text-red-400 hover:text-red-600" disabled={savingTable}>x</button>
                     </div>
                   ))}
@@ -668,16 +672,21 @@ export default function CustomTables() {
                 <div key={column.name}>
                   <label htmlFor={`custom-table-row-${column.name}`} className="mb-1 block text-sm font-medium capitalize text-gray-700 dark:text-gray-300">{column.name}</label>
                   {column.type === 'boolean' ? (
-                    <select
+                    <AppSelect
                       id={`custom-table-row-${column.name}`}
                       name={`custom_table_row_${column.name}`}
-                      className="input"
                       value={toInputValue(rowForm[column.name]) || '0'}
-                      onChange={(event) => setRowForm((current) => ({ ...current, [column.name]: event.target.value }))}
-                    >
-                      <option value="0">{t('no') || 'No'}</option>
-                      <option value="1">{t('yes') || 'Yes'}</option>
-                    </select>
+                      onChange={(nextValue) => setRowForm((current) => ({ ...current, [column.name]: nextValue }))}
+                      ariaLabel={column.name}
+                      className="w-full"
+                      buttonClassName="h-10 w-full text-sm"
+                      menuClassName="min-w-[8rem]"
+                      optionClassName="text-sm"
+                      options={[
+                        { value: '0', label: t('no') || 'No' },
+                        { value: '1', label: t('yes') || 'Yes' },
+                      ]}
+                    />
                   ) : column.type === 'long_text' ? (
                     <textarea
                       id={`custom-table-row-${column.name}`}

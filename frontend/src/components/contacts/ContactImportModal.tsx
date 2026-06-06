@@ -2,6 +2,7 @@ import type { ComponentType, ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import ModalBase from '../shared/Modal'
 import FilePickerModal from '../files/FilePickerModal'
+import AppSelect from '../shared/AppSelect.tsx'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
@@ -351,32 +352,42 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
             <label htmlFor="contacts-conflict-mode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               Default conflict action
             </label>
-            <select
+            <AppSelect
               id="contacts-conflict-mode"
               name="contacts_conflict_mode"
-              className="input"
               value={conflictMode}
-              onChange={(event) => setConflictMode(event.target.value as ConflictMode)}
-            >
-              <option value="skip">Skip existing records</option>
-              <option value="merge">Merge into empty fields</option>
-              <option value="overwrite">Overwrite existing records</option>
-            </select>
+              onChange={(nextValue) => setConflictMode(nextValue as ConflictMode)}
+              ariaLabel="Default conflict action"
+              className="w-full"
+              buttonClassName="h-10 w-full text-sm"
+              menuClassName="min-w-[15rem]"
+              optionClassName="text-sm"
+              options={[
+                { value: 'skip', label: 'Skip existing records' },
+                { value: 'merge', label: 'Merge into empty fields' },
+                { value: 'overwrite', label: 'Overwrite existing records' },
+              ]}
+            />
           </div>
           <div>
             <label htmlFor="contacts-field-rule-preset" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
               Contact detail handling
             </label>
-            <select
+            <AppSelect
               id="contacts-field-rule-preset"
-              className="input"
               value={fieldRules.__preset || 'merge_blank_only'}
-              onChange={(event) => applyContactRulePreset(event.target.value as ContactRulePreset)}
-            >
-              <option value="merge_blank_only">Fill blanks only</option>
-              <option value="keep_existing">Keep existing</option>
-              <option value="use_imported">Use imported</option>
-            </select>
+              onChange={(nextValue) => applyContactRulePreset(nextValue as ContactRulePreset)}
+              ariaLabel="Contact detail handling"
+              className="w-full"
+              buttonClassName="h-10 w-full text-sm"
+              menuClassName="min-w-[13rem]"
+              optionClassName="text-sm"
+              options={[
+                { value: 'merge_blank_only', label: 'Fill blanks only' },
+                { value: 'keep_existing', label: 'Keep existing' },
+                { value: 'use_imported', label: 'Use imported' },
+              ]}
+            />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Conflicts focus on same name, same phone/email/contact info, and duplicate membership numbers. Blank customer membership IDs stay auto-generated.
             </p>
