@@ -37,6 +37,15 @@ type PortalTransportModule = typeof import('./api/portalTransport.ts')
 type SystemRuntimeModule = typeof import('./api/systemRuntime.ts')
 type SaleWriteTransportModule = typeof import('./api/saleWriteTransport.ts')
 type OfflineSnapshotTransportModule = typeof import('./api/offlineSnapshotTransport.ts')
+type NotificationSummaryModule = typeof import('./api/notificationSummary.ts')
+type SettingsTransportModule = typeof import('./api/settingsTransport.ts')
+type ProductReadTransportModule = typeof import('./api/productReadTransport.ts')
+type ProductWriteTransportModule = typeof import('./api/productWriteTransport.ts')
+type LookupTransportModule = typeof import('./api/lookupTransport.ts')
+type BranchTransportModule = typeof import('./api/branchTransport.ts')
+type UserReadTransportModule = typeof import('./api/userReadTransport.ts')
+type ActionHistoryTransportModule = typeof import('./api/actionHistoryTransport.ts')
+type ProductQueryParams = Parameters<ProductReadTransportModule['searchProducts']>[0]
 type OfflineVaultKey = CryptoKey | null
 type OfflineRow = AnyRecord & {
   _seq?: number
@@ -79,6 +88,7 @@ const SERVICE_WORKER_UPDATE_INTERVAL_MS = 15 * 60_000
 const OFFLINE_VAULT_IDLE_LOCK_MS = 15 * 60_000
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024
 const OFFLINE_FILE_CHUNK_STATUS_WRITE_CONCURRENCY = 3
+const PENDING_SYNC_PREVIEW_LIMIT = 25
 let offlineMaintenanceStarted = false
 let initialOfflineMaintenanceScheduled = false
 let lastServiceWorkerUpdateAt = 0
@@ -95,6 +105,14 @@ let portalTransportModulePromise: Promise<PortalTransportModule> | null = null
 let systemRuntimeModulePromise: Promise<SystemRuntimeModule> | null = null
 let saleWriteTransportModulePromise: Promise<SaleWriteTransportModule> | null = null
 let offlineSnapshotTransportModulePromise: Promise<OfflineSnapshotTransportModule> | null = null
+let notificationSummaryModulePromise: Promise<NotificationSummaryModule> | null = null
+let settingsTransportModulePromise: Promise<SettingsTransportModule> | null = null
+let productReadTransportModulePromise: Promise<ProductReadTransportModule> | null = null
+let productWriteTransportModulePromise: Promise<ProductWriteTransportModule> | null = null
+let lookupTransportModulePromise: Promise<LookupTransportModule> | null = null
+let branchTransportModulePromise: Promise<BranchTransportModule> | null = null
+let userReadTransportModulePromise: Promise<UserReadTransportModule> | null = null
+let actionHistoryTransportModulePromise: Promise<ActionHistoryTransportModule> | null = null
 let localDbPromise: Promise<any> | null = null
 const lazyApiMethodCache = new Map<string, LazyApiMethod>()
 
@@ -148,6 +166,46 @@ function loadOfflineSnapshotTransportModule(): Promise<OfflineSnapshotTransportM
   return offlineSnapshotTransportModulePromise
 }
 
+function loadNotificationSummaryModule(): Promise<NotificationSummaryModule> {
+  if (!notificationSummaryModulePromise) notificationSummaryModulePromise = import('./api/notificationSummary.ts')
+  return notificationSummaryModulePromise
+}
+
+function loadSettingsTransportModule(): Promise<SettingsTransportModule> {
+  if (!settingsTransportModulePromise) settingsTransportModulePromise = import('./api/settingsTransport.ts')
+  return settingsTransportModulePromise
+}
+
+function loadProductReadTransportModule(): Promise<ProductReadTransportModule> {
+  if (!productReadTransportModulePromise) productReadTransportModulePromise = import('./api/productReadTransport.ts')
+  return productReadTransportModulePromise
+}
+
+function loadProductWriteTransportModule(): Promise<ProductWriteTransportModule> {
+  if (!productWriteTransportModulePromise) productWriteTransportModulePromise = import('./api/productWriteTransport.ts')
+  return productWriteTransportModulePromise
+}
+
+function loadLookupTransportModule(): Promise<LookupTransportModule> {
+  if (!lookupTransportModulePromise) lookupTransportModulePromise = import('./api/lookupTransport.ts')
+  return lookupTransportModulePromise
+}
+
+function loadBranchTransportModule(): Promise<BranchTransportModule> {
+  if (!branchTransportModulePromise) branchTransportModulePromise = import('./api/branchTransport.ts')
+  return branchTransportModulePromise
+}
+
+function loadUserReadTransportModule(): Promise<UserReadTransportModule> {
+  if (!userReadTransportModulePromise) userReadTransportModulePromise = import('./api/userReadTransport.ts')
+  return userReadTransportModulePromise
+}
+
+function loadActionHistoryTransportModule(): Promise<ActionHistoryTransportModule> {
+  if (!actionHistoryTransportModulePromise) actionHistoryTransportModulePromise = import('./api/actionHistoryTransport.ts')
+  return actionHistoryTransportModulePromise
+}
+
 function getAuthTransportMethod<T extends keyof AuthTransportModule>(name: T): (...args: any[]) => Promise<any> {
   return (...args) =>
     loadAuthTransportModule().then((module) => {
@@ -193,6 +251,29 @@ function getLazyApiMethod(name: string): LazyApiMethod {
       }))
   }
   return lazyApiMethodCache.get(name) as LazyApiMethod
+}
+
+function serializePendingSyncPreview(rows: OfflineRow[] = []): AnyRecord[] {
+  const preview: AnyRecord[] = []
+  const limit = Math.min(PENDING_SYNC_PREVIEW_LIMIT, rows.length)
+  for (let index = 0; index < limit; index += 1) {
+    const row = rows[index] || {}
+    preview.push({
+      _seq: row._seq,
+      channel: row.channel,
+      operation: row.operation || null,
+      entity_table: row.entity_table || null,
+      entity_id: row.entity_id ?? null,
+      entity_name: row.entity_name || null,
+      status: String(row.status || 'pending'),
+      created_at: row.created_at || null,
+      updated_at: row.updated_at || null,
+      retry_count: Number(row.retry_count || 0),
+      retry_at: row.retry_at || null,
+      error: row.error || null,
+    })
+  }
+  return preview
 }
 
 async function mapOfflineFileChunkStatusUpdates(
@@ -967,6 +1048,168 @@ const staticApi = {
   async getAppBootstrap() {
     const module = await loadAppBootstrapModule()
     return module.getAppBootstrap()
+  },
+
+  async getNotificationSummary() {
+    const module = await loadNotificationSummaryModule()
+    return module.getNotificationSummary()
+  },
+
+  async getPendingSyncState() {
+    const db = await getOfflineDb()
+    const rows = await db.sync_queue
+      .orderBy('_seq')
+      .toArray()
+      .catch(() => [])
+    const sorted = [...rows].sort((left, right) => {
+      const byCreated = String(left?.created_at || '').localeCompare(String(right?.created_at || ''))
+      if (byCreated !== 0) return byCreated
+      return Number(left?._seq || 0) - Number(right?._seq || 0)
+    }) as OfflineRow[]
+    const counts = sorted.reduce((acc, item) => {
+      const status = String(item?.status || 'pending')
+      acc.total += 1
+      if (status === 'syncing') acc.syncing += 1
+      else if (status === 'conflict') acc.conflict += 1
+      else if (status === 'failed') acc.failed += 1
+      else acc.pending += 1
+      return acc
+    }, { total: 0, pending: 0, syncing: 0, failed: 0, conflict: 0 })
+    return {
+      ...counts,
+      oldest_created_at: sorted[0]?.created_at || null,
+      writes_require_server: true,
+      items: serializePendingSyncPreview(sorted),
+    }
+  },
+
+  async retryPendingSyncNow() {
+    const module = await loadSaleWriteTransportModule()
+    return module.syncPendingSalesQueue({ force: true })
+  },
+
+  async refreshOfflineDeviceSnapshot(options: unknown = {}) {
+    const module = await loadOfflineSnapshotTransportModule()
+    return module.refreshOfflineDeviceSnapshot(options as Record<string, unknown>)
+  },
+
+  async getSettings(options: unknown = {}) {
+    const module = await loadSettingsTransportModule()
+    return module.getSettings(options as Record<string, unknown>)
+  },
+
+  async saveSettings(updates: unknown = {}, options: unknown = {}) {
+    const module = await loadSettingsTransportModule()
+    return module.saveSettings(updates as Record<string, unknown>, options as Record<string, unknown>)
+  },
+
+  async getProducts() {
+    const module = await loadProductReadTransportModule()
+    return module.getProducts()
+  },
+
+  async searchProducts(params: unknown = {}) {
+    const module = await loadProductReadTransportModule()
+    return module.searchProducts(params as ProductQueryParams)
+  },
+
+  async getProductBootstrap(params: unknown = {}) {
+    const module = await loadProductReadTransportModule()
+    return module.getProductBootstrap(params as ProductQueryParams)
+  },
+
+  async getProductsByIds(ids: unknown[] = [], params: unknown = {}) {
+    const module = await loadProductReadTransportModule()
+    return module.getProductsByIds(ids, params as ProductQueryParams)
+  },
+
+  async getProductFilters(params: unknown = {}) {
+    const module = await loadProductReadTransportModule()
+    return module.getProductFilters(params as ProductQueryParams)
+  },
+
+  async getProductLookupUsage() {
+    const module = await loadProductReadTransportModule()
+    return module.getProductLookupUsage()
+  },
+
+  async createProduct(payload: unknown = {}) {
+    const module = await loadProductWriteTransportModule()
+    return module.createProduct(payload as Record<string, unknown>)
+  },
+
+  async updateProduct(id: unknown, payload: unknown = {}) {
+    const module = await loadProductWriteTransportModule()
+    return module.updateProduct(id as string | number, payload as Record<string, unknown>)
+  },
+
+  async deleteProduct(id: unknown) {
+    const module = await loadProductWriteTransportModule()
+    return module.deleteProduct(id as string | number)
+  },
+
+  async createProductVariant(payload: unknown = {}) {
+    const module = await loadProductWriteTransportModule()
+    return module.createProductVariant(payload as Record<string, unknown>)
+  },
+
+  async bulkImportProducts(payload: unknown = {}) {
+    const module = await loadProductWriteTransportModule()
+    return module.bulkImportProducts(payload as Record<string, unknown>)
+  },
+
+  async getCategories() {
+    const module = await loadLookupTransportModule()
+    return module.getCategories()
+  },
+
+  async getUnits() {
+    const module = await loadLookupTransportModule()
+    return module.getUnits()
+  },
+
+  async getBranches() {
+    const module = await loadBranchTransportModule()
+    return module.getBranches()
+  },
+
+  async getUsers() {
+    const module = await loadUserReadTransportModule()
+    return module.getUsers()
+  },
+
+  async getActionHistory(scope: unknown = 'global', limit: unknown = 10, params: unknown = {}) {
+    const module = await loadActionHistoryTransportModule()
+    return module.getActionHistory(
+      scope as string | number,
+      limit as string | number,
+      params as Parameters<ActionHistoryTransportModule['getActionHistory']>[2],
+    )
+  },
+
+  async getActionHistoryUsers() {
+    const module = await loadActionHistoryTransportModule()
+    return module.getActionHistoryUsers()
+  },
+
+  async createActionHistory(payload: unknown = {}) {
+    const module = await loadActionHistoryTransportModule()
+    return module.createActionHistory(payload as Record<string, unknown>)
+  },
+
+  async updateActionHistory(id: unknown, payload: unknown = {}) {
+    const module = await loadActionHistoryTransportModule()
+    return module.updateActionHistory(id as string | number, payload as Record<string, unknown>)
+  },
+
+  async undoActionHistory(id: unknown) {
+    const module = await loadActionHistoryTransportModule()
+    return module.undoActionHistory(id as string | number)
+  },
+
+  async redoActionHistory(id: unknown) {
+    const module = await loadActionHistoryTransportModule()
+    return module.redoActionHistory(id as string | number)
   },
 
   setSyncToken(token: unknown) {

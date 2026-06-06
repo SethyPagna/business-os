@@ -19,6 +19,7 @@ const LATEST_REPORT_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/move766-prod
 type ConsoleEntry = { type: string; text: string }
 type ObservedResponse = { method: string; resourceType: string; status: number; url: string }
 type RuntimeHealth = { status?: string; runtime?: { sourceHash?: string; frontend?: { hash?: string } } }
+type ApiAccessEntry = { name: string; at: number }
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -120,10 +121,31 @@ async function main(): Promise<void> {
     const navStarted = Date.now()
     await page.goto('/products', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await hydratePlaywrightPage(page, storageState)
+    await page.evaluate(() => {
+      const win = window as typeof window & {
+        api?: Record<PropertyKey, unknown>
+        __move766ApiAccessLog?: ApiAccessEntry[]
+      }
+      if (!win.api || win.__move766ApiAccessLog) return
+      const originalApi = win.api
+      win.__move766ApiAccessLog = []
+      win.api = new Proxy(originalApi, {
+        get(target, prop, receiver) {
+          if (typeof prop === 'string') {
+            win.__move766ApiAccessLog?.push({ name: prop, at: Date.now() })
+          }
+          return Reflect.get(target, prop, receiver)
+        },
+      })
+    })
     await page.getByText('Products', { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
     const readyMs = Date.now() - navStarted
     await page.waitForTimeout(400)
     const scriptsBeforeWrite = [...loadedScripts].sort()
+    const apiAccessBeforeWrite = await page.evaluate(() => {
+      const win = window as typeof window & { __move766ApiAccessLog?: ApiAccessEntry[] }
+      return [...(win.__move766ApiAccessLog || [])]
+    })
 
     await openAddProductModal(page)
     await saveNewProduct(page, productName)
@@ -131,6 +153,10 @@ async function main(): Promise<void> {
     await deleteVisibleProduct(page)
     await page.waitForTimeout(600)
     const scriptsAfterWrite = [...loadedScripts].sort()
+    const apiAccessAfterWrite = await page.evaluate(() => {
+      const win = window as typeof window & { __move766ApiAccessLog?: ApiAccessEntry[] }
+      return [...(win.__move766ApiAccessLog || [])]
+    })
 
     const relevantConsole = consoleMessages.filter((entry) => !isIgnoredConsole(entry.text))
     const createCalls = observedResponses.filter((entry) => /\/api\/products$/i.test(entry.url) && entry.method === 'POST')
@@ -164,6 +190,9 @@ async function main(): Promise<void> {
       },
       scriptsBeforeWrite,
       scriptsAfterWrite,
+      apiAccessBeforeWrite,
+      apiAccessAfterWrite,
+      apiAccessNewDuringWrite: apiAccessAfterWrite.slice(apiAccessBeforeWrite.length),
       observedResponses,
       screenshotPath,
     }

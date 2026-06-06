@@ -181,6 +181,7 @@ const deferredModulePreloadPrefixes = [
   'assets/portal-content-i18n-',
   'assets/backup-reset-tools-',
   'assets/settings-otp-modal-',
+  'assets/settings-api-',
   'assets/Sidebar-',
   'assets/user-profile-modal-',
   'assets/user-detail-sheet-',
@@ -305,6 +306,7 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'api-http-core'
     }
+    if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
     if (normalized.endsWith('/src/api/contactWriteTransport.ts')) return 'contact-write-api'
@@ -317,6 +319,10 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/aiTransport.ts')) return 'ai-api'
     if (normalized.endsWith('/src/api/salesTransport.ts')) return 'sales-read-api'
     if (normalized.endsWith('/src/api/saleWriteTransport.ts')) return 'sale-write-api'
+    if (
+      normalized.endsWith('/src/api/notificationSummary.ts')
+      || normalized.endsWith('/src/api/cooldownFallbacks.ts')
+    ) return 'notification-api'
     if (normalized.endsWith('/src/api/productWriteTransport.ts')) return 'product-write-api'
     if (normalized.endsWith('/src/api/productImageUploadTransport.ts')) return 'product-image-upload-api'
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
@@ -333,7 +339,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
     if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
     if (normalized.endsWith('/src/api/offlineSnapshotTransport.ts')) return 'offline-snapshot-api'
+    if (normalized.endsWith('/src/api/settingsTransport.ts')) return 'settings-api'
     if (normalized.endsWith('/src/api/requestIds.ts')) return 'request-ids'
+    if (normalized.endsWith('/src/api/conflicts.ts')) return 'api-conflicts'
     if (
       normalized.endsWith('/src/api/productReadTransport.ts')
       || normalized.endsWith('/src/api/lookupTransport.ts')

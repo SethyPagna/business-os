@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType } from 'react'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import Modal from '../../shared/Modal'
+import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
 import BranchStockAdjuster from './BranchStockAdjuster'
 import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from '../../../utils/pricing.ts'
@@ -330,6 +331,59 @@ export default function ProductForm({
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
+
+  const categoryOptions = useMemo<AppSelectOption[]>(() => {
+    const currentCategory = String(form.category || '')
+    const options: AppSelectOption[] = [
+      { value: '', label: tr('category', 'Category', 'ប្រភេទ') },
+      ...categories.map((category) => ({ value: category.name, label: category.name })),
+    ]
+    if (currentCategory && !options.some((option) => String(option.value) === currentCategory)) {
+      options.splice(1, 0, { value: currentCategory, label: currentCategory })
+    }
+    return options
+  }, [categories, form.category])
+
+  const unitOptions = useMemo<AppSelectOption[]>(() => {
+    const currentUnit = String(form.unit || 'pcs')
+    const options = units.map((unit) => ({ value: unit.name, label: unit.name }))
+    if (currentUnit && !options.some((option) => String(option.value) === currentUnit)) {
+      return [{ value: currentUnit, label: currentUnit }, ...options]
+    }
+    return options
+  }, [form.unit, units])
+
+  const parentGroupOptions = useMemo<AppSelectOption[]>(() => {
+    const currentParentId = form.parent_id ? String(form.parent_id) : ''
+    const options: AppSelectOption[] = [
+      { value: '', label: tr('group_parent_none', 'No group parent (standalone or root item)', 'គ្មានក្រុមមេ (ឯករាជ្យ ឬ ជាឫសក្រុម)') },
+      ...availableGroupParents.map((candidate) => ({
+        value: String(candidate.id || ''),
+        label: candidate.name || tr('unnamed_group', 'Unnamed group', 'ក្រុមគ្មានឈ្មោះ'),
+      })),
+    ]
+    if (currentParentId && !options.some((option) => String(option.value) === currentParentId)) {
+      options.splice(1, 0, { value: currentParentId, label: tr('current_group_parent', 'Current group parent', 'ក្រុមមេបច្ចុប្បន្ន') })
+    }
+    return options
+  }, [availableGroupParents, form.parent_id])
+
+  const discountTypeOptions = useMemo<AppSelectOption[]>(() => [
+    { value: 'percent', label: tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ') },
+    { value: 'fixed', label: tr('discount_fixed', 'Fixed amount', 'បញ្ចុះជាចំនួនថេរ') },
+  ], [])
+
+  const initialBranchOptions = useMemo<AppSelectOption[]>(() => {
+    const currentBranchId = form.branch_id ? String(form.branch_id) : ''
+    const options = branches.map((branch) => ({
+      value: branch.id,
+      label: branch.is_default ? `${branch.name} (${tr('default_label', 'default', 'លំនាំដើម')})` : branch.name,
+    }))
+    if (currentBranchId && !options.some((option) => String(option.value) === currentBranchId)) {
+      return [{ value: currentBranchId, label: tr('current_branch', 'Current branch', 'សាខាបច្ចុប្បន្ន') }, ...options]
+    }
+    return options
+  }, [branches, form.branch_id])
 
   useEffect(() => {
     setForm({
@@ -665,12 +719,16 @@ export default function ProductForm({
             </div>
             <div>
               <label htmlFor="product-category" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('category', 'Category', 'ប្រភេទ')}</label>
-              <select id="product-category" name="product_category" className="input" value={form.category || ''} onChange={(event) => setField('category', event.target.value)}>
-                <option value="">{tr('category', 'Category', 'ប្រភេទ')}</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.name}>{category.name}</option>
-                ))}
-              </select>
+              <AppSelect
+                id="product-category"
+                name="product_category"
+                value={form.category || ''}
+                options={categoryOptions}
+                onChange={(value) => setField('category', value)}
+                ariaLabel={tr('category', 'Category', 'ប្រភេទ')}
+                className="w-full"
+                buttonClassName="input h-auto w-full"
+              />
             </div>
             <div>
               <label htmlFor="product-brand" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('brand', 'Brand', 'ម៉ាក')}</label>
@@ -691,34 +749,35 @@ export default function ProductForm({
             </div>
             <div>
               <label htmlFor="product-unit" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('unit')}</label>
-              <select id="product-unit" name="product_unit" className="input" value={form.unit || 'pcs'} onChange={(event) => setField('unit', event.target.value)}>
-                {units.map((unit) => (
-                  <option key={unit.id} value={unit.name}>{unit.name}</option>
-                ))}
-              </select>
+              <AppSelect
+                id="product-unit"
+                name="product_unit"
+                value={form.unit || 'pcs'}
+                options={unitOptions}
+                onChange={(value) => setField('unit', value)}
+                ariaLabel={t('unit') || 'Unit'}
+                className="w-full"
+                buttonClassName="input h-auto w-full"
+              />
             </div>
             <div>
               <label htmlFor="product-parent-group" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
                 {tr('group_parent', 'Group Parent', 'ក្រុមមេ')}
               </label>
-              <select
+              <AppSelect
                 id="product-parent-group"
                 name="product_parent_group"
-                className="input"
                 value={form.parent_id || ''}
-                onChange={(event) => {
-                  const nextParentId = event.target.value ? Number(event.target.value) : null
+                options={parentGroupOptions}
+                onChange={(value) => {
+                  const nextParentId = value ? Number(value) : null
                   setField('parent_id', nextParentId)
                   if (nextParentId) setField('is_group', 0)
                 }}
-              >
-                <option value="">{tr('group_parent_none', 'No group parent (standalone or root item)', 'គ្មានក្រុមមេ (ឯករាជ្យ ឬ ជាឫសក្រុម)')}</option>
-                {availableGroupParents.map((candidate) => (
-                  <option key={String(candidate.id || '')} value={String(candidate.id || '')}>
-                    {candidate.name}
-                  </option>
-                ))}
-              </select>
+                ariaLabel={tr('group_parent', 'Group Parent', 'ក្រុមមេ')}
+                className="w-full"
+                buttonClassName="input h-auto w-full"
+              />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 {form.parent_id
                   ? tr('group_parent_child_hint', 'This product will stay as a child variant inside the selected group.', 'ផលិតផលនេះនឹងនៅជាវ៉ារ្យ៉ង់កូននៅក្នុងក្រុមដែលបានជ្រើស។')
@@ -882,14 +941,15 @@ export default function ProductForm({
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_type', 'Discount type', 'ប្រភេទបញ្ចុះតម្លៃ')}</span>
-                <select
-                  className="input"
+                <AppSelect
+                  id="product-discount-type"
                   value={form.discount_type || 'percent'}
-                  onChange={(event) => setField('discount_type', event.target.value)}
-                >
-                  <option value="percent">{tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ')}</option>
-                  <option value="fixed">{tr('discount_fixed', 'Fixed amount', 'បញ្ចុះជាចំនួនថេរ')}</option>
-                </select>
+                  options={discountTypeOptions}
+                  onChange={(value) => setField('discount_type', value)}
+                  ariaLabel={tr('discount_type', 'Discount type', 'ប្រភេទបញ្ចុះតម្លៃ')}
+                  className="w-full"
+                  buttonClassName="input h-auto w-full"
+                />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_label', 'Badge label', 'ស្លាកប្រូម៉ូសិន')}</span>
@@ -1065,13 +1125,16 @@ export default function ProductForm({
           {!product && branches.length > 0 ? (
             <div>
               <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
-              <select id="product-initial-branch" name="product_initial_branch" className="input" value={form.branch_id || ''} onChange={(event) => setField('branch_id', event.target.value)}>
-                {branches.map((branch) => (
-                  <option key={branch.id} value={branch.id}>
-                    {branch.name}{branch.is_default ? ` (${tr('default_label', 'default', 'លំនាំដើម')})` : ''}
-                  </option>
-                ))}
-              </select>
+              <AppSelect
+                id="product-initial-branch"
+                name="product_initial_branch"
+                value={form.branch_id || ''}
+                options={initialBranchOptions}
+                onChange={(value) => setField('branch_id', value)}
+                ariaLabel={tr('assign_initial_branch', 'Assign Initial Stock to Branch', 'កំណត់ស្តុកដំបូងទៅសាខា')}
+                className="w-full"
+                buttonClassName="input h-auto w-full"
+              />
             </div>
           ) : null}
 
