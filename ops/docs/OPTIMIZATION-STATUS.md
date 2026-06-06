@@ -8,8 +8,8 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 811, share POS product brand and supplier
-  filter option normalization with the Products helper layer.
+- Latest completed move: Move 812, share POS comma search-term normalization
+  with the Products helper layer.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `a3fd08ced369f325`
+  `0dd2009439038702`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -30,15 +30,15 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T21-15-59-982Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T21-41-56-700Z/report.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T21-16-36-948Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T21-42-34-043Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T21-15-47-933Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T21-41-34-607Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -2444,7 +2444,7 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 811
+## Recent Move 811
 
 - POS filter option normalization now reuses the Products helper layer.
   `frontend/src/components/pos/POS.tsx` calls `buildProductBrandOptions` and
@@ -2483,6 +2483,53 @@ Recent route-level win:
   R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
   active image `business-os:v6.0.0-202606070504` were preserved.
 - Current plan position after Move 811: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Latest Move 812
+
+- POS comma search-term parsing now reuses the Products helper layer.
+  `frontend/src/components/pos/POS.tsx` calls `buildProductSearchTerms` from
+  `frontend/src/components/products/helpers/productFilterHelpers.ts` instead
+  of keeping a route-local `deferredSearch.split(...)` parser.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` requires the shared
+  search helper import and blocks the old local comma parser.
+- Source checks passed: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productFilterHelpers.test.ts`,
+  `node frontend\tests\productSearchPagination.test.ts`, frontend typecheck,
+  JSX/source check, frontend utility suite, and frontend production build. The
+  POS chunk is `76.50 kB` / `19.86 kB` gzip, Products is `86.85 kB` /
+  `23.30 kB` gzip, and `product-shared` is `6.83 kB` / `2.62 kB` gzip.
+- Docker/runtime proof: `business-os:v6.0.0-202606070530` is running healthy
+  after backup `ops/runtime/docker-release/backups/20260607-054018`.
+- Live route proof: POS 272 ms, Products 234 ms, Inventory 255 ms, Dashboard
+  207 ms, and public catalog 197 ms, all with zero failed requests and zero
+  console errors.
+- Full live suite passed: broad UI 66 signals on frontend hash
+  `0dd2009439038702`, public Cloudflare portal 20 products, zero failed
+  responses, zero page errors, zero relevant console messages, CSP present, and
+  post-live hygiene loaded.
+- Browser/Playwright proof: the in-app Browser loaded the public catalog with
+  no blank shell, no runtime overlay, and zero relevant app console messages.
+  A focused authenticated Playwright POS probe typed `AHC, Mask`, verified both
+  `ahc` and `mask` chips, narrowed POS to `1-4 / 4` real AHC mask cards, and
+  saw no no-data flash, console error, or page error.
+- Follow-up finding: public catalog comma search currently keeps `AHC, Mask`
+  at the full `5,539 result(s)` count in the rendered UI. The backend portal
+  search already accepts comma terms, so the next focused slice should
+  synchronize the public UI/request path.
+- Cleanup reclaimed 412,701,800 bytes from ignored regenerable artifacts:
+  `frontend/dist` (31,825,872 bytes) and `release` (380,875,928 bytes). No
+  source or business data was deleted.
+- Standard retention cleanup then removed 333,540 bytes of stale runtime
+  reports, Docker-release backup `20260607-041754` (5,047,616 bytes) beyond the
+  latest-three retention policy, old Docker rollback tag
+  `business-os:v6.0.0-202606070314`, and 38.4 MB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070530` were preserved.
+- Current plan position after Move 812: Phase 8.4 active; Phase 26 at 51
   completed organization moves; Phase 28 active with R2/access follow-up open;
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.

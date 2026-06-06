@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 811.
+- Latest completed implementation move in this roadmap: Move 812.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12562,6 +12562,58 @@ Move 811 status:
   R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
   active image `business-os:v6.0.0-202606070504` were preserved.
 - Current plan position after Move 811: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 812 status:
+- Move 812 shares POS search-term normalization with Products. `POS.tsx` now
+  calls `buildProductSearchTerms` from `productFilterHelpers.ts` instead of
+  keeping a route-local `deferredSearch.split(...)` parser for comma search
+  chips and AND/OR product-card filtering.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` requires the
+  shared search helper import and blocks the old route-local comma parser.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productFilterHelpers.test.ts`,
+  `node frontend\tests\productSearchPagination.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build emits POS
+  at 76.50 kB / 19.86 kB gzip, Products at 86.85 kB / 23.30 kB gzip, and
+  `product-shared` at 6.83 kB / 2.62 kB gzip.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070530` was built and
+  deployed healthy after backup
+  `ops/runtime/docker-release/backups/20260607-054018`.
+- Route proof: live traces passed with zero failed requests and zero console
+  errors: POS 272 ms / 29 requests / 22 scripts / 2 API, Products 234 ms / 35
+  requests / 27 scripts / 2 API, Inventory 255 ms / 36 requests / 29 scripts /
+  2 API, Dashboard 207 ms / 24 requests / 18 scripts / 2 API, and public
+  catalog 197 ms / 21 requests / 16 scripts / 1 API.
+- Full live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. Broad
+  UI checked 66 signals on frontend hash `0dd2009439038702` with zero relevant
+  console messages; public Cloudflare portal rendered 20 products with zero
+  failed responses, zero page errors, zero relevant console messages, and
+  enforced CSP present; post-live hygiene passed with loaded dataset status.
+- Browser/Playwright proof: the in-app Browser loaded the public catalog with
+  no blank shell, no runtime overlay, and zero relevant app console messages.
+  A focused authenticated Playwright POS probe typed `AHC, Mask`, saw both
+  `ahc` and `mask` chips, narrowed POS to `1-4 / 4` real AHC mask cards, and
+  reported zero relevant console/page errors.
+- Follow-up finding: public catalog comma search still renders the full
+  `5,539 result(s)` count for `AHC, Mask`; the portal backend already accepts
+  comma terms, so the next slice should synchronize the public UI/request path.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,825,872 bytes) and
+  `release` (380,875,928 bytes) were removed for 412,701,800 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 333,540
+  bytes of stale runtime reports, Docker-release backup `20260607-041754`
+  (5,047,616 bytes) beyond the latest-three policy, old Docker rollback tag
+  `business-os:v6.0.0-202606070314`, and 38.4 MB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070530` were preserved.
+- Current plan position after Move 812: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

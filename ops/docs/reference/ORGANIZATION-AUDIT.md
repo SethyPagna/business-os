@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-06T21:20:39.777Z
+Generated: 2026-06-06T21:56:15.899Z
 
 ## Summary
 
@@ -63,9 +63,9 @@ Generated: 2026-06-06T21:20:39.777Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 12569 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 12621 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8521 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8587 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4006 | frontend/components/inventory |
@@ -73,12 +73,12 @@ Generated: 2026-06-06T21:20:39.777Z
 | frontend/src/components/catalog/CatalogPage.tsx | 3602 | frontend/components/catalog |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3432 | ops/docs/reference |
 | ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3235 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 3245 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |
-| ops/docs/OPTIMIZATION-STATUS.md | 2489 | ops/docs |
-| frontend/src/components/pos/POS.tsx | 2456 | frontend/components/pos |
+| ops/docs/OPTIMIZATION-STATUS.md | 2536 | ops/docs |
+| frontend/src/components/pos/POS.tsx | 2453 | frontend/components/pos |
 | backend/src/routes/products.ts | 2277 | backend/routes |
 | ops/docs/reference/PERFORMANCE-SCAN.md | 2179 | ops/docs/reference |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
@@ -101,7 +101,7 @@ Generated: 2026-06-06T21:20:39.777Z
 | frontend/src/components/products/Products.tsx | 55 | frontend/components/products |
 | frontend/src/components/inventory/Inventory.tsx | 46 | frontend/components/inventory |
 | frontend/src/api/methods.ts | 41 | frontend/api |
-| frontend/src/components/pos/POS.tsx | 37 | frontend/components/pos |
+| frontend/src/components/pos/POS.tsx | 38 | frontend/components/pos |
 | frontend/src/web-api.ts | 36 | frontend/src/web-api.ts |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/contacts/CustomersTab.tsx | 24 | frontend/components/contacts |

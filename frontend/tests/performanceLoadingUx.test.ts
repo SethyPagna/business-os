@@ -2947,6 +2947,16 @@ assert.match(
 )
 assert.match(
   pos,
+  /import \{ buildProductSearchTerms \} from '\.\.\/products\/helpers\/productFilterHelpers\.ts'/,
+  'POS should reuse shared product search-term normalization',
+)
+assert.doesNotMatch(
+  pos,
+  /deferredSearch\.split\(/,
+  'POS should not keep a route-local comma search parser',
+)
+assert.match(
+  pos,
   /import \{ buildProductSupplierOptions \} from '\.\.\/products\/helpers\/productMenuHelpers\.ts'/,
   'POS should reuse shared product supplier option normalization',
 )

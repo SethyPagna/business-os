@@ -1825,57 +1825,57 @@ Total files documented: **263**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getPosStatusLabel` | function | 105 |
-| 2 | `loadContactOptionUtilsModule` | function | 111 |
-| 3 | `parseContactOptions` | function | 142 |
-| 4 | `isPlainRecord` | function | 333 |
-| 5 | `normalizeCategory` | function | 337 |
-| 6 | `loadPosProductBootstrap` | function | 352 |
-| 7 | `searchPosCatalogProducts` | function | 356 |
-| 8 | `loadPosProductFilters` | function | 360 |
-| 9 | `loadPosCategories` | function | 364 |
-| 10 | `getContactReadTransport` | function | 373 |
-| 11 | `getContactWriteTransport` | function | 378 |
-| 12 | `getPortalTransport` | function | 383 |
-| 13 | `getSaleWriteTransport` | function | 388 |
-| 14 | `loadPosCustomers` | function | 393 |
-| 15 | `loadPosDeliveryContacts` | function | 398 |
-| 16 | `createPosCustomer` | function | 403 |
-| 17 | `createPosDeliveryContact` | function | 408 |
-| 18 | `lookupPosPortalMembership` | function | 413 |
-| 19 | `createPosSale` | function | 418 |
-| 20 | `normalizeOrder` | function | 423 |
-| 21 | `getErrorMessage` | function | 434 |
-| 22 | `asText` | function | 438 |
-| 23 | `asNumber` | function | 442 |
-| 24 | `allTermsMatch` | function | 446 |
-| 25 | `ProductDiscountBadge` | function | 460 |
-| 26 | `POS` | component/function | 480 |
-| 27 | `setPersistedCat` | const arrow | 511 |
-| 28 | `setPersistedBrand` | const arrow | 512 |
-| 29 | `setPersistedBranch` | const arrow | 513 |
-| 30 | `setPersistedStock` | const arrow | 514 |
-| 31 | `setPersistedGroup` | const arrow | 515 |
-| 32 | `setPersistedSupplier` | const arrow | 516 |
-| 33 | `setPersistedInitial` | const arrow | 517 |
-| 34 | `addNewOrder` | const arrow | 578 |
-| 35 | `closeOrder` | const arrow | 590 |
-| 36 | `promise` | const arrow | 732 |
-| 37 | `selectCustomer` | const arrow | 1063 |
-| 38 | `applyCustomerOption` | const arrow | 1111 |
-| 39 | `clearCustomer` | const arrow | 1125 |
-| 40 | `handleAddCustomer` | const arrow | 1133 |
-| 41 | `selectDelivery` | const arrow | 1170 |
-| 42 | `clearDelivery` | const arrow | 1175 |
-| 43 | `handleAddDelivery` | const arrow | 1177 |
-| 44 | `addToCart` | function | 1406 |
-| 45 | `updateQty` | const arrow | 1445 |
-| 46 | `updatePrice` | const arrow | 1453 |
-| 47 | `updateItemBranch` | const arrow | 1477 |
-| 48 | `handleDiscountUsd` | const arrow | 1546 |
-| 49 | `handleDiscountKhr` | const arrow | 1547 |
-| 50 | `handleMembershipUnits` | const arrow | 1548 |
-| 51 | `handleCheckout` | const arrow | 1587 |
+| 1 | `getPosStatusLabel` | function | 106 |
+| 2 | `loadContactOptionUtilsModule` | function | 112 |
+| 3 | `parseContactOptions` | function | 143 |
+| 4 | `isPlainRecord` | function | 334 |
+| 5 | `normalizeCategory` | function | 338 |
+| 6 | `loadPosProductBootstrap` | function | 353 |
+| 7 | `searchPosCatalogProducts` | function | 357 |
+| 8 | `loadPosProductFilters` | function | 361 |
+| 9 | `loadPosCategories` | function | 365 |
+| 10 | `getContactReadTransport` | function | 374 |
+| 11 | `getContactWriteTransport` | function | 379 |
+| 12 | `getPortalTransport` | function | 384 |
+| 13 | `getSaleWriteTransport` | function | 389 |
+| 14 | `loadPosCustomers` | function | 394 |
+| 15 | `loadPosDeliveryContacts` | function | 399 |
+| 16 | `createPosCustomer` | function | 404 |
+| 17 | `createPosDeliveryContact` | function | 409 |
+| 18 | `lookupPosPortalMembership` | function | 414 |
+| 19 | `createPosSale` | function | 419 |
+| 20 | `normalizeOrder` | function | 424 |
+| 21 | `getErrorMessage` | function | 435 |
+| 22 | `asText` | function | 439 |
+| 23 | `asNumber` | function | 443 |
+| 24 | `allTermsMatch` | function | 447 |
+| 25 | `ProductDiscountBadge` | function | 461 |
+| 26 | `POS` | component/function | 481 |
+| 27 | `setPersistedCat` | const arrow | 512 |
+| 28 | `setPersistedBrand` | const arrow | 513 |
+| 29 | `setPersistedBranch` | const arrow | 514 |
+| 30 | `setPersistedStock` | const arrow | 515 |
+| 31 | `setPersistedGroup` | const arrow | 516 |
+| 32 | `setPersistedSupplier` | const arrow | 517 |
+| 33 | `setPersistedInitial` | const arrow | 518 |
+| 34 | `addNewOrder` | const arrow | 579 |
+| 35 | `closeOrder` | const arrow | 591 |
+| 36 | `promise` | const arrow | 733 |
+| 37 | `selectCustomer` | const arrow | 1064 |
+| 38 | `applyCustomerOption` | const arrow | 1112 |
+| 39 | `clearCustomer` | const arrow | 1126 |
+| 40 | `handleAddCustomer` | const arrow | 1134 |
+| 41 | `selectDelivery` | const arrow | 1171 |
+| 42 | `clearDelivery` | const arrow | 1176 |
+| 43 | `handleAddDelivery` | const arrow | 1178 |
+| 44 | `addToCart` | function | 1403 |
+| 45 | `updateQty` | const arrow | 1442 |
+| 46 | `updatePrice` | const arrow | 1450 |
+| 47 | `updateItemBranch` | const arrow | 1474 |
+| 48 | `handleDiscountUsd` | const arrow | 1543 |
+| 49 | `handleDiscountKhr` | const arrow | 1544 |
+| 50 | `handleMembershipUnits` | const arrow | 1545 |
+| 51 | `handleCheckout` | const arrow | 1584 |
 
 ### 3.119 `frontend/src/components/pos/posCore.ts`
 

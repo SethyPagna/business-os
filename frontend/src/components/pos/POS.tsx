@@ -61,6 +61,7 @@ import { calculateProductDiscount, normalizePriceValue } from '../../utils/prici
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
+import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
 import {
   buildProductLightboxState,
   getProductGalleryImages,
@@ -1207,11 +1208,7 @@ export default function POS() {
 
 // Product filter: comma-separated terms, AND/OR mode (same as Products page)
   const deferredSearch = useDeferredValue(search)
-  const searchTerms = useMemo(() => (
-    deferredSearch.trim()
-      ? deferredSearch.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean)
-      : []
-  ), [deferredSearch])
+  const searchTerms = useMemo(() => buildProductSearchTerms(deferredSearch), [deferredSearch])
   const normalizedBrandFilter = useMemo(
     () => (brandFilter === 'all' ? 'all' : brandFilter.toLowerCase()),
     [brandFilter],

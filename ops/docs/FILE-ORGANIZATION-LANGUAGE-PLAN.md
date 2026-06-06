@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 811 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 812 in this file.
 
 ## Goal
 
@@ -8495,6 +8495,72 @@ Decision rule:
   `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070504` were not touched.
 - Current plan position after Move 811: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 812: Share POS search-term normalization
+
+- Ownership evidence: Products already owns comma search normalization through
+  `buildProductSearchTerms` in
+  `frontend/src/components/products/helpers/productFilterHelpers.ts`. POS
+  duplicated the same comma split, trim, lowercase, and empty-term filtering
+  inside `frontend/src/components/pos/POS.tsx`.
+- Change: POS now imports `buildProductSearchTerms` and derives its deferred
+  search chips from the shared helper. This keeps POS and Products aligned for
+  comma-separated AND/OR search behavior while removing one more route-local
+  parser from the hot product-card filtering loop.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` now requires the
+  shared POS search helper import and blocks reintroducing
+  `deferredSearch.split(...)` in POS.
+- Verification: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productFilterHelpers.test.ts`,
+  `node frontend\tests\productSearchPagination.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build emits
+  `assets/POS-DHMUwrng.js` at 76.50 kB / 19.86 kB gzip,
+  `assets/Products-DuBCPKqV.js` at 86.85 kB / 23.30 kB gzip, and
+  `assets/product-shared-BsbHUoqf.js` at 6.83 kB / 2.62 kB gzip.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070530` was built and
+  deployed after backup `ops/runtime/docker-release/backups/20260607-054018`;
+  `business-os-app-1`, workers, Postgres, Redis, and Cloudflare containers are
+  healthy on that image.
+- Route proof: live route traces against the Docker app passed with zero failed
+  requests and zero console errors: POS 272 ms with 29 requests / 22 scripts /
+  2 API, Products 234 ms with 35 requests / 27 scripts / 2 API, Inventory
+  255 ms with 36 requests / 29 scripts / 2 API, Dashboard 207 ms with 24
+  requests / 18 scripts / 2 API, and public catalog 197 ms with 21 requests /
+  16 scripts / 1 API.
+- Live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. The broad
+  UI check covered 66 signals on frontend hash `0dd2009439038702` with zero
+  relevant console messages; the public Cloudflare portal check rendered 20
+  products with zero failed responses, zero page errors, zero relevant console
+  messages, and enforced CSP present; post-live hygiene passed with loaded
+  dataset status.
+- Browser/Playwright proof: the in-app Browser loaded the public catalog with
+  no blank shell, no runtime overlay, and zero relevant app console messages.
+  A focused authenticated Playwright POS check then loaded `/pos`, typed
+  `AHC, Mask`, verified the POS input retained the comma query, rendered both
+  `ahc` and `mask` chips, narrowed to `1-4 / 4` real AHC mask cards, and did
+  not show a no-data flash or relevant console/page error.
+- Follow-up finding: the public catalog currently keeps `AHC, Mask` at the full
+  `5,539 result(s)` count in the rendered UI. The backend portal search already
+  accepts comma terms, so this is logged as the next public-search synchronization
+  slice instead of being conflated with the POS parser cleanup.
+- Cleanup: ignored regenerable `frontend/dist` (31,825,872 bytes) and
+  `release` (380,875,928 bytes) were removed for 412,701,800 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 333,540
+  bytes of stale runtime reports, one old Docker-release backup
+  `20260607-041754` (5,047,616 bytes) beyond the latest-three retention
+  policy, old Docker rollback image tag `business-os:v6.0.0-202606070314`, and
+  38.4 MB of Docker builder cache. Uploads, secrets, env files, databases,
+  Docker volumes, latest backup sets, R2 backup
+  `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070530` were not touched.
+- Current plan position after Move 812: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
