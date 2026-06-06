@@ -10,6 +10,7 @@ import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { ProductImg } from '../products/shared/primitives'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
@@ -112,6 +113,20 @@ type CatalogAiProvider = {
   name?: string | null
   provider?: string | null
   provider_label?: string | null
+}
+
+function toAiProviderOptions(
+  aiProviders: CatalogAiProvider[],
+  autoLabel: string,
+  noModelLabel: string,
+): AppSelectOption[] {
+  return [
+    { value: '', label: autoLabel },
+    ...aiProviders.map((provider) => ({
+      value: String(provider.id),
+      label: `${provider.name || provider.provider_label || provider.provider || provider.id} | ${provider.provider_label || provider.provider || 'Provider'} | ${provider.default_model || noModelLabel}`,
+    })),
+  ]
 }
 
 type CatalogReviewItem = {
@@ -346,11 +361,21 @@ export default function CatalogEditorSurface() {
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="portal-price-display" className="block text-sm font-medium text-slate-700">{copy('priceDisplay', 'Price display')}</label>
-                <select id="portal-price-display" name="customer_portal_price_display" className="input" value={editorDraft.customer_portal_price_display || 'USD'} onChange={(event) => setDraft('customer_portal_price_display', event.target.value)}>
-                  <option value="USD">USD</option>
-                  <option value="KHR">KHR</option>
-                  <option value="BOTH">Both</option>
-                </select>
+                <AppSelect
+                  id="portal-price-display"
+                  name="customer_portal_price_display"
+                  value={editorDraft.customer_portal_price_display || 'USD'}
+                  onChange={(nextValue) => setDraft('customer_portal_price_display', nextValue)}
+                  ariaLabel={copy('priceDisplay', 'Price display')}
+                  className="mt-1 w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[8rem]"
+                  options={[
+                    { value: 'USD', label: 'USD' },
+                    { value: 'KHR', label: 'KHR' },
+                    { value: 'BOTH', label: copy('both', 'Both') },
+                  ]}
+                />
               </div>
               <div>
                   <label htmlFor="portal-refresh-seconds" className="block text-sm font-medium text-slate-700">{copy('refreshSeconds', 'Public refresh interval (seconds)', 'ចន្លោះពេលស្រស់ថ្មីសាធារណៈ (វិនាទី)')}</label>
@@ -917,14 +942,20 @@ export default function CatalogEditorSurface() {
                 </div>
                 <div>
                   <label htmlFor="portal-ai-provider" className="block text-sm font-medium text-slate-700">{copy('assistantProvider', 'AI provider entry', 'AI provider')}</label>
-                  <select id="portal-ai-provider" className="input mt-1" value={editorDraft.customer_portal_ai_provider_id || ''} onChange={(event) => setDraft('customer_portal_ai_provider_id', event.target.value)}>
-                    <option value="">{copy('assistantProviderAuto', 'Automatic (best available)', 'ស្វ័យប្រវត្តិ (ល្អបំផុតដែលមាន)')}</option>
-                    {aiProviders.map((provider) => (
-                      <option key={provider.id} value={String(provider.id)}>
-                        {provider.name} | {provider.provider_label || provider.provider} | {provider.default_model || copy('noModel', 'No model')}
-                      </option>
-                    ))}
-                  </select>
+                  <AppSelect
+                    id="portal-ai-provider"
+                    value={editorDraft.customer_portal_ai_provider_id || ''}
+                    onChange={(nextValue) => setDraft('customer_portal_ai_provider_id', nextValue)}
+                    ariaLabel={copy('assistantProvider', 'AI provider entry', 'AI provider')}
+                    className="mt-1 w-full"
+                    buttonClassName="h-10 w-full"
+                    menuClassName="min-w-[18rem]"
+                    options={toAiProviderOptions(
+                      aiProviders,
+                      copy('assistantProviderAuto', 'Automatic (best available)', 'ស្វ័យប្រវត្តិ (ល្អបំផុតដែលមាន)'),
+                      copy('noModel', 'No model'),
+                    )}
+                  />
                 </div>
               </div>
 
@@ -1088,11 +1119,21 @@ export default function CatalogEditorSurface() {
                 </div>
                 <div>
                   <label htmlFor="portal-language" className="block text-sm font-medium text-slate-700">{copy('language', 'Portal language')}</label>
-                  <select id="portal-language" name="customer_portal_language" className="input" value={editorDraft.customer_portal_language || 'auto'} onChange={(event) => setDraft('customer_portal_language', event.target.value)}>
-                    <option value="auto">{copy('followApp', 'English (default source)')}</option>
-                    <option value="en">{copy('english', 'English')}</option>
-                    <option value="km">{copy('khmer', 'Khmer')}</option>
-                  </select>
+                  <AppSelect
+                    id="portal-language"
+                    name="customer_portal_language"
+                    value={editorDraft.customer_portal_language || 'auto'}
+                    onChange={(nextValue) => setDraft('customer_portal_language', nextValue)}
+                    ariaLabel={copy('language', 'Portal language')}
+                    className="mt-1 w-full"
+                    buttonClassName="h-10 w-full"
+                    menuClassName="min-w-[12rem]"
+                    options={[
+                      { value: 'auto', label: copy('followApp', 'English (default source)') },
+                      { value: 'en', label: copy('english', 'English') },
+                      { value: 'km', label: copy('khmer', 'Khmer') },
+                    ]}
+                  />
                 </div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -1234,16 +1275,20 @@ export default function CatalogEditorSurface() {
               </label>
               <label className="block">
                 <span className="text-sm font-medium text-slate-700">{copy('logoFit', 'Logo fit')}</span>
-                <select
+                <AppSelect
                   id="portal-logo-fit"
                   name="customer_portal_logo_fit"
-                  className="input mt-2"
                   value={editorDraft.customer_portal_logo_fit || 'cover'}
-                  onChange={(event) => setDraft('customer_portal_logo_fit', event.target.value)}
-                >
-                  <option value="contain">{copy('fitContain', 'Fit inside')}</option>
-                  <option value="cover">{copy('fitCover', 'Fill frame')}</option>
-                </select>
+                  onChange={(nextValue) => setDraft('customer_portal_logo_fit', nextValue)}
+                  ariaLabel={copy('logoFit', 'Logo fit')}
+                  className="mt-2 w-full"
+                  buttonClassName="h-10 w-full"
+                  menuClassName="min-w-[10rem]"
+                  options={[
+                    { value: 'contain', label: copy('fitContain', 'Fit inside') },
+                    { value: 'cover', label: copy('fitCover', 'Fill frame') },
+                  ]}
+                />
               </label>
               <label className="block">
                 <span className="text-sm font-medium text-slate-700">{copy('logoZoom', 'Logo zoom')}</span>
@@ -1365,10 +1410,20 @@ export default function CatalogEditorSurface() {
               <div className="mt-4 grid gap-4 sm:grid-cols-2">
                 <div>
                   <label htmlFor="portal-stock-threshold-mode" className="block text-sm font-medium text-slate-700">{copy('stockThresholdMode', 'Stock badge mode')}</label>
-                  <select id="portal-stock-threshold-mode" name="customer_portal_stock_threshold_mode" className="input" value={editorDraft.customer_portal_stock_threshold_mode || 'product'} onChange={(event) => setDraft('customer_portal_stock_threshold_mode', event.target.value)}>
-                    <option value="product">{copy('stockThresholdModeProduct', 'Use each product threshold')}</option>
-                    <option value="global">{copy('stockThresholdModeGlobal', 'Use portal-wide thresholds')}</option>
-                  </select>
+                  <AppSelect
+                    id="portal-stock-threshold-mode"
+                    name="customer_portal_stock_threshold_mode"
+                    value={editorDraft.customer_portal_stock_threshold_mode || 'product'}
+                    onChange={(nextValue) => setDraft('customer_portal_stock_threshold_mode', nextValue)}
+                    ariaLabel={copy('stockThresholdMode', 'Stock badge mode')}
+                    className="mt-1 w-full"
+                    buttonClassName="h-10 w-full"
+                    menuClassName="min-w-[16rem]"
+                    options={[
+                      { value: 'product', label: copy('stockThresholdModeProduct', 'Use each product threshold') },
+                      { value: 'global', label: copy('stockThresholdModeGlobal', 'Use portal-wide thresholds') },
+                    ]}
+                  />
                 </div>
                 <div>
                   <label htmlFor="portal-low-stock-threshold" className="block text-sm font-medium text-slate-700">{copy('lowStockThreshold', 'Low stock threshold')}</label>
