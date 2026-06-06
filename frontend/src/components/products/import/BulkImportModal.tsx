@@ -5,6 +5,7 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Modal from '../../shared/Modal'
+import AppSelect from '../../shared/AppSelect'
 import FilePickerModalBase from '../../files/FilePickerModal'
 import {
   analyzeProductImportText,
@@ -254,12 +255,6 @@ function getProductImportApi(): ProductImportApi {
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
-
-const FIELD_RULE_PRESET_HINTS = {
-  merge_blank_only: 'Only fill blank existing details; keep existing values when both sides have data.',
-  keep_existing: 'Keep existing product details and only import stock/images according to row actions.',
-  use_imported: 'Use imported CSV details for reviewed fields when the row updates or overrides a product.',
-} satisfies Record<FieldRulePreset, string>
 
 function getBaseName(value: unknown): string {
   return String(value || '')
@@ -1619,24 +1614,24 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
               ) : null}
             </div>
           </div>
-          <select
-            className="input h-8 min-w-[8.5rem] py-1 text-xs"
+          <AppSelect
             value={decisionValue}
-            title={`Action target: ${targetSummary}`}
-            onChange={(event) => {
+            onChange={(nextValue) => {
               pushReviewUndoSnapshot(`Changed row ${editedRow._rowNumber || index + 2} action`)
-              setDecisions((state) => ({ ...state, [index]: event.target.value }))
+              setDecisions((state) => ({ ...state, [index]: nextValue }))
             }}
-          >
-            {IMPORT_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-          </select>
+            ariaLabel="Import decision"
+            className="min-w-[8.5rem]"
+            buttonClassName="h-8 w-full px-2 py-1 text-xs"
+            menuClassName="min-w-[9rem]"
+            optionClassName="text-xs"
+            options={IMPORT_DECISION_OPTIONS}
+          />
           {conflictFields.length ? (
-            <select
-              className="input h-8 min-w-[8.5rem] py-1 text-xs"
+            <AppSelect
               value={identifierDecision}
-              title="Choose whether duplicate SKU/barcode values are cleared, changed, or intentionally kept."
-              onChange={(event) => {
-                const value = event.target.value
+              onChange={(nextValue) => {
+                const value = nextValue
                 pushReviewUndoSnapshot(`Changed row ${editedRow._rowNumber || index + 2} identifier choice`)
                 setIdentifierDecisions((state) => ({ ...state, [index]: value }))
                 if (value === 'allow_duplicate') {
@@ -1646,22 +1641,28 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
                   setIdentifierOverrides((state) => ({ ...state, [index]: { sku: '', barcode: '' } }))
                 }
               }}
-            >
-              {IDENTIFIER_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+              ariaLabel="Identifier decision"
+              className="min-w-[8.5rem]"
+              buttonClassName="h-8 w-full px-2 py-1 text-xs"
+              menuClassName="min-w-[10rem]"
+              optionClassName="text-xs"
+              options={IDENTIFIER_DECISION_OPTIONS}
+            />
           ) : null}
           {rowIncomingImages.length ? (
-            <select
-              className="input h-8 min-w-[8.5rem] py-1 text-xs"
+            <AppSelect
               value={imageDecision}
-              title="Choose how incoming CSV/library images should affect the matched product images."
-              onChange={(event) => {
+              onChange={(nextValue) => {
                 pushReviewUndoSnapshot(`Changed row ${editedRow._rowNumber || index + 2} image action`)
-                setImageDecisions((state) => ({ ...state, [index]: event.target.value }))
+                setImageDecisions((state) => ({ ...state, [index]: nextValue }))
               }}
-            >
-              {IMAGE_CONFLICT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-            </select>
+              ariaLabel="Image conflict decision"
+              className="min-w-[8.5rem]"
+              buttonClassName="h-8 w-full px-2 py-1 text-xs"
+              menuClassName="min-w-[11rem]"
+              optionClassName="text-xs"
+              options={IMAGE_CONFLICT_OPTIONS}
+            />
           ) : null}
         </div>
 
@@ -1953,40 +1954,62 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
                   </label>
                   <label className="inline-flex items-center gap-2">
                     <span className="text-gray-500 dark:text-gray-400">Action</span>
-                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyDecisionToSelection(event.target.value); event.target.value = '' }}>
-                      <option value="">Apply to selected...</option>
-                      {IMPORT_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                    </select>
+                    <AppSelect
+                      value=""
+                      onChange={(nextValue) => { if (nextValue) applyDecisionToSelection(nextValue) }}
+                      ariaLabel="Apply action to selected"
+                      className="min-w-[9rem]"
+                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
+                      menuClassName="min-w-[10rem]"
+                      optionClassName="text-xs"
+                      options={[{ value: '', label: 'Apply to selected...' }, ...IMPORT_DECISION_OPTIONS]}
+                    />
                   </label>
                   <label className="inline-flex items-center gap-2">
                     <span className="text-gray-500 dark:text-gray-400">SKU/barcode</span>
-                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyIdentifierDecisionToSelection(event.target.value); event.target.value = '' }}>
-                      <option value="">Apply...</option>
-                      {IDENTIFIER_DECISION_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                    </select>
+                    <AppSelect
+                      value=""
+                      onChange={(nextValue) => { if (nextValue) applyIdentifierDecisionToSelection(nextValue) }}
+                      ariaLabel="Apply identifier decision to selected"
+                      className="min-w-[9rem]"
+                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
+                      menuClassName="min-w-[10rem]"
+                      optionClassName="text-xs"
+                      options={[{ value: '', label: 'Apply...' }, ...IDENTIFIER_DECISION_OPTIONS]}
+                    />
                   </label>
                   <label className="inline-flex items-center gap-2">
                     <span className="text-gray-500 dark:text-gray-400">Images</span>
-                    <select className="input h-8 min-w-[9rem] py-1 text-xs" defaultValue="" onChange={(event) => { if (event.target.value) applyImageDecisionToSelection(event.target.value); event.target.value = '' }}>
-                      <option value="">Apply...</option>
-                      {IMAGE_CONFLICT_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                    </select>
+                    <AppSelect
+                      value=""
+                      onChange={(nextValue) => { if (nextValue) applyImageDecisionToSelection(nextValue) }}
+                      ariaLabel="Apply image decision to selected"
+                      className="min-w-[9rem]"
+                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
+                      menuClassName="min-w-[11rem]"
+                      optionClassName="text-xs"
+                      options={[{ value: '', label: 'Apply...' }, ...IMAGE_CONFLICT_OPTIONS]}
+                    />
                   </label>
                   <label className="ml-auto inline-flex min-w-[13rem] items-center gap-2">
                     <span className="whitespace-nowrap text-gray-500 dark:text-gray-400">Details</span>
-                    <select
-                      className="input h-8 min-w-[11rem] py-1 text-xs"
+                    <AppSelect
                       value={(fieldRules.__preset as FieldRulePreset | undefined) || 'merge_blank_only'}
-                      title={FIELD_RULE_PRESET_HINTS[(fieldRules.__preset as FieldRulePreset | undefined) || 'merge_blank_only']}
-                      onChange={(event) => {
-                        const value = event.target.value as FieldRulePreset
+                      onChange={(nextValue) => {
+                        const value = nextValue as FieldRulePreset
                         applyFieldRulePreset(value)
                       }}
-                    >
-                      <option value="merge_blank_only">Fill blanks only</option>
-                      <option value="keep_existing">Keep existing</option>
-                      <option value="use_imported">Use imported</option>
-                    </select>
+                      ariaLabel="Product detail handling"
+                      className="min-w-[11rem]"
+                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
+                      menuClassName="min-w-[11rem]"
+                      optionClassName="text-xs"
+                      options={[
+                        { value: 'merge_blank_only', label: 'Fill blanks only' },
+                        { value: 'keep_existing', label: 'Keep existing' },
+                        { value: 'use_imported', label: 'Use imported' },
+                      ]}
+                    />
                   </label>
                 </div>
               </div>
