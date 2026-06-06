@@ -1868,14 +1868,14 @@ Total files documented: **263**
 | 41 | `selectDelivery` | const arrow | 1165 |
 | 42 | `clearDelivery` | const arrow | 1170 |
 | 43 | `handleAddDelivery` | const arrow | 1172 |
-| 44 | `addToCart` | function | 1434 |
-| 45 | `updateQty` | const arrow | 1473 |
-| 46 | `updatePrice` | const arrow | 1481 |
-| 47 | `updateItemBranch` | const arrow | 1505 |
-| 48 | `handleDiscountUsd` | const arrow | 1574 |
-| 49 | `handleDiscountKhr` | const arrow | 1575 |
-| 50 | `handleMembershipUnits` | const arrow | 1576 |
-| 51 | `handleCheckout` | const arrow | 1615 |
+| 44 | `addToCart` | function | 1439 |
+| 45 | `updateQty` | const arrow | 1478 |
+| 46 | `updatePrice` | const arrow | 1486 |
+| 47 | `updateItemBranch` | const arrow | 1510 |
+| 48 | `handleDiscountUsd` | const arrow | 1579 |
+| 49 | `handleDiscountKhr` | const arrow | 1580 |
+| 50 | `handleMembershipUnits` | const arrow | 1581 |
+| 51 | `handleCheckout` | const arrow | 1620 |
 
 ### 3.119 `frontend/src/components/pos/posCore.ts`
 

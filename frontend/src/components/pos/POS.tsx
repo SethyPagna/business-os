@@ -1345,17 +1345,22 @@ export default function POS() {
   }, [])
 
   const pickBestBranchId = useCallback((product: ProductRecord) => {
-    const stockRows = (product?.branch_stock || [])
-      .map((entry) => ({ branchId: Number(entry.branch_id), qty: Number(entry.quantity || 0) }))
-      .filter((entry) => Number.isFinite(entry.branchId) && entry.qty > 0)
+    let bestBranchId: number | null = null
+    let bestQuantity = 0
+    const preferredBranchId = defaultBranchId ? Number(defaultBranchId) : null
 
-    if (!stockRows.length) return defaultBranchId || null
+    for (const entry of product?.branch_stock || []) {
+      const branchId = Number(entry.branch_id)
+      const qty = Number(entry.quantity || 0)
+      if (!Number.isFinite(branchId) || qty <= 0) continue
+      if (preferredBranchId != null && branchId === preferredBranchId) return branchId
+      if (qty > bestQuantity) {
+        bestBranchId = branchId
+        bestQuantity = qty
+      }
+    }
 
-    const defaultRow = defaultBranchId ? stockRows.find((entry) => entry.branchId === Number(defaultBranchId)) : null
-    if (defaultRow) return defaultRow.branchId
-
-    stockRows.sort((a, b) => b.qty - a.qty)
-    return stockRows[0].branchId
+    return bestBranchId || defaultBranchId || null
   }, [defaultBranchId])
 
   /** Stock quantity relevant to the active branch filter or item branch assignment. */

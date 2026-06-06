@@ -2927,6 +2927,16 @@ assert.doesNotMatch(
 )
 assert.match(
   pos,
+  /const pickBestBranchId = useCallback\(\(product: ProductRecord\) => \{[\s\S]*let bestBranchId: number \| null = null[\s\S]*for \(const entry of product\?\.branch_stock \|\| \[\]\)[\s\S]*if \(preferredBranchId != null && branchId === preferredBranchId\) return branchId[\s\S]*if \(qty > bestQuantity\)/,
+  'POS branch selection should choose a branch in one pass without mapping and sorting stock rows',
+)
+assert.doesNotMatch(
+  pos,
+  /const pickBestBranchId = useCallback\(\(product: ProductRecord\) => \{[\s\S]*stockRows\.sort/,
+  'POS branch selection should not sort branch_stock rows just to find the largest quantity',
+)
+assert.match(
+  pos,
   /const cartTotals = useMemo\(\(\) => \{[\s\S]*for \(const item of active\.cart\)[\s\S]*branchIds: Array\.from\(branchIds\)/,
   'POS should derive cart subtotals and branch ids in one memoized cart pass',
 )

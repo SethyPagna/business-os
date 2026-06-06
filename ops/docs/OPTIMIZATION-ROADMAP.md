@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 808.
+- Latest completed implementation move in this roadmap: Move 809.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12418,6 +12418,51 @@ Move 808 status:
   `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070343` were preserved.
 - Current plan position after Move 808: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 809 status:
+- Move 809 picks the POS best branch in one pass. `POS.tsx` now scans
+  `branch_stock` once in `pickBestBranchId`, immediately accepts the preferred
+  default branch when it has positive quantity, and otherwise tracks the
+  highest positive quantity without allocating a filtered array or sorting it.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  one-pass chooser and blocks the old `stockRows.sort(...)` selection path.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production POS chunk is
+  `assets/POS-oyl15zcb.js` at 77.23 kB / 20.03 kB gzip.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070408` was built and
+  deployed healthy after backup
+  `ops/runtime/docker-release/backups/20260607-041754`.
+- Route proof: live traces passed with zero failed requests and zero console
+  errors: POS 236 ms / 26 requests / 19 scripts / 2 API, Inventory 231 ms / 36
+  requests / 29 scripts / 2 API, Dashboard 223 ms / 24 requests / 18 scripts /
+  2 API, and public catalog 211 ms / 21 requests / 16 scripts / 1 API.
+- Full live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. Broad
+  UI checked 66 signals on frontend hash `d7232f7ee0e9f429` with zero relevant
+  console messages; public Cloudflare portal rendered 20 products with zero
+  failed responses, zero page errors, zero relevant console messages, and
+  enforced CSP present; post-live hygiene passed with loaded dataset status.
+- Browser/Playwright proof: the in-app Browser loaded the pages but its virtual
+  clipboard layer failed before typing, so regular Playwright performed the
+  no-side-effect public interaction proof. It loaded 5,539 products, typed
+  `AHC`, verified 4 real AHC products, and recorded zero console/page errors.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,826,187 bytes) and
+  `release` (380,876,952 bytes) were removed for 412,703,139 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 354,792
+  bytes of stale runtime reports, one old Docker-release backup
+  `20260607-025635` (5,041,511 bytes) beyond the latest-three retention
+  policy, old Docker rollback image tag `business-os:v6.0.0-202606061753`, and
+  613.6 MB of Docker builder cache. Uploads, secrets, env files, databases,
+  Docker volumes, latest backup sets, R2 backup
+  `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070408` were preserved.
+- Current plan position after Move 809: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
