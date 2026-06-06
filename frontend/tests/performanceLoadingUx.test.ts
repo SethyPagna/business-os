@@ -26,6 +26,7 @@ const viteConfig = fs.readFileSync(new URL('../vite.config.ts', import.meta.url)
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
+const dashboardExport = fs.readFileSync(new URL('../src/components/dashboard/dashboardExport.ts', import.meta.url), 'utf8')
 const exportMenu = fs.readFileSync(new URL('../src/components/shared/ExportMenu.tsx', import.meta.url), 'utf8')
 const filterMenu = fs.readFileSync(new URL('../src/components/shared/FilterMenu.tsx', import.meta.url), 'utf8')
 const lazyPortalMenu = fs.readFileSync(new URL('../src/components/shared/LazyPortalMenu.tsx', import.meta.url), 'utf8')
@@ -451,6 +452,8 @@ assert.match(productExport, /formatPriceNumber/, 'Products export chunk should o
 assert.doesNotMatch(productFilterHelpers, /buildProductExportRows|formatPriceNumber/, 'Products live filtering helper should not carry export row or price formatting code')
 assert.match(viteConfig, /'assets\/product-export-',/, 'Products export chunk should be excluded from eager modulepreload')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/components\/products\/helpers\/productExport\.ts'\)\) \{\s*return 'product-export'/, 'Products export row assembly should have a named intent chunk')
+assert.match(viteConfig, /'assets\/dashboard-export-',/, 'Dashboard export chunk should be excluded from eager modulepreload')
+assert.match(viteConfig, /normalized\.includes\('\/src\/components\/dashboard\/charts\/'\)\) return 'dashboard-charts'[\s\S]*normalized\.endsWith\('\/src\/components\/dashboard\/dashboardExport\.ts'\)\) return 'dashboard-export'/, 'Dashboard charts should not be owned by the export/report chunk')
 for (const [name, source] of [['Customers', customers], ['Suppliers', suppliers], ['Delivery', delivery]] as const) {
   assert.doesNotMatch(source, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, `${name} contacts tab should not load CSV helpers before export intent`)
   assert.match(source, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*const \{ downloadCSV \} = await loadCsvUtilsModule\(\)/, `${name} contacts export should lazy-load CSV helpers through a memoized dynamic import`)
@@ -860,6 +863,36 @@ assert.doesNotMatch(
   dashboard,
   /import \{ buildCSV, downloadCSV, downloadZipFilesAsync \} from '\.\.\/\.\.\/utils\/csv'/,
   'dashboard should lazy-load export helpers only when an export is requested',
+)
+assert.match(
+  dashboard,
+  /type DashboardExportModule = typeof import\('\.\/dashboardExport\.ts'\)[\s\S]*dashboardExportModulePromiseRef[\s\S]*import\('\.\/dashboardExport\.ts'\)/,
+  'dashboard should load export row and report assembly only after export intent',
+)
+assert.doesNotMatch(
+  dashboard,
+  /buildDashboardKpiRows|buildDashboardFormulaRows|buildDashboardSalesRows|buildDashboardTopCustomerRows|buildStandaloneReportHtml|buildReportPackageFiles/,
+  'dashboard route should not carry export-only row/report assembly in the live route chunk',
+)
+assert.match(
+  dashboardExport,
+  /export function exportDashboardFull[\s\S]*export function exportDashboardStats[\s\S]*export async function exportDashboardPackage/,
+  'dashboard export chunk should own full CSV, stats CSV, and ZIP report assembly',
+)
+assert.match(
+  dashboardExport,
+  /formatPriceNumber/,
+  'dashboard export chunk should own export-only price formatting',
+)
+assert.match(
+  viteConfig,
+  /'assets\/dashboard-export-',/,
+  'dashboard export chunk should be excluded from eager modulepreload',
+)
+assert.match(
+  viteConfig,
+  /normalized\.endsWith\('\/src\/components\/dashboard\/dashboardExport\.ts'\)\) return 'dashboard-export'/,
+  'dashboard export assembly should have a named intent chunk',
 )
 assert.doesNotMatch(
   dashboard,

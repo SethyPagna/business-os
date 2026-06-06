@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 792.
+- Latest completed implementation move in this roadmap: Move 802.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12084,6 +12084,56 @@ Move 801 status:
   non-data follow-up for locked old report log
   `ops/runtime/reports/vite-preview-appselect.log`.
 - Current plan position after Move 801: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail.
+
+Move 802 status:
+- Move 802 lazy-loads Dashboard export/report assembly. `Dashboard.tsx` now
+  builds a compact export context and imports `dashboardExport.ts` only when a
+  Dashboard export menu action runs. The new export module owns CSV row
+  assembly, calculation/formula rows, standalone report HTML, and ZIP package
+  generation.
+- Chunk policy: `frontend/vite.config.ts` names `dashboard-export` as an
+  intent-only chunk and separately names `dashboard-charts` so Rollup does not
+  park visible chart code inside the export/report chunk. The production build
+  emits `Dashboard` at 63.64 kB, `dashboard-charts` at 10.70 kB, and
+  `dashboard-export` at 20.52 kB, compared with the earlier 81.46 kB Dashboard
+  route baseline.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  memoized dynamic import, prevents export/report builders from returning to
+  `Dashboard.tsx`, checks export-module ownership of price formatting, and
+  checks the Vite chunk ordering. `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker release `business-os:v6.0.0-202606061709` built and
+  started healthy with frontend hash `bf8deeb130c3f486`. The update created
+  backup `ops/runtime/docker-release/backups/20260606-171118` before restart.
+  The focused Dashboard route trace
+  `ops/runtime/reports/route-load-trace-2026-06-06T09-12-04-350Z.json`
+  reached ready text in 322 ms with 25 requests, 19 scripts, 2 API calls, no
+  failed requests, no relevant console errors, and zero `dashboard-export-*`
+  requests on normal route entry.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T09-12-04-495Z/report.json`
+  checked 66 signals with all probed route/API calls at HTTP 200, no framework
+  overlay, and zero relevant console messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T09-12-43-086Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Post-live hygiene
+  passed with loaded dataset status and zero generated-integrity matches.
+- Cleanup and Phase 29 proof: after runtime proof, ignored regenerable
+  `frontend/dist` (31,781,438 bytes) and `release` (380,845,720 bytes) were
+  removed, for 412,627,158 bytes reclaimed. Uploads, secrets, env files,
+  databases, volumes, backups, and the active Docker image were not touched.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed all nine
+  guardrail checks. `npm.cmd --prefix ops run prune-storage` still has a
+  non-data follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 802: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays
   at 51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

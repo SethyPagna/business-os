@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-06T08:40:01.326Z
+Generated: 2026-06-06T09:13:47.619Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 639
+- Files scanned: 640
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-06T08:40:01.326Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 434 |
+| .ts | 435 |
 | .tsx | 113 |
 | .md | 45 |
 | .json | 17 |
@@ -42,10 +42,10 @@ Generated: 2026-06-06T08:40:01.326Z
 | frontend/components/inventory | 10 |
 | run | 9 |
 | run/docker | 9 |
+| frontend/components/dashboard | 8 |
 | frontend/components/receipt-settings | 8 |
 | frontend/components/utils-settings | 8 |
 | ops/scripts/powershell | 8 |
-| frontend/components/dashboard | 7 |
 | frontend/components/sales | 7 |
 | ops/scripts/runtime/audits | 7 |
 | ops/scripts/runtime/storage | 7 |
@@ -63,9 +63,9 @@ Generated: 2026-06-06T08:40:01.326Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 12043 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 12091 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7863 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7923 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4001 | frontend/components/inventory |
@@ -73,18 +73,18 @@ Generated: 2026-06-06T08:40:01.326Z
 | frontend/src/components/catalog/CatalogPage.tsx | 3655 | frontend/components/catalog |
 | ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3253 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3101 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 3134 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2477 | frontend/components/pos |
-| frontend/src/components/dashboard/Dashboard.tsx | 2380 | frontend/components/dashboard |
 | backend/src/routes/products.ts | 2277 | backend/routes |
 | ops/docs/reference/PERFORMANCE-SCAN.md | 2179 | ops/docs/reference |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
-| ops/docs/OPTIMIZATION-STATUS.md | 2066 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 2094 | ops/docs |
+| frontend/src/components/dashboard/Dashboard.tsx | 1984 | frontend/components/dashboard |
 | frontend/src/components/utils-settings/Settings.tsx | 1911 | frontend/components/utils-settings |
 | frontend/src/App.tsx | 1905 | frontend/src/App.tsx |
 | backend/src/routes/inventory.ts | 1902 | backend/routes |
@@ -109,10 +109,10 @@ Generated: 2026-06-06T08:40:01.326Z
 | frontend/src/components/catalog/CatalogPage.tsx | 23 | frontend/components/catalog |
 | frontend/src/components/contacts/DeliveryTab.tsx | 23 | frontend/components/contacts |
 | frontend/src/components/contacts/SuppliersTab.tsx | 23 | frontend/components/contacts |
-| frontend/src/components/dashboard/Dashboard.tsx | 22 | frontend/components/dashboard |
 | backend/src/routes/system/index.ts | 20 | backend/routes |
 | frontend/src/components/returns/Returns.tsx | 19 | frontend/components/returns |
 | backend/src/routes/products.ts | 18 | backend/routes |
+| frontend/src/components/dashboard/Dashboard.tsx | 17 | frontend/components/dashboard |
 | frontend/src/components/utils-settings/Settings.tsx | 17 | frontend/components/utils-settings |
 | backend/test/routeContracts.test.ts | 16 | backend/test/routeContracts.test.ts |
 | frontend/src/components/users/Users.tsx | 16 | frontend/components/users |

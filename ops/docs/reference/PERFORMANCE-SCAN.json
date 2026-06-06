@@ -1,10 +1,10 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 441,
+  "sourceFiles": 442,
   "distAssets": 0,
-  "totalSourceBytes": 6971071,
-  "totalSourceLines": 160185,
+  "totalSourceBytes": 6973070,
+  "totalSourceLines": 160275,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -66,11 +66,6 @@
       "lines": 2477
     },
     {
-      "file": "frontend/src/components/dashboard/Dashboard.tsx",
-      "size": 121098,
-      "lines": 2380
-    },
-    {
       "file": "frontend/src/components/products/Products.tsx",
       "size": 121057,
       "lines": 2553
@@ -89,6 +84,11 @@
       "file": "backend/src/routes/products.ts",
       "size": 103391,
       "lines": 2277
+    },
+    {
+      "file": "frontend/src/components/dashboard/Dashboard.tsx",
+      "size": 103069,
+      "lines": 1984
     },
     {
       "file": "frontend/src/components/utils-settings/Settings.tsx",
@@ -198,11 +198,6 @@
       "lines": 2477
     },
     {
-      "file": "frontend/src/components/dashboard/Dashboard.tsx",
-      "size": 121098,
-      "lines": 2380
-    },
-    {
       "file": "backend/src/routes/products.ts",
       "size": 103391,
       "lines": 2277
@@ -211,6 +206,11 @@
       "file": "frontend/src/components/products/import/BulkImportModal.tsx",
       "size": 103646,
       "lines": 2170
+    },
+    {
+      "file": "frontend/src/components/dashboard/Dashboard.tsx",
+      "size": 103069,
+      "lines": 1984
     },
     {
       "file": "frontend/src/components/utils-settings/Settings.tsx",

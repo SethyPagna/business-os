@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 801 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 802 in this file.
 
 ## Goal
 
@@ -7901,6 +7901,70 @@ Decision rule:
   schema, cleanup, and performance guardrail. Next executable target: inspect
   the remaining dashboard/portal language and CSS costs with browser traces
   before any broader language/runtime rewrites.
+
+### Move 802: Lazy-load Dashboard export and report assembly
+
+- Ownership evidence: the focused Dashboard trace after the Products export
+  split showed Dashboard still carried export-only CSV/report package code in
+  its normal route graph. Dashboard viewing, range changes, chart rendering,
+  stock alerts, recent sales, and KPI detail modals do not need CSV, ZIP, or
+  standalone HTML report assembly until the user chooses an export action.
+- Change: `frontend/src/components/dashboard/dashboardExport.ts` now owns
+  export-only dashboard KPI rows, formula rows, manifest rows, sales/chart
+  rows, top-product/customer rows, payment/branch rows, stock alert rows,
+  recent-sale rows, standalone report assembly, and ZIP package generation.
+  `Dashboard.tsx` builds a compact export context and dynamically imports the
+  export module only from export menu actions. `frontend/vite.config.ts` names
+  both `dashboard-export` and `dashboard-charts`; visible chart components stay
+  in `dashboard-charts` so the export-only chunk is not fetched by normal
+  Dashboard entry.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  memoized dynamic Dashboard export import, prevents export row/report builders
+  from creeping back into `Dashboard.tsx`, checks export-module ownership of
+  price formatting, and asserts the Vite chunk ordering that keeps
+  `dashboard-charts` separate from `dashboard-export`.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build now emits
+  `Dashboard` at 63.64 kB, `dashboard-charts` at 10.70 kB, and intent-only
+  `dashboard-export` at 20.52 kB. Compared with the earlier Dashboard route
+  baseline of 81.46 kB, export/report assembly is no longer part of the
+  route-local bundle.
+- Packaged runtime proof: Docker release `business-os:v6.0.0-202606061709`
+  built, updated, and started healthy with frontend hash
+  `bf8deeb130c3f486`. The Docker update created backup
+  `ops/runtime/docker-release/backups/20260606-171118` before restart. The
+  focused Dashboard route trace
+  `ops/runtime/reports/route-load-trace-2026-06-06T09-12-04-350Z.json`
+  reached ready text in 322 ms with 25 requests, 19 scripts, 2 API calls, no
+  failed requests, no relevant console errors, and zero `dashboard-export-*`
+  requests on normal route entry. `dashboard-charts-*` loaded once because the
+  charts are visible route content.
+- Live proof: the full Phase 8.4 live suite passed. Broad local UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T09-12-04-495Z/report.json`
+  checked 66 signals with all probed route/API calls at HTTP 200, no framework
+  overlay, and zero relevant console messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T09-12-43-086Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Post-live hygiene
+  passed with loaded dataset status and zero generated-integrity matches.
+- Cleanup and Phase 29 proof: after runtime proof, ignored regenerable
+  `frontend/dist` (31,781,438 bytes) and `release` (380,845,720 bytes) were
+  removed, for 412,627,158 bytes reclaimed. Uploads, secrets, env files,
+  databases, volumes, backups, and the active Docker image were not touched.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed all nine
+  guardrail checks. `npm.cmd --prefix ops run prune-storage` still has a
+  non-data follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 802: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail. Next executable target: inspect
+  remaining portal language-pack/CSS costs and Dashboard chart packaging with
+  browser traces before any broader language/runtime rewrites.
 
 ## Safety Gates
 
