@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
+import { buildProductExportRows } from '../src/components/products/helpers/productExport.ts'
 import {
-  buildProductExportRows,
   buildProductSearchTerms,
   filterProductsForPage,
   getProductBranchQuantity,

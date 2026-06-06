@@ -169,6 +169,7 @@ const deferredModulePreloadPrefixes = [
   'assets/inventory-write-api-',
   'assets/import-jobs-api-',
   'assets/multipart-headers-api-',
+  'assets/product-export-',
   'assets/product-write-api-',
   'assets/rfid-api-',
   'assets/sale-write-api-',
@@ -370,6 +371,9 @@ function manualChunks(id: string): string | undefined {
       || normalized.endsWith('/src/utils/csvImport.ts')
     ) {
       return 'csv-utils'
+    }
+    if (normalized.endsWith('/src/components/products/helpers/productExport.ts')) {
+      return 'product-export'
     }
     if (normalized.endsWith('/src/utils/mediaUploadState.ts')) {
       return 'media-upload-state'

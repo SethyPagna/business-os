@@ -8,9 +8,9 @@ Last updated: 2026-06-06
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 800, lazy-load Inventory export/report assembly
-  so the normal Inventory route no longer parses CSV/report/zip packaging code
-  before the user asks for an export.
+- Latest completed move: Move 801, lazy-load Products CSV export row assembly
+  so the normal Products route no longer parses export-only row formatting
+  before the user asks for a CSV export.
 
 ## Current Baseline
 
@@ -18,7 +18,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `95c05024fca68d3a`
+  `ef9de1c26f7b18d1`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -31,15 +31,15 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-17-36-183Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-38-27-510Z/report.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-18-14-943Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-39-03-098Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T08-16-53-367Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T08-38-13-721Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -71,6 +71,34 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 801 built and started Docker release `business-os:v6.0.0-202606061633`
+  for the Products CSV export split. `Products.tsx` now lazy-loads
+  `productExport.ts` only when the CSV export action runs; the export module
+  owns row normalization, image gallery flattening, branch-stock summary
+  formatting, and price formatting. The production build emits
+  `assets/Products-*.js` at 96.60 kB and the intent-only
+  `assets/product-export-*.js` at 2.60 kB, moving 2.20 kB out of the first
+  Products route chunk compared with the previous 98.80 kB baseline. The
+  focused route trace
+  `ops/runtime/reports/route-load-trace-2026-06-06T08-38-13-721Z.json`
+  loaded Products in 315 ms ready time with 35 requests, 27 scripts, 2 API
+  calls, no failed requests, no relevant console errors, and no
+  `product-export-*` request on normal route entry. The broad Phase 8.4 UI
+  live check
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-38-27-510Z/report.json`
+  passed with 66 checked signals, all probed route/API signals at HTTP 200,
+  no framework overlay, and zero relevant console messages. The public
+  Cloudflare portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-39-03-098Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Docker showed only the
+  expected release stack: app, cloudflared, import worker, media worker,
+  Postgres, Redis queue, and Redis cache. After live proof, ignored
+  regenerable output was removed again: `frontend/dist` (31,780,848 bytes) and
+  `release` (380,849,816 bytes), for 412,630,664 bytes reclaimed. The
+  follow-up Phase 29 audit passed all nine checks. `npm.cmd --prefix ops run
+  prune-storage` still has a non-data follow-up: it could not remove a locked
+  old Vite preview report log, `ops/runtime/reports/vite-preview-appselect.log`.
 - Move 800 built and started Docker release `business-os:v6.0.0-202606061614`
   for the Inventory export/report split. `Inventory.tsx` now lazy-loads
   `inventoryExport.ts` only when an export action is requested; the export

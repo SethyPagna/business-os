@@ -12040,3 +12040,51 @@ Move 800 status:
   at 51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
   schema, cleanup, and performance guardrail.
+
+Move 801 status:
+- Move 801 lazy-loads Products CSV export row assembly. `Products.tsx` now
+  imports `productExport.ts` only when the CSV export action runs. The new
+  export module owns row normalization, image gallery flattening, branch-stock
+  summary formatting, and price formatting, while `productFilterHelpers.ts`
+  stays focused on route-live search/filter helpers.
+- Chunk policy: `frontend/vite.config.ts` names the new `product-export`
+  chunk and excludes `assets/product-export-*` from eager modulepreload. The
+  production build emits `Products` at 96.60 kB and the deferred
+  `product-export` chunk at 2.60 kB, compared with the previous 98.80 kB
+  Products route chunk.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  dynamic import, prevents export row assembly from creeping back into
+  `productFilterHelpers.ts`, checks export-module ownership of price
+  formatting, and checks the Vite chunk policy. Focused frontend tests,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker release `business-os:v6.0.0-202606061633` built and
+  started healthy with frontend hash `ef9de1c26f7b18d1`. The focused Products
+  route trace
+  `ops/runtime/reports/route-load-trace-2026-06-06T08-38-13-721Z.json`
+  reached ready text in 315 ms with 35 requests, 27 scripts, 2 API calls, no
+  failed requests, no relevant console errors, and no `product-export-*`
+  request on normal route entry.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-38-27-510Z/report.json`
+  checked 66 signals with all probed route/API calls at HTTP 200, no framework
+  overlay, and zero relevant console messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-39-03-098Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Post-live hygiene
+  passed with loaded dataset status and zero generated-integrity matches.
+- Cleanup and Phase 29 proof: after runtime proof, ignored regenerable
+  `frontend/dist` (31,780,848 bytes) and `release` (380,849,816 bytes) were
+  removed, for 412,630,664 bytes reclaimed. Uploads, secrets, env files,
+  databases, volumes, backups, and the active Docker image were not touched.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed all nine
+  guardrail checks. `npm.cmd --prefix ops run prune-storage` still has a
+  non-data follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 801: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail.

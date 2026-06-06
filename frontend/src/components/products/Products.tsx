@@ -65,7 +65,6 @@ import {
   updateProductLightboxIndex,
 } from './helpers/productGalleryHelpers.ts'
 import {
-  buildProductExportRows,
   buildProductSearchTerms,
   filterProductsForPage,
   getProductBranchQuantity,
@@ -1218,7 +1217,10 @@ export default function Products() {
   }), [brandFilter, branchFilter, catFilter, createdMonthFilter, createdYearFilter, groupFilter, parentProductIds, products, searchMode, searchTerms, stockFilter, supplierFilter])
 
   const exportProductsCsv = useCallback(async (rowsToExport = filtered, filePrefix = 'products') => {
-    const { downloadCSV } = await import('../../utils/csv.ts')
+    const [{ downloadCSV }, { buildProductExportRows }] = await Promise.all([
+      import('../../utils/csv.ts'),
+      import('./helpers/productExport.ts'),
+    ])
     downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0,10)}.csv`, buildProductExportRows(rowsToExport))
   }, [filtered])
 

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 800 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 801 in this file.
 
 ## Goal
 
@@ -7841,6 +7841,66 @@ Decision rule:
   measured route-local Products/Inventory code-size checks and inspect the
   remaining dashboard/portal language and CSS costs with browser traces before
   any broader language/runtime rewrites.
+
+### Move 801: Lazy-load Products CSV export row assembly
+
+- Ownership evidence: the measured route-size sweep after Move 800 showed
+  Products still carried export-only CSV row assembly in the normal route
+  chunk. That logic is not needed for viewing, filtering, pagination, grouped
+  rows, action history, selection, undo/redo, or product management; it is
+  needed only when the user activates CSV export.
+- Change: `frontend/src/components/products/helpers/productExport.ts` now owns
+  export-only product row normalization, image gallery flattening, branch-stock
+  summary formatting, and price formatting. `Products.tsx` lazy-loads that
+  module together with `csv.ts` only inside the CSV export action, while
+  `productFilterHelpers.ts` keeps only route-live filtering/search helpers.
+  `frontend/vite.config.ts` assigns the export helper to a named deferred
+  `product-export` chunk and keeps it out of eager modulepreload.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies that
+  Products dynamically imports `productExport.ts`, does not import
+  `buildProductExportRows` from `productFilterHelpers.ts`, that the export
+  module owns `formatPriceNumber`, and that Vite defers the named
+  `product-export` chunk.
+- Verification proof: `node frontend\tests\productFilterHelpers.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productSearchPagination.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build now emits
+  `Products` at 96.60 kB plus an intent-only `product-export` chunk at
+  2.60 kB, compared with the previous 98.80 kB Products route chunk.
+- Packaged runtime proof: Docker release `business-os:v6.0.0-202606061633`
+  built, updated, and started healthy with frontend hash
+  `ef9de1c26f7b18d1`. The focused route trace
+  `ops/runtime/reports/route-load-trace-2026-06-06T08-38-13-721Z.json`
+  loaded Products in 315 ms ready time with 35 requests, 27 scripts, 2 API
+  calls, no failed requests, no relevant console errors, and no
+  `product-export-*` request on normal route entry. `docker ps` showed only
+  the expected release stack containers.
+- Live proof: the full Phase 8.4 live suite passed. Broad local UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-38-27-510Z/report.json`
+  checked 66 signals with all probed route/API calls at HTTP 200, no framework
+  overlay, and zero relevant console messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-39-03-098Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Post-live hygiene
+  passed with loaded dataset status and zero generated-integrity matches.
+- Cleanup and Phase 29 proof: after runtime proof, ignored regenerable
+  `frontend/dist` (31,780,848 bytes) and `release` (380,849,816 bytes) were
+  removed, for 412,630,664 bytes reclaimed. Uploads, secrets, env files,
+  databases, volumes, backups, and the active Docker image were not touched.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed all nine
+  guardrail checks. `npm.cmd --prefix ops run prune-storage` still has a
+  non-data follow-up for a locked old Vite preview report log:
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 801: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail. Next executable target: inspect
+  the remaining dashboard/portal language and CSS costs with browser traces
+  before any broader language/runtime rewrites.
 
 ## Safety Gates
 
