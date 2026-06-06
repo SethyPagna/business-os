@@ -1274,23 +1274,12 @@ export default function POS() {
       if (normalizedSupplierFilter !== 'all' && (p.supplier||'').toLowerCase() !== normalizedSupplierFilter) return false
 
       // Branch requires a branch_stock entry for the selected branch.
+      let qty = Number(p.stock_quantity || 0)
       if (branchFilterId != null) {
         const bs = (p.branch_stock || []).find((b) => Number(b.branch_id) === branchFilterId)
         if (!bs) return false
+        qty = Number(bs.quantity || 0)
       }
-
-      // Compute the effective quantity for this product in the active context.
-      const qty = (() => {
-        if (branchFilterId != null) {
-          const bs = (p.branch_stock || []).find((b) => Number(b.branch_id) === branchFilterId)
-          return bs ? Number(bs.quantity || 0) : 0
-        }
-        // When no explicit branch filter is selected, show the product's
-        // global `stock_quantity` rather than falling back to the default
-        // branch's stock. This prevents "All" from appearing empty when
-        // the default branch has no entries for many products.
-        return Number(p.stock_quantity || 0)
-      })()
 
       // Explicit stock filter.
       if (stockFilter === 'out')      return qty <= asNumber(p.out_of_stock_threshold)

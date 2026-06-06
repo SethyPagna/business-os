@@ -2917,6 +2917,16 @@ assert.match(
 )
 assert.match(
   pos,
+  /let qty = Number\(p\.stock_quantity \|\| 0\)[\s\S]*if \(branchFilterId != null\) \{[\s\S]*const bs = \(p\.branch_stock \|\| \[\]\)\.find[\s\S]*if \(!bs\) return false[\s\S]*qty = Number\(bs\.quantity \|\| 0\)/,
+  'POS branch filtering should reuse one branch-stock lookup for existence and quantity',
+)
+assert.doesNotMatch(
+  pos,
+  /const qty = \(\(\) => \{[\s\S]*branchFilterId != null[\s\S]*branch_stock/,
+  'POS branch filtering should not rescan branch_stock inside a quantity IIFE',
+)
+assert.match(
+  pos,
   /const cartTotals = useMemo\(\(\) => \{[\s\S]*for \(const item of active\.cart\)[\s\S]*branchIds: Array\.from\(branchIds\)/,
   'POS should derive cart subtotals and branch ids in one memoized cart pass',
 )

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 807 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 808 in this file.
 
 ## Goal
 
@@ -8270,6 +8270,59 @@ Decision rule:
 - Next safe target: use the current live route traces to choose another focused
   route-local loop, loading, or chunk reduction, then repeat source checks,
   Docker/live route proof, Browser proof, cleanup, and Phase 29 audit.
+
+### Move 808: Reuse POS branch-stock lookup in branch filtering
+
+- Ownership evidence: `frontend/src/components/pos/POS.tsx` still owns POS
+  product filtering, branch stock visibility, stock-status filtering, and the
+  route-local product list used before checkout.
+- Change: the branch-filter path now finds the selected branch stock row once,
+  reuses that row for both branch existence and quantity, and keeps the
+  no-branch-filter path on the global `stock_quantity`. This removes the prior
+  duplicated `branch_stock.find(...)` pass and the nested quantity IIFE inside
+  the hot `filteredProducts` loop.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` now verifies the
+  single branch-stock lookup pattern and blocks the old branch quantity IIFE
+  rescan.
+- Verification: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070343` was built and
+  deployed after backup `ops/runtime/docker-release/backups/20260607-035407`;
+  `business-os-app-1`, workers, Postgres, Redis, and Cloudflare containers are
+  healthy on that image.
+- Route proof: live route traces against the Docker app passed with zero failed
+  requests and zero console errors: POS 237 ms with 26 requests / 19 scripts /
+  2 API, Inventory 256 ms with 36 requests / 29 scripts / 2 API, Dashboard
+  225 ms with 24 requests / 18 scripts / 2 API, and public catalog 184 ms with
+  21 requests / 16 scripts / 1 API.
+- Browser proof: the in-app Browser rendered `http://127.0.0.1:4000/` and
+  `http://127.0.0.1:4000/public` with no runtime overlay and no captured
+  console warnings/errors. The public portal showed 5,539 products, and a
+  no-side-effect search interaction for `AHC` kept real product cards visible
+  with no `0`/no-results flash.
+- Full live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. The
+  broad UI check covered 66 signals with zero relevant console messages; the
+  public Cloudflare portal check rendered 20 products with zero failed
+  responses, zero page errors, zero relevant console messages, and enforced CSP
+  present; post-live hygiene passed with loaded dataset status.
+- Cleanup: ignored regenerable `frontend/dist` (31,826,251 bytes) and
+  `release` (380,877,976 bytes) were removed for 412,704,227 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 328,231
+  bytes of stale runtime reports, one old Docker-release backup
+  `20260606-181051` (5,039,476 bytes) beyond the latest-three retention
+  policy, old Docker rollback image tag `business-os:v6.0.0-202606061728`, and
+  613.5 MB of Docker builder cache. Uploads, secrets, env files, databases,
+  Docker volumes, latest backup sets, R2 backup
+  `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070343` were not touched.
+- Current plan position after Move 808: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 ## Safety Gates
 

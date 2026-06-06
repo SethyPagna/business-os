@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 807.
+- Latest completed implementation move in this roadmap: Move 808.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12372,6 +12372,52 @@ Move 807 status:
   `business-os:latest`, and active image `business-os:v6.0.0-202606070314`
   were not touched.
 - Current plan position after Move 807: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 808 status:
+- Move 808 reuses the POS branch-stock lookup inside product filtering.
+  `POS.tsx` now finds the selected `branch_stock` row once per product when a
+  branch filter is active, reusing that row for branch existence and quantity
+  before stock-status checks. The no-branch-filter path still uses global
+  `stock_quantity`.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  single branch-stock lookup pattern and blocks the old nested quantity IIFE
+  that rescanned `branch_stock`.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070343` was built and
+  deployed healthy after backup
+  `ops/runtime/docker-release/backups/20260607-035407`.
+- Route proof: live traces passed with zero failed requests and zero console
+  errors: POS 237 ms / 26 requests / 19 scripts / 2 API, Inventory 256 ms / 36
+  requests / 29 scripts / 2 API, Dashboard 225 ms / 24 requests / 18 scripts /
+  2 API, and public catalog 184 ms / 21 requests / 16 scripts / 1 API.
+- Browser proof: the in-app Browser rendered the local app shell and public
+  portal with no runtime overlay and no captured console warnings/errors; the
+  public portal showed 5,539 products, and typing `AHC` kept real product cards
+  visible with no `0`/no-results flash.
+- Full live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. Broad
+  UI checked 66 signals with zero relevant console messages; public Cloudflare
+  portal rendered 20 products with zero failed responses, zero page errors,
+  zero relevant console messages, and enforced CSP present; post-live hygiene
+  passed with loaded dataset status.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,826,251 bytes) and
+  `release` (380,877,976 bytes) were removed for 412,704,227 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 328,231
+  bytes of stale runtime reports, one old Docker-release backup
+  `20260606-181051` (5,039,476 bytes) beyond the latest-three retention
+  policy, old Docker rollback image tag `business-os:v6.0.0-202606061728`, and
+  613.5 MB of Docker builder cache. Uploads, secrets, env files, databases,
+  Docker volumes, latest backup sets, R2 backup
+  `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070343` were preserved.
+- Current plan position after Move 808: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
