@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-05
+Last updated: 2026-06-06
 
 ## Phase Board
 
@@ -8,18 +8,19 @@ Last updated: 2026-06-05
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 795, fold the Returns `undo-2` lucide icon into
-  the existing shared icon chunk so Returns no longer spends a separate
-  startup request on a tiny route-local undo icon chunk
+- Latest completed move: Move 796, harden receipt print/reprint/image export
+  so bilingual receipt output keeps its separators and item structure, omits
+  the sale status and redundant unit-price line, and is verified by stricter
+  Playwright export assertions.
 
 ## Current Baseline
 
 Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
-- latest verified frontend/source hash from the most recent Docker-served live check: `5d419c030bf25d50`
+- latest verified frontend/source hash from the most recent Docker-served live check: `9e29b055b17fc325`
 - latest production build hash from Docker-served live check:
-  `b95ab65d20e981cf`
+  `1922511a00ae140f`
 
 Latest verified reports:
 
@@ -30,7 +31,9 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-04T22-48-17-381Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T07-16-37-505Z/report.json`
+- latest focused receipt export layout check:
+  `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-05T00-20-09-999Z/report.json`
 - latest focused local route-load trace:
@@ -66,6 +69,17 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 796 built and started Docker release `business-os:v6.0.0-202606061516`
+  for the receipt export fallback hardening. The focused receipt export live
+  check
+  `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
+  passed settings preview, Sales reprint modal, print-preview popup, and PNG
+  download. The check now explicitly rejects sale status rows, redundant
+  `@ $...` unit-price lines, missing Name/Qty/Price item headers, overflow,
+  and collapsed image exports. The broad Phase 8.4 UI live check
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T07-16-37-505Z/report.json`
+  also passed on the same Docker image with all probed routes/API calls at
+  HTTP 200, no framework overlay, and zero relevant console messages.
 - Move 795 built and started Docker release `business-os:v6.0.0-202606050903`
   for the Returns icon-chunk startup optimization. The focused local
   route-load trace

@@ -321,13 +321,13 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     header: (
       <div key="header">
         {tpl.custom_header ? <div data-receipt-line="true" className={`${headerAlignClass} font-semibold`}>{em(tpl.custom_header)}</div> : null}
-        <div className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
+        <div data-receipt-line="true" data-receipt-align="center" className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
         {tpl.show_business_name && settings?.business_name ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-lg font-bold`}>{settings.business_name}</div> : null}
         {tpl.show_address && settings?.business_address ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_address}</div> : null}
         {tpl.show_phone && settings?.business_phone ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>{settings.business_phone}</div> : null}
         {tpl.show_email && settings?.business_email ? <div data-receipt-line="true" className={`${headerAlignClass} break-all text-[11px]`}>{settings.business_email}</div> : null}
         {tpl.show_tax_id && settings?.tax_id ? <div data-receipt-line="true" className={`${headerAlignClass} break-words text-[11px]`}>Tax ID: {settings.tax_id}</div> : null}
-        <div className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
+        <div data-receipt-line="true" data-receipt-align="center" className="my-1 text-center text-[11px] text-gray-500">{headerDivider}</div>
       </div>
     ),
     order_info: (
@@ -383,7 +383,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
                   {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
-              {tpl.item_separator && index < items.length - 1 ? <div className="text-center text-[11px] text-gray-400">{divider}</div> : null}
+              {tpl.item_separator && index < items.length - 1 ? <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-400">{divider}</div> : null}
             </div>
           )
         })}
@@ -430,11 +430,11 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ) : null,
     footer: (
       <div key="footer" className="mt-2">
-        <div className="text-center text-[11px] text-gray-500">{footerDivider}</div>
+        <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
         <div data-receipt-line="true" className="mt-1 text-center text-[11px]">
           {tpl.custom_footer || settings?.receipt_footer || labelFor(lang, 'thankYou')}
         </div>
-        <div className="text-center text-[11px] text-gray-500">{footerDivider}</div>
+        <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
       </div>
     ),
   }

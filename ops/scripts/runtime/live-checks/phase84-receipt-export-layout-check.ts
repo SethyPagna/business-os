@@ -89,6 +89,13 @@ async function assertReceiptNotOverflowing(page: Page, label: string): Promise<R
   return result
 }
 
+async function assertReceiptContentPolicy(page: Page, label: string): Promise<void> {
+  const receiptText = await page.locator('[data-receipt-export-root="true"]').first().innerText({ timeout: 10_000 })
+  assert(!/\bStatus\s*:|ស្ថានភាព\s*:/.test(receiptText), `${label} still renders a sale status row`)
+  assert(!/@\s*\$\d/i.test(receiptText), `${label} still renders a redundant unit-price @ line`)
+  assert(/\bName\b/i.test(receiptText) && /\bQty\b/i.test(receiptText) && /\bPrice\b/i.test(receiptText), `${label} item table header is missing Name / Qty / Price`)
+}
+
 async function screenshot(page: Page, name: string, report: Report, fullPage = false): Promise<string> {
   const target = path.join(REPORT_DIR, name)
   await page.screenshot({ path: target, fullPage })
@@ -123,7 +130,7 @@ async function downloadReceiptImage(page: Page, report: Report): Promise<void> {
   }))
   assert(size.width >= 240 && size.width <= 1200, `Downloaded receipt image has unexpected width ${size.width}px`)
   assert(size.height >= 240, `Downloaded receipt image is too short: ${size.height}px`)
-  assert(size.height > size.width * 0.75, `Downloaded receipt image ratio looks collapsed: ${size.width}x${size.height}`)
+  assert(size.height > size.width * 1.1, `Downloaded receipt image ratio looks collapsed: ${size.width}x${size.height}`)
   await screenshot(imagePage, 'sales-reprint-image-download.png', report, true)
   await imagePage.close()
   report.downloads.push({ fileName: download.suggestedFilename(), path: target, width: size.width, height: size.height })
@@ -157,6 +164,7 @@ async function main(): Promise<void> {
     await page.getByText('Receipt Settings', { exact: false }).first().waitFor({ state: 'visible', timeout: 20_000 })
     await page.getByRole('button', { name: /Both/i }).first().click({ timeout: 10_000 })
     await page.getByText(/Name/i).first().waitFor({ state: 'visible', timeout: 10_000 })
+    await assertReceiptContentPolicy(page, 'receipt settings preview')
     report.checks.receiptSettingsPreview = await assertReceiptNotOverflowing(page, 'receipt settings preview')
     await screenshot(page, 'receipt-settings-preview.png', report)
 
@@ -169,6 +177,7 @@ async function main(): Promise<void> {
     await reprintButtons.first().click({ timeout: 10_000 })
     await page.getByText(/Receipt RCP|Receipt PRE|Receipt #/i).first().waitFor({ state: 'visible', timeout: 20_000 })
     await page.getByText(/Name/i).first().waitFor({ state: 'visible', timeout: 10_000 })
+    await assertReceiptContentPolicy(page, 'sales receipt modal')
     report.checks.salesReceiptModal = await assertReceiptNotOverflowing(page, 'sales receipt modal')
     await screenshot(page, 'sales-reprint-modal.png', report)
 

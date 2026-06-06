@@ -38,6 +38,10 @@ type TextPdfInput = {
   pageWidthPt: number
   title?: string
 }
+type ReceiptFallbackLine = {
+  text: string
+  kind: 'text' | 'center' | 'row' | 'item'
+}
 
 function parsePrintNumber(value: unknown, fallback: number): number {
   const parsed = Number.parseFloat(String(value ?? ''))
@@ -463,19 +467,39 @@ function wrapReceiptFallbackLine(line: unknown, maxChars: number): string[] {
   ]
 }
 
+function classifyReceiptFallbackLine(line: unknown, index: number): ReceiptFallbackLine {
+  const text = String(line || '').replace(/\s+/g, ' ').trim()
+  if (!text) return { text: '', kind: 'text' }
+  if (/^[=\-_.]{8,}$/.test(text)) return { text, kind: 'center' }
+  if (text.includes('\t')) {
+    return { text, kind: text.split('\t').length >= 3 ? 'item' : 'row' }
+  }
+  if (index <= 2) return { text, kind: 'center' }
+  if (/thank you/i.test(text)) return { text, kind: 'center' }
+  return { text, kind: 'text' }
+}
+
+function measureWrappedReceiptHeight(lines: ReceiptFallbackLine[], maxChars: number, lineHeight: number): number {
+  return lines.reduce((height, line) => {
+    const wrappedCount = Math.max(1, wrapReceiptFallbackLine(line.text, maxChars).length)
+    const extra = line.kind === 'center' && /^[=\-_.]{8,}$/.test(line.text) ? 3 : 0
+    return height + wrappedCount * lineHeight + extra
+  }, 0)
+}
+
 function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPrintOptions = {}): HTMLCanvasElement {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
   const lines = extractReceiptLines(content)
   const scale = 2
   const widthPx = Math.max(320, Math.round(widthMm * 4.2))
-  const paddingX = 18
-  const paddingY = 20
-  const lineHeight = 17
+  const paddingX = 24
+  const paddingY = 24
+  const lineHeight = 18
   const fontSize = 12
   const maxChars = Math.max(28, Math.floor((widthPx - paddingX * 2) / 6.5))
-  const wrappedLines = lines.flatMap((line) => wrapReceiptFallbackLine(line, maxChars))
-  const heightPx = Math.max(220, paddingY * 2 + wrappedLines.length * lineHeight)
+  const classifiedLines = lines.map(classifyReceiptFallbackLine)
+  const heightPx = Math.max(260, paddingY * 2 + measureWrappedReceiptHeight(classifiedLines, maxChars, lineHeight))
 
   const canvas = document.createElement('canvas')
   canvas.width = widthPx * scale
@@ -487,37 +511,70 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
   context.fillStyle = '#ffffff'
   context.fillRect(0, 0, widthPx, heightPx)
   context.fillStyle = '#111827'
-  context.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
+  const fontStack = `"Noto Sans Khmer", "Khmer OS", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
+  context.font = `${fontSize}px ${fontStack}`
   context.textBaseline = 'top'
 
   let y = paddingY
-  wrappedLines.forEach((line, index) => {
-    if (index === 0) {
-      context.font = `600 ${fontSize + 2}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
-    } else {
-      context.font = `${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`
-    }
-    const textLine = String(line || '')
-    if (textLine.includes('\t')) {
-      const parts = textLine.split('\t')
-      if (parts.length >= 3) {
+  classifiedLines.forEach((entry, index) => {
+    const wrappedLines = wrapReceiptFallbackLine(entry.text, maxChars)
+    wrappedLines.forEach((line, wrappedIndex) => {
+      const textLine = String(line || '')
+      const isSeparator = /^[=\-_.]{8,}$/.test(textLine)
+      const isTitle = index === 0
+      const isCenter = entry.kind === 'center'
+      if (isTitle) {
+        context.font = `700 ${fontSize + 3}px ${fontStack}`
+      } else if (entry.kind === 'item' || /^(total|subtotal|paid|change|discount|delivery)\b/i.test(textLine)) {
+        context.font = `600 ${fontSize}px ${fontStack}`
+      } else {
+        context.font = `${fontSize}px ${fontStack}`
+      }
+
+      if (isSeparator) {
+        context.strokeStyle = '#cbd5e1'
+        context.lineWidth = 1
+        context.beginPath()
+        context.moveTo(paddingX, y + 7)
+        context.lineTo(widthPx - paddingX, y + 7)
+        context.stroke()
+        y += lineHeight
+        return
+      }
+
+      if (entry.kind === 'item' && textLine.includes('\t')) {
+        const parts = textLine.split('\t')
         context.textAlign = 'left'
         context.fillText(parts[0] || '', paddingX, y)
         context.textAlign = 'center'
-        context.fillText(parts[1] || '', widthPx - paddingX - 84, y)
+        context.fillText(parts[1] || '', widthPx - paddingX - 88, y)
         context.textAlign = 'right'
         context.fillText(parts.slice(2).join(' ') || '', widthPx - paddingX, y)
-      } else {
+        context.textAlign = 'left'
+      } else if (entry.kind === 'row' && textLine.includes('\t')) {
+        const parts = textLine.split('\t')
         context.textAlign = 'left'
         context.fillText(parts[0] || '', paddingX, y)
         context.textAlign = 'right'
-        context.fillText(parts[1] || '', widthPx - paddingX, y)
+        context.fillText(parts.slice(1).join(' ') || '', widthPx - paddingX, y)
+        context.textAlign = 'left'
+      } else if (isCenter) {
+        context.textAlign = 'center'
+        context.fillText(textLine, widthPx / 2, y)
+        context.textAlign = 'left'
+      } else if (wrappedIndex > 0) {
+        context.fillText(`  ${textLine}`, paddingX, y)
+      } else {
+        context.fillText(textLine, paddingX, y)
       }
-      context.textAlign = 'left'
+      y += lineHeight
+    })
+
+    if (entry.kind === 'center' && /^[=\-_.]{8,}$/.test(entry.text)) {
+      y += 3
     } else {
-      context.fillText(textLine, paddingX, y)
+      y += 1
     }
-    y += lineHeight
   })
 
   return canvas
