@@ -2081,7 +2081,7 @@ Recent route-level win:
    organization moves; Phase 28 active with R2 prune follow-up; Phase 29 active
    for whole-codebase schema/cleanup/TypeScript/runtime/performance sweeps.
 
-## Latest Move 785
+## Recent Move 785
 
 - Products and Inventory no longer load the ProductDetailModal chunk during
   first-window route startup. `frontend/vite.config.ts` keeps visible row
@@ -2121,3 +2121,40 @@ Recent route-level win:
   and 38.2 MB of Docker builder cache while preserving uploads, secrets, env
   files, backup roots, images, volumes, and newest R2 backup
   `datasync-2026-06-04T09-26-59-912Z`.
+
+## Latest Move 803
+
+- `frontend/src/AppContext.tsx` now defers the full English language pack.
+  The app keeps a tiny `CORE_ENGLISH_PACK` for first-paint labels, then loads
+  `frontend/src/lang/en.json` dynamically after page load/idle. Khmer and other
+  non-core language selections still load immediately.
+- Guardrails and source tests passed:
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build`.
+- Docker/live proof: release image `business-os:v6.0.0-202606061728` built,
+  updated, and started healthy after backup
+  `ops/runtime/docker-release/backups/20260606-173024`. Route traces against
+  the live Docker app passed with no failures/errors and no first-window
+  `lang-en-*` requests: public catalog 271 ms with 21 requests/16 scripts,
+  Dashboard 271 ms with 24 requests/18 scripts, Inventory 362 ms with
+  36 requests/29 scripts, and POS 206 ms with 26 requests/19 scripts.
+- Full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T09-33-26-469Z/report.json`
+  checked 66 signals with zero relevant console messages. Public Cloudflare
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T09-34-08-289Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, and CSP
+  enforced.
+- Cleanup removed ignored/regenerable `frontend/dist` (31,826,118 bytes) and
+  `release` (380,876,952 bytes), reclaiming 412,703,070 bytes. Uploads,
+  secrets, env files, databases, volumes, backups, and active Docker images
+  were preserved. `npm.cmd --prefix ops run prune-storage` still has the same
+  non-data follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 803: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.

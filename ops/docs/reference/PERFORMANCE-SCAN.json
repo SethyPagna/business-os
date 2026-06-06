@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 442,
   "distAssets": 0,
-  "totalSourceBytes": 6973070,
-  "totalSourceLines": 160275,
+  "totalSourceBytes": 6976468,
+  "totalSourceLines": 160385,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -107,8 +107,8 @@
     },
     {
       "file": "frontend/src/AppContext.tsx",
-      "size": 76854,
-      "lines": 1868
+      "size": 80252,
+      "lines": 1978
     },
     {
       "file": "frontend/src/App.tsx",
@@ -213,6 +213,11 @@
       "lines": 1984
     },
     {
+      "file": "frontend/src/AppContext.tsx",
+      "size": 80252,
+      "lines": 1978
+    },
+    {
       "file": "frontend/src/components/utils-settings/Settings.tsx",
       "size": 90232,
       "lines": 1911
@@ -226,11 +231,6 @@
       "file": "backend/src/routes/inventory.ts",
       "size": 86181,
       "lines": 1902
-    },
-    {
-      "file": "frontend/src/AppContext.tsx",
-      "size": 76854,
-      "lines": 1868
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.tsx",

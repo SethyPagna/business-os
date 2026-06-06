@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 802.
+- Latest completed implementation move in this roadmap: Move 803.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12138,3 +12138,43 @@ Move 802 status:
   at 51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
   schema, cleanup, and performance guardrail.
+
+Move 803 status:
+- Move 803 defers the full English app language pack. `AppContext.tsx` now
+  keeps a small `CORE_ENGLISH_PACK` for first-paint labels, dynamically imports
+  `frontend/src/lang/en.json` after page load/idle, and still loads non-core
+  language selections immediately.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` forbids a
+  static `en.json` import in AppContext, verifies the core fallback, verifies
+  the dynamic language-pack import, and checks the deferred load/idle path.
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker release `business-os:v6.0.0-202606061728` built,
+  updated, and started healthy. The update created backup
+  `ops/runtime/docker-release/backups/20260606-173024` before restart.
+  Focused route traces against the live Docker app passed with zero failures
+  and zero relevant console/page errors: public catalog 271 ms with
+  21 requests/16 scripts/1 API, Dashboard 271 ms with 24 requests/18 scripts/2
+  API, Inventory 362 ms with 36 requests/29 scripts/2 API, and POS 206 ms with
+  26 requests/19 scripts/2 API. None of those first-window traces requested
+  `lang-en-*`, and Dashboard still did not request `dashboard-export-*`.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T09-33-26-469Z/report.json`
+  checked 66 signals with no framework overlay and zero relevant console
+  messages. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T09-34-08-289Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present.
+- Cleanup: ignored regenerable `frontend/dist` (31,826,118 bytes) and
+  `release` (380,876,952 bytes) were removed for 412,703,070 bytes reclaimed.
+  Uploads, secrets, env files, databases, volumes, backups, and active Docker
+  images were not touched. `npm.cmd --prefix ops run prune-storage` still has
+  the same non-data follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 803: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, and performance guardrail.

@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, useContext as _useContext, startTransition } from 'react'
 import type { ReactNode } from 'react'
-import en from './lang/en.json'
 import { STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
 import {
@@ -219,16 +218,92 @@ function flattenTranslationTree(input: unknown, target: TranslationPack = {}): T
   return target
 }
 
-const baseEnglishPack: TranslationPack = flattenTranslationTree(en, {})
+const CORE_ENGLISH_PACK: TranslationPack = {
+  access_denied: 'Access Denied',
+  access_denied_desc: 'You do not have permission to view this page. Contact your administrator.',
+  action: 'Action',
+  actions: 'Actions',
+  active: 'Active',
+  add: 'Add',
+  all: 'All',
+  all_brands: 'All Brands',
+  all_branches: 'All Branches',
+  all_statuses: 'All Statuses',
+  all_users: 'All Users',
+  analytics: 'Analytics',
+  apply: 'Apply',
+  audit_log: 'Audit Log',
+  backup: 'Backup',
+  branch: 'Branch',
+  cancel: 'Cancel',
+  categories: 'Categories',
+  close: 'Close',
+  completed: 'Completed',
+  contacts: 'Contacts',
+  custom: 'Custom',
+  customer_portal: 'Customer Portal',
+  dashboard: 'Dashboard',
+  delete: 'Delete',
+  edit: 'Edit',
+  error: 'Error',
+  export: 'Export',
+  failed: 'failed',
+  files: 'Files',
+  filters: 'Filters',
+  history: 'History',
+  import: 'Import',
+  inventory: 'Inventory',
+  library: 'Library',
+  loading: 'Loading',
+  login: 'Login',
+  logout: 'Logout',
+  loyalty_points: 'Loyalty Points',
+  movements: 'Movements',
+  next: 'Next',
+  no_recent_actions: 'No recent actions',
+  offline_mode: 'Offline mode',
+  offline_mode_active: 'Offline mode: sales are saved on this device and will sync when the server reconnects.',
+  offline_mode_ready_sync: 'Server is back online. Offline actions can sync now.',
+  page: 'Page',
+  pending: 'pending',
+  point_of_sale: 'Point of Sale',
+  previous: 'Previous',
+  products: 'Products',
+  receipt_settings: 'Receipt Settings',
+  redo: 'Redo',
+  returns: 'Returns',
+  sales: 'Sales',
+  save: 'Save',
+  search: 'Search',
+  server_back_online: 'Server is back online. You can keep working.',
+  server_reconnecting: 'Server reconnecting',
+  server_tunnel_reconnecting: 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.',
+  settings: 'Settings',
+  status_active: 'Active',
+  status_ready: 'Ready',
+  sync_now: 'Sync now',
+  sync_server_title: 'Sync Server',
+  syncing: 'syncing',
+  undo: 'Undo',
+  units: 'Units',
+  users: 'Users',
+  view_details: 'View details',
+  waiting_for_server: 'Waiting for server',
+}
+const CORE_LANGUAGE_CODES = new Set(['en'])
 
 const LANG_LOADERS: Record<string, () => Promise<TranslationPack>> = {
-  en: async () => baseEnglishPack,
+  en: async () => {
+    const { default: en } = await import('./lang/en.json')
+    return flattenTranslationTree(en, {})
+  },
   km: async () => {
     const { default: km } = await import('./lang/km.json')
     return flattenTranslationTree(km, {})
   },
 }
-const loadedLangs: Record<string, TranslationPack> = { en: baseEnglishPack }
+const loadedLangs: Record<string, TranslationPack> = { en: CORE_ENGLISH_PACK }
+const fullyLoadedLangs = new Set<string>()
 const AppContext = createContext<AppContextValue | null>(null)
 const SyncContext = createContext<SyncContextValue | null>(null)
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
@@ -1180,21 +1255,56 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
   useEffect(() => {
     let cancelled = false
+    let timerId: number | null = null
+    let idleId: number | null = null
+    let loadListener: (() => void) | null = null
     const nextLang = String(language || 'en').trim() || 'en'
-    if (loadedLangs[nextLang]) return undefined
+    if (fullyLoadedLangs.has(nextLang)) return undefined
 
     const loader = LANG_LOADERS[nextLang]
     if (!loader) return undefined
 
-    loader()
+    const loadLanguagePack = () => {
+      loader()
       .then((messages: TranslationPack) => {
         if (cancelled || !messages) return
         loadedLangs[nextLang] = messages
+        fullyLoadedLangs.add(nextLang)
         setLangRevision((value) => value + 1)
       })
       .catch(() => {})
+    }
 
-    return () => { cancelled = true }
+    const scheduleDeferredLanguagePack = () => {
+      const runWhenIdle = () => {
+        if (cancelled) return
+        if (typeof window.requestIdleCallback === 'function') {
+          idleId = window.requestIdleCallback(loadLanguagePack, { timeout: 7000 })
+          return
+        }
+        timerId = window.setTimeout(loadLanguagePack, 1200)
+      }
+
+      if (document.readyState === 'complete') {
+        timerId = window.setTimeout(runWhenIdle, 900)
+        return
+      }
+
+      loadListener = () => {
+        timerId = window.setTimeout(runWhenIdle, 900)
+      }
+      window.addEventListener('load', loadListener, { once: true })
+    }
+
+    if (CORE_LANGUAGE_CODES.has(nextLang)) scheduleDeferredLanguagePack()
+    else loadLanguagePack()
+
+    return () => {
+      cancelled = true
+      if (timerId != null) window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
+      if (loadListener) window.removeEventListener('load', loadListener)
+    }
   }, [language])
 
   useEffect(() => {

@@ -10,7 +10,7 @@ Total files documented: **1**
 
 | No. | File | Symbols | Route handlers |
 |---:|---|---:|---:|
-| 1 | `backend/server.js` | 24 | 0 |
+| 1 | `backend/server.js` | 29 | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -19,27 +19,32 @@ Total files documented: **1**
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `startRequestedWorkerRole` | function | 6 |
-| 2 | `listFrontendAssetFiles` | function | 69 |
-| 3 | `resolveFrontendAssetPath` | function | 80 |
-| 4 | `loadCompressionMiddleware` | function | 106 |
-| 5 | `applySecurityHeaders` | function | 115 |
-| 6 | `applyRequestPolicy` | function | 120 |
-| 7 | `applyCoreMiddleware` | function | 129 |
-| 8 | `normalizeUploadFileName` | function | 143 |
-| 9 | `getSafeActiveUploadPath` | function | 150 |
-| 10 | `findBackupUploadFallback` | function | 160 |
-| 11 | `inferUploadContentType` | function | 214 |
-| 12 | `serveLocalUpload` | function | 230 |
-| 13 | `getObjectStreamWithTimeout` | function | 247 |
-| 14 | `mountStaticAssets` | function | 262 |
-| 15 | `mountHealthRoute` | function | 340 |
-| 16 | `mountApiRoutes` | function | 368 |
-| 17 | `mountTransfersAlias` | function | 403 |
-| 18 | `mountSpaFallback` | function | 417 |
-| 19 | `mountErrorHandler` | function | 435 |
-| 20 | `getStartupBanner` | function | 448 |
-| 21 | `closeDatabase` | function | 471 |
-| 22 | `startDatabaseMaintenanceTimer` | function | 482 |
-| 23 | `registerShutdownHandlers` | function | 490 |
-| 24 | `bootstrapServer` | function | 504 |
+| 2 | `listFrontendAssetFiles` | function | 93 |
+| 3 | `resolveFrontendAssetPath` | function | 104 |
+| 4 | `resolveFrontendChunkAssetName` | function | 130 |
+| 5 | `getSpaModulePreloadChunks` | function | 151 |
+| 6 | `appendLinkHeader` | function | 158 |
+| 7 | `appendSpaModulePreloadHeaders` | function | 167 |
+| 8 | `sendSpaIndex` | function | 176 |
+| 9 | `loadCompressionMiddleware` | function | 181 |
+| 10 | `applySecurityHeaders` | function | 190 |
+| 11 | `applyRequestPolicy` | function | 195 |
+| 12 | `applyCoreMiddleware` | function | 204 |
+| 13 | `normalizeUploadFileName` | function | 218 |
+| 14 | `getSafeActiveUploadPath` | function | 225 |
+| 15 | `findBackupUploadFallback` | function | 235 |
+| 16 | `inferUploadContentType` | function | 289 |
+| 17 | `serveLocalUpload` | function | 305 |
+| 18 | `getObjectStreamWithTimeout` | function | 322 |
+| 19 | `mountStaticAssets` | function | 337 |
+| 20 | `mountHealthRoute` | function | 416 |
+| 21 | `mountApiRoutes` | function | 444 |
+| 22 | `mountTransfersAlias` | function | 479 |
+| 23 | `mountSpaFallback` | function | 493 |
+| 24 | `mountErrorHandler` | function | 510 |
+| 25 | `getStartupBanner` | function | 523 |
+| 26 | `closeDatabase` | function | 546 |
+| 27 | `startDatabaseMaintenanceTimer` | function | 557 |
+| 28 | `registerShutdownHandlers` | function | 565 |
+| 29 | `bootstrapServer` | function | 579 |
 

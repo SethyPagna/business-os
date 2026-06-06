@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-06T09:13:47.619Z
+Generated: 2026-06-06T09:40:37.443Z
 
 ## Summary
 
@@ -63,17 +63,17 @@ Generated: 2026-06-06T09:13:47.619Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 12091 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 12179 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 7923 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8045 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4001 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3655 | frontend/components/catalog |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3433 | ops/docs/reference |
 | ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3253 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3134 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 3139 | frontend/tests/performanceLoadingUx.test.ts |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |
@@ -81,15 +81,15 @@ Generated: 2026-06-06T09:13:47.619Z
 | backend/src/routes/products.ts | 2277 | backend/routes |
 | ops/docs/reference/PERFORMANCE-SCAN.md | 2179 | ops/docs/reference |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
+| ops/docs/OPTIMIZATION-STATUS.md | 2159 | ops/docs |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
-| ops/docs/OPTIMIZATION-STATUS.md | 2094 | ops/docs |
 | frontend/src/components/dashboard/Dashboard.tsx | 1984 | frontend/components/dashboard |
+| frontend/src/AppContext.tsx | 1978 | frontend/src/AppContext.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1911 | frontend/components/utils-settings |
 | frontend/src/App.tsx | 1905 | frontend/src/App.tsx |
 | backend/src/routes/inventory.ts | 1902 | backend/routes |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
-| frontend/src/AppContext.tsx | 1868 | frontend/src/AppContext.tsx |
 | ops/docs/reference/FOLDER-COVERAGE.md | 1813 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1775 | frontend/components/utils-settings |
 | backend/src/routes/system/index.ts | 1674 | backend/routes |

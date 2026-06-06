@@ -96,6 +96,11 @@ const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.u
 
 assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
 assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/pathRouting\.ts'/, 'app context should derive the initial route page without importing the heavier admin shell utility chunk')
+assert.doesNotMatch(appContext, /import en from '\.\/lang\/en\.json'/, 'app context should not statically load the full English language pack during startup')
+assert.match(appContext, /const CORE_ENGLISH_PACK: TranslationPack = \{[\s\S]*sync_server_title: 'Sync Server'[\s\S]*\}/, 'app context should keep a tiny synchronous English fallback for first paint labels')
+assert.match(appContext, /const \{ default: en \} = await import\('\.\/lang\/en\.json'\)/, 'app context should load the full English language pack dynamically after first paint')
+assert.match(appContext, /CORE_LANGUAGE_CODES\.has\(nextLang\)[\s\S]*scheduleDeferredLanguagePack\(\)/, 'core language packs should be deferred instead of requested in the first script window')
+assert.match(appContext, /window\.requestIdleCallback\(loadLanguagePack, \{ timeout: 7000 \}\)/, 'deferred full language pack loading should prefer idle time with a bounded timeout')
 assert.match(appContext, /function getInitialAdminPage\(publicMode: boolean\): string \{[\s\S]*getAdminPageFromPath\(window\.location\.pathname\) \|\| 'dashboard'[\s\S]*\}/, 'direct admin URLs should initialize the active page without briefly mounting Dashboard first')
 assert.match(appContext, /const \[page,\s+setPage\]\s+= useState\(\(\) => getInitialAdminPage\(publicMode\)\)/, 'initial active page state should come from the current URL')
 assert.match(app, /const NARROW_PAGE_ENTRY_WARMUP_IDS[\s\S]*'sales',[\s\S]*'returns',/, 'Sales and Returns should use narrow delayed page-entry warmup instead of pulling the later admin stack immediately')

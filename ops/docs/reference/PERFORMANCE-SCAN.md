@@ -28,7 +28,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/utils-settings/Settings.tsx` | 88.1 | 1911 |
 | `backend/src/routes/inventory.ts` | 84.2 | 1902 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 80.1 | 1775 |
-| `frontend/src/AppContext.tsx` | 75.1 | 1868 |
+| `frontend/src/AppContext.tsx` | 78.4 | 1978 |
 | `frontend/src/App.tsx` | 71.7 | 1905 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 68.2 | 1326 |
@@ -54,10 +54,10 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/products.ts` | 2277 | 101.0 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2170 | 101.2 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 1984 | 100.7 |
+| `frontend/src/AppContext.tsx` | 1978 | 78.4 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1911 | 88.1 |
 | `frontend/src/App.tsx` | 1905 | 71.7 |
 | `backend/src/routes/inventory.ts` | 1902 | 84.2 |
-| `frontend/src/AppContext.tsx` | 1868 | 75.1 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1775 | 80.1 |
 | `backend/src/routes/system/index.ts` | 1674 | 65.6 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |

@@ -7966,6 +7966,67 @@ Decision rule:
   remaining portal language-pack/CSS costs and Dashboard chart packaging with
   browser traces before any broader language/runtime rewrites.
 
+### Move 803: Defer the full English app language pack
+
+- Ownership evidence: post-Move-802 route traces showed public catalog,
+  Dashboard, Inventory, and POS still fetched the full `lang-en` chunk during
+  the first route-load window even though the visible first-paint shell needs
+  only a small set of common English labels. The full dictionary is pure
+  lookup data and is not needed to render the first meaningful screen.
+- Change: `frontend/src/AppContext.tsx` no longer statically imports
+  `frontend/src/lang/en.json`. It now keeps a tiny `CORE_ENGLISH_PACK` for
+  first-paint labels and dynamically imports the full English dictionary after
+  page load/idle with a bounded timeout. Non-core language selections, such as
+  Khmer, still load immediately so language recovery remains responsive.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now forbids
+  the static English JSON import, verifies the synchronous core fallback,
+  verifies the dynamic `import('./lang/en.json')`, and checks that core
+  language packs are scheduled through the deferred load/idle path.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build still
+  emits `lang-en` as a separate chunk, but it is no longer required by initial
+  route entry.
+- Packaged runtime proof: Docker release `business-os:v6.0.0-202606061728`
+  built, updated, and started healthy. The Docker update created backup
+  `ops/runtime/docker-release/backups/20260606-173024` before restart. Local
+  route traces against the live Docker app passed with zero failed requests
+  and zero relevant console/page errors:
+  public catalog `ops/runtime/reports/route-load-trace-2026-06-06T09-31-15-116Z.json`
+  reached ready text in 271 ms with 21 requests/16 scripts/1 API;
+  Dashboard `ops/runtime/reports/route-load-trace-2026-06-06T09-31-15-606Z.json`
+  reached ready text in 271 ms with 24 requests/18 scripts/2 API;
+  Inventory `ops/runtime/reports/route-load-trace-2026-06-06T09-31-15-629Z.json`
+  reached ready text in 362 ms with 36 requests/29 scripts/2 API;
+  POS `ops/runtime/reports/route-load-trace-2026-06-06T09-31-35-634Z.json`
+  reached ready text in 206 ms with 26 requests/19 scripts/2 API. None of
+  those first-window traces requested `lang-en-*`; Dashboard also kept
+  `dashboard-export-*` out of normal route entry.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T09-33-26-469Z/report.json`
+  checked 66 signals with all probed route/API calls at HTTP 200, no framework
+  overlay, and zero relevant console messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T09-34-08-289Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Post-live hygiene
+  passed with loaded dataset status and zero generated-integrity matches.
+- Cleanup and Phase 29 proof: after runtime proof, ignored regenerable
+  `frontend/dist` (31,826,118 bytes) and `release` (380,876,952 bytes) were
+  removed, for 412,703,070 bytes reclaimed. Uploads, secrets, env files,
+  databases, volumes, backups, and the active Docker image were not touched.
+  `npm.cmd --prefix ops run prune-storage` still has the same non-data
+  follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 803: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail. Next executable target: continue
+  inspecting the public catalog route chunk and Inventory first-load helper
+  graph before any broader language/runtime rewrites.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.
