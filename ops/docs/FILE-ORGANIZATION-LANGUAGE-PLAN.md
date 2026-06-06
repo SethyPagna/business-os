@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 799 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 800 in this file.
 
 ## Goal
 
@@ -7786,6 +7786,61 @@ Decision rule:
   rendered 20 products with portal bootstrap 200, AI status 200 after
   interaction, enforced CSP, no internal server error, zero failed responses,
   zero relevant console messages, and zero page errors.
+
+### Move 800: Lazy-load Inventory export and report assembly
+
+- Ownership evidence: the measured route-size sweep after Move 799 showed
+  Inventory still carried export-only CSV/report/ZIP assembly in the normal
+  route chunk. Those helpers are not needed for viewing products, stats,
+  movements, RFID, filters, or stock actions; they are needed only when the
+  user activates an export command.
+- Change: `frontend/src/components/inventory/inventoryExport.ts` now owns the
+  export-only row builders, standalone report assembly, and ZIP package
+  generation. `Inventory.tsx` keeps a small `buildInventoryExportScope`
+  callback and lazy-loads `inventoryExport.ts` only inside export actions.
+  `frontend/vite.config.ts` assigns that file to a named deferred
+  `inventory-export` chunk and keeps it out of eager modulepreload.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now verifies
+  that Inventory dynamically imports the export module, does not statically
+  import it, that the export module owns `exportInventoryPackage` and
+  `buildStandaloneReportHtml`, and that Vite defers the named
+  `inventory-export` chunk.
+- Verification proof: `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build now emits
+  `Inventory` at 132.96 kB plus an intent-only `inventory-export` chunk at
+  16.71 kB, compared with the previous 145.95 kB Inventory route chunk.
+- Packaged runtime proof: Docker release `business-os:v6.0.0-202606061614`
+  built, updated, and started healthy with frontend hash
+  `95c05024fca68d3a`. The focused route trace
+  `ops/runtime/reports/route-load-trace-2026-06-06T08-16-53-367Z.json`
+  loaded Inventory in 371 ms ready time with 37 requests, 30 scripts, 2 API
+  calls, no failed requests, no relevant console errors, and no
+  `inventory-export-*` request on normal route entry. `docker ps` showed only
+  the expected release stack containers.
+- Live proof: the full Phase 8.4 live suite passed. Broad local UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-17-36-183Z/report.json`
+  checked 66 signals with all probed route/API calls at HTTP 200, no framework
+  overlay, and zero relevant console messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-18-14-943Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Post-live hygiene
+  passed with loaded dataset status and zero generated-integrity matches.
+- Cleanup and Phase 29 proof: after runtime proof, ignored regenerable
+  `frontend/dist` (31,780,450 bytes) and `release` (380,849,304 bytes) were
+  removed, for 412,629,754 bytes reclaimed. Uploads, secrets, env files,
+  databases, volumes, backups, and the active Docker image were not touched.
+  The follow-up `npm.cmd --prefix ops run phase29:audit` passed all nine
+  guardrail checks.
+- Current plan position after Move 800: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail. Next executable target: continue
+  measured route-local Products/Inventory code-size checks and inspect the
+  remaining dashboard/portal language and CSS costs with browser traces before
+  any broader language/runtime rewrites.
 
 ## Safety Gates
 

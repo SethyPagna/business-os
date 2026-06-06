@@ -165,6 +165,7 @@ const deferredModulePreloadPrefixes = [
   'assets/dashboard-api-',
   'assets/file-api-',
   'assets/inventory-api-',
+  'assets/inventory-export-',
   'assets/inventory-write-api-',
   'assets/import-jobs-api-',
   'assets/multipart-headers-api-',
@@ -327,6 +328,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/productImageUploadTransport.ts')) return 'product-image-upload-api'
     if (normalized.endsWith('/src/api/branchTransport.ts')) return 'branch-api'
     if (normalized.endsWith('/src/api/inventoryTransport.ts')) return 'inventory-api'
+    if (normalized.endsWith('/src/components/inventory/inventoryExport.ts')) return 'inventory-export'
     if (normalized.endsWith('/src/api/inventoryWriteTransport.ts')) return 'inventory-write-api'
     if (
       normalized.endsWith('/src/api/importJobsTransport.ts')

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-05T05:13:18.908Z",
+  "generatedAt": "2026-06-06T08:22:47.232Z",
   "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
   "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
   "measurementMode": "bounded-parallel-targets",
@@ -9,8 +9,8 @@
   "fileStatConcurrency": 32,
   "targets": 15,
   "existingTargets": 7,
-  "totalBytes": 539459038,
-  "protectedBytes": 246959046,
+  "totalBytes": 611778301,
+  "protectedBytes": 319278309,
   "cleanupCandidateBytes": 292499992,
   "nestedTargetOverlaps": [
     {
@@ -31,8 +31,8 @@
     }
   ],
   "nestedOverlapBytes": 15496556,
-  "adjustedTotalBytes": 523962482,
-  "adjustedProtectedBytes": 231462490,
+  "adjustedTotalBytes": 596281745,
+  "adjustedProtectedBytes": 303781753,
   "adjustedCleanupCandidateBytes": 292499992,
   "largestProtectedTargets": [
     {
@@ -45,9 +45,9 @@
     },
     {
       "path": "ops/runtime",
-      "bytes": 68155120,
-      "files": 755,
-      "folders": 59,
+      "bytes": 140474383,
+      "files": 1632,
+      "folders": 204,
       "category": "runtime state",
       "disposition": "retention"
     },
@@ -97,7 +97,7 @@
   "slowestTargetMeasurements": [
     {
       "path": "backend/node_modules",
-      "measureMs": 1016,
+      "measureMs": 805,
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
@@ -106,7 +106,7 @@
     },
     {
       "path": "frontend/node_modules",
-      "measureMs": 682,
+      "measureMs": 531,
       "bytes": 158132222,
       "files": 11264,
       "folders": 986,
@@ -114,8 +114,17 @@
       "protected": false
     },
     {
+      "path": "ops/runtime",
+      "measureMs": 106,
+      "bytes": 140474383,
+      "files": 1632,
+      "folders": 204,
+      "category": "runtime state",
+      "protected": true
+    },
+    {
       "path": "ops/node_modules",
-      "measureMs": 54,
+      "measureMs": 27,
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
@@ -123,30 +132,12 @@
       "protected": false
     },
     {
-      "path": "ops/runtime",
-      "measureMs": 45,
-      "bytes": 68155120,
-      "files": 755,
-      "folders": 59,
-      "category": "runtime state",
-      "protected": true
-    },
-    {
       "path": "business-os-data",
-      "measureMs": 12,
+      "measureMs": 10,
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
       "category": "business data",
-      "protected": true
-    },
-    {
-      "path": "ops/runtime/secrets",
-      "measureMs": 3,
-      "bytes": 713,
-      "files": 4,
-      "folders": 1,
-      "category": "secrets",
       "protected": true
     },
     {
@@ -156,6 +147,15 @@
       "files": 12,
       "folders": 1,
       "category": "business uploads",
+      "protected": true
+    },
+    {
+      "path": "ops/runtime/secrets",
+      "measureMs": 2,
+      "bytes": 713,
+      "files": 4,
+      "folders": 1,
+      "category": "secrets",
       "protected": true
     }
   ],
@@ -167,9 +167,9 @@
       "targets": 3
     },
     "retention": {
-      "bytes": 68155120,
-      "files": 755,
-      "folders": 59,
+      "bytes": 140474383,
+      "files": 1632,
+      "folders": 204,
       "targets": 1
     },
     "reinstallable": {
@@ -227,7 +227,7 @@
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
-      "measureMs": 12,
+      "measureMs": 10,
       "category": "business data",
       "disposition": "preserve",
       "protected": true,
@@ -241,21 +241,7 @@
       "bytes": 158132222,
       "files": 11264,
       "folders": 986,
-      "measureMs": 682,
-      "category": "dependencies",
-      "disposition": "reinstallable",
-      "protected": false,
-      "ignoreCovered": true,
-      "cleanGeneratedCovered": true,
-      "parseAsSource": false
-    },
-    {
-      "path": "backend/node_modules",
-      "exists": true,
-      "bytes": 120569968,
-      "files": 8618,
-      "folders": 1654,
-      "measureMs": 1016,
+      "measureMs": 531,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -266,13 +252,27 @@
     {
       "path": "ops/runtime",
       "exists": true,
-      "bytes": 68155120,
-      "files": 755,
-      "folders": 59,
-      "measureMs": 45,
+      "bytes": 140474383,
+      "files": 1632,
+      "folders": 204,
+      "measureMs": 106,
       "category": "runtime state",
       "disposition": "retention",
       "protected": true,
+      "ignoreCovered": true,
+      "cleanGeneratedCovered": true,
+      "parseAsSource": false
+    },
+    {
+      "path": "backend/node_modules",
+      "exists": true,
+      "bytes": 120569968,
+      "files": 8618,
+      "folders": 1654,
+      "measureMs": 805,
+      "category": "dependencies",
+      "disposition": "reinstallable",
+      "protected": false,
       "ignoreCovered": true,
       "cleanGeneratedCovered": true,
       "parseAsSource": false
@@ -297,7 +297,7 @@
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
-      "measureMs": 54,
+      "measureMs": 27,
       "category": "dependencies",
       "disposition": "safe cleanup",
       "protected": false,
@@ -311,7 +311,7 @@
       "bytes": 713,
       "files": 4,
       "folders": 1,
-      "measureMs": 3,
+      "measureMs": 2,
       "category": "secrets",
       "disposition": "preserve",
       "protected": true,
@@ -339,7 +339,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 1,
+      "measureMs": 0,
       "category": "build output",
       "disposition": "regenerable",
       "protected": false,
@@ -381,7 +381,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "browser artifact",
       "disposition": "safe cleanup",
       "protected": false,
@@ -409,7 +409,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 1,
+      "measureMs": 0,
       "category": "release kit",
       "disposition": "regenerable",
       "protected": false,

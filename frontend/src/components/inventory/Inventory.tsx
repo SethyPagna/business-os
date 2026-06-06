@@ -13,7 +13,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
-import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing.ts'
+import { calculateProductDiscount } from '../../utils/pricing.ts'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
@@ -193,6 +193,7 @@ type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
 type RfidTransportModule = typeof import('../../api/rfidTransport.ts')
 type UserReadTransportModule = typeof import('../../api/userReadTransport.ts')
 type InventoryWriteTransportModule = typeof import('../../api/inventoryWriteTransport.ts')
+type InventoryExportModule = typeof import('./inventoryExport.ts')
 
 type LoadOptions = {
   force?: boolean
@@ -206,6 +207,7 @@ let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
 let rfidTransportPromise: Promise<RfidTransportModule> | null = null
 let userReadTransportPromise: Promise<UserReadTransportModule> | null = null
 let inventoryWriteTransportPromise: Promise<InventoryWriteTransportModule> | null = null
+let inventoryExportModulePromise: Promise<InventoryExportModule> | null = null
 
 function loadBranchTransport(): Promise<BranchTransportModule> {
   if (!branchTransportPromise) branchTransportPromise = import('../../api/branchTransport.ts')
@@ -245,6 +247,11 @@ function loadRfidTransport(): Promise<RfidTransportModule> {
 function loadUserReadTransport(): Promise<UserReadTransportModule> {
   if (!userReadTransportPromise) userReadTransportPromise = import('../../api/userReadTransport.ts')
   return userReadTransportPromise
+}
+
+function loadInventoryExportModule(): Promise<InventoryExportModule> {
+  if (!inventoryExportModulePromise) inventoryExportModulePromise = import('./inventoryExport.ts')
+  return inventoryExportModulePromise
 }
 
 function getInventoryApi(): InventoryApi {
@@ -357,10 +364,6 @@ function limitInventorySectionsForMobile(sections: LegacyInventoryRecord[] = [],
   return limitedSections
 }
 
-function priceCsv(value: unknown): string {
-  return formatPriceNumber(value || 0)
-}
-
 function parseInventoryTimestamp(value: unknown): Date | null {
   if (!value) return null
   const raw = String(value).trim()
@@ -450,23 +453,6 @@ const RFID_SECTION_OPTIONS = [
   { value: 'exceptions', labelKey: 'rfid_section_exceptions', hintKey: 'rfid_section_exceptions_hint', label: 'Exceptions', hint: 'Review wrong-branch, unknown, missing, and extra tag detections before applying.' },
   { value: 'sessions', labelKey: 'rfid_section_sessions', hintKey: 'rfid_section_sessions_hint', label: 'Sessions', hint: 'Audit RFID scan sessions and manually apply approved results.' },
 ]
-
-let inventoryExportToolsPromise: Promise<LegacyInventoryRecord> | null = null
-
-async function loadInventoryExportTools() {
-  if (!inventoryExportToolsPromise) {
-    inventoryExportToolsPromise = Promise.all([
-      import('../../utils/csv'),
-      import('../../utils/exportReports'),
-      import('../../utils/exportPackage'),
-    ]).then(([csvUtils, reportUtils, packageUtils]) => ({
-      ...csvUtils,
-      ...reportUtils,
-      ...packageUtils,
-    }))
-  }
-  return inventoryExportToolsPromise
-}
 
 export default function Inventory() {
   const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp() as InventoryAppContext
@@ -2435,138 +2421,29 @@ export default function Inventory() {
     () => visibleMovementGroups.reduce((sum, group) => sum + Number(group.items?.length || group.recordCount || 0), 0),
     [visibleMovementGroups],
   )
-  const movementActivityRows = useMemo(() => {
-    const map = new Map()
-    visibleMovementGroups.forEach((group) => {
-      const key = String(group.movement_type || group.movementLabel || 'other')
-      const current = map.get(key) || {
-        name: group.movementLabel || key,
-        groups: 0,
-        quantity: 0,
-        total_cost_usd: 0,
-      }
-      current.groups += 1
-      current.quantity += Number(group.totalQuantity || 0)
-      current.total_cost_usd += Number(group.totalCostUsd || 0)
-      map.set(key, current)
-    })
-    return [...map.values()].sort((left, right) => right.quantity - left.quantity || right.groups - left.groups)
-  }, [visibleMovementGroups])
-
-  const movementVolumeRows = useMemo(() => {
-    const map = new Map()
-    visibleMovementGroups.forEach((group) => {
-      const raw = group.latest_at || group.items?.[0]?.created_at || ''
-      const date = parseInventoryTimestamp(raw)
-      if (!date) return
-      const period = movementTimeMode === 'year'
-        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-        : movementTimeMode === 'month'
-          ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-          : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      const current = map.get(period) || { period, count: 0, quantity: 0, total_cost_usd: 0 }
-      current.count += Number(group.items?.length || 0)
-      current.quantity += Number(group.totalQuantity || 0)
-      current.total_cost_usd += Number(group.totalCostUsd || 0)
-      map.set(period, current)
-    })
-    return [...map.values()]
-  }, [movementTimeMode, visibleMovementGroups])
-
-  const stockStatusRows = useMemo(() => ([
-    { name: tr('in_stock', 'In Stock'), value: inStockCount },
-    { name: tr('low_stock', 'Low Stock'), value: lowStockCount },
-    { name: tr('out_of_stock', 'Out of Stock'), value: outStockCount },
-  ]), [inStockCount, lowStockCount, outStockCount, tr])
-
-  const topStockValueRows = useMemo(() => (
-    [...filteredSummary]
-      .sort((left, right) => Number(right.stock_value_usd || 0) - Number(left.stock_value_usd || 0))
-      .slice(0, 10)
-      .map((product) => ({
-        Product: product.name || '',
-        Stock_Value_USD: Number(product.stock_value_usd || 0),
-        Stock_Qty: getStockQty(product),
-        Revenue_USD: Number(product.revenue_usd || 0),
-        Brand: product.brand || '',
-      }))
-  ), [filteredSummary, getStockQty])
-
-  const branchComparisonRows = useMemo(() => {
-    const map = new Map()
-    filteredSummary.forEach((product) => {
-      const cost = Number(product.purchase_price_usd || product.cost_price_usd || 0)
-      if (Array.isArray(product.branch_stock) && product.branch_stock.length) {
-        product.branch_stock.forEach((branchStock) => {
-          const key = String(branchStock.branch_id || branchStock.branch_name || '')
-          if (!key) return
-          const current = map.get(key) || {
-            branch_name: branchStock.branch_name || getBranchLabel(key, key),
-            quantity: 0,
-            stock_value_usd: 0,
-            product_count: 0,
-          }
-          const quantity = Number(branchStock.quantity || 0)
-          current.quantity += quantity
-          current.stock_value_usd += quantity * cost
-          if (quantity > 0) current.product_count += 1
-          map.set(key, current)
-        })
-      }
-    })
-    return [...map.values()].sort((left, right) => right.stock_value_usd - left.stock_value_usd || right.quantity - left.quantity)
-  }, [filteredSummary, getBranchLabel])
-
-  const buildInventoryStatsRows = useCallback(() => ([
-    { Section: 'Inventory Stats', Metric: 'View Tab', Value: tab },
-    { Section: 'Inventory Stats', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
-    { Section: 'Inventory Stats', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
-    { Section: 'Inventory Stats', Metric: 'Stock Filter', Value: stockFilter },
-    { Section: 'Inventory Stats', Metric: 'Visible Movement Date Range', Value: movementDateRangeLabel },
-    { Section: 'Inventory Stats', Metric: 'Search', Value: search || '' },
-    { Section: 'Inventory Stats', Metric: 'Movement Year Filter', Value: movementYearFilter },
-    { Section: 'Inventory Stats', Metric: 'Movement Month Filter', Value: movementMonthFilter },
-    { Section: 'Inventory Stats', Metric: 'Movement Type Filter', Value: movFilter },
-    { Section: 'Inventory Stats', Metric: 'Movement Group Mode', Value: movementGroupMode },
-    { Section: 'Inventory Stats', Metric: 'Movement Sort Direction', Value: movementSortDirection },
-    { Section: 'Inventory Stats', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
-    { Section: 'Inventory Stats', Metric: 'Visible Movement Records', Value: visibleMovementRecordCount },
-    { Section: 'Inventory Stats', Metric: 'Visible Movement Quantity', Value: visibleMovementQuantity },
-    { Section: 'Inventory Stats', Metric: 'Visible Products', Value: filteredSummary.length },
-    { Section: 'Inventory Stats', Metric: 'Total Products', Value: totalProducts },
-    { Section: 'Inventory Stats', Metric: 'Low Stock Count', Value: lowStockCount },
-    { Section: 'Inventory Stats', Metric: 'Out Of Stock Count', Value: outStockCount },
-    { Section: 'Inventory Stats', Metric: 'Stock Value (USD)', Value: totalValue.toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'Net Sold Qty', Value: totalQtySold },
-    { Section: 'Inventory Stats', Metric: 'Revenue (USD)', Value: totalRevenue.toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'COGS (USD)', Value: totalCOGS.toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'Gross Profit (USD)', Value: totalProfit.toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'Store Discounts (USD)', Value: totalStoreDiscounts.toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'Membership Discounts (USD)', Value: totalMembershipDiscounts.toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'Returns Count', Value: returnStats?.count ?? 0 },
-    { Section: 'Inventory Stats', Metric: 'Return Refunds (USD)', Value: Number(returnStats?.refund_usd || 0).toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'Tax Collected (USD)', Value: Number(taxDelivery.tax || 0).toFixed(2) },
-    { Section: 'Inventory Stats', Metric: 'Delivery Fees (USD)', Value: Number(taxDelivery.delivery || 0).toFixed(2) },
-  ]), [
+  const buildInventoryExportScope = useCallback(() => ({
     branchFilter,
     brandFilter,
+    exportStamp,
+    filteredSummary,
+    fmtUSD,
     getBranchLabel,
-    filteredSummary.length,
+    getStockQty,
+    inStockCount,
     lowStockCount,
     movFilter,
+    movementDateRangeLabel,
     movementGroupMode,
     movementMonthFilter,
     movementSortDirection,
-    movementDateRangeLabel,
+    movementTimeMode,
     movementYearFilter,
     outStockCount,
-    returnStats?.count,
-    returnStats?.refund_usd,
+    returnStats,
     search,
     stockFilter,
     tab,
-    taxDelivery.delivery,
-    taxDelivery.tax,
+    taxDelivery,
     totalCOGS,
     totalMembershipDiscounts,
     totalProducts,
@@ -2575,367 +2452,66 @@ export default function Inventory() {
     totalRevenue,
     totalStoreDiscounts,
     totalValue,
-    visibleMovementGroups.length,
+    tr,
+    visibleMovementGroups,
     visibleMovementQuantity,
     visibleMovementRecordCount,
-  ])
-
-  const buildInventoryFormulaRows = useCallback(() => ([
-    {
-      Section: 'Calculation',
-      Metric: 'Visible stock value',
-      Formula: 'Stock value = sum(stock quantity * unit cost)',
-      Example: `${fmtUSD(totalValue)} across ${filteredSummary.length} visible products`,
-    },
-    {
-      Section: 'Calculation',
-      Metric: 'Gross profit',
-      Formula: 'Gross profit = revenue - COGS',
-      Example: `${fmtUSD(totalProfit)} = ${fmtUSD(totalRevenue)} - ${fmtUSD(totalCOGS)}`,
-    },
-    {
-      Section: 'Calculation',
-      Metric: 'In-stock count',
-      Formula: 'In stock = quantity greater than the low-stock threshold',
-      Example: `${stockStatusRows[0]?.value || 0} visible products`,
-    },
-    {
-      Section: 'Calculation',
-      Metric: 'Low-stock count',
-      Formula: 'Low stock = quantity above out-of-stock threshold and at or below low-stock threshold',
-      Example: `${lowStockCount} visible products`,
-    },
-    {
-      Section: 'Calculation',
-      Metric: 'Out-of-stock count',
-      Formula: 'Out of stock = quantity at or below out-of-stock threshold',
-      Example: `${outStockCount} visible products`,
-    },
-    {
-      Section: 'Calculation',
-      Metric: 'Visible movement quantity',
-      Formula: 'Visible movement quantity = sum(group quantities after filters/grouping)',
-      Example: `${visibleMovementQuantity} units across ${visibleMovementRecordCount} records in ${visibleMovementGroups.length} visible movement groups`,
-    },
-  ]), [
-    filteredSummary.length,
-    fmtUSD,
-    lowStockCount,
-    outStockCount,
-    stockStatusRows,
-    totalCOGS,
-    totalProfit,
-    totalRevenue,
-    totalValue,
-    visibleMovementGroups.length,
-    visibleMovementRecordCount,
-    visibleMovementQuantity,
-  ])
-
-  const buildMovementFilterRows = useCallback(() => ([
-    { Section: 'Movement Filters', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
-    { Section: 'Movement Filters', Metric: 'Movement Type Filter', Value: movFilter },
-    { Section: 'Movement Filters', Metric: 'Year Filter', Value: movementYearFilter },
-    { Section: 'Movement Filters', Metric: 'Month Filter', Value: movementMonthFilter },
-    { Section: 'Movement Filters', Metric: 'Group Mode', Value: movementGroupMode },
-    { Section: 'Movement Filters', Metric: 'Sort Direction', Value: movementSortDirection },
-    { Section: 'Movement Filters', Metric: 'Search', Value: search || '' },
-    { Section: 'Movement Filters', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
-    { Section: 'Movement Filters', Metric: 'Visible Movement Records', Value: visibleMovementRecordCount },
-    { Section: 'Movement Filters', Metric: 'Visible Movement Quantity', Value: visibleMovementQuantity },
-  ]), [
-    branchFilter,
-    getBranchLabel,
-    movFilter,
-    movementGroupMode,
-    movementMonthFilter,
-    movementSortDirection,
-    movementYearFilter,
-    search,
-    visibleMovementGroups.length,
-    visibleMovementQuantity,
-    visibleMovementRecordCount,
-  ])
-
-  const buildInventoryExportContextRows = useCallback(() => ([
-    { Section: 'Export Context', Metric: 'Active Tab', Value: tab },
-    { Section: 'Export Context', Metric: 'Branch Filter', Value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
-    { Section: 'Export Context', Metric: 'Brand Filter', Value: brandFilter === 'all' ? 'All brands' : brandFilter },
-    { Section: 'Export Context', Metric: 'Stock Filter', Value: stockFilter },
-    { Section: 'Export Context', Metric: 'Movement Type Filter', Value: movFilter },
-    { Section: 'Export Context', Metric: 'Movement Date Range', Value: movementDateRangeLabel },
-    { Section: 'Export Context', Metric: 'Movement Group Mode', Value: movementGroupMode },
-    { Section: 'Export Context', Metric: 'Movement Sort Direction', Value: movementSortDirection },
-    { Section: 'Export Context', Metric: 'Year Filter', Value: movementYearFilter },
-    { Section: 'Export Context', Metric: 'Month Filter', Value: movementMonthFilter },
-    { Section: 'Export Context', Metric: 'Search', Value: search || '' },
-    { Section: 'Export Context', Metric: 'Visible Products', Value: filteredSummary.length },
-    { Section: 'Export Context', Metric: 'Visible Movement Groups', Value: visibleMovementGroups.length },
-    { Section: 'Export Context', Metric: 'Visible Movement Records', Value: visibleMovementRecordCount },
-    { Section: 'Export Context', Metric: 'Generated At', Value: new Date().toISOString() },
-  ]), [
+  }), [
     branchFilter,
     brandFilter,
-    filteredSummary.length,
-    getBranchLabel,
-    movFilter,
-    movementDateRangeLabel,
-    movementGroupMode,
-    movementMonthFilter,
-    movementSortDirection,
-    movementYearFilter,
-    search,
-    stockFilter,
-    tab,
-    visibleMovementGroups.length,
-    visibleMovementRecordCount,
-  ])
-
-  const buildMovementRows = useCallback((groups: LegacyInventoryRecord[]) => groups.map((group: LegacyInventoryRecord) => ({
-    Date: group.latest_at || '',
-    Activity: group.movementLabel || '',
-    Products: group.productSummary || '',
-    Records: group.items?.length || 0,
-    Qty: group.totalQuantity || 0,
-    Total_Cost_USD: priceCsv(group.totalCostUsd || 0),
-    Branch: group.branchSummary || '',
-    Reason: group.reasonSummary || '',
-    User: group.userSummary || '',
-  })), [])
-
-  const buildInventoryProductRows = useCallback((productsToExport: InventoryProduct[] = filteredSummary) => (
-    productsToExport.map((p: InventoryProduct) => ({
-      Name: p.name || '',
-      SKU: p.sku || '',
-      Category: p.category || '',
-      Brand: p.brand || '',
-      Selling_Price_USD: priceCsv(p.selling_price_usd || 0),
-      Selling_Price_KHR: priceCsv(p.selling_price_khr || 0),
-      Special_Price_USD: priceCsv(p.special_price_usd || p.selling_price_usd || 0),
-      Special_Price_KHR: priceCsv(p.special_price_khr || p.selling_price_khr || 0),
-      Discount_Enabled: p.discount_enabled ? 'yes' : 'no',
-      Discount_Type: p.discount_type || '',
-      Discount_Percent: priceCsv(p.discount_percent || 0),
-      Discount_Amount_USD: priceCsv(p.discount_amount_usd || 0),
-      Discount_Amount_KHR: priceCsv(p.discount_amount_khr || 0),
-      Discount_Label: p.discount_label || '',
-      Discount_Badge_Color: p.discount_badge_color || '',
-      Discount_Starts_At: p.discount_starts_at || '',
-      Discount_Ends_At: p.discount_ends_at || '',
-      Cost_Price_USD: priceCsv(p.purchase_price_usd || p.cost_price_usd || 0),
-      Cost_Price_KHR: priceCsv(p.purchase_price_khr || p.cost_price_khr || 0),
-      Stock_Qty: getStockQty(p),
-      Sold_Qty: p.qty_sold || 0,
-      Revenue_USD: priceCsv(p.revenue_usd || 0),
-      COGS_USD: priceCsv(p.cogs_usd || 0),
-      Profit_USD: priceCsv((p.revenue_usd || 0) - (p.cogs_usd || 0)),
-      Stock_Value_USD: priceCsv(getStockQty(p) * (p.purchase_price_usd || p.cost_price_usd || 0)),
-      Unit: p.unit || '',
-      Supplier: p.supplier || '',
-    }))
-  ), [filteredSummary, getStockQty])
-
-  const exportMovementGroups = useCallback(async (groups: LegacyInventoryRecord[], filePrefix = 'inventory-movements') => {
-    const { downloadCSV } = await loadInventoryExportTools()
-    downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildMovementRows(groups))
-  }, [buildMovementRows, exportStamp])
-
-  const exportInventorySummary = useCallback(async (productsToExport: InventoryProduct[] = filteredSummary, filePrefix = 'inventory') => {
-    const { downloadCSV } = await loadInventoryExportTools()
-    downloadCSV(`${filePrefix}-${exportStamp}.csv`, buildInventoryProductRows(productsToExport))
-  }, [buildInventoryProductRows, exportStamp, filteredSummary])
-
-  const exportInventoryStats = useCallback(async (filePrefix = 'inventory-stats') => {
-    const { downloadCSV } = await loadInventoryExportTools()
-    const rows = [
-      ...buildInventoryExportContextRows().map((row) => ({
-        Section: row.Section,
-        Metric: row.Metric,
-        Value: row.Value,
-        Formula: '',
-        Example: '',
-      })),
-      ...buildInventoryStatsRows().map((row) => ({
-        Section: row.Section,
-        Metric: row.Metric,
-        Value: row.Value,
-        Formula: '',
-        Example: '',
-      })),
-      ...buildInventoryFormulaRows().map((row) => ({
-        Section: row.Section,
-        Metric: row.Metric,
-        Value: '',
-        Formula: row.Formula,
-        Example: row.Example,
-      })),
-    ]
-    downloadCSV(`${filePrefix}-${exportStamp}.csv`, rows)
-  }, [buildInventoryExportContextRows, buildInventoryFormulaRows, buildInventoryStatsRows, exportStamp])
-
-  const exportInventoryPackage = useCallback(async (mode = tab) => {
-    const {
-      buildCSV,
-      buildReportManifestRows,
-      buildReportPackageFiles,
-      buildStandaloneReportHtml,
-      downloadZipFilesAsync,
-    } = await loadInventoryExportTools()
-    const movementRows = buildMovementRows(visibleMovementGroups)
-    const productRows = buildInventoryProductRows(filteredSummary)
-    const statsRows = buildInventoryStatsRows()
-    const formulaRows = buildInventoryFormulaRows()
-    const contextRows = buildInventoryExportContextRows()
-    const manifestRows = buildReportManifestRows(contextRows.map((row) => ({
-      metric: row.Metric,
-      value: row.Value,
-    })))
-    const reportContent = buildStandaloneReportHtml({
-      fileName: 'inventory-report.html',
-      title: 'Inventory Report',
-      subtitle: `${mode === 'movements' ? 'Movements' : 'Products'} | ${movementDateRangeLabel}`,
-      exportedAt: new Date().toISOString(),
-      summaryCards: [
-        { label: 'Visible Products', value: filteredSummary.length, sub: `${totalProducts} total products` },
-        { label: 'Visible Movement Groups', value: visibleMovementGroups.length, sub: movementDateRangeLabel },
-        { label: tr('stock_value', 'Stock Value'), value: fmtUSD(totalValue), sub: `${tr('gross_profit', 'Gross profit')} ${fmtUSD(totalProfit)}` },
-        { label: tr('revenue', 'Revenue'), value: fmtUSD(totalRevenue), sub: `${tr('cogs', 'COGS')} ${fmtUSD(totalCOGS)}` },
-        { label: tr('low_stock', 'Low Stock'), value: lowStockCount, sub: `${tr('out_of_stock', 'Out of stock')} ${outStockCount}` },
-        { label: tr('returns_count', 'Returns'), value: returnStats?.count ?? 0, sub: `${tr('total_refunded', 'Refunded')} ${fmtUSD(returnStats?.refund_usd || 0)}` },
-      ],
-      metadataGroups: [
-        {
-          title: 'Active Filters',
-          subtitle: 'Visible inventory scope captured in this export',
-          rows: [
-            { label: 'View', value: mode },
-            { label: 'Branch', value: branchFilter === 'all' ? 'All branches' : getBranchLabel(branchFilter, branchFilter) },
-            { label: 'Brand', value: brandFilter === 'all' ? 'All brands' : brandFilter },
-            { label: 'Stock status', value: stockFilter },
-            { label: 'Search', value: search || 'None' },
-          ],
-        },
-        {
-          title: 'Movement Filters',
-          subtitle: 'Grouping and date metadata for the visible movement set',
-          rows: [
-            { label: 'Date range', value: movementDateRangeLabel },
-            { label: 'Year filter', value: movementYearFilter },
-            { label: 'Month filter', value: movementMonthFilter },
-            { label: 'Activity type', value: movFilter },
-            { label: 'Group mode', value: movementGroupMode },
-            { label: 'Sort direction', value: movementSortDirection },
-          ],
-        },
-      ],
-      charts: [
-        {
-          type: 'donut',
-          title: 'Stock status distribution',
-          subtitle: 'Visible products by current stock state',
-          props: { data: stockStatusRows, valueKey: 'value' },
-        },
-        {
-          type: 'bar',
-          title: 'Top stock-value products',
-          subtitle: 'Highest stock value in the visible set',
-          props: { data: topStockValueRows.map((row) => ({ product_name: row.Product, stock_value_usd: row.Stock_Value_USD })), valueKey: 'stock_value_usd', labelKey: 'product_name', color: '#2563eb' },
-        },
-        {
-          type: 'donut',
-          title: 'Movement activity mix',
-          subtitle: 'Visible movement groups by activity type',
-          props: { data: movementActivityRows.map((row) => ({ name: row.name, value: row.quantity })), valueKey: 'value' },
-        },
-        {
-          type: 'bar',
-          title: 'Movement volume over time',
-          subtitle: 'Visible movement quantity by period bucket',
-          props: { data: movementVolumeRows, valueKey: 'quantity', labelKey: 'period', color: '#7c3aed', isCount: true },
-        },
-        ...(branchComparisonRows.length > 1 ? [{
-          type: 'bar',
-          title: 'Branch comparison',
-          subtitle: 'Stock value by branch',
-          props: { data: branchComparisonRows, valueKey: 'stock_value_usd', labelKey: 'branch_name', color: '#0891b2' },
-        }] : []),
-      ],
-      tables: [
-        { title: 'Inventory stats', subtitle: 'Core figures and active filters', rows: statsRows },
-        { title: 'Inventory calculations', subtitle: 'Formula reference used in the visible summary', rows: formulaRows },
-        { title: 'Top stock-value products', subtitle: 'Visible product leaders by stock value', rows: topStockValueRows, limit: 10 },
-        { title: 'Movement activity mix', subtitle: 'Visible grouped movements by type', rows: movementActivityRows.map((row) => ({ Activity: row.name, Groups: row.groups, Quantity: row.quantity, Total_Cost_USD: row.total_cost_usd })), limit: 10 },
-        { title: 'Movement volume timeline', subtitle: 'Visible movement quantity over the current time window', rows: movementVolumeRows, limit: 12 },
-        ...(branchComparisonRows.length > 1 ? [{ title: 'Branch comparison', subtitle: 'Visible branch stock totals', rows: branchComparisonRows, limit: 10 }] : []),
-      ],
-      notes: [
-        'Package includes raw CSV data, calculations, active filter metadata, and this self-contained HTML report.',
-        'Single CSV exports remain available from the Export menu when you only need one dataset.',
-      ],
-    })
-    const files = buildReportPackageFiles({
-      baseName: 'inventory',
-      exportStamp,
-      manifestRows,
-      csvFiles: mode === 'movements'
-        ? [
-            { name: `inventory-export-context-${exportStamp}.csv`, content: buildCSV(contextRows) },
-            { name: `inventory-movement-filters-${exportStamp}.csv`, content: buildCSV(buildMovementFilterRows()) },
-            { name: `inventory-movement-groups-${exportStamp}.csv`, content: buildCSV(movementRows) },
-            { name: `inventory-stats-${exportStamp}.csv`, content: buildCSV(statsRows) },
-            { name: `inventory-calculations-${exportStamp}.csv`, content: buildCSV(formulaRows) },
-            { name: `inventory-products-reference-${exportStamp}.csv`, content: buildCSV(productRows) },
-          ]
-        : [
-            { name: `inventory-export-context-${exportStamp}.csv`, content: buildCSV(contextRows) },
-            { name: `inventory-stats-${exportStamp}.csv`, content: buildCSV(statsRows) },
-            { name: `inventory-calculations-${exportStamp}.csv`, content: buildCSV(formulaRows) },
-            { name: `inventory-products-${exportStamp}.csv`, content: buildCSV(productRows) },
-            { name: `inventory-movement-reference-${exportStamp}.csv`, content: buildCSV(movementRows) },
-          ],
-      reportFileName: 'inventory-report.html',
-      reportContent,
-    })
-    await downloadZipFilesAsync(`inventory-report-${mode}-${exportStamp}.zip`, files)
-  }, [
-    branchComparisonRows,
-    branchFilter,
-    brandFilter,
-    buildInventoryFormulaRows,
-    buildInventoryProductRows,
-    buildInventoryStatsRows,
-    buildInventoryExportContextRows,
-    buildMovementFilterRows,
-    buildMovementRows,
     exportStamp,
     filteredSummary,
     fmtUSD,
     getBranchLabel,
+    getStockQty,
+    inStockCount,
     lowStockCount,
     movFilter,
     movementDateRangeLabel,
     movementGroupMode,
     movementMonthFilter,
     movementSortDirection,
+    movementTimeMode,
     movementYearFilter,
     outStockCount,
-    returnStats?.count,
-    returnStats?.refund_usd,
+    returnStats,
     search,
     stockFilter,
-    stockStatusRows,
     tab,
-    topStockValueRows,
+    taxDelivery,
     totalCOGS,
+    totalMembershipDiscounts,
     totalProducts,
     totalProfit,
+    totalQtySold,
     totalRevenue,
+    totalStoreDiscounts,
     totalValue,
     tr,
     visibleMovementGroups,
-    movementActivityRows,
-    movementVolumeRows,
+    visibleMovementQuantity,
+    visibleMovementRecordCount,
   ])
+
+  const exportMovementGroups = useCallback(async (groups: LegacyInventoryRecord[], filePrefix = 'inventory-movements') => {
+    const exportModule = await loadInventoryExportModule()
+    await exportModule.exportInventoryMovementGroups(buildInventoryExportScope(), groups, filePrefix)
+  }, [buildInventoryExportScope])
+
+  const exportInventorySummary = useCallback(async (productsToExport: InventoryProduct[] = filteredSummary, filePrefix = 'inventory') => {
+    const exportModule = await loadInventoryExportModule()
+    await exportModule.exportInventorySummary(buildInventoryExportScope(), productsToExport, filePrefix)
+  }, [buildInventoryExportScope, filteredSummary])
+
+  const exportInventoryStats = useCallback(async (filePrefix = 'inventory-stats') => {
+    const exportModule = await loadInventoryExportModule()
+    await exportModule.exportInventoryStats(buildInventoryExportScope(), filePrefix)
+  }, [buildInventoryExportScope])
+
+  const exportInventoryPackage = useCallback(async (mode = tab) => {
+    const exportModule = await loadInventoryExportModule()
+    await exportModule.exportInventoryPackage(buildInventoryExportScope(), mode)
+  }, [buildInventoryExportScope, tab])
 
   const inventoryExportItems = useMemo<any[]>(() => {
     if (tab === 'movements') {

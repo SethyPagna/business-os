@@ -1,7 +1,7 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 618,
+  "filesScanned": 638,
   "largeFiles": 80,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
@@ -32,7 +32,7 @@
   "largestAreas": [
     [
       "frontend/api",
-      52
+      53
     ],
     [
       "frontend/utils",
@@ -47,24 +47,24 @@
       32
     ],
     [
+      "ops/scripts/runtime/live-checks",
+      32
+    ],
+    [
       "backend/routes",
       24
     ],
     [
-      "ops/scripts/runtime/live-checks",
-      24
+      "frontend/components/shared",
+      19
     ],
     [
-      "frontend/components/shared",
+      "frontend/components/catalog",
       18
     ],
     [
       "ops/docs",
       14
-    ],
-    [
-      "frontend/components/catalog",
-      13
     ],
     [
       "backend/services",
@@ -76,7 +76,7 @@
     ],
     [
       "frontend/components/inventory",
-      9
+      10
     ],
     [
       "run",

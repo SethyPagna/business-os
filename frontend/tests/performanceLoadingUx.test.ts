@@ -32,6 +32,7 @@ const lazyPortalMenu = fs.readFileSync(new URL('../src/components/shared/LazyPor
 const portalMenu = fs.readFileSync(new URL('../src/components/shared/PortalMenu.tsx', import.meta.url), 'utf8')
 const catalogPreviewSurface = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+const inventoryExport = fs.readFileSync(new URL('../src/components/inventory/inventoryExport.ts', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
 const settingsPage = fs.readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
@@ -462,6 +463,12 @@ assert.doesNotMatch(products, /\(window as Window & \{ api\?: ProductApi \}\)\.a
 assert.match(inventory, /function loadInventoryTransport\(\): Promise<InventoryTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/inventoryTransport\.ts'\)[\s\S]*function loadProductReadTransport\(\): Promise<ProductReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)[\s\S]*function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/, 'Inventory route should lazy-load focused inventory, product-read, and returns transports instead of the broad API registry')
 assert.match(inventory, /function loadUserReadTransport\(\): Promise<UserReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/userReadTransport\.ts'\)/, 'Inventory route should lazy-load the tiny user read transport for admin movement filters')
 assert.match(inventory, /function loadBranchTransport\(\): Promise<BranchTransportModule>[\s\S]*function loadDashboardTransport\(\): Promise<DashboardTransportModule>[\s\S]*function loadRfidTransport\(\): Promise<RfidTransportModule>/, 'Inventory route should own narrow lazy loaders for branch, dashboard, and RFID transport paths')
+assert.match(inventory, /function loadInventoryExportModule\(\): Promise<InventoryExportModule>[\s\S]*import\('\.\/inventoryExport\.ts'\)/, 'Inventory route should lazy-load export assembly only when an export action is requested')
+assert.doesNotMatch(inventory, /from '\.\/inventoryExport\.ts'/, 'Inventory route should not statically import the export assembly chunk')
+assert.match(inventoryExport, /export async function exportInventoryPackage/, 'Inventory export chunk should own package report assembly')
+assert.match(inventoryExport, /buildStandaloneReportHtml/, 'Inventory export chunk should own standalone HTML report generation')
+assert.match(viteConfig, /'assets\/inventory-export-',/, 'Inventory export chunk should be excluded from eager modulepreload')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/components\/inventory\/inventoryExport\.ts'\)\) return 'inventory-export'/, 'Inventory export assembly should have a named intent chunk')
 assert.doesNotMatch(inventory, /window\.api|\(window as Window & \{ api\?:/, 'Inventory route should not wake the broad window.api registry for reads, stats, or stock mutations')
 assert.match(actionHistory, /function loadActionHistoryTransport\(\): Promise<ActionHistoryTransportModule>[\s\S]*import\('\.\.\/api\/actionHistoryTransport\.ts'\)/, 'action history hook should lazy-load its focused transport instead of window.api')
 assert.match(actionHistoryTransport, /export function getActionHistoryUsers\(\): Promise<unknown>[\s\S]*apiFetch\('GET', '\/api\/users'\)/, 'action history admin user filter should stay in the focused action-history transport')
@@ -1222,9 +1229,9 @@ assert.match(
   'inventory should precompute default transfer destinations instead of scanning branches for every transfer draft',
 )
 assert.match(
-  inventory,
-  /getBranchLabel\(branchFilter, branchFilter\)/,
-  'inventory exports should resolve branch labels through the indexed branch map',
+  inventoryExport,
+  /scope\.getBranchLabel\(scope\.branchFilter, scope\.branchFilter\)/,
+  'inventory export chunk should resolve branch labels through the indexed branch map supplied by Inventory',
 )
 assert.match(
   inventory,
@@ -1328,17 +1335,17 @@ assert.match(
 )
 assert.match(
   inventory,
-  /function renderDestinationProductOptions\(products(?:: [^=]+)? = \[\], excludedProductId(?:\?: [^)]+)?\) \{[\s\S]*return products\.map\(\(product\) => \{[\s\S]*if \(Number\.isFinite\(excludedId\) && id === excludedId\) return null/,
+  /function buildDestinationProductOptions\(products(?:: [^=]+)? = \[\], excludedProductId(?:: [^,]+)?, placeholder(?:: [^)]+)?\)(?:: [^{]+)? \{[\s\S]*const options(?:: [^=]+)? = \[\{ value: '', label: placeholder \}\][\s\S]*for \(const product of products\)[\s\S]*if \(Number\.isFinite\(excludedId\) && id === excludedId\) continue[\s\S]*options\.push/,
   'inventory destination product options should skip excluded products without a filtered allocation',
 )
 assert.match(
   inventory,
-  /renderDestinationProductOptions\(summary, moveModal\.id\)/,
+  /buildDestinationProductOptions\(summary, moveModal\.id/,
   'inventory single move destination selector should reuse the destination option renderer',
 )
 assert.match(
   inventory,
-  /renderDestinationProductOptions\(summary, item\.productId\)/,
+  /buildDestinationProductOptions\(summary, item\.productId/,
   'inventory batch move destination selector should reuse the destination option renderer',
 )
 assert.doesNotMatch(

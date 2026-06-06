@@ -1,14 +1,14 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 420,
+  "sourceFiles": 440,
   "distAssets": 0,
-  "totalSourceBytes": 6820259,
-  "totalSourceLines": 156491,
+  "totalSourceBytes": 6970493,
+  "totalSourceLines": 160153,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
-  "largestSourceLines": 4414,
+  "largestSourceLines": 4001,
   "largestBuiltChunk": null,
   "largestBuiltChunkBytes": 0,
   "oversizedSourceFiles": [
@@ -42,13 +42,13 @@
     },
     {
       "file": "frontend/src/components/inventory/Inventory.tsx",
-      "size": 228401,
-      "lines": 4414
+      "size": 203110,
+      "lines": 4001
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.tsx",
-      "size": 161459,
-      "lines": 3630
+      "size": 162390,
+      "lines": 3655
     },
     {
       "file": "backend/src/services/importJobs.ts",
@@ -62,38 +62,38 @@
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 130225,
-      "lines": 2453
+      "size": 131177,
+      "lines": 2477
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.tsx",
-      "size": 120955,
-      "lines": 2376
+      "size": 121098,
+      "lines": 2380
     },
     {
       "file": "frontend/src/components/products/Products.tsx",
-      "size": 120315,
-      "lines": 2521
+      "size": 120987,
+      "lines": 2551
     },
     {
       "file": "frontend/src/components/catalog/CatalogEditorSurface.tsx",
-      "size": 105425,
-      "lines": 1488
+      "size": 107114,
+      "lines": 1543
     },
     {
       "file": "frontend/src/components/products/import/BulkImportModal.tsx",
-      "size": 103619,
-      "lines": 2147
+      "size": 103646,
+      "lines": 2170
     },
     {
       "file": "backend/src/routes/products.ts",
-      "size": 101850,
-      "lines": 2238
+      "size": 103391,
+      "lines": 2277
     },
     {
       "file": "frontend/src/components/utils-settings/Settings.tsx",
-      "size": 89525,
-      "lines": 1890
+      "size": 90232,
+      "lines": 1911
     },
     {
       "file": "backend/src/routes/inventory.ts",
@@ -107,8 +107,13 @@
     },
     {
       "file": "frontend/src/AppContext.tsx",
-      "size": 77069,
-      "lines": 1872
+      "size": 76854,
+      "lines": 1868
+    },
+    {
+      "file": "frontend/src/App.tsx",
+      "size": 73389,
+      "lines": 1905
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
@@ -116,14 +121,9 @@
       "lines": 1666
     },
     {
-      "file": "frontend/src/App.tsx",
-      "size": 73155,
-      "lines": 1901
-    },
-    {
       "file": "frontend/src/components/users/UserProfileModal.tsx",
-      "size": 69508,
-      "lines": 1315
+      "size": 69863,
+      "lines": 1326
     },
     {
       "file": "backend/src/routes/system/index.ts",
@@ -142,13 +142,13 @@
     },
     {
       "file": "frontend/src/components/utils-settings/AuditLog.tsx",
-      "size": 61381,
-      "lines": 1306
+      "size": 62001,
+      "lines": 1322
     },
     {
       "file": "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
-      "size": 59392,
-      "lines": 1085
+      "size": 60408,
+      "lines": 1115
     },
     {
       "file": "backend/src/services/googleDriveSync/index.ts",
@@ -157,15 +157,15 @@
     },
     {
       "file": "frontend/src/components/users/Users.tsx",
-      "size": 58232,
-      "lines": 1224
+      "size": 58830,
+      "lines": 1245
     }
   ],
   "topSourceByLines": [
     {
       "file": "frontend/src/components/inventory/Inventory.tsx",
-      "size": 228401,
-      "lines": 4414
+      "size": 203110,
+      "lines": 4001
     },
     {
       "file": "backend/src/services/importJobs.ts",
@@ -174,8 +174,8 @@
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.tsx",
-      "size": 161459,
-      "lines": 3630
+      "size": 162390,
+      "lines": 3655
     },
     {
       "file": "frontend/src/lang/km.json",
@@ -189,28 +189,38 @@
     },
     {
       "file": "frontend/src/components/products/Products.tsx",
-      "size": 120315,
-      "lines": 2521
+      "size": 120987,
+      "lines": 2551
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 130225,
-      "lines": 2453
+      "size": 131177,
+      "lines": 2477
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.tsx",
-      "size": 120955,
-      "lines": 2376
+      "size": 121098,
+      "lines": 2380
     },
     {
       "file": "backend/src/routes/products.ts",
-      "size": 101850,
-      "lines": 2238
+      "size": 103391,
+      "lines": 2277
     },
     {
       "file": "frontend/src/components/products/import/BulkImportModal.tsx",
-      "size": 103619,
-      "lines": 2147
+      "size": 103646,
+      "lines": 2170
+    },
+    {
+      "file": "frontend/src/components/utils-settings/Settings.tsx",
+      "size": 90232,
+      "lines": 1911
+    },
+    {
+      "file": "frontend/src/App.tsx",
+      "size": 73389,
+      "lines": 1905
     },
     {
       "file": "backend/src/routes/inventory.ts",
@@ -218,19 +228,9 @@
       "lines": 1902
     },
     {
-      "file": "frontend/src/App.tsx",
-      "size": 73155,
-      "lines": 1901
-    },
-    {
-      "file": "frontend/src/components/utils-settings/Settings.tsx",
-      "size": 89525,
-      "lines": 1890
-    },
-    {
       "file": "frontend/src/AppContext.tsx",
-      "size": 77069,
-      "lines": 1872
+      "size": 76854,
+      "lines": 1868
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.tsx",
@@ -259,8 +259,8 @@
     },
     {
       "file": "frontend/src/components/catalog/CatalogEditorSurface.tsx",
-      "size": 105425,
-      "lines": 1488
+      "size": 107114,
+      "lines": 1543
     },
     {
       "file": "ops/scripts/runtime/audits/deep-live-audit.ts",
@@ -283,9 +283,9 @@
       "lines": 1349
     },
     {
-      "file": "frontend/src/components/users/UserProfileModal.tsx",
-      "size": 69508,
-      "lines": 1315
+      "file": "frontend/src/web-api.ts",
+      "size": 53439,
+      "lines": 1328
     }
   ],
   "topBuiltChunks": [],

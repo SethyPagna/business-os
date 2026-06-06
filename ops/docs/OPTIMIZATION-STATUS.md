@@ -8,10 +8,9 @@ Last updated: 2026-06-06
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 799, polish shared filter/dropdown surfaces and
-  compact POS filter rows so Products, Inventory, Audit, Library, Dashboard,
-  and POS use rounded app-native controls with no stray translated `Back`
-  labels.
+- Latest completed move: Move 800, lazy-load Inventory export/report assembly
+  so the normal Inventory route no longer parses CSV/report/zip packaging code
+  before the user asks for an export.
 
 ## Current Baseline
 
@@ -19,7 +18,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `66c6408cdb3475b0`
+  `95c05024fca68d3a`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -32,15 +31,15 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T07-46-47-867Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-17-36-183Z/report.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T07-47-54-599Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-18-14-943Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-05T01-14-26-794Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T08-16-53-367Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -72,6 +71,31 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 800 built and started Docker release `business-os:v6.0.0-202606061614`
+  for the Inventory export/report split. `Inventory.tsx` now lazy-loads
+  `inventoryExport.ts` only when an export action is requested; the export
+  module owns CSV rows, report HTML assembly, and ZIP packaging. The production
+  build emits `assets/Inventory-*.js` at 132.96 kB and the intent-only
+  `assets/inventory-export-*.js` at 16.71 kB, moving about 13 kB out of the
+  first Inventory route chunk compared with the previous 145.95 kB baseline.
+  The focused route trace
+  `ops/runtime/reports/route-load-trace-2026-06-06T08-16-53-367Z.json`
+  loaded Inventory in 371 ms ready time with 37 requests, 30 scripts, 2 API
+  calls, no failed requests, no relevant console errors, and no
+  `inventory-export-*` request on normal route entry. The broad Phase 8.4 UI
+  live check
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T08-17-36-183Z/report.json`
+  passed with 66 checked signals, all probed route/API signals at HTTP 200,
+  no framework overlay, and zero relevant console messages. The public
+  Cloudflare portal check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T08-18-14-943Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Docker now shows only
+  the expected release stack: app, cloudflared, import worker, media worker,
+  Postgres, Redis queue, and Redis cache. After live proof, ignored
+  regenerable output was removed again: `frontend/dist` (31,780,450 bytes) and
+  `release` (380,849,304 bytes), for 412,629,754 bytes reclaimed. The
+  follow-up Phase 29 audit passed all nine checks.
 - Move 799 built and started Docker release `business-os:v6.0.0-202606061544`
   for shared filter/dropdown polish. The focused filter-menu live check
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
