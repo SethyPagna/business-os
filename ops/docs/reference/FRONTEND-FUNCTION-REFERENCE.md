@@ -1873,10 +1873,10 @@ Total files documented: **263**
 | 46 | `updateQty` | const arrow | 1484 |
 | 47 | `updatePrice` | const arrow | 1492 |
 | 48 | `updateItemBranch` | const arrow | 1516 |
-| 49 | `handleDiscountUsd` | const arrow | 1565 |
-| 50 | `handleDiscountKhr` | const arrow | 1566 |
-| 51 | `handleMembershipUnits` | const arrow | 1567 |
-| 52 | `handleCheckout` | const arrow | 1606 |
+| 49 | `handleDiscountUsd` | const arrow | 1585 |
+| 50 | `handleDiscountKhr` | const arrow | 1586 |
+| 51 | `handleMembershipUnits` | const arrow | 1587 |
+| 52 | `handleCheckout` | const arrow | 1626 |
 
 ### 3.119 `frontend/src/components/pos/posCore.ts`
 

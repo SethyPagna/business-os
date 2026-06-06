@@ -8,8 +8,8 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 806, reuse Inventory movement selection indexes
-  and remove repeated visible-group cleanup scans.
+- Latest completed move: Move 807, reuse POS cart totals and branch ids to
+  remove repeated cart subtotal and checkout branch scans.
 
 ## Current Baseline
 
@@ -2244,7 +2244,7 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 806
+## Recent Move 806
 
 - Inventory movement selection now reuses one memoized visible-group ID index.
   `Inventory.tsx` builds `visibleMovementGroupIds` once from
@@ -2282,6 +2282,44 @@ Recent route-level win:
   files, and backups. Generated references were refreshed and
   `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
 - Current plan position after Move 806: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Latest Move 807
+
+- POS checkout math now reuses one memoized `cartTotals` pass in
+  `frontend/src/components/pos/POS.tsx`. That pass derives USD subtotal, KHR
+  subtotal, and unique cart branch IDs together, while checkout reuses
+  `branchesById` and `cartTotals.branchIds` instead of rebuilding Set/map/filter
+  results.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` blocks the old
+  separate subtotal `active.cart.reduce` scans and checkout branch `map/filter`
+  rebuild.
+- Source checks passed: `node frontend\tests\performanceLoadingUx.test.ts`,
+  frontend typecheck, JSX/source check, frontend utility suite, and frontend
+  production build.
+- Docker/runtime proof: `business-os:v6.0.0-202606070314` is running healthy
+  after backup `ops/runtime/docker-release/backups/20260607-032424`.
+- Live route proof: POS 213 ms, Inventory 232 ms, Dashboard 213 ms, and public
+  catalog 189 ms, all with zero failed requests and zero console errors.
+- Browser proof: the in-app Browser rendered the local app shell and public
+  portal with no runtime overlay and no captured console errors; the portal
+  showed 5,539 products.
+- Full live suite passed: broad UI 66 signals, public Cloudflare portal 20
+  products, zero failed responses, zero page errors, zero relevant console
+  messages, CSP present, and post-live hygiene loaded.
+- Cleanup reclaimed 412,703,283 bytes from ignored regenerable artifacts:
+  `frontend/dist` (31,826,331 bytes) and `release` (380,876,952 bytes). No
+  source or business data was deleted.
+- Standard retention cleanup then removed 326,058 bytes of stale runtime
+  reports, Docker-release backup `20260606-175543` (5,037,440 bytes) beyond the
+  latest-three retention policy, old Docker rollback tag
+  `business-os:v6.0.0-202606061709`, and 21.27 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070314` were preserved.
+- Current plan position after Move 807: Phase 8.4 active; Phase 26 at 51
   completed organization moves; Phase 28 active with R2/access follow-up open;
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.

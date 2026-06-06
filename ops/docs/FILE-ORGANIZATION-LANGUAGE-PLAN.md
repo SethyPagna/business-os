@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 806 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 807 in this file.
 
 ## Goal
 
@@ -8217,6 +8217,59 @@ Decision rule:
   executable target: continue measured Inventory/Product/POS startup and
   interaction cleanup, then inspect remaining UI filter/dropdown polish and
   route-local helper splits.
+
+### Move 807: Reuse POS cart totals and branch ids
+
+- Ownership evidence: `frontend/src/components/pos/POS.tsx` still owns active
+  cart totals, checkout branch validation, and sale payload construction.
+- Change: POS now derives USD subtotal, KHR subtotal, and unique non-empty cart
+  branch IDs in one memoized `cartTotals` pass over `active.cart`. Checkout
+  reuses `branchesById` for inactive-branch validation and reuses
+  `cartTotals.branchIds` for the sale-level branch id, instead of rebuilding a
+  separate branch Set and a cart `map/filter` branch list.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` now asserts the
+  memoized cart pass exists and blocks the old separate `active.cart.reduce`
+  subtotal scans plus the checkout branch `map/filter` rebuild.
+- Verification: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070314` was built and
+  deployed after backup `ops/runtime/docker-release/backups/20260607-032424`;
+  `business-os-app-1`, worker, Postgres, Redis, and Cloudflare containers are
+  healthy on that image.
+- Route proof: live route traces passed with zero failed requests and zero
+  console errors: POS 213 ms with 26 requests, Inventory 232 ms with 36
+  requests, Dashboard 213 ms with 24 requests, and public catalog 189 ms with
+  21 requests.
+- Browser proof: the in-app Browser rendered `http://127.0.0.1:4000/` with no
+  runtime overlay and no captured console errors, then rendered
+  `http://127.0.0.1:4000/public` with 5,539 products visible, no runtime
+  overlay, and no captured console errors.
+- Full live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. The
+  broad UI check covered 66 signals with zero relevant console messages; the
+  public Cloudflare portal check rendered 20 products with zero failed
+  responses, zero page errors, zero relevant console messages, and enforced CSP
+  present; post-live hygiene passed with loaded dataset status.
+- Cleanup: ignored regenerable `frontend/dist` (31,826,331 bytes) and
+  `release` (380,876,952 bytes) were removed for 412,703,283 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 326,058
+  bytes of stale runtime reports, one old Docker-release backup
+  `20260606-175543` (5,037,440 bytes) beyond the latest-three retention
+  policy, old Docker rollback image tag `business-os:v6.0.0-202606061709`, and
+  21.27 GB of Docker builder cache. Uploads, secrets, env files, databases,
+  Docker volumes, latest backup sets, R2 backup `datasync-2026-06-06T18-54-10-839Z`,
+  `business-os:latest`, and active image `business-os:v6.0.0-202606070314`
+  were not touched.
+- Current plan position after Move 807: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+- Next safe target: use the current live route traces to choose another focused
+  route-local loop, loading, or chunk reduction, then repeat source checks,
+  Docker/live route proof, Browser proof, cleanup, and Phase 29 audit.
 
 ## Safety Gates
 

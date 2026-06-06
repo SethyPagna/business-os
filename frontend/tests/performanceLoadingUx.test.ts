@@ -2917,6 +2917,26 @@ assert.match(
 )
 assert.match(
   pos,
+  /const cartTotals = useMemo\(\(\) => \{[\s\S]*for \(const item of active\.cart\)[\s\S]*branchIds: Array\.from\(branchIds\)/,
+  'POS should derive cart subtotals and branch ids in one memoized cart pass',
+)
+assert.doesNotMatch(
+  pos,
+  /const subtotalUsd\s*=\s*active\.cart\.reduce/,
+  'POS should not scan the cart separately for USD subtotal',
+)
+assert.doesNotMatch(
+  pos,
+  /const subtotalKhr\s*=\s*active\.cart\.reduce/,
+  'POS should not scan the cart separately for KHR subtotal',
+)
+assert.doesNotMatch(
+  pos,
+  /active\.cart\.map\(i => Number\(i\.branch_id\)\)\.filter\(Boolean\)/,
+  'POS checkout should reuse memoized cart branch ids instead of rebuilding them',
+)
+assert.match(
+  pos,
   /productsById\.get\(Number\(cartItem\?\.id\)\)/,
   'POS quantity updates should resolve products from the indexed product map',
 )

@@ -1530,8 +1530,28 @@ export default function POS() {
   }
 
 // Totals derived from the active order
-  const subtotalUsd  = active.cart.reduce((s, i) => s + i.applied_price_usd * i.quantity, 0)
-  const subtotalKhr  = active.cart.reduce((s, i) => s + i.applied_price_khr * i.quantity, 0)
+  const cartTotals = useMemo(() => {
+    let subtotalUsd = 0
+    let subtotalKhr = 0
+    const branchIds = new Set<number>()
+
+    for (const item of active.cart) {
+      subtotalUsd += item.applied_price_usd * item.quantity
+      subtotalKhr += item.applied_price_khr * item.quantity
+
+      const branchId = Number(item.branch_id)
+      if (branchId) branchIds.add(branchId)
+    }
+
+    return {
+      subtotalUsd,
+      subtotalKhr,
+      branchIds: Array.from(branchIds),
+    }
+  }, [active.cart])
+
+  const subtotalUsd = cartTotals.subtotalUsd
+  const subtotalKhr = cartTotals.subtotalKhr
 
   const discUsd      = parseFloat(active.discountUsd) || 0
   const discKhr      = parseFloat(active.discountKhr) || CURRENCY.usdToKhr(discUsd, exchangeRate)
@@ -1608,8 +1628,7 @@ export default function POS() {
     if (totalPaid < totalUsd - 0.005)    return notify(t('insufficient_amount'), 'error')
     if (loading || checkoutInFlightRef.current) return
 
-    const branchIds = new Set(branches.map((branch) => Number(branch.id)))
-    const invalidBranchItem = active.cart.find((item) => item.branch_id && !branchIds.has(Number(item.branch_id)))
+    const invalidBranchItem = active.cart.find((item) => item.branch_id && !branchesById.has(Number(item.branch_id)))
     if (invalidBranchItem) {
       return notify(posCopy('One or more cart items use an inactive branch. Please re-select the branch before checkout.'), 'error')
     }
@@ -1627,8 +1646,7 @@ export default function POS() {
     checkoutInFlightRef.current = true
     setLoading(true)
 
-    const uniqueBranches = [...new Set(active.cart.map(i => Number(i.branch_id)).filter(Boolean))]
-    const saleBranchId   = uniqueBranches.length === 1 ? uniqueBranches[0] : null
+    const saleBranchId = cartTotals.branchIds.length === 1 ? cartTotals.branchIds[0] : null
 
     const device = getClientDeviceInfo()
     const saleData = {
