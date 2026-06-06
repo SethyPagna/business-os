@@ -17,7 +17,7 @@ import { calculateProductDiscount, formatPriceNumber } from '../../utils/pricing
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import AppSelect from '../shared/AppSelect'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
@@ -317,13 +317,15 @@ function countSelectedIds(ids: InventoryId[] = [], selectedIds: Set<InventoryId>
   return count
 }
 
-function renderDestinationProductOptions(products: InventoryProduct[] = [], excludedProductId?: InventoryId) {
+function buildDestinationProductOptions(products: InventoryProduct[] = [], excludedProductId: InventoryId | undefined, placeholder: string): AppSelectOption[] {
   const excludedId = Number(excludedProductId)
-  return products.map((product) => {
+  const options: AppSelectOption[] = [{ value: '', label: placeholder }]
+  for (const product of products) {
     const id = Number(product?.id)
-    if (Number.isFinite(excludedId) && id === excludedId) return null
-    return <option key={product.id} value={product.id}>{product.name}</option>
-  })
+    if (Number.isFinite(excludedId) && id === excludedId) continue
+    options.push({ value: String(product.id), label: product.name || String(product.id) })
+  }
+  return options
 }
 
 const INVENTORY_MOBILE_INITIAL_ITEM_LIMIT = 4
@@ -1121,6 +1123,40 @@ export default function Inventory() {
       return productId === selectedId || productId === familyRootId || parentId === familyRootId
     })
   }, [adjustModal, summary])
+  const adjustTargetSelectOptions = useMemo(() => adjustTargetOptions.map((product) => ({
+    value: String(product.id),
+    label: `${product.name}${product.parent_id ? ' (Variant)' : product.is_group ? ' (Group)' : ''}`,
+  })), [adjustTargetOptions])
+  const branchSelectOptions = useMemo(() => branches.map((branch) => ({
+    value: String(branch.id),
+    label: branch.name || String(branch.id),
+  })), [branches])
+  const adjustBranchSelectOptions = useMemo(() => [
+    { value: '', label: t('no_specific_branch') || 'No specific branch' },
+    ...branchSelectOptions,
+  ], [branchSelectOptions, t])
+  const chooseBranchLabel = tr('choose_branch', 'Choose a branch')
+  const transferSourceBranchOptions = useMemo(() => [
+    { value: '', label: chooseBranchLabel },
+    ...branches.map((branch) => {
+      const branchQty = Number((transferModal?.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
+      return { value: String(branch.id), label: `${branch.name || branch.id} (${branchQty})` }
+    }),
+  ], [branches, chooseBranchLabel, transferModal])
+  const branchWithPlaceholderOptions = useMemo(() => [
+    { value: '', label: chooseBranchLabel },
+    ...branchSelectOptions,
+  ], [branchSelectOptions, chooseBranchLabel])
+  const moveReasonOptions = useMemo(() => [
+    { value: '', label: t('reason') || 'Reason' },
+    ...reasonsByType.move.map((entry) => ({ value: entry.label, label: entry.label })),
+    { value: 'broken', label: tr('reason_broken', 'Broken') },
+    { value: 'open', label: tr('reason_opened', 'Opened') },
+    { value: 'loose', label: tr('reason_loose', 'Loose') },
+    { value: 'discount', label: tr('reason_discount', 'Discount / promotion') },
+    { value: 'special_price', label: tr('reason_special_price', 'Special price') },
+    { value: 'other', label: t('other') || 'Other' },
+  ], [reasonsByType.move, t, tr])
 
   const handleAdjust = async () => {
     if (adjustSaving) return
@@ -3757,17 +3793,16 @@ export default function Inventory() {
               {adjustTargetOptions.length > 1 ? (
                 <div>
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target')}</label>
-                  <select
-                    className="input text-sm"
-                    value={adjustForm.product_id || adjustModal.id}
-                    onChange={(event) => setAdjustForm((current) => ({ ...current, product_id: event.target.value }))}
-                  >
-                    {adjustTargetOptions.map((product) => (
-                      <option key={product.id} value={product.id}>
-                        {product.name}{product.parent_id ? ' (Variant)' : product.is_group ? ' (Group)' : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <AppSelect
+                    value={adjustForm.product_id || adjustModal.id || ''}
+                    onChange={(nextValue) => setAdjustForm((current) => ({ ...current, product_id: nextValue }))}
+                    ariaLabel={tr('adjust_target', 'Adjust target')}
+                    className="w-full"
+                    buttonClassName="h-10 w-full text-sm"
+                    menuClassName="min-w-[15rem]"
+                    optionClassName="text-sm"
+                    options={adjustTargetSelectOptions}
+                  />
                 </div>
               ) : null}
               <div className="grid grid-cols-3 gap-2">
@@ -3821,16 +3856,18 @@ export default function Inventory() {
               {branches.length > 1 && (
                 <div>
                   <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('branch')}</label>
-                  <select
+                  <AppSelect
                     id="inventory-adjust-branch"
                     name="inventory_adjust_branch"
-                    className="input text-sm"
                     value={adjustForm.branch_id}
-                    onChange={e => setAdjustForm(f=>({...f, branch_id:e.target.value}))}
-                  >
-                    <option value="">{t('no_specific_branch')}</option>
-                    {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
+                    onChange={(nextValue) => setAdjustForm((current) => ({ ...current, branch_id: nextValue }))}
+                    ariaLabel={t('branch') || 'Branch'}
+                    className="w-full"
+                    buttonClassName="h-10 w-full text-sm"
+                    menuClassName="min-w-[13rem]"
+                    optionClassName="text-sm"
+                    options={adjustBranchSelectOptions}
+                  />
                 </div>
               )}
               <div>
@@ -3885,22 +3922,29 @@ export default function Inventory() {
             <div className="modal-scroll space-y-3 p-4">
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
-                <select className="input text-sm" value={transferForm.from_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, from_branch_id: event.target.value }))}>
-                  <option value="">{tr('choose_branch', 'Choose a branch')}</option>
-                  {branches.map((branch) => {
-                    const branchQty = Number((transferModal.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
-                    return <option key={branch.id} value={branch.id}>{branch.name} ({branchQty})</option>
-                  })}
-                </select>
+                <AppSelect
+                  value={transferForm.from_branch_id}
+                  onChange={(nextValue) => setTransferForm((current) => ({ ...current, from_branch_id: nextValue }))}
+                  ariaLabel={tr('source_branch', 'Source branch')}
+                  className="w-full"
+                  buttonClassName="h-10 w-full text-sm"
+                  menuClassName="min-w-[13rem]"
+                  optionClassName="text-sm"
+                  options={transferSourceBranchOptions}
+                />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch')}</span>
-                <select className="input text-sm" value={transferForm.to_branch_id} onChange={(event) => setTransferForm((current) => ({ ...current, to_branch_id: event.target.value }))}>
-                  <option value="">{tr('choose_branch', 'Choose a branch')}</option>
-                  {branches.map((branch) => (
-                    <option key={branch.id} value={branch.id}>{branch.name}</option>
-                  ))}
-                </select>
+                <AppSelect
+                  value={transferForm.to_branch_id}
+                  onChange={(nextValue) => setTransferForm((current) => ({ ...current, to_branch_id: nextValue }))}
+                  ariaLabel={tr('destination_branch', 'Destination branch')}
+                  className="w-full"
+                  buttonClassName="h-10 w-full text-sm"
+                  menuClassName="min-w-[13rem]"
+                  optionClassName="text-sm"
+                  options={branchWithPlaceholderOptions}
+                />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'} *</span>
@@ -3975,10 +4019,16 @@ export default function Inventory() {
               {moveForm.mode === 'existing' ? (
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row')}</span>
-                  <select className="input text-sm" value={moveForm.destination_product_id} onChange={(event) => setMoveForm((current) => ({ ...current, destination_product_id: event.target.value }))}>
-                    <option value="">{tr('choose_destination_product', 'Choose a destination product row')}</option>
-                    {renderDestinationProductOptions(summary, moveModal.id)}
-                  </select>
+                  <AppSelect
+                    value={moveForm.destination_product_id}
+                    onChange={(nextValue) => setMoveForm((current) => ({ ...current, destination_product_id: nextValue }))}
+                    ariaLabel={tr('destination_product', 'Destination product row')}
+                    className="w-full"
+                    buttonClassName="h-10 w-full text-sm"
+                    menuClassName="min-w-[16rem]"
+                    optionClassName="text-sm"
+                    options={buildDestinationProductOptions(summary, moveModal.id, tr('choose_destination_product', 'Choose a destination product row'))}
+                  />
                 </label>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2">
@@ -4014,9 +4064,16 @@ export default function Inventory() {
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
-                  <select className="input text-sm" value={moveForm.branch_id} onChange={(event) => setMoveForm((current) => ({ ...current, branch_id: event.target.value }))}>
-                    {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                  </select>
+                  <AppSelect
+                    value={moveForm.branch_id}
+                    onChange={(nextValue) => setMoveForm((current) => ({ ...current, branch_id: nextValue }))}
+                    ariaLabel={t('branch') || 'Branch'}
+                    className="w-full"
+                    buttonClassName="h-10 w-full text-sm"
+                    menuClassName="min-w-[13rem]"
+                    optionClassName="text-sm"
+                    options={branchSelectOptions}
+                  />
                 </label>
               </div>
               <label className="block">
@@ -4026,17 +4083,16 @@ export default function Inventory() {
                     {tr('manage_reasons', 'Manage reasons')}
                   </button>
                 </div>
-                <select className="input text-sm" value={moveForm.reason} onChange={(event) => setMoveForm((current) => ({ ...current, reason: event.target.value }))}>
-                  {reasonsByType.move.map((entry) => (
-                    <option key={entry.id} value={entry.label}>{entry.label}</option>
-                  ))}
-                  <option value="broken">{tr('reason_broken', 'Broken')}</option>
-                  <option value="open">{tr('reason_opened', 'Opened')}</option>
-                  <option value="loose">{tr('reason_loose', 'Loose')}</option>
-                  <option value="discount">{tr('reason_discount', 'Discount / promotion')}</option>
-                  <option value="special_price">{tr('reason_special_price', 'Special price')}</option>
-                  <option value="other">{t('other') || 'Other'}</option>
-                </select>
+                <AppSelect
+                  value={moveForm.reason}
+                  onChange={(nextValue) => setMoveForm((current) => ({ ...current, reason: nextValue }))}
+                  ariaLabel={t('reason') || 'Reason'}
+                  className="w-full"
+                  buttonClassName="h-10 w-full text-sm"
+                  menuClassName="min-w-[13rem]"
+                  optionClassName="text-sm"
+                  options={moveReasonOptions}
+                />
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
@@ -4141,11 +4197,20 @@ export default function Inventory() {
                       ) : null}
                     </div>
                     <div className="flex items-center gap-2">
-                      <select className="input text-xs" value={item.action} onChange={(event) => updateInventoryBatchLine(item.productId, { action: event.target.value, reason: '' })}>
-                        <option value="adjust">{tr('adjust_stock', 'Adjust stock')}</option>
-                        <option value="transfer">{tr('transfer', 'Transfer')}</option>
-                        <option value="move">{tr('move_stock', 'Move stock')}</option>
-                      </select>
+                      <AppSelect
+                        value={item.action}
+                        onChange={(nextValue) => updateInventoryBatchLine(item.productId, { action: nextValue, reason: '' })}
+                        ariaLabel={t('action') || 'Action'}
+                        className="w-32"
+                        buttonClassName="h-8 w-full px-2 py-1 text-xs"
+                        menuClassName="min-w-[9rem]"
+                        optionClassName="text-xs"
+                        options={[
+                          { value: 'adjust', label: tr('adjust_stock', 'Adjust stock') },
+                          { value: 'transfer', label: tr('transfer', 'Transfer') },
+                          { value: 'move', label: tr('move_stock', 'Move stock') },
+                        ]}
+                      />
                       <button type="button" className="rounded-lg px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/30" onClick={() => removeInventoryBatchLine(item.productId)} disabled={batchApplying}>
                         {t('remove') || 'Remove'}
                       </button>
@@ -4162,17 +4227,33 @@ export default function Inventory() {
                       <>
                         <label className="block lg:col-span-2">
                           <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('action') || 'Action'}</span>
-                          <select className="input text-sm" value={item.adjustType} onChange={(event) => updateInventoryBatchLine(item.productId, { adjustType: event.target.value })}>
-                            <option value="add">{t('add') || 'Add'}</option>
-                            <option value="remove">{t('remove') || 'Remove'}</option>
-                            <option value="set">{t('set') || 'Set'}</option>
-                          </select>
+                          <AppSelect
+                            value={item.adjustType}
+                            onChange={(nextValue) => updateInventoryBatchLine(item.productId, { adjustType: nextValue })}
+                            ariaLabel={t('action') || 'Action'}
+                            className="w-full"
+                            buttonClassName="h-10 w-full text-sm"
+                            menuClassName="min-w-[8rem]"
+                            optionClassName="text-sm"
+                            options={[
+                              { value: 'add', label: t('add') || 'Add' },
+                              { value: 'remove', label: t('remove') || 'Remove' },
+                              { value: 'set', label: t('set') || 'Set' },
+                            ]}
+                          />
                         </label>
                         <label className="block lg:col-span-2">
                           <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
-                          <select className="input text-sm" value={item.branchId} onChange={(event) => updateInventoryBatchLine(item.productId, { branchId: event.target.value })}>
-                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                          </select>
+                          <AppSelect
+                            value={item.branchId}
+                            onChange={(nextValue) => updateInventoryBatchLine(item.productId, { branchId: nextValue })}
+                            ariaLabel={t('branch') || 'Branch'}
+                            className="w-full"
+                            buttonClassName="h-10 w-full text-sm"
+                            menuClassName="min-w-[13rem]"
+                            optionClassName="text-sm"
+                            options={branchSelectOptions}
+                          />
                         </label>
                       </>
                     ) : null}
@@ -4181,17 +4262,29 @@ export default function Inventory() {
                       <>
                         <label className="block lg:col-span-2">
                           <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
-                          <select className="input text-sm" value={item.fromBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { fromBranchId: event.target.value })}>
-                            <option value="">{tr('choose_branch', 'Choose a branch')}</option>
-                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                          </select>
+                          <AppSelect
+                            value={item.fromBranchId}
+                            onChange={(nextValue) => updateInventoryBatchLine(item.productId, { fromBranchId: nextValue })}
+                            ariaLabel={tr('source_branch', 'Source branch')}
+                            className="w-full"
+                            buttonClassName="h-10 w-full text-sm"
+                            menuClassName="min-w-[13rem]"
+                            optionClassName="text-sm"
+                            options={branchWithPlaceholderOptions}
+                          />
                         </label>
                         <label className="block lg:col-span-2">
                           <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch')}</span>
-                          <select className="input text-sm" value={item.toBranchId} onChange={(event) => updateInventoryBatchLine(item.productId, { toBranchId: event.target.value })}>
-                            <option value="">{tr('choose_branch', 'Choose a branch')}</option>
-                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                          </select>
+                          <AppSelect
+                            value={item.toBranchId}
+                            onChange={(nextValue) => updateInventoryBatchLine(item.productId, { toBranchId: nextValue })}
+                            ariaLabel={tr('destination_branch', 'Destination branch')}
+                            className="w-full"
+                            buttonClassName="h-10 w-full text-sm"
+                            menuClassName="min-w-[13rem]"
+                            optionClassName="text-sm"
+                            options={branchWithPlaceholderOptions}
+                          />
                         </label>
                       </>
                     ) : null}
@@ -4207,17 +4300,30 @@ export default function Inventory() {
                         </div>
                         <label className="block lg:col-span-2">
                           <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
-                          <select className="input text-sm" value={item.branchId} onChange={(event) => updateInventoryBatchLine(item.productId, { branchId: event.target.value })}>
-                            {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-                          </select>
+                          <AppSelect
+                            value={item.branchId}
+                            onChange={(nextValue) => updateInventoryBatchLine(item.productId, { branchId: nextValue })}
+                            ariaLabel={t('branch') || 'Branch'}
+                            className="w-full"
+                            buttonClassName="h-10 w-full text-sm"
+                            menuClassName="min-w-[13rem]"
+                            optionClassName="text-sm"
+                            options={branchSelectOptions}
+                          />
                         </label>
                         {item.moveMode === 'existing' ? (
                           <label className="block lg:col-span-4">
                             <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row')}</span>
-                            <select className="input text-sm" value={item.destinationProductId} onChange={(event) => updateInventoryBatchLine(item.productId, { destinationProductId: event.target.value })}>
-                              <option value="">{tr('choose_destination_product', 'Choose a destination product row')}</option>
-                              {renderDestinationProductOptions(summary, item.productId)}
-                            </select>
+                            <AppSelect
+                              value={item.destinationProductId}
+                              onChange={(nextValue) => updateInventoryBatchLine(item.productId, { destinationProductId: nextValue })}
+                              ariaLabel={tr('destination_product', 'Destination product row')}
+                              className="w-full"
+                              buttonClassName="h-10 w-full text-sm"
+                              menuClassName="min-w-[16rem]"
+                              optionClassName="text-sm"
+                              options={buildDestinationProductOptions(summary, item.productId, tr('choose_destination_product', 'Choose a destination product row'))}
+                            />
                           </label>
                         ) : (
                           <label className="block lg:col-span-4">
@@ -4251,17 +4357,16 @@ export default function Inventory() {
                           </div>
                         ) : null}
                         {item.action === 'move' ? (
-                          <select className="input text-sm" value={item.reason} onChange={(event) => updateInventoryBatchLine(item.productId, { reason: event.target.value })}>
-                            {reasonsByType.move.map((entry) => (
-                              <option key={entry.id} value={entry.label}>{entry.label}</option>
-                            ))}
-                            <option value="broken">{tr('reason_broken', 'Broken')}</option>
-                            <option value="open">{tr('reason_opened', 'Opened')}</option>
-                            <option value="loose">{tr('reason_loose', 'Loose')}</option>
-                            <option value="discount">{tr('reason_discount', 'Discount / promotion')}</option>
-                            <option value="special_price">{tr('reason_special_price', 'Special price')}</option>
-                            <option value="other">{t('other') || 'Other'}</option>
-                          </select>
+                          <AppSelect
+                            value={item.reason || ''}
+                            onChange={(nextValue) => updateInventoryBatchLine(item.productId, { reason: nextValue })}
+                            ariaLabel={t('reason') || 'Reason'}
+                            className="w-full"
+                            buttonClassName="h-10 w-full text-sm"
+                            menuClassName="min-w-[13rem]"
+                            optionClassName="text-sm"
+                            options={moveReasonOptions}
+                          />
                         ) : (
                           <textarea className="input min-h-[80px] text-sm" value={item.reason} onChange={(event) => updateInventoryBatchLine(item.productId, { reason: event.target.value })} placeholder={t('reason') || 'Reason'} />
                         )}
