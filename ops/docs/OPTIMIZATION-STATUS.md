@@ -8,9 +8,8 @@ Last updated: 2026-06-06
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 804, move external public-portal Google
-  Translate widget setup into the lazy portal translate controller so normal
-  public catalog entry no longer carries script-host/callback/retry-loop code.
+- Latest completed move: Move 805, skip staff-editor draft construction and
+  editor collection normalization in public catalog mode.
 
 ## Current Baseline
 
@@ -18,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `2a46d573da4df4b6`
+  `1711ceb5a5561b79`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -31,15 +30,15 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T09-57-04-872Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T10-12-01-061Z/report.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T09-57-43-322Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T10-12-39-454Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T09-56-31-899Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-48-622Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -2159,7 +2158,7 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 804
+## Recent Move 804
 
 - `frontend/src/components/catalog/portalTranslateController.ts` now owns the
   external Google Translate widget setup path through
@@ -2202,6 +2201,45 @@ Recent route-level win:
   follow-up for locked old report log
   `ops/runtime/reports/vite-preview-appselect.log`.
 - Current plan position after Move 804: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Latest Move 805
+
+- Public catalog mode no longer builds or writes staff-editor draft state.
+  `editorDraft` initializes to `{}` for public mode, public bootstrap skips
+  `setEditorDraft(buildDraft(nextConfig))`, and recommended/about/promo/FAQ
+  memos read `previewConfig` unless `canEdit` is true.
+- Guardrails and source tests passed:
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build`.
+- Docker/live proof: release image `business-os:v6.0.0-202606061809` built,
+  updated, and started healthy after backup
+  `ops/runtime/docker-release/backups/20260606-181051`. Route traces against
+  the live Docker app passed with no failures/errors: public catalog 295 ms
+  with 21 requests/16 scripts/1 API, Dashboard 270 ms with 24 requests/18
+  scripts/2 API, Inventory 249 ms with 36 requests/29 scripts/2 API, and POS
+  205 ms with 26 requests/19 scripts/2 API.
+- Full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T10-12-01-061Z/report.json`
+  checked 66 signals with zero relevant console messages. Public Cloudflare
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T10-12-39-454Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, and CSP
+  enforced.
+- Cleanup removed ignored/regenerable `frontend/dist` (31,826,268 bytes) and
+  `release` (380,877,976 bytes), reclaiming 412,704,244 bytes. Uploads,
+  secrets, env files, databases, volumes, backups, and active Docker images
+  were preserved. Generated references were refreshed and
+  `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
+  `npm.cmd --prefix ops run prune-storage` still has the same non-data
+  follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 805: Phase 8.4 active; Phase 26 at 51
   completed organization moves; Phase 28 active with R2/access follow-up open;
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.

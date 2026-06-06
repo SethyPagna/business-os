@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 804.
+- Latest completed implementation move in this roadmap: Move 805.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12227,6 +12227,56 @@ Move 804 status:
   follow-up for locked old report log
   `ops/runtime/reports/vite-preview-appselect.log`.
 - Current plan position after Move 804: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 805 status:
+- Move 805 skips staff-editor draft work in public catalog mode. Public mode
+  now initializes `editorDraft` as `{}`, public bootstrap no longer writes
+  `setEditorDraft(buildDraft(nextConfig))`, and recommended/about/promo/FAQ
+  memos read `previewConfig` directly unless `canEdit` is true. Staff editor
+  mode still uses the draft path.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  public-mode editor draft skip, blocks public bootstrap from writing editor
+  draft state, and checks that public collection memos use config rather than
+  editor draft fields.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. This is a CPU-path reduction,
+  not a chunk split; the production catalog chunk is 120.54 kB / 35.13 kB
+  gzip.
+- Runtime proof: Docker release `business-os:v6.0.0-202606061809` built,
+  updated, and started healthy after backup
+  `ops/runtime/docker-release/backups/20260606-181051`. Route traces against
+  the live Docker app passed with no failures/errors: public catalog
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-48-622Z.json`
+  reached ready text in 295 ms with 21 requests/16 scripts/1 API, Dashboard
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-49-353Z.json`
+  reached ready text in 270 ms with 24 requests/18 scripts/2 API, Inventory
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-50-072Z.json`
+  reached ready text in 249 ms with 36 requests/29 scripts/2 API, and POS
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-50-726Z.json`
+  reached ready text in 205 ms with 26 requests/19 scripts/2 API.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T10-12-01-061Z/report.json`
+  checked 66 signals with zero relevant console messages and no framework
+  overlay. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T10-12-39-454Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, zero
+  relevant console messages, and enforced CSP present.
+- Cleanup: ignored/regenerable `frontend/dist` (31,826,268 bytes) and
+  `release` (380,877,976 bytes) were removed, reclaiming 412,704,244 bytes.
+  Uploads, secrets, env files, databases, volumes, backups, and active Docker
+  images were preserved. Generated references were refreshed and
+  `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
+  `npm.cmd --prefix ops run prune-storage` still has the same non-data
+  follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 805: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 804 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 805 in this file.
 
 ## Goal
 
@@ -8092,6 +8092,67 @@ Decision rule:
   schema, cleanup, and performance guardrail. Next executable target: continue
   inspecting the public catalog/CSS and Inventory first-load helper graph
   before any broader language/runtime rewrites.
+
+### Move 805: Skip public catalog editor draft work
+
+- Ownership evidence: `CatalogPage.tsx` serves both the public customer portal
+  and the staff editor. After Move 804, public route traces were clean, but
+  source inspection showed public mode still constructed `buildDraft(...)`,
+  wrote editor draft state after public bootstrap, and normalized editor draft
+  fields for recommended products, about blocks, promo items, and FAQ items.
+  Those drafts are staff-editor state, not customer first-paint state.
+- Change: public mode now initializes `editorDraft` as an empty object, public
+  bootstrap no longer calls `setEditorDraft(buildDraft(nextConfig))`, and the
+  public-facing recommended/about/promo/FAQ memos read `previewConfig`
+  directly unless `canEdit` is true. Staff editor behavior still uses the
+  draft path.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now checks
+  that public first render skips editor draft construction, that the public
+  bootstrap branch does not write editor draft state, and that public
+  collection memos read config instead of editor draft fields.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build remains a
+  CPU-path optimization rather than a chunk split: the catalog chunk is
+  120.54 kB / 35.13 kB gzip.
+- Runtime proof: Docker release `business-os:v6.0.0-202606061809` built,
+  updated, and started healthy. The update created backup
+  `ops/runtime/docker-release/backups/20260606-181051` before restart. Local
+  route traces against the live Docker app passed with zero failed requests and
+  zero relevant console/page errors: public catalog
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-48-622Z.json`
+  reached ready text in 295 ms with 21 requests/16 scripts/1 API; Dashboard
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-49-353Z.json`
+  reached ready text in 270 ms with 24 requests/18 scripts/2 API; Inventory
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-50-072Z.json`
+  reached ready text in 249 ms with 36 requests/29 scripts/2 API; POS
+  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-50-726Z.json`
+  reached ready text in 205 ms with 26 requests/19 scripts/2 API.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T10-12-01-061Z/report.json`
+  checked 66 signals with no framework overlay and zero relevant console
+  messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T10-12-39-454Z/report.json`
+  rendered 20 products with zero failed responses, zero relevant console
+  messages, zero page errors, and enforced CSP present. Post-live hygiene
+  passed with loaded dataset status and zero generated-integrity matches.
+- Cleanup: ignored regenerable `frontend/dist` (31,826,268 bytes) and
+  `release` (380,877,976 bytes) were removed for 412,704,244 bytes reclaimed.
+  Uploads, secrets, env files, databases, volumes, backups, and active Docker
+  images were not touched. Generated references were refreshed and
+  `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
+  `npm.cmd --prefix ops run prune-storage` still has the same non-data
+  follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 805: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, and performance guardrail. Next executable target: continue
+  separating public catalog customer-only code from staff editor code, then
+  inspect the Inventory first-load helper graph.
 
 ## Safety Gates
 

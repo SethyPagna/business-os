@@ -17,7 +17,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
 | `frontend/src/components/inventory/Inventory.tsx` | 198.3 | 4001 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 156.9 | 3599 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 157.0 | 3602 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
 | `frontend/src/components/pos/POS.tsx` | 128.1 | 2477 |
 | `frontend/src/components/products/Products.tsx` | 118.2 | 2553 |
@@ -46,7 +46,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `frontend/src/components/inventory/Inventory.tsx` | 4001 | 198.3 |
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 3599 | 156.9 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 3602 | 157.0 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
 | `frontend/src/components/products/Products.tsx` | 2553 | 118.2 |

@@ -1334,10 +1334,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     ...DEFAULT_CONFIG,
     ...(cachedPortal?.config || {}),
   }))
-  const [editorDraft, setEditorDraft] = useState<PortalDraft>(() => buildDraft({
-    ...DEFAULT_CONFIG,
-    ...(cachedPortal?.config || {}),
-  }))
+  const [editorDraft, setEditorDraft] = useState<PortalDraft>(() => (
+    publicView
+      ? {}
+      : buildDraft({
+          ...DEFAULT_CONFIG,
+          ...(cachedPortal?.config || {}),
+        })
+  ))
   const [editorDirty, setEditorDirty] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
   const [products, setProducts] = useState<CatalogProduct[]>(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
@@ -1440,11 +1444,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }, [previewConfig])
   const recommendedProductIds = useMemo(
     () => normalizeRecommendedProductIds(
-      editorDraft.customer_portal_recommended_product_ids
+      (canEdit ? editorDraft.customer_portal_recommended_product_ids : null)
       || previewConfig.recommendedProductIds
       || []
     ),
-    [editorDraft.customer_portal_recommended_product_ids, previewConfig.recommendedProductIds]
+    [canEdit, editorDraft.customer_portal_recommended_product_ids, previewConfig.recommendedProductIds]
   )
   const configuredPortalLanguage = normalizeFirstPartyPortalLanguage(previewConfig.language) || 'en'
   const normalizedTranslateTarget = normalizePortalTranslateChoice(translateTarget, configuredPortalLanguage)
@@ -1595,12 +1599,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const versionedBusinessFavicon = withAssetVersion(previewConfig.businessFavicon || previewConfig.businessLogo, faviconVersionSeed)
   const versionedBusinessCover = withAssetVersion(previewConfig.businessCover, coverVersionSeed)
   const aboutBlocks = useMemo(
-    () => normalizeAboutBlocks(editorDraft.customer_portal_about_blocks || previewConfig.aboutBlocks || [], { keepEmpty: true }),
-    [editorDraft.customer_portal_about_blocks, previewConfig.aboutBlocks]
+    () => normalizeAboutBlocks((canEdit ? editorDraft.customer_portal_about_blocks : null) || previewConfig.aboutBlocks || [], { keepEmpty: true }),
+    [canEdit, editorDraft.customer_portal_about_blocks, previewConfig.aboutBlocks]
   )
   const promoItems = useMemo(
-    () => normalizePromoItems(editorDraft.customer_portal_promo_items || previewConfig.promoItems || [], { keepEmpty: true }),
-    [editorDraft.customer_portal_promo_items, previewConfig.promoItems]
+    () => normalizePromoItems((canEdit ? editorDraft.customer_portal_promo_items : null) || previewConfig.promoItems || [], { keepEmpty: true }),
+    [canEdit, editorDraft.customer_portal_promo_items, previewConfig.promoItems]
   )
   const getMediaUploadState = (key: string): UploadState => mediaUploadStates[key] || createInitialUploadState()
   const updateMediaUploadState = (key: string, action: UploadAction) => {
@@ -1619,14 +1623,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     })
   }
   const faqItems = useMemo(() => {
-    const raw = editorDraft.customer_portal_faq_items || JSON.stringify(previewConfig.faqItems || [])
+    const raw = (canEdit ? editorDraft.customer_portal_faq_items : null) || JSON.stringify(previewConfig.faqItems || [])
     try {
       const parsed = JSON.parse(raw)
       return normalizeFaqItems(parsed)
     } catch (_) {
       return normalizeFaqItems(previewConfig.faqItems)
     }
-  }, [editorDraft.customer_portal_faq_items, previewConfig.faqItems])
+  }, [canEdit, editorDraft.customer_portal_faq_items, previewConfig.faqItems])
   const assistantCategoryOptions = useMemo(() => {
     const names = categories.map((entry) => String(entry?.name || '').trim()).filter(Boolean)
     return Array.from(new Set([
@@ -1861,7 +1865,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       skipNextBootstrappedProductSearchRef.current = true
       setConfig(nextConfig)
       setPortalConfigReady(true)
-      if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
       setCategories(nextMeta.categories)
       setBrands(nextMeta.brands)
       setBranches(nextMeta.branches)
