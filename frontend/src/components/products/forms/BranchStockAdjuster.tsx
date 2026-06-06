@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from 'react'
+import AppSelect from '../../shared/AppSelect.tsx'
 import { beginSingleAction, finishSingleAction } from '../../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../../utils/loaders.ts'
 
@@ -157,15 +158,20 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
             <span className={`w-16 text-right text-sm font-bold ${row.current > 0 ? 'text-green-600' : 'text-gray-400'}`}>
               {row.current} {product.unit}
             </span>
-            <select
-              className="input w-24 flex-shrink-0 py-1 text-xs"
+            <AppSelect
               value={row.type}
-              onChange={(event) => setRow(index, 'type', event.target.value)}
-            >
-              <option value="add">+ {T('add', 'Add', 'បន្ថែម')}</option>
-              <option value="remove">- {T('remove', 'Remove', 'ដក')}</option>
-              <option value="set">= {T('set', 'Set', 'កំណត់')}</option>
-            </select>
+              onChange={(nextValue) => setRow(index, 'type', nextValue)}
+              ariaLabel={T('adjust_stock', 'Adjust stock')}
+              className="w-24 flex-shrink-0"
+              buttonClassName="h-8 w-full px-2 py-1 text-xs"
+              menuClassName="min-w-[7rem]"
+              optionClassName="text-xs"
+              options={[
+                { value: 'add', label: `+ ${T('add', 'Add')}` },
+                { value: 'remove', label: `- ${T('remove', 'Remove')}` },
+                { value: 'set', label: `= ${T('set', 'Set')}` },
+              ]}
+            />
             <input
               className="input w-20 flex-shrink-0 py-1 text-xs"
               type="number"

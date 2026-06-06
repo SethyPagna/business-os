@@ -1,5 +1,6 @@
 import { useMemo, useState, type MouseEvent } from 'react'
 import { fmtTime } from '../../utils/formatters.ts'
+import AppSelect from '../shared/AppSelect.tsx'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
 
 type TranslateFn = (key: string) => string
@@ -364,16 +365,19 @@ export default function SaleDetailModal({
                   <label htmlFor="sale-status-select" className="mb-1 block text-xs text-gray-400">
                     {t('status') || 'Status'}
                   </label>
-                  <select
+                  <AppSelect
                     id="sale-status-select"
-                    className="input text-sm"
                     value={newStatus}
-                    onChange={(event) => setNewStatus(event.target.value)}
-                  >
-                    {ALL_STATUSES.filter((status) => !['partial_return', 'returned'].includes(status)).map((status) => (
-                      <option key={status} value={status}>{getStatusLabel(status, t)}</option>
-                    ))}
-                  </select>
+                    onChange={(nextValue) => setNewStatus(nextValue)}
+                    ariaLabel={t('status') || 'Status'}
+                    className="w-full"
+                    buttonClassName="h-10 w-full text-sm"
+                    menuClassName="min-w-[13rem]"
+                    optionClassName="text-sm"
+                    options={ALL_STATUSES
+                      .filter((status) => !['partial_return', 'returned'].includes(status))
+                      .map((status) => ({ value: status, label: getStatusLabel(status, t) }))}
+                  />
                 </div>
                 <div>
                   <label htmlFor="sale-status-notes" className="mb-1 block text-xs text-gray-400">

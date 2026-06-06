@@ -1,6 +1,7 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
 import { useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import AppSelect from '../shared/AppSelect.tsx'
 import { fmtTime } from '../../utils/formatters'
 import {
   beginTrackedRequest,
@@ -527,9 +528,16 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
                   {T('return_reason','Return Reason')} *
                 </label>
-                <select className="input text-sm mb-2" value={reason} onChange={e => setReason(e.target.value)}>
-                  {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
+                <AppSelect
+                  value={reason}
+                  onChange={(nextValue) => setReason(nextValue)}
+                  ariaLabel={T('return_reason','Return Reason')}
+                  className="mb-2 w-full"
+                  buttonClassName="h-10 w-full text-sm"
+                  menuClassName="min-w-[14rem]"
+                  optionClassName="text-sm"
+                  options={RETURN_REASONS.map((returnReason) => ({ value: returnReason, label: returnReason }))}
+                />
                 {reason === OTHER_LABEL && (
                   <input className="input text-sm" placeholder={T('reason_placeholder','Describe the reason…')}
                     value={customReason} onChange={e => setCustomReason(e.target.value)} />

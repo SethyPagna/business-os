@@ -1,5 +1,6 @@
 import { useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import AppSelect from '../shared/AppSelect.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
 
@@ -302,9 +303,16 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
               {T('return_reason','Reason')} *
             </label>
-            <select className="input text-sm mb-2" value={reasonValue} onChange={(event: ChangeEvent<HTMLSelectElement>) => setReason(event.target.value)}>
-              {RETURN_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+            <AppSelect
+              value={reasonValue}
+              onChange={(nextValue) => setReason(nextValue)}
+              ariaLabel={T('return_reason','Reason')}
+              className="mb-2 w-full"
+              buttonClassName="h-10 w-full text-sm"
+              menuClassName="min-w-[14rem]"
+              optionClassName="text-sm"
+              options={RETURN_REASONS.map((returnReason) => ({ value: returnReason, label: returnReason }))}
+            />
             {reasonValue === OTHER_LABEL && (
               <input className="input text-sm"
                 placeholder={T('reason_placeholder','Describe the reason…')}
