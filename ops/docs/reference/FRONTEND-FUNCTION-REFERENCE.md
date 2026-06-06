@@ -1689,8 +1689,8 @@ Total files documented: **263**
 | 27 | `handleMoveStock` | const arrow | 1314 |
 | 28 | `handleTransferStock` | const arrow | 1387 |
 | 29 | `syncViewport` | const arrow | 1551 |
-| 30 | `statsValue` | const arrow | 2170 |
-| 31 | `selectInventorySection` | const arrow | 2893 |
+| 30 | `statsValue` | const arrow | 2172 |
+| 31 | `selectInventorySection` | const arrow | 2898 |
 
 ### 3.106 `frontend/src/components/inventory/inventoryExport.ts`
 

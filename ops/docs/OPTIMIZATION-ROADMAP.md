@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 805.
+- Latest completed implementation move in this roadmap: Move 806.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12277,6 +12277,56 @@ Move 805 status:
   follow-up for locked old report log
   `ops/runtime/reports/vite-preview-appselect.log`.
 - Current plan position after Move 805: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 806 status:
+- Move 806 reuses Inventory movement selection indexes. `Inventory.tsx` now
+  builds one memoized `visibleMovementGroupIds` set from `visibleMovementGroups`
+  and reuses it for expanded movement groups, expanded movement pages, and
+  selected movement cleanup. `selectedMovementGroups` is now memoized for
+  movement rendering/export instead of being filtered on every render.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  shared visible movement ID index, blocks the previous per-entry
+  `visibleMovementGroups.some(...)` cleanup scan, and verifies memoized
+  selected movement groups.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070254` built,
+  updated, and started healthy after backup
+  `ops/runtime/docker-release/backups/20260607-025635`. Route traces against
+  the live Docker app passed with no failures/errors: Inventory
+  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-30-753Z.json`
+  reached ready text in 513 ms with 36 requests/29 scripts/2 API, Dashboard
+  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-29-541Z.json`
+  reached ready text in 657 ms with 24 requests/18 scripts/2 API, POS
+  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-30-106Z.json`
+  reached ready text in 638 ms with 26 requests/19 scripts/2 API, and public
+  catalog `ops/runtime/reports/route-load-trace-2026-06-06T18-57-31-347Z.json`
+  reached ready text in 421 ms with 21 requests/16 scripts/1 API.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T18-57-45-619Z/report.json`
+  checked 66 signals on frontend hash `0fadf1009a3f3008`, source hash
+  `9e29b055b17fc325`, with zero relevant console messages and no framework
+  overlay. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T18-58-29-787Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, zero
+  relevant console messages, and enforced CSP present.
+- Cleanup: ignored/regenerable `frontend/dist` (31,826,258 bytes) and
+  `release` (380,877,976 bytes) were removed, reclaiming 412,704,234 bytes.
+  Uploads, secrets, env files, databases, volumes, backups, and active Docker
+  images were preserved. The standard storage prune then completed and pruned
+  stale reports plus old `business-os:v6.0.0-*` rollback image tags under
+  policy while preserving `business-os:latest`, active image
+  `business-os:v6.0.0-202606070254`, Docker volumes, uploads, secrets, env
+  files, and backups. Generated references were refreshed and
+  `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
+- Current plan position after Move 806: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

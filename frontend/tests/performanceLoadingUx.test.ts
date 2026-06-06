@@ -1347,6 +1347,21 @@ assert.match(
 )
 assert.match(
   inventory,
+  /const visibleMovementGroupIds = useMemo\(\s*\(\) => new Set\(visibleMovementGroups\.map\(\(group\) => group\.id\)\),\s*\[visibleMovementGroups\],\s*\)/,
+  'inventory movement cleanup should reuse a single visible group id index',
+)
+assert.match(
+  inventory,
+  /Object\.entries\(current\)\.filter\(\(\[groupId\]\) => visibleMovementGroupIds\.has\(groupId\)\)/,
+  'inventory movement page cleanup should use the visible group id index instead of scanning groups per entry',
+)
+assert.match(
+  inventory,
+  /const selectedMovementGroups = useMemo\(\s*\(\) => visibleMovementGroups\.filter\(\(group\) => selectedMovementIds\.has\(group\.id\)\),\s*\[selectedMovementIds, visibleMovementGroups\],\s*\)/,
+  'inventory selected movement groups should stay memoized for export and movement rendering',
+)
+assert.match(
+  inventory,
   /stockStats\?\.net_sold_qty\s*\?\?\s*visibleInventoryStats\.netSoldQty/,
   'inventory net-sold fallback should reuse the visible stats accumulator',
 )

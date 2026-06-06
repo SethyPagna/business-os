@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 805 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 806 in this file.
 
 ## Goal
 
@@ -8153,6 +8153,70 @@ Decision rule:
   schema, cleanup, and performance guardrail. Next executable target: continue
   separating public catalog customer-only code from staff editor code, then
   inspect the Inventory first-load helper graph.
+
+### Move 806: Reuse Inventory movement selection indexes
+
+- Ownership evidence: `frontend/src/components/inventory/Inventory.tsx` still
+  owns the movement tab state, movement export scope, visible movement groups,
+  expanded group/page state, and selected movement groups. After Move 805,
+  source inspection found the route rebuilding the same visible movement ID set
+  in multiple cleanup effects and scanning `visibleMovementGroups.some(...)`
+  once per expanded-page entry.
+- Change: the route now builds one memoized `visibleMovementGroupIds` set from
+  `visibleMovementGroups`, reuses it for expanded group cleanup, expanded page
+  cleanup, and selected group cleanup, and memoizes `selectedMovementGroups`
+  for movement rendering/export. This removes repeated O(n) ID-set rebuilds and
+  an avoidable O(n*m) cleanup scan without changing movement UI, selection, or
+  export behavior.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` now asserts
+  the shared `visibleMovementGroupIds` memo, verifies expanded movement pages
+  use `.has(...)` on that index instead of scanning every group per entry, and
+  keeps selected movement groups memoized.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070254` built,
+  updated, and started healthy after backup
+  `ops/runtime/docker-release/backups/20260607-025635`. Route traces against
+  the live Docker app passed with zero failed requests and zero relevant
+  console/page errors: Inventory
+  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-30-753Z.json`
+  reached ready text in 513 ms with 36 requests/29 scripts/2 API; Dashboard
+  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-29-541Z.json`
+  reached ready text in 657 ms with 24 requests/18 scripts/2 API; POS
+  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-30-106Z.json`
+  reached ready text in 638 ms with 26 requests/19 scripts/2 API; public
+  catalog `ops/runtime/reports/route-load-trace-2026-06-06T18-57-31-347Z.json`
+  reached ready text in 421 ms with 21 requests/16 scripts/1 API.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T18-57-45-619Z/report.json`
+  checked 66 signals on frontend hash `0fadf1009a3f3008`, source hash
+  `9e29b055b17fc325`, with no framework overlay and zero relevant console
+  messages. Public Cloudflare portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T18-58-29-787Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, zero
+  relevant console messages, and enforced CSP present. Post-live hygiene passed
+  with loaded dataset status and zero generated-integrity matches.
+- Cleanup: ignored regenerable `frontend/dist` (31,826,258 bytes) and
+  `release` (380,877,976 bytes) were removed for 412,704,234 bytes reclaimed.
+  Uploads, secrets, env files, databases, volumes, backups, and the active
+  Docker image were not touched. The standard `npm.cmd --prefix ops run
+  prune-storage` completed successfully afterward, pruning stale retained
+  reports and old `business-os:v6.0.0-*` release image tags under policy while
+  preserving `business-os:latest`, the active
+  `business-os:v6.0.0-202606070254` image, Docker volumes, uploads, secrets,
+  env files, and backups. Generated references were refreshed and
+  `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
+- Current plan position after Move 806: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays
+  at 51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail. Next
+  executable target: continue measured Inventory/Product/POS startup and
+  interaction cleanup, then inspect remaining UI filter/dropdown polish and
+  route-local helper splits.
 
 ## Safety Gates
 

@@ -1900,6 +1900,10 @@ export default function Inventory() {
     () => movementSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
     [movementSections],
   )
+  const visibleMovementGroupIds = useMemo(
+    () => new Set(visibleMovementGroups.map((group) => group.id)),
+    [visibleMovementGroups],
+  )
 
   const getMovementRecordCount = useCallback(
     (group: LegacyInventoryRecord) => Math.max(0, Number(group?.recordCount || group?.items?.length || 0)),
@@ -1922,21 +1926,19 @@ export default function Inventory() {
 
   useEffect(() => {
     setExpandedMovementGroups((current) => {
-      const validIds = new Set(visibleMovementGroups.map((group) => group.id))
-      return reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id)))
+      return reuseSetWhenUnchanged(current, [...current].filter((id) => visibleMovementGroupIds.has(id)))
     })
-  }, [visibleMovementGroups])
+  }, [visibleMovementGroupIds])
 
   useEffect(() => {
     setExpandedMovementPages((current) => Object.fromEntries(
-      Object.entries(current).filter(([groupId]) => visibleMovementGroups.some((group) => group.id === groupId)),
+      Object.entries(current).filter(([groupId]) => visibleMovementGroupIds.has(groupId)),
     ))
-  }, [visibleMovementGroups])
+  }, [visibleMovementGroupIds])
 
   useEffect(() => {
-    const validIds = new Set(visibleMovementGroups.map((group) => group.id))
-    setSelectedMovementIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id))))
-  }, [visibleMovementGroups])
+    setSelectedMovementIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => visibleMovementGroupIds.has(id))))
+  }, [visibleMovementGroupIds])
 
   useEffect(() => {
     if (!movementSelectAllRef.current) return
@@ -2391,7 +2393,10 @@ export default function Inventory() {
       })
     }
   }, [apiInventoryInitialOptions, derivedInventoryInitialOptions])
-  const selectedMovementGroups = visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id))
+  const selectedMovementGroups = useMemo(
+    () => visibleMovementGroups.filter((group) => selectedMovementIds.has(group.id)),
+    [selectedMovementIds, visibleMovementGroups],
+  )
   const exportStamp = useMemo(() => new Date().toISOString().slice(0, 10), [])
   const movementDateRangeLabel = useMemo(() => {
     const timestamps = visibleMovementGroups

@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-06
+Last updated: 2026-06-07
 
 ## Phase Board
 
@@ -8,8 +8,8 @@ Last updated: 2026-06-06
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 805, skip staff-editor draft construction and
-  editor collection normalization in public catalog mode.
+- Latest completed move: Move 806, reuse Inventory movement selection indexes
+  and remove repeated visible-group cleanup scans.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `1711ceb5a5561b79`
+  `0fadf1009a3f3008`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -30,15 +30,15 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T10-12-01-061Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T18-57-45-619Z/report.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T10-12-39-454Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T18-58-29-787Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T10-11-48-622Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-30-753Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -2205,7 +2205,7 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 805
+## Recent Move 805
 
 - Public catalog mode no longer builds or writes staff-editor draft state.
   `editorDraft` initializes to `{}` for public mode, public bootstrap skips
@@ -2240,6 +2240,48 @@ Recent route-level win:
   follow-up for locked old report log
   `ops/runtime/reports/vite-preview-appselect.log`.
 - Current plan position after Move 805: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Latest Move 806
+
+- Inventory movement selection now reuses one memoized visible-group ID index.
+  `Inventory.tsx` builds `visibleMovementGroupIds` once from
+  `visibleMovementGroups`, reuses it for expanded group cleanup, expanded page
+  cleanup, and selected group cleanup, and memoizes `selectedMovementGroups`
+  for movement rendering/export.
+- Guardrails and source tests passed:
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build`.
+- Docker/live proof: release image `business-os:v6.0.0-202606070254` built,
+  updated, and started healthy after backup
+  `ops/runtime/docker-release/backups/20260607-025635`. Route traces against
+  the live Docker app passed with no failures/errors: Inventory 513 ms with 36
+  requests/29 scripts/2 API, Dashboard 657 ms with 24 requests/18 scripts/2
+  API, POS 638 ms with 26 requests/19 scripts/2 API, and public catalog 421 ms
+  with 21 requests/16 scripts/1 API.
+- Full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T18-57-45-619Z/report.json`
+  checked 66 signals on frontend hash `0fadf1009a3f3008`, source hash
+  `9e29b055b17fc325`, with zero relevant console messages. Public Cloudflare
+  report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T18-58-29-787Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, and CSP
+  enforced.
+- Cleanup removed ignored/regenerable `frontend/dist` (31,826,258 bytes) and
+  `release` (380,877,976 bytes), reclaiming 412,704,234 bytes. Uploads,
+  secrets, env files, databases, volumes, backups, and active Docker images
+  were preserved. The standard `prune-storage` command completed afterward and
+  pruned stale reports plus old `business-os:v6.0.0-*` release image tags under
+  policy while preserving `business-os:latest`, active image
+  `business-os:v6.0.0-202606070254`, Docker volumes, uploads, secrets, env
+  files, and backups. Generated references were refreshed and
+  `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
+- Current plan position after Move 806: Phase 8.4 active; Phase 26 at 51
   completed organization moves; Phase 28 active with R2/access follow-up open;
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
