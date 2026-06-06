@@ -90,6 +90,14 @@ function normalizeOptionValue(value: unknown): string {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
+function safeFilterLabel(t: (key: string) => string, key: string, fallback: string): string {
+  const value = t(key)
+  const normalized = String(value || '').trim().toLowerCase()
+  if (!value || value === key) return fallback
+  if (key === 'brand' && normalized === 'back') return fallback
+  return value
+}
+
 export function buildProductExportItems({
   brandFilter = 'all',
   branchFilter = 'all',
@@ -267,9 +275,9 @@ export function buildProductFilterSections({
     } : null,
     brandOptions.length ? {
       id: 'brand',
-      label: t('brand') || 'Brand',
+      label: safeFilterLabel(t, 'brand', 'Brand'),
       options: [
-        { id: 'brand-all', label: t('all_brands') || 'All Brands', active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
+        { id: 'brand-all', label: safeFilterLabel(t, 'all_brands', 'All Brands'), active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
         ...brandOptions.map((brand) => ({
           id: `brand-${brand}`,
           label: String(brand),

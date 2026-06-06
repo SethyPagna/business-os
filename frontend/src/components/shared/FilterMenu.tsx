@@ -32,10 +32,38 @@ type FilterMenuProps = {
   onOpenChange?: ((open: boolean) => void) | null
 }
 
+const SECTION_LABEL_FALLBACKS: Record<string, string> = {
+  action: 'Action',
+  brand: 'Brand',
+  branch: 'Branch',
+  category: 'Category',
+  group: 'Groups',
+  month: 'Month',
+  sort: 'Sort',
+  stock: 'Stock',
+  supplier: 'Supplier',
+  user: 'User',
+  year: 'Year',
+}
+
 function sectionButtonClass(active: boolean): string {
   return active
     ? 'bg-blue-600 text-white border-blue-700 shadow-sm'
     : 'bg-white/95 text-slate-700 border-slate-200 shadow-sm hover:border-blue-300 hover:text-blue-700 hover:bg-blue-50 dark:bg-slate-800/90 dark:text-slate-200 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:text-blue-300 dark:hover:bg-slate-700/80'
+}
+
+function getSectionFallbackLabel(sectionId: string | number): string {
+  const normalizedId = String(sectionId || '').trim().toLowerCase()
+  return SECTION_LABEL_FALLBACKS[normalizedId] || ''
+}
+
+function resolveSectionLabel(section: FilterSection): ReactNode {
+  if (typeof section.label !== 'string') return section.label
+  const label = section.label.trim()
+  const fallback = getSectionFallbackLabel(section.id)
+  if (!label) return fallback || section.label
+  if (fallback && label.toLowerCase() === 'back') return fallback
+  return section.label
 }
 
 export default function FilterMenu({
@@ -106,10 +134,14 @@ export default function FilterMenu({
 
           <div className="space-y-2">
             {(sections.filter(Boolean) as FilterSection[]).map((section) => (
-              <div key={section.id} className="rounded-2xl bg-slate-50/70 p-2 dark:bg-slate-800/40">
-                <div className="grid grid-cols-[5.25rem_minmax(0,1fr)] items-center gap-2">
+              <div
+                key={section.id}
+                className="rounded-2xl bg-slate-50/70 p-1.5 dark:bg-slate-800/40"
+                data-filter-menu-section={String(section.id)}
+              >
+                <div className="grid grid-cols-[4.85rem_minmax(0,1fr)] items-center gap-2 sm:grid-cols-[5.25rem_minmax(0,1fr)]">
                   <div className="min-w-0 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                    <span className="block truncate">{section.label}</span>
+                    <span className="block truncate" data-filter-menu-section-label={String(section.id)}>{resolveSectionLabel(section)}</span>
                   </div>
                   <div className="min-w-0">
                     {section.description ? (

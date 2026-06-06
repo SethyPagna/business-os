@@ -481,6 +481,13 @@ export default function Inventory() {
     if (isKhmer && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
     return fallbackEn
   }, [isKhmer, t])
+  const filterLabel = useCallback((key: string, fallback: string) => {
+    const value = typeof t === 'function' ? t(key) : ''
+    const normalized = String(value || '').trim().toLowerCase()
+    if (!value || value === key || isBrokenLocalizedString(value)) return fallback
+    if (key === 'brand' && normalized === 'back') return fallback
+    return value
+  }, [t])
   const [summary,       setSummary]       = useState<InventoryProduct[]>([])
   const [stockStats,    setStockStats]    = useState<InventoryStats>(null)
   const [stockStatsLoaded, setStockStatsLoaded] = useState(false)
@@ -3160,7 +3167,7 @@ export default function Inventory() {
       },
       inventoryBrands.length ? {
         id: 'brand',
-        label: t('brand') || 'Brand',
+        label: filterLabel('brand', 'Brand'),
         render: ({ closeMenu }: { closeMenu: () => void }) => (
           <AppSelect
             value={brandFilter}
@@ -3168,12 +3175,12 @@ export default function Inventory() {
               setBrandFilter(nextValue || 'all')
               closeMenu()
             }}
-            ariaLabel={t('brand') || 'Brand'}
+            ariaLabel={filterLabel('brand', 'Brand')}
             className="w-full"
             buttonClassName="h-9 w-full rounded-xl px-3 py-1.5 text-sm"
             menuClassName="min-w-[12rem]"
             options={[
-              { value: 'all', label: t('all_brands') || 'All brands' },
+              { value: 'all', label: filterLabel('all_brands', 'All brands') },
               ...inventoryBrands.map((brand) => ({ value: brand, label: brand })),
             ]}
           />
@@ -3194,6 +3201,7 @@ export default function Inventory() {
     movementYearFilter,
     movementYears,
     isAdmin,
+    filterLabel,
     stockFilter,
     t,
     tab,
