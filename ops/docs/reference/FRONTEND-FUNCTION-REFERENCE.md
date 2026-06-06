@@ -258,7 +258,7 @@ Total files documented: **263**
 | 246 | `frontend/src/utils/mediaUploadState.ts` | 0 |
 | 247 | `frontend/src/utils/permissions.ts` | 1 |
 | 248 | `frontend/src/utils/pricing.ts` | 0 |
-| 249 | `frontend/src/utils/printReceipt.ts` | 33 |
+| 249 | `frontend/src/utils/printReceipt.ts` | 35 |
 | 250 | `frontend/src/utils/productBatches.ts` | 1 |
 | 251 | `frontend/src/utils/productGrouping.ts` | 9 |
 | 252 | `frontend/src/utils/publicAssetUrls.ts` | 6 |
@@ -2349,10 +2349,10 @@ Total files documented: **263**
 | 6 | `parseItems` | function | 134 |
 | 7 | `getErrorMessage` | function | 145 |
 | 8 | `getReceiptPaperWidthMm` | function | 149 |
-| 9 | `labelFor` | function | 242 |
-| 10 | `Row` | function | 247 |
-| 11 | `Receipt` | component/function | 259 |
-| 12 | `exportReceiptPdf` | const arrow | 475 |
+| 9 | `labelFor` | function | 217 |
+| 10 | `Row` | function | 222 |
+| 11 | `Receipt` | component/function | 234 |
+| 12 | `exportReceiptPdf` | const arrow | 450 |
 
 ### 3.164 `frontend/src/components/returns/EditReturnModal.tsx`
 
@@ -3240,18 +3240,20 @@ Total files documented: **263**
 | 19 | `wrapReceiptFallbackLine` | function | 443 |
 | 20 | `classifyReceiptFallbackLine` | function | 470 |
 | 21 | `measureWrappedReceiptHeight` | function | 482 |
-| 22 | `createTextOnlyReceiptCanvas` | function | 490 |
-| 23 | `canvasToPngBlob` | function | 583 |
-| 24 | `waitForElementAssets` | function | 596 |
-| 25 | `renderElementToCanvas` | function | 625 |
-| 26 | `createPrintableReceiptMarkup` | function | 736 |
-| 27 | `buildPrintablePreviewDocument` | function | 759 |
-| 28 | `attachPrintablePreviewActions` | function | 914 |
-| 29 | `schedulePrint` | const arrow | 923 |
-| 30 | `downloadBlob` | function | 941 |
-| 31 | `buildTextOnlyReceiptBlob` | const arrow | 989 |
-| 32 | `renderPdfBlob` | const arrow | 1003 |
-| 33 | `extractReceiptLines` | function | 1059 |
+| 22 | `wrapCanvasText` | function | 490 |
+| 23 | `drawClippedText` | function | 526 |
+| 24 | `createTextOnlyReceiptCanvas` | function | 535 |
+| 25 | `canvasToPngBlob` | function | 638 |
+| 26 | `waitForElementAssets` | function | 651 |
+| 27 | `renderElementToCanvas` | function | 680 |
+| 28 | `createPrintableReceiptMarkup` | function | 791 |
+| 29 | `buildPrintablePreviewDocument` | function | 814 |
+| 30 | `attachPrintablePreviewActions` | function | 969 |
+| 31 | `schedulePrint` | const arrow | 978 |
+| 32 | `downloadBlob` | function | 996 |
+| 33 | `buildTextOnlyReceiptBlob` | const arrow | 1044 |
+| 34 | `renderPdfBlob` | const arrow | 1058 |
+| 35 | `extractReceiptLines` | function | 1114 |
 
 ### 3.250 `frontend/src/utils/productBatches.ts`
 

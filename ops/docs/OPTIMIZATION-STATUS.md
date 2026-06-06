@@ -8,8 +8,8 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 813, share public catalog comma search-term
-  normalization with the Products helper layer.
+- Latest completed move: Move 814, harden receipt Khmer labels and image export
+  column fallback.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `92a899e0a7b2462c`
+  `e567678f3ad2f58d`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -34,7 +34,7 @@ Latest verified reports:
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
-  `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
+  `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T22-15-44-427Z/report.json`
 - latest focused local route-load trace:
@@ -2534,7 +2534,7 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 813
+## Recent Move 813
 
 - Public catalog comma search-term parsing now reuses the Products helper
   layer. `frontend/src/components/catalog/CatalogPage.tsx` calls
@@ -2580,6 +2580,50 @@ Recent route-level win:
 - Follow-up cleared: the Move 812 public catalog comma-search synchronization
   issue is resolved for the deployed local runtime.
 - Current plan position after Move 813: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Latest Move 814
+
+- Receipt bilingual output now uses the canonical Khmer label map directly.
+  `frontend/src/components/receipt/Receipt.tsx` no longer carries a duplicated
+  second Khmer label object, and the source guard now requires real Khmer text
+  while rejecting mojibake fragments.
+- Receipt PNG fallback rendering is tighter. `frontend/src/utils/printReceipt.ts`
+  wraps canvas text by measured pixel width, clips product names to the item
+  name column, and draws Qty and Price at fixed column positions so image
+  downloads do not regress into a horizontal strip or run-on item row.
+- Live guardrail:
+  `ops/scripts/runtime/live-checks/phase84-receipt-export-layout-check.ts`
+  now rejects English and Khmer status rows, redundant `@ $...` unit-price
+  lines, missing Name/Qty/Price headers, receipt overflow, and collapsed image
+  downloads.
+- Verification passed: `node frontend\tests\receiptTemplate.test.ts`,
+  `node frontend\tests\receiptSettingsSync.test.ts`, frontend typecheck,
+  JSX/source check, frontend utility suite, and frontend production build.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070648` is running
+  healthy after backup `ops/runtime/docker-release/backups/20260607-065135`;
+  runtime health reports frontend hash `e567678f3ad2f58d` and source hash
+  `9e29b055b17fc325`.
+- Live receipt proof:
+  `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
+  passed Receipt Settings preview, Sales reprint modal, print-preview popup,
+  and PNG image download. The downloaded image
+  `Receipt-RCP-1778187462364-1R0O.png` measured 672 by 876 pixels.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,827,183 bytes) and
+  `release` (380,878,183 bytes) were removed for 412,705,366 bytes reclaimed.
+  `npm.cmd --prefix ops run prune-storage` then removed 30,307 bytes of stale
+  runtime reports, two old Docker-release backup packages (10,105,392 bytes
+  total), two old Docker rollback tags, and 1.269 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070648` were not touched.
+- Phase 29/schema proof: `node ops\scripts\architecture\phase29-audit.ts`
+  passed after cleanup with 9 checks and 0 failures, and
+  `node ops\scripts\backend\schema-audit.ts` passed with 45 static tables and
+  zero relationship-doc or backup action-needed gaps.
+- Current plan position after Move 814: Phase 8.4 active; Phase 26 at 51
   completed organization moves; Phase 28 active with R2/access follow-up open;
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.

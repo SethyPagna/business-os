@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 813.
+- Latest completed implementation move in this roadmap: Move 814.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12666,6 +12666,44 @@ Move 813 status:
 - Follow-up cleared: the Move 812 public catalog comma-search synchronization
   finding is resolved for the deployed local runtime.
 - Current plan position after Move 813: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 814 status:
+- Move 814 hardens receipt bilingual output and image export fallback. The
+  receipt component now uses one canonical Khmer label map for both Khmer-only
+  and bilingual receipts, and the receipt template guard requires real Khmer
+  text while rejecting mojibake fragments.
+- The receipt image fallback now measures canvas text, wraps long product names
+  by pixel width, clips item names to the name column, and draws Qty and Price
+  at fixed column positions. This protects PNG receipt downloads from returning
+  to the broken single-line/export-strip behavior.
+- The focused receipt export live check now rejects English and Khmer status
+  rows, redundant `@ $...` unit-price lines, missing Name/Qty/Price headers,
+  receipt overflow, and collapsed image downloads.
+- Verification passed: focused receipt template/settings tests, frontend
+  typecheck, JSX/source check, full frontend utility suite, frontend production
+  build, Docker release/update, and focused receipt Playwright live check.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070648` is running
+  healthy on local port 4000 with frontend hash `e567678f3ad2f58d`. The live
+  report is
+  `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,827,183 bytes) and
+  `release` (380,878,183 bytes) were removed for 412,705,366 bytes reclaimed.
+  `npm.cmd --prefix ops run prune-storage` then removed 30,307 bytes of stale
+  runtime reports, two old Docker-release backup packages (10,105,392 bytes
+  total), old Docker rollback tags `business-os:v6.0.0-202606070439` and
+  `business-os:v6.0.0-202606070408`, and 1.269 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070648` were not touched.
+- Phase 29/schema proof: `node ops\scripts\architecture\phase29-audit.ts`
+  passed after cleanup with 9 checks and 0 failures, and
+  `node ops\scripts\backend\schema-audit.ts` passed with 45 static tables and
+  zero relationship-doc or backup action-needed gaps.
+- Current plan position after Move 814: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

@@ -487,6 +487,51 @@ function measureWrappedReceiptHeight(lines: ReceiptFallbackLine[], maxChars: num
   }, 0)
 }
 
+function wrapCanvasText(context: CanvasRenderingContext2D, text: unknown, maxWidth: number): string[] {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return ['']
+  const words = clean.split(' ')
+  const lines: string[] = []
+  let current = ''
+
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word
+    if (context.measureText(next).width <= maxWidth) {
+      current = next
+      return
+    }
+    if (current) lines.push(current)
+    if (context.measureText(word).width <= maxWidth) {
+      current = word
+      return
+    }
+
+    let fragment = ''
+    Array.from(word).forEach((char) => {
+      const candidate = `${fragment}${char}`
+      if (context.measureText(candidate).width <= maxWidth || !fragment) {
+        fragment = candidate
+        return
+      }
+      lines.push(fragment)
+      fragment = char
+    })
+    current = fragment
+  })
+
+  if (current) lines.push(current)
+  return lines.length ? lines : ['']
+}
+
+function drawClippedText(context: CanvasRenderingContext2D, text: string, x: number, y: number, maxWidth: number, lineHeight: number): void {
+  context.save()
+  context.beginPath()
+  context.rect(x, y - 1, maxWidth, lineHeight + 2)
+  context.clip()
+  context.fillText(text, x, y)
+  context.restore()
+}
+
 function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPrintOptions = {}): HTMLCanvasElement {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
@@ -544,13 +589,23 @@ function createTextOnlyReceiptCanvas(content: ReceiptContent, options: ReceiptPr
 
       if (entry.kind === 'item' && textLine.includes('\t')) {
         const parts = textLine.split('\t')
+        const qtyX = widthPx - paddingX - 96
+        const priceX = widthPx - paddingX
+        const nameMaxWidth = Math.max(92, qtyX - paddingX - 18)
+        const nameLines = wrapCanvasText(context, parts[0] || '', nameMaxWidth)
         context.textAlign = 'left'
-        context.fillText(parts[0] || '', paddingX, y)
+        drawClippedText(context, nameLines[0] || '', paddingX, y, nameMaxWidth, lineHeight)
         context.textAlign = 'center'
-        context.fillText(parts[1] || '', widthPx - paddingX - 88, y)
+        context.fillText(parts[1] || '', qtyX, y)
         context.textAlign = 'right'
-        context.fillText(parts.slice(2).join(' ') || '', widthPx - paddingX, y)
+        context.fillText(parts.slice(2).join(' ') || '', priceX, y)
         context.textAlign = 'left'
+        nameLines.slice(1).forEach((continuation) => {
+          y += lineHeight
+          drawClippedText(context, `  ${continuation}`, paddingX, y, nameMaxWidth, lineHeight)
+        })
+        y += lineHeight
+        return
       } else if (entry.kind === 'row' && textLine.includes('\t')) {
         const parts = textLine.split('\t')
         context.textAlign = 'left'

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 813 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 814 in this file.
 
 ## Goal
 
@@ -8622,6 +8622,48 @@ Decision rule:
 - Follow-up cleared: the Move 812 public catalog comma-search synchronization
   finding is resolved for the deployed local runtime.
 - Current plan position after Move 813: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 814: Harden receipt Khmer labels and image export fallback
+
+- Ownership evidence: the receipt overlay and print utility already own the
+  receipt/export surface, while the focused receipt export live check exercises
+  Receipt Settings preview, Sales reprint modal, print-preview popup, and PNG
+  image download. This is a Phase 8.4/Phase 29 correctness and export fallback
+  hardening move, not a folder move.
+- Change: `Receipt.tsx` now uses the canonical Khmer label map directly instead
+  of duplicating a second Khmer label object. `printReceipt.ts` now wraps canvas
+  fallback text by measured pixel width, clips item names to the name column,
+  and draws Qty and Price at fixed column positions for downloaded PNG receipts.
+- Guardrail proof: `receiptTemplate.test.ts` now requires real Khmer labels,
+  rejects mojibake fragments, and checks the canvas wrapping/clipping fallback
+  helpers. The receipt export live check rejects status rows, redundant
+  `@ $...` unit-price lines, missing Name/Qty/Price headers, overflow, and
+  collapsed image downloads.
+- Verification proof: focused receipt tests, receipt settings sync, frontend
+  typecheck, JSX/source check, full frontend utility suite, production build,
+  Docker release/update, and the receipt Playwright live check passed.
+- Runtime proof: `business-os:v6.0.0-202606070648` is healthy with frontend
+  hash `e567678f3ad2f58d`; report:
+  `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,827,183 bytes) and
+  `release` (380,878,183 bytes) were removed for 412,705,366 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 30,307
+  bytes of stale runtime reports, two old Docker-release backup packages
+  (10,105,392 bytes total), old Docker rollback tags
+  `business-os:v6.0.0-202606070439` and
+  `business-os:v6.0.0-202606070408`, and 1.269 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070648` were not touched.
+- Phase 29 proof: `node ops\scripts\architecture\phase29-audit.ts` passed
+  after cleanup with 9 checks and 0 failures, and
+  `node ops\scripts\backend\schema-audit.ts` passed with 45 static tables and
+  zero relationship-doc or backup action-needed gaps.
+- Current plan position after Move 814: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
