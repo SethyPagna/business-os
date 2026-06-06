@@ -34,6 +34,7 @@ import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from
 import PageHeader from '../shared/PageHeader'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
+import AppSelect from '../shared/AppSelect.tsx'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
@@ -1191,11 +1192,21 @@ export default function Settings() {
             {field('exchange_rate', t('exchange_rate'), 'number', '4100')}
             <div>
               <label htmlFor="settings-display-currency" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('display_currency')}</label>
-              <select id="settings-display-currency" name="display_currency" className="input" value={form.display_currency || 'USD'} onChange={(event) => setValue('display_currency', event.target.value)}>
-                <option value="USD">{t('usd_only')}</option>
-                <option value="KHR">{t('khr_only')}</option>
-                <option value="BOTH">{t('both_currencies')}</option>
-              </select>
+              <AppSelect
+                id="settings-display-currency"
+                name="display_currency"
+                value={form.display_currency || 'USD'}
+                onChange={(nextValue) => setValue('display_currency', nextValue)}
+                ariaLabel={t('display_currency')}
+                className="w-full"
+                buttonClassName="h-10 w-full"
+                menuClassName="min-w-[12rem]"
+                options={[
+                  { value: 'USD', label: t('usd_only') },
+                  { value: 'KHR', label: t('khr_only') },
+                  { value: 'BOTH', label: t('both_currencies') },
+                ]}
+              />
             </div>
           </div>
         </SettingsSection>
@@ -1514,18 +1525,21 @@ export default function Settings() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label htmlFor="settings-display-timezone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('display_timezone')}</label>
-              <select
+              <AppSelect
                 id="settings-display-timezone"
                 name="display_timezone"
-                className="input text-sm"
                 value={form.display_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
-                onChange={(event) => setValue('display_timezone', event.target.value)}
-              >
-                <option value="">{t('use_device_timezone')}</option>
-                {TIMEZONE_OPTIONS.map((timezone) => (
-                  <option key={timezone} value={timezone}>{timezone.replace(/_/g, ' ')}</option>
-                ))}
-              </select>
+                onChange={(nextValue) => setValue('display_timezone', nextValue)}
+                ariaLabel={t('display_timezone')}
+                className="w-full"
+                buttonClassName="h-10 w-full text-sm"
+                menuClassName="min-w-[16rem]"
+                optionClassName="text-sm"
+                options={[
+                  { value: '', label: t('use_device_timezone') },
+                  ...TIMEZONE_OPTIONS.map((timezone) => ({ value: timezone, label: timezone.replace(/_/g, ' ') })),
+                ]}
+              />
             </div>
 
             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-xs">
@@ -1714,20 +1728,24 @@ export default function Settings() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label htmlFor="login_session_duration" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('session_duration')}</label>
-              <select
+              <AppSelect
                 id="login_session_duration"
                 name="login_session_duration"
-                className="input"
                 value={form.login_session_duration || 'session'}
-                onChange={(event) => setValue('login_session_duration', event.target.value)}
-              >
-                <option value="session">{t('until_browser_closes')}</option>
-                <option value="1d">{t('for_1_day') || '1 day'}</option>
-                <option value="3d">{t('for_3_days') || '3 days'}</option>
-                <option value="7d">{t('days_7')}</option>
-                <option value="14d">{t('for_14_days') || '14 days'}</option>
-                <option value="30d">{t('days_30')}</option>
-              </select>
+                onChange={(nextValue) => setValue('login_session_duration', nextValue)}
+                ariaLabel={t('session_duration')}
+                className="w-full"
+                buttonClassName="h-10 w-full"
+                menuClassName="min-w-[13rem]"
+                options={[
+                  { value: 'session', label: t('until_browser_closes') },
+                  { value: '1d', label: t('for_1_day') || '1 day' },
+                  { value: '3d', label: t('for_3_days') || '3 days' },
+                  { value: '7d', label: t('days_7') },
+                  { value: '14d', label: t('for_14_days') || '14 days' },
+                  { value: '30d', label: t('days_30') },
+                ]}
+              />
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{t('session_duration_hint')}</p>
             </div>
           </div>
@@ -1799,24 +1817,27 @@ export default function Settings() {
                   {t('notification_realert_interval') || 'Unresolved alert repeat interval'}
                 </label>
                 <div className="grid gap-2 sm:grid-cols-[minmax(0,16rem)_minmax(0,12rem)]">
-                  <select
+                  <AppSelect
                     id="settings-notifications-realert"
                     name="notifications_realert_preset"
-                    className="input"
                     value={notificationRealertPreset}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (value !== 'custom') {
-                        setValue('notifications_realert_minutes', value)
+                    onChange={(nextValue) => {
+                      if (nextValue !== 'custom') {
+                        setValue('notifications_realert_minutes', nextValue)
                       }
                     }}
-                  >
-                    <option value="5">{t('every_5_minutes') || 'Every 5 minutes'}</option>
-                    <option value="10">{t('every_10_minutes') || 'Every 10 minutes'}</option>
-                    <option value="30">{t('every_30_minutes') || 'Every 30 minutes'}</option>
-                    <option value="60">{t('every_hour') || 'Every hour'}</option>
-                    <option value="custom">{t('custom') || 'Custom'}</option>
-                  </select>
+                    ariaLabel={t('notification_realert_interval') || 'Unresolved alert repeat interval'}
+                    className="w-full"
+                    buttonClassName="h-10 w-full"
+                    menuClassName="min-w-[13rem]"
+                    options={[
+                      { value: '5', label: t('every_5_minutes') || 'Every 5 minutes' },
+                      { value: '10', label: t('every_10_minutes') || 'Every 10 minutes' },
+                      { value: '30', label: t('every_30_minutes') || 'Every 30 minutes' },
+                      { value: '60', label: t('every_hour') || 'Every hour' },
+                      { value: 'custom', label: t('custom') || 'Custom' },
+                    ]}
+                  />
                   <input
                     id="settings-notifications-realert-custom"
                     name="notifications_realert_minutes"
