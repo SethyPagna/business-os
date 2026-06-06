@@ -5,6 +5,7 @@ import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import TestTube2 from 'lucide-react/dist/esm/icons/test-tube-2.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import type { Dispatch, SetStateAction } from 'react'
+import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 
 type TranslateFn = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
@@ -41,6 +42,14 @@ interface ProviderMeta {
   safeMaxCompletionTokens?: number
   safeTimeoutMs?: number
   safeCooldownSeconds?: number
+}
+
+function toProviderSelectOptions(providerOptions: Array<[string, ProviderMeta]> = []): AppSelectOption[] {
+  return providerOptions.map(([key, meta]) => ({ value: key, label: meta.label || key }))
+}
+
+function toProviderTypeOptions(types: string[] = ['chat']): AppSelectOption[] {
+  return types.map((type) => ({ value: type, label: type }))
 }
 
 type ProviderMetaMap = Record<string, ProviderMeta>
@@ -220,28 +229,28 @@ export default function FilesProvidersTab({
         <div className="mt-4 grid gap-4">
           <div>
             <label className="block text-sm font-medium text-slate-700">Provider</label>
-            <select
+            <AppSelect
               id="provider-form-provider"
               name="provider_form_provider"
-              className="input mt-1"
+              className="mt-1 w-full"
+              buttonClassName="h-10 w-full rounded-xl text-sm"
+              menuClassName="min-w-[14rem]"
               value={providerForm.provider}
-              onChange={(event) => setProviderForm((current) => ({
+              onChange={(nextProvider) => setProviderForm((current) => ({
                 ...current,
-                provider: event.target.value,
-                provider_type: providerMeta?.[event.target.value]?.supportedTypes?.[0] || 'chat',
-                default_model: providerMeta?.[event.target.value]?.defaultModel || '',
-                priority: providerMeta?.[event.target.value]?.defaultPriority || 50,
-                requests_per_minute: providerMeta?.[event.target.value]?.safeRequestsPerMinute || 10,
-                max_input_chars: providerMeta?.[event.target.value]?.safeMaxInputChars || 1000,
-                max_completion_tokens: providerMeta?.[event.target.value]?.safeMaxCompletionTokens || 1200,
-                timeout_ms: providerMeta?.[event.target.value]?.safeTimeoutMs || 15000,
-                cooldown_seconds: providerMeta?.[event.target.value]?.safeCooldownSeconds || 20,
+                provider: nextProvider,
+                provider_type: providerMeta?.[nextProvider]?.supportedTypes?.[0] || 'chat',
+                default_model: providerMeta?.[nextProvider]?.defaultModel || '',
+                priority: providerMeta?.[nextProvider]?.defaultPriority || 50,
+                requests_per_minute: providerMeta?.[nextProvider]?.safeRequestsPerMinute || 10,
+                max_input_chars: providerMeta?.[nextProvider]?.safeMaxInputChars || 1000,
+                max_completion_tokens: providerMeta?.[nextProvider]?.safeMaxCompletionTokens || 1200,
+                timeout_ms: providerMeta?.[nextProvider]?.safeTimeoutMs || 15000,
+                cooldown_seconds: providerMeta?.[nextProvider]?.safeCooldownSeconds || 20,
               }))}
-            >
-              {providerOptions.map(([key, meta]) => (
-                <option key={key} value={key}>{meta.label || key}</option>
-              ))}
-            </select>
+              ariaLabel="Provider"
+              options={toProviderSelectOptions(providerOptions)}
+            />
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -250,11 +259,17 @@ export default function FilesProvidersTab({
             </div>
             <div>
               <label htmlFor="provider-form-type" className="block text-sm font-medium text-slate-700">{providerText.type}</label>
-              <select id="provider-form-type" name="provider_form_type" className="input mt-1" value={providerForm.provider_type} onChange={(event) => setProviderForm((current) => ({ ...current, provider_type: event.target.value }))}>
-                {(selectedProviderMeta?.supportedTypes || ['chat']).map((type) => (
-                  <option key={type} value={type}>{type}</option>
-                ))}
-              </select>
+              <AppSelect
+                id="provider-form-type"
+                name="provider_form_type"
+                className="mt-1 w-full"
+                buttonClassName="h-10 w-full rounded-xl text-sm"
+                menuClassName="min-w-[9rem]"
+                value={providerForm.provider_type}
+                onChange={(nextType) => setProviderForm((current) => ({ ...current, provider_type: nextType }))}
+                ariaLabel={providerText.type}
+                options={toProviderTypeOptions(selectedProviderMeta?.supportedTypes || ['chat'])}
+              />
             </div>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">

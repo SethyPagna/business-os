@@ -18,6 +18,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import AppSelect from './AppSelect'
 
 type Tone = 'danger' | 'warning' | 'success' | 'info'
 type ToneFilter = Tone | 'all'
@@ -596,9 +597,16 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
               </div>
               <label className="flex items-center gap-2 text-[11px] font-medium text-slate-500 dark:text-slate-300">
                 {tr('per_page', 'Per page', 'ក្នុងមួយទំព័រ')}
-                <select className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-900" value={itemLimit} onChange={(event) => setItemLimit(Number(event.target.value) || 20)}>
-                  {NOTIFICATION_PAGE_SIZE_OPTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
-                </select>
+                <AppSelect
+                  value={itemLimit}
+                  onChange={(nextValue) => setItemLimit(Number(nextValue) || 20)}
+                  ariaLabel={tr('per_page', 'Per page', 'ក្នុងមួយទំព័រ')}
+                  className="h-8 w-16"
+                  buttonClassName="h-8 w-16 rounded-lg px-2 py-1 text-xs shadow-none"
+                  menuClassName="min-w-[4rem]"
+                  optionClassName="text-xs"
+                  options={NOTIFICATION_PAGE_SIZE_OPTIONS.map((value) => ({ value, label: value }))}
+                />
               </label>
             </div>
 
