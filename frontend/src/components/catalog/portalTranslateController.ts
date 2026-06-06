@@ -3,6 +3,29 @@ export const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target
 export const PORTAL_TRANSLATE_RELOAD_KEY = 'business-os:portal-translate-last-reload'
 export const PORTAL_TRANSLATE_SCRIPT_ID = 'business-os-portal-translate-script'
 
+declare global {
+  interface Window {
+    businessOsPortalTranslateInit?: () => void
+    google?: {
+      translate?: {
+        TranslateElement?: {
+          (options: unknown, elementId: string): unknown
+          InlineLayout?: { SIMPLE?: unknown }
+        }
+      }
+    }
+  }
+}
+
+type PortalExternalTranslateWidgetOptions = {
+  sourceLanguage: unknown
+  includedLanguages: unknown[]
+  callbackName?: string
+  onPending?: () => void
+  onReady?: () => void
+  onFailure?: () => void
+}
+
 const GOOGLE_TRANSLATE_PRECONNECTS = [
   'https://translate.google.com',
   'https://translate.googleapis.com',
@@ -168,6 +191,81 @@ export function ensurePortalTranslateWidgetHost(): HTMLDivElement | Element | nu
 export function removePortalTranslateWidgetHost(): void {
   if (typeof document === 'undefined') return
   Array.from(document.querySelectorAll(`#${PORTAL_TRANSLATE_WIDGET_HOST_ID}`)).forEach((node) => node.remove())
+}
+
+export function setupPortalExternalTranslateWidget({
+  sourceLanguage,
+  includedLanguages,
+  callbackName = 'businessOsPortalTranslateInit',
+  onPending,
+  onReady,
+  onFailure,
+}: PortalExternalTranslateWidgetOptions): () => void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    onFailure?.()
+    return () => {}
+  }
+
+  let cancelled = false
+  let container: Element | HTMLDivElement | null = ensurePortalTranslateWidgetHost()
+  const languageList = (Array.isArray(includedLanguages) ? includedLanguages : [])
+    .map((value) => canonicalTranslateLanguage(value, ''))
+    .filter((value) => value && value !== 'original')
+    .join(',')
+
+  const initWidget = () => {
+    if (cancelled || !window.google?.translate?.TranslateElement) return
+    try {
+      onPending?.()
+      const widgetContainer = container
+      if (!widgetContainer) return
+      widgetContainer.innerHTML = ''
+      window.google.translate.TranslateElement(
+        {
+          pageLanguage: canonicalTranslateLanguage(sourceLanguage, 'en') === 'km' ? 'km' : 'en',
+          includedLanguages: languageList,
+          autoDisplay: false,
+          layout: window.google.translate.TranslateElement.InlineLayout?.SIMPLE,
+        },
+        widgetContainer.id,
+      )
+      let widgetChecks = 0
+      const waitForWidget = () => {
+        if (cancelled) return
+        const combo = widgetContainer.querySelector('.goog-te-combo')
+        if (combo) {
+          onReady?.()
+          return
+        }
+        widgetChecks += 1
+        if (widgetChecks >= 80) {
+          onFailure?.()
+          return
+        }
+        window.setTimeout(waitForWidget, 120)
+      }
+      waitForWidget()
+    } catch (_) {
+      onFailure?.()
+    }
+  }
+
+  window.businessOsPortalTranslateInit = initWidget
+
+  if (window.google?.translate?.TranslateElement) {
+    initWidget()
+  } else if (container) {
+    ensurePortalTranslateScript(callbackName, () => {
+      if (!cancelled) onFailure?.()
+    })
+  } else {
+    onFailure?.()
+  }
+
+  return () => {
+    cancelled = true
+    container = null
+  }
 }
 
 export function applyGoogleTranslateSelection(sourceLang: unknown, targetLang: unknown): boolean {

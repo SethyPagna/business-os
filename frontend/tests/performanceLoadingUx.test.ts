@@ -358,6 +358,8 @@ assert.match(viteConfig, /PermissionEditor\.tsx'\)\) return 'user-permission-edi
 assert.match(viteConfig, /TransferModal\.tsx'\)\) return 'branch-transfer-modal'/, 'Branches transfer modal should have an action-only chunk')
 assert.doesNotMatch(catalogPage, /from '\.\/portalTranslateController\.ts'/, 'public catalog should not statically import the Google Translate controller during route startup')
 assert.match(catalogPage, /import\('\.\/portalTranslateController\.ts'\)/, 'public catalog should load the Google Translate controller only from external translation intent')
+assert.match(catalogPage, /setupPortalExternalTranslateWidget/, 'public catalog should delegate external Google Translate widget setup to the lazy controller module')
+assert.doesNotMatch(catalogPage, /window\.google|TranslateElement|ensurePortalTranslateScript|ensurePortalTranslateWidgetHost/, 'public catalog route should not carry Google Translate DOM setup in the first route chunk')
 assert.doesNotMatch(catalogPage, /import \{ createCircularFaviconDataUrl \} from '\.\.\/\.\.\/utils\/favicon'/, 'public catalog should not statically import the canvas favicon helper during route startup')
 assert.match(catalogPage, /window\.requestIdleCallback\(renderRoundedFavicon, \{ timeout: 1800 \}\)/, 'public catalog should round the favicon from an idle callback after the first viewport can render')
 assert.match(catalogPage, /import\('\.\.\/\.\.\/utils\/favicon\.ts'\)\.then\(\(\{ createCircularFaviconDataUrl \}\)/, 'public catalog should load favicon canvas helpers only from the delayed favicon task')

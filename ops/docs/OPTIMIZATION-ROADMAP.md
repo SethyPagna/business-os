@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 803.
+- Latest completed implementation move in this roadmap: Move 804.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12178,3 +12178,56 @@ Move 803 status:
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, and performance guardrail.
+
+Move 804 status:
+- Move 804 moves external public-portal Google Translate widget setup behind
+  the existing lazy `portalTranslateController.ts` boundary. `CatalogPage.tsx`
+  no longer carries `window.google`, `TranslateElement`, script-host setup, or
+  combo retry-loop code in the route-local chunk; it delegates to
+  `setupPortalExternalTranslateWidget` only after external translate intent.
+- Guardrail proof: `frontend/tests/performanceLoadingUx.test.ts` verifies the
+  lazy ownership boundary and blocks Google Translate DOM setup from returning
+  to `CatalogPage.tsx`. `node frontend\tests\portalTranslateController.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed.
+- Build proof: the public catalog route chunk dropped from the Move 803
+  `catalog` chunk at 121.24 kB / 35.34 kB gzip to 120.50 kB / 35.12 kB gzip.
+  The intent-only `portal-translate-controller` chunk grew from 5.51 kB to
+  6.59 kB because it now owns the external widget setup path.
+- Runtime proof: Docker release `business-os:v6.0.0-202606061753` built,
+  updated, and started healthy after backup
+  `ops/runtime/docker-release/backups/20260606-175543`. Route traces against
+  the live Docker app passed with no failures/errors: public catalog
+  `ops/runtime/reports/route-load-trace-2026-06-06T09-56-31-899Z.json`
+  reached ready text in 239 ms with 21 requests/16 scripts/1 API, Dashboard
+  `ops/runtime/reports/route-load-trace-2026-06-06T09-56-42-676Z.json`
+  reached ready text in 365 ms with 24 requests/18 scripts/2 API, Inventory
+  `ops/runtime/reports/route-load-trace-2026-06-06T09-56-42-718Z.json`
+  reached ready text in 400 ms with 36 requests/29 scripts/2 API, and POS
+  `ops/runtime/reports/route-load-trace-2026-06-06T09-56-43-612Z.json`
+  reached ready text in 212 ms with 26 requests/19 scripts/2 API. The public
+  catalog trace did not request `portal-translate-controller-*`, `lang-en-*`,
+  or Google Translate assets in the first-window route load.
+- Live proof: the full Phase 8.4 live suite passed. Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T09-57-04-872Z/report.json`
+  checked 66 signals with zero relevant console messages and no framework
+  overlay. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T09-57-43-322Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, zero
+  relevant console messages, and enforced CSP present.
+- Cleanup: ignored/regenerable `frontend/dist` (31,826,230 bytes) and
+  `release` (380,877,976 bytes) were removed, reclaiming 412,704,206 bytes.
+  Uploads, secrets, env files, databases, volumes, backups, and active Docker
+  images were preserved. Generated references were refreshed and
+  `npm.cmd --prefix ops run phase29:audit` passed all nine checks.
+  `npm.cmd --prefix ops run prune-storage` still has the same non-data
+  follow-up for locked old report log
+  `ops/runtime/reports/vite-preview-appselect.log`.
+- Current plan position after Move 804: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

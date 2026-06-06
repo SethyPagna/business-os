@@ -217,20 +217,6 @@ type CatalogAppContext = {
 }
 type CatalogSyncContext = { syncChannel?: { channel?: string } | null }
 
-declare global {
-  interface Window {
-    businessOsPortalTranslateInit?: () => void
-    google?: {
-      translate?: {
-        TranslateElement?: {
-          (options: unknown, elementId: string): unknown
-          InlineLayout?: { SIMPLE?: unknown }
-        }
-      }
-    }
-  }
-}
-
 type ImageFieldProps = {
   label: string
   value: string
@@ -2301,76 +2287,34 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       return undefined
     }
     let cancelled = false
-    let container: Element | HTMLDivElement | null = null
-    const initWidget = () => {
-      if (cancelled || !window.google?.translate?.TranslateElement) return
-      try {
-        setTranslateReady(false)
-        const widgetContainer = container
-        if (!widgetContainer) return
-        widgetContainer.innerHTML = ''
-        window.google.translate.TranslateElement(
-          {
-            pageLanguage: configuredPortalLanguage === 'km' ? 'km' : 'en',
-            includedLanguages: GOOGLE_TRANSLATE_FALLBACK_OPTIONS
-              .map((option) => option.value)
-              .filter((value) => value !== 'original')
-              .join(','),
-            autoDisplay: false,
-            layout: window.google.translate.TranslateElement.InlineLayout?.SIMPLE,
-          },
-          widgetContainer.id,
-        )
-        let widgetChecks = 0
-        const waitForWidget = () => {
-          if (cancelled) return
-          const combo = widgetContainer.querySelector('.goog-te-combo')
-          if (combo) {
-            setTranslateReady(true)
-            setTranslateApplyMessage('')
-            return
-          }
-          widgetChecks += 1
-          if (widgetChecks >= 80) {
-            setTranslateReady(false)
-            setTranslateApplyState('failed')
-            setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-            return
-          }
-          window.setTimeout(waitForWidget, 120)
-        }
-        waitForWidget()
-      } catch (_) {}
-    }
+    let cleanupWidget: (() => void) | null = null
 
     async function setupExternalTranslateWidget() {
       const {
-        ensurePortalTranslateScript,
-        ensurePortalTranslateWidgetHost,
+        setupPortalExternalTranslateWidget,
       } = await loadPortalTranslateControllerModule()
       if (cancelled) return
-      container = ensurePortalTranslateWidgetHost()
-      if (!container) return
-
-      window.businessOsPortalTranslateInit = initWidget
-
-      if (window.google?.translate?.TranslateElement) {
-        initWidget()
-        return
-      }
-
-      ensurePortalTranslateScript('businessOsPortalTranslateInit', () => {
-        if (!cancelled) {
+      cleanupWidget = setupPortalExternalTranslateWidget({
+        sourceLanguage: configuredPortalLanguage,
+        includedLanguages: GOOGLE_TRANSLATE_FALLBACK_OPTIONS.map((option) => option.value),
+        onPending: () => setTranslateReady(false),
+        onReady: () => {
+          setTranslateReady(true)
+          setTranslateApplyMessage('')
+        },
+        onFailure: () => {
+          if (cancelled) return
           setTranslateReady(false)
           setTranslateApplyState('failed')
           setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-        }
+        },
       })
     }
     void setupExternalTranslateWidget()
 
     return () => {
       cancelled = true
+      cleanupWidget?.()
     }
   }, [configuredPortalLanguage, externalTranslateTarget, previewConfig.translateWidgetEnabled, publicView])
 
