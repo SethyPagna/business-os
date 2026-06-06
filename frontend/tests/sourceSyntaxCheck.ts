@@ -43,9 +43,13 @@ assert.deepEqual(
 )
 
 const failures: string[] = []
+const nativeSelectFiles: string[] = []
 for (const file of files) {
   try {
     const source = await readFile(file, 'utf8')
+    if (file.includes(`${path.sep}src${path.sep}components${path.sep}`) && /<select[\s>]/.test(source)) {
+      nativeSelectFiles.push(path.relative(root, file))
+    }
     const loader = file.endsWith('.tsx') ? 'tsx' : 'ts'
     await transformWithEsbuild(source, file, { loader, jsx: 'automatic' })
   } catch (error) {
@@ -53,5 +57,10 @@ for (const file of files) {
   }
 }
 
+assert.deepEqual(
+  nativeSelectFiles,
+  [],
+  'frontend components should use AppSelect for rounded, keyboard-accessible filter and page-size menus instead of native square selects',
+)
 assert.deepEqual(failures, [])
 console.log(`PASS TypeScript source syntax check parsed ${files.length} source files`)

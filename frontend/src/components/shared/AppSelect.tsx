@@ -163,6 +163,7 @@ export default function AppSelect({
         id={id}
         type="button"
         className={`inline-flex min-w-0 items-center justify-between gap-2 rounded-[0.95rem] border border-slate-200 bg-white px-3 py-2 text-left text-sm font-medium text-slate-700 shadow-sm outline-none transition hover:border-slate-300 hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:border-slate-600 dark:hover:bg-slate-900 dark:focus:border-blue-500 dark:focus:ring-blue-950 ${buttonClassName}`.trim()}
+        data-app-select-button="true"
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -176,7 +177,7 @@ export default function AppSelect({
         }}
         onKeyDown={handleKeyDown}
       >
-        <span className="min-w-0 flex-1 truncate">{selectedOption?.label ?? selectedValue}</span>
+        <span className="min-w-0 flex-1 truncate" data-app-select-selected="true">{selectedOption?.label ?? selectedValue}</span>
         <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" />
       </button>
 
@@ -185,7 +186,7 @@ export default function AppSelect({
           ref={menuRef}
           role="listbox"
           aria-label={ariaLabel}
-          className={`max-h-72 overflow-y-auto rounded-[1.05rem] border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/12 ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/35 ${menuClassName}`.trim()}
+          className={`max-h-[min(18rem,calc(100vh-1rem))] overflow-y-auto overscroll-contain rounded-[1.05rem] border border-slate-200 bg-white p-1.5 shadow-2xl shadow-slate-900/12 ring-1 ring-black/5 dark:border-slate-700 dark:bg-slate-900 dark:shadow-black/35 ${menuClassName}`.trim()}
           data-app-select-menu="true"
           style={{ position: 'fixed', top: position.top, left: position.left, width: position.width, zIndex: 10000 }}
         >

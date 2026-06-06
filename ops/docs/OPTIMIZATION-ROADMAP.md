@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 814.
+- Latest completed implementation move in this roadmap: Move 815.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12704,6 +12704,55 @@ Move 814 status:
   `node ops\scripts\backend\schema-audit.ts` passed with 45 static tables and
   zero relationship-doc or backup action-needed gaps.
 - Current plan position after Move 814: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 815 status:
+- Move 815 hardens rounded custom filter dropdowns and live menu checks.
+  `AppSelect` now exposes stable live-check hooks for its trigger and selected
+  value, and its portal menu is viewport-bounded with overscroll containment so
+  expanded page-size/filter options stay rounded instead of reverting to tall
+  native-looking square popups.
+- `frontend/tests/sourceSyntaxCheck.ts` now rejects raw native `<select>`
+  elements under `frontend/src/components`, and
+  `frontend/tests/performanceLoadingUx.test.ts` now requires compact one-row
+  filter sections, the existing accidental `Back` label fallback, the
+  `AppSelect` live hooks, and the viewport-bounded custom select menu.
+- The focused Phase 8.4 filter-menu check now tolerates localized Dashboard
+  range buttons by falling back to the app's persisted dashboard filter
+  preference before verifying the actual custom date and granularity controls.
+- Verification passed: `node frontend\tests\sourceSyntaxCheck.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, frontend typecheck,
+  JSX/source check, frontend production build, focused filter-menu live check,
+  focused shared-select live check, and the route-load trace.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070725` is running
+  healthy on local port 4000 with frontend hash `c36ea69af92f848f`. The filter
+  report is
+  `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T23-29-11-677Z/report.json`.
+  The route trace reported Dashboard 245 ms, Inventory 243 ms, Sales 183 ms,
+  and Audit Log 167 ms with zero failed requests and zero console errors.
+- Browser proof: the in-app browser logged in through the real UI at
+  `http://127.0.0.1:4000/products` and opened the page-size dropdown. It
+  observed custom options `20`, `50`, and `100`, `16.8px` menu radius,
+  `288px` viewport-bounded max height, zero native selects, and no framework
+  overlay.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,827,380 bytes) and
+  `release` (380,878,695 bytes) were removed for 412,706,075 bytes reclaimed.
+  `npm.cmd --prefix ops run prune-storage` then removed 306,905 bytes of stale
+  runtime reports, Docker-release backup `20260607-061341` (5,056,608 bytes)
+  beyond the latest-three policy, old Docker rollback tags
+  `business-os:v6.0.0-202606070530` and
+  `business-os:v6.0.0-202606070504`, and 2.5 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070725` were not touched.
+- Phase 29/schema proof: `node ops\scripts\architecture\phase29-audit.ts`
+  passed after cleanup with 9 checks and 0 failures, and
+  `node ops\scripts\backend\schema-audit.ts` passed with 45 static tables and
+  zero relationship-doc or backup action-needed gaps.
+- Current plan position after Move 815: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

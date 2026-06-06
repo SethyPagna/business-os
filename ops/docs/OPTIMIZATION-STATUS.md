@@ -8,8 +8,8 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 814, harden receipt Khmer labels and image export
-  column fallback.
+- Latest completed move: Move 815, harden rounded filter dropdowns and live
+  filter-menu checks.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `e567678f3ad2f58d`
+  `c36ea69af92f848f`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -32,13 +32,15 @@ Latest verified reports:
 - latest broad Phase 8.4 UI live check:
   `ops/runtime/reports/phase84-ui-live-check-2026-06-06T22-15-06-108Z/report.json`
 - latest focused filter/dropdown live check:
-  `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
+  `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T23-29-11-677Z/report.json`
+- latest focused shared select live check:
+  `ops/runtime/reports/phase84-shared-select-live-check-2026-06-06T23-27-47-674Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T22-15-44-427Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T22-16-27-500Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T23-27-49-383Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -70,6 +72,23 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 815 built and started Docker release `business-os:v6.0.0-202606070725`
+  for rounded custom filter dropdown hardening. The focused filter-menu live
+  check
+  `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T23-29-11-677Z/report.json`
+  passed Products, Inventory, Audit Log, Library, Dashboard, and POS with no
+  stray `Back` label, rounded sections/options, HTTP 200 reads, no framework
+  overlay, and zero relevant console messages. The shared-select live check
+  also passed on frontend hash `c36ea69af92f848f`. The route trace loaded
+  Dashboard in 245 ms, Inventory in 243 ms, Sales in 183 ms, and Audit Log in
+  167 ms with zero failed requests and zero console errors. Ignored
+  regenerable output was removed again: `frontend/dist` (31,827,380 bytes) and
+  `release` (380,878,695 bytes), for 412,706,075 bytes reclaimed.
+  `npm.cmd --prefix ops run prune-storage` then removed 306,905 bytes of stale
+  runtime reports, Docker-release backup `20260607-061341` (5,056,608 bytes),
+  old Docker rollback tags `business-os:v6.0.0-202606070530` and
+  `business-os:v6.0.0-202606070504`, and 2.5 GB of Docker builder cache. Phase
+  29 and schema audits passed after cleanup.
 - Move 802 built and started Docker release `business-os:v6.0.0-202606061709`
   for the Dashboard export/report split. `Dashboard.tsx` now lazy-loads
   `dashboardExport.ts` only from export actions; the export module owns CSV row
@@ -2584,7 +2603,44 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 814
+## Latest Move 815
+
+- Rounded dropdown hardening is now live. `AppSelect` exposes stable trigger
+  and selected-value hooks, and its custom menu is viewport-bounded so page-size
+  and filter selectors stay rounded and compact instead of falling back to
+  square native popups.
+- Component source is guarded against native `<select>` reintroduction, and
+  the performance/loading UX test now requires compact one-row filter sections,
+  the accidental `Back` label fallback, the `AppSelect` hooks, and the bounded
+  custom menu.
+- The filter-menu live check now handles localized/compact Dashboard custom
+  range controls by falling back through persisted dashboard filter preferences
+  before verifying the actual custom date and granularity controls.
+- Verification passed: source syntax check, performance/loading UX guard,
+  frontend typecheck, JSX/source check, frontend production build, focused
+  filter-menu live check, focused shared-select live check, and route-load
+  trace.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070725` is healthy;
+  frontend hash `c36ea69af92f848f`, source hash `9e29b055b17fc325`.
+- Live proof: Products, Inventory, Audit Log, Library, Dashboard, and POS all
+  passed the focused filter-menu live check. Route-load trace was Dashboard
+  245 ms, Inventory 243 ms, Sales 183 ms, Audit Log 167 ms, with zero failed
+  requests and zero console errors. The in-app browser logged in through the
+  real UI and opened the Products page-size dropdown with options `20`, `50`,
+  and `100`, `16.8px` menu radius, `288px` max height, zero native selects,
+  and no framework overlay.
+- Cleanup proof: ignored regenerable `frontend/dist` and `release` reclaimed
+  412,706,075 bytes. Storage prune removed stale reports, one old
+  Docker-release backup, old Docker rollback tags, and 2.5 GB of Docker builder
+  cache while preserving uploads, secrets, env files, data, Docker volumes,
+  latest backup sets, R2 latest backup, `business-os:latest`, and the active
+  release image.
+- Current plan position after Move 815: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Previous Move 814
 
 - Receipt bilingual output now uses the canonical Khmer label map directly.
   `frontend/src/components/receipt/Receipt.tsx` no longer carries a duplicated

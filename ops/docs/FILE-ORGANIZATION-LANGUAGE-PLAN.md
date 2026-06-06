@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 814 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 815 in this file.
 
 ## Goal
 
@@ -8664,6 +8664,63 @@ Decision rule:
   `node ops\scripts\backend\schema-audit.ts` passed with 45 static tables and
   zero relationship-doc or backup action-needed gaps.
 - Current plan position after Move 814: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 815: Harden rounded filter dropdowns and live menu checks
+
+- Ownership evidence: `frontend/src/components/shared/AppSelect.tsx` owns the
+  rounded custom dropdown used by page-size and filter controls, while
+  `frontend/src/components/shared/FilterMenu.tsx` already owns the compact
+  expanded filter panel rows. This is a Phase 8.4/Phase 29 UI consistency and
+  live-check guardrail move, not a folder move.
+- Change: `AppSelect` now exposes stable `data-app-select-button` and
+  `data-app-select-selected` hooks and constrains its portal menu to
+  `min(18rem, 100vh - 1rem)` with overscroll containment. This keeps dropdowns
+  rounded, compact, and viewport-bounded across Dashboard, Products, Inventory,
+  POS, Audit Log, Library, and other shared filter surfaces.
+- Source guardrail: `frontend/tests/sourceSyntaxCheck.ts` now fails if
+  component source reintroduces native `<select>` controls. `frontend/tests/
+  performanceLoadingUx.test.ts` requires the compact one-row `FilterMenu`
+  layout, the `Back` label fallback, and the new `AppSelect` hooks/menu
+  bound.
+- Live-check hardening: `ops/scripts/runtime/live-checks/
+  phase84-filter-menu-live-check.ts` now falls back through persisted
+  Dashboard filter preferences when localized or compact range buttons do not
+  expose exact English `Custom` text, then verifies the actual custom date and
+  granularity controls.
+- Verification proof: `node frontend\tests\sourceSyntaxCheck.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `npm.cmd --prefix frontend run
+  typecheck`, `npm.cmd --prefix frontend run check:jsx`, `npm.cmd --prefix
+  frontend run build`, `node ops\scripts\runtime\live-checks\
+  phase84-filter-menu-live-check.ts`, `node ops\scripts\runtime\live-checks\
+  phase84-shared-select-live-check.ts`, and `npm.cmd --prefix ops run
+  phase84:route-load-trace` passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070725` was built,
+  deployed, and reported healthy on `http://127.0.0.1:4000/health` with
+  frontend hash `c36ea69af92f848f`. The route-load trace reported Dashboard
+  245 ms, Inventory 243 ms, Sales 183 ms, and Audit Log 167 ms with zero
+  failed requests and zero console errors.
+- Browser proof: the in-app browser signed in through the real local UI,
+  opened Products, and opened the page-size dropdown. It saw options `20`,
+  `50`, and `100`, a `16.8px` rounded custom menu, `288px` max height, zero
+  native selects, and no framework overlay.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,827,380 bytes) and
+  `release` (380,878,695 bytes) were removed for 412,706,075 bytes reclaimed.
+  The standard prune removed 306,905 bytes of stale runtime reports,
+  Docker-release backup `20260607-061341` (5,056,608 bytes), old Docker tags
+  `business-os:v6.0.0-202606070530` and
+  `business-os:v6.0.0-202606070504`, and 2.5 GB of Docker builder cache while
+  preserving uploads, secrets, env files, databases, Docker volumes, latest
+  backup sets, the latest R2 backup, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070725`.
+- Phase 29 proof: `node ops\scripts\architecture\phase29-audit.ts` passed with
+  9 checks and 0 failures after cleanup, and `node ops\scripts\backend\
+  schema-audit.ts` passed with 45 static tables and zero relationship-doc or
+  backup action-needed gaps.
+- Current plan position after Move 815: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
