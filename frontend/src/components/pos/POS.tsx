@@ -60,10 +60,12 @@ import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
 import {
   buildProductLightboxState,
   getProductGalleryImages,
 } from '../products/helpers/productGalleryHelpers.ts'
+import { buildProductSupplierOptions } from '../products/helpers/productMenuHelpers.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const FilterPanel = lazy(() => import('./FilterPanel'))
@@ -1225,20 +1227,13 @@ export default function POS() {
 
   // Derived filter lists from products
   const posSuppliers = useMemo(
-    () => [...new Set((productFilterMeta.suppliers || []).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    () => buildProductSupplierOptions(productFilterMeta.suppliers),
     [productFilterMeta.suppliers],
   )
-  const posBrands = useMemo(() => {
-    const fromProducts = (productFilterMeta.brands || []).map((brand) => String(brand || '').trim()).filter(Boolean)
-    let fromSettings: string[] = []
-    try {
-      const parsed = JSON.parse(settings?.product_brand_options || '[]')
-      if (Array.isArray(parsed)) {
-        fromSettings = parsed.map((entry) => String(entry || '').trim()).filter(Boolean)
-      }
-    } catch (_) {}
-    return Array.from(new Set([...fromProducts, ...fromSettings])).sort((a, b) => a.localeCompare(b))
-  }, [productFilterMeta.brands, settings?.product_brand_options])
+  const posBrands = useMemo(
+    () => buildProductBrandOptions(productFilterMeta.brands, String(settings?.product_brand_options || '[]')),
+    [productFilterMeta.brands, settings?.product_brand_options],
+  )
   const posPaymentMethods = useMemo((): string[] => {
     const fallback = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR', 'Pi Pay', 'Transfer']
     try {

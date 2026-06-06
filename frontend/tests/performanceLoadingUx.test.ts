@@ -2940,10 +2940,30 @@ assert.match(
   /import \{[\s\S]*buildProductLightboxState,[\s\S]*getProductGalleryImages,[\s\S]*\} from '\.\.\/products\/helpers\/productGalleryHelpers\.ts'/,
   'POS should reuse shared product gallery helpers instead of carrying a route-local gallery parser',
 )
+assert.match(
+  pos,
+  /import \{ buildProductBrandOptions \} from '\.\.\/products\/helpers\/productDisplayHelpers\.ts'/,
+  'POS should reuse shared product brand option normalization',
+)
+assert.match(
+  pos,
+  /import \{ buildProductSupplierOptions \} from '\.\.\/products\/helpers\/productMenuHelpers\.ts'/,
+  'POS should reuse shared product supplier option normalization',
+)
 assert.doesNotMatch(
   pos,
   /const getProductGallery = useCallback\([\s\S]*JSON\.parse\(raw\)[\s\S]*raw\.split\('\|'\)/,
   'POS should not duplicate JSON and pipe-delimited product gallery parsing',
+)
+assert.doesNotMatch(
+  pos,
+  /const posBrands = useMemo\(\(\) => \{[\s\S]*JSON\.parse\(settings\?\.product_brand_options/,
+  'POS should not duplicate product brand settings parsing',
+)
+assert.doesNotMatch(
+  pos,
+  /const posSuppliers = useMemo\(\s*\(\) => \[\.\.\.new Set\(\(productFilterMeta\.suppliers/,
+  'POS should not duplicate product supplier option Set sorting',
 )
 assert.match(
   pos,

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 810 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 811 in this file.
 
 ## Goal
 
@@ -8435,6 +8435,66 @@ Decision rule:
   `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070439` were not touched.
 - Current plan position after Move 810: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 811: Share POS product filter option helpers
+
+- Ownership evidence: Products already normalizes brand filter options through
+  `buildProductBrandOptions` and supplier filter options through
+  `buildProductSupplierOptions`. POS duplicated both paths with local
+  `Set`/`sort` logic and local `product_brand_options` JSON parsing.
+- Change: `frontend/src/components/pos/POS.tsx` now imports
+  `buildProductBrandOptions` from `productDisplayHelpers.ts` and
+  `buildProductSupplierOptions` from `productMenuHelpers.ts`. POS brand and
+  supplier option memos now share the same normalization, settings merge,
+  de-duplication, and sort behavior as Products.
+- Guardrail: `frontend/tests/performanceLoadingUx.test.ts` now requires the
+  shared POS imports and blocks reintroducing the local brand settings parser
+  and supplier `Set`/sort copy.
+- Verification: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productDisplayHelpers.test.ts`,
+  `node frontend\tests\productMenuHelpers.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build emits
+  `assets/POS-B3t7A_Za.js` at 76.52 kB / 19.86 kB gzip,
+  `assets/Products-iih_XeX5.js` at 88.63 kB / 23.93 kB gzip, and the shared
+  `assets/productMenuHelpers-ICbChNqd.js` at 8.06 kB / 2.55 kB gzip.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070504` was built and
+  deployed after backup `ops/runtime/docker-release/backups/20260607-051433`;
+  `business-os-app-1`, workers, Postgres, Redis, and Cloudflare containers are
+  healthy on that image.
+- Route proof: live route traces against the Docker app passed with zero failed
+  requests and zero console errors: POS 205 ms with 28 requests / 21 scripts /
+  2 API, Inventory 298 ms with 36 requests / 29 scripts / 2 API, Dashboard
+  218 ms with 24 requests / 18 scripts / 2 API, and public catalog 215 ms with
+  21 requests / 16 scripts / 1 API.
+- Live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. The broad
+  UI check covered 66 signals on frontend hash `a3fd08ced369f325` with zero
+  relevant console messages; the public Cloudflare portal check rendered 20
+  products with zero failed responses, zero page errors, zero relevant console
+  messages, and enforced CSP present; post-live hygiene passed with loaded
+  dataset status.
+- Browser/Playwright proof: the in-app Browser rendered
+  `http://127.0.0.1:4000/public` with no blank shell, no runtime overlay, and
+  no captured warnings/errors. Standalone Playwright then typed `AHC` into the
+  public search field and verified the list narrowed from 5,539 products to
+  4 real AHC products with no no-results flash, console error, or page error.
+- Cleanup: ignored regenerable `frontend/dist` (31,825,844 bytes) and
+  `release` (380,878,488 bytes) were removed for 412,704,332 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 325,725
+  bytes of stale runtime reports, one old Docker-release backup
+  `20260607-035407` (5,045,580 bytes) beyond the latest-three retention
+  policy, old Docker rollback image tag `business-os:v6.0.0-202606070254`, and
+  1.269 GB of Docker builder cache. Uploads, secrets, env files, databases,
+  Docker volumes, latest backup sets, R2 backup
+  `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070504` were not touched.
+- Current plan position after Move 811: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
