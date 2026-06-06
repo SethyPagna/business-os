@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 809 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 810 in this file.
 
 ## Goal
 
@@ -8374,6 +8374,67 @@ Decision rule:
   `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070408` were not touched.
 - Current plan position after Move 809: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 810: Share POS product gallery helpers
+
+- Ownership evidence: `frontend/src/components/products/helpers/productGalleryHelpers.ts`
+  already owns product gallery normalization and lightbox state for product
+  surfaces; `frontend/src/components/pos/POS.tsx` duplicated JSON string and
+  pipe-delimited gallery parsing inside its route component.
+- Change: `normalizeProductGallery` now accepts stored gallery arrays, JSON
+  array strings, and pipe-delimited strings, then trims, de-duplicates, applies
+  fallback images, and enforces the existing limit in one shared path. POS now
+  calls `getProductGalleryImages` and `buildProductLightboxState` instead of
+  carrying a route-local parser and lightbox object builder.
+- Guardrail: `frontend/tests/productGalleryHelpers.test.ts` verifies JSON
+  string and pipe-delimited gallery normalization. `frontend/tests/performanceLoadingUx.test.ts`
+  blocks the old POS-local `JSON.parse`/`split('|')` gallery parser and
+  requires the shared helper import.
+- Verification: `node frontend\tests\productGalleryHelpers.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build emits
+  `assets/POS-BXEuZ52k.js` at 76.75 kB / 19.91 kB gzip and
+  `assets/product-shared-CpOju8rp.js` at 6.83 kB / 2.62 kB gzip.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070439` was built and
+  deployed after backup `ops/runtime/docker-release/backups/20260607-044957`;
+  `business-os-app-1`, workers, Postgres, Redis, and Cloudflare containers are
+  healthy on that image.
+- Route proof: live route traces against the Docker app passed with zero failed
+  requests and zero console errors: POS 209 ms with 27 requests / 20 scripts /
+  2 API, Inventory 247 ms with 36 requests / 29 scripts / 2 API, Dashboard
+  273 ms with 24 requests / 18 scripts / 2 API, and public catalog 202 ms with
+  21 requests / 16 scripts / 1 API.
+- Live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. The broad
+  UI check covered 66 signals on frontend hash `4669a465a3229a92` with zero
+  relevant console messages; the public Cloudflare portal check rendered 20
+  products with zero failed responses, zero page errors, zero relevant console
+  messages, and enforced CSP present; post-live hygiene passed with loaded
+  dataset status.
+- Browser/Playwright proof: the in-app Browser rendered
+  `http://127.0.0.1:4000/public` with no runtime overlay and no captured
+  console warnings/errors. Its fill bridge set the public search value but did
+  not dispatch the same React input path, so regular Playwright performed the
+  no-side-effect interaction proof: public catalog loaded 5,539 products,
+  searching `AHC` narrowed to 4 real AHC products, and there was no
+  no-results flash, console error, or page error.
+- Cleanup: ignored regenerable `frontend/dist` (31,825,848 bytes) and
+  `release` (380,878,488 bytes) were removed for 412,704,336 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 354,753
+  bytes of stale runtime reports, one old Docker-release backup
+  `20260607-032424` (5,043,546 bytes) beyond the latest-three retention
+  policy, old Docker rollback image tag `business-os:v6.0.0-202606061809`, and
+  613.6 MB of Docker builder cache. Uploads, secrets, env files, databases,
+  Docker volumes, latest backup sets, R2 backup
+  `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070439` were not touched.
+- Current plan position after Move 810: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

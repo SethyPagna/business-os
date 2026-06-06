@@ -2937,6 +2937,16 @@ assert.doesNotMatch(
 )
 assert.match(
   pos,
+  /import \{[\s\S]*buildProductLightboxState,[\s\S]*getProductGalleryImages,[\s\S]*\} from '\.\.\/products\/helpers\/productGalleryHelpers\.ts'/,
+  'POS should reuse shared product gallery helpers instead of carrying a route-local gallery parser',
+)
+assert.doesNotMatch(
+  pos,
+  /const getProductGallery = useCallback\([\s\S]*JSON\.parse\(raw\)[\s\S]*raw\.split\('\|'\)/,
+  'POS should not duplicate JSON and pipe-delimited product gallery parsing',
+)
+assert.match(
+  pos,
   /const cartTotals = useMemo\(\(\) => \{[\s\S]*for \(const item of active\.cart\)[\s\S]*branchIds: Array\.from\(branchIds\)/,
   'POS should derive cart subtotals and branch ids in one memoized cart pass',
 )

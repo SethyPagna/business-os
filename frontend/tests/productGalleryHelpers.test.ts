@@ -17,6 +17,18 @@ assert.deepEqual(
 )
 
 assert.deepEqual(
+  normalizeProductGallery('[" one.jpg ","two.jpg","one.jpg"]', 'fallback.jpg'),
+  ['one.jpg', 'two.jpg'],
+  'gallery normalization accepts stored JSON array strings',
+)
+
+assert.deepEqual(
+  normalizeProductGallery(' one.jpg | two.jpg | one.jpg ', 'fallback.jpg'),
+  ['one.jpg', 'two.jpg'],
+  'gallery normalization accepts stored pipe-delimited strings',
+)
+
+assert.deepEqual(
   normalizeProductGallery([], ' fallback.jpg '),
   ['fallback.jpg'],
   'gallery normalization uses the fallback when no gallery images are present',

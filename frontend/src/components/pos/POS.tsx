@@ -59,8 +59,11 @@ import { getCategories as getPosCategories } from '../../api/lookupTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
-import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import {
+  buildProductLightboxState,
+  getProductGalleryImages,
+} from '../products/helpers/productGalleryHelpers.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const FilterPanel = lazy(() => import('./FilterPanel'))
@@ -1393,47 +1396,16 @@ export default function POS() {
     setDetailProduct(product)
   }, [addToCart, exchangeRate])
 
-  /** Build a normalized image list for POS product lightbox (gallery + fallback image). */
-  const getProductGallery = useCallback((product: ProductRecord | null | undefined) => {
-    const raw = product?.image_gallery
-    const list = Array.isArray(raw)
-      ? raw
-      : (() => {
-          if (!raw || typeof raw !== 'string') return []
-          try {
-            const parsed = JSON.parse(raw)
-            return Array.isArray(parsed) ? parsed : []
-          } catch {
-            return raw.split('|').map((entry) => entry.trim()).filter(Boolean)
-          }
-        })()
-    const combined = [...list, product?.image_path || '']
-    return [...new Set(combined.map((entry) => String(entry || '').trim()).filter(Boolean))]
-  }, [])
-
-  /** Resolve uploads paths so the lightbox can render both local and sync-server URLs. */
-  const resolveProductImage = useCallback((src: unknown) => {
-    const raw = String(src || '').trim()
-    if (!raw) return ''
-    return resolvePublicAssetUrl(raw)
-  }, [])
-
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
-    const images = getProductGallery(product).map(resolveProductImage).filter(Boolean)
-    if (!images.length) return
-    const safeIndex = Math.max(0, Math.min(startIndex, images.length - 1))
-    setImageLightbox({
-      title: product?.name || t('products'),
-      images,
-      index: safeIndex,
-    })
-  }, [getProductGallery, resolveProductImage, t])
+    const nextLightbox = buildProductLightboxState(getProductGalleryImages(product), startIndex, product?.name || t('products'))
+    if (nextLightbox) setImageLightbox(nextLightbox)
+  }, [t])
 
   /** Primary image used by cards/sheets, with gallery-first fallback. */
   const getPrimaryProductImage = useCallback((product: ProductRecord) => {
-    return getProductGallery(product)[0] || product?.image_path || ''
-  }, [getProductGallery])
+    return getProductGalleryImages(product)[0] || product?.image_path || ''
+  }, [])
 
 // Cart mutations
   function addToCart(product: ProductRecord, priceMode = 'selling') {

@@ -8,8 +8,8 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 809, pick POS best branch in one pass without
-  allocating and sorting branch-stock rows.
+- Latest completed move: Move 810, share POS product gallery parsing and
+  lightbox setup with the product gallery helper.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `0fadf1009a3f3008`
+  `4669a465a3229a92`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -30,15 +30,15 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T18-57-45-619Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T20-51-33-356Z/report.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T07-46-47-026Z/report.json`
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T07-16-15-109Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T18-58-29-787Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T20-52-10-161Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T18-57-30-753Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-06T20-51-22-264Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -2361,7 +2361,7 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 809
+## Recent Move 809
 
 - POS add-to-cart branch choice now scans branch stock once in
   `frontend/src/components/pos/POS.tsx`. `pickBestBranchId` returns the
@@ -2396,6 +2396,50 @@ Recent route-level win:
   R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
   active image `business-os:v6.0.0-202606070408` were preserved.
 - Current plan position after Move 809: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Latest Move 810
+
+- POS image gallery and lightbox handling now reuses
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts`.
+  `normalizeProductGallery` accepts array values, JSON array strings, and
+  pipe-delimited strings, while POS calls `getProductGalleryImages` and
+  `buildProductLightboxState` instead of a route-local parser.
+- Guardrails: `frontend/tests/productGalleryHelpers.test.ts` covers stored
+  string gallery formats, and `frontend/tests/performanceLoadingUx.test.ts`
+  blocks the old POS-local JSON/pipe parsing path.
+- Source checks passed: `node frontend\tests\productGalleryHelpers.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`, frontend typecheck,
+  JSX/source check, frontend utility suite, and frontend production build. The
+  POS chunk is `76.75 kB` / `19.91 kB` gzip, and `product-shared` is
+  `6.83 kB` / `2.62 kB` gzip.
+- Docker/runtime proof: `business-os:v6.0.0-202606070439` is running healthy
+  after backup `ops/runtime/docker-release/backups/20260607-044957`.
+- Live route proof: POS 209 ms, Inventory 247 ms, Dashboard 273 ms, and public
+  catalog 202 ms, all with zero failed requests and zero console errors.
+- Full live suite passed: broad UI 66 signals on frontend hash
+  `4669a465a3229a92`, public Cloudflare portal 20 products, zero failed
+  responses, zero page errors, zero relevant console messages, CSP present, and
+  post-live hygiene loaded.
+- Browser/Playwright proof: the in-app Browser loaded the public catalog with
+  no runtime overlay and zero captured warnings/errors. Its fill bridge set the
+  search value without triggering the same React filter path, so standalone
+  Playwright completed the interaction proof: public catalog loaded 5,539
+  products; searching `AHC` showed 4 real products with no no-results flash and
+  zero console/page errors.
+- Cleanup reclaimed 412,704,336 bytes from ignored regenerable artifacts:
+  `frontend/dist` (31,825,848 bytes) and `release` (380,878,488 bytes). No
+  source or business data was deleted.
+- Standard retention cleanup then removed 354,753 bytes of stale runtime
+  reports, Docker-release backup `20260607-032424` (5,043,546 bytes) beyond the
+  latest-three retention policy, old Docker rollback tag
+  `business-os:v6.0.0-202606061809`, and 613.6 MB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070439` were preserved.
+- Current plan position after Move 810: Phase 8.4 active; Phase 26 at 51
   completed organization moves; Phase 28 active with R2/access follow-up open;
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.

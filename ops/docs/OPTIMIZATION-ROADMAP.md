@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 809.
+- Latest completed implementation move in this roadmap: Move 810.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12463,6 +12463,57 @@ Move 809 status:
   `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070408` were preserved.
 - Current plan position after Move 809: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 810 status:
+- Move 810 shares product gallery parsing and lightbox setup with POS.
+  `frontend/src/components/products/helpers/productGalleryHelpers.ts` now
+  accepts array, JSON array string, and pipe-delimited gallery storage formats,
+  while `frontend/src/components/pos/POS.tsx` reuses
+  `getProductGalleryImages` and `buildProductLightboxState` instead of a
+  route-local JSON/pipe parser.
+- Guardrail proof: `frontend/tests/productGalleryHelpers.test.ts` verifies the
+  stored string gallery formats, and
+  `frontend/tests/performanceLoadingUx.test.ts` requires the shared helper
+  import while blocking the old POS-local parser.
+- Verification proof: `node frontend\tests\productGalleryHelpers.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`,
+  `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run test:utils`, and
+  `npm.cmd --prefix frontend run build` passed. The production build emits POS
+  at 76.75 kB / 19.91 kB gzip and `product-shared` at 6.83 kB / 2.62 kB gzip.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070439` was built and
+  deployed healthy after backup
+  `ops/runtime/docker-release/backups/20260607-044957`.
+- Route proof: live traces passed with zero failed requests and zero console
+  errors: POS 209 ms / 27 requests / 20 scripts / 2 API, Inventory 247 ms / 36
+  requests / 29 scripts / 2 API, Dashboard 273 ms / 24 requests / 18 scripts /
+  2 API, and public catalog 202 ms / 21 requests / 16 scripts / 1 API.
+- Full live proof: `npm.cmd --prefix ops run phase84:live-suite` passed. Broad
+  UI checked 66 signals on frontend hash `4669a465a3229a92` with zero relevant
+  console messages; public Cloudflare portal rendered 20 products with zero
+  failed responses, zero page errors, zero relevant console messages, and
+  enforced CSP present; post-live hygiene passed with loaded dataset status.
+- Browser/Playwright proof: the in-app Browser loaded the public catalog with
+  no runtime overlay and zero captured warnings/errors. Its fill bridge did not
+  dispatch the same React input path, so standalone Playwright completed the
+  no-side-effect proof: the public catalog loaded 5,539 products, searching
+  `AHC` narrowed to 4 products, with no no-results flash and zero console/page
+  errors.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,825,848 bytes) and
+  `release` (380,878,488 bytes) were removed for 412,704,336 bytes reclaimed.
+  The standard `npm.cmd --prefix ops run prune-storage` then removed 354,753
+  bytes of stale runtime reports, Docker-release backup `20260607-032424`
+  (5,043,546 bytes) beyond the latest-three policy, old Docker rollback tag
+  `business-os:v6.0.0-202606061809`, and 613.6 MB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070439` were preserved.
+- Current plan position after Move 810: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

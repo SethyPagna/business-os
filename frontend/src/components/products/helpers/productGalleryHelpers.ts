@@ -28,7 +28,18 @@ export function normalizeProductGallery(value: unknown, fallback: unknown = null
   const maxItems = Math.max(0, Number(limit || 0))
   if (!maxItems) return []
 
-  const input = Array.isArray(value) ? value : []
+  let input: unknown[] = []
+  if (Array.isArray(value)) {
+    input = value
+  } else if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value)
+      input = Array.isArray(parsed) ? parsed : value.split('|')
+    } catch {
+      input = value.split('|')
+    }
+  }
+
   const seen = new Set<string>()
   const list: string[] = []
   for (const entry of input) {
