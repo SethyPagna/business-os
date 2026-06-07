@@ -11,6 +11,7 @@ import {
 } from '../src/components/catalog/portalCatalogDisplay.ts'
 
 const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.ts', import.meta.url), 'utf8')
+const catalogPageSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.tsx', import.meta.url), 'utf8')
 const catalogEditorSource = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.tsx', import.meta.url), 'utf8')
 const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/catalog/CatalogSecondaryTabs.tsx', import.meta.url), 'utf8')
 
@@ -123,9 +124,14 @@ runTest('ranking badges do not render numeric prefixes in compact mobile cards',
 
 runTest('public portal mobile contact actions stay compact', () => {
   assert.match(catalogSecondaryTabsSource, /className="relative min-h-0 overflow-hidden text-white sm:min-h-\[30rem\]"/, 'public about hero should not force a tall mobile viewport')
+  assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
+  assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
+  assert.match(catalogSecondaryTabsSource, /min-h-0 max-w-3xl sm:min-h-\[17rem\]/, 'public about copy should not force desktop hero height on mobile')
   assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
   assert.match(catalogSecondaryTabsSource, /<span className="sr-only sm:not-sr-only">\{item\.label\}<\/span>/, 'social labels should collapse to accessible icon buttons on phones')
   assert.match(catalogSecondaryTabsSource, /businessFacts\?\.length \|\| socialLinks\?\.length/, 'contact and social actions should share one compact mobile tray')
+  assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
+  assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
 })
 
 if (failed > 0) {

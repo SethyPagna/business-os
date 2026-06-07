@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 815 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 816 in this file.
 
 ## Goal
 
@@ -8721,6 +8721,47 @@ Decision rule:
   schema-audit.ts` passed with 45 static tables and zero relationship-doc or
   backup action-needed gaps.
 - Current plan position after Move 815: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 816: Compact public portal mobile loading and contact tray
+
+- Ownership slice: public portal mobile UX and Phase 8.4 live-check coverage.
+  `CatalogSecondaryTabs.tsx` now marks and compacts the About hero/contact tray
+  so phone, address, and social actions occupy less vertical space on smaller
+  screens without changing desktop layout ownership.
+- Loading slice: `CatalogPage.tsx` now renders a tab-specific compact fallback
+  for lazy secondary public portal tabs instead of the large generic
+  `Loading customer portal...` panel. This keeps public Products, FAQ,
+  Membership, and Beauty Assistant transitions visually stable on mobile.
+- Guardrail slice: `portalCatalogDisplay.test.ts` now checks the About hero
+  hook, contact tray hook, mobile minimum-height rule, and compact secondary
+  loading fallback. The public Cloudflare check now verifies mobile hero/tray
+  size, horizontal overflow, Assistant readiness, and no final generic loading
+  panel.
+- Verification proof: `node frontend\tests\portalCatalogDisplay.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`, `npm.cmd --prefix
+  frontend run typecheck`, `npm.cmd --prefix frontend run check:jsx`,
+  `npm.cmd --prefix frontend run build`, Docker release/update,
+  `node ops\scripts\runtime\live-checks\phase84-public-portal-cloudflare-check.ts`,
+  `npm.cmd --prefix ops run phase84:route-load-trace`,
+  `npm.cmd --prefix ops run prune-storage`,
+  `node ops\scripts\architecture\phase29-audit.ts`, and
+  `node ops\scripts\backend\schema-audit.ts` passed.
+- Runtime proof: Docker image `business-os:v6.0.0-202606070759` was built,
+  deployed, and reported healthy on `http://127.0.0.1:4000/health` with
+  frontend hash `8d3cdc06c5e7b390`. Public portal proof:
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T00-02-46-596Z/report.json`.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,828,646 bytes) and
+  `release` (380,875,107 bytes) were removed for 412,703,753 bytes reclaimed.
+  The standard prune removed stale reports, two old Docker-release backups, old
+  Docker rollback tags, and 2.538 GB of Docker builder cache while preserving
+  uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  the latest R2 backup, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070759`.
+- Current plan position after Move 816: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

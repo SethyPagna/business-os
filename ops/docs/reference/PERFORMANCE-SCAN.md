@@ -16,7 +16,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
 | `frontend/src/components/inventory/Inventory.tsx` | 198.4 | 4006 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 157.2 | 3603 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 158.0 | 3623 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
 | `frontend/src/components/pos/POS.tsx` | 126.4 | 2453 |
@@ -36,7 +36,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/sales.ts` | 65.2 | 1591 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
 | `frontend/src/components/utils-settings/AuditLog.tsx` | 60.5 | 1322 |
-| `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 59.0 | 1115 |
+| `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 59.2 | 1116 |
 | `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
 | `frontend/src/components/users/Users.tsx` | 57.5 | 1245 |
 
@@ -46,7 +46,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `frontend/src/components/inventory/Inventory.tsx` | 4006 | 198.4 |
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 3603 | 157.2 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 3623 | 158.0 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
 | `frontend/src/components/products/Products.tsx` | 2553 | 118.2 |

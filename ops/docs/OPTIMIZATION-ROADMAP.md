@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 815.
+- Latest completed implementation move in this roadmap: Move 816.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12753,6 +12753,41 @@ Move 815 status:
   `node ops\scripts\backend\schema-audit.ts` passed with 45 static tables and
   zero relationship-doc or backup action-needed gaps.
 - Current plan position after Move 815: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 816 status:
+- Move 816 compacts the public portal mobile About/contact surface and replaces
+  the large generic secondary-tab loading panel with a tab-specific compact
+  fallback. The About hero now uses smaller mobile spacing, no forced tall
+  mobile minimum height, clamped mobile intro copy, and a shorter contact tray
+  for phone, address, and social links.
+- The public portal Cloudflare live check now verifies mobile About hero and
+  contact tray heights, zero horizontal overflow, Assistant-tab readiness, and
+  the absence of the generic `Loading customer portal...` panel after a
+  secondary-tab transition.
+- Verification passed: `node frontend\tests\portalCatalogDisplay.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`, frontend typecheck,
+  JSX/source check, frontend production build, Docker release/update, public
+  Cloudflare portal live check, route-load trace, storage prune, Phase 29 audit,
+  and the current TypeScript schema audit entrypoint.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070759` is running
+  healthy with frontend hash `8d3cdc06c5e7b390`. Public portal proof lives at
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T00-02-46-596Z/report.json`
+  and route-load proof lives at
+  `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`.
+- Cleanup proof: ignored regenerable `frontend/dist` (31,828,646 bytes) and
+  `release` (380,875,107 bytes) were removed for 412,703,753 bytes reclaimed.
+  The standard prune removed 293,626 bytes of stale reports, two old
+  Docker-release backups (10,115,370 bytes total), old Docker tags
+  `business-os:v6.0.0-202606070634` and
+  `business-os:v6.0.0-202606070604`, and 2.538 GB of Docker builder cache while
+  preserving uploads, secrets, env files, databases, Docker volumes, latest
+  backup sets, the latest R2 backup, `business-os:latest`, and active image
+  `business-os:v6.0.0-202606070759`.
+- Current plan position after Move 816: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

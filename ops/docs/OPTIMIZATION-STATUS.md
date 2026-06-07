@@ -8,8 +8,8 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 815, harden rounded filter dropdowns and live
-  filter-menu checks.
+- Latest completed move: Move 816, compact public portal mobile loading and
+  contact surfaces.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `c36ea69af92f848f`
+  `8d3cdc06c5e7b390`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -38,9 +38,9 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-06T22-15-44-427Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T00-02-46-596Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-06T23-27-49-383Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -72,6 +72,29 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 816 built and started Docker release `business-os:v6.0.0-202606070759`
+  for the compact public portal mobile polish. The public Cloudflare portal
+  check
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T00-02-46-596Z/report.json`
+  passed on frontend hash `8d3cdc06c5e7b390`: it rendered 20 products, loaded
+  the About/Assistant mobile path with no generic `Loading customer portal...`
+  panel left visible, measured a 413 px About hero, a 134 px contact tray, zero
+  horizontal overflow, HTTP 200 portal bootstrap and AI status, zero failed
+  responses, zero relevant console messages, and zero page errors. The route
+  trace loaded Dashboard in 211 ms, Inventory in 184 ms, Sales in 181 ms, and
+  Audit Log in 181 ms with zero failed requests and zero console errors.
+  Ignored regenerable output was removed again: `frontend/dist` (31,828,646
+  bytes) and `release` (380,875,107 bytes), for 412,703,753 bytes reclaimed.
+  `npm.cmd --prefix ops run prune-storage` then removed 293,626 bytes of stale
+  runtime reports, two old Docker-release backup packages (10,115,370 bytes
+  total), old Docker rollback tags `business-os:v6.0.0-202606070634` and
+  `business-os:v6.0.0-202606070604`, and 2.538 GB of Docker builder cache.
+  Uploads, secrets, env files, databases, Docker volumes, latest backup sets,
+  R2 backup `datasync-2026-06-06T18-54-10-839Z`, `business-os:latest`, and
+  active image `business-os:v6.0.0-202606070759` were not touched. Phase 29 and
+  schema audits passed after cleanup. The obsolete manual verification command
+  `node ops\scripts\backend\schema-audit.js` was corrected to the current
+  TypeScript entrypoint, `node ops\scripts\backend\schema-audit.ts`.
 - Move 815 built and started Docker release `business-os:v6.0.0-202606070725`
   for rounded custom filter dropdown hardening. The focused filter-menu live
   check
@@ -2603,7 +2626,46 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 815
+## Latest Move 816
+
+- Public portal mobile loading is now more compact and specific. The About
+  hero uses mobile-first spacing, removes the forced tall hero height on small
+  screens, clamps intro copy only on mobile, and compresses telephone, address,
+  and social contact actions into a shorter rounded tray.
+- Secondary public portal tabs now show a tab-specific compact Suspense
+  fallback instead of the large generic `Loading customer portal...` panel, so
+  mobile users do not land on a blank-feeling placeholder after tapping
+  Assistant, FAQ, Membership, or Products.
+- The public Cloudflare portal live check now verifies the mobile About hero,
+  contact tray, horizontal overflow, and absence of the generic loading panel
+  after opening the Assistant tab. This makes the mobile public-portal
+  regression visible in the normal Phase 8.4 gate.
+- Verification passed: `node frontend\tests\portalCatalogDisplay.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`, frontend typecheck,
+  JSX/source check, frontend production build, Docker release/update, public
+  Cloudflare portal Playwright check, route-load trace, storage prune, Phase 29
+  audit, and schema audit through the current TypeScript entrypoint.
+- Runtime proof: Docker release `business-os:v6.0.0-202606070759` is healthy;
+  frontend hash `8d3cdc06c5e7b390`, source hash `9e29b055b17fc325`.
+- Live proof: public portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T00-02-46-596Z/report.json`
+  rendered 20 products, measured a 413 px mobile About hero and 134 px contact
+  tray, saw zero horizontal overflow, kept `genericLoadingVisible` false, and
+  recorded zero failed responses, zero relevant console messages, and zero page
+  errors. Route-load trace was Dashboard 211 ms, Inventory 184 ms, Sales
+  181 ms, Audit Log 181 ms, with zero failed requests and zero console errors.
+- Cleanup proof: ignored regenerable `frontend/dist` and `release` reclaimed
+  412,703,753 bytes. Storage prune removed stale reports, two old
+  Docker-release backups, old Docker rollback tags, and 2.538 GB of Docker
+  builder cache while preserving uploads, secrets, env files, data, Docker
+  volumes, latest backup sets, R2 latest backup, `business-os:latest`, and the
+  active release image.
+- Current plan position after Move 816: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Previous Move 815
 
 - Rounded dropdown hardening is now live. `AppSelect` exposes stable trigger
   and selected-value hooks, and its custom menu is viewport-bounded so page-size

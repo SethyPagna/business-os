@@ -76,7 +76,7 @@ Total files documented: **263**
 | 64 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 2 |
 | 65 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
 | 66 | `frontend/src/components/catalog/catalogImages.tsx` | 5 |
-| 67 | `frontend/src/components/catalog/CatalogPage.tsx` | 126 |
+| 67 | `frontend/src/components/catalog/CatalogPage.tsx` | 127 |
 | 68 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
 | 69 | `frontend/src/components/catalog/catalogPagination.tsx` | 4 |
 | 70 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
@@ -1215,8 +1215,9 @@ Total files documented: **263**
 | 122 | `handleUploadSubmissionImages` | const arrow | 3308 |
 | 123 | `handlePortalTabChange` | const arrow | 3364 |
 | 124 | `renderSecondaryTabPanel` | function | 3372 |
-| 125 | `renderSecondaryTabSection` | function | 3384 |
-| 126 | `scrollPublicPortal` | const arrow | 3513 |
+| 125 | `renderSecondaryTabFallback` | function | 3384 |
+| 126 | `renderSecondaryTabSection` | function | 3408 |
+| 127 | `scrollPublicPortal` | const arrow | 3533 |
 
 ### 3.68 `frontend/src/components/catalog/CatalogPageContext.tsx`
 
@@ -1255,9 +1256,9 @@ Total files documented: **263**
 | 2 | `normalizePortalColor` | function | 275 |
 | 3 | `CatalogMembershipSection` | function | 280 |
 | 4 | `CatalogAboutSection` | function | 626 |
-| 5 | `CatalogFaqSection` | function | 846 |
-| 6 | `CatalogAiSection` | function | 900 |
-| 7 | `CatalogSecondaryTabs` | component/function | 1108 |
+| 5 | `CatalogFaqSection` | function | 847 |
+| 6 | `CatalogAiSection` | function | 901 |
+| 7 | `CatalogSecondaryTabs` | component/function | 1109 |
 
 ### 3.73 `frontend/src/components/catalog/catalogUi.tsx`
 

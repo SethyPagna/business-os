@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 442,
   "distAssets": 0,
-  "totalSourceBytes": 6978132,
-  "totalSourceLines": 160470,
+  "totalSourceBytes": 6981478,
+  "totalSourceLines": 160523,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -47,8 +47,8 @@
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.tsx",
-      "size": 160935,
-      "lines": 3603
+      "size": 161761,
+      "lines": 3623
     },
     {
       "file": "backend/src/services/importJobs.ts",
@@ -147,8 +147,8 @@
     },
     {
       "file": "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
-      "size": 60408,
-      "lines": 1115
+      "size": 60668,
+      "lines": 1116
     },
     {
       "file": "backend/src/services/googleDriveSync/index.ts",
@@ -174,8 +174,8 @@
     },
     {
       "file": "frontend/src/components/catalog/CatalogPage.tsx",
-      "size": 160935,
-      "lines": 3603
+      "size": 161761,
+      "lines": 3623
     },
     {
       "file": "frontend/src/lang/km.json",

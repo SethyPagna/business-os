@@ -658,6 +658,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     <section className="space-y-4">
       <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-slate-700/80 dark:bg-slate-900/88">
         <div
+          data-portal-about-hero="true"
           className="relative min-h-0 overflow-hidden text-white sm:min-h-[30rem]"
           style={{
             backgroundColor: heroGradientStart,
@@ -668,8 +669,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         >
           <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.12),rgba(15,23,42,0.38))] dark:bg-[linear-gradient(135deg,rgba(15,23,42,0.12),rgba(15,23,42,0.5))]" />
           <div className="absolute inset-0 bg-black/0" />
-          <div className="relative z-10 grid gap-6 px-6 py-8 sm:px-8 sm:py-10 xl:grid-cols-[1.08fr,0.92fr] xl:items-end">
-            <div className="min-h-[17rem] max-w-3xl">
+          <div className="relative z-10 grid gap-4 px-4 py-5 sm:gap-6 sm:px-8 sm:py-10 xl:grid-cols-[1.08fr,0.92fr] xl:items-end">
+            <div className="min-h-0 max-w-3xl sm:min-h-[17rem]">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/14 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/90 backdrop-blur">
                 <Store className="h-3.5 w-3.5" />
                 {aboutTitle}
@@ -679,7 +680,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   {previewConfig.businessName}
                 </div>
               ) : null}
-              <div className="mt-4 flex items-center gap-4">
+              <div className="mt-4 flex items-center gap-3 sm:gap-4">
                 <div
                   className="flex items-center justify-center overflow-hidden rounded-full bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)]"
                   style={{
@@ -716,16 +717,16 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                   {previewConfig.businessTagline ? <div className="notranslate mt-2 text-sm text-white/90 sm:text-base" translate="no">{previewConfig.businessTagline}</div> : null}
                 </div>
               </div>
-              <p className="notranslate mt-5 max-w-2xl text-sm leading-7 text-white sm:min-h-[5.25rem] sm:text-base" translate="no">
+              <p className="notranslate mt-4 line-clamp-4 max-w-2xl text-sm leading-6 text-white sm:mt-5 sm:min-h-[5.25rem] sm:line-clamp-none sm:text-base sm:leading-7" translate="no">
                 {introText}
               </p>
             </div>
 
             <div className="grid gap-4 xl:pl-6">
               {businessFacts?.length || socialLinks?.length ? (
-                <div className="rounded-[24px] border border-white/22 bg-white/14 p-3 shadow-lg shadow-slate-950/10 backdrop-blur sm:rounded-[28px] sm:p-4">
+                <div data-portal-contact-tray="true" className="rounded-[22px] border border-white/22 bg-white/14 p-2.5 shadow-lg shadow-slate-950/10 backdrop-blur sm:rounded-[28px] sm:p-4">
                   {businessFacts?.length ? (
-                    <div className="grid gap-2 sm:grid-cols-2 sm:gap-3">
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 sm:gap-3">
                       {businessFacts.map((item) => {
                         const Icon = item.icon || (item.key === 'phone'
                           ? Phone
@@ -733,12 +734,12 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                             ? Mail
                             : MapPin)
                         const body = (
-                          <div className={`rounded-2xl border border-white/18 bg-white/14 px-3 py-2.5 text-white transition hover:bg-white/18 sm:px-4 sm:py-3 ${item.key === 'address' ? 'sm:col-span-2 xl:col-span-1' : ''}`}>
-                            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/75 sm:text-[11px] sm:tracking-[0.18em]">
+                          <div className={`rounded-[18px] border border-white/18 bg-white/14 px-2.5 py-2 text-white transition hover:bg-white/18 sm:rounded-2xl sm:px-4 sm:py-3 ${item.key === 'address' ? 'col-span-2 sm:col-span-2 xl:col-span-1' : ''}`}>
+                            <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/75 sm:gap-2 sm:text-[11px] sm:tracking-[0.18em]">
                               <Icon className="h-3.5 w-3.5 shrink-0" />
                               {item.label}
                             </div>
-                            <div className={`portal-contact-value mt-1.5 text-xs font-semibold leading-5 text-white sm:mt-2 sm:text-sm sm:font-medium sm:leading-6 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>
+                            <div className={`portal-contact-value mt-1 text-[11px] font-semibold leading-4 text-white sm:mt-2 sm:text-sm sm:font-medium sm:leading-6 ${item.key === 'address' ? 'portal-contact-value-address' : ''}`} title={item.value}>
                               {item.value}
                             </div>
                           </div>
@@ -748,7 +749,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                     </div>
                   ) : null}
                   {socialLinks?.length ? (
-                    <div className={`flex flex-wrap gap-2 ${businessFacts?.length ? 'mt-2 sm:mt-3' : ''}`}>
+                    <div className={`flex flex-wrap gap-1.5 sm:gap-2 ${businessFacts?.length ? 'mt-2 sm:mt-3' : ''}`}>
                       {socialLinks.map((item) => {
                         const Icon = item.key === 'facebook'
                           ? Facebook
@@ -763,7 +764,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                             href={item.value}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex h-10 min-w-10 flex-1 items-center justify-center gap-2 rounded-2xl border border-white/20 bg-white px-3 text-sm font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 sm:h-auto sm:flex-none sm:rounded-full sm:px-4 sm:py-2"
+                            className="inline-flex h-9 min-w-9 flex-1 items-center justify-center gap-1.5 rounded-[18px] border border-white/20 bg-white px-2 text-xs font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100 dark:border-white/10 dark:bg-white dark:text-slate-950 dark:hover:bg-slate-100 sm:h-auto sm:flex-none sm:gap-2 sm:rounded-full sm:px-4 sm:py-2 sm:text-sm sm:font-medium"
                             aria-label={item.label}
                             title={item.label}
                           >

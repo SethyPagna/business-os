@@ -26,6 +26,10 @@ type PortalChecks = {
   portalVisible: boolean
   internalServerErrorVisible: boolean
   renderedProductCount: number
+  genericLoadingVisible: boolean
+  mobileAboutHeroHeight: number | null
+  mobileContactTrayHeight: number | null
+  mobileHorizontalOverflow: number
   bootstrapStatus: number | null
   aiStatusBeforeInteraction: number | null
   aiStatusAfterInteraction: number | null
@@ -119,6 +123,24 @@ async function main(): Promise<void> {
     const renderedProductCount = await page.locator('[data-product-card="true"]:visible').count().catch(() => 0)
 
     const aiStatusBeforeInteraction = endpointStatus(observedRequests, /\/api\/portal\/ai\/status/i)
+    const aboutTab = page.locator('button').filter({ hasText: /About/i }).first()
+    if (await aboutTab.count()) {
+      await aboutTab.click()
+      await page.locator('[data-portal-about-hero="true"]').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => null)
+      await page.waitForTimeout(500)
+    }
+    const mobileLayoutMetrics = await page.evaluate(() => {
+      const hero = document.querySelector('[data-portal-about-hero="true"]')
+      const contactTray = document.querySelector('[data-portal-contact-tray="true"]')
+      const root = document.documentElement
+      return {
+        aboutHeroHeight: hero ? Math.round(hero.getBoundingClientRect().height) : null,
+        contactTrayHeight: contactTray ? Math.round(contactTray.getBoundingClientRect().height) : null,
+        horizontalOverflow: Math.max(0, Math.round(root.scrollWidth - root.clientWidth)),
+        genericLoadingVisible: /Loading customer portal/i.test(document.body.innerText || ''),
+      }
+    })
+
     const assistantTab = page.locator('button').filter({ hasText: /AI assistant|assistant|beauty/i }).first()
     if (await assistantTab.count()) {
       await assistantTab.click()
@@ -126,8 +148,10 @@ async function main(): Promise<void> {
         (response) => /\/api\/portal\/ai\/status/i.test(response.url()),
         { timeout: 15_000 },
       ).catch(() => null)
+      await page.locator('#portal-assistant-question').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => null)
       await page.waitForTimeout(500)
     }
+    const genericLoadingVisible = await page.evaluate(() => /Loading customer portal/i.test(document.body.innerText || ''))
     const aiStatusAfterInteraction = endpointStatus(observedRequests, /\/api\/portal\/ai\/status/i)
     const relevantConsole = consoleMessages.filter((message) => isRelevantConsole(message.text))
     const failedResponses = observedRequests.filter((request) => request.status >= 500)
@@ -137,6 +161,10 @@ async function main(): Promise<void> {
       portalVisible,
       internalServerErrorVisible,
       renderedProductCount,
+      genericLoadingVisible,
+      mobileAboutHeroHeight: mobileLayoutMetrics.aboutHeroHeight,
+      mobileContactTrayHeight: mobileLayoutMetrics.contactTrayHeight,
+      mobileHorizontalOverflow: mobileLayoutMetrics.horizontalOverflow,
       bootstrapStatus: endpointStatus(observedRequests, /\/api\/portal\/bootstrap/i),
       aiStatusBeforeInteraction,
       aiStatusAfterInteraction,
@@ -172,6 +200,10 @@ async function main(): Promise<void> {
     assert(checks.bootstrapStatus === 200, `Remote portal bootstrap returned HTTP ${checks.bootstrapStatus}`)
     assert(checks.aiStatusBeforeInteraction == null, `Remote portal AI status should be deferred, saw HTTP ${checks.aiStatusBeforeInteraction}`)
     assert(checks.aiStatusAfterInteraction === 200, `Remote portal AI status after Assistant click returned HTTP ${checks.aiStatusAfterInteraction}`)
+    assert(!checks.genericLoadingVisible, 'Remote public portal final mobile view is still showing the generic loading card')
+    assert(checks.mobileAboutHeroHeight == null || checks.mobileAboutHeroHeight <= 620, `Remote public About hero is too tall on mobile (${checks.mobileAboutHeroHeight}px)`)
+    assert(checks.mobileContactTrayHeight == null || checks.mobileContactTrayHeight <= 190, `Remote public contact tray is too tall on mobile (${checks.mobileContactTrayHeight}px)`)
+    assert(checks.mobileHorizontalOverflow <= 2, `Remote public portal has horizontal overflow on mobile (${checks.mobileHorizontalOverflow}px)`)
     assert(checks.enforcedCspPresent, 'Remote public portal response did not expose the expected enforced CSP')
     assert(!checks.reportOnlyCspPresent || checks.toleratedCloudflareScriptMonitorReportOnlyCsp, 'Remote public portal response still exposes an app-origin report-only CSP header')
     assert(failedResponses.length === 0, `Remote public portal had ${failedResponses.length} HTTP 5xx response(s)`)
