@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 838 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 839 in this file.
 
 ## Goal
 
@@ -9492,6 +9492,48 @@ Decision rule:
   Docker volumes, active images, newest local backup sets, and the newest R2
   backup.
 - Current plan position after Move 838: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 839: Retire legacy Product image upload facade
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. Product image uploads
+  are now owned by focused route/form intent imports of
+  `frontend/src/api/productImageUploadTransport.ts`.
+- Code-flow slice: `frontend/src/api/methods.ts` no longer keeps the dead
+  `uploadProductImage`, `loadProductImageUploadTransport`, or product-image
+  upload transport promise. This avoids keeping image-upload upload machinery
+  visible through the broad legacy API registry.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` now reject product-image upload
+  wrappers returning to the legacy registry while still proving Products and
+  Product form own the focused upload transport. Dashboard first-viewport
+  label guards were added so range/payment/no-data text falls back instead of
+  exposing raw translation keys during language-pack loading.
+- Build/runtime slice: production build emitted `app-api-methods` at 23.75 KB,
+  down from 23.94 KB in Move 838. The focused
+  `product-image-upload-api` intent chunk remains available at 1.29 KB. The
+  Docker release runtime was rebuilt and recreated as
+  `business-os:v6.0.0-202606071009-move839`, then local health served frontend
+  hash `1c581b7659d369c7`.
+- Verification proof: focused API/performance/dashboard/action-stability tests,
+  standalone frontend typecheck, JSX/source check, frontend production build,
+  the full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, local Docker health, `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback`, and in-app Browser DOM/log/interaction checks passed.
+  Broad live-suite proof: 66 UI signals, zero relevant console messages, 20
+  public portal products, zero failed responses/page errors, and passing
+  post-live hygiene. Storage prune removed 321,415 bytes of stale retained
+  reports while preserving uploads, secrets, env files, Docker volumes, active
+  images, newest local backup sets, and the newest R2 backup. Browser screenshot
+  capture timed out through the bridge after Docker refresh; the accepted
+  focused Browser proof is the DOM/log/interaction result showing Dashboard
+  visible, no relevant app console errors, no raw range/no-data keys, and
+  Custom range input visibility after interaction.
+- Current plan position after Move 839: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

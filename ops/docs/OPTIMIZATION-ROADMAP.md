@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 838.
+- Latest completed implementation move in this roadmap: Move 839.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13398,6 +13398,44 @@ Move 838 status:
   retained reports while preserving uploads, secrets, env files, Docker
   volumes, active images, newest local backup sets, and the newest R2 backup.
 - Current plan position after Move 838: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 839 status:
+- Move 839 retires the legacy Product image upload compatibility wrapper after
+  Products and Product form had already moved upload intent to
+  `frontend/src/api/productImageUploadTransport.ts`.
+- `frontend/src/api/methods.ts` no longer keeps `uploadProductImage`,
+  `loadProductImageUploadTransport`, or the product-image upload transport
+  promise, removing another dead facade path from the normal legacy API
+  registry.
+- Source guardrails now reject product-image upload wrappers returning to the
+  legacy registry while still proving focused Products/Product form upload
+  ownership. Dashboard first-viewport labels were also guarded so range,
+  payment-method, and no-data text falls back instead of showing raw
+  translation keys.
+- Production build proof: `app-api-methods` emitted at 23.75 KB, down from
+  23.94 KB in Move 838, while the focused `product-image-upload-api` intent
+  chunk remains available at 1.29 KB. Docker release proof: local runtime was
+  rebuilt/recreated as `business-os:v6.0.0-202606071009-move839` and served
+  frontend hash `1c581b7659d369c7`.
+- Verification proof: focused API/performance/dashboard/action-stability tests,
+  standalone frontend typecheck, JSX/source check, frontend production build,
+  the full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, local Docker health, `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback`, and in-app Browser DOM/log/interaction checks passed.
+  Broad live-suite proof: 66 UI signals, zero relevant console messages, 20
+  public portal products, zero failed responses/page errors, and passing
+  post-live hygiene. Storage prune removed 321,415 bytes of stale retained
+  reports while preserving uploads, secrets, env files, Docker volumes, active
+  images, newest local backup sets, and the newest R2 backup. Browser screenshot
+  capture timed out through the bridge after Docker refresh; live proof still
+  verified Dashboard content, no relevant app console errors, no raw
+  range/no-data keys, and Custom range input visibility after interaction.
+- Current plan position after Move 839: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

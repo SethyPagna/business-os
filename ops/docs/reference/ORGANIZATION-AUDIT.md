@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-07T09:44:25.449Z
+Generated: 2026-06-07T10:33:26.516Z
 
 ## Summary
 
@@ -63,18 +63,18 @@ Generated: 2026-06-07T09:44:25.449Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 13405 | ops/docs |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12053 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10331 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9518 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 13443 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12050 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10330 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9560 | ops/docs |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4006 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3623 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3454 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3453 | ops/docs/reference |
 | ops/docs/reference/PHASE29-AUDIT.json | 3419 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3353 | frontend/tests/performanceLoadingUx.test.ts |
-| ops/docs/OPTIMIZATION-STATUS.md | 3254 | ops/docs |
+| frontend/tests/performanceLoadingUx.test.ts | 3355 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-STATUS.md | 3294 | ops/docs |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |
@@ -101,8 +101,8 @@ Generated: 2026-06-07T09:44:25.449Z
 | frontend/src/components/products/Products.tsx | 55 | frontend/components/products |
 | frontend/src/components/inventory/Inventory.tsx | 46 | frontend/components/inventory |
 | frontend/src/components/pos/POS.tsx | 38 | frontend/components/pos |
-| frontend/src/api/methods.ts | 36 | frontend/api |
 | frontend/src/web-api.ts | 36 | frontend/src/web-api.ts |
+| frontend/src/api/methods.ts | 35 | frontend/api |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/catalog/CatalogPage.tsx | 24 | frontend/components/catalog |
 | frontend/src/components/contacts/CustomersTab.tsx | 24 | frontend/components/contacts |

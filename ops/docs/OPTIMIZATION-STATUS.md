@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 838, retire legacy Dashboard facade wrappers.
+- Latest completed move: Move 839, retire legacy Product image upload facade and harden Dashboard labels.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `8d3cdc06c5e7b390`
+  `1c581b7659d369c7`
 - latest verified source hash from the most recent Docker-served live check:
   `9e29b055b17fc325`
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T09-39-53-943Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T10-31-12-049Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T09-40-33-546Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T10-31-50-227Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -78,6 +78,46 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 839 continues the startup/preload cleanup by removing the Product image
+  upload wrapper from the broad legacy `window.api` compatibility facade. The
+  Products route and Product form already import
+  `frontend/src/api/productImageUploadTransport.ts` directly on image-upload
+  intent, so `frontend/src/api/methods.ts` no longer keeps
+  `uploadProductImage`, `loadProductImageUploadTransport`, or the dead
+  product-image transport promise.
+- Dashboard label stability was hardened in the same slice: visible range,
+  payment-method, and no-data labels now use guarded `translateOr(...)`
+  fallbacks, and source tests reject raw translation keys returning to those
+  first-viewport labels.
+- Build/runtime proof: production emitted `app-api-methods` at 23.75 KB, down
+  from 23.94 KB in Move 838, while the focused
+  `product-image-upload-api` chunk remains available at 1.29 KB. The Docker
+  release runtime was rebuilt and recreated as
+  `business-os:v6.0.0-202606071009-move839`; local health then served frontend
+  hash `1c581b7659d369c7` with revision `move839-local`.
+- Verification proof: focused API/performance/dashboard/action-stability tests,
+  standalone frontend typecheck, JSX/source check, frontend production build,
+  the full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, local Docker health, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The in-app Browser live check on
+  `http://127.0.0.1:4000/?codex_cache_bust=move839-fresh` found app content,
+  Dashboard visible, no relevant app console errors, no raw Dashboard range or
+  no-data keys, and a Custom range interaction that exposed the range inputs.
+  The broad live suite supplied Playwright proof with 66 UI signals, zero
+  relevant console messages, 20 public portal products, zero failed
+  responses/page errors, and passing post-live hygiene. Storage prune removed
+  321,415 bytes of stale retained reports while preserving uploads, secrets,
+  env files, Docker volumes, active images, newest local backup sets, and the
+  newest R2 backup. Browser screenshot capture timed out through the bridge
+  after the Docker refresh, so the focused Browser proof for this move is
+  DOM/log/interaction based.
+- Current plan position after Move 839: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 838 continues the startup/preload cleanup by removing Dashboard
   operations from the broad legacy `window.api` compatibility facade. The

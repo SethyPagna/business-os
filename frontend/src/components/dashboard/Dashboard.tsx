@@ -438,13 +438,13 @@ export default function Dashboard() {
     [dashboardFilterStorageKeys],
   )
 
-  // Range presets use t() for labels inside the component so t() is in scope.
+  // Range presets use guarded translations so loading or missing language packs never show raw keys.
   const RANGE_PRESETS: DashboardRangePreset[] = [
-    { id: 'today',  label: t('range_today'),      getRange: () => ({ start: todayStr(), end: todayStr(), gran: 'day' }) },
-    { id: '7d',     label: t('range_7d'),          getRange: () => ({ start: offsetDate(-6), end: todayStr(), gran: 'day' }) },
-    { id: 'month',  label: t('range_this_month'),  getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' } } },
-    { id: 'year',   label: t('range_this_year'),   getRange: () => ({ start: `${new Date().getFullYear()}-01-01`, end: todayStr(), gran: 'month' }) },
-    { id: 'custom', label: t('range_custom'),      getRange: null },
+    { id: 'today',  label: translateOr('range_today', 'Today', 'ថ្ងៃនេះ'),      getRange: () => ({ start: todayStr(), end: todayStr(), gran: 'day' }) },
+    { id: '7d',     label: translateOr('range_7d', '7 Days', '៧ ថ្ងៃ'),          getRange: () => ({ start: offsetDate(-6), end: todayStr(), gran: 'day' }) },
+    { id: 'month',  label: translateOr('range_this_month', 'This Month', 'ខែនេះ'),  getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' } } },
+    { id: 'year',   label: translateOr('range_this_year', 'This Year', 'ឆ្នាំនេះ'),   getRange: () => ({ start: `${new Date().getFullYear()}-01-01`, end: todayStr(), gran: 'month' }) },
+    { id: 'custom', label: translateOr('range_custom', 'Custom', 'កំណត់'),      getRange: null },
   ]
 
   const [summary, setSummary]     = useState<DashboardSummary | null>(null)
@@ -1177,7 +1177,7 @@ export default function Dashboard() {
       <div className="card p-2.5 sm:p-3">
         <div className="flex flex-col gap-2">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-300 sm:text-sm">{t('period_label')||'Range'}:</span>
+            <span className="shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-300 sm:text-sm">{translateOr('period_label', 'Range', 'ជ្រើសពេល')}:</span>
             <span className="min-w-0 flex-1 truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300 sm:text-sm">{rangeLabel}</span>
           </div>
           <div className="flex gap-1 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible">
@@ -1292,7 +1292,7 @@ export default function Dashboard() {
           </div>
           {analyticsPending ? <div className="h-52 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />
           : analyticsUnavailable ? <div className="flex h-52 flex-col items-center justify-center rounded-2xl border border-amber-200 bg-amber-50/60 px-4 text-center text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
-          : chartRenderData.length === 0 ? <div className="flex h-52 items-center justify-center text-sm text-gray-400">{t('no_data')}</div>
+          : chartRenderData.length === 0 ? <div className="flex h-52 items-center justify-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</div>
           : activeChart === 'revenue' ? (
             <>
               <LineChart data={chartRenderData} lines={[
@@ -1326,7 +1326,7 @@ export default function Dashboard() {
         </div>
 
         <div className="card p-3 sm:p-4">
-          <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{t('payment_method')}</h2>
+          <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់')}</h2>
           {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
             <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
           ) : (
@@ -1350,7 +1350,7 @@ export default function Dashboard() {
                     </div>
                   )
                 })}
-                {!(analytics?.byPayment?.length) && <p className="text-xs text-gray-400 text-center py-2">{t('no_data')}</p>}
+                {!(analytics?.byPayment?.length) && <p className="text-xs text-gray-400 text-center py-2">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>}
               </div>
             </>
           )}
@@ -1372,7 +1372,7 @@ export default function Dashboard() {
             return (
               <>
                 <div className="space-y-2">
-                  {all.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{t('no_data')}</p>
+                  {all.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
                   : vis.map((b,i) => {
                     const pct = ((b.revenue_usd||0)/maxRev*100).toFixed(0)
                     return (
@@ -1420,7 +1420,7 @@ export default function Dashboard() {
           ) : (
             <>
               <div className="space-y-1.5">
-                {topList.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{t('no_data')}</p>
+                {topList.length === 0 ? <p className="text-xs text-gray-400 text-center py-4">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
                 : (showAllProducts ? topList : topList.slice(0,4)).map((p,i) => {
                   const maxVal = topMode==='qty' ? topList[0]?.qty_sold||1 : topList[0]?.revenue_usd||1
                   const val    = topMode==='qty' ? p.qty_sold || 0 : p.revenue_usd || 0
@@ -1571,7 +1571,7 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <div className="space-y-1">
-                  {visH.length===0 && <p className="text-xs text-gray-400 text-center">{t('no_data')}</p>}
+                  {visH.length===0 && <p className="text-xs text-gray-400 text-center">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>}
                   {visH.map((h,i) => (
                     <button
                       key={h.hour}
@@ -1700,7 +1700,7 @@ export default function Dashboard() {
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
             {!summary?.expiring_products?.length
-              ? <p className="p-4 text-sm text-gray-400 text-center">{t('no_data')}</p>
+              ? <p className="p-4 text-sm text-gray-400 text-center">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
               : (showAllExpiring ? summary.expiring_products : summary.expiring_products.slice(0,5)).map(p => (
                 <div key={p.id} className="flex items-center justify-between gap-2 px-3 sm:px-4 py-2.5">
                   <div className="min-w-0">
@@ -1729,7 +1729,7 @@ export default function Dashboard() {
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
             {!summary?.recent_sales?.length
-              ? <p className="p-4 text-sm text-gray-400 text-center">{t('no_data')}</p>
+              ? <p className="p-4 text-sm text-gray-400 text-center">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
               : summary.recent_sales.slice(0, 5).map((s) => (
                 <button
                   key={s.id}

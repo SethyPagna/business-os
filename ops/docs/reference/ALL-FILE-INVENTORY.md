@@ -296,7 +296,7 @@ Total files documented: **715**
 | 284 | `frontend/src/api/localDb.ts` | frontend-api | 282 | 10.8 | Frontend API/sync helper |
 | 285 | `frontend/src/api/localMirrors.ts` | frontend-api | 83 | 2.9 | Frontend API/sync helper |
 | 286 | `frontend/src/api/lookupTransport.ts` | frontend-api | 104 | 2.9 | Frontend API/sync helper |
-| 287 | `frontend/src/api/methods.ts` | frontend-api | 1211 | 49.3 | Frontend API/sync helper |
+| 287 | `frontend/src/api/methods.ts` | frontend-api | 1200 | 48.9 | Frontend API/sync helper |
 | 288 | `frontend/src/api/multipartHeaders.ts` | frontend-api | 19 | 0.5 | Frontend API/sync helper |
 | 289 | `frontend/src/api/notificationSummary.ts` | frontend-api | 61 | 2.0 | Frontend API/sync helper |
 | 290 | `frontend/src/api/offlineSnapshotTransport.ts` | frontend-api | 137 | 5.1 | Frontend API/sync helper |
@@ -365,7 +365,7 @@ Total files documented: **715**
 | 353 | `frontend/src/components/dashboard/charts/index.ts` | frontend-ui | 5 | 0.2 | UI component/page |
 | 354 | `frontend/src/components/dashboard/charts/LineChart.tsx` | frontend-ui | 245 | 9.6 | UI component/page |
 | 355 | `frontend/src/components/dashboard/charts/NoData.tsx` | frontend-ui | 15 | 0.4 | UI component/page |
-| 356 | `frontend/src/components/dashboard/Dashboard.tsx` | frontend-ui | 1984 | 100.7 | UI component/page |
+| 356 | `frontend/src/components/dashboard/Dashboard.tsx` | frontend-ui | 1984 | 101.5 | UI component/page |
 | 357 | `frontend/src/components/dashboard/dashboardExport.ts` | frontend-ui | 486 | 19.6 | UI component/page |
 | 358 | `frontend/src/components/dashboard/MiniStat.tsx` | frontend-ui | 53 | 2.0 | UI component/page |
 | 359 | `frontend/src/components/files/FilePickerModal.tsx` | frontend-ui | 333 | 13.7 | UI component/page |
@@ -536,7 +536,7 @@ Total files documented: **715**
 | 524 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
 | 525 | `frontend/tests/actionStability.test.ts` | frontend-root | 752 | 61.3 | Project source/support file |
 | 526 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
-| 527 | `frontend/tests/apiHttp.test.ts` | frontend-root | 1242 | 75.2 | Project source/support file |
+| 527 | `frontend/tests/apiHttp.test.ts` | frontend-root | 1241 | 75.0 | Project source/support file |
 | 528 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
 | 529 | `frontend/tests/appShellUtils.test.ts` | frontend-root | 127 | 6.5 | Project source/support file |
 | 530 | `frontend/tests/assetCompression.test.ts` | frontend-root | 36 | 1.5 | Project source/support file |
@@ -569,7 +569,7 @@ Total files documented: **715**
 | 557 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 558 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 100 | 5.1 | Project source/support file |
 | 559 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 560 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3353 | 233.2 | Project source/support file |
+| 560 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3355 | 233.8 | Project source/support file |
 | 561 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 39 | 1.5 | Project source/support file |
 | 562 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 563 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 140 | 6.5 | Project source/support file |
