@@ -163,6 +163,7 @@ const WAIT_FOR_NETWORK_IDLE = process.env.BOS_ALL_PAGES_WAIT_NETWORK_IDLE === '1
 const SCRIPT_STARTED_AT = performance.now()
 
 const MUTATING_OR_NOISY_BUTTON_RE = /\b(delete|remove|restore|reset|save|submit|confirm|done|pay|checkout|void|logout|log out|upload file|upload|camera|scan|print|download|open files|sync now|create backup|start backup|run backup|apply|approve|reject|send|email|whatsapp)\b/i
+const MAX_STABLE_BUTTON_LABEL_LENGTH = Number(process.env.BOS_ALL_PAGES_MAX_BUTTON_LABEL_LENGTH || 96)
 const SETTINGS_LANGUAGE_BUTTON_RE = /^(en|kh|both)$/i
 const LOW_VALUE_BUTTON_RE = /^\s*(\+|-|×|x|\.{1,3}|…|←|→|↑|↓|<|>|\/|a|b|c|d|e|f|g|h|i|j|k|[0-9]+)\s*$/i
 const EXTERNAL_NOISE_RE = /chrome-extension:|No Listener: tabs:outgoing|Grammarly|Statsig|ab\.chatgpt\.com|ERR_BLOCKED_BY_CLIENT|webextension\.js|CoupertUIFont|unsafe-eval.*content\.js/i
@@ -266,10 +267,10 @@ function textForLabel(value: unknown): string {
 function buttonSkipReason(label: string): string {
   const value = textForLabel(label)
   if (!value) return 'empty accessible label'
-  if (value.length > 60) return 'label too long for stable broad audit'
   if (MUTATING_OR_NOISY_BUTTON_RE.test(value)) return 'mutating, noisy, file, print, or external action'
   if (SETTINGS_LANGUAGE_BUTTON_RE.test(value)) return 'settings language toggle requires rollback harness'
   if (LOW_VALUE_BUTTON_RE.test(value)) return 'low-value pagination, alphabet, icon-only, or numeric control'
+  if (value.length > MAX_STABLE_BUTTON_LABEL_LENGTH) return 'label too long for stable broad audit'
   return ''
 }
 
@@ -1065,6 +1066,7 @@ async function runRoute(page: Page, profile: AuditProfile, route: AuditRoute, st
     .slice(0, MAX_BUTTON_CLICKS_PER_ROUTE)
   for (const candidate of clickableButtonCandidates) {
     controls.push(await clickButtonCandidate(page, root, route, candidate, storageState))
+    await navigateRoute(page, route, storageState).catch(() => {})
   }
   await navigateRoute(page, route, storageState).catch(() => {})
   const layoutIssues = await collectLayoutIssues(page, route)

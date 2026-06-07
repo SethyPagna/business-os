@@ -8,8 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 816, compact public portal mobile loading and
-  contact surfaces.
+- Latest completed move: Move 817, strengthen all-pages control audit coverage.
 
 ## Current Baseline
 
@@ -25,6 +24,8 @@ Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
+- latest passing all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-07T00-22-18-993Z/summary.json`
 - latest fast all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-04T00-01-16-941Z/summary.json`
 - latest exhaustive desktop/mobile all-pages control audit:
@@ -72,6 +73,17 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 817 strengthened the Phase 8.4 all-pages control audit. The audit now
+  skips mutating/file/print/settings-toggle controls before applying the
+  long-label stability guard, uses a configurable 96-character stable label
+  limit, and reloads the route between safe button clicks so tab/panel controls
+  do not hide later candidates from the same route. The targeted Receipt
+  Settings/Loyalty Points rerun passed with 4 routes, 27 tested controls, 0
+  failed controls, and 0 findings. The full broad all-pages audit then passed
+  with 34 routes, 454 controls, 398 tested controls, 56 guarded skips, 0 failed
+  controls, 0 layout/network/console findings, 68 screenshots, and a 12.3%
+  skipped-control ratio. Proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-07T00-22-18-993Z/summary.json`.
 - Move 816 built and started Docker release `business-os:v6.0.0-202606070759`
   for the compact public portal mobile polish. The public Cloudflare portal
   check
@@ -2626,7 +2638,29 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 816
+## Latest Move 817
+
+- The all-pages control audit is now more independent and higher coverage.
+  Safe button clicks are isolated by returning the page to its route between
+  interactions, so one tab click no longer hides the remaining safe candidates.
+- Mutating, file/media, print/download, delivery, and settings-toggle actions
+  are still skipped into the seeded rollback backlog before the long-label
+  stability guard runs. Normal safe sentence-length controls now remain
+  testable up to a configurable 96-character limit.
+- Verification passed: targeted Receipt Settings/Loyalty Points all-pages
+  audit, then the full broad all-pages control audit.
+- Live proof: `ops/runtime/reports/all-pages-control-audit-2026-06-07T00-22-18-993Z/summary.json`
+  passed with 34 routes, 398 tested controls, 56 guarded skips, 0 failed
+  controls, 0 findings, and 68 screenshots. The previously weak routes now
+  meet the minimum route coverage gate: desktop/mobile Loyalty Points tested 5
+  controls each, desktop Receipt Settings tested 8, and mobile Receipt Settings
+  tested 9.
+- Current plan position after Move 817: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Previous Move 816
 
 - Public portal mobile loading is now more compact and specific. The About
   hero uses mobile-first spacing, removes the forced tall hero height on small

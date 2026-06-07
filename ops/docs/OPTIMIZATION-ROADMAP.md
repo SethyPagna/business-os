@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 816.
+- Latest completed implementation move in this roadmap: Move 817.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12788,6 +12788,29 @@ Move 816 status:
   backup sets, the latest R2 backup, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070759`.
 - Current plan position after Move 816: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 817 status:
+- Move 817 strengthens the Phase 8.4 all-pages control audit rather than
+  lowering its coverage gate. Safe button clicks are now isolated by reloading
+  the route after each click, which keeps tab/panel interactions from hiding
+  later candidates on Receipt Settings, Loyalty Points, and similar pages.
+- The audit policy now classifies mutating/file/print/settings-toggle controls
+  before the long-label stability guard, and the stable-label limit is an
+  explicit configurable 96 characters. This keeps dangerous controls in the
+  seeded rollback backlog while allowing safe sentence-length controls to be
+  clicked by the broad non-mutating audit.
+- Verification proof: the targeted Receipt Settings/Loyalty Points audit
+  passed with 4 routes, 27 tested controls, 0 failed controls, and 0 findings.
+  The full broad all-pages audit then passed with 34 routes, 454 controls, 398
+  tested controls, 56 guarded skips, 0 failed controls, 0 findings, and 68
+  screenshots.
+- Runtime/live proof:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-07T00-22-18-993Z/summary.json`.
+- Current plan position after Move 817: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 816 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 817 in this file.
 
 ## Goal
 
@@ -8762,6 +8762,30 @@ Decision rule:
   the latest R2 backup, `business-os:latest`, and active image
   `business-os:v6.0.0-202606070759`.
 - Current plan position after Move 816: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 817: Strengthen all-pages live-control audit coverage
+
+- Ownership slice: Phase 8.4 live audit infrastructure only. No app route,
+  data, schema, Docker image, or runtime path changed in this move.
+- Test strategy slice: `all-pages-control-audit.ts` now reloads the current
+  route after each safe button click so tab/panel controls are tested
+  independently instead of being marked hidden after an earlier interaction.
+- Safety slice: mutating, file/media, print/download, external delivery, and
+  settings-toggle controls are still classified before the long-label guard and
+  remain in the seeded rollback backlog. Safe sentence-length buttons can be
+  tested up to the configurable `BOS_ALL_PAGES_MAX_BUTTON_LABEL_LENGTH`
+  threshold, defaulting to 96 characters.
+- Verification proof: `npm.cmd --prefix ops run phase84:all-pages-control-audit
+  -- --route receipt_settings --route loyalty_points` passed with 4 routes, 27
+  tested controls, and 0 findings. `npm.cmd --prefix ops run
+  phase84:all-pages-control-audit` then passed with 34 routes, 398 tested
+  controls, 56 guarded skips, 0 failed controls, 0 findings, and 68
+  screenshots.
+- Current plan position after Move 817: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
