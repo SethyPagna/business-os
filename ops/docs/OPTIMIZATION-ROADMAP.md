@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 831.
+- Latest completed implementation move in this roadmap: Move 832.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13178,6 +13178,36 @@ Move 831 status:
   321,164 bytes of stale retained report directories while preserving uploads,
   secrets, env files, Docker volumes, active images, and newest backup sets.
 - Current plan position after Move 831: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 832 status:
+- Move 832 continues the startup/preload cleanup by splitting legacy
+  sync-server URL/token state out of the heavy HTTP core.
+- `frontend/src/api/httpState.ts` now owns the tiny synchronous state helpers.
+  `frontend/src/api/http.ts` imports/re-exports those helpers while keeping the
+  full fetch, cache, fallback, and health behavior. `frontend/src/api/methods.ts`
+  imports only `getSyncServerUrl()` from `httpState.ts` and lazy-loads
+  `http.ts` only when reset/cache-clear flows need `cacheClearAll()`.
+- `frontend/vite.config.ts` now emits `api-http-state` as a named deferred
+  chunk. Production build proof emitted `api-http-state` at 0.18 KB,
+  `api-http-core` at 21.90 KB, and `app-api-methods` at 25.00 KB. The earlier
+  circular chunk warning is gone; compiled `app-api-methods` statically imports
+  only the state chunk and references `api-http-core` through Vite's dynamic
+  dependency map for reset-like flows.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses or page errors, and passed post-live hygiene. The storage
+  prune removed 321,475 bytes of stale retained report directories while
+  preserving uploads, secrets, env files, Docker volumes, active images, newest
+  local backup sets, and the newest R2 backup.
+- Current plan position after Move 832: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

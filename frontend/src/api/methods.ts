@@ -36,6 +36,7 @@ let accessControlTransportPromise = null
 let customTablesTransportPromise = null
 let clientRuntimeModulePromise = null
 let appRefreshModulePromise = null
+let httpCoreModulePromise = null
 
 const CATEGORY_REFRESH_CHANNELS = ['categories', 'products', 'inventory']
 const UNIT_REFRESH_CHANNELS = ['units', 'products', 'inventory']
@@ -205,6 +206,11 @@ function loadAppRefreshModule() {
   return appRefreshModulePromise
 }
 
+function loadHttpCoreModule() {
+  if (!httpCoreModulePromise) httpCoreModulePromise = import('./http.ts')
+  return httpCoreModulePromise
+}
+
 async function buildImportCsvTemplate(headers, filename) {
   const { buildCSVTemplate } = await loadCsvTemplateModule()
   return buildCSVTemplate(headers, filename)
@@ -217,10 +223,7 @@ async function buildImportCsvTemplate(headers, filename) {
  * runtime compatibility wrapper for legacy window.api callers.
  */
 
-import {
-  getSyncServerUrl,
-  cacheClearAll,
-} from './http.ts'
+import { getSyncServerUrl } from './httpState.ts'
 export async function openCSVDialog() {
   const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
   return openBrowserCSVDialog()
@@ -293,6 +296,7 @@ export async function refreshOfflineDeviceSnapshot(options = {}) {
 
 async function invalidateClientRuntimeState(reason = 'server-mutation') {
   const { resetClientRuntimeState } = await loadClientRuntimeModule()
+  const { cacheClearAll } = await loadHttpCoreModule()
   await resetClientRuntimeState({
     clearAuth: false,
     preserveDeviceSettings: true,
@@ -1126,6 +1130,7 @@ export const syncGoogleDriveNow = async () => {
 export async function resetData(mode = 'sales') {
   const result = await callSystemRuntimeMethod('resetData', mode)
   await invalidateClientRuntimeState(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
+  const { cacheClearAll } = await loadHttpCoreModule()
   cacheClearAll()
   return result
 }
@@ -1133,6 +1138,7 @@ export async function resetData(mode = 'sales') {
 export async function factoryReset() {
   const result = await callSystemRuntimeMethod('factoryReset')
   await invalidateClientRuntimeState('factory-reset')
+  const { cacheClearAll } = await loadHttpCoreModule()
   cacheClearAll()
   return result
 }

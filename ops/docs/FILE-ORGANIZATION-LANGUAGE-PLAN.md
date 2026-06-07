@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 831 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 832 in this file.
 
 ## Goal
 
@@ -9233,6 +9233,43 @@ Decision rule:
   321,164 bytes of stale retained report directories while preserving uploads,
   secrets, env files, Docker volumes, active images, and newest backup sets.
 - Current plan position after Move 831: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 832: Split legacy sync-server HTTP state from HTTP core
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The tiny sync-server
+  URL/token state now lives in `frontend/src/api/httpState.ts` while
+  `frontend/src/api/http.ts` keeps owning fetch, health, cache, fallback, and
+  route behavior.
+- Code-flow slice: `frontend/src/api/methods.ts` imports only
+  `getSyncServerUrl()` from the tiny state module for synchronous compatibility
+  reads. Reset/data-path/factory-reset flows lazy-load `http.ts` through
+  `loadHttpCoreModule()` only when `cacheClearAll()` is actually needed.
+- Build slice: `frontend/vite.config.ts` gives `httpState.ts` the
+  `api-http-state` chunk and excludes it from eager module preload. Production
+  build proof emitted `api-http-state` at 0.18 KB, `api-http-core` at 21.90 KB,
+  and `app-api-methods` at 25.00 KB. The previous circular chunk warning is
+  gone; compiled `app-api-methods` statically imports only the state chunk and
+  keeps `api-http-core` behind Vite's dynamic dependency map for reset-like
+  flows.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` verify the legacy registry does
+  not statically import `http.ts`, does import `httpState.ts`, lazy-loads the
+  HTTP core for cache clears, and keeps the state helper in a named tiny chunk.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses or page errors, and passed post-live hygiene. The storage
+  prune removed 321,475 bytes of stale retained report directories while
+  preserving uploads, secrets, env files, Docker volumes, active images, newest
+  local backup sets, and the newest R2 backup.
+- Current plan position after Move 832: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

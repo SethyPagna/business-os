@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 831, lazy-load legacy runtime reset and lookup refresh utilities.
+- Latest completed move: Move 832, split legacy sync-server HTTP state from the HTTP core.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T03-58-52-719Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T04-36-23-566Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T03-59-36-029Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T04-37-03-295Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -79,6 +79,26 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 832 continues the startup/preload cleanup by splitting the legacy
+  sync-server URL/token state out of `frontend/src/api/http.ts` and into the
+  tiny `frontend/src/api/httpState.ts` module. `frontend/src/api/methods.ts`
+  now imports only the synchronous `getSyncServerUrl()` helper from that state
+  module and lazy-loads `http.ts` only when reset/cache-clear flows need
+  `cacheClearAll()`. Build proof: production emitted `api-http-state` at
+  0.18 KB, `api-http-core` at 21.90 KB, and `app-api-methods` at 25.00 KB.
+  The earlier circular chunk warning is gone; compiled `app-api-methods`
+  statically imports only the 0.18 KB state chunk and references
+  `api-http-core` through Vite's dynamic dependency map for reset-like flows.
+  Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses or page errors, and passed post-live hygiene. The storage
+  prune removed 321,475 bytes of stale retained live-check report directories
+  while preserving uploads, secrets, env files, Docker volumes, active images,
+  newest local backup sets, and the newest R2 backup.
 - Move 831 continues the startup/preload cleanup by removing the remaining
   static runtime-reset and app-refresh utility imports from
   `frontend/src/api/methods.ts`. Legacy reset/data-path invalidation now

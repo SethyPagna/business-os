@@ -153,6 +153,7 @@ const deferredModulePreloadPrefixes = [
   'assets/app-bootstrap-',
   'assets/app-auth-',
   'assets/app-api-methods-',
+  'assets/api-http-state-',
   'assets/app-portal-',
   'assets/app-shell-',
   'assets/app-shell-icons-',
@@ -315,6 +316,7 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'api-http-core'
     }
+    if (normalized.endsWith('/src/api/httpState.ts')) return 'api-http-state'
     if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'

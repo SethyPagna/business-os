@@ -275,9 +275,11 @@ assert.match(
   /normalized\.endsWith\('\/src\/api\/http\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/query\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/actorQuery\.ts'\)[\s\S]*return 'api-http-core'/,
   'focused read transports should share a tiny HTTP/query core instead of inheriting app-api-methods',
 )
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/httpState\.ts'\)\) return 'api-http-state'/, 'sync-server URL/token state should stay in a tiny shared chunk instead of inheriting app-api-methods or api-http-core')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/websocket\.ts'\)[\s\S]*return 'app-api'[\s\S]*if \(normalized\.includes\('\/src\/api\/'\)\) return 'app-api-methods'/, 'Vite should keep only runtime connection files in app-api and move method transports behind the lazy methods chunk')
 assert.match(viteConfig, /'assets\/app-bootstrap-',[\s\S]*'assets\/app-auth-',/, 'bootstrap and auth chunks should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/app-auth-',[\s\S]*'assets\/app-portal-',/, 'public portal transport should also be excluded from initial modulepreload')
+assert.match(viteConfig, /'assets\/app-api-methods-',[\s\S]*'assets\/api-http-state-',[\s\S]*'assets\/app-portal-',/, 'tiny sync-server HTTP state should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/app-portal-',[\s\S]*'assets\/app-system-',/, 'server diagnostics transport should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/auth-login-',/, 'signed-out Login UI should not be eagerly modulepreloaded into the authenticated shell')
 assert.match(viteConfig, /Login\.tsx'\)\) return 'auth-login'/, 'Vite should keep Login UI in an auth-only chunk')
@@ -563,6 +565,9 @@ assert.doesNotMatch(apiMethods, /from '\.\/lookupTransport\.ts'/, 'legacy API re
 assert.doesNotMatch(apiMethods, /from '\.\.\/platform\/runtime\/clientRuntime\.ts'/, 'legacy API registry should not statically import runtime reset helpers')
 assert.doesNotMatch(apiMethods, /from '\.\.\/utils\/appRefresh\.ts'/, 'legacy API registry should not statically import app refresh helpers')
 assert.doesNotMatch(apiMethods, /from '\.\.\/utils\/settingsRefresh\.ts'/, 'legacy API registry should not statically import settings refresh helpers')
+assert.doesNotMatch(apiMethods, /from '\.\/http\.ts'/, 'legacy API registry should not statically import the heavy HTTP core')
+assert.match(apiMethods, /import \{ getSyncServerUrl \} from '\.\/httpState\.ts'/, 'legacy API registry should keep synchronous server URL reads on the tiny HTTP state module')
+assert.match(apiMethods, /function loadHttpCoreModule\(\) \{[\s\S]*import\('\.\/http\.ts'\)/, 'legacy cache clears should lazy-load the HTTP core only for reset-like flows')
 assert.match(apiMethods, /function loadClientRuntimeModule\(\) \{[\s\S]*import\('\.\.\/platform\/runtime\/clientRuntime\.ts'\)/, 'legacy runtime invalidation should lazy-load client runtime helpers')
 assert.match(apiMethods, /function loadAppRefreshModule\(\) \{[\s\S]*import\('\.\.\/utils\/appRefresh\.ts'\)/, 'legacy lookup mutations should lazy-load app refresh helpers')
 assert.match(apiMethods, /export const createCategory = async payload => \{[\s\S]*loadLookupTransport\(\)[\s\S]*createCategoryRequest\(payload\)[\s\S]*dispatchRefreshAppData\(CATEGORY_REFRESH_CHANNELS/, 'legacy category writes should preserve refresh behavior after lazy lookup loading')

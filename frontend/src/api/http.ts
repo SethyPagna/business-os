@@ -13,6 +13,19 @@
 
 import { SYNC } from '../constants.ts'
 import { getClientMetaHeaders as sharedGetClientMetaHeaders } from '../utils/deviceInfo.ts'
+import {
+  getSyncServerUrl,
+  getSyncToken,
+  setSyncServerUrl,
+  setSyncToken,
+} from './httpState.ts'
+
+export {
+  getSyncServerUrl,
+  getSyncToken,
+  setSyncServerUrl,
+  setSyncToken,
+} from './httpState.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 declare const __FRONTEND_BUILD_REVISION__: string | undefined
@@ -37,8 +50,6 @@ type ServerHealthProbeResult = {
 }
 
 // ?€?€?€ Mutable connection state (module-level, intentionally not React state) ?€?€?€
-let syncServerUrl = ''
-let syncToken     = ''
 const RECONNECT_REFRESH_CHANNELS = [
   'settings',
   'products',
@@ -56,12 +67,6 @@ const RECONNECT_REFRESH_CHANNELS = [
   'audit_log',
   'users',
 ]
-
-export function getSyncServerUrl(): string { return syncServerUrl }
-export function getSyncToken(): string     { return syncToken }
-
-export function setSyncServerUrl(url: unknown): void { syncServerUrl = String(url || '').trim().replace(/\/$/, '') }
-export function setSyncToken(token: unknown): void   { syncToken = String(token || '').trim() }
 
 // ?€?€?€ In-memory read cache with request deduplication ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 const _cache: Record<string, CacheEntry> = {}
@@ -380,6 +385,7 @@ export function isInvalidSessionError(error: any): boolean {
 }
 
 export function requireLiveServerWrite(channel: string, options: { notConfiguredMessage?: string; offlineMessage?: string } = {}): true {
+  const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) {
     const message = options.notConfiguredMessage || 'Server is not connected. Changes are invalid until a live server is configured.'
     dispatchWriteBlocked(channel, message, {
@@ -544,9 +550,11 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
   }
 
   const requestPromise: Promise<any> = (async () => {
-  const base    = syncServerUrl.replace(/\/$/, '')
-  const headers: Record<string, string> = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
-  if (syncToken) headers['x-sync-token'] = syncToken
+    const syncServerUrl = getSyncServerUrl()
+    const syncToken = getSyncToken()
+    const base    = syncServerUrl.replace(/\/$/, '')
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
+    if (syncToken) headers['x-sync-token'] = syncToken
 
   const ctrl  = new AbortController()
   let timedOut = false
@@ -704,6 +712,7 @@ export async function pingServerHealth(force = false): Promise<ServerHealthProbe
     cloudflareAccessRequired: false,
     payload: null,
   }
+  const syncServerUrl = getSyncServerUrl()
   if (!syncServerUrl) return skippedResult
   if (isProtectedAdminHost() && !hasStoredAuthSession()) return skippedResult
 
@@ -959,6 +968,7 @@ async function raceServerReadWithLocalFallback<T>(
  */
 export async function route<T = any>(channel: string, serverFn: RouteFn<T>, localFn?: RouteFn<T> | null, isWrite = false): Promise<T | null> {
   const t0 = Date.now()
+  const syncServerUrl = getSyncServerUrl()
 
   // ?€?€ Reads ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (!isWrite) {
