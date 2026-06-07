@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 830.
+- Latest completed implementation move in this roadmap: Move 831.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13150,6 +13150,34 @@ Move 830 status:
   failed responses, and passed post-live hygiene. The storage prune removed 0
   bytes because all retention targets were already within policy.
 - Current plan position after Move 830: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 831 status:
+- Move 831 continues the startup/preload cleanup by lazy-loading legacy runtime
+  reset and lookup refresh utilities out of `frontend/src/api/methods.ts`.
+- The legacy registry no longer statically imports `clientRuntime.ts`,
+  `appRefresh.ts`, or `settingsRefresh.ts`. Reset/data-path invalidation now
+  resolves `resetClientRuntimeState` only when reset-like flows run, and
+  category/unit writes resolve `refreshAppData` only after the write succeeds.
+- The production build emitted `settings-refresh` at 1.45 KB as a deferred
+  dependency; compiled `app-api-methods` references the helper chunk only
+  through Vite's dynamic import dependency map. The compatibility facade grew
+  from 24.39 KB to 24.80 KB because of the final lazy wrapper metadata, but
+  the runtime reset and refresh helper code is no longer evaluated on legacy
+  API registry load.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses, and passed post-live hygiene. The storage prune removed
+  321,164 bytes of stale retained report directories while preserving uploads,
+  secrets, env files, Docker volumes, active images, and newest backup sets.
+- Current plan position after Move 831: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

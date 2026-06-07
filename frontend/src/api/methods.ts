@@ -34,6 +34,11 @@ let queryCacheModulePromise = null
 let localMirrorsModulePromise = null
 let accessControlTransportPromise = null
 let customTablesTransportPromise = null
+let clientRuntimeModulePromise = null
+let appRefreshModulePromise = null
+
+const CATEGORY_REFRESH_CHANNELS = ['categories', 'products', 'inventory']
+const UNIT_REFRESH_CHANNELS = ['units', 'products', 'inventory']
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -190,6 +195,16 @@ function loadCustomTablesTransport() {
   return customTablesTransportPromise
 }
 
+function loadClientRuntimeModule() {
+  if (!clientRuntimeModulePromise) clientRuntimeModulePromise = import('../platform/runtime/clientRuntime.ts')
+  return clientRuntimeModulePromise
+}
+
+function loadAppRefreshModule() {
+  if (!appRefreshModulePromise) appRefreshModulePromise = import('../utils/appRefresh.ts')
+  return appRefreshModulePromise
+}
+
 async function buildImportCsvTemplate(headers, filename) {
   const { buildCSVTemplate } = await loadCsvTemplateModule()
   return buildCSVTemplate(headers, filename)
@@ -206,12 +221,6 @@ import {
   getSyncServerUrl,
   cacheClearAll,
 } from './http.ts'
-import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
-import { refreshAppData } from '../utils/appRefresh.ts'
-import {
-  CATEGORY_REFRESH_CHANNELS,
-  UNIT_REFRESH_CHANNELS,
-} from '../utils/settingsRefresh.ts'
 export async function openCSVDialog() {
   const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
   return openBrowserCSVDialog()
@@ -283,6 +292,7 @@ export async function refreshOfflineDeviceSnapshot(options = {}) {
 }
 
 async function invalidateClientRuntimeState(reason = 'server-mutation') {
+  const { resetClientRuntimeState } = await loadClientRuntimeModule()
   await resetClientRuntimeState({
     clearAuth: false,
     preserveDeviceSettings: true,
@@ -296,6 +306,11 @@ async function invalidateClientRuntimeState(reason = 'server-mutation') {
       detail: { channel: 'runtime', reason, ts: Date.now() },
     }))
   }
+}
+
+async function dispatchRefreshAppData(channels, detail = {}) {
+  const { refreshAppData } = await loadAppRefreshModule()
+  refreshAppData(channels, detail)
 }
 
 if (typeof window !== 'undefined') {
@@ -403,19 +418,19 @@ export const getCategories = async () => {
 export const createCategory = async payload => {
   const { createCategory: createCategoryRequest } = await loadLookupTransport()
   const result = await createCategoryRequest(payload)
-  refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:create' })
+  await dispatchRefreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:create' })
   return result
 }
 export const updateCategory = async (id, payload) => {
   const { updateCategory: updateCategoryRequest } = await loadLookupTransport()
   const result = await updateCategoryRequest(id, payload)
-  refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:update' })
+  await dispatchRefreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:update' })
   return result
 }
 export const deleteCategory = async (id, payload) => {
   const { deleteCategory: deleteCategoryRequest } = await loadLookupTransport()
   const result = await deleteCategoryRequest(id, payload)
-  refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-deleted', source: 'categories:delete' })
+  await dispatchRefreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-deleted', source: 'categories:delete' })
   return result
 }
 
@@ -427,19 +442,19 @@ export const getUnits = async () => {
 export const createUnit = async payload => {
   const { createUnit: createUnitRequest } = await loadLookupTransport()
   const result = await createUnitRequest(payload)
-  refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:create' })
+  await dispatchRefreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:create' })
   return result
 }
 export const updateUnit = async (id, payload) => {
   const { updateUnit: updateUnitRequest } = await loadLookupTransport()
   const result = await updateUnitRequest(id, payload)
-  refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:update' })
+  await dispatchRefreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:update' })
   return result
 }
 export const deleteUnit = async (id, payload) => {
   const { deleteUnit: deleteUnitRequest } = await loadLookupTransport()
   const result = await deleteUnitRequest(id, payload)
-  refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-deleted', source: 'units:delete' })
+  await dispatchRefreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-deleted', source: 'units:delete' })
   return result
 }
 
