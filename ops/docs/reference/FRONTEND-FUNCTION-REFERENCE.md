@@ -4,277 +4,276 @@ Auto-generated symbol inventory for frontend files. Regenerate with `node ops/sc
 
 ## 1. Coverage Summary
 
-Total files documented: **265**
+Total files documented: **264**
 
 ## 2. Symbol Count by File
 
 | No. | File | Symbols |
 |---:|---|---:|
 | 1 | `frontend/src/AdminRoot.tsx` | 1 |
-| 2 | `frontend/src/api/accessControlTransport.ts` | 1 |
-| 3 | `frontend/src/api/actionHistoryTransport.ts` | 1 |
-| 4 | `frontend/src/api/actorQuery.ts` | 0 |
-| 5 | `frontend/src/api/aiTransport.ts` | 0 |
-| 6 | `frontend/src/api/appBootstrapTransport.ts` | 5 |
-| 7 | `frontend/src/api/auditLogTransport.ts` | 4 |
-| 8 | `frontend/src/api/authTransport.ts` | 0 |
-| 9 | `frontend/src/api/branchTransport.ts` | 2 |
-| 10 | `frontend/src/api/browserDialogs.ts` | 0 |
-| 11 | `frontend/src/api/conflicts.ts` | 0 |
-| 12 | `frontend/src/api/contactReadTransport.ts` | 9 |
-| 13 | `frontend/src/api/contactsTransport.ts` | 12 |
-| 14 | `frontend/src/api/contactWriteTransport.ts` | 6 |
-| 15 | `frontend/src/api/cooldownFallbacks.ts` | 3 |
-| 16 | `frontend/src/api/customTablesTransport.ts` | 3 |
-| 17 | `frontend/src/api/dashboardTransport.ts` | 0 |
-| 18 | `frontend/src/api/driveSync.ts` | 0 |
-| 19 | `frontend/src/api/expectedUpdatedAt.ts` | 2 |
-| 20 | `frontend/src/api/fileTransport.ts` | 5 |
-| 21 | `frontend/src/api/http.ts` | 31 |
-| 22 | `frontend/src/api/httpState.ts` | 0 |
-| 23 | `frontend/src/api/importJobsTransport.ts` | 5 |
-| 24 | `frontend/src/api/importTransport.ts` | 0 |
-| 25 | `frontend/src/api/inventoryTransport.ts` | 0 |
-| 26 | `frontend/src/api/inventoryWriteTransport.ts` | 1 |
-| 27 | `frontend/src/api/lazyLocalDb.ts` | 0 |
-| 28 | `frontend/src/api/localDb.ts` | 1 |
-| 29 | `frontend/src/api/localMirrors.ts` | 3 |
-| 30 | `frontend/src/api/lookupTransport.ts` | 4 |
-| 31 | `frontend/src/api/methods.ts` | 174 |
-| 32 | `frontend/src/api/multipartHeaders.ts` | 0 |
-| 33 | `frontend/src/api/notificationSummary.ts` | 1 |
-| 34 | `frontend/src/api/offlineSnapshotTransport.ts` | 7 |
-| 35 | `frontend/src/api/pendingSyncTransport.ts` | 0 |
-| 36 | `frontend/src/api/portalHttp.ts` | 0 |
-| 37 | `frontend/src/api/portalTransport.ts` | 2 |
-| 38 | `frontend/src/api/productImageUploadTransport.ts` | 1 |
-| 39 | `frontend/src/api/productReadTransport.ts` | 0 |
-| 40 | `frontend/src/api/productWriteTransport.ts` | 3 |
-| 41 | `frontend/src/api/query.ts` | 1 |
-| 42 | `frontend/src/api/queryCache.ts` | 0 |
-| 43 | `frontend/src/api/requestIds.ts` | 0 |
-| 44 | `frontend/src/api/returnsTransport.ts` | 5 |
-| 45 | `frontend/src/api/rfidTransport.ts` | 2 |
-| 46 | `frontend/src/api/salesTransport.ts` | 4 |
-| 47 | `frontend/src/api/saleWriteTransport.ts` | 16 |
-| 48 | `frontend/src/api/settingsTransport.ts` | 6 |
-| 49 | `frontend/src/api/syncPreview.ts` | 0 |
-| 50 | `frontend/src/api/syncRuntime.ts` | 0 |
-| 51 | `frontend/src/api/systemJobs.ts` | 3 |
-| 52 | `frontend/src/api/systemRuntime.ts` | 0 |
-| 53 | `frontend/src/api/userAdminTransport.ts` | 1 |
-| 54 | `frontend/src/api/userReadTransport.ts` | 0 |
-| 55 | `frontend/src/api/websocket.ts` | 8 |
-| 56 | `frontend/src/App.tsx` | 85 |
-| 57 | `frontend/src/app/appShellUtils.ts` | 0 |
-| 58 | `frontend/src/app/pathRouting.ts` | 0 |
-| 59 | `frontend/src/app/publicErrorRecovery.ts` | 1 |
-| 60 | `frontend/src/AppContext.tsx` | 43 |
-| 61 | `frontend/src/components/auth/Login.tsx` | 23 |
-| 62 | `frontend/src/components/branches/Branches.tsx` | 15 |
-| 63 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
-| 64 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
-| 65 | `frontend/src/components/catalog/catalogAssetUrls.ts` | 7 |
-| 66 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 2 |
-| 67 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
-| 68 | `frontend/src/components/catalog/catalogImages.tsx` | 5 |
-| 69 | `frontend/src/components/catalog/CatalogPage.tsx` | 127 |
-| 70 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
-| 71 | `frontend/src/components/catalog/catalogPagination.tsx` | 4 |
-| 72 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
-| 73 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
-| 74 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 7 |
-| 75 | `frontend/src/components/catalog/catalogUi.tsx` | 1 |
-| 76 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 2 |
-| 77 | `frontend/src/components/catalog/portalContentI18n.ts` | 14 |
-| 78 | `frontend/src/components/catalog/portalEditorUtils.ts` | 2 |
-| 79 | `frontend/src/components/catalog/portalLanguageOptions.ts` | 0 |
-| 80 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 0 |
-| 81 | `frontend/src/components/catalog/portalTranslateController.ts` | 4 |
-| 82 | `frontend/src/components/catalog/portalTranslationData.ts` | 1 |
-| 83 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 |
-| 84 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
-| 85 | `frontend/src/components/contacts/contactOptionUtils.ts` | 3 |
-| 86 | `frontend/src/components/contacts/Contacts.tsx` | 13 |
-| 87 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
-| 88 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 |
-| 89 | `frontend/src/components/contacts/CustomersTab.tsx` | 19 |
-| 90 | `frontend/src/components/contacts/DeliveryTab.tsx` | 28 |
-| 91 | `frontend/src/components/contacts/shared.tsx` | 3 |
-| 92 | `frontend/src/components/contacts/SuppliersTab.tsx` | 23 |
-| 93 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
-| 94 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
-| 95 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
-| 96 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
-| 97 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
-| 98 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
-| 99 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
-| 100 | `frontend/src/components/dashboard/dashboardExport.ts` | 16 |
-| 101 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
-| 102 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
-| 103 | `frontend/src/components/files/FilesPage.tsx` | 27 |
-| 104 | `frontend/src/components/files/FilesProvidersTab.tsx` | 4 |
-| 105 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
-| 106 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
-| 107 | `frontend/src/components/inventory/Inventory.tsx` | 31 |
-| 108 | `frontend/src/components/inventory/inventoryExport.ts` | 14 |
-| 109 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
-| 110 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
-| 111 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
-| 112 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
-| 113 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
-| 114 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
-| 115 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
-| 116 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 11 |
-| 117 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
-| 118 | `frontend/src/components/pos/CartItem.tsx` | 2 |
-| 119 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
-| 120 | `frontend/src/components/pos/POS.tsx` | 51 |
-| 121 | `frontend/src/components/pos/posCore.ts` | 1 |
-| 122 | `frontend/src/components/pos/ProductImage.tsx` | 5 |
-| 123 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
-| 124 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
-| 125 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 6 |
-| 126 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 6 |
-| 127 | `frontend/src/components/products/forms/ProductForm.tsx` | 19 |
-| 128 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 3 |
-| 129 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 |
-| 130 | `frontend/src/components/products/helpers/productExport.ts` | 5 |
-| 131 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 2 |
-| 132 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 0 |
-| 133 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 0 |
-| 134 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 3 |
-| 135 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 0 |
-| 136 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 0 |
-| 137 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 3 |
-| 138 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 |
-| 139 | `frontend/src/components/products/import/BulkImportModal.tsx` | 51 |
-| 140 | `frontend/src/components/products/import/productImportPlanner.ts` | 11 |
-| 141 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
-| 142 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 10 |
-| 143 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
-| 144 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
-| 145 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 7 |
-| 146 | `frontend/src/components/products/Products.tsx` | 30 |
-| 147 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 4 |
-| 148 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 4 |
-| 149 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 |
-| 150 | `frontend/src/components/products/scanning/cameraPermission.ts` | 3 |
-| 151 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 5 |
-| 152 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
-| 153 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
-| 154 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 3 |
-| 155 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 1 |
-| 156 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 3 |
-| 157 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
-| 158 | `frontend/src/components/receipt-settings/constants.ts` | 1 |
-| 159 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
-| 160 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 9 |
-| 161 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 8 |
-| 162 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
-| 163 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 4 |
-| 164 | `frontend/src/components/receipt-settings/template.ts` | 2 |
-| 165 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
-| 166 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
-| 167 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
-| 168 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
-| 169 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
-| 170 | `frontend/src/components/returns/Returns.tsx` | 12 |
-| 171 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
-| 172 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
-| 173 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
-| 174 | `frontend/src/components/sales/Sales.tsx` | 16 |
-| 175 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
-| 176 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
-| 177 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
-| 178 | `frontend/src/components/sales/StatusBadge.tsx` | 2 |
-| 179 | `frontend/src/components/server/ServerPage.tsx` | 21 |
-| 180 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
-| 181 | `frontend/src/components/shared/AppSelect.tsx` | 8 |
-| 182 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 21 |
-| 183 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
-| 184 | `frontend/src/components/shared/FilterMenu.tsx` | 4 |
-| 185 | `frontend/src/components/shared/globalScroll.ts` | 3 |
-| 186 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 5 |
-| 187 | `frontend/src/components/shared/LazyPortalMenu.tsx` | 1 |
-| 188 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
-| 189 | `frontend/src/components/shared/Modal.tsx` | 1 |
-| 190 | `frontend/src/components/shared/navigationConfig.ts` | 0 |
-| 191 | `frontend/src/components/shared/NotificationCenter.tsx` | 9 |
-| 192 | `frontend/src/components/shared/pageActivity.ts` | 0 |
-| 193 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
-| 194 | `frontend/src/components/shared/PaginationControls.tsx` | 3 |
-| 195 | `frontend/src/components/shared/PortalMenu.tsx` | 6 |
-| 196 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
-| 197 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
-| 198 | `frontend/src/components/shared/WriteConflictModal.tsx` | 10 |
-| 199 | `frontend/src/components/users/permissionDefinitions.ts` | 0 |
-| 200 | `frontend/src/components/users/PermissionEditor.tsx` | 3 |
-| 201 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
-| 202 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
-| 203 | `frontend/src/components/users/Users.tsx` | 18 |
-| 204 | `frontend/src/components/utils-settings/AuditLog.tsx` | 20 |
-| 205 | `frontend/src/components/utils-settings/Backup.tsx` | 34 |
-| 206 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
-| 207 | `frontend/src/components/utils-settings/index.ts` | 0 |
-| 208 | `frontend/src/components/utils-settings/OtpModal.tsx` | 4 |
-| 209 | `frontend/src/components/utils-settings/ResetData.tsx` | 10 |
-| 210 | `frontend/src/components/utils-settings/Settings.tsx` | 27 |
-| 211 | `frontend/src/components/utils-settings/settingsConflict.ts` | 1 |
-| 212 | `frontend/src/constants.ts` | 0 |
-| 213 | `frontend/src/index.tsx` | 12 |
-| 214 | `frontend/src/platform/runtime/clientRuntime.ts` | 9 |
-| 215 | `frontend/src/platform/storage/storagePolicy.ts` | 0 |
-| 216 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 8 |
-| 217 | `frontend/src/public-runtime/service-worker.ts` | 24 |
-| 218 | `frontend/src/public-runtime/theme-bootstrap.ts` | 15 |
-| 219 | `frontend/src/public-web-api.ts` | 2 |
-| 220 | `frontend/src/PublicCatalogRoot.tsx` | 2 |
-| 221 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 5 |
-| 222 | `frontend/src/types/lucide-react-icons.d.ts` | 0 |
-| 223 | `frontend/src/types/receiptContracts.ts` | 0 |
-| 224 | `frontend/src/types/settingsContracts.ts` | 0 |
-| 225 | `frontend/src/utils/actionGuards.ts` | 1 |
-| 226 | `frontend/src/utils/actionHistory.ts` | 5 |
-| 227 | `frontend/src/utils/appRefresh.ts` | 0 |
-| 228 | `frontend/src/utils/bulkOps.ts` | 1 |
-| 229 | `frontend/src/utils/color.ts` | 2 |
-| 230 | `frontend/src/utils/csv.ts` | 8 |
-| 231 | `frontend/src/utils/csvExportWorker.ts` | 1 |
-| 232 | `frontend/src/utils/csvImport.ts` | 8 |
-| 233 | `frontend/src/utils/csvRowCounter.ts` | 1 |
-| 234 | `frontend/src/utils/csvTemplate.ts` | 0 |
-| 235 | `frontend/src/utils/dateHelpers.ts` | 1 |
-| 236 | `frontend/src/utils/deviceInfo.ts` | 2 |
-| 237 | `frontend/src/utils/exportPackage.ts` | 0 |
-| 238 | `frontend/src/utils/exportReports.tsx` | 8 |
-| 239 | `frontend/src/utils/favicon.ts` | 3 |
-| 240 | `frontend/src/utils/formatters.ts` | 1 |
-| 241 | `frontend/src/utils/groupedRecords.ts` | 3 |
-| 242 | `frontend/src/utils/historyHelpers.ts` | 0 |
-| 243 | `frontend/src/utils/importJobRefresh.ts` | 4 |
-| 244 | `frontend/src/utils/index.ts` | 0 |
-| 245 | `frontend/src/utils/initials.ts` | 1 |
-| 246 | `frontend/src/utils/loaders.ts` | 0 |
-| 247 | `frontend/src/utils/mediaUpload.ts` | 0 |
-| 248 | `frontend/src/utils/mediaUploadState.ts` | 0 |
-| 249 | `frontend/src/utils/permissions.ts` | 1 |
-| 250 | `frontend/src/utils/pricing.ts` | 0 |
-| 251 | `frontend/src/utils/printReceipt.ts` | 35 |
-| 252 | `frontend/src/utils/productBatches.ts` | 1 |
-| 253 | `frontend/src/utils/productGrouping.ts` | 9 |
-| 254 | `frontend/src/utils/publicAssetUrls.ts` | 6 |
-| 255 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 |
-| 256 | `frontend/src/utils/scriptTypography.ts` | 0 |
-| 257 | `frontend/src/utils/settingsRefresh.ts` | 1 |
-| 258 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
-| 259 | `frontend/src/web-api.ts` | 58 |
-| 260 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
-| 261 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
-| 262 | `ops/scripts/frontend/verify-performance.ts` | 4 |
-| 263 | `ops/scripts/frontend/verify-ui.ts` | 11 |
-| 264 | `frontend/vite.config.ts` | 7 |
-| 265 | `frontend/tailwind.config.ts` | 0 |
+| 2 | `frontend/src/api/actionHistoryTransport.ts` | 1 |
+| 3 | `frontend/src/api/actorQuery.ts` | 0 |
+| 4 | `frontend/src/api/aiTransport.ts` | 0 |
+| 5 | `frontend/src/api/appBootstrapTransport.ts` | 5 |
+| 6 | `frontend/src/api/auditLogTransport.ts` | 4 |
+| 7 | `frontend/src/api/authTransport.ts` | 0 |
+| 8 | `frontend/src/api/branchTransport.ts` | 2 |
+| 9 | `frontend/src/api/browserDialogs.ts` | 0 |
+| 10 | `frontend/src/api/conflicts.ts` | 0 |
+| 11 | `frontend/src/api/contactReadTransport.ts` | 9 |
+| 12 | `frontend/src/api/contactsTransport.ts` | 12 |
+| 13 | `frontend/src/api/contactWriteTransport.ts` | 6 |
+| 14 | `frontend/src/api/cooldownFallbacks.ts` | 3 |
+| 15 | `frontend/src/api/customTablesTransport.ts` | 3 |
+| 16 | `frontend/src/api/dashboardTransport.ts` | 0 |
+| 17 | `frontend/src/api/driveSync.ts` | 0 |
+| 18 | `frontend/src/api/expectedUpdatedAt.ts` | 2 |
+| 19 | `frontend/src/api/fileTransport.ts` | 5 |
+| 20 | `frontend/src/api/http.ts` | 31 |
+| 21 | `frontend/src/api/httpState.ts` | 0 |
+| 22 | `frontend/src/api/importJobsTransport.ts` | 5 |
+| 23 | `frontend/src/api/importTransport.ts` | 0 |
+| 24 | `frontend/src/api/inventoryTransport.ts` | 0 |
+| 25 | `frontend/src/api/inventoryWriteTransport.ts` | 1 |
+| 26 | `frontend/src/api/lazyLocalDb.ts` | 0 |
+| 27 | `frontend/src/api/localDb.ts` | 1 |
+| 28 | `frontend/src/api/localMirrors.ts` | 3 |
+| 29 | `frontend/src/api/lookupTransport.ts` | 4 |
+| 30 | `frontend/src/api/methods.ts` | 175 |
+| 31 | `frontend/src/api/multipartHeaders.ts` | 0 |
+| 32 | `frontend/src/api/notificationSummary.ts` | 1 |
+| 33 | `frontend/src/api/offlineSnapshotTransport.ts` | 7 |
+| 34 | `frontend/src/api/pendingSyncTransport.ts` | 0 |
+| 35 | `frontend/src/api/portalHttp.ts` | 0 |
+| 36 | `frontend/src/api/portalTransport.ts` | 2 |
+| 37 | `frontend/src/api/productImageUploadTransport.ts` | 1 |
+| 38 | `frontend/src/api/productReadTransport.ts` | 0 |
+| 39 | `frontend/src/api/productWriteTransport.ts` | 3 |
+| 40 | `frontend/src/api/query.ts` | 1 |
+| 41 | `frontend/src/api/queryCache.ts` | 0 |
+| 42 | `frontend/src/api/requestIds.ts` | 0 |
+| 43 | `frontend/src/api/returnsTransport.ts` | 5 |
+| 44 | `frontend/src/api/rfidTransport.ts` | 2 |
+| 45 | `frontend/src/api/salesTransport.ts` | 4 |
+| 46 | `frontend/src/api/saleWriteTransport.ts` | 16 |
+| 47 | `frontend/src/api/settingsTransport.ts` | 6 |
+| 48 | `frontend/src/api/syncPreview.ts` | 0 |
+| 49 | `frontend/src/api/syncRuntime.ts` | 0 |
+| 50 | `frontend/src/api/systemJobs.ts` | 3 |
+| 51 | `frontend/src/api/systemRuntime.ts` | 0 |
+| 52 | `frontend/src/api/userAdminTransport.ts` | 1 |
+| 53 | `frontend/src/api/userReadTransport.ts` | 0 |
+| 54 | `frontend/src/api/websocket.ts` | 8 |
+| 55 | `frontend/src/App.tsx` | 85 |
+| 56 | `frontend/src/app/appShellUtils.ts` | 0 |
+| 57 | `frontend/src/app/pathRouting.ts` | 0 |
+| 58 | `frontend/src/app/publicErrorRecovery.ts` | 1 |
+| 59 | `frontend/src/AppContext.tsx` | 43 |
+| 60 | `frontend/src/components/auth/Login.tsx` | 23 |
+| 61 | `frontend/src/components/branches/Branches.tsx` | 15 |
+| 62 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
+| 63 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
+| 64 | `frontend/src/components/catalog/catalogAssetUrls.ts` | 7 |
+| 65 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 2 |
+| 66 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
+| 67 | `frontend/src/components/catalog/catalogImages.tsx` | 5 |
+| 68 | `frontend/src/components/catalog/CatalogPage.tsx` | 127 |
+| 69 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 0 |
+| 70 | `frontend/src/components/catalog/catalogPagination.tsx` | 4 |
+| 71 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
+| 72 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
+| 73 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 7 |
+| 74 | `frontend/src/components/catalog/catalogUi.tsx` | 1 |
+| 75 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 2 |
+| 76 | `frontend/src/components/catalog/portalContentI18n.ts` | 14 |
+| 77 | `frontend/src/components/catalog/portalEditorUtils.ts` | 2 |
+| 78 | `frontend/src/components/catalog/portalLanguageOptions.ts` | 0 |
+| 79 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 0 |
+| 80 | `frontend/src/components/catalog/portalTranslateController.ts` | 4 |
+| 81 | `frontend/src/components/catalog/portalTranslationData.ts` | 1 |
+| 82 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 |
+| 83 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
+| 84 | `frontend/src/components/contacts/contactOptionUtils.ts` | 3 |
+| 85 | `frontend/src/components/contacts/Contacts.tsx` | 13 |
+| 86 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
+| 87 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 0 |
+| 88 | `frontend/src/components/contacts/CustomersTab.tsx` | 19 |
+| 89 | `frontend/src/components/contacts/DeliveryTab.tsx` | 28 |
+| 90 | `frontend/src/components/contacts/shared.tsx` | 3 |
+| 91 | `frontend/src/components/contacts/SuppliersTab.tsx` | 23 |
+| 92 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
+| 93 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
+| 94 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
+| 95 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
+| 96 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
+| 97 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
+| 98 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
+| 99 | `frontend/src/components/dashboard/dashboardExport.ts` | 16 |
+| 100 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
+| 101 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
+| 102 | `frontend/src/components/files/FilesPage.tsx` | 27 |
+| 103 | `frontend/src/components/files/FilesProvidersTab.tsx` | 4 |
+| 104 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
+| 105 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
+| 106 | `frontend/src/components/inventory/Inventory.tsx` | 31 |
+| 107 | `frontend/src/components/inventory/inventoryExport.ts` | 14 |
+| 108 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
+| 109 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
+| 110 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
+| 111 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
+| 112 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
+| 113 | `frontend/src/components/inventory/movementGroups.ts` | 11 |
+| 114 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
+| 115 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 11 |
+| 116 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
+| 117 | `frontend/src/components/pos/CartItem.tsx` | 2 |
+| 118 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
+| 119 | `frontend/src/components/pos/POS.tsx` | 51 |
+| 120 | `frontend/src/components/pos/posCore.ts` | 1 |
+| 121 | `frontend/src/components/pos/ProductImage.tsx` | 5 |
+| 122 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
+| 123 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
+| 124 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 6 |
+| 125 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 6 |
+| 126 | `frontend/src/components/products/forms/ProductForm.tsx` | 19 |
+| 127 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 3 |
+| 128 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 1 |
+| 129 | `frontend/src/components/products/helpers/productExport.ts` | 5 |
+| 130 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 2 |
+| 131 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 0 |
+| 132 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 0 |
+| 133 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 3 |
+| 134 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 0 |
+| 135 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 0 |
+| 136 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 3 |
+| 137 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 0 |
+| 138 | `frontend/src/components/products/import/BulkImportModal.tsx` | 51 |
+| 139 | `frontend/src/components/products/import/productImportPlanner.ts` | 11 |
+| 140 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
+| 141 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 10 |
+| 142 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
+| 143 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
+| 144 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 7 |
+| 145 | `frontend/src/components/products/Products.tsx` | 30 |
+| 146 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 4 |
+| 147 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 4 |
+| 148 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 0 |
+| 149 | `frontend/src/components/products/scanning/cameraPermission.ts` | 3 |
+| 150 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 5 |
+| 151 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
+| 152 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
+| 153 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 3 |
+| 154 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 1 |
+| 155 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 3 |
+| 156 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
+| 157 | `frontend/src/components/receipt-settings/constants.ts` | 1 |
+| 158 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
+| 159 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 9 |
+| 160 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 8 |
+| 161 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
+| 162 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 4 |
+| 163 | `frontend/src/components/receipt-settings/template.ts` | 2 |
+| 164 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
+| 165 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
+| 166 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
+| 167 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
+| 168 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
+| 169 | `frontend/src/components/returns/Returns.tsx` | 12 |
+| 170 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
+| 171 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
+| 172 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
+| 173 | `frontend/src/components/sales/Sales.tsx` | 16 |
+| 174 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
+| 175 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
+| 176 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
+| 177 | `frontend/src/components/sales/StatusBadge.tsx` | 2 |
+| 178 | `frontend/src/components/server/ServerPage.tsx` | 21 |
+| 179 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
+| 180 | `frontend/src/components/shared/AppSelect.tsx` | 8 |
+| 181 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 21 |
+| 182 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
+| 183 | `frontend/src/components/shared/FilterMenu.tsx` | 4 |
+| 184 | `frontend/src/components/shared/globalScroll.ts` | 3 |
+| 185 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 5 |
+| 186 | `frontend/src/components/shared/LazyPortalMenu.tsx` | 1 |
+| 187 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
+| 188 | `frontend/src/components/shared/Modal.tsx` | 1 |
+| 189 | `frontend/src/components/shared/navigationConfig.ts` | 0 |
+| 190 | `frontend/src/components/shared/NotificationCenter.tsx` | 9 |
+| 191 | `frontend/src/components/shared/pageActivity.ts` | 0 |
+| 192 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
+| 193 | `frontend/src/components/shared/PaginationControls.tsx` | 3 |
+| 194 | `frontend/src/components/shared/PortalMenu.tsx` | 6 |
+| 195 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
+| 196 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
+| 197 | `frontend/src/components/shared/WriteConflictModal.tsx` | 10 |
+| 198 | `frontend/src/components/users/permissionDefinitions.ts` | 0 |
+| 199 | `frontend/src/components/users/PermissionEditor.tsx` | 3 |
+| 200 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
+| 201 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
+| 202 | `frontend/src/components/users/Users.tsx` | 18 |
+| 203 | `frontend/src/components/utils-settings/AuditLog.tsx` | 20 |
+| 204 | `frontend/src/components/utils-settings/Backup.tsx` | 34 |
+| 205 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
+| 206 | `frontend/src/components/utils-settings/index.ts` | 0 |
+| 207 | `frontend/src/components/utils-settings/OtpModal.tsx` | 4 |
+| 208 | `frontend/src/components/utils-settings/ResetData.tsx` | 10 |
+| 209 | `frontend/src/components/utils-settings/Settings.tsx` | 27 |
+| 210 | `frontend/src/components/utils-settings/settingsConflict.ts` | 1 |
+| 211 | `frontend/src/constants.ts` | 0 |
+| 212 | `frontend/src/index.tsx` | 12 |
+| 213 | `frontend/src/platform/runtime/clientRuntime.ts` | 9 |
+| 214 | `frontend/src/platform/storage/storagePolicy.ts` | 0 |
+| 215 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 8 |
+| 216 | `frontend/src/public-runtime/service-worker.ts` | 24 |
+| 217 | `frontend/src/public-runtime/theme-bootstrap.ts` | 15 |
+| 218 | `frontend/src/public-web-api.ts` | 2 |
+| 219 | `frontend/src/PublicCatalogRoot.tsx` | 2 |
+| 220 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 5 |
+| 221 | `frontend/src/types/lucide-react-icons.d.ts` | 0 |
+| 222 | `frontend/src/types/receiptContracts.ts` | 0 |
+| 223 | `frontend/src/types/settingsContracts.ts` | 0 |
+| 224 | `frontend/src/utils/actionGuards.ts` | 1 |
+| 225 | `frontend/src/utils/actionHistory.ts` | 5 |
+| 226 | `frontend/src/utils/appRefresh.ts` | 0 |
+| 227 | `frontend/src/utils/bulkOps.ts` | 1 |
+| 228 | `frontend/src/utils/color.ts` | 2 |
+| 229 | `frontend/src/utils/csv.ts` | 8 |
+| 230 | `frontend/src/utils/csvExportWorker.ts` | 1 |
+| 231 | `frontend/src/utils/csvImport.ts` | 8 |
+| 232 | `frontend/src/utils/csvRowCounter.ts` | 1 |
+| 233 | `frontend/src/utils/csvTemplate.ts` | 0 |
+| 234 | `frontend/src/utils/dateHelpers.ts` | 1 |
+| 235 | `frontend/src/utils/deviceInfo.ts` | 2 |
+| 236 | `frontend/src/utils/exportPackage.ts` | 0 |
+| 237 | `frontend/src/utils/exportReports.tsx` | 8 |
+| 238 | `frontend/src/utils/favicon.ts` | 3 |
+| 239 | `frontend/src/utils/formatters.ts` | 1 |
+| 240 | `frontend/src/utils/groupedRecords.ts` | 3 |
+| 241 | `frontend/src/utils/historyHelpers.ts` | 0 |
+| 242 | `frontend/src/utils/importJobRefresh.ts` | 4 |
+| 243 | `frontend/src/utils/index.ts` | 0 |
+| 244 | `frontend/src/utils/initials.ts` | 1 |
+| 245 | `frontend/src/utils/loaders.ts` | 0 |
+| 246 | `frontend/src/utils/mediaUpload.ts` | 0 |
+| 247 | `frontend/src/utils/mediaUploadState.ts` | 0 |
+| 248 | `frontend/src/utils/permissions.ts` | 1 |
+| 249 | `frontend/src/utils/pricing.ts` | 0 |
+| 250 | `frontend/src/utils/printReceipt.ts` | 35 |
+| 251 | `frontend/src/utils/productBatches.ts` | 1 |
+| 252 | `frontend/src/utils/productGrouping.ts` | 9 |
+| 253 | `frontend/src/utils/publicAssetUrls.ts` | 6 |
+| 254 | `frontend/src/utils/receiptAppliedConfig.ts` | 1 |
+| 255 | `frontend/src/utils/scriptTypography.ts` | 0 |
+| 256 | `frontend/src/utils/settingsRefresh.ts` | 1 |
+| 257 | `frontend/src/utils/settingsWriteOptions.ts` | 0 |
+| 258 | `frontend/src/web-api.ts` | 58 |
+| 259 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
+| 260 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
+| 261 | `ops/scripts/frontend/verify-performance.ts` | 4 |
+| 262 | `ops/scripts/frontend/verify-ui.ts` | 11 |
+| 263 | `frontend/vite.config.ts` | 7 |
+| 264 | `frontend/tailwind.config.ts` | 0 |
 
 ## 3. Detailed Function Commentary
 
@@ -284,27 +283,21 @@ Total files documented: **265**
 |---:|---|---:|---:|
 | 1 | `AdminRoot` | component/function | 6 |
 
-### 3.2 `frontend/src/api/accessControlTransport.ts`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---:|---:|
-| 1 | `encodeId` | function | 9 |
-
-### 3.3 `frontend/src/api/actionHistoryTransport.ts`
+### 3.2 `frontend/src/api/actionHistoryTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getDevicePayload` | function | 7 |
 
-### 3.4 `frontend/src/api/actorQuery.ts`
+### 3.3 `frontend/src/api/actorQuery.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.5 `frontend/src/api/aiTransport.ts`
+### 3.4 `frontend/src/api/aiTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.6 `frontend/src/api/appBootstrapTransport.ts`
+### 3.5 `frontend/src/api/appBootstrapTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -314,7 +307,7 @@ Total files documented: **265**
 | 4 | `ensureBootstrapServerUrl` | function | 52 |
 | 5 | `buildLocalBootstrap` | function | 63 |
 
-### 3.7 `frontend/src/api/auditLogTransport.ts`
+### 3.6 `frontend/src/api/auditLogTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -323,26 +316,26 @@ Total files documented: **265**
 | 3 | `scheduleAuditLogMirror` | function | 23 |
 | 4 | `normalizeAuditPageSize` | function | 36 |
 
-### 3.8 `frontend/src/api/authTransport.ts`
+### 3.7 `frontend/src/api/authTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.9 `frontend/src/api/branchTransport.ts`
+### 3.8 `frontend/src/api/branchTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getDevicePayload` | function | 10 |
 | 2 | `encodeId` | function | 14 |
 
-### 3.10 `frontend/src/api/browserDialogs.ts`
+### 3.9 `frontend/src/api/browserDialogs.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.11 `frontend/src/api/conflicts.ts`
+### 3.10 `frontend/src/api/conflicts.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.12 `frontend/src/api/contactReadTransport.ts`
+### 3.11 `frontend/src/api/contactReadTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -356,7 +349,7 @@ Total files documented: **265**
 | 8 | `idle` | const arrow | 87 |
 | 9 | `readContacts` | function | 96 |
 
-### 3.13 `frontend/src/api/contactsTransport.ts`
+### 3.12 `frontend/src/api/contactsTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -373,7 +366,7 @@ Total files documented: **265**
 | 11 | `deleteContact` | function | 121 |
 | 12 | `bulkImportContact` | function | 131 |
 
-### 3.14 `frontend/src/api/contactWriteTransport.ts`
+### 3.13 `frontend/src/api/contactWriteTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -384,7 +377,7 @@ Total files documented: **265**
 | 5 | `updateContact` | function | 51 |
 | 6 | `deleteContact` | function | 68 |
 
-### 3.15 `frontend/src/api/cooldownFallbacks.ts`
+### 3.14 `frontend/src/api/cooldownFallbacks.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -392,7 +385,7 @@ Total files documented: **265**
 | 2 | `writeBrowserStoredNumber` | function | 36 |
 | 3 | `clearBrowserStoredNumber` | function | 44 |
 
-### 3.16 `frontend/src/api/customTablesTransport.ts`
+### 3.15 `frontend/src/api/customTablesTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -400,22 +393,22 @@ Total files documented: **265**
 | 2 | `tableDataPath` | function | 28 |
 | 3 | `tableRowPath` | function | 32 |
 
-### 3.17 `frontend/src/api/dashboardTransport.ts`
+### 3.16 `frontend/src/api/dashboardTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.18 `frontend/src/api/driveSync.ts`
+### 3.17 `frontend/src/api/driveSync.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.19 `frontend/src/api/expectedUpdatedAt.ts`
+### 3.18 `frontend/src/api/expectedUpdatedAt.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getLocalDbModule` | function | 13 |
 | 2 | `hasExpectedUpdatedAt` | function | 18 |
 
-### 3.20 `frontend/src/api/fileTransport.ts`
+### 3.19 `frontend/src/api/fileTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -425,7 +418,7 @@ Total files documented: **265**
 | 4 | `parseJsonResponse` | function | 87 |
 | 5 | `finish` | const arrow | 122 |
 
-### 3.21 `frontend/src/api/http.ts`
+### 3.20 `frontend/src/api/http.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -461,11 +454,11 @@ Total files documented: **265**
 | 30 | `clearInflight` | function | 852 |
 | 31 | `hasReusableInflight` | function | 857 |
 
-### 3.22 `frontend/src/api/httpState.ts`
+### 3.21 `frontend/src/api/httpState.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.23 `frontend/src/api/importJobsTransport.ts`
+### 3.22 `frontend/src/api/importJobsTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -475,31 +468,31 @@ Total files documented: **265**
 | 4 | `notifyImportJobActivity` | function | 53 |
 | 5 | `runImportJobAction` | function | 121 |
 
-### 3.24 `frontend/src/api/importTransport.ts`
+### 3.23 `frontend/src/api/importTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.25 `frontend/src/api/inventoryTransport.ts`
+### 3.24 `frontend/src/api/inventoryTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.26 `frontend/src/api/inventoryWriteTransport.ts`
+### 3.25 `frontend/src/api/inventoryWriteTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getDevicePayload` | function | 7 |
 
-### 3.27 `frontend/src/api/lazyLocalDb.ts`
+### 3.26 `frontend/src/api/lazyLocalDb.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.28 `frontend/src/api/localDb.ts`
+### 3.27 `frontend/src/api/localDb.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `splitCSVLine` | function | 268 |
 
-### 3.29 `frontend/src/api/localMirrors.ts`
+### 3.28 `frontend/src/api/localMirrors.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -507,7 +500,7 @@ Total files documented: **265**
 | 2 | `scheduleMirrorWrite` | function | 18 |
 | 3 | `idle` | const arrow | 24 |
 
-### 3.30 `frontend/src/api/lookupTransport.ts`
+### 3.29 `frontend/src/api/lookupTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -516,196 +509,197 @@ Total files documented: **265**
 | 3 | `updateLookupRow` | function | 47 |
 | 4 | `deleteLookupRow` | function | 60 |
 
-### 3.31 `frontend/src/api/methods.ts`
+### 3.30 `frontend/src/api/methods.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `loadPortalTransport` | function | 45 |
-| 2 | `loadSaleWriteTransport` | function | 50 |
-| 3 | `loadCsvTemplateModule` | function | 55 |
-| 4 | `loadBrowserDialogsModule` | function | 60 |
-| 5 | `loadAiTransport` | function | 65 |
-| 6 | `loadActionHistoryTransport` | function | 70 |
-| 7 | `loadAuditLogTransport` | function | 75 |
-| 8 | `loadAuthTransport` | function | 80 |
-| 9 | `loadContactsTransport` | function | 85 |
-| 10 | `loadDashboardTransport` | function | 90 |
-| 11 | `loadFileTransport` | function | 95 |
-| 12 | `loadBranchTransport` | function | 100 |
-| 13 | `loadInventoryTransport` | function | 105 |
-| 14 | `loadInventoryWriteTransport` | function | 110 |
-| 15 | `loadImportJobsTransport` | function | 115 |
-| 16 | `loadProductWriteTransport` | function | 120 |
-| 17 | `loadProductImageUploadTransport` | function | 125 |
-| 18 | `loadRfidTransport` | function | 130 |
-| 19 | `loadSalesTransport` | function | 135 |
-| 20 | `loadSettingsTransport` | function | 140 |
-| 21 | `loadOfflineSnapshotTransport` | function | 145 |
-| 22 | `loadReturnsTransport` | function | 150 |
-| 23 | `loadPendingSyncTransport` | function | 155 |
-| 24 | `loadDriveSyncTransport` | function | 160 |
-| 25 | `loadNotificationSummaryTransport` | function | 165 |
-| 26 | `loadSystemJobsTransport` | function | 170 |
-| 27 | `loadLookupTransport` | function | 175 |
-| 28 | `loadProductReadTransport` | function | 180 |
-| 29 | `loadQueryCacheModule` | function | 185 |
-| 30 | `loadLocalMirrorsModule` | function | 190 |
-| 31 | `loadAccessControlTransport` | function | 195 |
-| 32 | `loadCustomTablesTransport` | function | 200 |
-| 33 | `loadClientRuntimeModule` | function | 205 |
-| 34 | `loadAppRefreshModule` | function | 210 |
-| 35 | `loadHttpCoreModule` | function | 215 |
-| 36 | `buildImportCsvTemplate` | function | 220 |
-| 37 | `loadSystemRuntimeModule` | function | 252 |
-| 38 | `callSystemRuntimeMethod` | function | 257 |
-| 39 | `scheduleSensitiveMirrorPurge` | function | 264 |
-| 40 | `run` | const arrow | 265 |
-| 41 | `invalidateClientRuntimeState` | function | 303 |
-| 42 | `dispatchRefreshAppData` | function | 321 |
-| 43 | `login` | const arrow | 345 |
-| 44 | `logout` | const arrow | 349 |
-| 45 | `resetPasswordWithOtp` | const arrow | 353 |
-| 46 | `requestPasswordResetEmail` | const arrow | 357 |
-| 47 | `completePasswordReset` | const arrow | 361 |
-| 48 | `updateSessionDuration` | const arrow | 365 |
-| 49 | `getVerificationCapabilities` | const arrow | 369 |
-| 50 | `getSystemConfig` | const arrow | 373 |
-| 51 | `getSystemBootstrap` | const arrow | 375 |
-| 52 | `getSystemDebugLog` | const arrow | 381 |
-| 53 | `startGoogleOauth` | const arrow | 383 |
-| 54 | `completeGoogleOauth` | const arrow | 387 |
-| 55 | `unlinkGoogleOauth` | const arrow | 391 |
-| 56 | `getAppBootstrap` | const arrow | 395 |
-| 57 | `getOrganizationBootstrap` | const arrow | 399 |
-| 58 | `searchOrganizations` | const arrow | 403 |
-| 59 | `getCurrentOrganization` | const arrow | 407 |
-| 60 | `getCategories` | const arrow | 424 |
-| 61 | `updateCategory` | const arrow | 434 |
-| 62 | `deleteCategory` | const arrow | 440 |
-| 63 | `getUnits` | const arrow | 448 |
-| 64 | `updateUnit` | const arrow | 458 |
-| 65 | `deleteUnit` | const arrow | 464 |
-| 66 | `getBranches` | const arrow | 472 |
-| 67 | `getBranchSummary` | const arrow | 476 |
-| 68 | `updateBranch` | const arrow | 484 |
-| 69 | `deleteBranch` | const arrow | 488 |
-| 70 | `getBranchStock` | const arrow | 492 |
-| 71 | `getTransfers` | const arrow | 496 |
-| 72 | `getBranchStockIntegrity` | const arrow | 504 |
-| 73 | `getProducts` | const arrow | 514 |
-| 74 | `searchProducts` | const arrow | 518 |
-| 75 | `getProductBootstrap` | const arrow | 522 |
-| 76 | `getProductsByIds` | const arrow | 526 |
-| 77 | `getProductFilters` | const arrow | 530 |
-| 78 | `getProductLookupUsage` | const arrow | 534 |
-| 79 | `replaceProductLookupValues` | const arrow | 538 |
-| 80 | `getPortalSubmissionsForReview` | const arrow | 586 |
-| 81 | `reviewPortalSubmission` | const arrow | 590 |
-| 82 | `getAiProviders` | const arrow | 595 |
-| 83 | `createAiProvider` | const arrow | 599 |
-| 84 | `updateAiProvider` | const arrow | 603 |
-| 85 | `deleteAiProvider` | const arrow | 607 |
-| 86 | `testAiProvider` | const arrow | 611 |
-| 87 | `getAiResponses` | const arrow | 615 |
-| 88 | `createProduct` | const arrow | 619 |
-| 89 | `updateProduct` | const arrow | 623 |
-| 90 | `deleteProduct` | const arrow | 627 |
-| 91 | `otpSetup` | const arrow | 633 |
-| 92 | `otpConfirm` | const arrow | 637 |
-| 93 | `otpDisable` | const arrow | 641 |
-| 94 | `otpVerify` | const arrow | 645 |
-| 95 | `otpStatus` | const arrow | 649 |
-| 96 | `listImportJobs` | const arrow | 669 |
-| 97 | `getImportJobReview` | const arrow | 677 |
-| 98 | `updateImportJobDecisions` | const arrow | 681 |
-| 99 | `startImportJob` | const arrow | 689 |
-| 100 | `approveImportJob` | const arrow | 693 |
-| 101 | `cancelImportJob` | const arrow | 697 |
-| 102 | `retryImportJob` | const arrow | 701 |
-| 103 | `deleteImportJob` | const arrow | 705 |
-| 104 | `getImportQueueStatus` | const arrow | 709 |
-| 105 | `getFiles` | const arrow | 730 |
-| 106 | `deleteFileAsset` | const arrow | 740 |
-| 107 | `getActionHistory` | const arrow | 790 |
-| 108 | `updateActionHistory` | const arrow | 798 |
-| 109 | `getInventorySummary` | const arrow | 810 |
-| 110 | `getInventoryStats` | const arrow | 814 |
-| 111 | `getInventoryBootstrap` | const arrow | 818 |
-| 112 | `searchInventoryProducts` | const arrow | 822 |
-| 113 | `getInventoryMovements` | const arrow | 826 |
-| 114 | `getInventoryReasons` | const arrow | 830 |
-| 115 | `saveInventoryReasons` | const arrow | 834 |
-| 116 | `getRfidStatus` | const arrow | 839 |
-| 117 | `searchRfidTags` | const arrow | 847 |
-| 118 | `recordRfidSessionEvents` | const arrow | 855 |
-| 119 | `applyRfidSession` | const arrow | 863 |
-| 120 | `getSales` | const arrow | 874 |
-| 121 | `getDashboard` | const arrow | 880 |
-| 122 | `getAnalytics` | const arrow | 884 |
-| 123 | `getCustomers` | const arrow | 890 |
-| 124 | `getCustomerPointSummaries` | const arrow | 894 |
-| 125 | `updateCustomer` | const arrow | 902 |
-| 126 | `deleteCustomer` | const arrow | 906 |
-| 127 | `downloadCustomerTemplate` | const arrow | 914 |
-| 128 | `getSuppliers` | const arrow | 920 |
-| 129 | `updateSupplier` | const arrow | 928 |
-| 130 | `deleteSupplier` | const arrow | 932 |
-| 131 | `downloadSupplierTemplate` | const arrow | 940 |
-| 132 | `getDeliveryContacts` | const arrow | 946 |
-| 133 | `updateDeliveryContact` | const arrow | 954 |
-| 134 | `deleteDeliveryContact` | const arrow | 958 |
-| 135 | `getUsers` | const arrow | 968 |
-| 136 | `updateUser` | const arrow | 976 |
-| 137 | `getUserProfile` | const arrow | 980 |
-| 138 | `getUserAuthMethods` | const arrow | 984 |
-| 139 | `updateUserProfile` | const arrow | 988 |
-| 140 | `disconnectUserAuthProvider` | const arrow | 992 |
-| 141 | `changeUserPassword` | const arrow | 996 |
-| 142 | `resetPassword` | const arrow | 1000 |
-| 143 | `getRoles` | const arrow | 1006 |
-| 144 | `updateRole` | const arrow | 1014 |
-| 145 | `deleteRole` | const arrow | 1018 |
-| 146 | `getCustomTables` | const arrow | 1024 |
-| 147 | `getCustomTableData` | const arrow | 1032 |
-| 148 | `insertCustomRow` | const arrow | 1036 |
-| 149 | `updateCustomRow` | const arrow | 1040 |
-| 150 | `deleteCustomRow` | const arrow | 1044 |
-| 151 | `getAuditLogs` | const arrow | 1050 |
-| 152 | `deleteAuditLogsRetention` | const arrow | 1055 |
-| 153 | `getIntegrationDoctor` | const arrow | 1076 |
-| 154 | `getGoogleDriveSyncStatus` | const arrow | 1101 |
-| 155 | `saveGoogleDriveSyncPreferences` | const arrow | 1106 |
-| 156 | `startGoogleDriveSyncOauth` | const arrow | 1111 |
-| 157 | `disconnectGoogleDriveSync` | const arrow | 1116 |
-| 158 | `forgetGoogleDriveSyncCredentials` | const arrow | 1121 |
-| 159 | `queueGoogleDriveSyncNow` | const arrow | 1126 |
-| 160 | `syncGoogleDriveNow` | const arrow | 1131 |
-| 161 | `openPath` | const arrow | 1196 |
-| 162 | `getReturns` | const arrow | 1200 |
-| 163 | `getReturn` | const arrow | 1212 |
-| 164 | `updateSaleStatus` | const arrow | 1218 |
-| 165 | `attachSaleCustomer` | const arrow | 1224 |
-| 166 | `getSalesExport` | const arrow | 1229 |
-| 167 | `updateReturn` | const arrow | 1233 |
-| 168 | `testSyncServer` | const arrow | 1240 |
-| 169 | `openFolderDialog` | const arrow | 1245 |
-| 170 | `getDataPath` | const arrow | 1249 |
-| 171 | `getScaleMigrationStatus` | const arrow | 1251 |
-| 172 | `prepareScaleMigration` | const arrow | 1253 |
-| 173 | `runScaleMigration` | const arrow | 1255 |
-| 174 | `browseDir` | const arrow | 1267 |
+| 1 | `loadPortalTransport` | function | 46 |
+| 2 | `loadSaleWriteTransport` | function | 51 |
+| 3 | `loadCsvTemplateModule` | function | 56 |
+| 4 | `loadBrowserDialogsModule` | function | 61 |
+| 5 | `loadAiTransport` | function | 66 |
+| 6 | `loadActionHistoryTransport` | function | 71 |
+| 7 | `loadAuditLogTransport` | function | 76 |
+| 8 | `loadAuthTransport` | function | 81 |
+| 9 | `loadContactsTransport` | function | 86 |
+| 10 | `loadDashboardTransport` | function | 91 |
+| 11 | `loadFileTransport` | function | 96 |
+| 12 | `loadBranchTransport` | function | 101 |
+| 13 | `loadInventoryTransport` | function | 106 |
+| 14 | `loadInventoryWriteTransport` | function | 111 |
+| 15 | `loadImportJobsTransport` | function | 116 |
+| 16 | `loadProductWriteTransport` | function | 121 |
+| 17 | `loadProductImageUploadTransport` | function | 126 |
+| 18 | `loadRfidTransport` | function | 131 |
+| 19 | `loadSalesTransport` | function | 136 |
+| 20 | `loadSettingsTransport` | function | 141 |
+| 21 | `loadOfflineSnapshotTransport` | function | 146 |
+| 22 | `loadReturnsTransport` | function | 151 |
+| 23 | `loadPendingSyncTransport` | function | 156 |
+| 24 | `loadDriveSyncTransport` | function | 161 |
+| 25 | `loadNotificationSummaryTransport` | function | 166 |
+| 26 | `loadSystemJobsTransport` | function | 171 |
+| 27 | `loadLookupTransport` | function | 176 |
+| 28 | `loadProductReadTransport` | function | 181 |
+| 29 | `loadQueryCacheModule` | function | 186 |
+| 30 | `loadLocalMirrorsModule` | function | 191 |
+| 31 | `loadUserAdminTransport` | function | 196 |
+| 32 | `loadUserReadTransport` | function | 201 |
+| 33 | `loadCustomTablesTransport` | function | 206 |
+| 34 | `loadClientRuntimeModule` | function | 211 |
+| 35 | `loadAppRefreshModule` | function | 216 |
+| 36 | `loadHttpCoreModule` | function | 221 |
+| 37 | `buildImportCsvTemplate` | function | 226 |
+| 38 | `loadSystemRuntimeModule` | function | 258 |
+| 39 | `callSystemRuntimeMethod` | function | 263 |
+| 40 | `scheduleSensitiveMirrorPurge` | function | 270 |
+| 41 | `run` | const arrow | 271 |
+| 42 | `invalidateClientRuntimeState` | function | 309 |
+| 43 | `dispatchRefreshAppData` | function | 327 |
+| 44 | `login` | const arrow | 351 |
+| 45 | `logout` | const arrow | 355 |
+| 46 | `resetPasswordWithOtp` | const arrow | 359 |
+| 47 | `requestPasswordResetEmail` | const arrow | 363 |
+| 48 | `completePasswordReset` | const arrow | 367 |
+| 49 | `updateSessionDuration` | const arrow | 371 |
+| 50 | `getVerificationCapabilities` | const arrow | 375 |
+| 51 | `getSystemConfig` | const arrow | 379 |
+| 52 | `getSystemBootstrap` | const arrow | 381 |
+| 53 | `getSystemDebugLog` | const arrow | 387 |
+| 54 | `startGoogleOauth` | const arrow | 389 |
+| 55 | `completeGoogleOauth` | const arrow | 393 |
+| 56 | `unlinkGoogleOauth` | const arrow | 397 |
+| 57 | `getAppBootstrap` | const arrow | 401 |
+| 58 | `getOrganizationBootstrap` | const arrow | 405 |
+| 59 | `searchOrganizations` | const arrow | 409 |
+| 60 | `getCurrentOrganization` | const arrow | 413 |
+| 61 | `getCategories` | const arrow | 430 |
+| 62 | `updateCategory` | const arrow | 440 |
+| 63 | `deleteCategory` | const arrow | 446 |
+| 64 | `getUnits` | const arrow | 454 |
+| 65 | `updateUnit` | const arrow | 464 |
+| 66 | `deleteUnit` | const arrow | 470 |
+| 67 | `getBranches` | const arrow | 478 |
+| 68 | `getBranchSummary` | const arrow | 482 |
+| 69 | `updateBranch` | const arrow | 490 |
+| 70 | `deleteBranch` | const arrow | 494 |
+| 71 | `getBranchStock` | const arrow | 498 |
+| 72 | `getTransfers` | const arrow | 502 |
+| 73 | `getBranchStockIntegrity` | const arrow | 510 |
+| 74 | `getProducts` | const arrow | 520 |
+| 75 | `searchProducts` | const arrow | 524 |
+| 76 | `getProductBootstrap` | const arrow | 528 |
+| 77 | `getProductsByIds` | const arrow | 532 |
+| 78 | `getProductFilters` | const arrow | 536 |
+| 79 | `getProductLookupUsage` | const arrow | 540 |
+| 80 | `replaceProductLookupValues` | const arrow | 544 |
+| 81 | `getPortalSubmissionsForReview` | const arrow | 592 |
+| 82 | `reviewPortalSubmission` | const arrow | 596 |
+| 83 | `getAiProviders` | const arrow | 601 |
+| 84 | `createAiProvider` | const arrow | 605 |
+| 85 | `updateAiProvider` | const arrow | 609 |
+| 86 | `deleteAiProvider` | const arrow | 613 |
+| 87 | `testAiProvider` | const arrow | 617 |
+| 88 | `getAiResponses` | const arrow | 621 |
+| 89 | `createProduct` | const arrow | 625 |
+| 90 | `updateProduct` | const arrow | 629 |
+| 91 | `deleteProduct` | const arrow | 633 |
+| 92 | `otpSetup` | const arrow | 639 |
+| 93 | `otpConfirm` | const arrow | 643 |
+| 94 | `otpDisable` | const arrow | 647 |
+| 95 | `otpVerify` | const arrow | 651 |
+| 96 | `otpStatus` | const arrow | 655 |
+| 97 | `listImportJobs` | const arrow | 675 |
+| 98 | `getImportJobReview` | const arrow | 683 |
+| 99 | `updateImportJobDecisions` | const arrow | 687 |
+| 100 | `startImportJob` | const arrow | 695 |
+| 101 | `approveImportJob` | const arrow | 699 |
+| 102 | `cancelImportJob` | const arrow | 703 |
+| 103 | `retryImportJob` | const arrow | 707 |
+| 104 | `deleteImportJob` | const arrow | 711 |
+| 105 | `getImportQueueStatus` | const arrow | 715 |
+| 106 | `getFiles` | const arrow | 736 |
+| 107 | `deleteFileAsset` | const arrow | 746 |
+| 108 | `getActionHistory` | const arrow | 796 |
+| 109 | `updateActionHistory` | const arrow | 804 |
+| 110 | `getInventorySummary` | const arrow | 816 |
+| 111 | `getInventoryStats` | const arrow | 820 |
+| 112 | `getInventoryBootstrap` | const arrow | 824 |
+| 113 | `searchInventoryProducts` | const arrow | 828 |
+| 114 | `getInventoryMovements` | const arrow | 832 |
+| 115 | `getInventoryReasons` | const arrow | 836 |
+| 116 | `saveInventoryReasons` | const arrow | 840 |
+| 117 | `getRfidStatus` | const arrow | 845 |
+| 118 | `searchRfidTags` | const arrow | 853 |
+| 119 | `recordRfidSessionEvents` | const arrow | 861 |
+| 120 | `applyRfidSession` | const arrow | 869 |
+| 121 | `getSales` | const arrow | 880 |
+| 122 | `getDashboard` | const arrow | 886 |
+| 123 | `getAnalytics` | const arrow | 890 |
+| 124 | `getCustomers` | const arrow | 896 |
+| 125 | `getCustomerPointSummaries` | const arrow | 900 |
+| 126 | `updateCustomer` | const arrow | 908 |
+| 127 | `deleteCustomer` | const arrow | 912 |
+| 128 | `downloadCustomerTemplate` | const arrow | 920 |
+| 129 | `getSuppliers` | const arrow | 926 |
+| 130 | `updateSupplier` | const arrow | 934 |
+| 131 | `deleteSupplier` | const arrow | 938 |
+| 132 | `downloadSupplierTemplate` | const arrow | 946 |
+| 133 | `getDeliveryContacts` | const arrow | 952 |
+| 134 | `updateDeliveryContact` | const arrow | 960 |
+| 135 | `deleteDeliveryContact` | const arrow | 964 |
+| 136 | `getUsers` | const arrow | 974 |
+| 137 | `updateUser` | const arrow | 982 |
+| 138 | `getUserProfile` | const arrow | 986 |
+| 139 | `getUserAuthMethods` | const arrow | 990 |
+| 140 | `updateUserProfile` | const arrow | 994 |
+| 141 | `disconnectUserAuthProvider` | const arrow | 998 |
+| 142 | `changeUserPassword` | const arrow | 1002 |
+| 143 | `resetPassword` | const arrow | 1006 |
+| 144 | `getRoles` | const arrow | 1012 |
+| 145 | `updateRole` | const arrow | 1020 |
+| 146 | `deleteRole` | const arrow | 1024 |
+| 147 | `getCustomTables` | const arrow | 1030 |
+| 148 | `getCustomTableData` | const arrow | 1038 |
+| 149 | `insertCustomRow` | const arrow | 1042 |
+| 150 | `updateCustomRow` | const arrow | 1046 |
+| 151 | `deleteCustomRow` | const arrow | 1050 |
+| 152 | `getAuditLogs` | const arrow | 1056 |
+| 153 | `deleteAuditLogsRetention` | const arrow | 1061 |
+| 154 | `getIntegrationDoctor` | const arrow | 1082 |
+| 155 | `getGoogleDriveSyncStatus` | const arrow | 1107 |
+| 156 | `saveGoogleDriveSyncPreferences` | const arrow | 1112 |
+| 157 | `startGoogleDriveSyncOauth` | const arrow | 1117 |
+| 158 | `disconnectGoogleDriveSync` | const arrow | 1122 |
+| 159 | `forgetGoogleDriveSyncCredentials` | const arrow | 1127 |
+| 160 | `queueGoogleDriveSyncNow` | const arrow | 1132 |
+| 161 | `syncGoogleDriveNow` | const arrow | 1137 |
+| 162 | `openPath` | const arrow | 1202 |
+| 163 | `getReturns` | const arrow | 1206 |
+| 164 | `getReturn` | const arrow | 1218 |
+| 165 | `updateSaleStatus` | const arrow | 1224 |
+| 166 | `attachSaleCustomer` | const arrow | 1230 |
+| 167 | `getSalesExport` | const arrow | 1235 |
+| 168 | `updateReturn` | const arrow | 1239 |
+| 169 | `testSyncServer` | const arrow | 1246 |
+| 170 | `openFolderDialog` | const arrow | 1251 |
+| 171 | `getDataPath` | const arrow | 1255 |
+| 172 | `getScaleMigrationStatus` | const arrow | 1257 |
+| 173 | `prepareScaleMigration` | const arrow | 1259 |
+| 174 | `runScaleMigration` | const arrow | 1261 |
+| 175 | `browseDir` | const arrow | 1273 |
 
-### 3.32 `frontend/src/api/multipartHeaders.ts`
+### 3.31 `frontend/src/api/multipartHeaders.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.33 `frontend/src/api/notificationSummary.ts`
+### 3.32 `frontend/src/api/notificationSummary.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `buildNotificationSummaryFallback` | function | 12 |
 
-### 3.34 `frontend/src/api/offlineSnapshotTransport.ts`
+### 3.33 `frontend/src/api/offlineSnapshotTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -717,32 +711,32 @@ Total files documented: **265**
 | 6 | `runOfflineSnapshotStep` | function | 73 |
 | 7 | `previousMeta` | const arrow | 93 |
 
-### 3.35 `frontend/src/api/pendingSyncTransport.ts`
+### 3.34 `frontend/src/api/pendingSyncTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.36 `frontend/src/api/portalHttp.ts`
+### 3.35 `frontend/src/api/portalHttp.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.37 `frontend/src/api/portalTransport.ts`
+### 3.36 `frontend/src/api/portalTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `readJsonObject` | function | 18 |
 | 2 | `fetchPortalJson` | function | 22 |
 
-### 3.38 `frontend/src/api/productImageUploadTransport.ts`
+### 3.37 `frontend/src/api/productImageUploadTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `dataUrlToBlob` | function | 10 |
 
-### 3.39 `frontend/src/api/productReadTransport.ts`
+### 3.38 `frontend/src/api/productReadTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.40 `frontend/src/api/productWriteTransport.ts`
+### 3.39 `frontend/src/api/productWriteTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -750,21 +744,21 @@ Total files documented: **265**
 | 2 | `encodeId` | function | 13 |
 | 3 | `ensureSupplierExists` | function | 17 |
 
-### 3.41 `frontend/src/api/query.ts`
+### 3.40 `frontend/src/api/query.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `appendQueryValue` | function | 44 |
 
-### 3.42 `frontend/src/api/queryCache.ts`
+### 3.41 `frontend/src/api/queryCache.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.43 `frontend/src/api/requestIds.ts`
+### 3.42 `frontend/src/api/requestIds.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.44 `frontend/src/api/returnsTransport.ts`
+### 3.43 `frontend/src/api/returnsTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -774,14 +768,14 @@ Total files documented: **265**
 | 4 | `buildReturnNumber` | function | 35 |
 | 5 | `attachAttemptedReturnUpdate` | function | 39 |
 
-### 3.45 `frontend/src/api/rfidTransport.ts`
+### 3.44 `frontend/src/api/rfidTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getDevicePayload` | function | 7 |
 | 2 | `encodeId` | function | 11 |
 
-### 3.46 `frontend/src/api/salesTransport.ts`
+### 3.45 `frontend/src/api/salesTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -790,7 +784,7 @@ Total files documented: **265**
 | 3 | `getResultTimestamp` | function | 29 |
 | 4 | `attachAttempted` | function | 34 |
 
-### 3.47 `frontend/src/api/saleWriteTransport.ts`
+### 3.46 `frontend/src/api/saleWriteTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -811,7 +805,7 @@ Total files documented: **265**
 | 15 | `createSaleRequest` | function | 238 |
 | 16 | `createSaleWithoutWriteDedupe` | function | 247 |
 
-### 3.48 `frontend/src/api/settingsTransport.ts`
+### 3.47 `frontend/src/api/settingsTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -822,15 +816,15 @@ Total files documented: **265**
 | 5 | `getServerSettings` | function | 43 |
 | 6 | `saveSettingsOnce` | function | 64 |
 
-### 3.49 `frontend/src/api/syncPreview.ts`
+### 3.48 `frontend/src/api/syncPreview.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.50 `frontend/src/api/syncRuntime.ts`
+### 3.49 `frontend/src/api/syncRuntime.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.51 `frontend/src/api/systemJobs.ts`
+### 3.50 `frontend/src/api/systemJobs.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -838,21 +832,21 @@ Total files documented: **265**
 | 2 | `requireJobId` | function | 29 |
 | 3 | `unwrapSystemJob` | function | 35 |
 
-### 3.52 `frontend/src/api/systemRuntime.ts`
+### 3.51 `frontend/src/api/systemRuntime.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.53 `frontend/src/api/userAdminTransport.ts`
+### 3.52 `frontend/src/api/userAdminTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `encodeId` | function | 8 |
 
-### 3.54 `frontend/src/api/userReadTransport.ts`
+### 3.53 `frontend/src/api/userReadTransport.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.55 `frontend/src/api/websocket.ts`
+### 3.54 `frontend/src/api/websocket.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -865,7 +859,7 @@ Total files documented: **265**
 | 7 | `logWs` | function | 72 |
 | 8 | `scheduleReconnect` | function | 212 |
 
-### 3.56 `frontend/src/App.tsx`
+### 3.55 `frontend/src/App.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -955,21 +949,21 @@ Total files documented: **265**
 | 84 | `handleLocationChange` | const arrow | 1686 |
 | 85 | `processFavicon` | function | 1734 |
 
-### 3.57 `frontend/src/app/appShellUtils.ts`
+### 3.56 `frontend/src/app/appShellUtils.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.58 `frontend/src/app/pathRouting.ts`
+### 3.57 `frontend/src/app/pathRouting.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.59 `frontend/src/app/publicErrorRecovery.ts`
+### 3.58 `frontend/src/app/publicErrorRecovery.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getRecoveryStorage` | function | 6 |
 
-### 3.60 `frontend/src/AppContext.tsx`
+### 3.59 `frontend/src/AppContext.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1017,7 +1011,7 @@ Total files documented: **265**
 | 42 | `clearPendingLink` | const arrow | 1587 |
 | 43 | `run` | const arrow | 1591 |
 
-### 3.61 `frontend/src/components/auth/Login.tsx`
+### 3.60 `frontend/src/components/auth/Login.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1045,7 +1039,7 @@ Total files documented: **265**
 | 22 | `handleStartOauth` | const arrow | 739 |
 | 23 | `closeAuxMode` | const arrow | 787 |
 
-### 3.62 `frontend/src/components/branches/Branches.tsx`
+### 3.61 `frontend/src/components/branches/Branches.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1065,14 +1059,14 @@ Total files documented: **265**
 | 14 | `toggleSelect` | const arrow | 722 |
 | 15 | `toggleSelectAll` | const arrow | 731 |
 
-### 3.63 `frontend/src/components/branches/BranchForm.tsx`
+### 3.62 `frontend/src/components/branches/BranchForm.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `BranchForm` | component/function | 37 |
 | 2 | `handleSave` | const arrow | 57 |
 
-### 3.64 `frontend/src/components/branches/TransferModal.tsx`
+### 3.63 `frontend/src/components/branches/TransferModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1083,7 +1077,7 @@ Total files documented: **265**
 | 5 | `loadStock` | function | 165 |
 | 6 | `handleTransfer` | const arrow | 213 |
 
-### 3.65 `frontend/src/components/catalog/catalogAssetUrls.ts`
+### 3.64 `frontend/src/components/catalog/catalogAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1095,20 +1089,20 @@ Total files documented: **265**
 | 6 | `api` | const arrow | 40 |
 | 7 | `appendAssetVersion` | function | 51 |
 
-### 3.66 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
+### 3.65 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `toAiProviderOptions` | function | 118 |
 | 2 | `CatalogEditorSurface` | component/function | 215 |
 
-### 3.67 `frontend/src/components/catalog/CatalogImageField.tsx`
+### 3.66 `frontend/src/components/catalog/CatalogImageField.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `CatalogImageField` | component/function | 29 |
 
-### 3.68 `frontend/src/components/catalog/catalogImages.tsx`
+### 3.67 `frontend/src/components/catalog/catalogImages.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1118,7 +1112,7 @@ Total files documented: **265**
 | 4 | `CatalogProductImage` | component/function | 36 |
 | 5 | `loadImageData` | function | 78 |
 
-### 3.69 `frontend/src/components/catalog/CatalogPage.tsx`
+### 3.68 `frontend/src/components/catalog/CatalogPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1250,11 +1244,11 @@ Total files documented: **265**
 | 126 | `renderSecondaryTabSection` | function | 3408 |
 | 127 | `scrollPublicPortal` | const arrow | 3533 |
 
-### 3.70 `frontend/src/components/catalog/CatalogPageContext.tsx`
+### 3.69 `frontend/src/components/catalog/CatalogPageContext.tsx`
 
 - No top-level named function/class symbols detected.
 
-### 3.71 `frontend/src/components/catalog/catalogPagination.tsx`
+### 3.70 `frontend/src/components/catalog/catalogPagination.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1263,14 +1257,14 @@ Total files documented: **265**
 | 3 | `commitPageDraft` | const arrow | 62 |
 | 4 | `handlePageInputKeyDown` | const arrow | 73 |
 
-### 3.72 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
+### 3.71 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `CatalogPreviewSurface` | component/function | 113 |
 | 2 | `handlePortalTabClick` | const arrow | 151 |
 
-### 3.73 `frontend/src/components/catalog/CatalogProductsSection.tsx`
+### 3.72 `frontend/src/components/catalog/CatalogProductsSection.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1279,7 +1273,7 @@ Total files documented: **265**
 | 3 | `getProductInitial` | function | 137 |
 | 4 | `CatalogProductsSection` | component/function | 145 |
 
-### 3.74 `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
+### 3.73 `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1291,20 +1285,20 @@ Total files documented: **265**
 | 6 | `CatalogAiSection` | function | 901 |
 | 7 | `CatalogSecondaryTabs` | component/function | 1109 |
 
-### 3.75 `frontend/src/components/catalog/catalogUi.tsx`
+### 3.74 `frontend/src/components/catalog/catalogUi.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `statusClass` | function | 22 |
 
-### 3.76 `frontend/src/components/catalog/portalCatalogDisplay.ts`
+### 3.75 `frontend/src/components/catalog/portalCatalogDisplay.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `replaceRankVars` | function | 173 |
 | 2 | `normalizeRankBadgeLabel` | function | 177 |
 
-### 3.77 `frontend/src/components/catalog/portalContentI18n.ts`
+### 3.76 `frontend/src/components/catalog/portalContentI18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1323,22 +1317,22 @@ Total files documented: **265**
 | 13 | `localizeFaqItems` | function | 722 |
 | 14 | `getProductTranslationBlock` | function | 762 |
 
-### 3.78 `frontend/src/components/catalog/portalEditorUtils.ts`
+### 3.77 `frontend/src/components/catalog/portalEditorUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `isPlainObject` | function | 47 |
 | 2 | `toTrimmedString` | function | 51 |
 
-### 3.79 `frontend/src/components/catalog/portalLanguageOptions.ts`
+### 3.78 `frontend/src/components/catalog/portalLanguageOptions.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.80 `frontend/src/components/catalog/portalLanguagePacks.ts`
+### 3.79 `frontend/src/components/catalog/portalLanguagePacks.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.81 `frontend/src/components/catalog/portalTranslateController.ts`
+### 3.80 `frontend/src/components/catalog/portalTranslateController.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1347,13 +1341,13 @@ Total files documented: **265**
 | 3 | `initWidget` | const arrow | 216 |
 | 4 | `waitForWidget` | const arrow | 233 |
 
-### 3.82 `frontend/src/components/catalog/portalTranslationData.ts`
+### 3.81 `frontend/src/components/catalog/portalTranslationData.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `isPlainObject` | function | 3 |
 
-### 3.83 `frontend/src/components/contacts/ContactImportModal.tsx`
+### 3.82 `frontend/src/components/contacts/ContactImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1366,13 +1360,13 @@ Total files documented: **265**
 | 7 | `applyContactRulePreset` | const arrow | 232 |
 | 8 | `handleImport` | const arrow | 242 |
 
-### 3.84 `frontend/src/components/contacts/contactImportWorker.ts`
+### 3.83 `frontend/src/components/contacts/contactImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.85 `frontend/src/components/contacts/contactOptionUtils.ts`
+### 3.84 `frontend/src/components/contacts/contactOptionUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1380,7 +1374,7 @@ Total files documented: **265**
 | 2 | `readStringField` | function | 28 |
 | 3 | `normalizeOption` | function | 45 |
 
-### 3.86 `frontend/src/components/contacts/Contacts.tsx`
+### 3.85 `frontend/src/components/contacts/Contacts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1398,7 +1392,7 @@ Total files documented: **265**
 | 12 | `handleTypeSelected` | const arrow | 350 |
 | 13 | `handleImportDone` | const arrow | 355 |
 
-### 3.87 `frontend/src/components/contacts/CustomerFormModal.tsx`
+### 3.86 `frontend/src/components/contacts/CustomerFormModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1413,11 +1407,11 @@ Total files documented: **265**
 | 9 | `updateOption` | const arrow | 130 |
 | 10 | `handleSubmit` | const arrow | 131 |
 
-### 3.88 `frontend/src/components/contacts/customerMembershipNumber.ts`
+### 3.87 `frontend/src/components/contacts/customerMembershipNumber.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.89 `frontend/src/components/contacts/CustomersTab.tsx`
+### 3.88 `frontend/src/components/contacts/CustomersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1441,7 +1435,7 @@ Total files documented: **265**
 | 18 | `handleDelete` | const arrow | 564 |
 | 19 | `handleBulkDelete` | const arrow | 603 |
 
-### 3.90 `frontend/src/components/contacts/DeliveryTab.tsx`
+### 3.89 `frontend/src/components/contacts/DeliveryTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1474,7 +1468,7 @@ Total files documented: **265**
 | 27 | `handleDelete` | const arrow | 667 |
 | 28 | `handleBulkDelete` | const arrow | 704 |
 
-### 3.91 `frontend/src/components/contacts/shared.tsx`
+### 3.90 `frontend/src/components/contacts/shared.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1482,7 +1476,7 @@ Total files documented: **265**
 | 2 | `clearSelection` | const arrow | 111 |
 | 3 | `menuContent` | const arrow | 165 |
 
-### 3.92 `frontend/src/components/contacts/SuppliersTab.tsx`
+### 3.91 `frontend/src/components/contacts/SuppliersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1510,7 +1504,7 @@ Total files documented: **265**
 | 22 | `handleDelete` | const arrow | 627 |
 | 23 | `handleBulkDelete` | const arrow | 666 |
 
-### 3.93 `frontend/src/components/custom-tables/CustomTables.tsx`
+### 3.92 `frontend/src/components/custom-tables/CustomTables.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1534,7 +1528,7 @@ Total files documented: **265**
 | 18 | `openAddRow` | const arrow | 496 |
 | 19 | `openEditRow` | const arrow | 503 |
 
-### 3.94 `frontend/src/components/dashboard/charts/BarChart.tsx`
+### 3.93 `frontend/src/components/dashboard/charts/BarChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1544,17 +1538,17 @@ Total files documented: **265**
 | 4 | `updateWidth` | const arrow | 53 |
 | 5 | `yPx` | function | 89 |
 
-### 3.95 `frontend/src/components/dashboard/charts/DonutChart.tsx`
+### 3.94 `frontend/src/components/dashboard/charts/DonutChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `DonutChart` | component/function | 22 |
 
-### 3.96 `frontend/src/components/dashboard/charts/index.ts`
+### 3.95 `frontend/src/components/dashboard/charts/index.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.97 `frontend/src/components/dashboard/charts/LineChart.tsx`
+### 3.96 `frontend/src/components/dashboard/charts/LineChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1566,13 +1560,13 @@ Total files documented: **265**
 | 6 | `yPx` | function | 104 |
 | 7 | `handleMouseMove` | const arrow | 114 |
 
-### 3.98 `frontend/src/components/dashboard/charts/NoData.tsx`
+### 3.97 `frontend/src/components/dashboard/charts/NoData.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `NoData` | component/function | 7 |
 
-### 3.99 `frontend/src/components/dashboard/Dashboard.tsx`
+### 3.98 `frontend/src/components/dashboard/Dashboard.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1595,7 +1589,7 @@ Total files documented: **265**
 | 17 | `rangeLabel` | const arrow | 771 |
 | 18 | `periodShort` | const arrow | 777 |
 
-### 3.100 `frontend/src/components/dashboard/dashboardExport.ts`
+### 3.99 `frontend/src/components/dashboard/dashboardExport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1616,13 +1610,13 @@ Total files documented: **265**
 | 15 | `buildDashboardRecentRows` | function | 247 |
 | 16 | `hasDashboardExportData` | function | 258 |
 
-### 3.101 `frontend/src/components/dashboard/MiniStat.tsx`
+### 3.100 `frontend/src/components/dashboard/MiniStat.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `MiniStat` | component/function | 13 |
 
-### 3.102 `frontend/src/components/files/FilePickerModal.tsx`
+### 3.101 `frontend/src/components/files/FilePickerModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1635,7 +1629,7 @@ Total files documented: **265**
 | 7 | `handleUpload` | function | 173 |
 | 8 | `handleDelete` | function | 215 |
 
-### 3.103 `frontend/src/components/files/FilesPage.tsx`
+### 3.102 `frontend/src/components/files/FilesPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1667,7 +1661,7 @@ Total files documented: **265**
 | 26 | `testProvider` | function | 937 |
 | 27 | `removeProvider` | function | 958 |
 
-### 3.104 `frontend/src/components/files/FilesProvidersTab.tsx`
+### 3.103 `frontend/src/components/files/FilesProvidersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1676,19 +1670,19 @@ Total files documented: **265**
 | 3 | `ProviderStatus` | function | 130 |
 | 4 | `FilesProvidersTab` | component/function | 141 |
 
-### 3.105 `frontend/src/components/files/FilesResponsesTab.tsx`
+### 3.104 `frontend/src/components/files/FilesResponsesTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `FilesResponsesTab` | component/function | 64 |
 
-### 3.106 `frontend/src/components/inventory/DualMoney.tsx`
+### 3.105 `frontend/src/components/inventory/DualMoney.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `DualMoney` | component/function | 8 |
 
-### 3.107 `frontend/src/components/inventory/Inventory.tsx`
+### 3.106 `frontend/src/components/inventory/Inventory.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1724,7 +1718,7 @@ Total files documented: **265**
 | 30 | `statsValue` | const arrow | 2172 |
 | 31 | `selectInventorySection` | const arrow | 2898 |
 
-### 3.108 `frontend/src/components/inventory/inventoryExport.ts`
+### 3.107 `frontend/src/components/inventory/inventoryExport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1743,7 +1737,7 @@ Total files documented: **265**
 | 13 | `buildMovementRows` | function | 281 |
 | 14 | `buildInventoryProductRows` | function | 295 |
 
-### 3.109 `frontend/src/components/inventory/InventoryImportModal.tsx`
+### 3.108 `frontend/src/components/inventory/InventoryImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1757,19 +1751,19 @@ Total files documented: **265**
 | 8 | `handleDownloadTemplate` | const arrow | 181 |
 | 9 | `handleImport` | const arrow | 185 |
 
-### 3.110 `frontend/src/components/inventory/inventoryImportWorker.ts`
+### 3.109 `frontend/src/components/inventory/inventoryImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.111 `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
+### 3.110 `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `InventoryMovementsSurface` | component/function | 143 |
 
-### 3.112 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
+### 3.111 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1777,13 +1771,13 @@ Total files documented: **265**
 | 2 | `renderDesktopTableHead` | const arrow | 142 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 164 |
 
-### 3.113 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
+### 3.112 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `InventoryRfidSurface` | component/function | 55 |
 
-### 3.114 `frontend/src/components/inventory/movementGroups.ts`
+### 3.113 `frontend/src/components/inventory/movementGroups.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1799,14 +1793,14 @@ Total files documented: **265**
 | 10 | `movementAbsoluteValue` | function | 117 |
 | 11 | `parseMovementTime` | function | 123 |
 
-### 3.115 `frontend/src/components/inventory/ProductDetailModal.tsx`
+### 3.114 `frontend/src/components/inventory/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getBranchStockKey` | function | 61 |
 | 2 | `ProductDetailModal` | component/function | 65 |
 
-### 3.116 `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
+### 3.115 `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1822,7 +1816,7 @@ Total files documented: **265**
 | 10 | `handleSave` | function | 337 |
 | 11 | `handleLookup` | function | 361 |
 
-### 3.117 `frontend/src/components/navigation/Sidebar.tsx`
+### 3.116 `frontend/src/components/navigation/Sidebar.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1836,14 +1830,14 @@ Total files documented: **265**
 | 8 | `isNavigationItemWithIcon` | function | 150 |
 | 9 | `Sidebar` | component/function | 154 |
 
-### 3.118 `frontend/src/components/pos/CartItem.tsx`
+### 3.117 `frontend/src/components/pos/CartItem.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `translate` | function | 42 |
 | 2 | `CartItem` | component/function | 46 |
 
-### 3.119 `frontend/src/components/pos/FilterPanel.tsx`
+### 3.118 `frontend/src/components/pos/FilterPanel.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1853,7 +1847,7 @@ Total files documented: **265**
 | 4 | `clearAll` | const arrow | 100 |
 | 5 | `chip` | const arrow | 109 |
 
-### 3.120 `frontend/src/components/pos/POS.tsx`
+### 3.119 `frontend/src/components/pos/POS.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1909,13 +1903,13 @@ Total files documented: **265**
 | 50 | `handleMembershipUnits` | const arrow | 1545 |
 | 51 | `handleCheckout` | const arrow | 1584 |
 
-### 3.121 `frontend/src/components/pos/posCore.ts`
+### 3.120 `frontend/src/components/pos/posCore.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeNumber` | function | 48 |
 
-### 3.122 `frontend/src/components/pos/ProductImage.tsx`
+### 3.121 `frontend/src/components/pos/ProductImage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1925,18 +1919,18 @@ Total files documented: **265**
 | 4 | `ProductImage` | component/function | 34 |
 | 5 | `loadImageData` | function | 71 |
 
-### 3.123 `frontend/src/components/pos/QuickAddModal.tsx`
+### 3.122 `frontend/src/components/pos/QuickAddModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `QuickAddModal` | component/function | 12 |
 | 2 | `T` | const arrow | 13 |
 
-### 3.124 `frontend/src/components/products/config/productPageConfig.ts`
+### 3.123 `frontend/src/components/products/config/productPageConfig.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.125 `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
+### 3.124 `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1947,7 +1941,7 @@ Total files documented: **265**
 | 5 | `setRow` | const arrow | 109 |
 | 6 | `handleSave` | const arrow | 115 |
 
-### 3.126 `frontend/src/components/products/forms/BulkAddStockModal.tsx`
+### 3.125 `frontend/src/components/products/forms/BulkAddStockModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1958,7 +1952,7 @@ Total files documented: **265**
 | 5 | `BulkAddStockModal` | component/function | 89 |
 | 6 | `handleSave` | const arrow | 109 |
 
-### 3.127 `frontend/src/components/products/forms/ProductForm.tsx`
+### 3.126 `frontend/src/components/products/forms/ProductForm.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1982,7 +1976,7 @@ Total files documented: **265**
 | 18 | `closeScanner` | function | 581 |
 | 19 | `applyScannedValue` | function | 585 |
 
-### 3.128 `frontend/src/components/products/forms/VariantFormModal.tsx`
+### 3.127 `frontend/src/components/products/forms/VariantFormModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -1990,13 +1984,13 @@ Total files documented: **265**
 | 2 | `getErrorMessage` | function | 109 |
 | 3 | `VariantFormModal` | component/function | 113 |
 
-### 3.129 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
+### 3.128 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `toNumber` | function | 57 |
 
-### 3.130 `frontend/src/components/products/helpers/productExport.ts`
+### 3.129 `frontend/src/components/products/helpers/productExport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2006,22 +2000,22 @@ Total files documented: **265**
 | 4 | `toImageUrl` | const arrow | 60 |
 | 5 | `priceCsv` | const arrow | 61 |
 
-### 3.131 `frontend/src/components/products/helpers/productFilterHelpers.ts`
+### 3.130 `frontend/src/components/products/helpers/productFilterHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `toNumber` | function | 43 |
 | 2 | `normalizeFilterValue` | function | 48 |
 
-### 3.132 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
+### 3.131 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.133 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
+### 3.132 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.134 `frontend/src/components/products/helpers/productMenuHelpers.ts`
+### 3.133 `frontend/src/components/products/helpers/productMenuHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2029,15 +2023,15 @@ Total files documented: **265**
 | 2 | `normalizeOptionValue` | function | 89 |
 | 3 | `safeFilterLabel` | function | 93 |
 
-### 3.135 `frontend/src/components/products/helpers/productPageHelpers.ts`
+### 3.134 `frontend/src/components/products/helpers/productPageHelpers.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.136 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
+### 3.135 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.137 `frontend/src/components/products/helpers/productWriteHelpers.ts`
+### 3.136 `frontend/src/components/products/helpers/productWriteHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2045,11 +2039,11 @@ Total files documented: **265**
 | 2 | `hasBulkFormValue` | function | 128 |
 | 3 | `stringOrEmpty` | function | 132 |
 
-### 3.138 `frontend/src/components/products/history/productHistoryHelpers.ts`
+### 3.137 `frontend/src/components/products/history/productHistoryHelpers.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.139 `frontend/src/components/products/import/BulkImportModal.tsx`
+### 3.138 `frontend/src/components/products/import/BulkImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2105,7 +2099,7 @@ Total files documented: **265**
 | 50 | `renderConflictRow` | const arrow | 1571 |
 | 51 | `updateEditedRow` | const arrow | 1579 |
 
-### 3.140 `frontend/src/components/products/import/productImportPlanner.ts`
+### 3.139 `frontend/src/components/products/import/productImportPlanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2121,7 +2115,7 @@ Total files documented: **265**
 | 10 | `buildImportedIdentifierIndex` | function | 320 |
 | 11 | `buildProductImportReviewGroups` | function | 336 |
 
-### 3.141 `frontend/src/components/products/import/productImportWorker.ts`
+### 3.140 `frontend/src/components/products/import/productImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2129,7 +2123,7 @@ Total files documented: **265**
 | 2 | `waitForNextTask` | function | 43 |
 | 3 | `getErrorMessage` | function | 49 |
 
-### 3.142 `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
+### 3.141 `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2144,7 +2138,7 @@ Total files documented: **265**
 | 9 | `buildSavedLibrary` | function | 176 |
 | 10 | `ManageBrandsModal` | component/function | 198 |
 
-### 3.143 `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
+### 3.142 `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2154,7 +2148,7 @@ Total files documented: **265**
 | 4 | `mergeCategoryUsage` | function | 129 |
 | 5 | `ManageCategoriesModal` | component/function | 158 |
 
-### 3.144 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
+### 3.143 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2164,7 +2158,7 @@ Total files documented: **265**
 | 4 | `mergeUnitUsage` | function | 129 |
 | 5 | `ManageUnitsModal` | component/function | 158 |
 
-### 3.145 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
+### 3.144 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2176,7 +2170,7 @@ Total files documented: **265**
 | 6 | `fetchLookupProductSnapshotsForName` | function | 113 |
 | 7 | `fetchProductsByIds` | function | 165 |
 
-### 3.146 `frontend/src/components/products/Products.tsx`
+### 3.145 `frontend/src/components/products/Products.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2211,7 +2205,7 @@ Total files documented: **265**
 | 29 | `openLightbox` | const arrow | 1188 |
 | 30 | `getStockBadge` | const arrow | 1195 |
 
-### 3.147 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
+### 3.146 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2220,7 +2214,7 @@ Total files documented: **265**
 | 3 | `loadImageSource` | function | 66 |
 | 4 | `detectWithNativeBarcodeDetector` | function | 75 |
 
-### 3.148 `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
+### 3.147 `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2229,11 +2223,11 @@ Total files documented: **265**
 | 3 | `stopStream` | function | 112 |
 | 4 | `BarcodeScannerModal` | component/function | 118 |
 
-### 3.149 `frontend/src/components/products/scanning/barcodeScannerState.ts`
+### 3.148 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.150 `frontend/src/components/products/scanning/cameraPermission.ts`
+### 3.149 `frontend/src/components/products/scanning/cameraPermission.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2241,7 +2235,7 @@ Total files documented: **265**
 | 2 | `queryCameraPermission` | function | 16 |
 | 3 | `handleChange` | const arrow | 35 |
 
-### 3.151 `frontend/src/components/products/scanning/scanbotScanner.ts`
+### 3.150 `frontend/src/components/products/scanning/scanbotScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2251,7 +2245,7 @@ Total files documented: **265**
 | 4 | `loadScanbotScript` | function | 82 |
 | 5 | `getInitializedScanbot` | function | 135 |
 
-### 3.152 `frontend/src/components/products/shared/primitives.tsx`
+### 3.151 `frontend/src/components/products/shared/primitives.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2268,14 +2262,14 @@ Total files documented: **265**
 | 11 | `handleUsdChange` | const arrow | 211 |
 | 12 | `handleKhrChange` | const arrow | 212 |
 
-### 3.153 `frontend/src/components/products/surfaces/HeaderActions.tsx`
+### 3.152 `frontend/src/components/products/surfaces/HeaderActions.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `ProductsHeaderActions` | component/function | 22 |
 | 2 | `tr` | const arrow | 32 |
 
-### 3.154 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
+### 3.153 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2283,13 +2277,13 @@ Total files documented: **265**
 | 2 | `T` | const arrow | 95 |
 | 3 | `Row` | const arrow | 121 |
 
-### 3.155 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
+### 3.154 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `label` | const arrow | 104 |
 
-### 3.156 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
+### 3.155 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2297,7 +2291,7 @@ Total files documented: **265**
 | 2 | `renderDesktopTableHead` | const arrow | 105 |
 | 3 | `renderDesktopLoadingShell` | const arrow | 134 |
 
-### 3.157 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
+### 3.156 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2306,19 +2300,19 @@ Total files documented: **265**
 | 3 | `T` | const arrow | 49 |
 | 4 | `toggleSection` | const arrow | 68 |
 
-### 3.158 `frontend/src/components/receipt-settings/constants.ts`
+### 3.157 `frontend/src/components/receipt-settings/constants.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `T` | const arrow | 110 |
 
-### 3.159 `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
+### 3.158 `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `formatError` | function | 11 |
 
-### 3.160 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
+### 3.159 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2332,7 +2326,7 @@ Total files documented: **265**
 | 8 | `handleDragStart` | const arrow | 112 |
 | 9 | `handleDragOver` | const arrow | 117 |
 
-### 3.161 `frontend/src/components/receipt-settings/PrintSettings.tsx`
+### 3.160 `frontend/src/components/receipt-settings/PrintSettings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2345,7 +2339,7 @@ Total files documented: **265**
 | 7 | `resetMargins` | const arrow | 125 |
 | 8 | `getPreviewSource` | const arrow | 148 |
 
-### 3.162 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
+### 3.161 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2353,7 +2347,7 @@ Total files documented: **265**
 | 2 | `ReceiptPreview` | component/function | 39 |
 | 3 | `loadPreview` | function | 50 |
 
-### 3.163 `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
+### 3.162 `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2362,14 +2356,14 @@ Total files documented: **265**
 | 3 | `Toggle` | function | 96 |
 | 4 | `ReceiptSettings` | component/function | 111 |
 
-### 3.164 `frontend/src/components/receipt-settings/template.ts`
+### 3.163 `frontend/src/components/receipt-settings/template.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `isRecord` | function | 6 |
 | 2 | `parseTemplateInput` | function | 10 |
 
-### 3.165 `frontend/src/components/receipt/Receipt.tsx`
+### 3.164 `frontend/src/components/receipt/Receipt.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2386,7 +2380,7 @@ Total files documented: **265**
 | 11 | `Receipt` | component/function | 234 |
 | 12 | `exportReceiptPdf` | const arrow | 450 |
 
-### 3.166 `frontend/src/components/returns/EditReturnModal.tsx`
+### 3.165 `frontend/src/components/returns/EditReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2398,7 +2392,7 @@ Total files documented: **265**
 | 6 | `updateQty` | const arrow | 145 |
 | 7 | `updateRestock` | const arrow | 148 |
 
-### 3.167 `frontend/src/components/returns/NewReturnModal.tsx`
+### 3.166 `frontend/src/components/returns/NewReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2416,7 +2410,7 @@ Total files documented: **265**
 | 12 | `clearAll` | const arrow | 266 |
 | 13 | `handleSubmit` | const arrow | 273 |
 
-### 3.168 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
+### 3.167 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2428,7 +2422,7 @@ Total files documented: **265**
 | 6 | `updateQty` | const arrow | 278 |
 | 7 | `submit` | const arrow | 284 |
 
-### 3.169 `frontend/src/components/returns/ReturnDetailModal.tsx`
+### 3.168 `frontend/src/components/returns/ReturnDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2437,7 +2431,7 @@ Total files documented: **265**
 | 3 | `isPositiveMoney` | function | 60 |
 | 4 | `ReturnDetailModal` | component/function | 64 |
 
-### 3.170 `frontend/src/components/returns/Returns.tsx`
+### 3.169 `frontend/src/components/returns/Returns.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2454,7 +2448,7 @@ Total files documented: **265**
 | 11 | `Returns` | component/function | 230 |
 | 12 | `promise` | const arrow | 304 |
 
-### 3.171 `frontend/src/components/returns/ReturnsListSurface.tsx`
+### 3.170 `frontend/src/components/returns/ReturnsListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2464,7 +2458,7 @@ Total files documented: **265**
 | 4 | `ReturnsListSurface` | component/function | 113 |
 | 5 | `apply` | const arrow | 144 |
 
-### 3.172 `frontend/src/components/sales/ExportModal.tsx`
+### 3.171 `frontend/src/components/sales/ExportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2474,7 +2468,7 @@ Total files documented: **265**
 | 4 | `handlePreview` | const arrow | 154 |
 | 5 | `handleExportCSV` | const arrow | 172 |
 
-### 3.173 `frontend/src/components/sales/SaleDetailModal.tsx`
+### 3.172 `frontend/src/components/sales/SaleDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2483,7 +2477,7 @@ Total files documented: **265**
 | 3 | `parseItems` | function | 95 |
 | 4 | `SaleDetailModal` | component/function | 106 |
 
-### 3.174 `frontend/src/components/sales/Sales.tsx`
+### 3.173 `frontend/src/components/sales/Sales.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2504,7 +2498,7 @@ Total files documented: **265**
 | 15 | `toggleSelectAll` | const arrow | 660 |
 | 16 | `handleBulkStatusUpdate` | const arrow | 736 |
 
-### 3.175 `frontend/src/components/sales/SalesImportModal.tsx`
+### 3.174 `frontend/src/components/sales/SalesImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2517,27 +2511,27 @@ Total files documented: **265**
 | 7 | `handleDownloadTemplate` | const arrow | 169 |
 | 8 | `handleImport` | const arrow | 173 |
 
-### 3.176 `frontend/src/components/sales/salesImportWorker.ts`
+### 3.175 `frontend/src/components/sales/salesImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.177 `frontend/src/components/sales/SalesListSurface.tsx`
+### 3.176 `frontend/src/components/sales/SalesListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getSaleItems` | function | 67 |
 | 2 | `SalesListSurface` | component/function | 71 |
 
-### 3.178 `frontend/src/components/sales/StatusBadge.tsx`
+### 3.177 `frontend/src/components/sales/StatusBadge.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `isSaleStatus` | function | 24 |
 | 2 | `StatusBadge` | component/function | 50 |
 
-### 3.179 `frontend/src/components/server/ServerPage.tsx`
+### 3.178 `frontend/src/components/server/ServerPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2563,7 +2557,7 @@ Total files documented: **265**
 | 20 | `handleSave` | function | 795 |
 | 21 | `handleDisconnect` | function | 802 |
 
-### 3.180 `frontend/src/components/shared/ActionHistoryBar.tsx`
+### 3.179 `frontend/src/components/shared/ActionHistoryBar.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2571,7 +2565,7 @@ Total files documented: **265**
 | 2 | `formatServerStatus` | function | 55 |
 | 3 | `ActionHistoryBar` | component/function | 62 |
 
-### 3.181 `frontend/src/components/shared/AppSelect.tsx`
+### 3.180 `frontend/src/components/shared/AppSelect.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2584,7 +2578,7 @@ Total files documented: **265**
 | 7 | `moveActive` | const arrow | 121 |
 | 8 | `handleKeyDown` | const arrow | 131 |
 
-### 3.182 `frontend/src/components/shared/BackgroundImportTracker.tsx`
+### 3.181 `frontend/src/components/shared/BackgroundImportTracker.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2610,13 +2604,13 @@ Total files documented: **265**
 | 20 | `handleRemove` | const arrow | 508 |
 | 21 | `handleDismiss` | const arrow | 546 |
 
-### 3.183 `frontend/src/components/shared/ExportMenu.tsx`
+### 3.182 `frontend/src/components/shared/ExportMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `ExportMenu` | component/function | 17 |
 
-### 3.184 `frontend/src/components/shared/FilterMenu.tsx`
+### 3.183 `frontend/src/components/shared/FilterMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2625,7 +2619,7 @@ Total files documented: **265**
 | 3 | `resolveSectionLabel` | function | 73 |
 | 4 | `FilterMenu` | component/function | 82 |
 
-### 3.185 `frontend/src/components/shared/globalScroll.ts`
+### 3.184 `frontend/src/components/shared/globalScroll.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2633,7 +2627,7 @@ Total files documented: **265**
 | 2 | `getPageScrollCandidates` | function | 25 |
 | 3 | `isVisibleScrollNode` | function | 38 |
 
-### 3.186 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
+### 3.185 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2643,29 +2637,29 @@ Total files documented: **265**
 | 4 | `renderGalleryImage` | function | 63 |
 | 5 | `onKeyDown` | function | 70 |
 
-### 3.187 `frontend/src/components/shared/LazyPortalMenu.tsx`
+### 3.186 `frontend/src/components/shared/LazyPortalMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `LazyPortalMenu` | component/function | 7 |
 
-### 3.188 `frontend/src/components/shared/LoadingWatchdog.tsx`
+### 3.187 `frontend/src/components/shared/LoadingWatchdog.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `LoadingWatchdog` | component/function | 14 |
 
-### 3.189 `frontend/src/components/shared/Modal.tsx`
+### 3.188 `frontend/src/components/shared/Modal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `Modal` | component/function | 13 |
 
-### 3.190 `frontend/src/components/shared/navigationConfig.ts`
+### 3.189 `frontend/src/components/shared/navigationConfig.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.191 `frontend/src/components/shared/NotificationCenter.tsx`
+### 3.190 `frontend/src/components/shared/NotificationCenter.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2679,17 +2673,17 @@ Total files documented: **265**
 | 8 | `onVisible` | const arrow | 382 |
 | 9 | `handleClickOutside` | const arrow | 405 |
 
-### 3.192 `frontend/src/components/shared/pageActivity.ts`
+### 3.191 `frontend/src/components/shared/pageActivity.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.193 `frontend/src/components/shared/PageHeader.tsx`
+### 3.192 `frontend/src/components/shared/PageHeader.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `PageHeader` | component/function | 26 |
 
-### 3.194 `frontend/src/components/shared/PaginationControls.tsx`
+### 3.193 `frontend/src/components/shared/PaginationControls.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2697,7 +2691,7 @@ Total files documented: **265**
 | 2 | `commitPageDraft` | const arrow | 73 |
 | 3 | `handlePageInputKeyDown` | const arrow | 84 |
 
-### 3.195 `frontend/src/components/shared/PortalMenu.tsx`
+### 3.194 `frontend/src/components/shared/PortalMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2708,7 +2702,7 @@ Total files documented: **265**
 | 5 | `scheduleReposition` | const arrow | 134 |
 | 6 | `closeIfEscape` | const arrow | 141 |
 
-### 3.196 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
+### 3.195 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2716,7 +2710,7 @@ Total files documented: **265**
 | 2 | `QuickPreferenceToggles` | component/function | 45 |
 | 3 | `tr` | const arrow | 48 |
 
-### 3.197 `frontend/src/components/shared/SectionSwitcher.tsx`
+### 3.196 `frontend/src/components/shared/SectionSwitcher.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2724,7 +2718,7 @@ Total files documented: **265**
 | 2 | `SectionSwitcher` | component/function | 29 |
 | 3 | `selectValue` | const arrow | 58 |
 
-### 3.198 `frontend/src/components/shared/WriteConflictModal.tsx`
+### 3.197 `frontend/src/components/shared/WriteConflictModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2739,11 +2733,11 @@ Total files documented: **265**
 | 9 | `getConflictFieldRows` | function | 132 |
 | 10 | `WriteConflictModal` | component/function | 226 |
 
-### 3.199 `frontend/src/components/users/permissionDefinitions.ts`
+### 3.198 `frontend/src/components/users/permissionDefinitions.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.200 `frontend/src/components/users/PermissionEditor.tsx`
+### 3.199 `frontend/src/components/users/PermissionEditor.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2751,7 +2745,7 @@ Total files documented: **265**
 | 2 | `PermissionEditor` | component/function | 25 |
 | 3 | `toggle` | const arrow | 40 |
 
-### 3.201 `frontend/src/components/users/UserDetailSheet.tsx`
+### 3.200 `frontend/src/components/users/UserDetailSheet.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2760,7 +2754,7 @@ Total files documented: **265**
 | 3 | `parsePermissions` | function | 60 |
 | 4 | `UserDetailSheet` | component/function | 71 |
 
-### 3.202 `frontend/src/components/users/UserProfileModal.tsx`
+### 3.201 `frontend/src/components/users/UserProfileModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2779,7 +2773,7 @@ Total files documented: **265**
 | 13 | `handleSessionSave` | const arrow | 686 |
 | 14 | `refreshOtpState` | const arrow | 706 |
 
-### 3.203 `frontend/src/components/users/Users.tsx`
+### 3.202 `frontend/src/components/users/Users.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2802,7 +2796,7 @@ Total files documented: **265**
 | 17 | `handleResetPassword` | const arrow | 678 |
 | 18 | `handleSaveRole` | const arrow | 735 |
 
-### 3.204 `frontend/src/components/utils-settings/AuditLog.tsx`
+### 3.203 `frontend/src/components/utils-settings/AuditLog.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2827,7 +2821,7 @@ Total files documented: **265**
 | 19 | `AuditLog` | component/function | 300 |
 | 20 | `sessionEntryLabel` | function | 694 |
 
-### 3.205 `frontend/src/components/utils-settings/Backup.tsx`
+### 3.204 `frontend/src/components/utils-settings/Backup.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2866,17 +2860,17 @@ Total files documented: **265**
 | 33 | `handleFolderExport` | const arrow | 1449 |
 | 34 | `handleFolderImport` | const arrow | 1518 |
 
-### 3.206 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
+### 3.205 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `FontFamilyPicker` | component/function | 30 |
 
-### 3.207 `frontend/src/components/utils-settings/index.ts`
+### 3.206 `frontend/src/components/utils-settings/index.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.208 `frontend/src/components/utils-settings/OtpModal.tsx`
+### 3.207 `frontend/src/components/utils-settings/OtpModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2885,7 +2879,7 @@ Total files documented: **265**
 | 3 | `OtpModal` | component/function | 53 |
 | 4 | `loadSetup` | function | 88 |
 
-### 3.209 `frontend/src/components/utils-settings/ResetData.tsx`
+### 3.208 `frontend/src/components/utils-settings/ResetData.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2900,7 +2894,7 @@ Total files documented: **265**
 | 9 | `T` | const arrow | 266 |
 | 10 | `doFactoryReset` | function | 273 |
 
-### 3.210 `frontend/src/components/utils-settings/Settings.tsx`
+### 3.209 `frontend/src/components/utils-settings/Settings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2932,17 +2926,17 @@ Total files documented: **265**
 | 26 | `uploadImageSetting` | const arrow | 822 |
 | 27 | `handleSaveSettings` | const arrow | 889 |
 
-### 3.211 `frontend/src/components/utils-settings/settingsConflict.ts`
+### 3.210 `frontend/src/components/utils-settings/settingsConflict.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeObject` | function | 28 |
 
-### 3.212 `frontend/src/constants.ts`
+### 3.211 `frontend/src/constants.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.213 `frontend/src/index.tsx`
+### 3.212 `frontend/src/index.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2959,7 +2953,7 @@ Total files documented: **265**
 | 11 | `stopKnownStartupNoise` | const arrow | 164 |
 | 12 | `scheduleFormFieldAccessibility` | function | 199 |
 
-### 3.214 `frontend/src/platform/runtime/clientRuntime.ts`
+### 3.213 `frontend/src/platform/runtime/clientRuntime.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2973,11 +2967,11 @@ Total files documented: **265**
 | 8 | `clearStorage` | function | 190 |
 | 9 | `restoreStorage` | function | 203 |
 
-### 3.215 `frontend/src/platform/storage/storagePolicy.ts`
+### 3.214 `frontend/src/platform/storage/storagePolicy.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.216 `frontend/src/public-runtime/runtime-noise-guard.ts`
+### 3.215 `frontend/src/public-runtime/runtime-noise-guard.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -2990,7 +2984,7 @@ Total files documented: **265**
 | 7 | `guardedInsertRule` | const function | 89 |
 | 8 | `guardedCssRulesGetter` | const function | 104 |
 
-### 3.217 `frontend/src/public-runtime/service-worker.ts`
+### 3.216 `frontend/src/public-runtime/service-worker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3019,7 +3013,7 @@ Total files documented: **265**
 | 23 | `appShellFallback` | function | 370 |
 | 24 | `networkFirstStatic` | function | 389 |
 
-### 3.218 `frontend/src/public-runtime/theme-bootstrap.ts`
+### 3.217 `frontend/src/public-runtime/theme-bootstrap.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3039,21 +3033,21 @@ Total files documented: **265**
 | 14 | `safeInsertRule` | const function | 132 |
 | 15 | `safeCssRulesGetter` | const function | 147 |
 
-### 3.219 `frontend/src/public-web-api.ts`
+### 3.218 `frontend/src/public-web-api.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `loadPortalTransport` | function | 18 |
 | 2 | `getPortalMethod` | function | 23 |
 
-### 3.220 `frontend/src/PublicCatalogRoot.tsx`
+### 3.219 `frontend/src/PublicCatalogRoot.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `PublicCatalogFallback` | function | 6 |
 | 2 | `PublicCatalogRoot` | component/function | 16 |
 
-### 3.221 `frontend/src/runtime/runtimeErrorClassifier.ts`
+### 3.220 `frontend/src/runtime/runtimeErrorClassifier.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3063,25 +3057,25 @@ Total files documented: **265**
 | 4 | `includesExtensionOrigin` | function | 39 |
 | 5 | `getPathname` | function | 44 |
 
-### 3.222 `frontend/src/types/lucide-react-icons.d.ts`
+### 3.221 `frontend/src/types/lucide-react-icons.d.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.223 `frontend/src/types/receiptContracts.ts`
+### 3.222 `frontend/src/types/receiptContracts.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.224 `frontend/src/types/settingsContracts.ts`
+### 3.223 `frontend/src/types/settingsContracts.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.225 `frontend/src/utils/actionGuards.ts`
+### 3.224 `frontend/src/utils/actionGuards.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `hasOwn` | function | 18 |
 
-### 3.226 `frontend/src/utils/actionHistory.ts`
+### 3.225 `frontend/src/utils/actionHistory.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3091,24 +3085,24 @@ Total files documented: **265**
 | 4 | `parsePermissions` | function | 107 |
 | 5 | `getErrorMessage` | function | 119 |
 
-### 3.227 `frontend/src/utils/appRefresh.ts`
+### 3.226 `frontend/src/utils/appRefresh.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.228 `frontend/src/utils/bulkOps.ts`
+### 3.227 `frontend/src/utils/bulkOps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `runner` | function | 47 |
 
-### 3.229 `frontend/src/utils/color.ts`
+### 3.228 `frontend/src/utils/color.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeHex` | function | 1 |
 | 2 | `relativeLuminance` | function | 12 |
 
-### 3.230 `frontend/src/utils/csv.ts`
+### 3.229 `frontend/src/utils/csv.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3121,13 +3115,13 @@ Total files documented: **265**
 | 7 | `toBlobPart` | function | 94 |
 | 8 | `encodeZipTimestamp` | function | 100 |
 
-### 3.231 `frontend/src/utils/csvExportWorker.ts`
+### 3.230 `frontend/src/utils/csvExportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getErrorMessage` | function | 20 |
 
-### 3.232 `frontend/src/utils/csvImport.ts`
+### 3.231 `frontend/src/utils/csvImport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3140,34 +3134,34 @@ Total files documented: **265**
 | 7 | `removeCurrencyNoise` | function | 237 |
 | 8 | `normalizeNumberSeparators` | function | 244 |
 
-### 3.233 `frontend/src/utils/csvRowCounter.ts`
+### 3.232 `frontend/src/utils/csvRowCounter.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `finishRecord` | const arrow | 7 |
 
-### 3.234 `frontend/src/utils/csvTemplate.ts`
+### 3.233 `frontend/src/utils/csvTemplate.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.235 `frontend/src/utils/dateHelpers.ts`
+### 3.234 `frontend/src/utils/dateHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `toLocalDateString` | function | 4 |
 
-### 3.236 `frontend/src/utils/deviceInfo.ts`
+### 3.235 `frontend/src/utils/deviceInfo.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getBrowserName` | function | 13 |
 | 2 | `getOperatingSystemName` | function | 21 |
 
-### 3.237 `frontend/src/utils/exportPackage.ts`
+### 3.236 `frontend/src/utils/exportPackage.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.238 `frontend/src/utils/exportReports.tsx`
+### 3.237 `frontend/src/utils/exportReports.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3180,7 +3174,7 @@ Total files documented: **265**
 | 7 | `renderTables` | function | 340 |
 | 8 | `renderNotes` | function | 374 |
 
-### 3.239 `frontend/src/utils/favicon.ts`
+### 3.238 `frontend/src/utils/favicon.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3188,13 +3182,13 @@ Total files documented: **265**
 | 2 | `shouldUseAnonymousCors` | function | 18 |
 | 3 | `loadImage` | function | 29 |
 
-### 3.240 `frontend/src/utils/formatters.ts`
+### 3.239 `frontend/src/utils/formatters.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeTimestampInput` | function | 6 |
 
-### 3.241 `frontend/src/utils/groupedRecords.ts`
+### 3.240 `frontend/src/utils/groupedRecords.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3202,11 +3196,11 @@ Total files documented: **265**
 | 2 | `normalizeName` | function | 56 |
 | 3 | `compareAlphabetLabels` | function | 64 |
 
-### 3.242 `frontend/src/utils/historyHelpers.ts`
+### 3.241 `frontend/src/utils/historyHelpers.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.243 `frontend/src/utils/importJobRefresh.ts`
+### 3.242 `frontend/src/utils/importJobRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3215,39 +3209,39 @@ Total files documented: **265**
 | 3 | `uniqueChannels` | function | 32 |
 | 4 | `dispatchSyncUpdate` | function | 41 |
 
-### 3.244 `frontend/src/utils/index.ts`
+### 3.243 `frontend/src/utils/index.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.245 `frontend/src/utils/initials.ts`
+### 3.244 `frontend/src/utils/initials.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `getInitialRank` | function | 54 |
 
-### 3.246 `frontend/src/utils/loaders.ts`
+### 3.245 `frontend/src/utils/loaders.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.247 `frontend/src/utils/mediaUpload.ts`
+### 3.246 `frontend/src/utils/mediaUpload.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.248 `frontend/src/utils/mediaUploadState.ts`
+### 3.247 `frontend/src/utils/mediaUploadState.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.249 `frontend/src/utils/permissions.ts`
+### 3.248 `frontend/src/utils/permissions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `isPermissionMap` | function | 3 |
 
-### 3.250 `frontend/src/utils/pricing.ts`
+### 3.249 `frontend/src/utils/pricing.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.251 `frontend/src/utils/printReceipt.ts`
+### 3.250 `frontend/src/utils/printReceipt.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3287,13 +3281,13 @@ Total files documented: **265**
 | 34 | `renderPdfBlob` | const arrow | 1058 |
 | 35 | `extractReceiptLines` | function | 1114 |
 
-### 3.252 `frontend/src/utils/productBatches.ts`
+### 3.251 `frontend/src/utils/productBatches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeBranchId` | function | 26 |
 
-### 3.253 `frontend/src/utils/productGrouping.ts`
+### 3.252 `frontend/src/utils/productGrouping.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3307,7 +3301,7 @@ Total files documented: **265**
 | 8 | `compareProductsWithinGroup` | function | 140 |
 | 9 | `resolveGroupKey` | function | 155 |
 
-### 3.254 `frontend/src/utils/publicAssetUrls.ts`
+### 3.253 `frontend/src/utils/publicAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3318,27 +3312,27 @@ Total files documented: **265**
 | 5 | `getSafeCurrentOrigin` | function | 42 |
 | 6 | `api` | const arrow | 57 |
 
-### 3.255 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.254 `frontend/src/utils/receiptAppliedConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `parseObject` | function | 67 |
 
-### 3.256 `frontend/src/utils/scriptTypography.ts`
+### 3.255 `frontend/src/utils/scriptTypography.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.257 `frontend/src/utils/settingsRefresh.ts`
+### 3.256 `frontend/src/utils/settingsRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
 | 1 | `normalizeSettingKeys` | function | 62 |
 
-### 3.258 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.257 `frontend/src/utils/settingsWriteOptions.ts`
 
 - No top-level named function/class symbols detected.
 
-### 3.259 `frontend/src/web-api.ts`
+### 3.258 `frontend/src/web-api.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3401,7 +3395,7 @@ Total files documented: **265**
 | 57 | `forwardServiceWorkerOutboxEvent` | function | 870 |
 | 58 | `forwardServiceWorkerAppEvent` | function | 958 |
 
-### 3.260 `ops/scripts/frontend/build-public-runtime-scripts.ts`
+### 3.259 `ops/scripts/frontend/build-public-runtime-scripts.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3411,7 +3405,7 @@ Total files documented: **265**
 | 4 | `writeIfChanged` | function | 67 |
 | 5 | `main` | function | 74 |
 
-### 3.261 `ops/scripts/frontend/verify-i18n.ts`
+### 3.260 `ops/scripts/frontend/verify-i18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3422,7 +3416,7 @@ Total files documented: **265**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.262 `ops/scripts/frontend/verify-performance.ts`
+### 3.261 `ops/scripts/frontend/verify-performance.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3431,7 +3425,7 @@ Total files documented: **265**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.263 `ops/scripts/frontend/verify-ui.ts`
+### 3.262 `ops/scripts/frontend/verify-ui.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3447,7 +3441,7 @@ Total files documented: **265**
 | 10 | `printAuditSummary` | function | 202 |
 | 11 | `main` | function | 220 |
 
-### 3.264 `frontend/vite.config.ts`
+### 3.263 `frontend/vite.config.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
@@ -3456,10 +3450,10 @@ Total files documented: **265**
 | 3 | `inlinePublicRuntimeScripts` | function | 59 |
 | 4 | `fixCrossorigin` | function | 84 |
 | 5 | `emitBuildManifest` | function | 109 |
-| 6 | `shouldDeferModulePreload` | function | 295 |
-| 7 | `manualChunks` | function | 299 |
+| 6 | `shouldDeferModulePreload` | function | 294 |
+| 7 | `manualChunks` | function | 298 |
 
-### 3.265 `frontend/tailwind.config.ts`
+### 3.264 `frontend/tailwind.config.ts`
 
 - No top-level named function/class symbols detected.
 

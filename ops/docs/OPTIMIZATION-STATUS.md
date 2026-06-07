@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 834, split legacy product image upload from file transport.
+- Latest completed move: Move 835, retire legacy access-control transport.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T06-11-54-954Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T07-19-19-252Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T06-12-36-483Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T07-20-03-531Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -79,6 +79,29 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 835 continues the startup/preload cleanup by retiring the obsolete
+  combined access-control wrapper after its behavior was split into narrower
+  user transports. The legacy `window.api.getUsers`
+  compatibility wrapper now lazy-loads the 906-byte `user-read-api` chunk,
+  while user profile, authentication-method, password, and role operations
+  lazy-load the 2,543-byte `user-admin-api` chunk. `frontend/vite.config.ts`
+  no longer emits or excludes the former access-control chunk because the
+  source module is gone. Build proof: production emitted `user-read-api` at 0.91 KB,
+  `user-admin-api` at 2.54 KB, `app-api-methods` at 25.24 KB,
+  `api-http-core` at 21.90 KB, and no former access-control asset; built
+  `index.html` has no eager preload entry for user read/admin chunks,
+  `app-api-methods`, or the retired access-control chunk. Verification proof:
+  focused API and performance tests, standalone frontend typecheck,
+  JSX/source check, full frontend utility suite, frontend production build,
+  backend utility suite, schema audit, organization audit, generated reference
+  refresh, Phase 29 audit, storage prune, local health check, and `npm.cmd
+  --prefix ops run phase84:live-suite -- --skip-rollback` passed. The in-app
+  Browser path was attempted first but remains blocked locally by the kernel
+  asset path error, so repo Playwright checks supplied browser proof: 66 UI
+  signals, zero relevant console messages, 20 public portal products, zero
+  failed responses/page errors, and post-live hygiene passed. Storage prune
+  removed 0 bytes because local/R2 backup retention, report retention, Docker
+  image retention, and log policies were already satisfied.
 - Move 834 continues the startup/preload cleanup by routing the legacy
   `window.api.uploadProductImage` wrapper through the focused
   `frontend/src/api/productImageUploadTransport.ts` chunk instead of the broad
@@ -214,16 +237,16 @@ Latest cleanup run:
   focused transports keep owning their real behavior:
   `productReadTransport.ts` owns product search/bootstrap/lookup replacement,
   `lookupTransport.ts` owns category/unit route mirroring and expected-update
-  writes, `accessControlTransport.ts` owns Users/Roles reads and mutations, and
+  writes, the then-current access-control transport owned Users/Roles reads and mutations, and
   `customTablesTransport.ts` owns custom-table row access. Build wiring now
-  gives access control and custom tables named `access-control-api` and
+  gave access control and custom tables named access-control and
   `custom-tables-api` intent chunks and excludes both from eager module
   preload. Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
   frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
   the full frontend utility suite, frontend production build, generated
   reference refresh, Phase 29 audit, schema audit, organization audit, storage
   prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
-  -- --skip-rollback` passed. The build emitted `access-control-api` at 2.07
+  -- --skip-rollback` passed. The build emitted the then-current access-control chunk at 2.07
   KB, `custom-tables-api` at 1.28 KB, kept `product-read-api` as the focused
   7.00 KB lazy dependency, and reduced `app-api-methods` from 23.51 KB to
   23.26 KB while removing the static `product-read-api` import from the
@@ -2049,8 +2072,7 @@ Recent route-level win:
   36/46 controls tested, 10 long-label controls skipped by stable broad-audit
   guardrails, and zero findings.
 
-- Frontend access-control transport is now
-  `frontend/src/api/accessControlTransport.ts` with typed user, profile,
+- Frontend access-control transport was extracted as a typed user, profile,
   auth-method, password, role, and permission-management transport. Actor
   attribution, mirrored user/role fallbacks, encoded row ids, provider
   disconnect paths, and expected-updated-at security mutations now live

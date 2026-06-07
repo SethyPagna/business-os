@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 834 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 835 in this file.
 
 ## Goal
 
@@ -6343,7 +6343,7 @@ Decision rule:
     after reference refresh.
 
 688. Extract typed access-control transport from the large domain registry.
-    Done: `frontend/src/api/accessControlTransport.ts` now owns user, profile,
+    Done: a dedicated access-control transport owned user, profile,
     auth-method, password, role, and permission-management transport previously
     embedded in `frontend/src/api/methods.ts`. The helper keeps actor-attributed
     user/role reads, mirrored user/role fallbacks, encoded row ids, provider
@@ -9087,8 +9087,8 @@ Decision rule:
   wrappers, Users/Roles wrappers, custom-table wrappers, sync-update cache
   cleanup, and delayed sensitive mirror purge now resolve memoized dynamic
   modules only when those flows are used.
-- Build slice: `frontend/vite.config.ts` gives access-control and custom-table
-  operations named `access-control-api` and `custom-tables-api` chunks and
+- Build slice: `frontend/vite.config.ts` gave access-control and custom-table
+  operations named access-control and `custom-tables-api` chunks and
   excludes them from eager module preload. The existing `product-read-api`
   chunk stays the focused product/lookup/mirror/cache owner instead of being
   statically imported by `app-api-methods`.
@@ -9103,7 +9103,7 @@ Decision rule:
   reference refresh, Phase 29 audit, schema audit, organization audit, storage
   prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
   -- --skip-rollback` passed. The production build emitted
-  `access-control-api` at 2.07 KB, `custom-tables-api` at 1.28 KB, retained
+  the then-current access-control chunk at 2.07 KB, `custom-tables-api` at 1.28 KB, retained
   `product-read-api` as a 7.00 KB lazy dependency, and reduced
   `app-api-methods` from 23.51 KB to 23.26 KB. Inspection of the emitted
   `app-api-methods-*.js` confirmed no static `import ... from
@@ -9344,6 +9344,43 @@ Decision rule:
   retained reports while preserving uploads, secrets, env files, Docker
   volumes, active images, newest local backup sets, and the newest R2 backup.
 - Current plan position after Move 834: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 835: Retire legacy access-control transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. User list reads are
+  now owned by `frontend/src/api/userReadTransport.ts`; user profile,
+  authentication-method, password, role, and permission-management operations
+  are owned by `frontend/src/api/userAdminTransport.ts`.
+- Code-flow slice: the legacy `window.api.getUsers` compatibility wrapper in
+  `frontend/src/api/methods.ts` lazy-loads the narrow user-read transport.
+  Profile, password, and role wrappers lazy-load the user-admin transport. The
+  obsolete combined access-control wrapper was deleted instead of carrying a
+  third compatibility layer.
+- Preload slice: `frontend/vite.config.ts` no longer emits a named
+  access-control chunk. Production build proof emitted `user-read-api` at
+  0.91 KB, `user-admin-api` at 2.54 KB, `app-api-methods` at 25.24 KB, and no
+  access-control asset; built `index.html` has no eager preload entry for
+  these user chunks or the legacy API facade.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` now reject the retired loader
+  and chunk rule, require user list wrappers to use `loadUserReadTransport()`,
+  and require profile/password/role wrappers to use `loadUserAdminTransport()`.
+- Verification proof: focused API and performance tests, standalone frontend
+  typecheck, JSX/source check, full frontend utility suite, frontend production
+  build, backend utility suite, schema audit, organization audit, generated
+  reference refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed.
+  The in-app Browser path was attempted first but remains blocked locally by
+  the kernel asset path error; repo Playwright checks supplied browser proof
+  with 66 UI signals, zero relevant console messages, 20 public portal
+  products, zero failed responses/page errors, and passing post-live hygiene.
+  Storage prune removed 0 bytes because retention policies were already
+  satisfied.
+- Current plan position after Move 835: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

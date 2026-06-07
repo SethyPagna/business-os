@@ -1,8 +1,8 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 644,
-  "largeFiles": 80,
+  "filesScanned": 643,
+  "largeFiles": 81,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
   "wrapperRemovalCandidates": 0,
@@ -32,7 +32,7 @@
   "largestAreas": [
     [
       "frontend/api",
-      55
+      54
     ],
     [
       "frontend/utils",
@@ -213,6 +213,7 @@
     "ops/docs/OPTIMIZATION-SESSION-LOG.md",
     "ops/docs/OPTIMIZATION-STATUS.md",
     "ops/docs/reference/ACTION-STABILITY-INVENTORY.md",
+    "ops/docs/reference/ALL-FILE-INVENTORY.md",
     "ops/docs/reference/ALL-FUNCTION-REFERENCE.md",
     "ops/docs/reference/CLEANUP-SWEEP.md",
     "ops/docs/reference/FOLDER-COVERAGE.md",

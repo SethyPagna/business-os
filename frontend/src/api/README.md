@@ -123,16 +123,24 @@ This folder is the browser-side transport layer for Business OS.
   - keeps last-list fallback caching, canonical remove fallback, device metadata fields, and batched image upload progress outside the large domain registry
 
 - `fileTransport.ts`
-  - library file list/delete, generic asset upload, product image upload, and user avatar upload transport
+  - library file list/delete, generic asset upload, and user avatar upload transport
   - keeps file list metadata normalization, XMLHttpRequest upload progress, data-url image conversion, actor attribution, and live-server upload gating outside the large domain registry
+
+- `productImageUploadTransport.ts`
+  - product image upload transport
+  - keeps product upload progress, device metadata, and image-upload live-server gating outside both the large domain registry and the broader library file transport
 
 - `contactsTransport.ts`
   - customer, supplier, and delivery-contact reads/writes, bulk imports, loyalty point summaries, and contact CSV templates
   - keeps mirrored unpaged reads, cached paged customer reads, device-attributed creates, expected-updated-at mutations, and contact import-template ownership outside the large domain registry
 
-- `accessControlTransport.ts`
-  - user, profile, authentication-method, password, role, and permission-management transport
-  - keeps actor-attributed user/role reads, mirrored user/role fallbacks, encoded ids, and expected-updated-at security mutations outside the large domain registry
+- `userReadTransport.ts`
+  - user list transport
+  - keeps actor-attributed user reads and lazy local user fallback outside the large domain registry and the admin-only user transport
+
+- `userAdminTransport.ts`
+  - user profile, authentication-method, password, role, and permission-management transport
+  - keeps role fallbacks, encoded ids, and expected-updated-at security mutations outside the large domain registry while reusing the narrow user-list transport
 
 - `appBootstrapTransport.ts`
   - app bootstrap transport with local, unauthorized, and transient-offline fallbacks

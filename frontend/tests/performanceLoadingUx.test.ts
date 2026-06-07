@@ -89,6 +89,7 @@ const usersPage = fs.readFileSync(new URL('../src/components/users/Users.tsx', i
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 const userPermissionEditor = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
 const userDetailSheet = fs.readFileSync(new URL('../src/components/users/UserDetailSheet.tsx', import.meta.url), 'utf8')
+const userReadTransport = fs.readFileSync(new URL('../src/api/userReadTransport.ts', import.meta.url), 'utf8')
 const userAdminTransport = fs.readFileSync(new URL('../src/api/userAdminTransport.ts', import.meta.url), 'utf8')
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
@@ -302,7 +303,7 @@ assert.match(viteConfig, /if \(authLoginIconNames\.has\(iconName\)\) return 'aut
 assert.match(viteConfig, /'assets\/catalog-',[\s\S]*'assets\/portal-language-options-',[\s\S]*'assets\/portal-language-packs-',[\s\S]*'assets\/portal-content-i18n-'/, 'catalog and public portal intent chunks should be excluded from eager modulepreload')
 assert.match(viteConfig, /'assets\/backup-reset-tools-',/, 'Backup reset tools should not be eagerly modulepreloaded into the normal Backup route')
 assert.match(viteConfig, /'assets\/settings-otp-modal-',/, 'Settings OTP modal should not be eagerly modulepreloaded into the normal Settings route')
-assert.match(viteConfig, /'assets\/access-control-api-',/, 'Legacy access-control transport should not be eagerly modulepreloaded into normal startup')
+assert.doesNotMatch(viteConfig, /'assets\/access-control-api-'|accessControlTransport/, 'Retired access-control transport should not produce or preload a stale chunk')
 assert.match(viteConfig, /'assets\/custom-tables-api-',/, 'Legacy custom-table transport should not be eagerly modulepreloaded into normal startup')
 assert.match(viteConfig, /'assets\/user-profile-modal-',/, 'Users profile modal should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /'assets\/user-detail-sheet-',/, 'Users detail sheet should not be eagerly modulepreloaded into the normal Users route')
@@ -323,7 +324,7 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productImageUploadT
 assert.match(viteConfig, /'assets\/product-image-upload-api-',/, 'Product image upload intent chunk should be excluded from eager modulepreload')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/branchTransport\.ts'\)\) return 'branch-api'[\s\S]*normalized\.endsWith\('\/src\/api\/inventoryTransport\.ts'\)\) return 'inventory-api'/, 'Products page branch and stock intents should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userAdminTransport\.ts'\)\) return 'user-admin-api'[\s\S]*normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'/, 'Users admin reads and mutations should use a focused route chunk instead of app-api-methods')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/accessControlTransport\.ts'\)\) return 'access-control-api'/, 'legacy Users and Roles API wrappers should have a focused lazy access-control chunk')
+assert.doesNotMatch(viteConfig, /normalized\.endsWith\('\/src\/api\/accessControlTransport\.ts'\)\) return 'access-control-api'/, 'retired access-control wrapper should not keep a manual chunk rule')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/customTablesTransport\.ts'\)\) return 'custom-tables-api'/, 'legacy custom-table API wrappers should have a focused lazy custom-tables chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsTransport\.ts'\)\) return 'returns-api'[\s\S]*normalized\.endsWith\('\/src\/api\/rfidTransport\.ts'\)\) return 'rfid-api'/, 'Inventory user, dashboard, returns, and RFID reads should use focused chunks instead of app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'action-history-api'/, 'action history reads/writes and admin user filter reads should not collapse into app-api-methods')
@@ -586,8 +587,13 @@ assert.doesNotMatch(apiMethods, /from '\.\/inventoryTransport\.ts'/, 'legacy API
 assert.match(apiMethods, /export const getInventoryBootstrap = async \(params = \{\}\) => \{[\s\S]*loadInventoryTransport\(\)[\s\S]*getInventoryBootstrapRequest\(params\)/, 'legacy inventory bootstrap should delegate through lazy inventory read transport')
 assert.match(apiMethods, /function loadProductReadTransport\(\) \{[\s\S]*import\('\.\/productReadTransport\.ts'\)/, 'legacy API registry should lazy-load product read APIs')
 assert.doesNotMatch(apiMethods, /from '\.\/productReadTransport\.ts'/, 'legacy API registry should not statically import product read APIs')
-assert.match(apiMethods, /function loadAccessControlTransport\(\) \{[\s\S]*import\('\.\/accessControlTransport\.ts'\)/, 'legacy API registry should lazy-load access-control APIs')
 assert.doesNotMatch(apiMethods, /from '\.\/accessControlTransport\.ts'/, 'legacy API registry should not statically import access-control APIs')
+assert.doesNotMatch(apiMethods, /accessControlTransport\.ts|loadAccessControlTransport/, 'legacy API registry should not retain the retired access-control loader')
+assert.match(apiMethods, /function loadUserReadTransport\(\) \{[\s\S]*import\('\.\/userReadTransport\.ts'\)/, 'legacy API registry should lazy-load user list reads through the user-read transport')
+assert.match(apiMethods, /function loadUserAdminTransport\(\) \{[\s\S]*import\('\.\/userAdminTransport\.ts'\)/, 'legacy API registry should lazy-load profile, password, and role operations through the user-admin transport')
+assert.match(apiMethods, /export const getUsers = async \(\) => \{[\s\S]*loadUserReadTransport\(\)[\s\S]*getUsersRequest\(\)/, 'legacy user list reads should delegate through lazy user-read transport')
+assert.match(apiMethods, /export const getRoles = async \(\) => \{[\s\S]*loadUserAdminTransport\(\)[\s\S]*getRolesRequest\(\)/, 'legacy role reads should delegate through lazy user-admin transport')
+assert.match(apiMethods, /export const getUserProfile = async \(id\) => \{[\s\S]*loadUserAdminTransport\(\)[\s\S]*getUserProfileRequest\(id\)/, 'legacy profile reads should delegate through lazy user-admin transport')
 assert.match(apiMethods, /function loadCustomTablesTransport\(\) \{[\s\S]*import\('\.\/customTablesTransport\.ts'\)/, 'legacy API registry should lazy-load custom-table APIs')
 assert.doesNotMatch(apiMethods, /from '\.\/customTablesTransport\.ts'/, 'legacy API registry should not statically import custom-table APIs')
 assert.match(apiMethods, /function loadQueryCacheModule\(\) \{[\s\S]*import\('\.\/queryCache\.ts'\)/, 'legacy API registry should lazy-load query-cache cleanup only after sync updates')
@@ -1996,6 +2002,11 @@ assert.match(
   userAdminTransport,
   /import \{ getUsers as getUsersRequest \} from '\.\/userReadTransport\.ts'/,
   'Users admin transport should reuse the narrow user read transport for the list',
+)
+assert.match(
+  userReadTransport,
+  /appendActorQuery\('\/api\/users'\)[\s\S]*const \{ getLocalDb \} = await import\('\.\/lazyLocalDb\.ts'\)/,
+  'Users read transport should keep the list read and local fallback narrow',
 )
 assert.match(
   userAdminTransport,

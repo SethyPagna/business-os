@@ -4,94 +4,108 @@ Auto-generated folder-level documentation coverage for all first-party project f
 
 ## 1. Coverage Summary
 
-Total folders documented: **82**
+Total folders documented: **96**
 
 ## 2. Folder Matrix
 
 | No. | Folder | Purpose | Direct files | Direct subfolders |
 |---:|---|---|---:|---:|
 | 1 | `.` | Project root (run files, setup, packaging, top-level config) | 4 | 4 |
-| 2 | `backend` | Backend project root | 7 | 2 |
-| 3 | `backend/src` | Backend runtime core | 40 | 10 |
-| 4 | `backend/src/analytics` | Backend runtime core | 1 | 0 |
-| 5 | `backend/src/config` | Backend runtime core | 1 | 0 |
-| 6 | `backend/src/dataPath` | Backend runtime core | 1 | 0 |
-| 7 | `backend/src/db` | Backend runtime core | 3 | 0 |
-| 8 | `backend/src/organizationContext` | Backend runtime core | 1 | 0 |
-| 9 | `backend/src/routes` | HTTP route modules | 23 | 1 |
-| 10 | `backend/src/routes/system` | HTTP route modules | 1 | 0 |
-| 11 | `backend/src/runtimeState` | Backend runtime core | 1 | 0 |
-| 12 | `backend/src/services` | Provider/service integrations | 10 | 1 |
-| 13 | `backend/src/services/googleDriveSync` | Provider/service integrations | 2 | 0 |
-| 14 | `backend/src/storage` | Backend runtime core | 1 | 0 |
-| 15 | `backend/src/workers` | Backend runtime core | 2 | 0 |
-| 16 | `backend/test` | Project folder | 52 | 0 |
-| 17 | `frontend` | Frontend project root | 8 | 3 |
-| 18 | `frontend/public` | Project folder | 6 | 1 |
-| 19 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
-| 20 | `frontend/public/scanbot-web-sdk/bundle` | Project folder | 2 | 1 |
-| 21 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
-| 22 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
-| 23 | `frontend/src` | Project folder | 6 | 10 |
-| 24 | `frontend/src/api` | Frontend API and sync transport | 41 | 0 |
-| 25 | `frontend/src/app` | Project folder | 2 | 0 |
-| 26 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
-| 27 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
-| 28 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
-| 29 | `frontend/src/components/catalog` | UI pages/components domain | 13 | 0 |
-| 30 | `frontend/src/components/contacts` | UI pages/components domain | 10 | 0 |
-| 31 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
-| 32 | `frontend/src/components/dashboard` | UI pages/components domain | 2 | 1 |
-| 33 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 5 | 0 |
-| 34 | `frontend/src/components/files` | UI pages/components domain | 4 | 0 |
-| 35 | `frontend/src/components/inventory` | UI pages/components domain | 9 | 0 |
-| 36 | `frontend/src/components/loyalty-points` | UI pages/components domain | 1 | 0 |
-| 37 | `frontend/src/components/navigation` | UI pages/components domain | 1 | 0 |
-| 38 | `frontend/src/components/pos` | UI pages/components domain | 6 | 0 |
-| 39 | `frontend/src/components/products` | UI pages/components domain | 1 | 9 |
-| 40 | `frontend/src/components/products/config` | UI pages/components domain | 1 | 0 |
-| 41 | `frontend/src/components/products/forms` | UI pages/components domain | 4 | 0 |
-| 42 | `frontend/src/components/products/helpers` | UI pages/components domain | 8 | 0 |
-| 43 | `frontend/src/components/products/history` | UI pages/components domain | 1 | 0 |
-| 44 | `frontend/src/components/products/import` | UI pages/components domain | 3 | 0 |
-| 45 | `frontend/src/components/products/lookups` | UI pages/components domain | 4 | 0 |
-| 46 | `frontend/src/components/products/scanning` | UI pages/components domain | 5 | 0 |
-| 47 | `frontend/src/components/products/shared` | UI pages/components domain | 1 | 0 |
-| 48 | `frontend/src/components/products/surfaces` | UI pages/components domain | 4 | 0 |
-| 49 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
-| 50 | `frontend/src/components/receipt-settings` | UI pages/components domain | 8 | 0 |
-| 51 | `frontend/src/components/returns` | UI pages/components domain | 6 | 0 |
-| 52 | `frontend/src/components/sales` | UI pages/components domain | 7 | 0 |
-| 53 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
-| 54 | `frontend/src/components/shared` | UI pages/components domain | 17 | 0 |
-| 55 | `frontend/src/components/users` | UI pages/components domain | 4 | 0 |
-| 56 | `frontend/src/components/utils-settings` | UI pages/components domain | 8 | 0 |
-| 57 | `frontend/src/lang` | Localization resources | 2 | 0 |
-| 58 | `frontend/src/platform` | Project folder | 0 | 2 |
-| 59 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
-| 60 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
-| 61 | `frontend/src/public-runtime` | Project folder | 3 | 0 |
-| 62 | `frontend/src/runtime` | Project folder | 1 | 0 |
-| 63 | `frontend/src/styles` | Project folder | 1 | 0 |
-| 64 | `frontend/src/types` | Project folder | 2 | 0 |
-| 65 | `frontend/src/utils` | Project folder | 33 | 0 |
-| 66 | `frontend/tests` | Project folder | 76 | 0 |
-| 67 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
-| 68 | `ops/scripts/architecture` | Project folder | 5 | 0 |
-| 69 | `ops/scripts/backend` | Project folder | 6 | 0 |
-| 70 | `ops/scripts/frontend` | Project folder | 4 | 0 |
-| 71 | `ops/scripts/lib` | Project folder | 2 | 0 |
-| 72 | `ops/scripts/powershell` | Project folder | 8 | 0 |
-| 73 | `ops/scripts/runtime` | Project folder | 2 | 5 |
-| 74 | `ops/scripts/runtime/audits` | Project folder | 7 | 0 |
-| 75 | `ops/scripts/runtime/cloudflare` | Project folder | 4 | 0 |
-| 76 | `ops/scripts/runtime/live-checks` | Project folder | 20 | 0 |
-| 77 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
-| 78 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
-| 79 | `ops/scripts/verification` | Project folder | 6 | 0 |
-| 80 | `run` | Project run-script home for bat and sh launchers | 9 | 2 |
-| 81 | `run/docker` | Project folder | 9 | 0 |
-| 82 | `run/sh` | POSIX run/setup/stop scripts | 3 | 0 |
+| 2 | `backend` | Backend project root | 7 | 3 |
+| 3 | `backend/.pkg-stage` | Project folder | 2 | 1 |
+| 4 | `backend/.pkg-stage/src` | Project folder | 40 | 10 |
+| 5 | `backend/.pkg-stage/src/analytics` | Project folder | 1 | 0 |
+| 6 | `backend/.pkg-stage/src/config` | Project folder | 1 | 0 |
+| 7 | `backend/.pkg-stage/src/dataPath` | Project folder | 1 | 0 |
+| 8 | `backend/.pkg-stage/src/db` | Project folder | 3 | 0 |
+| 9 | `backend/.pkg-stage/src/organizationContext` | Project folder | 1 | 0 |
+| 10 | `backend/.pkg-stage/src/routes` | Project folder | 23 | 1 |
+| 11 | `backend/.pkg-stage/src/routes/system` | Project folder | 1 | 0 |
+| 12 | `backend/.pkg-stage/src/runtimeState` | Project folder | 1 | 0 |
+| 13 | `backend/.pkg-stage/src/services` | Project folder | 10 | 1 |
+| 14 | `backend/.pkg-stage/src/services/googleDriveSync` | Project folder | 2 | 0 |
+| 15 | `backend/.pkg-stage/src/storage` | Project folder | 1 | 0 |
+| 16 | `backend/.pkg-stage/src/workers` | Project folder | 2 | 0 |
+| 17 | `backend/src` | Backend runtime core | 40 | 10 |
+| 18 | `backend/src/analytics` | Backend runtime core | 1 | 0 |
+| 19 | `backend/src/config` | Backend runtime core | 1 | 0 |
+| 20 | `backend/src/dataPath` | Backend runtime core | 1 | 0 |
+| 21 | `backend/src/db` | Backend runtime core | 3 | 0 |
+| 22 | `backend/src/organizationContext` | Backend runtime core | 1 | 0 |
+| 23 | `backend/src/routes` | HTTP route modules | 23 | 1 |
+| 24 | `backend/src/routes/system` | HTTP route modules | 1 | 0 |
+| 25 | `backend/src/runtimeState` | Backend runtime core | 1 | 0 |
+| 26 | `backend/src/services` | Provider/service integrations | 10 | 1 |
+| 27 | `backend/src/services/googleDriveSync` | Provider/service integrations | 2 | 0 |
+| 28 | `backend/src/storage` | Backend runtime core | 1 | 0 |
+| 29 | `backend/src/workers` | Backend runtime core | 2 | 0 |
+| 30 | `backend/test` | Project folder | 52 | 0 |
+| 31 | `frontend` | Frontend project root | 8 | 3 |
+| 32 | `frontend/public` | Project folder | 6 | 1 |
+| 33 | `frontend/public/scanbot-web-sdk` | Project folder | 0 | 1 |
+| 34 | `frontend/public/scanbot-web-sdk/bundle` | Project folder | 2 | 1 |
+| 35 | `frontend/public/scanbot-web-sdk/bundle/bin` | Project folder | 0 | 1 |
+| 36 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner` | Project folder | 8 | 0 |
+| 37 | `frontend/src` | Project folder | 9 | 10 |
+| 38 | `frontend/src/api` | Frontend API and sync transport | 54 | 0 |
+| 39 | `frontend/src/app` | Project folder | 3 | 0 |
+| 40 | `frontend/src/components` | UI pages/components domain | 1 | 20 |
+| 41 | `frontend/src/components/auth` | UI pages/components domain | 1 | 0 |
+| 42 | `frontend/src/components/branches` | UI pages/components domain | 3 | 0 |
+| 43 | `frontend/src/components/catalog` | UI pages/components domain | 18 | 0 |
+| 44 | `frontend/src/components/contacts` | UI pages/components domain | 10 | 0 |
+| 45 | `frontend/src/components/custom-tables` | UI pages/components domain | 1 | 0 |
+| 46 | `frontend/src/components/dashboard` | UI pages/components domain | 3 | 1 |
+| 47 | `frontend/src/components/dashboard/charts` | UI pages/components domain | 5 | 0 |
+| 48 | `frontend/src/components/files` | UI pages/components domain | 4 | 0 |
+| 49 | `frontend/src/components/inventory` | UI pages/components domain | 10 | 0 |
+| 50 | `frontend/src/components/loyalty-points` | UI pages/components domain | 1 | 0 |
+| 51 | `frontend/src/components/navigation` | UI pages/components domain | 1 | 0 |
+| 52 | `frontend/src/components/pos` | UI pages/components domain | 6 | 0 |
+| 53 | `frontend/src/components/products` | UI pages/components domain | 1 | 9 |
+| 54 | `frontend/src/components/products/config` | UI pages/components domain | 1 | 0 |
+| 55 | `frontend/src/components/products/forms` | UI pages/components domain | 4 | 0 |
+| 56 | `frontend/src/components/products/helpers` | UI pages/components domain | 9 | 0 |
+| 57 | `frontend/src/components/products/history` | UI pages/components domain | 1 | 0 |
+| 58 | `frontend/src/components/products/import` | UI pages/components domain | 3 | 0 |
+| 59 | `frontend/src/components/products/lookups` | UI pages/components domain | 4 | 0 |
+| 60 | `frontend/src/components/products/scanning` | UI pages/components domain | 5 | 0 |
+| 61 | `frontend/src/components/products/shared` | UI pages/components domain | 1 | 0 |
+| 62 | `frontend/src/components/products/surfaces` | UI pages/components domain | 4 | 0 |
+| 63 | `frontend/src/components/receipt` | UI pages/components domain | 1 | 0 |
+| 64 | `frontend/src/components/receipt-settings` | UI pages/components domain | 8 | 0 |
+| 65 | `frontend/src/components/returns` | UI pages/components domain | 6 | 0 |
+| 66 | `frontend/src/components/sales` | UI pages/components domain | 7 | 0 |
+| 67 | `frontend/src/components/server` | UI pages/components domain | 1 | 0 |
+| 68 | `frontend/src/components/shared` | UI pages/components domain | 19 | 0 |
+| 69 | `frontend/src/components/users` | UI pages/components domain | 5 | 0 |
+| 70 | `frontend/src/components/utils-settings` | UI pages/components domain | 8 | 0 |
+| 71 | `frontend/src/lang` | Localization resources | 2 | 0 |
+| 72 | `frontend/src/platform` | Project folder | 0 | 2 |
+| 73 | `frontend/src/platform/runtime` | Project folder | 1 | 0 |
+| 74 | `frontend/src/platform/storage` | Project folder | 1 | 0 |
+| 75 | `frontend/src/public-runtime` | Project folder | 3 | 0 |
+| 76 | `frontend/src/runtime` | Project folder | 1 | 0 |
+| 77 | `frontend/src/styles` | Project folder | 1 | 0 |
+| 78 | `frontend/src/types` | Project folder | 3 | 0 |
+| 79 | `frontend/src/utils` | Project folder | 35 | 0 |
+| 80 | `frontend/tests` | Project folder | 76 | 0 |
+| 81 | `ops/scripts` | Project-level automation scripts | 0 | 7 |
+| 82 | `ops/scripts/architecture` | Project folder | 5 | 0 |
+| 83 | `ops/scripts/backend` | Project folder | 6 | 0 |
+| 84 | `ops/scripts/frontend` | Project folder | 4 | 0 |
+| 85 | `ops/scripts/lib` | Project folder | 2 | 0 |
+| 86 | `ops/scripts/powershell` | Project folder | 8 | 0 |
+| 87 | `ops/scripts/runtime` | Project folder | 2 | 5 |
+| 88 | `ops/scripts/runtime/audits` | Project folder | 7 | 0 |
+| 89 | `ops/scripts/runtime/cloudflare` | Project folder | 5 | 0 |
+| 90 | `ops/scripts/runtime/live-checks` | Project folder | 34 | 0 |
+| 91 | `ops/scripts/runtime/smoke` | Project folder | 4 | 0 |
+| 92 | `ops/scripts/runtime/storage` | Project folder | 7 | 0 |
+| 93 | `ops/scripts/verification` | Project folder | 6 | 0 |
+| 94 | `run` | Project run-script home for bat and sh launchers | 9 | 2 |
+| 95 | `run/docker` | Project folder | 9 | 0 |
+| 96 | `run/sh` | POSIX run/setup/stop scripts | 3 | 0 |
 
 ## 3. Detailed Folder Commentary
 
@@ -124,14 +138,15 @@ Total folders documented: **82**
 
 - Purpose: Backend project root
 - Direct files: **7**
-- Direct subfolders: **2**
+- Direct subfolders: **3**
 
 #### 3.2.1 Subfolders
 
 | No. | Name |
 |---:|---|
-| 1 | `src` |
-| 2 | `test` |
+| 1 | `.pkg-stage` |
+| 2 | `src` |
+| 3 | `test` |
 
 #### 3.2.2 Files
 
@@ -146,13 +161,33 @@ Total folders documented: **82**
 | 7 | `server.ts` | Project source/support file |
 
 
-### 3.3 Folder: `backend/src`
+### 3.3 Folder: `backend/.pkg-stage`
 
-- Purpose: Backend runtime core
+- Purpose: Project folder
+- Direct files: **2**
+- Direct subfolders: **1**
+
+#### 3.3.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `src` |
+
+#### 3.3.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `package.json` | Configuration/data manifest |
+| 2 | `server.js` | Backend server entrypoint |
+
+
+### 3.4 Folder: `backend/.pkg-stage/src`
+
+- Purpose: Project folder
 - Direct files: **40**
 - Direct subfolders: **10**
 
-#### 3.3.1 Subfolders
+#### 3.4.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -167,7 +202,277 @@ Total folders documented: **82**
 | 9 | `storage` |
 | 10 | `workers` |
 
-#### 3.3.2 Files
+#### 3.4.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `accessControl.js` | Project source/support file |
+| 2 | `authOtpGuards.js` | Project source/support file |
+| 3 | `backupSchema.js` | Project source/support file |
+| 4 | `businessMetrics.js` | Project source/support file |
+| 5 | `catalogTextIntegrity.js` | Project source/support file |
+| 6 | `conflictControl.js` | Project source/support file |
+| 7 | `contactOptions.js` | Project source/support file |
+| 8 | `database.js` | Project source/support file |
+| 9 | `fileAssets.js` | Project source/support file |
+| 10 | `helpers.js` | Project source/support file |
+| 11 | `idempotency.js` | Project source/support file |
+| 12 | `importCsv.js` | Project source/support file |
+| 13 | `importParsing.js` | Project source/support file |
+| 14 | `initials.js` | Project source/support file |
+| 15 | `maintenanceLock.js` | Project source/support file |
+| 16 | `middleware.js` | Project source/support file |
+| 17 | `money.js` | Project source/support file |
+| 18 | `netSecurity.js` | Project source/support file |
+| 19 | `objectStore.js` | Project source/support file |
+| 20 | `optionalSharp.js` | Project source/support file |
+| 21 | `permissions.js` | Project source/support file |
+| 22 | `portalUtils.js` | Project source/support file |
+| 23 | `postgresDatabase.js` | Project source/support file |
+| 24 | `productBatches.js` | Project source/support file |
+| 25 | `productDiscounts.js` | Project source/support file |
+| 26 | `productImportPolicies.js` | Project source/support file |
+| 27 | `README.md` | Documentation |
+| 28 | `requestContext.js` | Project source/support file |
+| 29 | `runtimeCache.js` | Project source/support file |
+| 30 | `runtimeVersion.js` | Project source/support file |
+| 31 | `schemaMetadata.js` | Project source/support file |
+| 32 | `security.js` | Project source/support file |
+| 33 | `serverUtils.js` | Project source/support file |
+| 34 | `sessionAuth.js` | Project source/support file |
+| 35 | `settingsSnapshot.js` | Project source/support file |
+| 36 | `systemFsWorker.js` | Project source/support file |
+| 37 | `systemJobs.js` | Project source/support file |
+| 38 | `uploadReferenceCleanup.js` | Project source/support file |
+| 39 | `uploadSecurity.js` | Project source/support file |
+| 40 | `websocket.js` | Project source/support file |
+
+
+### 3.5 Folder: `backend/.pkg-stage/src/analytics`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.5.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `duckdbRuntime.js` | Project source/support file |
+
+
+### 3.6 Folder: `backend/.pkg-stage/src/config`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.6.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `index.js` | Project source/support file |
+
+
+### 3.7 Folder: `backend/.pkg-stage/src/dataPath`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.7.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `index.js` | Project source/support file |
+
+
+### 3.8 Folder: `backend/.pkg-stage/src/db`
+
+- Purpose: Project folder
+- Direct files: **3**
+- Direct subfolders: **0**
+
+#### 3.8.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `cutoverReadiness.js` | Project source/support file |
+| 2 | `postgresQueryCompat.js` | Project source/support file |
+| 3 | `postgresSchema.sql` | Project source/support file |
+
+
+### 3.9 Folder: `backend/.pkg-stage/src/organizationContext`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.9.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `index.js` | Project source/support file |
+
+
+### 3.10 Folder: `backend/.pkg-stage/src/routes`
+
+- Purpose: Project folder
+- Direct files: **23**
+- Direct subfolders: **1**
+
+#### 3.10.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `system` |
+
+#### 3.10.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `actionHistory.js` | API route handler |
+| 2 | `ai.js` | API route handler |
+| 3 | `auth.js` | API route handler |
+| 4 | `branches.js` | API route handler |
+| 5 | `catalog.js` | API route handler |
+| 6 | `categories.js` | API route handler |
+| 7 | `contacts.js` | API route handler |
+| 8 | `customTables.js` | API route handler |
+| 9 | `files.js` | API route handler |
+| 10 | `importJobs.js` | API route handler |
+| 11 | `inventory.js` | API route handler |
+| 12 | `notifications.js` | API route handler |
+| 13 | `organizations.js` | API route handler |
+| 14 | `portal.js` | API route handler |
+| 15 | `products.js` | API route handler |
+| 16 | `README.md` | API route handler |
+| 17 | `returns.js` | API route handler |
+| 18 | `runtime.js` | API route handler |
+| 19 | `sales.js` | API route handler |
+| 20 | `settings.js` | API route handler |
+| 21 | `sync.js` | API route handler |
+| 22 | `units.js` | API route handler |
+| 23 | `users.js` | API route handler |
+
+
+### 3.11 Folder: `backend/.pkg-stage/src/routes/system`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.11.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `index.js` | API route handler |
+
+
+### 3.12 Folder: `backend/.pkg-stage/src/runtimeState`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.12.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `index.js` | Project source/support file |
+
+
+### 3.13 Folder: `backend/.pkg-stage/src/services`
+
+- Purpose: Project folder
+- Direct files: **10**
+- Direct subfolders: **1**
+
+#### 3.13.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `googleDriveSync` |
+
+#### 3.13.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `aiGateway.js` | Integration/service layer |
+| 2 | `backupPackages.js` | Integration/service layer |
+| 3 | `firebaseAuth.js` | Integration/service layer |
+| 4 | `googleOauth.js` | Integration/service layer |
+| 5 | `importJobs.js` | Integration/service layer |
+| 6 | `integrationDoctor.js` | Integration/service layer |
+| 7 | `mediaQueue.js` | Integration/service layer |
+| 8 | `portalAi.js` | Integration/service layer |
+| 9 | `README.md` | Integration/service layer |
+| 10 | `verification.js` | Integration/service layer |
+
+
+### 3.14 Folder: `backend/.pkg-stage/src/services/googleDriveSync`
+
+- Purpose: Project folder
+- Direct files: **2**
+- Direct subfolders: **0**
+
+#### 3.14.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `index.js` | Integration/service layer |
+| 2 | `versioning.js` | Integration/service layer |
+
+
+### 3.15 Folder: `backend/.pkg-stage/src/storage`
+
+- Purpose: Project folder
+- Direct files: **1**
+- Direct subfolders: **0**
+
+#### 3.15.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `organizationFolders.js` | Project source/support file |
+
+
+### 3.16 Folder: `backend/.pkg-stage/src/workers`
+
+- Purpose: Project folder
+- Direct files: **2**
+- Direct subfolders: **0**
+
+#### 3.16.2 Files
+
+| No. | File | Purpose |
+|---:|---|---|
+| 1 | `importWorker.js` | Project source/support file |
+| 2 | `mediaWorker.js` | Project source/support file |
+
+
+### 3.17 Folder: `backend/src`
+
+- Purpose: Backend runtime core
+- Direct files: **40**
+- Direct subfolders: **10**
+
+#### 3.17.1 Subfolders
+
+| No. | Name |
+|---:|---|
+| 1 | `analytics` |
+| 2 | `config` |
+| 3 | `dataPath` |
+| 4 | `db` |
+| 5 | `organizationContext` |
+| 6 | `routes` |
+| 7 | `runtimeState` |
+| 8 | `services` |
+| 9 | `storage` |
+| 10 | `workers` |
+
+#### 3.17.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -213,52 +518,52 @@ Total folders documented: **82**
 | 40 | `websocket.ts` | Project source/support file |
 
 
-### 3.4 Folder: `backend/src/analytics`
+### 3.18 Folder: `backend/src/analytics`
 
 - Purpose: Backend runtime core
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.4.2 Files
+#### 3.18.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `duckdbRuntime.ts` | Project source/support file |
 
 
-### 3.5 Folder: `backend/src/config`
+### 3.19 Folder: `backend/src/config`
 
 - Purpose: Backend runtime core
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.5.2 Files
+#### 3.19.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `index.ts` | Project source/support file |
 
 
-### 3.6 Folder: `backend/src/dataPath`
+### 3.20 Folder: `backend/src/dataPath`
 
 - Purpose: Backend runtime core
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.6.2 Files
+#### 3.20.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `index.ts` | Project source/support file |
 
 
-### 3.7 Folder: `backend/src/db`
+### 3.21 Folder: `backend/src/db`
 
 - Purpose: Backend runtime core
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.7.2 Files
+#### 3.21.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -267,32 +572,32 @@ Total folders documented: **82**
 | 3 | `postgresSchema.sql` | Project source/support file |
 
 
-### 3.8 Folder: `backend/src/organizationContext`
+### 3.22 Folder: `backend/src/organizationContext`
 
 - Purpose: Backend runtime core
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.8.2 Files
+#### 3.22.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `index.ts` | Project source/support file |
 
 
-### 3.9 Folder: `backend/src/routes`
+### 3.23 Folder: `backend/src/routes`
 
 - Purpose: HTTP route modules
 - Direct files: **23**
 - Direct subfolders: **1**
 
-#### 3.9.1 Subfolders
+#### 3.23.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `system` |
 
-#### 3.9.2 Files
+#### 3.23.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -321,45 +626,45 @@ Total folders documented: **82**
 | 23 | `users.ts` | API route handler |
 
 
-### 3.10 Folder: `backend/src/routes/system`
+### 3.24 Folder: `backend/src/routes/system`
 
 - Purpose: HTTP route modules
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.10.2 Files
+#### 3.24.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `index.ts` | API route handler |
 
 
-### 3.11 Folder: `backend/src/runtimeState`
+### 3.25 Folder: `backend/src/runtimeState`
 
 - Purpose: Backend runtime core
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.11.2 Files
+#### 3.25.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `index.ts` | Project source/support file |
 
 
-### 3.12 Folder: `backend/src/services`
+### 3.26 Folder: `backend/src/services`
 
 - Purpose: Provider/service integrations
 - Direct files: **10**
 - Direct subfolders: **1**
 
-#### 3.12.1 Subfolders
+#### 3.26.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `googleDriveSync` |
 
-#### 3.12.2 Files
+#### 3.26.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -375,13 +680,13 @@ Total folders documented: **82**
 | 10 | `verification.ts` | Integration/service layer |
 
 
-### 3.13 Folder: `backend/src/services/googleDriveSync`
+### 3.27 Folder: `backend/src/services/googleDriveSync`
 
 - Purpose: Provider/service integrations
 - Direct files: **2**
 - Direct subfolders: **0**
 
-#### 3.13.2 Files
+#### 3.27.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -389,26 +694,26 @@ Total folders documented: **82**
 | 2 | `versioning.ts` | Integration/service layer |
 
 
-### 3.14 Folder: `backend/src/storage`
+### 3.28 Folder: `backend/src/storage`
 
 - Purpose: Backend runtime core
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.14.2 Files
+#### 3.28.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `organizationFolders.ts` | Project source/support file |
 
 
-### 3.15 Folder: `backend/src/workers`
+### 3.29 Folder: `backend/src/workers`
 
 - Purpose: Backend runtime core
 - Direct files: **2**
 - Direct subfolders: **0**
 
-#### 3.15.2 Files
+#### 3.29.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -416,13 +721,13 @@ Total folders documented: **82**
 | 2 | `mediaWorker.ts` | Project source/support file |
 
 
-### 3.16 Folder: `backend/test`
+### 3.30 Folder: `backend/test`
 
 - Purpose: Project folder
 - Direct files: **52**
 - Direct subfolders: **0**
 
-#### 3.16.2 Files
+#### 3.30.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -480,13 +785,13 @@ Total folders documented: **82**
 | 52 | `websocket.test.ts` | Project source/support file |
 
 
-### 3.17 Folder: `frontend`
+### 3.31 Folder: `frontend`
 
 - Purpose: Frontend project root
 - Direct files: **8**
 - Direct subfolders: **3**
 
-#### 3.17.1 Subfolders
+#### 3.31.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -494,7 +799,7 @@ Total folders documented: **82**
 | 2 | `src` |
 | 3 | `tests` |
 
-#### 3.17.2 Files
+#### 3.31.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -508,19 +813,19 @@ Total folders documented: **82**
 | 8 | `vite.config.ts` | Project source/support file |
 
 
-### 3.18 Folder: `frontend/public`
+### 3.32 Folder: `frontend/public`
 
 - Purpose: Project folder
 - Direct files: **6**
 - Direct subfolders: **1**
 
-#### 3.18.1 Subfolders
+#### 3.32.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `scanbot-web-sdk` |
 
-#### 3.18.2 Files
+#### 3.32.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -532,32 +837,32 @@ Total folders documented: **82**
 | 6 | `theme-bootstrap.js` | Project source/support file |
 
 
-### 3.19 Folder: `frontend/public/scanbot-web-sdk`
+### 3.33 Folder: `frontend/public/scanbot-web-sdk`
 
 - Purpose: Project folder
 - Direct files: **0**
 - Direct subfolders: **1**
 
-#### 3.19.1 Subfolders
+#### 3.33.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `bundle` |
 
 
-### 3.20 Folder: `frontend/public/scanbot-web-sdk/bundle`
+### 3.34 Folder: `frontend/public/scanbot-web-sdk/bundle`
 
 - Purpose: Project folder
 - Direct files: **2**
 - Direct subfolders: **1**
 
-#### 3.20.1 Subfolders
+#### 3.34.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `bin` |
 
-#### 3.20.2 Files
+#### 3.34.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -565,26 +870,26 @@ Total folders documented: **82**
 | 2 | `ScanbotSDK.ui2.min.js.LICENSE.txt` | Project source/support file |
 
 
-### 3.21 Folder: `frontend/public/scanbot-web-sdk/bundle/bin`
+### 3.35 Folder: `frontend/public/scanbot-web-sdk/bundle/bin`
 
 - Purpose: Project folder
 - Direct files: **0**
 - Direct subfolders: **1**
 
-#### 3.21.1 Subfolders
+#### 3.35.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `barcode-scanner` |
 
 
-### 3.22 Folder: `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner`
+### 3.36 Folder: `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner`
 
 - Purpose: Project folder
 - Direct files: **8**
 - Direct subfolders: **0**
 
-#### 3.22.2 Files
+#### 3.36.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -598,13 +903,13 @@ Total folders documented: **82**
 | 8 | `ScanbotSDK.Core.js` | Project source/support file |
 
 
-### 3.23 Folder: `frontend/src`
+### 3.37 Folder: `frontend/src`
 
 - Purpose: Project folder
-- Direct files: **6**
+- Direct files: **9**
 - Direct subfolders: **10**
 
-#### 3.23.1 Subfolders
+#### 3.37.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -619,92 +924,109 @@ Total folders documented: **82**
 | 9 | `types` |
 | 10 | `utils` |
 
-#### 3.23.2 Files
+#### 3.37.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `App.tsx` | Main app shell and page mounting |
-| 2 | `AppContext.tsx` | Global app state/context provider |
-| 3 | `constants.ts` | Project source/support file |
-| 4 | `index.tsx` | Project source/support file |
-| 5 | `README.md` | Documentation |
-| 6 | `web-api.ts` | Project source/support file |
+| 1 | `AdminRoot.tsx` | Project source/support file |
+| 2 | `App.tsx` | Main app shell and page mounting |
+| 3 | `AppContext.tsx` | Global app state/context provider |
+| 4 | `constants.ts` | Project source/support file |
+| 5 | `index.tsx` | Project source/support file |
+| 6 | `public-web-api.ts` | Project source/support file |
+| 7 | `PublicCatalogRoot.tsx` | Project source/support file |
+| 8 | `README.md` | Documentation |
+| 9 | `web-api.ts` | Project source/support file |
 
 
-### 3.24 Folder: `frontend/src/api`
+### 3.38 Folder: `frontend/src/api`
 
 - Purpose: Frontend API and sync transport
-- Direct files: **41**
+- Direct files: **54**
 - Direct subfolders: **0**
 
-#### 3.24.2 Files
+#### 3.38.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `accessControlTransport.ts` | Frontend API/sync helper |
-| 2 | `actionHistoryTransport.ts` | Frontend API/sync helper |
-| 3 | `actorQuery.ts` | Frontend API/sync helper |
-| 4 | `aiTransport.ts` | Frontend API/sync helper |
-| 5 | `appBootstrapTransport.ts` | Frontend API/sync helper |
-| 6 | `auditLogTransport.ts` | Frontend API/sync helper |
-| 7 | `authTransport.ts` | Frontend API/sync helper |
-| 8 | `branchTransport.ts` | Frontend API/sync helper |
-| 9 | `browserDialogs.ts` | Frontend API/sync helper |
-| 10 | `conflicts.ts` | Frontend API/sync helper |
+| 1 | `actionHistoryTransport.ts` | Frontend API/sync helper |
+| 2 | `actorQuery.ts` | Frontend API/sync helper |
+| 3 | `aiTransport.ts` | Frontend API/sync helper |
+| 4 | `appBootstrapTransport.ts` | Frontend API/sync helper |
+| 5 | `auditLogTransport.ts` | Frontend API/sync helper |
+| 6 | `authTransport.ts` | Frontend API/sync helper |
+| 7 | `branchTransport.ts` | Frontend API/sync helper |
+| 8 | `browserDialogs.ts` | Frontend API/sync helper |
+| 9 | `conflicts.ts` | Frontend API/sync helper |
+| 10 | `contactReadTransport.ts` | Frontend API/sync helper |
 | 11 | `contactsTransport.ts` | Frontend API/sync helper |
-| 12 | `cooldownFallbacks.ts` | Frontend API/sync helper |
-| 13 | `customTablesTransport.ts` | Frontend API/sync helper |
-| 14 | `dashboardTransport.ts` | Frontend API/sync helper |
-| 15 | `driveSync.ts` | Frontend API/sync helper |
-| 16 | `expectedUpdatedAt.ts` | Frontend API/sync helper |
-| 17 | `fileTransport.ts` | Frontend API/sync helper |
-| 18 | `http.ts` | Frontend API/sync helper |
-| 19 | `importJobsTransport.ts` | Frontend API/sync helper |
-| 20 | `importTransport.ts` | Frontend API/sync helper |
-| 21 | `inventoryTransport.ts` | Frontend API/sync helper |
-| 22 | `localDb.ts` | Frontend API/sync helper |
-| 23 | `localMirrors.ts` | Frontend API/sync helper |
-| 24 | `lookupTransport.ts` | Frontend API/sync helper |
-| 25 | `methods.ts` | Frontend API/sync helper |
-| 26 | `notificationSummary.ts` | Frontend API/sync helper |
-| 27 | `portalHttp.ts` | Frontend API/sync helper |
-| 28 | `portalTransport.ts` | Frontend API/sync helper |
-| 29 | `productReadTransport.ts` | Frontend API/sync helper |
-| 30 | `productWriteTransport.ts` | Frontend API/sync helper |
-| 31 | `query.ts` | Frontend API/sync helper |
-| 32 | `queryCache.ts` | Frontend API/sync helper |
-| 33 | `README.md` | Frontend API/sync helper |
-| 34 | `requestIds.ts` | Frontend API/sync helper |
-| 35 | `rfidTransport.ts` | Frontend API/sync helper |
-| 36 | `salesTransport.ts` | Frontend API/sync helper |
-| 37 | `syncPreview.ts` | Frontend API/sync helper |
-| 38 | `syncRuntime.ts` | Frontend API/sync helper |
-| 39 | `systemJobs.ts` | Frontend API/sync helper |
-| 40 | `systemRuntime.ts` | Frontend API/sync helper |
-| 41 | `websocket.ts` | Frontend API/sync helper |
+| 12 | `contactWriteTransport.ts` | Frontend API/sync helper |
+| 13 | `cooldownFallbacks.ts` | Frontend API/sync helper |
+| 14 | `customTablesTransport.ts` | Frontend API/sync helper |
+| 15 | `dashboardTransport.ts` | Frontend API/sync helper |
+| 16 | `driveSync.ts` | Frontend API/sync helper |
+| 17 | `expectedUpdatedAt.ts` | Frontend API/sync helper |
+| 18 | `fileTransport.ts` | Frontend API/sync helper |
+| 19 | `http.ts` | Frontend API/sync helper |
+| 20 | `httpState.ts` | Frontend API/sync helper |
+| 21 | `importJobsTransport.ts` | Frontend API/sync helper |
+| 22 | `importTransport.ts` | Frontend API/sync helper |
+| 23 | `inventoryTransport.ts` | Frontend API/sync helper |
+| 24 | `inventoryWriteTransport.ts` | Frontend API/sync helper |
+| 25 | `lazyLocalDb.ts` | Frontend API/sync helper |
+| 26 | `localDb.ts` | Frontend API/sync helper |
+| 27 | `localMirrors.ts` | Frontend API/sync helper |
+| 28 | `lookupTransport.ts` | Frontend API/sync helper |
+| 29 | `methods.ts` | Frontend API/sync helper |
+| 30 | `multipartHeaders.ts` | Frontend API/sync helper |
+| 31 | `notificationSummary.ts` | Frontend API/sync helper |
+| 32 | `offlineSnapshotTransport.ts` | Frontend API/sync helper |
+| 33 | `pendingSyncTransport.ts` | Frontend API/sync helper |
+| 34 | `portalHttp.ts` | Frontend API/sync helper |
+| 35 | `portalTransport.ts` | Frontend API/sync helper |
+| 36 | `productImageUploadTransport.ts` | Frontend API/sync helper |
+| 37 | `productReadTransport.ts` | Frontend API/sync helper |
+| 38 | `productWriteTransport.ts` | Frontend API/sync helper |
+| 39 | `query.ts` | Frontend API/sync helper |
+| 40 | `queryCache.ts` | Frontend API/sync helper |
+| 41 | `README.md` | Frontend API/sync helper |
+| 42 | `requestIds.ts` | Frontend API/sync helper |
+| 43 | `returnsTransport.ts` | Frontend API/sync helper |
+| 44 | `rfidTransport.ts` | Frontend API/sync helper |
+| 45 | `salesTransport.ts` | Frontend API/sync helper |
+| 46 | `saleWriteTransport.ts` | Frontend API/sync helper |
+| 47 | `settingsTransport.ts` | Frontend API/sync helper |
+| 48 | `syncPreview.ts` | Frontend API/sync helper |
+| 49 | `syncRuntime.ts` | Frontend API/sync helper |
+| 50 | `systemJobs.ts` | Frontend API/sync helper |
+| 51 | `systemRuntime.ts` | Frontend API/sync helper |
+| 52 | `userAdminTransport.ts` | Frontend API/sync helper |
+| 53 | `userReadTransport.ts` | Frontend API/sync helper |
+| 54 | `websocket.ts` | Frontend API/sync helper |
 
 
-### 3.25 Folder: `frontend/src/app`
+### 3.39 Folder: `frontend/src/app`
 
 - Purpose: Project folder
-- Direct files: **2**
+- Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.25.2 Files
+#### 3.39.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `appShellUtils.ts` | Project source/support file |
-| 2 | `publicErrorRecovery.ts` | Project source/support file |
+| 2 | `pathRouting.ts` | Project source/support file |
+| 3 | `publicErrorRecovery.ts` | Project source/support file |
 
 
-### 3.26 Folder: `frontend/src/components`
+### 3.40 Folder: `frontend/src/components`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **20**
 
-#### 3.26.1 Subfolders
+#### 3.40.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -729,33 +1051,33 @@ Total folders documented: **82**
 | 19 | `users` |
 | 20 | `utils-settings` |
 
-#### 3.26.2 Files
+#### 3.40.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `README.md` | UI component/page |
 
 
-### 3.27 Folder: `frontend/src/components/auth`
+### 3.41 Folder: `frontend/src/components/auth`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.27.2 Files
+#### 3.41.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Login.tsx` | UI component/page |
 
 
-### 3.28 Folder: `frontend/src/components/branches`
+### 3.42 Folder: `frontend/src/components/branches`
 
 - Purpose: UI pages/components domain
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.28.2 Files
+#### 3.42.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -764,38 +1086,43 @@ Total folders documented: **82**
 | 3 | `TransferModal.tsx` | UI component/page |
 
 
-### 3.29 Folder: `frontend/src/components/catalog`
+### 3.43 Folder: `frontend/src/components/catalog`
 
 - Purpose: UI pages/components domain
-- Direct files: **13**
+- Direct files: **18**
 - Direct subfolders: **0**
 
-#### 3.29.2 Files
+#### 3.43.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `CatalogEditorSurface.tsx` | UI component/page |
-| 2 | `CatalogImageField.tsx` | UI component/page |
-| 3 | `CatalogPage.tsx` | UI component/page |
-| 4 | `CatalogPageContext.tsx` | UI component/page |
-| 5 | `CatalogPreviewSurface.tsx` | UI component/page |
-| 6 | `CatalogProductsSection.tsx` | UI component/page |
-| 7 | `CatalogSecondaryTabs.tsx` | UI component/page |
-| 8 | `catalogUi.tsx` | UI component/page |
-| 9 | `portalCatalogDisplay.ts` | UI component/page |
-| 10 | `portalContentI18n.ts` | UI component/page |
-| 11 | `portalEditorUtils.ts` | UI component/page |
-| 12 | `portalLanguagePacks.ts` | UI component/page |
-| 13 | `portalTranslateController.ts` | UI component/page |
+| 1 | `catalogAssetUrls.ts` | UI component/page |
+| 2 | `CatalogEditorSurface.tsx` | UI component/page |
+| 3 | `CatalogImageField.tsx` | UI component/page |
+| 4 | `catalogImages.tsx` | UI component/page |
+| 5 | `CatalogPage.tsx` | UI component/page |
+| 6 | `CatalogPageContext.tsx` | UI component/page |
+| 7 | `catalogPagination.tsx` | UI component/page |
+| 8 | `CatalogPreviewSurface.tsx` | UI component/page |
+| 9 | `CatalogProductsSection.tsx` | UI component/page |
+| 10 | `CatalogSecondaryTabs.tsx` | UI component/page |
+| 11 | `catalogUi.tsx` | UI component/page |
+| 12 | `portalCatalogDisplay.ts` | UI component/page |
+| 13 | `portalContentI18n.ts` | UI component/page |
+| 14 | `portalEditorUtils.ts` | UI component/page |
+| 15 | `portalLanguageOptions.ts` | UI component/page |
+| 16 | `portalLanguagePacks.ts` | UI component/page |
+| 17 | `portalTranslateController.ts` | UI component/page |
+| 18 | `portalTranslationData.ts` | UI component/page |
 
 
-### 3.30 Folder: `frontend/src/components/contacts`
+### 3.44 Folder: `frontend/src/components/contacts`
 
 - Purpose: UI pages/components domain
 - Direct files: **10**
 - Direct subfolders: **0**
 
-#### 3.30.2 Files
+#### 3.44.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -811,46 +1138,47 @@ Total folders documented: **82**
 | 10 | `SuppliersTab.tsx` | UI component/page |
 
 
-### 3.31 Folder: `frontend/src/components/custom-tables`
+### 3.45 Folder: `frontend/src/components/custom-tables`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.31.2 Files
+#### 3.45.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `CustomTables.tsx` | UI component/page |
 
 
-### 3.32 Folder: `frontend/src/components/dashboard`
+### 3.46 Folder: `frontend/src/components/dashboard`
 
 - Purpose: UI pages/components domain
-- Direct files: **2**
+- Direct files: **3**
 - Direct subfolders: **1**
 
-#### 3.32.1 Subfolders
+#### 3.46.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `charts` |
 
-#### 3.32.2 Files
+#### 3.46.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Dashboard.tsx` | UI component/page |
-| 2 | `MiniStat.tsx` | UI component/page |
+| 2 | `dashboardExport.ts` | UI component/page |
+| 3 | `MiniStat.tsx` | UI component/page |
 
 
-### 3.33 Folder: `frontend/src/components/dashboard/charts`
+### 3.47 Folder: `frontend/src/components/dashboard/charts`
 
 - Purpose: UI pages/components domain
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.33.2 Files
+#### 3.47.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -861,13 +1189,13 @@ Total folders documented: **82**
 | 5 | `NoData.tsx` | UI component/page |
 
 
-### 3.34 Folder: `frontend/src/components/files`
+### 3.48 Folder: `frontend/src/components/files`
 
 - Purpose: UI pages/components domain
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.34.2 Files
+#### 3.48.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -877,60 +1205,61 @@ Total folders documented: **82**
 | 4 | `FilesResponsesTab.tsx` | UI component/page |
 
 
-### 3.35 Folder: `frontend/src/components/inventory`
+### 3.49 Folder: `frontend/src/components/inventory`
 
 - Purpose: UI pages/components domain
-- Direct files: **9**
+- Direct files: **10**
 - Direct subfolders: **0**
 
-#### 3.35.2 Files
+#### 3.49.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `DualMoney.tsx` | UI component/page |
 | 2 | `Inventory.tsx` | UI component/page |
-| 3 | `InventoryImportModal.tsx` | UI component/page |
-| 4 | `inventoryImportWorker.ts` | UI component/page |
-| 5 | `InventoryMovementsSurface.tsx` | UI component/page |
-| 6 | `InventoryProductsSurface.tsx` | UI component/page |
-| 7 | `InventoryRfidSurface.tsx` | UI component/page |
-| 8 | `movementGroups.ts` | UI component/page |
-| 9 | `ProductDetailModal.tsx` | UI component/page |
+| 3 | `inventoryExport.ts` | UI component/page |
+| 4 | `InventoryImportModal.tsx` | UI component/page |
+| 5 | `inventoryImportWorker.ts` | UI component/page |
+| 6 | `InventoryMovementsSurface.tsx` | UI component/page |
+| 7 | `InventoryProductsSurface.tsx` | UI component/page |
+| 8 | `InventoryRfidSurface.tsx` | UI component/page |
+| 9 | `movementGroups.ts` | UI component/page |
+| 10 | `ProductDetailModal.tsx` | UI component/page |
 
 
-### 3.36 Folder: `frontend/src/components/loyalty-points`
+### 3.50 Folder: `frontend/src/components/loyalty-points`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.36.2 Files
+#### 3.50.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `LoyaltyPointsPage.tsx` | UI component/page |
 
 
-### 3.37 Folder: `frontend/src/components/navigation`
+### 3.51 Folder: `frontend/src/components/navigation`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.37.2 Files
+#### 3.51.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Sidebar.tsx` | UI component/page |
 
 
-### 3.38 Folder: `frontend/src/components/pos`
+### 3.52 Folder: `frontend/src/components/pos`
 
 - Purpose: UI pages/components domain
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.38.2 Files
+#### 3.52.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -942,13 +1271,13 @@ Total folders documented: **82**
 | 6 | `QuickAddModal.tsx` | UI component/page |
 
 
-### 3.39 Folder: `frontend/src/components/products`
+### 3.53 Folder: `frontend/src/components/products`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **9**
 
-#### 3.39.1 Subfolders
+#### 3.53.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -962,33 +1291,33 @@ Total folders documented: **82**
 | 8 | `shared` |
 | 9 | `surfaces` |
 
-#### 3.39.2 Files
+#### 3.53.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Products.tsx` | UI component/page |
 
 
-### 3.40 Folder: `frontend/src/components/products/config`
+### 3.54 Folder: `frontend/src/components/products/config`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.40.2 Files
+#### 3.54.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `productPageConfig.ts` | UI component/page |
 
 
-### 3.41 Folder: `frontend/src/components/products/forms`
+### 3.55 Folder: `frontend/src/components/products/forms`
 
 - Purpose: UI pages/components domain
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.41.2 Files
+#### 3.55.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -998,46 +1327,47 @@ Total folders documented: **82**
 | 4 | `VariantFormModal.tsx` | UI component/page |
 
 
-### 3.42 Folder: `frontend/src/components/products/helpers`
+### 3.56 Folder: `frontend/src/components/products/helpers`
 
 - Purpose: UI pages/components domain
-- Direct files: **8**
+- Direct files: **9**
 - Direct subfolders: **0**
 
-#### 3.42.2 Files
+#### 3.56.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `productDisplayHelpers.ts` | UI component/page |
-| 2 | `productFilterHelpers.ts` | UI component/page |
-| 3 | `productGalleryHelpers.ts` | UI component/page |
-| 4 | `productGroupViewHelpers.ts` | UI component/page |
-| 5 | `productMenuHelpers.ts` | UI component/page |
-| 6 | `productPageHelpers.ts` | UI component/page |
-| 7 | `productSelectionHelpers.ts` | UI component/page |
-| 8 | `productWriteHelpers.ts` | UI component/page |
+| 2 | `productExport.ts` | UI component/page |
+| 3 | `productFilterHelpers.ts` | UI component/page |
+| 4 | `productGalleryHelpers.ts` | UI component/page |
+| 5 | `productGroupViewHelpers.ts` | UI component/page |
+| 6 | `productMenuHelpers.ts` | UI component/page |
+| 7 | `productPageHelpers.ts` | UI component/page |
+| 8 | `productSelectionHelpers.ts` | UI component/page |
+| 9 | `productWriteHelpers.ts` | UI component/page |
 
 
-### 3.43 Folder: `frontend/src/components/products/history`
+### 3.57 Folder: `frontend/src/components/products/history`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.43.2 Files
+#### 3.57.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `productHistoryHelpers.ts` | UI component/page |
 
 
-### 3.44 Folder: `frontend/src/components/products/import`
+### 3.58 Folder: `frontend/src/components/products/import`
 
 - Purpose: UI pages/components domain
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.44.2 Files
+#### 3.58.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1046,13 +1376,13 @@ Total folders documented: **82**
 | 3 | `productImportWorker.ts` | UI component/page |
 
 
-### 3.45 Folder: `frontend/src/components/products/lookups`
+### 3.59 Folder: `frontend/src/components/products/lookups`
 
 - Purpose: UI pages/components domain
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.45.2 Files
+#### 3.59.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1062,13 +1392,13 @@ Total folders documented: **82**
 | 4 | `productLookupSnapshots.ts` | UI component/page |
 
 
-### 3.46 Folder: `frontend/src/components/products/scanning`
+### 3.60 Folder: `frontend/src/components/products/scanning`
 
 - Purpose: UI pages/components domain
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.46.2 Files
+#### 3.60.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1079,26 +1409,26 @@ Total folders documented: **82**
 | 5 | `scanbotScanner.ts` | UI component/page |
 
 
-### 3.47 Folder: `frontend/src/components/products/shared`
+### 3.61 Folder: `frontend/src/components/products/shared`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.47.2 Files
+#### 3.61.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `primitives.tsx` | UI component/page |
 
 
-### 3.48 Folder: `frontend/src/components/products/surfaces`
+### 3.62 Folder: `frontend/src/components/products/surfaces`
 
 - Purpose: UI pages/components domain
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.48.2 Files
+#### 3.62.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1108,26 +1438,26 @@ Total folders documented: **82**
 | 4 | `ProductsListSurface.tsx` | UI component/page |
 
 
-### 3.49 Folder: `frontend/src/components/receipt`
+### 3.63 Folder: `frontend/src/components/receipt`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.49.2 Files
+#### 3.63.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `Receipt.tsx` | UI component/page |
 
 
-### 3.50 Folder: `frontend/src/components/receipt-settings`
+### 3.64 Folder: `frontend/src/components/receipt-settings`
 
 - Purpose: UI pages/components domain
 - Direct files: **8**
 - Direct subfolders: **0**
 
-#### 3.50.2 Files
+#### 3.64.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1141,13 +1471,13 @@ Total folders documented: **82**
 | 8 | `template.ts` | UI component/page |
 
 
-### 3.51 Folder: `frontend/src/components/returns`
+### 3.65 Folder: `frontend/src/components/returns`
 
 - Purpose: UI pages/components domain
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.51.2 Files
+#### 3.65.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1159,13 +1489,13 @@ Total folders documented: **82**
 | 6 | `ReturnsListSurface.tsx` | UI component/page |
 
 
-### 3.52 Folder: `frontend/src/components/sales`
+### 3.66 Folder: `frontend/src/components/sales`
 
 - Purpose: UI pages/components domain
 - Direct files: **7**
 - Direct subfolders: **0**
 
-#### 3.52.2 Files
+#### 3.66.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1178,71 +1508,74 @@ Total folders documented: **82**
 | 7 | `StatusBadge.tsx` | UI component/page |
 
 
-### 3.53 Folder: `frontend/src/components/server`
+### 3.67 Folder: `frontend/src/components/server`
 
 - Purpose: UI pages/components domain
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.53.2 Files
+#### 3.67.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `ServerPage.tsx` | UI component/page |
 
 
-### 3.54 Folder: `frontend/src/components/shared`
+### 3.68 Folder: `frontend/src/components/shared`
 
 - Purpose: UI pages/components domain
-- Direct files: **17**
+- Direct files: **19**
 - Direct subfolders: **0**
 
-#### 3.54.2 Files
+#### 3.68.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `ActionHistoryBar.tsx` | UI component/page |
-| 2 | `BackgroundImportTracker.tsx` | UI component/page |
-| 3 | `ExportMenu.tsx` | UI component/page |
-| 4 | `FilterMenu.tsx` | UI component/page |
-| 5 | `globalScroll.ts` | UI component/page |
-| 6 | `ImageGalleryLightbox.tsx` | UI component/page |
-| 7 | `LoadingWatchdog.tsx` | UI component/page |
-| 8 | `Modal.tsx` | UI component/page |
-| 9 | `navigationConfig.ts` | UI component/page |
-| 10 | `NotificationCenter.tsx` | UI component/page |
-| 11 | `pageActivity.ts` | UI component/page |
-| 12 | `PageHeader.tsx` | UI component/page |
-| 13 | `PaginationControls.tsx` | UI component/page |
-| 14 | `PortalMenu.tsx` | UI component/page |
-| 15 | `QuickPreferenceToggles.tsx` | UI component/page |
-| 16 | `SectionSwitcher.tsx` | UI component/page |
-| 17 | `WriteConflictModal.tsx` | UI component/page |
+| 2 | `AppSelect.tsx` | UI component/page |
+| 3 | `BackgroundImportTracker.tsx` | UI component/page |
+| 4 | `ExportMenu.tsx` | UI component/page |
+| 5 | `FilterMenu.tsx` | UI component/page |
+| 6 | `globalScroll.ts` | UI component/page |
+| 7 | `ImageGalleryLightbox.tsx` | UI component/page |
+| 8 | `LazyPortalMenu.tsx` | UI component/page |
+| 9 | `LoadingWatchdog.tsx` | UI component/page |
+| 10 | `Modal.tsx` | UI component/page |
+| 11 | `navigationConfig.ts` | UI component/page |
+| 12 | `NotificationCenter.tsx` | UI component/page |
+| 13 | `pageActivity.ts` | UI component/page |
+| 14 | `PageHeader.tsx` | UI component/page |
+| 15 | `PaginationControls.tsx` | UI component/page |
+| 16 | `PortalMenu.tsx` | UI component/page |
+| 17 | `QuickPreferenceToggles.tsx` | UI component/page |
+| 18 | `SectionSwitcher.tsx` | UI component/page |
+| 19 | `WriteConflictModal.tsx` | UI component/page |
 
 
-### 3.55 Folder: `frontend/src/components/users`
+### 3.69 Folder: `frontend/src/components/users`
 
 - Purpose: UI pages/components domain
-- Direct files: **4**
+- Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.55.2 Files
+#### 3.69.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `PermissionEditor.tsx` | UI component/page |
-| 2 | `UserDetailSheet.tsx` | UI component/page |
-| 3 | `UserProfileModal.tsx` | UI component/page |
-| 4 | `Users.tsx` | UI component/page |
+| 1 | `permissionDefinitions.ts` | UI component/page |
+| 2 | `PermissionEditor.tsx` | UI component/page |
+| 3 | `UserDetailSheet.tsx` | UI component/page |
+| 4 | `UserProfileModal.tsx` | UI component/page |
+| 5 | `Users.tsx` | UI component/page |
 
 
-### 3.56 Folder: `frontend/src/components/utils-settings`
+### 3.70 Folder: `frontend/src/components/utils-settings`
 
 - Purpose: UI pages/components domain
 - Direct files: **8**
 - Direct subfolders: **0**
 
-#### 3.56.2 Files
+#### 3.70.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1256,13 +1589,13 @@ Total folders documented: **82**
 | 8 | `settingsConflict.ts` | UI component/page |
 
 
-### 3.57 Folder: `frontend/src/lang`
+### 3.71 Folder: `frontend/src/lang`
 
 - Purpose: Localization resources
 - Direct files: **2**
 - Direct subfolders: **0**
 
-#### 3.57.2 Files
+#### 3.71.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1270,13 +1603,13 @@ Total folders documented: **82**
 | 2 | `km.json` | Localization dictionary |
 
 
-### 3.58 Folder: `frontend/src/platform`
+### 3.72 Folder: `frontend/src/platform`
 
 - Purpose: Project folder
 - Direct files: **0**
 - Direct subfolders: **2**
 
-#### 3.58.1 Subfolders
+#### 3.72.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -1284,39 +1617,39 @@ Total folders documented: **82**
 | 2 | `storage` |
 
 
-### 3.59 Folder: `frontend/src/platform/runtime`
+### 3.73 Folder: `frontend/src/platform/runtime`
 
 - Purpose: Project folder
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.59.2 Files
+#### 3.73.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `clientRuntime.ts` | Project source/support file |
 
 
-### 3.60 Folder: `frontend/src/platform/storage`
+### 3.74 Folder: `frontend/src/platform/storage`
 
 - Purpose: Project folder
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.60.2 Files
+#### 3.74.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `storagePolicy.ts` | Project source/support file |
 
 
-### 3.61 Folder: `frontend/src/public-runtime`
+### 3.75 Folder: `frontend/src/public-runtime`
 
 - Purpose: Project folder
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.61.2 Files
+#### 3.75.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1325,53 +1658,54 @@ Total folders documented: **82**
 | 3 | `theme-bootstrap.ts` | Project source/support file |
 
 
-### 3.62 Folder: `frontend/src/runtime`
+### 3.76 Folder: `frontend/src/runtime`
 
 - Purpose: Project folder
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.62.2 Files
+#### 3.76.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `runtimeErrorClassifier.ts` | Project source/support file |
 
 
-### 3.63 Folder: `frontend/src/styles`
+### 3.77 Folder: `frontend/src/styles`
 
 - Purpose: Project folder
 - Direct files: **1**
 - Direct subfolders: **0**
 
-#### 3.63.2 Files
+#### 3.77.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `main.css` | Project source/support file |
 
 
-### 3.64 Folder: `frontend/src/types`
+### 3.78 Folder: `frontend/src/types`
 
 - Purpose: Project folder
-- Direct files: **2**
+- Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.64.2 Files
+#### 3.78.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
-| 1 | `receiptContracts.ts` | Project source/support file |
-| 2 | `settingsContracts.ts` | Project source/support file |
+| 1 | `lucide-react-icons.d.ts` | Project source/support file |
+| 2 | `receiptContracts.ts` | Project source/support file |
+| 3 | `settingsContracts.ts` | Project source/support file |
 
 
-### 3.65 Folder: `frontend/src/utils`
+### 3.79 Folder: `frontend/src/utils`
 
 - Purpose: Project folder
-- Direct files: **33**
+- Direct files: **35**
 - Direct subfolders: **0**
 
-#### 3.65.2 Files
+#### 3.79.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1385,38 +1719,40 @@ Total folders documented: **82**
 | 8 | `csvImport.ts` | Utility helper |
 | 9 | `csvRowCounter.d.mts` | Utility helper |
 | 10 | `csvRowCounter.ts` | Utility helper |
-| 11 | `dateHelpers.ts` | Utility helper |
-| 12 | `deviceInfo.ts` | Utility helper |
-| 13 | `exportPackage.ts` | Utility helper |
-| 14 | `exportReports.tsx` | Utility helper |
-| 15 | `favicon.ts` | Utility helper |
-| 16 | `formatters.ts` | Utility helper |
-| 17 | `groupedRecords.ts` | Utility helper |
-| 18 | `historyHelpers.ts` | Utility helper |
-| 19 | `importJobRefresh.ts` | Utility helper |
-| 20 | `index.ts` | Utility helper |
-| 21 | `initials.ts` | Utility helper |
-| 22 | `loaders.ts` | Utility helper |
-| 23 | `mediaUpload.ts` | Utility helper |
-| 24 | `permissions.ts` | Utility helper |
-| 25 | `pricing.ts` | Utility helper |
-| 26 | `printReceipt.ts` | Utility helper |
-| 27 | `productBatches.ts` | Utility helper |
-| 28 | `productGrouping.ts` | Utility helper |
-| 29 | `publicAssetUrls.ts` | Utility helper |
-| 30 | `receiptAppliedConfig.ts` | Utility helper |
-| 31 | `scriptTypography.ts` | Utility helper |
-| 32 | `settingsRefresh.ts` | Utility helper |
-| 33 | `settingsWriteOptions.ts` | Utility helper |
+| 11 | `csvTemplate.ts` | Utility helper |
+| 12 | `dateHelpers.ts` | Utility helper |
+| 13 | `deviceInfo.ts` | Utility helper |
+| 14 | `exportPackage.ts` | Utility helper |
+| 15 | `exportReports.tsx` | Utility helper |
+| 16 | `favicon.ts` | Utility helper |
+| 17 | `formatters.ts` | Utility helper |
+| 18 | `groupedRecords.ts` | Utility helper |
+| 19 | `historyHelpers.ts` | Utility helper |
+| 20 | `importJobRefresh.ts` | Utility helper |
+| 21 | `index.ts` | Utility helper |
+| 22 | `initials.ts` | Utility helper |
+| 23 | `loaders.ts` | Utility helper |
+| 24 | `mediaUpload.ts` | Utility helper |
+| 25 | `mediaUploadState.ts` | Utility helper |
+| 26 | `permissions.ts` | Utility helper |
+| 27 | `pricing.ts` | Utility helper |
+| 28 | `printReceipt.ts` | Utility helper |
+| 29 | `productBatches.ts` | Utility helper |
+| 30 | `productGrouping.ts` | Utility helper |
+| 31 | `publicAssetUrls.ts` | Utility helper |
+| 32 | `receiptAppliedConfig.ts` | Utility helper |
+| 33 | `scriptTypography.ts` | Utility helper |
+| 34 | `settingsRefresh.ts` | Utility helper |
+| 35 | `settingsWriteOptions.ts` | Utility helper |
 
 
-### 3.66 Folder: `frontend/tests`
+### 3.80 Folder: `frontend/tests`
 
 - Purpose: Project folder
 - Direct files: **76**
 - Direct subfolders: **0**
 
-#### 3.66.2 Files
+#### 3.80.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1498,13 +1834,13 @@ Total folders documented: **82**
 | 76 | `utilsSettingsBarrel.test.ts` | Project source/support file |
 
 
-### 3.67 Folder: `ops/scripts`
+### 3.81 Folder: `ops/scripts`
 
 - Purpose: Project-level automation scripts
 - Direct files: **0**
 - Direct subfolders: **7**
 
-#### 3.67.1 Subfolders
+#### 3.81.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -1517,13 +1853,13 @@ Total folders documented: **82**
 | 7 | `verification` |
 
 
-### 3.68 Folder: `ops/scripts/architecture`
+### 3.82 Folder: `ops/scripts/architecture`
 
 - Purpose: Project folder
 - Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.68.2 Files
+#### 3.82.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1534,13 +1870,13 @@ Total folders documented: **82**
 | 5 | `runtime-js-inventory.ts` | Project source/support file |
 
 
-### 3.69 Folder: `ops/scripts/backend`
+### 3.83 Folder: `ops/scripts/backend`
 
 - Purpose: Project folder
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.69.2 Files
+#### 3.83.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1552,13 +1888,13 @@ Total folders documented: **82**
 | 6 | `verify-data-integrity.ts` | Project source/support file |
 
 
-### 3.70 Folder: `ops/scripts/frontend`
+### 3.84 Folder: `ops/scripts/frontend`
 
 - Purpose: Project folder
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.70.2 Files
+#### 3.84.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1568,13 +1904,13 @@ Total folders documented: **82**
 | 4 | `verify-ui.ts` | Project source/support file |
 
 
-### 3.71 Folder: `ops/scripts/lib`
+### 3.85 Folder: `ops/scripts/lib`
 
 - Purpose: Project folder
 - Direct files: **2**
 - Direct subfolders: **0**
 
-#### 3.71.2 Files
+#### 3.85.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1582,13 +1918,13 @@ Total folders documented: **82**
 | 2 | `report-utils.ts` | Project source/support file |
 
 
-### 3.72 Folder: `ops/scripts/powershell`
+### 3.86 Folder: `ops/scripts/powershell`
 
 - Purpose: Project folder
 - Direct files: **8**
 - Direct subfolders: **0**
 
-#### 3.72.2 Files
+#### 3.86.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1602,13 +1938,13 @@ Total folders documented: **82**
 | 8 | `tailscale-health-monitor.ps1` | Project source/support file |
 
 
-### 3.73 Folder: `ops/scripts/runtime`
+### 3.87 Folder: `ops/scripts/runtime`
 
 - Purpose: Project folder
 - Direct files: **2**
 - Direct subfolders: **5**
 
-#### 3.73.1 Subfolders
+#### 3.87.1 Subfolders
 
 | No. | Name |
 |---:|---|
@@ -1618,7 +1954,7 @@ Total folders documented: **82**
 | 4 | `smoke` |
 | 5 | `storage` |
 
-#### 3.73.2 Files
+#### 3.87.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1626,13 +1962,13 @@ Total folders documented: **82**
 | 2 | `build-ecosystem-config.ts` | Project source/support file |
 
 
-### 3.74 Folder: `ops/scripts/runtime/audits`
+### 3.88 Folder: `ops/scripts/runtime/audits`
 
 - Purpose: Project folder
 - Direct files: **7**
 - Direct subfolders: **0**
 
-#### 3.74.2 Files
+#### 3.88.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1645,13 +1981,13 @@ Total folders documented: **82**
 | 7 | `package.json` | Configuration/data manifest |
 
 
-### 3.75 Folder: `ops/scripts/runtime/cloudflare`
+### 3.89 Folder: `ops/scripts/runtime/cloudflare`
 
 - Purpose: Project folder
-- Direct files: **4**
+- Direct files: **5**
 - Direct subfolders: **0**
 
-#### 3.75.2 Files
+#### 3.89.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1659,47 +1995,62 @@ Total folders documented: **82**
 | 2 | `update-cloudflare-tunnel-origin.ts` | Project source/support file |
 | 3 | `verify-cloudflare-automation.ts` | Project source/support file |
 | 4 | `verify-r2-object-store.ts` | Project source/support file |
+| 5 | `warm-cloudflare-startup-assets.ts` | Project source/support file |
 
 
-### 3.76 Folder: `ops/scripts/runtime/live-checks`
+### 3.90 Folder: `ops/scripts/runtime/live-checks`
 
 - Purpose: Project folder
-- Direct files: **20**
+- Direct files: **34**
 - Direct subfolders: **0**
 
-#### 3.76.2 Files
+#### 3.90.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
 | 1 | `all-pages-control-audit.ts` | Project source/support file |
-| 2 | `live-check-utils.ts` | Project source/support file |
-| 3 | `package.json` | Configuration/data manifest |
-| 4 | `phase84-branches-actions-live-check.ts` | Project source/support file |
-| 5 | `phase84-contacts-live-check.ts` | Project source/support file |
-| 6 | `phase84-files-providers-actions-live-check.ts` | Project source/support file |
-| 7 | `phase84-inventory-actions-live-check.ts` | Project source/support file |
-| 8 | `phase84-live-suite.ts` | Project source/support file |
-| 9 | `phase84-product-brands-actions-live-check.ts` | Project source/support file |
-| 10 | `phase84-product-categories-actions-live-check.ts` | Project source/support file |
-| 11 | `phase84-product-page-actions-live-check.ts` | Project source/support file |
-| 12 | `phase84-product-scanning-actions-live-check.ts` | Project source/support file |
-| 13 | `phase84-product-stock-actions-live-check.ts` | Project source/support file |
-| 14 | `phase84-product-units-actions-live-check.ts` | Project source/support file |
-| 15 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
-| 16 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
-| 17 | `phase84-receipt-settings-rollback-check.ts` | Project source/support file |
-| 18 | `phase84-sales-actions-live-check.ts` | Project source/support file |
-| 19 | `phase84-ui-live-check.ts` | Project source/support file |
-| 20 | `phase84-users-actions-live-check.ts` | Project source/support file |
+| 2 | `filter-burst-check.ts` | Project source/support file |
+| 3 | `live-check-utils.ts` | Project source/support file |
+| 4 | `move766-product-write-live-check.ts` | Project source/support file |
+| 5 | `package.json` | Configuration/data manifest |
+| 6 | `phase84-account-loyalty-select-live-check.ts` | Project source/support file |
+| 7 | `phase84-branches-actions-live-check.ts` | Project source/support file |
+| 8 | `phase84-catalog-editor-select-live-check.ts` | Project source/support file |
+| 9 | `phase84-contacts-live-check.ts` | Project source/support file |
+| 10 | `phase84-files-providers-actions-live-check.ts` | Project source/support file |
+| 11 | `phase84-filter-menu-live-check.ts` | Project source/support file |
+| 12 | `phase84-inventory-actions-live-check.ts` | Project source/support file |
+| 13 | `phase84-inventory-section-restore-live-check.ts` | Project source/support file |
+| 14 | `phase84-live-suite.ts` | Project source/support file |
+| 15 | `phase84-loyalty-points-rollback-check.ts` | Project source/support file |
+| 16 | `phase84-product-brands-actions-live-check.ts` | Project source/support file |
+| 17 | `phase84-product-categories-actions-live-check.ts` | Project source/support file |
+| 18 | `phase84-product-form-dropdown-live-check.ts` | Project source/support file |
+| 19 | `phase84-product-page-actions-live-check.ts` | Project source/support file |
+| 20 | `phase84-product-scanning-actions-live-check.ts` | Project source/support file |
+| 21 | `phase84-product-stock-actions-live-check.ts` | Project source/support file |
+| 22 | `phase84-product-units-actions-live-check.ts` | Project source/support file |
+| 23 | `phase84-product-variant-actions-live-check.ts` | Project source/support file |
+| 24 | `phase84-public-assistant-select-live-check.ts` | Project source/support file |
+| 25 | `phase84-public-portal-cloudflare-check.ts` | Project source/support file |
+| 26 | `phase84-receipt-export-layout-check.ts` | Project source/support file |
+| 27 | `phase84-receipt-settings-rollback-check.ts` | Project source/support file |
+| 28 | `phase84-sales-actions-live-check.ts` | Project source/support file |
+| 29 | `phase84-settings-save-rollback-check.ts` | Project source/support file |
+| 30 | `phase84-settings-select-live-check.ts` | Project source/support file |
+| 31 | `phase84-shared-select-live-check.ts` | Project source/support file |
+| 32 | `phase84-ui-live-check.ts` | Project source/support file |
+| 33 | `phase84-users-actions-live-check.ts` | Project source/support file |
+| 34 | `route-load-trace.ts` | Project source/support file |
 
 
-### 3.77 Folder: `ops/scripts/runtime/smoke`
+### 3.91 Folder: `ops/scripts/runtime/smoke`
 
 - Purpose: Project folder
 - Direct files: **4**
 - Direct subfolders: **0**
 
-#### 3.77.2 Files
+#### 3.91.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1709,13 +2060,13 @@ Total folders documented: **82**
 | 4 | `post-start-diagnostics.ts` | Project source/support file |
 
 
-### 3.78 Folder: `ops/scripts/runtime/storage`
+### 3.92 Folder: `ops/scripts/runtime/storage`
 
 - Purpose: Project folder
 - Direct files: **7**
 - Direct subfolders: **0**
 
-#### 3.78.2 Files
+#### 3.92.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1728,13 +2079,13 @@ Total folders documented: **82**
 | 7 | `restore-rehearsal.ts` | Project source/support file |
 
 
-### 3.79 Folder: `ops/scripts/verification`
+### 3.93 Folder: `ops/scripts/verification`
 
 - Purpose: Project folder
 - Direct files: **6**
 - Direct subfolders: **0**
 
-#### 3.79.2 Files
+#### 3.93.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1746,20 +2097,20 @@ Total folders documented: **82**
 | 6 | `verify-secret-hygiene.ts` | Project source/support file |
 
 
-### 3.80 Folder: `run`
+### 3.94 Folder: `run`
 
 - Purpose: Project run-script home for bat and sh launchers
 - Direct files: **9**
 - Direct subfolders: **2**
 
-#### 3.80.1 Subfolders
+#### 3.94.1 Subfolders
 
 | No. | Name |
 |---:|---|
 | 1 | `docker` |
 | 2 | `sh` |
 
-#### 3.80.2 Files
+#### 3.94.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1774,13 +2125,13 @@ Total folders documented: **82**
 | 9 | `verify-local.bat` | Project source/support file |
 
 
-### 3.81 Folder: `run/docker`
+### 3.95 Folder: `run/docker`
 
 - Purpose: Project folder
 - Direct files: **9**
 - Direct subfolders: **0**
 
-#### 3.81.2 Files
+#### 3.95.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|
@@ -1795,13 +2146,13 @@ Total folders documented: **82**
 | 9 | `update.bat` | Project source/support file |
 
 
-### 3.82 Folder: `run/sh`
+### 3.96 Folder: `run/sh`
 
 - Purpose: POSIX run/setup/stop scripts
 - Direct files: **3**
 - Direct subfolders: **0**
 
-#### 3.82.2 Files
+#### 3.96.2 Files
 
 | No. | File | Purpose |
 |---:|---|---|

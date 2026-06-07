@@ -25,6 +25,22 @@ export function getRoles(): Promise<unknown> {
   )
 }
 
+export function getUserProfile(id: string | number): Promise<unknown> {
+  return route(
+    `users:profile:${id}`,
+    () => apiFetch('GET', appendActorQuery(`/api/users/${encodeId(id)}/profile`)),
+    () => null,
+  )
+}
+
+export function getUserAuthMethods(id: string | number): Promise<unknown> {
+  return route(
+    `users:authMethods:${id}`,
+    () => apiFetch('GET', appendActorQuery(`/api/users/${encodeId(id)}/auth-methods`)),
+    () => null,
+  )
+}
+
 export function createUser(payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'users:create',
@@ -44,10 +60,38 @@ export async function updateUser(id: string | number, payload: AccessPayload = {
   )
 }
 
+export async function updateUserProfile(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
+  const body = await withExpectedUpdatedAt('users', id, payload)
+  return route(
+    'users:updateProfile',
+    () => apiFetch('PUT', `/api/users/${encodeId(id)}/profile`, body),
+    null,
+    true,
+  )
+}
+
+export function disconnectUserAuthProvider(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
+  return route(
+    'users:disconnectProvider',
+    () => apiFetch('POST', `/api/users/${encodeId(id)}/provider-disconnect`, payload),
+    null,
+    true,
+  )
+}
+
 export function changeUserPassword(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
   return route(
     'users:changePassword',
     () => apiFetch('POST', `/api/users/${encodeId(id)}/change-password`, payload),
+    null,
+    true,
+  )
+}
+
+export function resetPassword(id: string | number, payload: AccessPayload = {}): Promise<unknown> {
+  return route(
+    'users:resetPassword',
+    () => apiFetch('POST', `/api/users/${encodeId(id)}/reset-password`, payload),
     null,
     true,
   )

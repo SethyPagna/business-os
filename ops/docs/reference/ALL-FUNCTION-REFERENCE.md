@@ -4,531 +4,661 @@ Auto-generated function/class symbol commentary for all first-party code files (
 
 ## 1. Coverage Summary
 
-Code files scanned: **515**
+Code files scanned: **645**
 
 ## 2. Symbol Count by File
 
 | No. | File | Symbols |
 |---:|---|---:|
-| 1 | `backend/server.js` | 24 |
-| 2 | `backend/server.ts` | 24 |
-| 3 | `backend/src/accessControl.ts` | 18 |
-| 4 | `backend/src/analytics/duckdbRuntime.ts` | 3 |
-| 5 | `backend/src/authOtpGuards.ts` | 3 |
-| 6 | `backend/src/backupSchema.ts` | 4 |
-| 7 | `backend/src/businessMetrics.ts` | 9 |
-| 8 | `backend/src/catalogTextIntegrity.ts` | 5 |
-| 9 | `backend/src/config/index.ts` | 11 |
-| 10 | `backend/src/conflictControl.ts` | 6 |
-| 11 | `backend/src/contactOptions.ts` | 10 |
-| 12 | `backend/src/database.ts` | 0 |
-| 13 | `backend/src/dataPath/index.ts` | 11 |
-| 14 | `backend/src/db/cutoverReadiness.ts` | 10 |
-| 15 | `backend/src/db/postgresQueryCompat.ts` | 12 |
-| 16 | `backend/src/fileAssets.ts` | 61 |
-| 17 | `backend/src/helpers.ts` | 30 |
-| 18 | `backend/src/idempotency.ts` | 1 |
-| 19 | `backend/src/importCsv.ts` | 16 |
-| 20 | `backend/src/importParsing.ts` | 6 |
-| 21 | `backend/src/initials.ts` | 7 |
-| 22 | `backend/src/maintenanceLock.ts` | 9 |
-| 23 | `backend/src/middleware.ts` | 21 |
-| 24 | `backend/src/money.ts` | 3 |
-| 25 | `backend/src/netSecurity.ts` | 7 |
-| 26 | `backend/src/objectStore.ts` | 29 |
-| 27 | `backend/src/optionalSharp.ts` | 1 |
-| 28 | `backend/src/organizationContext/index.ts` | 14 |
-| 29 | `backend/src/permissions.ts` | 7 |
-| 30 | `backend/src/portalUtils.ts` | 6 |
-| 31 | `backend/src/postgresDatabase.ts` | 14 |
-| 32 | `backend/src/productBatches.ts` | 34 |
-| 33 | `backend/src/productDiscounts.ts` | 9 |
-| 34 | `backend/src/productImportPolicies.ts` | 10 |
-| 35 | `backend/src/requestContext.ts` | 5 |
-| 36 | `backend/src/routes/actionHistory.ts` | 12 |
-| 37 | `backend/src/routes/ai.ts` | 3 |
-| 38 | `backend/src/routes/auth.ts` | 31 |
-| 39 | `backend/src/routes/branches.ts` | 10 |
-| 40 | `backend/src/routes/catalog.ts` | 4 |
-| 41 | `backend/src/routes/categories.ts` | 2 |
-| 42 | `backend/src/routes/contacts.ts` | 34 |
-| 43 | `backend/src/routes/customTables.ts` | 9 |
-| 44 | `backend/src/routes/files.ts` | 3 |
-| 45 | `backend/src/routes/importJobs.ts` | 16 |
-| 46 | `backend/src/routes/inventory.ts` | 32 |
-| 47 | `backend/src/routes/notifications.ts` | 27 |
-| 48 | `backend/src/routes/organizations.ts` | 0 |
-| 49 | `backend/src/routes/portal.ts` | 60 |
-| 50 | `backend/src/routes/products.ts` | 64 |
-| 51 | `backend/src/routes/returns.ts` | 10 |
-| 52 | `backend/src/routes/runtime.ts` | 6 |
-| 53 | `backend/src/routes/sales.ts` | 24 |
-| 54 | `backend/src/routes/settings.ts` | 10 |
-| 55 | `backend/src/routes/sync.ts` | 12 |
-| 56 | `backend/src/routes/system/index.ts` | 44 |
-| 57 | `backend/src/routes/units.ts` | 3 |
-| 58 | `backend/src/routes/users.ts` | 26 |
-| 59 | `backend/src/runtimeCache.ts` | 12 |
-| 60 | `backend/src/runtimeState/index.ts` | 6 |
-| 61 | `backend/src/runtimeVersion.ts` | 8 |
-| 62 | `backend/src/schemaMetadata.ts` | 9 |
-| 63 | `backend/src/security.ts` | 14 |
-| 64 | `backend/src/serverUtils.ts` | 26 |
-| 65 | `backend/src/services/aiGateway.ts` | 17 |
-| 66 | `backend/src/services/backupPackages.ts` | 59 |
-| 67 | `backend/src/services/firebaseAuth.ts` | 22 |
-| 68 | `backend/src/services/googleDriveSync/index.ts` | 75 |
-| 69 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
-| 70 | `backend/src/services/googleOauth.ts` | 17 |
-| 71 | `backend/src/services/importJobs.ts` | 175 |
-| 72 | `backend/src/services/integrationDoctor.ts` | 14 |
-| 73 | `backend/src/services/mediaQueue.ts` | 10 |
-| 74 | `backend/src/services/portalAi.ts` | 42 |
-| 75 | `backend/src/services/verification.ts` | 21 |
-| 76 | `backend/src/sessionAuth.ts` | 13 |
-| 77 | `backend/src/settingsSnapshot.ts` | 12 |
-| 78 | `backend/src/storage/organizationFolders.ts` | 5 |
-| 79 | `backend/src/systemFsWorker.ts` | 7 |
-| 80 | `backend/src/systemJobs.ts` | 28 |
-| 81 | `backend/src/uploadReferenceCleanup.ts` | 3 |
-| 82 | `backend/src/uploadSecurity.ts` | 7 |
-| 83 | `backend/src/websocket.ts` | 1 |
-| 84 | `backend/src/workers/importWorker.ts` | 2 |
-| 85 | `backend/src/workers/mediaWorker.ts` | 2 |
-| 86 | `backend/test/accessControl.test.ts` | 2 |
-| 87 | `backend/test/analyticsRuntime.test.ts` | 1 |
-| 88 | `backend/test/authOtpGuards.test.ts` | 1 |
-| 89 | `backend/test/authSecurityFlow.test.ts` | 14 |
-| 90 | `backend/test/backupDefaultDestination.test.ts` | 0 |
-| 91 | `backend/test/backupPerformanceHardening.test.ts` | 1 |
-| 92 | `backend/test/backupRetention.test.ts` | 1 |
-| 93 | `backend/test/backupSchema.test.ts` | 1 |
-| 94 | `backend/test/branchStockSearch.test.ts` | 10 |
-| 95 | `backend/test/contactOptions.test.ts` | 1 |
-| 96 | `backend/test/dataPath.test.ts` | 2 |
-| 97 | `backend/test/defaultRoles.test.ts` | 8 |
-| 98 | `backend/test/fileAssetStorageReconcile.test.ts` | 1 |
-| 99 | `backend/test/fileAssetUsageCache.test.ts` | 1 |
-| 100 | `backend/test/fileRouteSecurityFlow.test.ts` | 9 |
-| 101 | `backend/test/fullAutomation.test.ts` | 2 |
-| 102 | `backend/test/googleDriveSyncVersioning.test.ts` | 1 |
-| 103 | `backend/test/idempotency.test.ts` | 1 |
-| 104 | `backend/test/importCsv.test.ts` | 2 |
-| 105 | `backend/test/importDecisionIntegrity.test.ts` | 0 |
-| 106 | `backend/test/importJobPerformanceHardening.test.ts` | 1 |
-| 107 | `backend/test/importJobStateMachine.test.ts` | 4 |
-| 108 | `backend/test/importScaleSmoke.test.ts` | 3 |
-| 109 | `backend/test/initials.test.ts` | 0 |
-| 110 | `backend/test/integrationDoctor.test.ts` | 1 |
-| 111 | `backend/test/inventorySettingsMediaContracts.test.ts` | 2 |
-| 112 | `backend/test/mediaOptimization.test.ts` | 3 |
-| 113 | `backend/test/netSecurity.test.ts` | 1 |
-| 114 | `backend/test/notificationSummaryCache.test.ts` | 1 |
-| 115 | `backend/test/offlineSecurity.test.ts` | 2 |
-| 116 | `backend/test/ownedGoogleAuth.test.ts` | 2 |
-| 117 | `backend/test/permissionPolicy.test.ts` | 0 |
-| 118 | `backend/test/portalInventoryRegression.test.ts` | 2 |
-| 119 | `backend/test/portalUtils.test.ts` | 1 |
-| 120 | `backend/test/postgresCutoverReadiness.test.ts` | 1 |
-| 121 | `backend/test/postgresDatabase.test.ts` | 3 |
-| 122 | `backend/test/postgresQueryCompat.test.ts` | 1 |
-| 123 | `backend/test/productBatchHierarchy.test.ts` | 2 |
-| 124 | `backend/test/productExpiry.test.ts` | 1 |
-| 125 | `backend/test/productImportPolicies.test.ts` | 1 |
-| 126 | `backend/test/productSearchPagination.test.ts` | 0 |
-| 127 | `backend/test/rfidRoutes.test.ts` | 1 |
-| 128 | `backend/test/routeContracts.test.ts` | 2 |
-| 129 | `backend/test/runtimeCache.test.ts` | 2 |
-| 130 | `backend/test/runtimeVersion.test.ts` | 1 |
-| 131 | `backend/test/schemaMetadata.test.ts` | 3 |
-| 132 | `backend/test/security.test.ts` | 1 |
-| 133 | `backend/test/serverUtils.test.ts` | 2 |
-| 134 | `backend/test/settingsSnapshotObjectStorage.test.ts` | 4 |
-| 135 | `backend/test/systemJobs.test.ts` | 3 |
-| 136 | `backend/test/uploadSecurity.test.ts` | 1 |
-| 137 | `backend/test/websocket.test.ts` | 0 |
-| 138 | `frontend/public/runtime-noise-guard.js` | 8 |
-| 139 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 |
-| 140 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 |
-| 141 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js` | 0 |
-| 142 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js` | 0 |
-| 143 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js` | 0 |
-| 144 | `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js` | 0 |
-| 145 | `frontend/public/sw.js` | 24 |
-| 146 | `frontend/public/theme-bootstrap.js` | 15 |
-| 147 | `frontend/src/api/accessControlTransport.ts` | 14 |
-| 148 | `frontend/src/api/actionHistoryTransport.ts` | 6 |
-| 149 | `frontend/src/api/actorQuery.ts` | 2 |
-| 150 | `frontend/src/api/aiTransport.ts` | 6 |
-| 151 | `frontend/src/api/appBootstrapTransport.ts` | 4 |
-| 152 | `frontend/src/api/auditLogTransport.ts` | 3 |
-| 153 | `frontend/src/api/authTransport.ts` | 18 |
-| 154 | `frontend/src/api/branchTransport.ts` | 12 |
-| 155 | `frontend/src/api/browserDialogs.ts` | 3 |
-| 156 | `frontend/src/api/conflicts.ts` | 2 |
-| 157 | `frontend/src/api/contactsTransport.ts` | 27 |
-| 158 | `frontend/src/api/cooldownFallbacks.ts` | 11 |
-| 159 | `frontend/src/api/customTablesTransport.ts` | 9 |
-| 160 | `frontend/src/api/dashboardTransport.ts` | 2 |
-| 161 | `frontend/src/api/driveSync.ts` | 7 |
-| 162 | `frontend/src/api/expectedUpdatedAt.ts` | 3 |
-| 163 | `frontend/src/api/fileTransport.ts` | 10 |
-| 164 | `frontend/src/api/http.ts` | 62 |
-| 165 | `frontend/src/api/importJobsTransport.ts` | 20 |
-| 166 | `frontend/src/api/importTransport.ts` | 2 |
-| 167 | `frontend/src/api/inventoryTransport.ts` | 10 |
-| 168 | `frontend/src/api/localDb.ts` | 10 |
-| 169 | `frontend/src/api/localMirrors.ts` | 3 |
-| 170 | `frontend/src/api/lookupTransport.ts` | 12 |
-| 171 | `frontend/src/api/methods.ts` | 183 |
-| 172 | `frontend/src/api/notificationSummary.ts` | 2 |
-| 173 | `frontend/src/api/portalHttp.ts` | 2 |
-| 174 | `frontend/src/api/portalTransport.ts` | 15 |
-| 175 | `frontend/src/api/productReadTransport.ts` | 6 |
-| 176 | `frontend/src/api/productWriteTransport.ts` | 8 |
-| 177 | `frontend/src/api/query.ts` | 4 |
-| 178 | `frontend/src/api/queryCache.ts` | 2 |
-| 179 | `frontend/src/api/requestIds.ts` | 1 |
-| 180 | `frontend/src/api/rfidTransport.ts` | 9 |
-| 181 | `frontend/src/api/salesTransport.ts` | 3 |
-| 182 | `frontend/src/api/syncPreview.ts` | 1 |
-| 183 | `frontend/src/api/syncRuntime.ts` | 4 |
-| 184 | `frontend/src/api/systemJobs.ts` | 10 |
-| 185 | `frontend/src/api/systemRuntime.ts` | 15 |
-| 186 | `frontend/src/api/websocket.ts` | 11 |
-| 187 | `frontend/src/App.tsx` | 84 |
-| 188 | `frontend/src/app/appShellUtils.ts` | 10 |
-| 189 | `frontend/src/app/publicErrorRecovery.ts` | 4 |
-| 190 | `frontend/src/AppContext.tsx` | 40 |
-| 191 | `frontend/src/components/auth/Login.tsx` | 23 |
-| 192 | `frontend/src/components/branches/Branches.tsx` | 15 |
-| 193 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
-| 194 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
-| 195 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1 |
-| 196 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
-| 197 | `frontend/src/components/catalog/CatalogPage.tsx` | 117 |
-| 198 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 |
-| 199 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
-| 200 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
-| 201 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 6 |
-| 202 | `frontend/src/components/catalog/catalogUi.tsx` | 4 |
-| 203 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 9 |
-| 204 | `frontend/src/components/catalog/portalContentI18n.ts` | 18 |
-| 205 | `frontend/src/components/catalog/portalEditorUtils.ts` | 10 |
-| 206 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 3 |
-| 207 | `frontend/src/components/catalog/portalTranslateController.ts` | 17 |
-| 208 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 |
-| 209 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
-| 210 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
-| 211 | `frontend/src/components/contacts/Contacts.tsx` | 11 |
-| 212 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
-| 213 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
-| 214 | `frontend/src/components/contacts/CustomersTab.tsx` | 18 |
-| 215 | `frontend/src/components/contacts/DeliveryTab.tsx` | 27 |
-| 216 | `frontend/src/components/contacts/shared.tsx` | 6 |
-| 217 | `frontend/src/components/contacts/SuppliersTab.tsx` | 20 |
-| 218 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
-| 219 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
-| 220 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
-| 221 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
-| 222 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
-| 223 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
-| 224 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
-| 225 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
-| 226 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
-| 227 | `frontend/src/components/files/FilesPage.tsx` | 27 |
-| 228 | `frontend/src/components/files/FilesProvidersTab.tsx` | 2 |
-| 229 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
-| 230 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
-| 231 | `frontend/src/components/inventory/Inventory.tsx` | 23 |
-| 232 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
-| 233 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
-| 234 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
-| 235 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
-| 236 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
-| 237 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
-| 238 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
-| 239 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 10 |
-| 240 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
-| 241 | `frontend/src/components/pos/CartItem.tsx` | 2 |
-| 242 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
-| 243 | `frontend/src/components/pos/POS.tsx` | 36 |
-| 244 | `frontend/src/components/pos/posCore.ts` | 10 |
-| 245 | `frontend/src/components/pos/ProductImage.tsx` | 1 |
-| 246 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
-| 247 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
-| 248 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 6 |
-| 249 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 6 |
-| 250 | `frontend/src/components/products/forms/ProductForm.tsx` | 18 |
-| 251 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 3 |
-| 252 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
-| 253 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 9 |
-| 254 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 8 |
-| 255 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 2 |
-| 256 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 5 |
-| 257 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 3 |
-| 258 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 7 |
-| 259 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 18 |
-| 260 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 1 |
-| 261 | `frontend/src/components/products/import/BulkImportModal.tsx` | 51 |
-| 262 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
-| 263 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
-| 264 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 9 |
-| 265 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
-| 266 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
-| 267 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
-| 268 | `frontend/src/components/products/Products.tsx` | 24 |
-| 269 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
-| 270 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 4 |
-| 271 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
-| 272 | `frontend/src/components/products/scanning/cameraPermission.ts` | 5 |
-| 273 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 8 |
-| 274 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
-| 275 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
-| 276 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 3 |
-| 277 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 5 |
-| 278 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 3 |
-| 279 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
-| 280 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
-| 281 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
-| 282 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 9 |
-| 283 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 8 |
-| 284 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
-| 285 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 4 |
-| 286 | `frontend/src/components/receipt-settings/template.ts` | 4 |
-| 287 | `frontend/src/components/receipt/Receipt.tsx` | 10 |
-| 288 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
-| 289 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
-| 290 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
-| 291 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
-| 292 | `frontend/src/components/returns/Returns.tsx` | 12 |
-| 293 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
-| 294 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
-| 295 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
-| 296 | `frontend/src/components/sales/Sales.tsx` | 16 |
-| 297 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
-| 298 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
-| 299 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
-| 300 | `frontend/src/components/sales/StatusBadge.tsx` | 3 |
-| 301 | `frontend/src/components/server/ServerPage.tsx` | 20 |
-| 302 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
-| 303 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 21 |
-| 304 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
-| 305 | `frontend/src/components/shared/FilterMenu.tsx` | 2 |
-| 306 | `frontend/src/components/shared/globalScroll.ts` | 5 |
-| 307 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 5 |
-| 308 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
-| 309 | `frontend/src/components/shared/Modal.tsx` | 1 |
-| 310 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
-| 311 | `frontend/src/components/shared/NotificationCenter.tsx` | 9 |
-| 312 | `frontend/src/components/shared/pageActivity.ts` | 1 |
-| 313 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
-| 314 | `frontend/src/components/shared/PaginationControls.tsx` | 4 |
-| 315 | `frontend/src/components/shared/PortalMenu.tsx` | 7 |
-| 316 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
-| 317 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
-| 318 | `frontend/src/components/shared/WriteConflictModal.tsx` | 10 |
-| 319 | `frontend/src/components/users/PermissionEditor.tsx` | 3 |
-| 320 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
-| 321 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
-| 322 | `frontend/src/components/users/Users.tsx` | 18 |
-| 323 | `frontend/src/components/utils-settings/AuditLog.tsx` | 18 |
-| 324 | `frontend/src/components/utils-settings/Backup.tsx` | 34 |
-| 325 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
-| 326 | `frontend/src/components/utils-settings/index.ts` | 0 |
-| 327 | `frontend/src/components/utils-settings/OtpModal.tsx` | 4 |
-| 328 | `frontend/src/components/utils-settings/ResetData.tsx` | 10 |
-| 329 | `frontend/src/components/utils-settings/Settings.tsx` | 26 |
-| 330 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
-| 331 | `frontend/src/constants.ts` | 3 |
-| 332 | `frontend/src/index.tsx` | 12 |
-| 333 | `frontend/src/platform/runtime/clientRuntime.ts` | 17 |
-| 334 | `frontend/src/platform/storage/storagePolicy.ts` | 3 |
-| 335 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 8 |
-| 336 | `frontend/src/public-runtime/service-worker.ts` | 24 |
-| 337 | `frontend/src/public-runtime/theme-bootstrap.ts` | 15 |
-| 338 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 13 |
-| 339 | `frontend/src/types/receiptContracts.ts` | 0 |
-| 340 | `frontend/src/types/settingsContracts.ts` | 0 |
-| 341 | `frontend/src/utils/actionGuards.ts` | 5 |
-| 342 | `frontend/src/utils/actionHistory.ts` | 5 |
-| 343 | `frontend/src/utils/appRefresh.ts` | 2 |
-| 344 | `frontend/src/utils/bulkOps.ts` | 1 |
-| 345 | `frontend/src/utils/color.ts` | 3 |
-| 346 | `frontend/src/utils/csv.ts` | 15 |
-| 347 | `frontend/src/utils/csvExportWorker.ts` | 1 |
-| 348 | `frontend/src/utils/csvImport.ts` | 19 |
-| 349 | `frontend/src/utils/csvRowCounter.ts` | 2 |
-| 350 | `frontend/src/utils/dateHelpers.ts` | 3 |
-| 351 | `frontend/src/utils/deviceInfo.ts` | 4 |
-| 352 | `frontend/src/utils/exportPackage.ts` | 2 |
-| 353 | `frontend/src/utils/exportReports.tsx` | 9 |
-| 354 | `frontend/src/utils/favicon.ts` | 4 |
-| 355 | `frontend/src/utils/formatters.ts` | 5 |
-| 356 | `frontend/src/utils/groupedRecords.ts` | 8 |
-| 357 | `frontend/src/utils/historyHelpers.ts` | 2 |
-| 358 | `frontend/src/utils/importJobRefresh.ts` | 7 |
-| 359 | `frontend/src/utils/index.ts` | 0 |
-| 360 | `frontend/src/utils/initials.ts` | 7 |
-| 361 | `frontend/src/utils/loaders.ts` | 7 |
-| 362 | `frontend/src/utils/mediaUpload.ts` | 5 |
-| 363 | `frontend/src/utils/permissions.ts` | 2 |
-| 364 | `frontend/src/utils/pricing.ts` | 8 |
-| 365 | `frontend/src/utils/printReceipt.ts` | 40 |
-| 366 | `frontend/src/utils/productBatches.ts` | 3 |
-| 367 | `frontend/src/utils/productGrouping.ts` | 13 |
-| 368 | `frontend/src/utils/publicAssetUrls.ts` | 8 |
-| 369 | `frontend/src/utils/receiptAppliedConfig.ts` | 7 |
-| 370 | `frontend/src/utils/scriptTypography.ts` | 3 |
-| 371 | `frontend/src/utils/settingsRefresh.ts` | 2 |
-| 372 | `frontend/src/utils/settingsWriteOptions.ts` | 1 |
-| 373 | `frontend/src/web-api.ts` | 38 |
-| 374 | `frontend/tailwind.config.ts` | 0 |
-| 375 | `frontend/tests/actionGuards.test.ts` | 1 |
-| 376 | `frontend/tests/actionStability.test.ts` | 3 |
-| 377 | `frontend/tests/adminShellMediaGuards.test.ts` | 0 |
-| 378 | `frontend/tests/apiHttp.test.ts` | 3 |
-| 379 | `frontend/tests/appRefresh.test.ts` | 2 |
-| 380 | `frontend/tests/appShellUtils.test.ts` | 1 |
-| 381 | `frontend/tests/assetCompression.test.ts` | 1 |
-| 382 | `frontend/tests/backupJobs.test.ts` | 0 |
-| 383 | `frontend/tests/barcodeImageScanner.test.ts` | 2 |
-| 384 | `frontend/tests/barcodeScannerState.test.ts` | 1 |
-| 385 | `frontend/tests/bulkOps.test.ts` | 1 |
-| 386 | `frontend/tests/contactImportWorker.test.ts` | 1 |
-| 387 | `frontend/tests/csvImport.test.ts` | 1 |
-| 388 | `frontend/tests/dashboardDataReliability.test.ts` | 0 |
-| 389 | `frontend/tests/dateHelpers.test.ts` | 2 |
-| 390 | `frontend/tests/deviceInfo.test.ts` | 2 |
-| 391 | `frontend/tests/exportPackages.test.ts` | 1 |
-| 392 | `frontend/tests/formatters.test.ts` | 1 |
-| 393 | `frontend/tests/globalScroll.test.ts` | 0 |
-| 394 | `frontend/tests/globalScrollControls.test.ts` | 1 |
-| 395 | `frontend/tests/groupedRecords.test.ts` | 1 |
-| 396 | `frontend/tests/historyHelpers.test.ts` | 1 |
-| 397 | `frontend/tests/importJobRefresh.test.ts` | 4 |
-| 398 | `frontend/tests/initials.test.ts` | 1 |
-| 399 | `frontend/tests/inventoryImportWorker.test.ts` | 1 |
-| 400 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 0 |
-| 401 | `frontend/tests/inventoryMovementGroups.test.ts` | 1 |
-| 402 | `frontend/tests/inventoryRfidSection.test.ts` | 0 |
-| 403 | `frontend/tests/loaders.test.ts` | 1 |
-| 404 | `frontend/tests/mediaUploadHelpers.test.ts` | 1 |
-| 405 | `frontend/tests/navigationConfig.test.ts` | 1 |
-| 406 | `frontend/tests/notificationBadge.test.ts` | 0 |
-| 407 | `frontend/tests/offlineSalesQueue.test.ts` | 1 |
-| 408 | `frontend/tests/offlineSecurityHardening.test.ts` | 1 |
-| 409 | `frontend/tests/offlineSyncArchitecture.test.ts` | 1 |
-| 410 | `frontend/tests/ownedGoogleAuth.test.ts` | 1 |
-| 411 | `frontend/tests/performanceLoadingUx.test.ts` | 0 |
-| 412 | `frontend/tests/permissionEditor.test.ts` | 0 |
-| 413 | `frontend/tests/permissions.test.ts` | 0 |
-| 414 | `frontend/tests/portalCatalogDisplay.test.ts` | 1 |
-| 415 | `frontend/tests/portalContentI18n.test.ts` | 0 |
-| 416 | `frontend/tests/portalEditorUtils.test.ts` | 1 |
-| 417 | `frontend/tests/portalFaqVocabulary.test.ts` | 0 |
-| 418 | `frontend/tests/portalLanguagePacks.test.ts` | 0 |
-| 419 | `frontend/tests/portalTranslateController.test.ts` | 3 |
-| 420 | `frontend/tests/posCore.test.ts` | 1 |
-| 421 | `frontend/tests/pricingContacts.test.ts` | 1 |
-| 422 | `frontend/tests/productBatches.test.ts` | 0 |
-| 423 | `frontend/tests/productDiscountUx.test.ts` | 1 |
-| 424 | `frontend/tests/productDisplayHelpers.test.ts` | 0 |
-| 425 | `frontend/tests/productFilterHelpers.test.ts` | 0 |
-| 426 | `frontend/tests/productGalleryHelpers.test.ts` | 0 |
-| 427 | `frontend/tests/productGrouping.test.ts` | 1 |
-| 428 | `frontend/tests/productGroupViewHelpers.test.ts` | 2 |
-| 429 | `frontend/tests/productHistoryHelpers.test.ts` | 1 |
-| 430 | `frontend/tests/productImportPlanner.test.ts` | 1 |
-| 431 | `frontend/tests/productImportWorkerFallback.test.ts` | 1 |
-| 432 | `frontend/tests/productMenuHelpers.test.ts` | 5 |
-| 433 | `frontend/tests/productPageHelpers.test.ts` | 0 |
-| 434 | `frontend/tests/productSearchPagination.test.ts` | 0 |
-| 435 | `frontend/tests/productSelectionHelpers.test.ts` | 0 |
-| 436 | `frontend/tests/productWriteHelpers.test.ts` | 0 |
-| 437 | `frontend/tests/publicErrorRecovery.test.ts` | 1 |
-| 438 | `frontend/tests/receiptSettingsSync.test.ts` | 0 |
-| 439 | `frontend/tests/receiptTemplate.test.ts` | 1 |
-| 440 | `frontend/tests/returnsLayout.test.ts` | 0 |
-| 441 | `frontend/tests/runtimeErrorClassifier.test.ts` | 0 |
-| 442 | `frontend/tests/salesImportWorker.test.ts` | 1 |
-| 443 | `frontend/tests/scanbotScanner.test.ts` | 2 |
-| 444 | `frontend/tests/scriptTypography.test.ts` | 0 |
-| 445 | `frontend/tests/sectionNavigation.test.ts` | 0 |
-| 446 | `frontend/tests/settingsConflictHelpers.test.ts` | 1 |
-| 447 | `frontend/tests/settingsRefresh.test.ts` | 0 |
-| 448 | `frontend/tests/sourceSyntaxCheck.ts` | 1 |
-| 449 | `frontend/tests/storagePolicy.test.ts` | 1 |
-| 450 | `frontend/tests/utilsSettingsBarrel.test.ts` | 0 |
-| 451 | `frontend/vite.config.ts` | 5 |
-| 452 | `ops/scripts/architecture/generated-bulk-audit.ts` | 18 |
-| 453 | `ops/scripts/architecture/language-runtime-audit.ts` | 20 |
-| 454 | `ops/scripts/architecture/organization-audit.ts` | 14 |
-| 455 | `ops/scripts/architecture/phase29-audit.ts` | 14 |
-| 456 | `ops/scripts/architecture/runtime-js-inventory.ts` | 6 |
-| 457 | `ops/scripts/backend/build-package-stage.ts` | 10 |
-| 458 | `ops/scripts/backend/build-server-entry.ts` | 5 |
-| 459 | `ops/scripts/backend/schema-audit.ts` | 25 |
-| 460 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 5 |
-| 461 | `ops/scripts/backend/verify-data-integrity.ts` | 27 |
-| 462 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
-| 463 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
-| 464 | `ops/scripts/frontend/verify-performance.ts` | 4 |
-| 465 | `ops/scripts/frontend/verify-ui.ts` | 11 |
-| 466 | `ops/scripts/lib/fs-utils.ts` | 13 |
-| 467 | `ops/scripts/lib/report-utils.ts` | 5 |
-| 468 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 |
-| 469 | `ops/scripts/runtime/audits/audit-auth.ts` | 6 |
-| 470 | `ops/scripts/runtime/audits/audit-manifest.ts` | 3 |
-| 471 | `ops/scripts/runtime/audits/audit-report-html.ts` | 11 |
-| 472 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 42 |
-| 473 | `ops/scripts/runtime/audits/full-app-audit.ts` | 22 |
-| 474 | `ops/scripts/runtime/browser-action-smoke.ts` | 32 |
-| 475 | `ops/scripts/runtime/build-ecosystem-config.ts` | 5 |
-| 476 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 16 |
-| 477 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
-| 478 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
-| 479 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
-| 480 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 44 |
-| 481 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
-| 482 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 2 |
-| 483 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
-| 484 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 2 |
-| 485 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 3 |
-| 486 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
-| 487 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 3 |
-| 488 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 2 |
-| 489 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 3 |
-| 490 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 2 |
-| 491 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 2 |
-| 492 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 2 |
-| 493 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 3 |
-| 494 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
-| 495 | `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts` | 9 |
-| 496 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
-| 497 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 2 |
-| 498 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
-| 499 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
-| 500 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
-| 501 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
-| 502 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
-| 503 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
-| 504 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
-| 505 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
-| 506 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 11 |
-| 507 | `ops/scripts/runtime/storage/prune-storage.ts` | 17 |
-| 508 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
-| 509 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
-| 510 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
-| 511 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
-| 512 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
-| 513 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
-| 514 | `ops/scripts/verification/verify-scale-services.ts` | 9 |
-| 515 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
+| 1 | `backend/.pkg-stage/server.js` | 24 |
+| 2 | `backend/.pkg-stage/src/accessControl.js` | 18 |
+| 3 | `backend/.pkg-stage/src/analytics/duckdbRuntime.js` | 3 |
+| 4 | `backend/.pkg-stage/src/authOtpGuards.js` | 3 |
+| 5 | `backend/.pkg-stage/src/backupSchema.js` | 4 |
+| 6 | `backend/.pkg-stage/src/businessMetrics.js` | 9 |
+| 7 | `backend/.pkg-stage/src/catalogTextIntegrity.js` | 5 |
+| 8 | `backend/.pkg-stage/src/config/index.js` | 11 |
+| 9 | `backend/.pkg-stage/src/conflictControl.js` | 6 |
+| 10 | `backend/.pkg-stage/src/contactOptions.js` | 10 |
+| 11 | `backend/.pkg-stage/src/database.js` | 0 |
+| 12 | `backend/.pkg-stage/src/dataPath/index.js` | 11 |
+| 13 | `backend/.pkg-stage/src/db/cutoverReadiness.js` | 10 |
+| 14 | `backend/.pkg-stage/src/db/postgresQueryCompat.js` | 12 |
+| 15 | `backend/.pkg-stage/src/fileAssets.js` | 61 |
+| 16 | `backend/.pkg-stage/src/helpers.js` | 30 |
+| 17 | `backend/.pkg-stage/src/idempotency.js` | 1 |
+| 18 | `backend/.pkg-stage/src/importCsv.js` | 16 |
+| 19 | `backend/.pkg-stage/src/importParsing.js` | 6 |
+| 20 | `backend/.pkg-stage/src/initials.js` | 7 |
+| 21 | `backend/.pkg-stage/src/maintenanceLock.js` | 9 |
+| 22 | `backend/.pkg-stage/src/middleware.js` | 21 |
+| 23 | `backend/.pkg-stage/src/money.js` | 3 |
+| 24 | `backend/.pkg-stage/src/netSecurity.js` | 7 |
+| 25 | `backend/.pkg-stage/src/objectStore.js` | 29 |
+| 26 | `backend/.pkg-stage/src/optionalSharp.js` | 1 |
+| 27 | `backend/.pkg-stage/src/organizationContext/index.js` | 14 |
+| 28 | `backend/.pkg-stage/src/permissions.js` | 7 |
+| 29 | `backend/.pkg-stage/src/portalUtils.js` | 6 |
+| 30 | `backend/.pkg-stage/src/postgresDatabase.js` | 14 |
+| 31 | `backend/.pkg-stage/src/productBatches.js` | 34 |
+| 32 | `backend/.pkg-stage/src/productDiscounts.js` | 9 |
+| 33 | `backend/.pkg-stage/src/productImportPolicies.js` | 10 |
+| 34 | `backend/.pkg-stage/src/requestContext.js` | 5 |
+| 35 | `backend/.pkg-stage/src/routes/actionHistory.js` | 12 |
+| 36 | `backend/.pkg-stage/src/routes/ai.js` | 3 |
+| 37 | `backend/.pkg-stage/src/routes/auth.js` | 31 |
+| 38 | `backend/.pkg-stage/src/routes/branches.js` | 10 |
+| 39 | `backend/.pkg-stage/src/routes/catalog.js` | 4 |
+| 40 | `backend/.pkg-stage/src/routes/categories.js` | 2 |
+| 41 | `backend/.pkg-stage/src/routes/contacts.js` | 34 |
+| 42 | `backend/.pkg-stage/src/routes/customTables.js` | 9 |
+| 43 | `backend/.pkg-stage/src/routes/files.js` | 3 |
+| 44 | `backend/.pkg-stage/src/routes/importJobs.js` | 16 |
+| 45 | `backend/.pkg-stage/src/routes/inventory.js` | 32 |
+| 46 | `backend/.pkg-stage/src/routes/notifications.js` | 27 |
+| 47 | `backend/.pkg-stage/src/routes/organizations.js` | 0 |
+| 48 | `backend/.pkg-stage/src/routes/portal.js` | 60 |
+| 49 | `backend/.pkg-stage/src/routes/products.js` | 64 |
+| 50 | `backend/.pkg-stage/src/routes/returns.js` | 10 |
+| 51 | `backend/.pkg-stage/src/routes/runtime.js` | 6 |
+| 52 | `backend/.pkg-stage/src/routes/sales.js` | 26 |
+| 53 | `backend/.pkg-stage/src/routes/settings.js` | 10 |
+| 54 | `backend/.pkg-stage/src/routes/sync.js` | 12 |
+| 55 | `backend/.pkg-stage/src/routes/system/index.js` | 44 |
+| 56 | `backend/.pkg-stage/src/routes/units.js` | 3 |
+| 57 | `backend/.pkg-stage/src/routes/users.js` | 26 |
+| 58 | `backend/.pkg-stage/src/runtimeCache.js` | 12 |
+| 59 | `backend/.pkg-stage/src/runtimeState/index.js` | 6 |
+| 60 | `backend/.pkg-stage/src/runtimeVersion.js` | 8 |
+| 61 | `backend/.pkg-stage/src/schemaMetadata.js` | 9 |
+| 62 | `backend/.pkg-stage/src/security.js` | 14 |
+| 63 | `backend/.pkg-stage/src/serverUtils.js` | 26 |
+| 64 | `backend/.pkg-stage/src/services/aiGateway.js` | 17 |
+| 65 | `backend/.pkg-stage/src/services/backupPackages.js` | 59 |
+| 66 | `backend/.pkg-stage/src/services/firebaseAuth.js` | 22 |
+| 67 | `backend/.pkg-stage/src/services/googleDriveSync/index.js` | 75 |
+| 68 | `backend/.pkg-stage/src/services/googleDriveSync/versioning.js` | 7 |
+| 69 | `backend/.pkg-stage/src/services/googleOauth.js` | 17 |
+| 70 | `backend/.pkg-stage/src/services/importJobs.js` | 175 |
+| 71 | `backend/.pkg-stage/src/services/integrationDoctor.js` | 14 |
+| 72 | `backend/.pkg-stage/src/services/mediaQueue.js` | 10 |
+| 73 | `backend/.pkg-stage/src/services/portalAi.js` | 42 |
+| 74 | `backend/.pkg-stage/src/services/verification.js` | 21 |
+| 75 | `backend/.pkg-stage/src/sessionAuth.js` | 13 |
+| 76 | `backend/.pkg-stage/src/settingsSnapshot.js` | 12 |
+| 77 | `backend/.pkg-stage/src/storage/organizationFolders.js` | 5 |
+| 78 | `backend/.pkg-stage/src/systemFsWorker.js` | 7 |
+| 79 | `backend/.pkg-stage/src/systemJobs.js` | 28 |
+| 80 | `backend/.pkg-stage/src/uploadReferenceCleanup.js` | 3 |
+| 81 | `backend/.pkg-stage/src/uploadSecurity.js` | 7 |
+| 82 | `backend/.pkg-stage/src/websocket.js` | 1 |
+| 83 | `backend/.pkg-stage/src/workers/importWorker.js` | 2 |
+| 84 | `backend/.pkg-stage/src/workers/mediaWorker.js` | 2 |
+| 85 | `backend/server.js` | 29 |
+| 86 | `backend/server.ts` | 29 |
+| 87 | `backend/src/accessControl.ts` | 18 |
+| 88 | `backend/src/analytics/duckdbRuntime.ts` | 3 |
+| 89 | `backend/src/authOtpGuards.ts` | 3 |
+| 90 | `backend/src/backupSchema.ts` | 4 |
+| 91 | `backend/src/businessMetrics.ts` | 9 |
+| 92 | `backend/src/catalogTextIntegrity.ts` | 5 |
+| 93 | `backend/src/config/index.ts` | 11 |
+| 94 | `backend/src/conflictControl.ts` | 6 |
+| 95 | `backend/src/contactOptions.ts` | 10 |
+| 96 | `backend/src/database.ts` | 0 |
+| 97 | `backend/src/dataPath/index.ts` | 11 |
+| 98 | `backend/src/db/cutoverReadiness.ts` | 10 |
+| 99 | `backend/src/db/postgresQueryCompat.ts` | 12 |
+| 100 | `backend/src/fileAssets.ts` | 61 |
+| 101 | `backend/src/helpers.ts` | 30 |
+| 102 | `backend/src/idempotency.ts` | 1 |
+| 103 | `backend/src/importCsv.ts` | 16 |
+| 104 | `backend/src/importParsing.ts` | 6 |
+| 105 | `backend/src/initials.ts` | 7 |
+| 106 | `backend/src/maintenanceLock.ts` | 9 |
+| 107 | `backend/src/middleware.ts` | 21 |
+| 108 | `backend/src/money.ts` | 3 |
+| 109 | `backend/src/netSecurity.ts` | 7 |
+| 110 | `backend/src/objectStore.ts` | 29 |
+| 111 | `backend/src/optionalSharp.ts` | 1 |
+| 112 | `backend/src/organizationContext/index.ts` | 14 |
+| 113 | `backend/src/permissions.ts` | 7 |
+| 114 | `backend/src/portalUtils.ts` | 6 |
+| 115 | `backend/src/postgresDatabase.ts` | 14 |
+| 116 | `backend/src/productBatches.ts` | 34 |
+| 117 | `backend/src/productDiscounts.ts` | 9 |
+| 118 | `backend/src/productImportPolicies.ts` | 10 |
+| 119 | `backend/src/requestContext.ts` | 5 |
+| 120 | `backend/src/routes/actionHistory.ts` | 12 |
+| 121 | `backend/src/routes/ai.ts` | 3 |
+| 122 | `backend/src/routes/auth.ts` | 31 |
+| 123 | `backend/src/routes/branches.ts` | 10 |
+| 124 | `backend/src/routes/catalog.ts` | 4 |
+| 125 | `backend/src/routes/categories.ts` | 2 |
+| 126 | `backend/src/routes/contacts.ts` | 34 |
+| 127 | `backend/src/routes/customTables.ts` | 9 |
+| 128 | `backend/src/routes/files.ts` | 3 |
+| 129 | `backend/src/routes/importJobs.ts` | 16 |
+| 130 | `backend/src/routes/inventory.ts` | 34 |
+| 131 | `backend/src/routes/notifications.ts` | 27 |
+| 132 | `backend/src/routes/organizations.ts` | 0 |
+| 133 | `backend/src/routes/portal.ts` | 60 |
+| 134 | `backend/src/routes/products.ts` | 72 |
+| 135 | `backend/src/routes/returns.ts` | 10 |
+| 136 | `backend/src/routes/runtime.ts` | 6 |
+| 137 | `backend/src/routes/sales.ts` | 26 |
+| 138 | `backend/src/routes/settings.ts` | 10 |
+| 139 | `backend/src/routes/sync.ts` | 12 |
+| 140 | `backend/src/routes/system/index.ts` | 46 |
+| 141 | `backend/src/routes/units.ts` | 3 |
+| 142 | `backend/src/routes/users.ts` | 26 |
+| 143 | `backend/src/runtimeCache.ts` | 12 |
+| 144 | `backend/src/runtimeState/index.ts` | 6 |
+| 145 | `backend/src/runtimeVersion.ts` | 8 |
+| 146 | `backend/src/schemaMetadata.ts` | 9 |
+| 147 | `backend/src/security.ts` | 14 |
+| 148 | `backend/src/serverUtils.ts` | 27 |
+| 149 | `backend/src/services/aiGateway.ts` | 17 |
+| 150 | `backend/src/services/backupPackages.ts` | 59 |
+| 151 | `backend/src/services/firebaseAuth.ts` | 22 |
+| 152 | `backend/src/services/googleDriveSync/index.ts` | 75 |
+| 153 | `backend/src/services/googleDriveSync/versioning.ts` | 7 |
+| 154 | `backend/src/services/googleOauth.ts` | 17 |
+| 155 | `backend/src/services/importJobs.ts` | 175 |
+| 156 | `backend/src/services/integrationDoctor.ts` | 14 |
+| 157 | `backend/src/services/mediaQueue.ts` | 10 |
+| 158 | `backend/src/services/portalAi.ts` | 42 |
+| 159 | `backend/src/services/verification.ts` | 21 |
+| 160 | `backend/src/sessionAuth.ts` | 13 |
+| 161 | `backend/src/settingsSnapshot.ts` | 12 |
+| 162 | `backend/src/storage/organizationFolders.ts` | 5 |
+| 163 | `backend/src/systemFsWorker.ts` | 7 |
+| 164 | `backend/src/systemJobs.ts` | 28 |
+| 165 | `backend/src/uploadReferenceCleanup.ts` | 3 |
+| 166 | `backend/src/uploadSecurity.ts` | 7 |
+| 167 | `backend/src/websocket.ts` | 1 |
+| 168 | `backend/src/workers/importWorker.ts` | 2 |
+| 169 | `backend/src/workers/mediaWorker.ts` | 2 |
+| 170 | `backend/test/accessControl.test.ts` | 2 |
+| 171 | `backend/test/analyticsRuntime.test.ts` | 1 |
+| 172 | `backend/test/authOtpGuards.test.ts` | 1 |
+| 173 | `backend/test/authSecurityFlow.test.ts` | 14 |
+| 174 | `backend/test/backupDefaultDestination.test.ts` | 0 |
+| 175 | `backend/test/backupPerformanceHardening.test.ts` | 1 |
+| 176 | `backend/test/backupRetention.test.ts` | 1 |
+| 177 | `backend/test/backupSchema.test.ts` | 1 |
+| 178 | `backend/test/branchStockSearch.test.ts` | 10 |
+| 179 | `backend/test/contactOptions.test.ts` | 1 |
+| 180 | `backend/test/dataPath.test.ts` | 2 |
+| 181 | `backend/test/defaultRoles.test.ts` | 8 |
+| 182 | `backend/test/fileAssetStorageReconcile.test.ts` | 1 |
+| 183 | `backend/test/fileAssetUsageCache.test.ts` | 1 |
+| 184 | `backend/test/fileRouteSecurityFlow.test.ts` | 9 |
+| 185 | `backend/test/fullAutomation.test.ts` | 2 |
+| 186 | `backend/test/googleDriveSyncVersioning.test.ts` | 1 |
+| 187 | `backend/test/idempotency.test.ts` | 1 |
+| 188 | `backend/test/importCsv.test.ts` | 2 |
+| 189 | `backend/test/importDecisionIntegrity.test.ts` | 0 |
+| 190 | `backend/test/importJobPerformanceHardening.test.ts` | 1 |
+| 191 | `backend/test/importJobStateMachine.test.ts` | 4 |
+| 192 | `backend/test/importScaleSmoke.test.ts` | 3 |
+| 193 | `backend/test/initials.test.ts` | 0 |
+| 194 | `backend/test/integrationDoctor.test.ts` | 1 |
+| 195 | `backend/test/inventorySettingsMediaContracts.test.ts` | 2 |
+| 196 | `backend/test/mediaOptimization.test.ts` | 3 |
+| 197 | `backend/test/netSecurity.test.ts` | 1 |
+| 198 | `backend/test/notificationSummaryCache.test.ts` | 1 |
+| 199 | `backend/test/offlineSecurity.test.ts` | 2 |
+| 200 | `backend/test/ownedGoogleAuth.test.ts` | 2 |
+| 201 | `backend/test/permissionPolicy.test.ts` | 0 |
+| 202 | `backend/test/portalInventoryRegression.test.ts` | 2 |
+| 203 | `backend/test/portalUtils.test.ts` | 1 |
+| 204 | `backend/test/postgresCutoverReadiness.test.ts` | 1 |
+| 205 | `backend/test/postgresDatabase.test.ts` | 3 |
+| 206 | `backend/test/postgresQueryCompat.test.ts` | 1 |
+| 207 | `backend/test/productBatchHierarchy.test.ts` | 2 |
+| 208 | `backend/test/productExpiry.test.ts` | 1 |
+| 209 | `backend/test/productImportPolicies.test.ts` | 1 |
+| 210 | `backend/test/productSearchPagination.test.ts` | 0 |
+| 211 | `backend/test/rfidRoutes.test.ts` | 1 |
+| 212 | `backend/test/routeContracts.test.ts` | 2 |
+| 213 | `backend/test/runtimeCache.test.ts` | 2 |
+| 214 | `backend/test/runtimeVersion.test.ts` | 1 |
+| 215 | `backend/test/schemaMetadata.test.ts` | 3 |
+| 216 | `backend/test/security.test.ts` | 1 |
+| 217 | `backend/test/serverUtils.test.ts` | 3 |
+| 218 | `backend/test/settingsSnapshotObjectStorage.test.ts` | 4 |
+| 219 | `backend/test/systemJobs.test.ts` | 3 |
+| 220 | `backend/test/uploadSecurity.test.ts` | 1 |
+| 221 | `backend/test/websocket.test.ts` | 0 |
+| 222 | `frontend/public/runtime-noise-guard.js` | 8 |
+| 223 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js` | 0 |
+| 224 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js` | 0 |
+| 225 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js` | 0 |
+| 226 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js` | 0 |
+| 227 | `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js` | 0 |
+| 228 | `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js` | 0 |
+| 229 | `frontend/public/sw.js` | 24 |
+| 230 | `frontend/public/theme-bootstrap.js` | 15 |
+| 231 | `frontend/src/AdminRoot.tsx` | 1 |
+| 232 | `frontend/src/api/actionHistoryTransport.ts` | 7 |
+| 233 | `frontend/src/api/actorQuery.ts` | 2 |
+| 234 | `frontend/src/api/aiTransport.ts` | 6 |
+| 235 | `frontend/src/api/appBootstrapTransport.ts` | 6 |
+| 236 | `frontend/src/api/auditLogTransport.ts` | 6 |
+| 237 | `frontend/src/api/authTransport.ts` | 18 |
+| 238 | `frontend/src/api/branchTransport.ts` | 12 |
+| 239 | `frontend/src/api/browserDialogs.ts` | 3 |
+| 240 | `frontend/src/api/conflicts.ts` | 2 |
+| 241 | `frontend/src/api/contactReadTransport.ts` | 12 |
+| 242 | `frontend/src/api/contactsTransport.ts` | 30 |
+| 243 | `frontend/src/api/contactWriteTransport.ts` | 15 |
+| 244 | `frontend/src/api/cooldownFallbacks.ts` | 11 |
+| 245 | `frontend/src/api/customTablesTransport.ts` | 9 |
+| 246 | `frontend/src/api/dashboardTransport.ts` | 3 |
+| 247 | `frontend/src/api/driveSync.ts` | 7 |
+| 248 | `frontend/src/api/expectedUpdatedAt.ts` | 4 |
+| 249 | `frontend/src/api/fileTransport.ts` | 9 |
+| 250 | `frontend/src/api/http.ts` | 62 |
+| 251 | `frontend/src/api/httpState.ts` | 4 |
+| 252 | `frontend/src/api/importJobsTransport.ts` | 21 |
+| 253 | `frontend/src/api/importTransport.ts` | 1 |
+| 254 | `frontend/src/api/inventoryTransport.ts` | 6 |
+| 255 | `frontend/src/api/inventoryWriteTransport.ts` | 5 |
+| 256 | `frontend/src/api/lazyLocalDb.ts` | 2 |
+| 257 | `frontend/src/api/localDb.ts` | 10 |
+| 258 | `frontend/src/api/localMirrors.ts` | 6 |
+| 259 | `frontend/src/api/lookupTransport.ts` | 12 |
+| 260 | `frontend/src/api/methods.ts` | 214 |
+| 261 | `frontend/src/api/multipartHeaders.ts` | 1 |
+| 262 | `frontend/src/api/notificationSummary.ts` | 2 |
+| 263 | `frontend/src/api/offlineSnapshotTransport.ts` | 8 |
+| 264 | `frontend/src/api/pendingSyncTransport.ts` | 3 |
+| 265 | `frontend/src/api/portalHttp.ts` | 2 |
+| 266 | `frontend/src/api/portalTransport.ts` | 15 |
+| 267 | `frontend/src/api/productImageUploadTransport.ts` | 2 |
+| 268 | `frontend/src/api/productReadTransport.ts` | 7 |
+| 269 | `frontend/src/api/productWriteTransport.ts` | 8 |
+| 270 | `frontend/src/api/query.ts` | 4 |
+| 271 | `frontend/src/api/queryCache.ts` | 2 |
+| 272 | `frontend/src/api/requestIds.ts` | 1 |
+| 273 | `frontend/src/api/returnsTransport.ts` | 10 |
+| 274 | `frontend/src/api/rfidTransport.ts` | 9 |
+| 275 | `frontend/src/api/salesTransport.ts` | 10 |
+| 276 | `frontend/src/api/saleWriteTransport.ts` | 18 |
+| 277 | `frontend/src/api/settingsTransport.ts` | 8 |
+| 278 | `frontend/src/api/syncPreview.ts` | 1 |
+| 279 | `frontend/src/api/syncRuntime.ts` | 4 |
+| 280 | `frontend/src/api/systemJobs.ts` | 10 |
+| 281 | `frontend/src/api/systemRuntime.ts` | 16 |
+| 282 | `frontend/src/api/userAdminTransport.ts` | 14 |
+| 283 | `frontend/src/api/userReadTransport.ts` | 1 |
+| 284 | `frontend/src/api/websocket.ts` | 15 |
+| 285 | `frontend/src/App.tsx` | 85 |
+| 286 | `frontend/src/app/appShellUtils.ts` | 5 |
+| 287 | `frontend/src/app/pathRouting.ts` | 5 |
+| 288 | `frontend/src/app/publicErrorRecovery.ts` | 4 |
+| 289 | `frontend/src/AppContext.tsx` | 45 |
+| 290 | `frontend/src/components/auth/Login.tsx` | 23 |
+| 291 | `frontend/src/components/branches/Branches.tsx` | 15 |
+| 292 | `frontend/src/components/branches/BranchForm.tsx` | 2 |
+| 293 | `frontend/src/components/branches/TransferModal.tsx` | 6 |
+| 294 | `frontend/src/components/catalog/catalogAssetUrls.ts` | 8 |
+| 295 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 2 |
+| 296 | `frontend/src/components/catalog/CatalogImageField.tsx` | 1 |
+| 297 | `frontend/src/components/catalog/catalogImages.tsx` | 5 |
+| 298 | `frontend/src/components/catalog/CatalogPage.tsx` | 127 |
+| 299 | `frontend/src/components/catalog/CatalogPageContext.tsx` | 1 |
+| 300 | `frontend/src/components/catalog/catalogPagination.tsx` | 4 |
+| 301 | `frontend/src/components/catalog/CatalogPreviewSurface.tsx` | 2 |
+| 302 | `frontend/src/components/catalog/CatalogProductsSection.tsx` | 4 |
+| 303 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 7 |
+| 304 | `frontend/src/components/catalog/catalogUi.tsx` | 4 |
+| 305 | `frontend/src/components/catalog/portalCatalogDisplay.ts` | 9 |
+| 306 | `frontend/src/components/catalog/portalContentI18n.ts` | 18 |
+| 307 | `frontend/src/components/catalog/portalEditorUtils.ts` | 10 |
+| 308 | `frontend/src/components/catalog/portalLanguageOptions.ts` | 2 |
+| 309 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 3 |
+| 310 | `frontend/src/components/catalog/portalTranslateController.ts` | 20 |
+| 311 | `frontend/src/components/catalog/portalTranslationData.ts` | 3 |
+| 312 | `frontend/src/components/contacts/ContactImportModal.tsx` | 8 |
+| 313 | `frontend/src/components/contacts/contactImportWorker.ts` | 1 |
+| 314 | `frontend/src/components/contacts/contactOptionUtils.ts` | 10 |
+| 315 | `frontend/src/components/contacts/Contacts.tsx` | 13 |
+| 316 | `frontend/src/components/contacts/CustomerFormModal.tsx` | 10 |
+| 317 | `frontend/src/components/contacts/customerMembershipNumber.ts` | 1 |
+| 318 | `frontend/src/components/contacts/CustomersTab.tsx` | 21 |
+| 319 | `frontend/src/components/contacts/DeliveryTab.tsx` | 30 |
+| 320 | `frontend/src/components/contacts/shared.tsx` | 6 |
+| 321 | `frontend/src/components/contacts/SuppliersTab.tsx` | 23 |
+| 322 | `frontend/src/components/custom-tables/CustomTables.tsx` | 19 |
+| 323 | `frontend/src/components/dashboard/charts/BarChart.tsx` | 5 |
+| 324 | `frontend/src/components/dashboard/charts/DonutChart.tsx` | 1 |
+| 325 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
+| 326 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
+| 327 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
+| 328 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
+| 329 | `frontend/src/components/dashboard/dashboardExport.ts` | 25 |
+| 330 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
+| 331 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
+| 332 | `frontend/src/components/files/FilesPage.tsx` | 27 |
+| 333 | `frontend/src/components/files/FilesProvidersTab.tsx` | 4 |
+| 334 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
+| 335 | `frontend/src/components/inventory/DualMoney.tsx` | 1 |
+| 336 | `frontend/src/components/inventory/Inventory.tsx` | 31 |
+| 337 | `frontend/src/components/inventory/inventoryExport.ts` | 18 |
+| 338 | `frontend/src/components/inventory/InventoryImportModal.tsx` | 9 |
+| 339 | `frontend/src/components/inventory/inventoryImportWorker.ts` | 1 |
+| 340 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | 1 |
+| 341 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | 3 |
+| 342 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | 1 |
+| 343 | `frontend/src/components/inventory/movementGroups.ts` | 15 |
+| 344 | `frontend/src/components/inventory/ProductDetailModal.tsx` | 2 |
+| 345 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | 11 |
+| 346 | `frontend/src/components/navigation/Sidebar.tsx` | 9 |
+| 347 | `frontend/src/components/pos/CartItem.tsx` | 2 |
+| 348 | `frontend/src/components/pos/FilterPanel.tsx` | 5 |
+| 349 | `frontend/src/components/pos/POS.tsx` | 51 |
+| 350 | `frontend/src/components/pos/posCore.ts` | 10 |
+| 351 | `frontend/src/components/pos/ProductImage.tsx` | 5 |
+| 352 | `frontend/src/components/pos/QuickAddModal.tsx` | 2 |
+| 353 | `frontend/src/components/products/config/productPageConfig.ts` | 0 |
+| 354 | `frontend/src/components/products/forms/BranchStockAdjuster.tsx` | 6 |
+| 355 | `frontend/src/components/products/forms/BulkAddStockModal.tsx` | 6 |
+| 356 | `frontend/src/components/products/forms/ProductForm.tsx` | 19 |
+| 357 | `frontend/src/components/products/forms/VariantFormModal.tsx` | 3 |
+| 358 | `frontend/src/components/products/helpers/productDisplayHelpers.ts` | 6 |
+| 359 | `frontend/src/components/products/helpers/productExport.ts` | 6 |
+| 360 | `frontend/src/components/products/helpers/productFilterHelpers.ts` | 5 |
+| 361 | `frontend/src/components/products/helpers/productGalleryHelpers.ts` | 8 |
+| 362 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | 2 |
+| 363 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | 7 |
+| 364 | `frontend/src/components/products/helpers/productPageHelpers.ts` | 3 |
+| 365 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | 7 |
+| 366 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | 18 |
+| 367 | `frontend/src/components/products/history/productHistoryHelpers.ts` | 1 |
+| 368 | `frontend/src/components/products/import/BulkImportModal.tsx` | 51 |
+| 369 | `frontend/src/components/products/import/productImportPlanner.ts` | 18 |
+| 370 | `frontend/src/components/products/import/productImportWorker.ts` | 3 |
+| 371 | `frontend/src/components/products/lookups/ManageBrandsModal.tsx` | 10 |
+| 372 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | 5 |
+| 373 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | 5 |
+| 374 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | 10 |
+| 375 | `frontend/src/components/products/Products.tsx` | 30 |
+| 376 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | 5 |
+| 377 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | 4 |
+| 378 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | 1 |
+| 379 | `frontend/src/components/products/scanning/cameraPermission.ts` | 5 |
+| 380 | `frontend/src/components/products/scanning/scanbotScanner.ts` | 8 |
+| 381 | `frontend/src/components/products/shared/primitives.tsx` | 12 |
+| 382 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | 2 |
+| 383 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | 3 |
+| 384 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | 5 |
+| 385 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | 3 |
+| 386 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | 4 |
+| 387 | `frontend/src/components/receipt-settings/constants.ts` | 2 |
+| 388 | `frontend/src/components/receipt-settings/ErrorBoundary.tsx` | 1 |
+| 389 | `frontend/src/components/receipt-settings/FieldOrderManager.tsx` | 9 |
+| 390 | `frontend/src/components/receipt-settings/PrintSettings.tsx` | 8 |
+| 391 | `frontend/src/components/receipt-settings/ReceiptPreview.tsx` | 3 |
+| 392 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 4 |
+| 393 | `frontend/src/components/receipt-settings/template.ts` | 4 |
+| 394 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
+| 395 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
+| 396 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
+| 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
+| 398 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
+| 399 | `frontend/src/components/returns/Returns.tsx` | 12 |
+| 400 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
+| 401 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
+| 402 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
+| 403 | `frontend/src/components/sales/Sales.tsx` | 16 |
+| 404 | `frontend/src/components/sales/SalesImportModal.tsx` | 8 |
+| 405 | `frontend/src/components/sales/salesImportWorker.ts` | 1 |
+| 406 | `frontend/src/components/sales/SalesListSurface.tsx` | 2 |
+| 407 | `frontend/src/components/sales/StatusBadge.tsx` | 3 |
+| 408 | `frontend/src/components/server/ServerPage.tsx` | 21 |
+| 409 | `frontend/src/components/shared/ActionHistoryBar.tsx` | 3 |
+| 410 | `frontend/src/components/shared/AppSelect.tsx` | 8 |
+| 411 | `frontend/src/components/shared/BackgroundImportTracker.tsx` | 21 |
+| 412 | `frontend/src/components/shared/ExportMenu.tsx` | 1 |
+| 413 | `frontend/src/components/shared/FilterMenu.tsx` | 4 |
+| 414 | `frontend/src/components/shared/globalScroll.ts` | 5 |
+| 415 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 5 |
+| 416 | `frontend/src/components/shared/LazyPortalMenu.tsx` | 1 |
+| 417 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
+| 418 | `frontend/src/components/shared/Modal.tsx` | 1 |
+| 419 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
+| 420 | `frontend/src/components/shared/NotificationCenter.tsx` | 9 |
+| 421 | `frontend/src/components/shared/pageActivity.ts` | 1 |
+| 422 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
+| 423 | `frontend/src/components/shared/PaginationControls.tsx` | 4 |
+| 424 | `frontend/src/components/shared/PortalMenu.tsx` | 7 |
+| 425 | `frontend/src/components/shared/QuickPreferenceToggles.tsx` | 3 |
+| 426 | `frontend/src/components/shared/SectionSwitcher.tsx` | 3 |
+| 427 | `frontend/src/components/shared/WriteConflictModal.tsx` | 10 |
+| 428 | `frontend/src/components/users/permissionDefinitions.ts` | 0 |
+| 429 | `frontend/src/components/users/PermissionEditor.tsx` | 3 |
+| 430 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
+| 431 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
+| 432 | `frontend/src/components/users/Users.tsx` | 18 |
+| 433 | `frontend/src/components/utils-settings/AuditLog.tsx` | 20 |
+| 434 | `frontend/src/components/utils-settings/Backup.tsx` | 34 |
+| 435 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
+| 436 | `frontend/src/components/utils-settings/index.ts` | 0 |
+| 437 | `frontend/src/components/utils-settings/OtpModal.tsx` | 4 |
+| 438 | `frontend/src/components/utils-settings/ResetData.tsx` | 10 |
+| 439 | `frontend/src/components/utils-settings/Settings.tsx` | 27 |
+| 440 | `frontend/src/components/utils-settings/settingsConflict.ts` | 3 |
+| 441 | `frontend/src/constants.ts` | 3 |
+| 442 | `frontend/src/index.tsx` | 12 |
+| 443 | `frontend/src/platform/runtime/clientRuntime.ts` | 17 |
+| 444 | `frontend/src/platform/storage/storagePolicy.ts` | 3 |
+| 445 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 8 |
+| 446 | `frontend/src/public-runtime/service-worker.ts` | 24 |
+| 447 | `frontend/src/public-runtime/theme-bootstrap.ts` | 15 |
+| 448 | `frontend/src/public-web-api.ts` | 2 |
+| 449 | `frontend/src/PublicCatalogRoot.tsx` | 2 |
+| 450 | `frontend/src/runtime/runtimeErrorClassifier.ts` | 13 |
+| 451 | `frontend/src/types/lucide-react-icons.d.ts` | 0 |
+| 452 | `frontend/src/types/receiptContracts.ts` | 0 |
+| 453 | `frontend/src/types/settingsContracts.ts` | 0 |
+| 454 | `frontend/src/utils/actionGuards.ts` | 5 |
+| 455 | `frontend/src/utils/actionHistory.ts` | 6 |
+| 456 | `frontend/src/utils/appRefresh.ts` | 2 |
+| 457 | `frontend/src/utils/bulkOps.ts` | 1 |
+| 458 | `frontend/src/utils/color.ts` | 3 |
+| 459 | `frontend/src/utils/csv.ts` | 15 |
+| 460 | `frontend/src/utils/csvExportWorker.ts` | 1 |
+| 461 | `frontend/src/utils/csvImport.ts` | 19 |
+| 462 | `frontend/src/utils/csvRowCounter.ts` | 2 |
+| 463 | `frontend/src/utils/csvTemplate.ts` | 1 |
+| 464 | `frontend/src/utils/dateHelpers.ts` | 3 |
+| 465 | `frontend/src/utils/deviceInfo.ts` | 4 |
+| 466 | `frontend/src/utils/exportPackage.ts` | 2 |
+| 467 | `frontend/src/utils/exportReports.tsx` | 9 |
+| 468 | `frontend/src/utils/favicon.ts` | 4 |
+| 469 | `frontend/src/utils/formatters.ts` | 5 |
+| 470 | `frontend/src/utils/groupedRecords.ts` | 8 |
+| 471 | `frontend/src/utils/historyHelpers.ts` | 2 |
+| 472 | `frontend/src/utils/importJobRefresh.ts` | 7 |
+| 473 | `frontend/src/utils/index.ts` | 0 |
+| 474 | `frontend/src/utils/initials.ts` | 7 |
+| 475 | `frontend/src/utils/loaders.ts` | 7 |
+| 476 | `frontend/src/utils/mediaUpload.ts` | 1 |
+| 477 | `frontend/src/utils/mediaUploadState.ts` | 4 |
+| 478 | `frontend/src/utils/permissions.ts` | 2 |
+| 479 | `frontend/src/utils/pricing.ts` | 8 |
+| 480 | `frontend/src/utils/printReceipt.ts` | 45 |
+| 481 | `frontend/src/utils/productBatches.ts` | 3 |
+| 482 | `frontend/src/utils/productGrouping.ts` | 13 |
+| 483 | `frontend/src/utils/publicAssetUrls.ts` | 8 |
+| 484 | `frontend/src/utils/receiptAppliedConfig.ts` | 7 |
+| 485 | `frontend/src/utils/scriptTypography.ts` | 3 |
+| 486 | `frontend/src/utils/settingsRefresh.ts` | 2 |
+| 487 | `frontend/src/utils/settingsWriteOptions.ts` | 1 |
+| 488 | `frontend/src/web-api.ts` | 58 |
+| 489 | `frontend/tailwind.config.ts` | 0 |
+| 490 | `frontend/tests/actionGuards.test.ts` | 1 |
+| 491 | `frontend/tests/actionStability.test.ts` | 3 |
+| 492 | `frontend/tests/adminShellMediaGuards.test.ts` | 0 |
+| 493 | `frontend/tests/apiHttp.test.ts` | 3 |
+| 494 | `frontend/tests/appRefresh.test.ts` | 2 |
+| 495 | `frontend/tests/appShellUtils.test.ts` | 1 |
+| 496 | `frontend/tests/assetCompression.test.ts` | 1 |
+| 497 | `frontend/tests/backupJobs.test.ts` | 0 |
+| 498 | `frontend/tests/barcodeImageScanner.test.ts` | 2 |
+| 499 | `frontend/tests/barcodeScannerState.test.ts` | 1 |
+| 500 | `frontend/tests/bulkOps.test.ts` | 1 |
+| 501 | `frontend/tests/contactImportWorker.test.ts` | 1 |
+| 502 | `frontend/tests/csvImport.test.ts` | 1 |
+| 503 | `frontend/tests/dashboardDataReliability.test.ts` | 0 |
+| 504 | `frontend/tests/dateHelpers.test.ts` | 2 |
+| 505 | `frontend/tests/deviceInfo.test.ts` | 2 |
+| 506 | `frontend/tests/exportPackages.test.ts` | 1 |
+| 507 | `frontend/tests/formatters.test.ts` | 1 |
+| 508 | `frontend/tests/globalScroll.test.ts` | 0 |
+| 509 | `frontend/tests/globalScrollControls.test.ts` | 1 |
+| 510 | `frontend/tests/groupedRecords.test.ts` | 1 |
+| 511 | `frontend/tests/historyHelpers.test.ts` | 1 |
+| 512 | `frontend/tests/importJobRefresh.test.ts` | 4 |
+| 513 | `frontend/tests/initials.test.ts` | 1 |
+| 514 | `frontend/tests/inventoryImportWorker.test.ts` | 1 |
+| 515 | `frontend/tests/inventoryMobileCardLayout.test.ts` | 0 |
+| 516 | `frontend/tests/inventoryMovementGroups.test.ts` | 1 |
+| 517 | `frontend/tests/inventoryRfidSection.test.ts` | 0 |
+| 518 | `frontend/tests/loaders.test.ts` | 1 |
+| 519 | `frontend/tests/mediaUploadHelpers.test.ts` | 1 |
+| 520 | `frontend/tests/navigationConfig.test.ts` | 1 |
+| 521 | `frontend/tests/notificationBadge.test.ts` | 0 |
+| 522 | `frontend/tests/offlineSalesQueue.test.ts` | 1 |
+| 523 | `frontend/tests/offlineSecurityHardening.test.ts` | 1 |
+| 524 | `frontend/tests/offlineSyncArchitecture.test.ts` | 1 |
+| 525 | `frontend/tests/ownedGoogleAuth.test.ts` | 1 |
+| 526 | `frontend/tests/performanceLoadingUx.test.ts` | 0 |
+| 527 | `frontend/tests/permissionEditor.test.ts` | 0 |
+| 528 | `frontend/tests/permissions.test.ts` | 0 |
+| 529 | `frontend/tests/portalCatalogDisplay.test.ts` | 1 |
+| 530 | `frontend/tests/portalContentI18n.test.ts` | 0 |
+| 531 | `frontend/tests/portalEditorUtils.test.ts` | 1 |
+| 532 | `frontend/tests/portalFaqVocabulary.test.ts` | 0 |
+| 533 | `frontend/tests/portalLanguagePacks.test.ts` | 0 |
+| 534 | `frontend/tests/portalTranslateController.test.ts` | 3 |
+| 535 | `frontend/tests/posCore.test.ts` | 1 |
+| 536 | `frontend/tests/pricingContacts.test.ts` | 1 |
+| 537 | `frontend/tests/productBatches.test.ts` | 0 |
+| 538 | `frontend/tests/productDiscountUx.test.ts` | 1 |
+| 539 | `frontend/tests/productDisplayHelpers.test.ts` | 0 |
+| 540 | `frontend/tests/productFilterHelpers.test.ts` | 0 |
+| 541 | `frontend/tests/productGalleryHelpers.test.ts` | 0 |
+| 542 | `frontend/tests/productGrouping.test.ts` | 1 |
+| 543 | `frontend/tests/productGroupViewHelpers.test.ts` | 2 |
+| 544 | `frontend/tests/productHistoryHelpers.test.ts` | 1 |
+| 545 | `frontend/tests/productImportPlanner.test.ts` | 1 |
+| 546 | `frontend/tests/productImportWorkerFallback.test.ts` | 1 |
+| 547 | `frontend/tests/productMenuHelpers.test.ts` | 5 |
+| 548 | `frontend/tests/productPageHelpers.test.ts` | 0 |
+| 549 | `frontend/tests/productSearchPagination.test.ts` | 0 |
+| 550 | `frontend/tests/productSelectionHelpers.test.ts` | 0 |
+| 551 | `frontend/tests/productWriteHelpers.test.ts` | 0 |
+| 552 | `frontend/tests/publicErrorRecovery.test.ts` | 1 |
+| 553 | `frontend/tests/receiptSettingsSync.test.ts` | 0 |
+| 554 | `frontend/tests/receiptTemplate.test.ts` | 1 |
+| 555 | `frontend/tests/returnsLayout.test.ts` | 0 |
+| 556 | `frontend/tests/runtimeErrorClassifier.test.ts` | 0 |
+| 557 | `frontend/tests/salesImportWorker.test.ts` | 1 |
+| 558 | `frontend/tests/scanbotScanner.test.ts` | 2 |
+| 559 | `frontend/tests/scriptTypography.test.ts` | 0 |
+| 560 | `frontend/tests/sectionNavigation.test.ts` | 0 |
+| 561 | `frontend/tests/settingsConflictHelpers.test.ts` | 1 |
+| 562 | `frontend/tests/settingsRefresh.test.ts` | 0 |
+| 563 | `frontend/tests/sourceSyntaxCheck.ts` | 1 |
+| 564 | `frontend/tests/storagePolicy.test.ts` | 1 |
+| 565 | `frontend/tests/utilsSettingsBarrel.test.ts` | 0 |
+| 566 | `frontend/vite.config.ts` | 7 |
+| 567 | `ops/scripts/architecture/generated-bulk-audit.ts` | 18 |
+| 568 | `ops/scripts/architecture/language-runtime-audit.ts` | 20 |
+| 569 | `ops/scripts/architecture/organization-audit.ts` | 14 |
+| 570 | `ops/scripts/architecture/phase29-audit.ts` | 14 |
+| 571 | `ops/scripts/architecture/runtime-js-inventory.ts` | 6 |
+| 572 | `ops/scripts/backend/build-package-stage.ts` | 10 |
+| 573 | `ops/scripts/backend/build-server-entry.ts` | 5 |
+| 574 | `ops/scripts/backend/schema-audit.ts` | 25 |
+| 575 | `ops/scripts/backend/schema-primary-key-preflight.ts` | 5 |
+| 576 | `ops/scripts/backend/verify-data-integrity.ts` | 27 |
+| 577 | `ops/scripts/frontend/build-public-runtime-scripts.ts` | 5 |
+| 578 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
+| 579 | `ops/scripts/frontend/verify-performance.ts` | 4 |
+| 580 | `ops/scripts/frontend/verify-ui.ts` | 11 |
+| 581 | `ops/scripts/lib/fs-utils.ts` | 13 |
+| 582 | `ops/scripts/lib/report-utils.ts` | 5 |
+| 583 | `ops/scripts/runtime/audits/action-history-undo-redo-check.ts` | 5 |
+| 584 | `ops/scripts/runtime/audits/audit-auth.ts` | 6 |
+| 585 | `ops/scripts/runtime/audits/audit-manifest.ts` | 3 |
+| 586 | `ops/scripts/runtime/audits/audit-report-html.ts` | 11 |
+| 587 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 42 |
+| 588 | `ops/scripts/runtime/audits/full-app-audit.ts` | 22 |
+| 589 | `ops/scripts/runtime/browser-action-smoke.ts` | 32 |
+| 590 | `ops/scripts/runtime/build-ecosystem-config.ts` | 5 |
+| 591 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 16 |
+| 592 | `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts` | 6 |
+| 593 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | 16 |
+| 594 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | 8 |
+| 595 | `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts` | 15 |
+| 596 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | 47 |
+| 597 | `ops/scripts/runtime/live-checks/filter-burst-check.ts` | 5 |
+| 598 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | 8 |
+| 599 | `ops/scripts/runtime/live-checks/move766-product-write-live-check.ts` | 8 |
+| 600 | `ops/scripts/runtime/live-checks/phase84-account-loyalty-select-live-check.ts` | 3 |
+| 601 | `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts` | 4 |
+| 602 | `ops/scripts/runtime/live-checks/phase84-catalog-editor-select-live-check.ts` | 4 |
+| 603 | `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts` | 2 |
+| 604 | `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts` | 2 |
+| 605 | `ops/scripts/runtime/live-checks/phase84-filter-menu-live-check.ts` | 7 |
+| 606 | `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts` | 3 |
+| 607 | `ops/scripts/runtime/live-checks/phase84-inventory-section-restore-live-check.ts` | 3 |
+| 608 | `ops/scripts/runtime/live-checks/phase84-live-suite.ts` | 11 |
+| 609 | `ops/scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts` | 9 |
+| 610 | `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts` | 3 |
+| 611 | `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts` | 2 |
+| 612 | `ops/scripts/runtime/live-checks/phase84-product-form-dropdown-live-check.ts` | 4 |
+| 613 | `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts` | 3 |
+| 614 | `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts` | 2 |
+| 615 | `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts` | 2 |
+| 616 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | 2 |
+| 617 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | 3 |
+| 618 | `ops/scripts/runtime/live-checks/phase84-public-assistant-select-live-check.ts` | 3 |
+| 619 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | 5 |
+| 620 | `ops/scripts/runtime/live-checks/phase84-receipt-export-layout-check.ts` | 9 |
+| 621 | `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts` | 9 |
+| 622 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | 2 |
+| 623 | `ops/scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts` | 7 |
+| 624 | `ops/scripts/runtime/live-checks/phase84-settings-select-live-check.ts` | 5 |
+| 625 | `ops/scripts/runtime/live-checks/phase84-shared-select-live-check.ts` | 4 |
+| 626 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | 4 |
+| 627 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | 2 |
+| 628 | `ops/scripts/runtime/live-checks/route-load-trace.ts` | 8 |
+| 629 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
+| 630 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
+| 631 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
+| 632 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
+| 633 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
+| 634 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
+| 635 | `ops/scripts/runtime/storage/dataset-readiness.ts` | 5 |
+| 636 | `ops/scripts/runtime/storage/post-live-hygiene.ts` | 11 |
+| 637 | `ops/scripts/runtime/storage/prune-storage.ts` | 20 |
+| 638 | `ops/scripts/runtime/storage/restore-candidates.ts` | 8 |
+| 639 | `ops/scripts/runtime/storage/restore-rehearsal.ts` | 14 |
+| 640 | `ops/scripts/verification/verify-backup-reliability.ts` | 6 |
+| 641 | `ops/scripts/verification/verify-docker-release.ts` | 11 |
+| 642 | `ops/scripts/verification/verify-hardening-policy.ts` | 10 |
+| 643 | `ops/scripts/verification/verify-runtime-deps.ts` | 15 |
+| 644 | `ops/scripts/verification/verify-scale-services.ts` | 9 |
+| 645 | `ops/scripts/verification/verify-secret-hygiene.ts` | 1 |
 
 ## 3. Detailed Function Commentary
 
-### 3.1 `backend/server.js`
+### 3.1 `backend/.pkg-stage/server.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -557,36 +687,7 @@ Code files scanned: **515**
 | 23 | `registerShutdownHandlers` | function | 490 |
 | 24 | `bootstrapServer` | function | 504 |
 
-### 3.2 `backend/server.ts`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `startRequestedWorkerRole` | function | 3 |
-| 2 | `listFrontendAssetFiles` | function | 100 |
-| 3 | `resolveFrontendAssetPath` | function | 110 |
-| 4 | `loadCompressionMiddleware` | function | 133 |
-| 5 | `applySecurityHeaders` | function | 142 |
-| 6 | `applyRequestPolicy` | function | 148 |
-| 7 | `applyCoreMiddleware` | function | 158 |
-| 8 | `normalizeUploadFileName` | function | 172 |
-| 9 | `getSafeActiveUploadPath` | function | 180 |
-| 10 | `findBackupUploadFallback` | function | 189 |
-| 11 | `inferUploadContentType` | function | 235 |
-| 12 | `serveLocalUpload` | function | 246 |
-| 13 | `getObjectStreamWithTimeout` | function | 263 |
-| 14 | `mountStaticAssets` | function | 277 |
-| 15 | `mountHealthRoute` | function | 342 |
-| 16 | `mountApiRoutes` | function | 371 |
-| 17 | `mountTransfersAlias` | function | 409 |
-| 18 | `mountSpaFallback` | function | 424 |
-| 19 | `mountErrorHandler` | function | 443 |
-| 20 | `getStartupBanner` | function | 457 |
-| 21 | `closeDatabase` | function | 482 |
-| 22 | `startDatabaseMaintenanceTimer` | function | 492 |
-| 23 | `registerShutdownHandlers` | function | 500 |
-| 24 | `bootstrapServer` | function | 517 |
-
-### 3.3 `backend/src/accessControl.ts`
+### 3.2 `backend/.pkg-stage/src/accessControl.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -609,7 +710,7 @@ Code files scanned: **515**
 | 17 | `classifyRequestAccess` | function | 170 |
 | 18 | `authorizeProtectedRequest` | function | 202 |
 
-### 3.4 `backend/src/analytics/duckdbRuntime.ts`
+### 3.3 `backend/.pkg-stage/src/analytics/duckdbRuntime.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -617,7 +718,7 @@ Code files scanned: **515**
 | 2 | `probeDuckDbPackage` | function | 44 |
 | 3 | `getDuckDbRuntimeStatus` | function | 74 |
 
-### 3.5 `backend/src/authOtpGuards.ts`
+### 3.4 `backend/.pkg-stage/src/authOtpGuards.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -625,7 +726,7 @@ Code files scanned: **515**
 | 2 | `canManageOtpTarget` | function | 12 |
 | 3 | `requiresSelfOtpDisablePassword` | function | 23 |
 
-### 3.6 `backend/src/backupSchema.ts`
+### 3.5 `backend/.pkg-stage/src/backupSchema.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -634,7 +735,7 @@ Code files scanned: **515**
 | 3 | `buildBackupSummary` | function | 125 |
 | 4 | `buildBackupSummaryFromCounts` | function | 133 |
 
-### 3.7 `backend/src/businessMetrics.ts`
+### 3.6 `backend/.pkg-stage/src/businessMetrics.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -648,7 +749,7 @@ Code files scanned: **515**
 | 8 | `getStockAlertProducts` | function | 127 |
 | 9 | `getExpiringProducts` | function | 152 |
 
-### 3.8 `backend/src/catalogTextIntegrity.ts`
+### 3.7 `backend/.pkg-stage/src/catalogTextIntegrity.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -658,7 +759,7 @@ Code files scanned: **515**
 | 4 | `assertCatalogTextIntegrity` | function | 63 |
 | 5 | `normalizeOptionList` | function | 73 |
 
-### 3.9 `backend/src/config/index.ts`
+### 3.8 `backend/.pkg-stage/src/config/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -674,7 +775,7 @@ Code files scanned: **515**
 | 10 | `normalizeOrganizationSeed` | function | 128 |
 | 11 | `STORAGE_ROOT` | const arrow | 135 |
 
-### 3.10 `backend/src/conflictControl.ts`
+### 3.9 `backend/.pkg-stage/src/conflictControl.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -685,7 +786,7 @@ Code files scanned: **515**
 | 5 | `sendWriteConflict` | function | 73 |
 | 6 | `sendSettingsConflict` | function | 93 |
 
-### 3.11 `backend/src/contactOptions.ts`
+### 3.10 `backend/.pkg-stage/src/contactOptions.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -700,11 +801,11 @@ Code files scanned: **515**
 | 9 | `getPrimaryContactOption` | function | 166 |
 | 10 | `buildImportedContactState` | function | 178 |
 
-### 3.12 `backend/src/database.ts`
+### 3.11 `backend/.pkg-stage/src/database.js`
 
 - No top-level named symbols detected.
 
-### 3.13 `backend/src/dataPath/index.ts`
+### 3.12 `backend/.pkg-stage/src/dataPath/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -720,7 +821,7 @@ Code files scanned: **515**
 | 10 | `renameDirectoryWithRetry` | function | 183 |
 | 11 | `relocateDataRoot` | function | 202 |
 
-### 3.14 `backend/src/db/cutoverReadiness.ts`
+### 3.13 `backend/.pkg-stage/src/db/cutoverReadiness.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -735,7 +836,7 @@ Code files scanned: **515**
 | 9 | `analyzeFiles` | function | 124 |
 | 10 | `analyzePostgresCutoverReadiness` | function | 134 |
 
-### 3.15 `backend/src/db/postgresQueryCompat.ts`
+### 3.14 `backend/.pkg-stage/src/db/postgresQueryCompat.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -752,7 +853,7 @@ Code files scanned: **515**
 | 11 | `coerceRowValue` | function | 213 |
 | 12 | `coerceRow` | function | 226 |
 
-### 3.16 `backend/src/fileAssets.ts`
+### 3.15 `backend/.pkg-stage/src/fileAssets.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -818,7 +919,7 @@ Code files scanned: **515**
 | 60 | `getFileAssetById` | function | 1215 |
 | 61 | `deleteFileAsset` | function | 1220 |
 
-### 3.17 `backend/src/helpers.ts`
+### 3.16 `backend/.pkg-stage/src/helpers.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -853,13 +954,13 @@ Code files scanned: **515**
 | 29 | `getSafeCostPrice` | function | 577 |
 | 30 | `calculateSaleProfit` | function | 588 |
 
-### 3.18 `backend/src/idempotency.ts`
+### 3.17 `backend/.pkg-stage/src/idempotency.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeClientRequestId` | function | 4 |
 
-### 3.19 `backend/src/importCsv.ts`
+### 3.18 `backend/.pkg-stage/src/importCsv.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -880,7 +981,7 @@ Code files scanned: **515**
 | 15 | `hasCsvContent` | function | 226 |
 | 16 | `emitRecord` | const function | 248 |
 
-### 3.20 `backend/src/importParsing.ts`
+### 3.19 `backend/.pkg-stage/src/importParsing.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -891,7 +992,7 @@ Code files scanned: **515**
 | 5 | `parseImportNumericValue` | function | 83 |
 | 6 | `normalizeImportMoney` | function | 102 |
 
-### 3.21 `backend/src/initials.ts`
+### 3.20 `backend/.pkg-stage/src/initials.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -903,7 +1004,7 @@ Code files scanned: **515**
 | 6 | `rank` | const arrow | 66 |
 | 7 | `aggregateInitialRows` | function | 87 |
 
-### 3.22 `backend/src/maintenanceLock.ts`
+### 3.21 `backend/.pkg-stage/src/maintenanceLock.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -917,7 +1018,7 @@ Code files scanned: **515**
 | 8 | `isMaintenanceWriteAllowed` | function | 87 |
 | 9 | `maintenanceWriteGuard` | function | 109 |
 
-### 3.23 `backend/src/middleware.ts`
+### 3.22 `backend/.pkg-stage/src/middleware.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -943,7 +1044,7 @@ Code files scanned: **515**
 | 20 | `validateUploadedFile` | function | 303 |
 | 21 | `validateUploadBufferPayload` | function | 314 |
 
-### 3.24 `backend/src/money.ts`
+### 3.23 `backend/.pkg-stage/src/money.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -951,7 +1052,7 @@ Code files scanned: **515**
 | 2 | `roundUpToDecimals` | function | 10 |
 | 3 | `normalizePriceValue` | function | 20 |
 
-### 3.25 `backend/src/netSecurity.ts`
+### 3.24 `backend/.pkg-stage/src/netSecurity.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -963,7 +1064,7 @@ Code files scanned: **515**
 | 6 | `assertSafeOutboundUrl` | function | 99 |
 | 7 | `isSafeExternalImageReference` | function | 130 |
 
-### 3.26 `backend/src/objectStore.ts`
+### 3.25 `backend/.pkg-stage/src/objectStore.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -997,13 +1098,13 @@ Code files scanned: **515**
 | 28 | `testObjectStore` | function | 433 |
 | 29 | `bufferToStream` | function | 448 |
 
-### 3.27 `backend/src/optionalSharp.ts`
+### 3.26 `backend/.pkg-stage/src/optionalSharp.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `loadSharp` | function | 9 |
 
-### 3.28 `backend/src/organizationContext/index.ts`
+### 3.27 `backend/.pkg-stage/src/organizationContext/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1022,7 +1123,7 @@ Code files scanned: **515**
 | 13 | `ensureOrganizationFilesystemLayout` | function | 157 |
 | 14 | `getOrganizationStorageStatus` | function | 226 |
 
-### 3.29 `backend/src/permissions.ts`
+### 3.28 `backend/.pkg-stage/src/permissions.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1034,7 +1135,7 @@ Code files scanned: **515**
 | 6 | `isSensitiveActionHistory` | function | 187 |
 | 7 | `hasPermissionValue` | function | 206 |
 
-### 3.30 `backend/src/portalUtils.ts`
+### 3.29 `backend/.pkg-stage/src/portalUtils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1045,7 +1146,7 @@ Code files scanned: **515**
 | 5 | `extractGoogleMapsEmbedUrl` | function | 78 |
 | 6 | `normalizeGoogleMapsEmbed` | function | 90 |
 
-### 3.31 `backend/src/postgresDatabase.ts`
+### 3.30 `backend/.pkg-stage/src/postgresDatabase.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1064,7 +1165,7 @@ Code files scanned: **515**
 | 13 | `getDb` | function | 553 |
 | 14 | `closeDatabase` | function | 581 |
 
-### 3.32 `backend/src/productBatches.ts`
+### 3.31 `backend/.pkg-stage/src/productBatches.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1103,7 +1204,7 @@ Code files scanned: **515**
 | 33 | `getReturnItemAllocations` | function | 598 |
 | 34 | `markReturnItemAllocationsReversed` | function | 610 |
 
-### 3.33 `backend/src/productDiscounts.ts`
+### 3.32 `backend/.pkg-stage/src/productDiscounts.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1117,7 +1218,7 @@ Code files scanned: **515**
 | 8 | `isDiscountActive` | function | 133 |
 | 9 | `calculateDiscountedPrice` | function | 152 |
 
-### 3.34 `backend/src/productImportPolicies.ts`
+### 3.33 `backend/.pkg-stage/src/productImportPolicies.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1132,7 +1233,7 @@ Code files scanned: **515**
 | 9 | `resolveImportValue` | function | 135 |
 | 10 | `normalizeImageConflictMode` | function | 155 |
 
-### 3.35 `backend/src/requestContext.ts`
+### 3.34 `backend/.pkg-stage/src/requestContext.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1142,7 +1243,7 @@ Code files scanned: **515**
 | 4 | `requestContextMiddleware` | function | 51 |
 | 5 | `getRequestMeta` | function | 57 |
 
-### 3.36 `backend/src/routes/actionHistory.ts`
+### 3.35 `backend/.pkg-stage/src/routes/actionHistory.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1159,7 +1260,7 @@ Code files scanned: **515**
 | 11 | `mapHistoryRows` | function | 103 |
 | 12 | `completeServerHistoryTransition` | function | 214 |
 
-### 3.37 `backend/src/routes/ai.ts`
+### 3.36 `backend/.pkg-stage/src/routes/ai.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1167,43 +1268,43 @@ Code files scanned: **515**
 | 2 | `getProviderRow` | function | 32 |
 | 3 | `serializeResponseRows` | function | 244 |
 
-### 3.38 `backend/src/routes/auth.ts`
+### 3.37 `backend/.pkg-stage/src/routes/auth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getClientKey` | function | 91 |
-| 2 | `applyRateLimit` | function | 104 |
-| 3 | `getLoginLockKey` | function | 116 |
-| 4 | `isReasonableCredentialLength` | function | 120 |
-| 5 | `normalizeLookupText` | function | 125 |
-| 6 | `isHttpUrl` | function | 129 |
-| 7 | `buildPublicBaseUrl` | function | 133 |
-| 8 | `isLocalOrigin` | function | 140 |
-| 9 | `resolvePublicAssetBaseUrl` | function | 149 |
-| 10 | `resolvePasswordResetRedirect` | function | 155 |
-| 11 | `findFirstHttpUrl` | function | 168 |
-| 12 | `loginIdentifierPreview` | function | 178 |
-| 13 | `rejectLogin` | function | 192 |
-| 14 | `getOtpSecret` | function | 214 |
-| 15 | `requireOtpActor` | function | 218 |
-| 16 | `getOtpTargetUser` | function | 224 |
-| 17 | `buildUserPayload` | function | 239 |
-| 18 | `resolveOrganizationLookup` | function | 271 |
-| 19 | `findUserByIdentifier` | function | 277 |
-| 20 | `getExactActiveUserById` | function | 346 |
-| 21 | `normalizeOauthMode` | function | 361 |
-| 22 | `isEmailIdentifier` | function | 366 |
-| 23 | `getUserById` | function | 370 |
-| 24 | `getSettingsSnapshot` | function | 374 |
-| 25 | `getBootstrapSystemSnapshot` | function | 383 |
-| 26 | `buildAuthenticatedBootstrap` | function | 415 |
-| 27 | `generateTemporaryAuthPassword` | function | 444 |
-| 28 | `issueAuthSession` | function | 448 |
-| 29 | `updateLocalUserGoogleIdentity` | function | 459 |
-| 30 | `completeGoogleLogin` | function | 608 |
-| 31 | `buildOauthCallbackHtml` | function | 694 |
+| 1 | `getClientKey` | function | 92 |
+| 2 | `applyRateLimit` | function | 105 |
+| 3 | `getLoginLockKey` | function | 117 |
+| 4 | `isReasonableCredentialLength` | function | 121 |
+| 5 | `normalizeLookupText` | function | 126 |
+| 6 | `isHttpUrl` | function | 130 |
+| 7 | `buildPublicBaseUrl` | function | 134 |
+| 8 | `isLocalOrigin` | function | 141 |
+| 9 | `resolvePublicAssetBaseUrl` | function | 150 |
+| 10 | `resolvePasswordResetRedirect` | function | 156 |
+| 11 | `findFirstHttpUrl` | function | 169 |
+| 12 | `loginIdentifierPreview` | function | 179 |
+| 13 | `rejectLogin` | function | 193 |
+| 14 | `getOtpSecret` | function | 215 |
+| 15 | `requireOtpActor` | function | 219 |
+| 16 | `getOtpTargetUser` | function | 225 |
+| 17 | `buildUserPayload` | function | 240 |
+| 18 | `resolveOrganizationLookup` | function | 272 |
+| 19 | `findUserByIdentifier` | function | 278 |
+| 20 | `getExactActiveUserById` | function | 347 |
+| 21 | `normalizeOauthMode` | function | 362 |
+| 22 | `isEmailIdentifier` | function | 367 |
+| 23 | `getUserById` | function | 371 |
+| 24 | `getSettingsSnapshot` | function | 375 |
+| 25 | `getBootstrapSystemSnapshot` | function | 384 |
+| 26 | `buildAuthenticatedBootstrap` | function | 423 |
+| 27 | `generateTemporaryAuthPassword` | function | 452 |
+| 28 | `issueAuthSession` | function | 456 |
+| 29 | `updateLocalUserGoogleIdentity` | function | 467 |
+| 30 | `completeGoogleLogin` | function | 616 |
+| 31 | `buildOauthCallbackHtml` | function | 702 |
 
-### 3.39 `backend/src/routes/branches.ts`
+### 3.38 `backend/.pkg-stage/src/routes/branches.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1218,7 +1319,7 @@ Code files scanned: **515**
 | 9 | `buildBranchStockWhere` | function | 69 |
 | 10 | `hasPagedStockQuery` | function | 93 |
 
-### 3.40 `backend/src/routes/catalog.ts`
+### 3.39 `backend/.pkg-stage/src/routes/catalog.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1227,14 +1328,14 @@ Code files scanned: **515**
 | 3 | `buildImageMap` | function | 26 |
 | 4 | `buildCatalogProductPayloads` | function | 35 |
 
-### 3.41 `backend/src/routes/categories.ts`
+### 3.40 `backend/.pkg-stage/src/routes/categories.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeLookup` | function | 12 |
 | 2 | `normalizeColor` | function | 16 |
 
-### 3.42 `backend/src/routes/contacts.ts`
+### 3.41 `backend/.pkg-stage/src/routes/contacts.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1273,7 +1374,7 @@ Code files scanned: **515**
 | 33 | `findExisting` | const arrow | 775 |
 | 34 | `findExisting` | const arrow | 969 |
 
-### 3.43 `backend/src/routes/customTables.ts`
+### 3.42 `backend/.pkg-stage/src/routes/customTables.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1287,7 +1388,7 @@ Code files scanned: **515**
 | 8 | `ensureCustomTableRowVersioning` | function | 75 |
 | 9 | `getWritableCustomTableKeys` | function | 92 |
 
-### 3.44 `backend/src/routes/files.ts`
+### 3.43 `backend/.pkg-stage/src/routes/files.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1295,7 +1396,7 @@ Code files scanned: **515**
 | 2 | `getFileListFilters` | function | 30 |
 | 3 | `getDeviceMeta` | function | 53 |
 
-### 3.45 `backend/src/routes/importJobs.ts`
+### 3.44 `backend/.pkg-stage/src/routes/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1316,7 +1417,7 @@ Code files scanned: **515**
 | 15 | `shouldForceDelete` | function | 190 |
 | 16 | `auditImportJobEvent` | function | 195 |
 
-### 3.46 `backend/src/routes/inventory.ts`
+### 3.45 `backend/.pkg-stage/src/routes/inventory.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1353,7 +1454,7 @@ Code files scanned: **515**
 | 31 | `upsertRfidSessionItem` | function | 1278 |
 | 32 | `recordRfidEvent` | function | 1303 |
 
-### 3.47 `backend/src/routes/notifications.ts`
+### 3.46 `backend/.pkg-stage/src/routes/notifications.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1385,11 +1486,11 @@ Code files scanned: **515**
 | 26 | `buildSystemSection` | function | 480 |
 | 27 | `sumSectionCounts` | function | 510 |
 
-### 3.48 `backend/src/routes/organizations.ts`
+### 3.47 `backend/.pkg-stage/src/routes/organizations.js`
 
 - No top-level named symbols detected.
 
-### 3.49 `backend/src/routes/portal.ts`
+### 3.48 `backend/.pkg-stage/src/routes/portal.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1454,7 +1555,7 @@ Code files scanned: **515**
 | 59 | `applyPortalRateLimit` | function | 1006 |
 | 60 | `collectRecommendationCitations` | function | 1014 |
 
-### 3.50 `backend/src/routes/products.ts`
+### 3.49 `backend/.pkg-stage/src/routes/products.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1523,7 +1624,7 @@ Code files scanned: **515**
 | 63 | `parseIncomingImageRefs` | const arrow | 1768 |
 | 64 | `loadCurrentGallery` | const arrow | 1804 |
 
-### 3.51 `backend/src/routes/returns.ts`
+### 3.50 `backend/.pkg-stage/src/routes/returns.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1538,7 +1639,7 @@ Code files scanned: **515**
 | 9 | `assertReturnableItems` | function | 91 |
 | 10 | `assertSupplierReturnableStock` | function | 535 |
 
-### 3.52 `backend/src/routes/runtime.ts`
+### 3.51 `backend/.pkg-stage/src/routes/runtime.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1549,7 +1650,7 @@ Code files scanned: **515**
 | 5 | `summarizeSuspiciousTextValues` | function | 71 |
 | 6 | `requireRuntimePermission` | function | 91 |
 
-### 3.53 `backend/src/routes/sales.ts`
+### 3.52 `backend/.pkg-stage/src/routes/sales.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1577,8 +1678,10 @@ Code files scanned: **515**
 | 22 | `restoreBranchStock` | function | 300 |
 | 23 | `fetchSaleItemsWithBranches` | function | 308 |
 | 24 | `findSaleByClientRequestId` | function | 317 |
+| 25 | `buildDashboardSummary` | function | 1105 |
+| 26 | `buildDashboardAnalytics` | function | 1232 |
 
-### 3.54 `backend/src/routes/settings.ts`
+### 3.53 `backend/.pkg-stage/src/routes/settings.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1593,7 +1696,7 @@ Code files scanned: **515**
 | 9 | `parseUpdatedAtMs` | function | 131 |
 | 10 | `isExpectedOlderThanCurrent` | function | 145 |
 
-### 3.55 `backend/src/routes/sync.ts`
+### 3.54 `backend/.pkg-stage/src/routes/sync.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1610,7 +1713,7 @@ Code files scanned: **515**
 | 11 | `getUploadDir` | function | 218 |
 | 12 | `readManifest` | function | 222 |
 
-### 3.56 `backend/src/routes/system/index.ts`
+### 3.55 `backend/.pkg-stage/src/routes/system/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1659,7 +1762,7 @@ Code files scanned: **515**
 | 43 | `listWindowsFsRoots` | const arrow | 1510 |
 | 44 | `listDriveRoots` | const arrow | 1525 |
 
-### 3.57 `backend/src/routes/units.ts`
+### 3.56 `backend/.pkg-stage/src/routes/units.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1667,7 +1770,7 @@ Code files scanned: **515**
 | 2 | `normalizeUnitColor` | function | 17 |
 | 3 | `updateUnitHandler` | function | 52 |
 
-### 3.58 `backend/src/routes/users.ts`
+### 3.57 `backend/.pkg-stage/src/routes/users.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1698,7 +1801,7 @@ Code files scanned: **515**
 | 25 | `findProviderIdentity` | function | 344 |
 | 26 | `buildAuthMethodsPayload` | function | 352 |
 
-### 3.59 `backend/src/runtimeCache.ts`
+### 3.58 `backend/.pkg-stage/src/runtimeCache.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1715,7 +1818,7 @@ Code files scanned: **515**
 | 11 | `pingRuntimeCache` | function | 213 |
 | 12 | `getRuntimeCacheStatus` | function | 227 |
 
-### 3.60 `backend/src/runtimeState/index.ts`
+### 3.59 `backend/.pkg-stage/src/runtimeState/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1726,7 +1829,7 @@ Code files scanned: **515**
 | 5 | `bumpStorageVersion` | function | 67 |
 | 6 | `buildRuntimeDescriptor` | function | 80 |
 
-### 3.61 `backend/src/runtimeVersion.ts`
+### 3.60 `backend/.pkg-stage/src/runtimeVersion.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1739,7 +1842,7 @@ Code files scanned: **515**
 | 7 | `readFrontendBuildInfoFromRoot` | function | 126 |
 | 8 | `getRuntimeVersion` | function | 165 |
 
-### 3.62 `backend/src/schemaMetadata.ts`
+### 3.61 `backend/.pkg-stage/src/schemaMetadata.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1753,7 +1856,7 @@ Code files scanned: **515**
 | 8 | `firstExistingColumn` | function | 108 |
 | 9 | `markColumnPresent` | function | 140 |
 
-### 3.63 `backend/src/security.ts`
+### 3.62 `backend/.pkg-stage/src/security.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1772,7 +1875,7 @@ Code files scanned: **515**
 | 13 | `recordAbuseFailure` | function | 211 |
 | 14 | `clearAbuseFailure` | function | 235 |
 
-### 3.64 `backend/src/serverUtils.ts`
+### 3.63 `backend/.pkg-stage/src/serverUtils.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1803,7 +1906,7 @@ Code files scanned: **515**
 | 25 | `setUploadStaticHeaders` | function | 368 |
 | 26 | `mapServerError` | function | 378 |
 
-### 3.65 `backend/src/services/aiGateway.ts`
+### 3.64 `backend/.pkg-stage/src/services/aiGateway.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1825,7 +1928,7 @@ Code files scanned: **515**
 | 16 | `callChatProvider` | function | 218 |
 | 17 | `testProviderConfig` | function | 307 |
 
-### 3.66 `backend/src/services/backupPackages.ts`
+### 3.65 `backend/.pkg-stage/src/services/backupPackages.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1889,7 +1992,7 @@ Code files scanned: **515**
 | 58 | `listLocalBackupVersions` | function | 971 |
 | 59 | `listBackupVersions` | function | 1003 |
 
-### 3.67 `backend/src/services/firebaseAuth.ts`
+### 3.66 `backend/.pkg-stage/src/services/firebaseAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1916,7 +2019,7 @@ Code files scanned: **515**
 | 21 | `setAuthUserActive` | function | 342 |
 | 22 | `verifyPasswordWithFirebase` | function | 355 |
 
-### 3.68 `backend/src/services/googleDriveSync/index.ts`
+### 3.67 `backend/.pkg-stage/src/services/googleDriveSync/index.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -1996,7 +2099,7 @@ Code files scanned: **515**
 | 74 | `forgetDriveSyncCredentials` | function | 1527 |
 | 75 | `schedulePeriodicDriveSync` | function | 1535 |
 
-### 3.69 `backend/src/services/googleDriveSync/versioning.ts`
+### 3.68 `backend/.pkg-stage/src/services/googleDriveSync/versioning.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2008,7 +2111,7 @@ Code files scanned: **515**
 | 6 | `selectDateExpiredVersions` | function | 101 |
 | 7 | `selectExpiredDriveSyncVersions` | function | 113 |
 
-### 3.70 `backend/src/services/googleOauth.ts`
+### 3.69 `backend/.pkg-stage/src/services/googleOauth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2030,7 +2133,7 @@ Code files scanned: **515**
 | 16 | `exchangeGoogleOauthCode` | function | 196 |
 | 17 | `getGoogleUserFromTokens` | function | 219 |
 
-### 3.71 `backend/src/services/importJobs.ts`
+### 3.70 `backend/.pkg-stage/src/services/importJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2210,7 +2313,7 @@ Code files scanned: **515**
 | 174 | `escape` | const arrow | 3833 |
 | 175 | `joinEscapedCsvRow` | function | 3846 |
 
-### 3.72 `backend/src/services/integrationDoctor.ts`
+### 3.71 `backend/.pkg-stage/src/services/integrationDoctor.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2229,7 +2332,7 @@ Code files scanned: **515**
 | 13 | `probeBackups` | function | 199 |
 | 14 | `buildIntegrationDoctor` | function | 216 |
 
-### 3.73 `backend/src/services/mediaQueue.ts`
+### 3.72 `backend/.pkg-stage/src/services/mediaQueue.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2244,7 +2347,7 @@ Code files scanned: **515**
 | 9 | `startMediaWorker` | function | 157 |
 | 10 | `getMediaQueueStatus` | function | 181 |
 
-### 3.74 `backend/src/services/portalAi.ts`
+### 3.73 `backend/.pkg-stage/src/services/portalAi.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2291,7 +2394,7 @@ Code files scanned: **515**
 | 41 | `remainingProviders` | function | 483 |
 | 42 | `generatePortalAiResponse` | function | 491 |
 
-### 3.75 `backend/src/services/verification.ts`
+### 3.74 `backend/.pkg-stage/src/services/verification.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2317,7 +2420,7 @@ Code files scanned: **515**
 | 20 | `sendEmail` | function | 183 |
 | 21 | `requestVerificationCode` | function | 247 |
 
-### 3.76 `backend/src/sessionAuth.ts`
+### 3.75 `backend/.pkg-stage/src/sessionAuth.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2335,7 +2438,7 @@ Code files scanned: **515**
 | 12 | `revokeAuthSession` | function | 175 |
 | 13 | `revokeUserSessions` | function | 187 |
 
-### 3.77 `backend/src/settingsSnapshot.ts`
+### 3.76 `backend/.pkg-stage/src/settingsSnapshot.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2352,7 +2455,7 @@ Code files scanned: **515**
 | 11 | `sanitizeSettingsSnapshot` | function | 147 |
 | 12 | `sanitizeSettingsSnapshotAsync` | function | 158 |
 
-### 3.78 `backend/src/storage/organizationFolders.ts`
+### 3.77 `backend/.pkg-stage/src/storage/organizationFolders.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2362,7 +2465,7 @@ Code files scanned: **515**
 | 4 | `extractOrganizationPublicId` | function | 30 |
 | 5 | `findOrganizationFolderByPublicId` | function | 38 |
 
-### 3.79 `backend/src/systemFsWorker.ts`
+### 3.78 `backend/.pkg-stage/src/systemFsWorker.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2374,7 +2477,7 @@ Code files scanned: **515**
 | 6 | `runRelocateDataRoot` | function | 94 |
 | 7 | `main` | function | 104 |
 
-### 3.80 `backend/src/systemJobs.ts`
+### 3.79 `backend/.pkg-stage/src/systemJobs.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2407,7 +2510,7 @@ Code files scanned: **515**
 | 27 | `getSystemJob` | function | 432 |
 | 28 | `listSystemJobs` | function | 444 |
 
-### 3.81 `backend/src/uploadReferenceCleanup.ts`
+### 3.80 `backend/.pkg-stage/src/uploadReferenceCleanup.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2415,7 +2518,7 @@ Code files scanned: **515**
 | 2 | `repairMissingUploadReferences` | function | 22 |
 | 3 | `repairMissingUploadReferencesAsync` | function | 134 |
 
-### 3.82 `backend/src/uploadSecurity.ts`
+### 3.81 `backend/.pkg-stage/src/uploadSecurity.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2427,46 +2530,1990 @@ Code files scanned: **515**
 | 6 | `validateUploadedBuffer` | function | 93 |
 | 7 | `validateUploadedPath` | function | 108 |
 
-### 3.83 `backend/src/websocket.ts`
+### 3.82 `backend/.pkg-stage/src/websocket.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `attachWss` | function | 24 |
 
-### 3.84 `backend/src/workers/importWorker.ts`
+### 3.83 `backend/.pkg-stage/src/workers/importWorker.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `start` | function | 13 |
 | 2 | `shutdown` | function | 23 |
 
-### 3.85 `backend/src/workers/mediaWorker.ts`
+### 3.84 `backend/.pkg-stage/src/workers/mediaWorker.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `start` | function | 13 |
 | 2 | `shutdown` | function | 22 |
 
-### 3.86 `backend/test/accessControl.test.ts`
+### 3.85 `backend/server.js`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `startRequestedWorkerRole` | function | 6 |
+| 2 | `listFrontendAssetFiles` | function | 93 |
+| 3 | `resolveFrontendAssetPath` | function | 104 |
+| 4 | `resolveFrontendChunkAssetName` | function | 130 |
+| 5 | `getSpaModulePreloadChunks` | function | 151 |
+| 6 | `appendLinkHeader` | function | 158 |
+| 7 | `appendSpaModulePreloadHeaders` | function | 167 |
+| 8 | `sendSpaIndex` | function | 176 |
+| 9 | `loadCompressionMiddleware` | function | 181 |
+| 10 | `applySecurityHeaders` | function | 190 |
+| 11 | `applyRequestPolicy` | function | 195 |
+| 12 | `applyCoreMiddleware` | function | 204 |
+| 13 | `normalizeUploadFileName` | function | 218 |
+| 14 | `getSafeActiveUploadPath` | function | 225 |
+| 15 | `findBackupUploadFallback` | function | 235 |
+| 16 | `inferUploadContentType` | function | 289 |
+| 17 | `serveLocalUpload` | function | 305 |
+| 18 | `getObjectStreamWithTimeout` | function | 322 |
+| 19 | `mountStaticAssets` | function | 337 |
+| 20 | `mountHealthRoute` | function | 416 |
+| 21 | `mountApiRoutes` | function | 444 |
+| 22 | `mountTransfersAlias` | function | 479 |
+| 23 | `mountSpaFallback` | function | 493 |
+| 24 | `mountErrorHandler` | function | 510 |
+| 25 | `getStartupBanner` | function | 523 |
+| 26 | `closeDatabase` | function | 546 |
+| 27 | `startDatabaseMaintenanceTimer` | function | 557 |
+| 28 | `registerShutdownHandlers` | function | 565 |
+| 29 | `bootstrapServer` | function | 579 |
+
+### 3.86 `backend/server.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `startRequestedWorkerRole` | function | 3 |
+| 2 | `listFrontendAssetFiles` | function | 124 |
+| 3 | `resolveFrontendAssetPath` | function | 134 |
+| 4 | `resolveFrontendChunkAssetName` | function | 157 |
+| 5 | `getSpaModulePreloadChunks` | function | 178 |
+| 6 | `appendLinkHeader` | function | 186 |
+| 7 | `appendSpaModulePreloadHeaders` | function | 196 |
+| 8 | `sendSpaIndex` | function | 205 |
+| 9 | `loadCompressionMiddleware` | function | 211 |
+| 10 | `applySecurityHeaders` | function | 220 |
+| 11 | `applyRequestPolicy` | function | 226 |
+| 12 | `applyCoreMiddleware` | function | 236 |
+| 13 | `normalizeUploadFileName` | function | 250 |
+| 14 | `getSafeActiveUploadPath` | function | 258 |
+| 15 | `findBackupUploadFallback` | function | 267 |
+| 16 | `inferUploadContentType` | function | 313 |
+| 17 | `serveLocalUpload` | function | 324 |
+| 18 | `getObjectStreamWithTimeout` | function | 341 |
+| 19 | `mountStaticAssets` | function | 355 |
+| 20 | `mountHealthRoute` | function | 422 |
+| 21 | `mountApiRoutes` | function | 451 |
+| 22 | `mountTransfersAlias` | function | 489 |
+| 23 | `mountSpaFallback` | function | 504 |
+| 24 | `mountErrorHandler` | function | 522 |
+| 25 | `getStartupBanner` | function | 536 |
+| 26 | `closeDatabase` | function | 561 |
+| 27 | `startDatabaseMaintenanceTimer` | function | 571 |
+| 28 | `registerShutdownHandlers` | function | 579 |
+| 29 | `bootstrapServer` | function | 596 |
+
+### 3.87 `backend/src/accessControl.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 45 |
+| 2 | `normalizeHostname` | function | 49 |
+| 3 | `getConfiguredSyncToken` | function | 55 |
+| 4 | `getRemoteAccessProvider` | function | 59 |
+| 5 | `isLegacyTailscaleEnabled` | function | 63 |
+| 6 | `getRequestHost` | function | 70 |
+| 7 | `getRemoteAddress` | function | 79 |
+| 8 | `isLoopbackAddress` | function | 87 |
+| 9 | `getPresentedSyncToken` | function | 97 |
+| 10 | `getTailscaleIdentity` | function | 106 |
+| 11 | `hasTrustedTailscaleIdentity` | function | 118 |
+| 12 | `isLocalHostRequest` | function | 129 |
+| 13 | `isTsNetHost` | function | 134 |
+| 14 | `getConfiguredTailscaleHost` | function | 139 |
+| 15 | `isPublicRemoteRequest` | function | 146 |
+| 16 | `isPublicApiRequest` | function | 157 |
+| 17 | `classifyRequestAccess` | function | 170 |
+| 18 | `authorizeProtectedRequest` | function | 202 |
+
+### 3.88 `backend/src/analytics/duckdbRuntime.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `tryRequireDuckDbPackage` | function | 30 |
+| 2 | `probeDuckDbPackage` | function | 44 |
+| 3 | `getDuckDbRuntimeStatus` | function | 74 |
+
+### 3.89 `backend/src/authOtpGuards.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeUserId` | function | 6 |
+| 2 | `canManageOtpTarget` | function | 12 |
+| 3 | `requiresSelfOtpDisablePassword` | function | 23 |
+
+### 3.90 `backend/src/backupSchema.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `countRowsByTable` | function | 102 |
+| 2 | `countCustomTableRows` | function | 114 |
+| 3 | `buildBackupSummary` | function | 125 |
+| 4 | `buildBackupSummaryFromCounts` | function | 133 |
+
+### 3.91 `backend/src/businessMetrics.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `sellableProductWhere` | function | 14 |
+| 2 | `effectiveCostExpr` | function | 25 |
+| 3 | `stockQuantityExpr` | function | 34 |
+| 4 | `normalizeMetricRow` | function | 41 |
+| 5 | `getStockMetrics` | function | 56 |
+| 6 | `getLowStockProducts` | function | 94 |
+| 7 | `getOutOfStockProducts` | function | 111 |
+| 8 | `getStockAlertProducts` | function | 127 |
+| 9 | `getExpiringProducts` | function | 152 |
+
+### 3.92 `backend/src/catalogTextIntegrity.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeCatalogText` | function | 16 |
+| 2 | `hasSuspiciousCatalogText` | function | 31 |
+| 3 | `listSuspiciousCatalogFields` | function | 46 |
+| 4 | `assertCatalogTextIntegrity` | function | 63 |
+| 5 | `normalizeOptionList` | function | 73 |
+
+### 3.93 `backend/src/config/index.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `buildEnvCandidates` | function | 25 |
+| 2 | `isDefaultDataMarker` | function | 54 |
+| 3 | `resolveStoredDataDir` | function | 59 |
+| 4 | `normalizeSelectedDataDir` | function | 66 |
+| 5 | `readDataLocation` | function | 78 |
+| 6 | `writeDataLocation` | function | 89 |
+| 7 | `ensureDirectory` | function | 105 |
+| 8 | `readSecretFileValue` | function | 109 |
+| 9 | `ensureOrganizationRuntimeLayout` | function | 121 |
+| 10 | `normalizeOrganizationSeed` | function | 128 |
+| 11 | `STORAGE_ROOT` | const arrow | 135 |
+
+### 3.94 `backend/src/conflictControl.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `WriteConflictError` | class | 8 |
+| 2 | `normalizeUpdatedAt` | function | 32 |
+| 3 | `getExpectedUpdatedAt` | function | 41 |
+| 4 | `assertUpdatedAtMatch` | function | 56 |
+| 5 | `sendWriteConflict` | function | 73 |
+| 6 | `sendSettingsConflict` | function | 93 |
+
+### 3.95 `backend/src/contactOptions.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `cleanText` | function | 9 |
+| 2 | `normalizeContactOption` | function | 41 |
+| 3 | `hasContactOptionData` | function | 57 |
+| 4 | `collectNormalizedContactOptions` | function | 72 |
+| 5 | `collectLegacyContactOptions` | function | 89 |
+| 6 | `parseStoredContactOptions` | function | 111 |
+| 7 | `parseImportContactOptions` | function | 135 |
+| 8 | `serializeContactOptions` | function | 156 |
+| 9 | `getPrimaryContactOption` | function | 166 |
+| 10 | `buildImportedContactState` | function | 178 |
+
+### 3.96 `backend/src/database.ts`
+
+- No top-level named symbols detected.
+
+### 3.97 `backend/src/dataPath/index.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizePathForCompare` | function | 32 |
+| 2 | `isSamePath` | function | 38 |
+| 3 | `isSubPath` | function | 42 |
+| 4 | `ensureDataRootLayout` | function | 47 |
+| 5 | `walkFiles` | function | 58 |
+| 6 | `summarizeDataRoot` | function | 80 |
+| 7 | `copyDirectoryContents` | function | 123 |
+| 8 | `buildArchivedTargetPath` | function | 160 |
+| 9 | `waitForFileSystemRetry` | function | 177 |
+| 10 | `renameDirectoryWithRetry` | function | 183 |
+| 11 | `relocateDataRoot` | function | 202 |
+
+### 3.98 `backend/src/db/cutoverReadiness.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeRelative` | function | 44 |
+| 2 | `toRelative` | function | 48 |
+| 3 | `shouldSkipDir` | function | 52 |
+| 4 | `listSourceFiles` | function | 60 |
+| 5 | `analyzeFile` | function | 74 |
+| 6 | `incrementCount` | function | 95 |
+| 7 | `mapCountsToRows` | function | 99 |
+| 8 | `summarizeBlockers` | function | 107 |
+| 9 | `analyzeFiles` | function | 124 |
+| 10 | `analyzePostgresCutoverReadiness` | function | 134 |
+
+### 3.99 `backend/src/db/postgresQueryCompat.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `countPositionalPlaceholders` | function | 63 |
+| 2 | `stripTrailingSemicolon` | function | 88 |
+| 3 | `replacePositionalParams` | function | 92 |
+| 4 | `normalizePortableSqlFunctions` | function | 126 |
+| 5 | `translateInsertOrIgnore` | function | 137 |
+| 6 | `translateParameters` | function | 141 |
+| 7 | `appendReturning` | function | 166 |
+| 8 | `isNumericFieldName` | function | 178 |
+| 9 | `getInsertTableName` | function | 185 |
+| 10 | `translateSql` | function | 195 |
+| 11 | `coerceRowValue` | function | 213 |
+| 12 | `coerceRow` | function | 226 |
+
+### 3.100 `backend/src/fileAssets.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getDb` | function | 59 |
+| 2 | `buildAssetExtToMime` | function | 63 |
+| 3 | `ensureUploadsDirectory` | function | 73 |
+| 4 | `getMimeTypeFromName` | function | 77 |
+| 5 | `getMediaType` | function | 82 |
+| 6 | `sanitizeOriginalFileName` | function | 91 |
+| 7 | `preserveOriginalDisplayName` | function | 105 |
+| 8 | `buildUniqueStoredName` | function | 113 |
+| 9 | `shouldCompressImage` | function | 130 |
+| 10 | `compressBufferForAsset` | function | 136 |
+| 11 | `encodeImageCandidate` | function | 220 |
+| 12 | `readImageDimensions` | function | 249 |
+| 13 | `getFfmpegPath` | function | 262 |
+| 14 | `buildVideoOptimizationArgs` | function | 270 |
+| 15 | `optimizeStoredVideo` | function | 308 |
+| 16 | `createFileAssetRecord` | function | 374 |
+| 17 | `getFileAssetByPublicPath` | function | 454 |
+| 18 | `buildFileAssetFilterParams` | function | 463 |
+| 19 | `listAssetRows` | function | 470 |
+| 20 | `countAssetRows` | function | 495 |
+| 21 | `writeObjectBodyToFile` | function | 515 |
+| 22 | `ensureStoredAssetAvailableLocally` | function | 533 |
+| 23 | `collectUploadPathsFromValue` | function | 543 |
+| 24 | `pruneInvalidReferenceBackfillAssets` | function | 571 |
+| 25 | `collectReferencedUploadPaths` | function | 579 |
+| 26 | `add` | const arrow | 581 |
+| 27 | `ensureReferencedAssetsRegistered` | function | 592 |
+| 28 | `getUploadFilePath` | function | 625 |
+| 29 | `toUploadPublicPathFromObjectKey` | function | 630 |
+| 30 | `findUploadStorageOrphans` | function | 636 |
+| 31 | `collectTrackedUploadPublicPaths` | function | 654 |
+| 32 | `add` | const arrow | 656 |
+| 33 | `collectObjectKeys` | function | 673 |
+| 34 | `listLocalUploadFiles` | function | 682 |
+| 35 | `reconcileUploadStorage` | function | 690 |
+| 36 | `requestUploadStorageReconcile` | function | 750 |
+| 37 | `ensureFileAssetListingWarm` | function | 754 |
+| 38 | `prewarmFileAssetListing` | function | 772 |
+| 39 | `deleteAllStoredUploads` | function | 783 |
+| 40 | `buildInClausePlaceholders` | function | 804 |
+| 41 | `normalizeUniquePublicPaths` | function | 810 |
+| 42 | `createUsageMap` | function | 822 |
+| 43 | `addReferencedRowUsages` | function | 830 |
+| 44 | `buildUploadReferenceUsageMap` | function | 840 |
+| 45 | `getCachedSettingsUsageReferences` | function | 862 |
+| 46 | `getCachedSubmissionUsageReferences` | function | 882 |
+| 47 | `mergeUsageReferences` | function | 902 |
+| 48 | `collectUsagesByPublicPath` | function | 911 |
+| 49 | `addUsage` | const arrow | 917 |
+| 50 | `collectUsage` | function | 987 |
+| 51 | `resolveBrowserPublicPath` | function | 991 |
+| 52 | `serializeAssetRow` | function | 998 |
+| 53 | `serializeAssetRows` | function | 1012 |
+| 54 | `registerStoredAsset` | function | 1026 |
+| 55 | `registerUploadFromRequest` | function | 1103 |
+| 56 | `optimizeStoredAssetFromQueue` | function | 1117 |
+| 57 | `storeDataUrlAsset` | function | 1149 |
+| 58 | `backfillUploadAssets` | function | 1175 |
+| 59 | `listFileAssets` | function | 1192 |
+| 60 | `getFileAssetById` | function | 1215 |
+| 61 | `deleteFileAsset` | function | 1220 |
+
+### 3.101 `backend/src/helpers.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `logOp` | function | 21 |
+| 2 | `getServerLog` | function | 26 |
+| 3 | `ok` | function | 30 |
+| 4 | `err` | function | 35 |
+| 5 | `audit` | function | 50 |
+| 6 | `safeHistoryPayload` | function | 99 |
+| 7 | `recordActionHistory` | function | 109 |
+| 8 | `broadcast` | function | 164 |
+| 9 | `tryParse` | function | 181 |
+| 10 | `today` | function | 186 |
+| 11 | `nonEmptyCsvLines` | function | 190 |
+| 12 | `normalizeCsvHeaders` | function | 198 |
+| 13 | `normalizeCsvCell` | function | 206 |
+| 14 | `buildCsvRow` | function | 210 |
+| 15 | `buildParsedCsvRows` | function | 218 |
+| 16 | `parseCSVRows` | function | 237 |
+| 17 | `bulkImportCSV` | function | 254 |
+| 18 | `parseCSVLine` | function | 280 |
+| 19 | `buildPlaceholders` | function | 294 |
+| 20 | `rowValuesForColumns` | function | 300 |
+| 21 | `importRows` | function | 314 |
+| 22 | `verifyAndRepairStockQuantities` | function | 329 |
+| 23 | `mapReturnedQuantities` | function | 382 |
+| 24 | `areAllSaleItemsReturned` | function | 390 |
+| 25 | `verifyAndRepairSaleStatuses` | function | 402 |
+| 26 | `verifyAndRepairCostPrices` | function | 461 |
+| 27 | `runDataIntegrityCheck` | function | 543 |
+| 28 | `hasRepairMessages` | function | 567 |
+| 29 | `getSafeCostPrice` | function | 577 |
+| 30 | `calculateSaleProfit` | function | 588 |
+
+### 3.102 `backend/src/idempotency.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeClientRequestId` | function | 4 |
+
+### 3.103 `backend/src/importCsv.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `stripBom` | function | 15 |
+| 2 | `normalizeDigit` | function | 22 |
+| 3 | `normalizeNumericText` | function | 33 |
+| 4 | `countDelimiter` | function | 44 |
+| 5 | `detectCsvDelimiter` | function | 66 |
+| 6 | `parseDelimitedRows` | function | 85 |
+| 7 | `normalizeCsvKey` | function | 130 |
+| 8 | `normalizeCsvHeaders` | function | 141 |
+| 9 | `hasDelimitedRowContent` | function | 152 |
+| 10 | `hasParsedCsvRowContent` | function | 162 |
+| 11 | `buildParsedCsvRows` | function | 172 |
+| 12 | `parseCsvRows` | function | 186 |
+| 13 | `detectCsvDelimiterFromFile` | function | 196 |
+| 14 | `csvValuesToRow` | function | 212 |
+| 15 | `hasCsvContent` | function | 226 |
+| 16 | `emitRecord` | const function | 248 |
+
+### 3.104 `backend/src/importParsing.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeDigit` | function | 13 |
+| 2 | `normalizeNumericText` | function | 24 |
+| 3 | `removeCurrencyNoise` | function | 34 |
+| 4 | `normalizeNumberSeparators` | function | 44 |
+| 5 | `parseImportNumericValue` | function | 83 |
+| 6 | `normalizeImportMoney` | function | 102 |
+
+### 3.105 `backend/src/initials.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `buildKhmerOrder` | function | 21 |
+| 2 | `normalizeInitialText` | function | 34 |
+| 3 | `getInitialKey` | function | 39 |
+| 4 | `getInitialType` | function | 51 |
+| 5 | `compareInitialKeys` | function | 61 |
+| 6 | `rank` | const arrow | 66 |
+| 7 | `aggregateInitialRows` | function | 87 |
+
+### 3.106 `backend/src/maintenanceLock.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `nowIso` | function | 15 |
+| 2 | `getMaintenanceLock` | function | 22 |
+| 3 | `isMaintenanceLocked` | function | 29 |
+| 4 | `acquireMaintenanceLock` | function | 37 |
+| 5 | `releaseMaintenanceLock` | function | 53 |
+| 6 | `withMaintenanceLock` | function | 66 |
+| 7 | `isReadOnlyMethod` | function | 79 |
+| 8 | `isMaintenanceWriteAllowed` | function | 87 |
+| 9 | `maintenanceWriteGuard` | function | 109 |
+
+### 3.107 `backend/src/middleware.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `authToken` | function | 14 |
+| 2 | `networkAccessGuard` | function | 27 |
+| 3 | `sanitiseFilename` | function | 32 |
+| 4 | `compressImageFile` | function | 64 |
+| 5 | `compressImageBuffer` | function | 99 |
+| 6 | `getClientKey` | function | 106 |
+| 7 | `routeRateLimit` | function | 112 |
+| 8 | `createStorage` | function | 124 |
+| 9 | `buildUpload` | function | 140 |
+| 10 | `parsePermissionsValue` | function | 172 |
+| 11 | `getMergedPermissions` | function | 182 |
+| 12 | `isAdminControlUser` | function | 189 |
+| 13 | `hasPermission` | function | 197 |
+| 14 | `requirePermission` | function | 204 |
+| 15 | `requireAnyPermission` | function | 216 |
+| 16 | `readAuditTextValue` | function | 234 |
+| 17 | `getAuditRequestMeta` | function | 240 |
+| 18 | `getAuditActor` | function | 269 |
+| 19 | `compressUpload` | function | 285 |
+| 20 | `validateUploadedFile` | function | 303 |
+| 21 | `validateUploadBufferPayload` | function | 314 |
+
+### 3.108 `backend/src/money.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `toFiniteNumber` | function | 4 |
+| 2 | `roundUpToDecimals` | function | 10 |
+| 3 | `normalizePriceValue` | function | 20 |
+
+### 3.109 `backend/src/netSecurity.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 29 |
+| 2 | `normalizeHostname` | function | 36 |
+| 3 | `isPrivateIpv4` | function | 43 |
+| 4 | `isPrivateIpv6` | function | 64 |
+| 5 | `isBlockedHostname` | function | 78 |
+| 6 | `assertSafeOutboundUrl` | function | 99 |
+| 7 | `isSafeExternalImageReference` | function | 130 |
+
+### 3.110 `backend/src/objectStore.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getS3RequestHandler` | function | 18 |
+| 2 | `getObjectStorageDriver` | function | 29 |
+| 3 | `isObjectStorageEnabled` | function | 33 |
+| 4 | `isR2Enabled` | function | 37 |
+| 5 | `isMinioEnabled` | function | 41 |
+| 6 | `trim` | function | 45 |
+| 7 | `getCloudflareAccountId` | function | 49 |
+| 8 | `getCloudflareApiToken` | function | 56 |
+| 9 | `canUseCloudflareR2Api` | function | 68 |
+| 10 | `buildR2ApiObjectUrl` | function | 72 |
+| 11 | `cloudflareR2ApiRequest` | function | 87 |
+| 12 | `shouldFallbackToR2Api` | function | 125 |
+| 13 | `isMissingObjectError` | function | 135 |
+| 14 | `getS3Client` | function | 145 |
+| 15 | `normalizeObjectKey` | function | 164 |
+| 16 | `normalizeUniqueObjectKeys` | function | 168 |
+| 17 | `buildDeleteObjectRefs` | function | 180 |
+| 18 | `serializeCloudflareObjectList` | function | 188 |
+| 19 | `serializeS3ObjectList` | function | 201 |
+| 20 | `ensureBucket` | function | 214 |
+| 21 | `putObject` | function | 232 |
+| 22 | `sendWithTimeout` | function | 267 |
+| 23 | `getObjectStream` | function | 279 |
+| 24 | `objectExists` | function | 312 |
+| 25 | `deleteObject` | function | 345 |
+| 26 | `deleteObjects` | function | 364 |
+| 27 | `listObjects` | function | 397 |
+| 28 | `testObjectStore` | function | 433 |
+| 29 | `bufferToStream` | function | 448 |
+
+### 3.111 `backend/src/optionalSharp.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `loadSharp` | function | 9 |
+
+### 3.112 `backend/src/organizationContext/index.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 11 |
+| 2 | `slugify` | function | 15 |
+| 3 | `generateOrganizationPublicId` | function | 23 |
+| 4 | `getDefaultOrganization` | function | 27 |
+| 5 | `getOrganizationById` | function | 36 |
+| 6 | `findOrganizationByLookup` | function | 45 |
+| 7 | `searchOrganizations` | function | 60 |
+| 8 | `getOrganizationGroup` | function | 93 |
+| 9 | `getDefaultOrganizationGroup` | function | 103 |
+| 10 | `getOrganizationContextForUser` | function | 115 |
+| 11 | `getPortalPublicPath` | function | 133 |
+| 12 | `getOrganizationFilesystemLayout` | function | 138 |
+| 13 | `ensureOrganizationFilesystemLayout` | function | 157 |
+| 14 | `getOrganizationStorageStatus` | function | 226 |
+
+### 3.113 `backend/src/permissions.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `buildPermissionDefinitions` | function | 51 |
+| 2 | `normalizeKey` | function | 148 |
+| 3 | `getPermissionDefinition` | function | 155 |
+| 4 | `isSensitivePermissionKey` | function | 166 |
+| 5 | `permissionForActionHistory` | function | 176 |
+| 6 | `isSensitiveActionHistory` | function | 187 |
+| 7 | `hasPermissionValue` | function | 206 |
+
+### 3.114 `backend/src/portalUtils.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `toTrimmedString` | function | 14 |
+| 2 | `safeJsonParse` | function | 23 |
+| 3 | `createAboutBlock` | function | 36 |
+| 4 | `normalizeAboutBlocks` | function | 51 |
+| 5 | `extractGoogleMapsEmbedUrl` | function | 78 |
+| 6 | `normalizeGoogleMapsEmbed` | function | 90 |
+
+### 3.115 `backend/src/postgresDatabase.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `loadPgNative` | function | 13 |
+| 2 | `normalizeQueryRows` | function | 30 |
+| 3 | `buildRunResult` | function | 37 |
+| 4 | `normalizeStatementArgs` | function | 46 |
+| 5 | `splitSqlStatements` | function | 55 |
+| 6 | `PostgresCompatStatement` | class | 65 |
+| 7 | `PostgresCompatDatabase` | class | 89 |
+| 8 | `createPostgresDatabase` | function | 531 |
+| 9 | `runDatabaseMaintenance` | function | 535 |
+| 10 | `ensureCoreDataInvariants` | function | 539 |
+| 11 | `ensureDefaultOrganizationAndGroup` | function | 543 |
+| 12 | `ensurePrimaryAdminRoleAndUser` | function | 547 |
+| 13 | `getDb` | function | 553 |
+| 14 | `closeDatabase` | function | 581 |
+
+### 3.116 `backend/src/productBatches.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeExpiryDate` | function | 23 |
+| 2 | `normalizeLotCode` | function | 28 |
+| 3 | `isSellableProduct` | function | 33 |
+| 4 | `buildBatchKey` | function | 37 |
+| 5 | `getProductById` | function | 46 |
+| 6 | `rowsToIds` | function | 52 |
+| 7 | `normalizePositiveIds` | function | 60 |
+| 8 | `buildPlaceholders` | function | 72 |
+| 9 | `sumQuantities` | function | 78 |
+| 10 | `hasTrackedBatch` | function | 86 |
+| 11 | `getProductBatchIds` | function | 93 |
+| 12 | `getBatchRowsForProduct` | function | 97 |
+| 13 | `getLegacyBatchBackfillCandidates` | function | 106 |
+| 14 | `createOrFindProductBatch` | function | 119 |
+| 15 | `setBranchBatchQuantity` | function | 176 |
+| 16 | `incrementBranchBatchQuantity` | function | 186 |
+| 17 | `getBatchStockRows` | function | 197 |
+| 18 | `listProductBatches` | function | 237 |
+| 19 | `syncProductBatchRollups` | function | 308 |
+| 20 | `migrateLegacyProductToBatches` | function | 353 |
+| 21 | `migrateAllLegacyProductsToBatches` | function | 397 |
+| 22 | `scheduleLegacyBatchBackfill` | function | 409 |
+| 23 | `runNextChunk` | const arrow | 415 |
+| 24 | `getLegacyBatchBackfillStatus` | function | 445 |
+| 25 | `getAvailableProductQuantity` | function | 454 |
+| 26 | `allocateProductBatches` | function | 459 |
+| 27 | `increaseProductBatchStock` | function | 499 |
+| 28 | `restoreBatchAllocations` | function | 516 |
+| 29 | `cloneAllocationsToProduct` | function | 531 |
+| 30 | `getSaleItemAllocations` | function | 555 |
+| 31 | `markSaleItemAllocationsReleased` | function | 567 |
+| 32 | `getAvailableSaleAllocationRows` | function | 575 |
+| 33 | `getReturnItemAllocations` | function | 598 |
+| 34 | `markReturnItemAllocationsReversed` | function | 610 |
+
+### 3.117 `backend/src/productDiscounts.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeBooleanFlag` | function | 41 |
+| 2 | `normalizePercent` | function | 54 |
+| 3 | `normalizeDiscountType` | function | 64 |
+| 4 | `normalizeHexColor` | function | 74 |
+| 5 | `normalizeDateText` | function | 83 |
+| 6 | `pick` | function | 97 |
+| 7 | `normalizeProductDiscount` | function | 106 |
+| 8 | `isDiscountActive` | function | 133 |
+| 9 | `calculateDiscountedPrice` | function | 152 |
+
+### 3.118 `backend/src/productImportPolicies.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseImportNumber` | function | 17 |
+| 2 | `parseImportFlag` | function | 31 |
+| 3 | `hasImportValue` | function | 45 |
+| 4 | `normalizeFieldRule` | function | 55 |
+| 5 | `splitUniqueImportValues` | function | 66 |
+| 6 | `collectImportListValues` | function | 83 |
+| 7 | `buildLowercaseSet` | function | 96 |
+| 8 | `appendUniqueImportValue` | function | 110 |
+| 9 | `resolveImportValue` | function | 135 |
+| 10 | `normalizeImageConflictMode` | function | 155 |
+
+### 3.119 `backend/src/requestContext.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `cleanText` | function | 10 |
+| 2 | `readHeader` | function | 17 |
+| 3 | `extractRequestMeta` | function | 24 |
+| 4 | `requestContextMiddleware` | function | 51 |
+| 5 | `getRequestMeta` | function | 57 |
+
+### 3.120 `backend/src/routes/actionHistory.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseJson` | function | 14 |
+| 2 | `normalizeLimit` | function | 24 |
+| 3 | `normalizeText` | function | 29 |
+| 4 | `serializePayload` | function | 34 |
+| 5 | `canReadAllHistory` | function | 43 |
+| 6 | `getOwnedHistoryRow` | function | 47 |
+| 7 | `canOperateHistoryRow` | function | 53 |
+| 8 | `canRecordHistory` | function | 67 |
+| 9 | `getHistoryRow` | function | 87 |
+| 10 | `mapRow` | function | 94 |
+| 11 | `mapHistoryRows` | function | 103 |
+| 12 | `completeServerHistoryTransition` | function | 214 |
+
+### 3.121 `backend/src/routes/ai.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `listProviders` | function | 19 |
+| 2 | `getProviderRow` | function | 32 |
+| 3 | `serializeResponseRows` | function | 244 |
+
+### 3.122 `backend/src/routes/auth.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getClientKey` | function | 92 |
+| 2 | `applyRateLimit` | function | 105 |
+| 3 | `getLoginLockKey` | function | 117 |
+| 4 | `isReasonableCredentialLength` | function | 121 |
+| 5 | `normalizeLookupText` | function | 126 |
+| 6 | `isHttpUrl` | function | 130 |
+| 7 | `buildPublicBaseUrl` | function | 134 |
+| 8 | `isLocalOrigin` | function | 141 |
+| 9 | `resolvePublicAssetBaseUrl` | function | 150 |
+| 10 | `resolvePasswordResetRedirect` | function | 156 |
+| 11 | `findFirstHttpUrl` | function | 169 |
+| 12 | `loginIdentifierPreview` | function | 179 |
+| 13 | `rejectLogin` | function | 193 |
+| 14 | `getOtpSecret` | function | 215 |
+| 15 | `requireOtpActor` | function | 219 |
+| 16 | `getOtpTargetUser` | function | 225 |
+| 17 | `buildUserPayload` | function | 240 |
+| 18 | `resolveOrganizationLookup` | function | 272 |
+| 19 | `findUserByIdentifier` | function | 278 |
+| 20 | `getExactActiveUserById` | function | 347 |
+| 21 | `normalizeOauthMode` | function | 362 |
+| 22 | `isEmailIdentifier` | function | 367 |
+| 23 | `getUserById` | function | 371 |
+| 24 | `getSettingsSnapshot` | function | 375 |
+| 25 | `getBootstrapSystemSnapshot` | function | 384 |
+| 26 | `buildAuthenticatedBootstrap` | function | 423 |
+| 27 | `generateTemporaryAuthPassword` | function | 452 |
+| 28 | `issueAuthSession` | function | 456 |
+| 29 | `updateLocalUserGoogleIdentity` | function | 467 |
+| 30 | `completeGoogleLogin` | function | 616 |
+| 31 | `buildOauthCallbackHtml` | function | 702 |
+
+### 3.123 `backend/src/routes/branches.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `toDbBool` | function | 13 |
+| 2 | `getStockTransferNoteColumn` | function | 21 |
+| 3 | `normalizePositiveInt` | function | 25 |
+| 4 | `getDefaultBranch` | function | 31 |
+| 5 | `getSellableProductWhere` | function | 35 |
+| 6 | `buildStockIntegrityPreview` | function | 41 |
+| 7 | `buildSqlPlaceholders` | function | 53 |
+| 8 | `quoteSqlColumns` | function | 61 |
+| 9 | `buildBranchStockWhere` | function | 69 |
+| 10 | `hasPagedStockQuery` | function | 93 |
+
+### 3.124 `backend/src/routes/catalog.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `collectProductIds` | function | 10 |
+| 2 | `buildPlaceholders` | function | 18 |
+| 3 | `buildImageMap` | function | 26 |
+| 4 | `buildCatalogProductPayloads` | function | 35 |
+
+### 3.125 `backend/src/routes/categories.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeLookup` | function | 12 |
+| 2 | `normalizeColor` | function | 16 |
+
+### 3.126 `backend/src/routes/contacts.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeLegacyMembershipNumber` | function | 20 |
+| 2 | `cleanMembershipNumber` | function | 26 |
+| 3 | `requireMembershipNumber` | function | 30 |
+| 4 | `assertUniqueMembershipNumber` | function | 36 |
+| 5 | `ensureMembershipNumber` | function | 50 |
+| 6 | `ensureOrGenerateMembershipNumber` | function | 55 |
+| 7 | `generateCustomerMembershipNumber` | function | 61 |
+| 8 | `normalizeFieldRule` | function | 75 |
+| 9 | `resolveFieldValue` | function | 82 |
+| 10 | `buildImportRows` | function | 93 |
+| 11 | `buildProvidedImportRows` | function | 103 |
+| 12 | `normalizeConflictMode` | function | 112 |
+| 13 | `toNumber` | function | 117 |
+| 14 | `normalizePositiveInt` | function | 122 |
+| 15 | `parseDateFilterParams` | function | 128 |
+| 16 | `buildContactListFilters` | function | 152 |
+| 17 | `buildSearchHaystack` | function | 176 |
+| 18 | `parseScopedIds` | function | 185 |
+| 19 | `addPositiveId` | function | 201 |
+| 20 | `collectPositiveIds` | function | 208 |
+| 21 | `buildSqlPlaceholders` | function | 217 |
+| 22 | `loadPointPolicy` | function | 225 |
+| 23 | `calculatePolicyPoints` | function | 253 |
+| 24 | `wantsExpandedPoints` | function | 258 |
+| 25 | `buildCustomerPointSummaries` | function | 263 |
+| 26 | `buildCustomerRowMap` | function | 336 |
+| 27 | `collectPointSummarySourceIds` | function | 345 |
+| 28 | `defaultPointSummary` | function | 356 |
+| 29 | `buildPointSummaryList` | function | 367 |
+| 30 | `attachPointSummaries` | function | 375 |
+| 31 | `collectCustomerIdsFromRows` | function | 387 |
+| 32 | `findExisting` | const arrow | 560 |
+| 33 | `findExisting` | const arrow | 775 |
+| 34 | `findExisting` | const arrow | 969 |
+
+### 3.127 `backend/src/routes/customTables.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `humanizeTableName` | function | 13 |
+| 2 | `serializeCustomTable` | function | 21 |
+| 3 | `sanitizeCustomTableName` | function | 29 |
+| 4 | `resolveCustomTableRow` | function | 35 |
+| 5 | `escapeIdentifier` | function | 44 |
+| 6 | `normalizeCustomTableSchema` | function | 48 |
+| 7 | `tableHasColumn` | function | 71 |
+| 8 | `ensureCustomTableRowVersioning` | function | 75 |
+| 9 | `getWritableCustomTableKeys` | function | 92 |
+
+### 3.128 `backend/src/routes/files.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `parseFileAssetId` | function | 22 |
+| 2 | `getFileListFilters` | function | 30 |
+| 3 | `getDeviceMeta` | function | 53 |
+
+### 3.129 `backend/src/routes/importJobs.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `permissionForImportType` | function | 34 |
+| 2 | `requireImportPermission` | function | 42 |
+| 3 | `hasAnyImportPermission` | function | 55 |
+| 4 | `getPermittedImportTypes` | function | 63 |
+| 5 | `requireAnyImportPermission` | function | 71 |
+| 6 | `ensureDir` | function | 81 |
+| 7 | `getJobUploadRoot` | function | 85 |
+| 8 | `getJobOr404` | function | 90 |
+| 9 | `serializeJobFile` | function | 99 |
+| 10 | `serializeJobFiles` | function | 111 |
+| 11 | `saveImageJobFiles` | function | 120 |
+| 12 | `isAllowedImportFile` | function | 149 |
+| 13 | `parsePolicy` | function | 173 |
+| 14 | `parseRelativePaths` | function | 179 |
+| 15 | `shouldForceDelete` | function | 190 |
+| 16 | `auditImportJobEvent` | function | 195 |
+
+### 3.130 `backend/src/routes/inventory.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeImportedTimestamp` | function | 28 |
+| 2 | `recalcProductStock` | function | 36 |
+| 3 | `findTransferByClientRequestId` | function | 40 |
+| 4 | `getStockTransferNoteColumn` | function | 54 |
+| 5 | `buildActiveBranchIndex` | function | 58 |
+| 6 | `collectSetValues` | function | 73 |
+| 7 | `compareInventoryProductRows` | function | 81 |
+| 8 | `insertInventoryProductRowSorted` | function | 89 |
+| 9 | `collectSortedInventoryProductRows` | function | 97 |
+| 10 | `cleanMoveReason` | function | 105 |
+| 11 | `normalizePositiveInt` | function | 111 |
+| 12 | `hasInventoryStatsFilter` | function | 117 |
+| 13 | `cleanInventoryReasonEntry` | function | 125 |
+| 14 | `normalizeInventoryReasonList` | function | 139 |
+| 15 | `loadSavedInventoryReasons` | function | 161 |
+| 16 | `persistSavedInventoryReasons` | function | 172 |
+| 17 | `splitSearchTerms` | function | 182 |
+| 18 | `normalizeMovementDisplayText` | function | 198 |
+| 19 | `sanitizeInventoryResponseProduct` | function | 209 |
+| 20 | `appendInventoryProductFilters` | function | 222 |
+| 21 | `getInventoryBootstrapBranches` | function | 278 |
+| 22 | `buildInventoryProductSearchPayload` | function | 282 |
+| 23 | `hydrateInventoryProducts` | function | 408 |
+| 24 | `appendAllocationMovementEntries` | function | 431 |
+| 25 | `buildInsertColumnSql` | function | 446 |
+| 26 | `buildInventoryFinancialJoinSql` | function | 459 |
+| 27 | `inventoryFinancialSelectSql` | function | 565 |
+| 28 | `getFilteredInventoryStats` | function | 579 |
+| 29 | `normalizeRfidId` | function | 1252 |
+| 30 | `getRfidSession` | function | 1256 |
+| 31 | `getBranchLedgerQty` | function | 1260 |
+| 32 | `refreshRfidSessionCounts` | function | 1264 |
+| 33 | `upsertRfidSessionItem` | function | 1299 |
+| 34 | `recordRfidEvent` | function | 1324 |
+
+### 3.131 `backend/src/routes/notifications.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeBoolean` | function | 26 |
+| 2 | `toNumber` | function | 34 |
+| 3 | `pruneNotificationSummaryCache` | function | 39 |
+| 4 | `getNotificationSummaryCacheKey` | function | 47 |
+| 5 | `cloneNotificationSummaryPayload` | function | 60 |
+| 6 | `getCachedNotificationSummary` | function | 64 |
+| 7 | `setCachedNotificationSummary` | function | 73 |
+| 8 | `buildPlaceholders` | function | 80 |
+| 9 | `rowsToSettingMap` | function | 88 |
+| 10 | `joinNotificationSummary` | function | 96 |
+| 11 | `loadNotificationPreferences` | function | 104 |
+| 12 | `loadPointPolicy` | function | 127 |
+| 13 | `calculatePolicyPoints` | function | 152 |
+| 14 | `buildInventoryItems` | function | 157 |
+| 15 | `buildInventorySection` | function | 186 |
+| 16 | `buildExpiryItems` | function | 209 |
+| 17 | `buildExpirySection` | function | 229 |
+| 18 | `buildSalesItems` | function | 251 |
+| 19 | `buildSalesSection` | function | 280 |
+| 20 | `rowsByCustomerId` | function | 326 |
+| 21 | `buildLoyaltyMatches` | function | 334 |
+| 22 | `buildLoyaltyItems` | function | 357 |
+| 23 | `buildLoyaltySection` | function | 376 |
+| 24 | `buildPortalItems` | function | 435 |
+| 25 | `buildPortalSection` | function | 452 |
+| 26 | `buildSystemSection` | function | 480 |
+| 27 | `sumSectionCounts` | function | 510 |
+
+### 3.132 `backend/src/routes/organizations.ts`
+
+- No top-level named symbols detected.
+
+### 3.133 `backend/src/routes/portal.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `asyncRoute` | function | 24 |
+| 2 | `toNumber` | function | 29 |
+| 3 | `normalizeBoolean` | function | 35 |
+| 4 | `normalizePhone` | function | 41 |
+| 5 | `normalizePublicPath` | function | 46 |
+| 6 | `normalizeUrl` | function | 60 |
+| 7 | `normalizeRedeemValueUsd` | function | 75 |
+| 8 | `normalizeRedeemValueKhr` | function | 80 |
+| 9 | `normalizeHexColor` | function | 87 |
+| 10 | `normalizeFaqItems` | function | 93 |
+| 11 | `normalizePortalTranslations` | function | 111 |
+| 12 | `normalizeProductIdList` | function | 125 |
+| 13 | `loadSettingsMap` | function | 140 |
+| 14 | `buildPortalConfig` | function | 150 |
+| 15 | `buildRankMap` | function | 276 |
+| 16 | `buildEmptyPortalMetric` | function | 297 |
+| 17 | `collectPortalSignalRows` | function | 309 |
+| 18 | `buildIdRankMap` | function | 322 |
+| 19 | `buildRecommendedRankMap` | function | 331 |
+| 20 | `getPortalProductSignals` | function | 339 |
+| 21 | `buildPlaceholders` | function | 415 |
+| 22 | `collectProductIds` | function | 421 |
+| 23 | `getPortalProductAssets` | function | 427 |
+| 24 | `buildPortalProductPayload` | function | 467 |
+| 25 | `buildPortalProductPayloads` | function | 484 |
+| 26 | `calculatePointsValue` | function | 493 |
+| 27 | `summarizePoints` | function | 503 |
+| 28 | `joinWrappedClauses` | function | 543 |
+| 29 | `normalizePortalSubmissionRows` | function | 550 |
+| 30 | `summarizeMembershipTotals` | function | 562 |
+| 31 | `getPortalProducts` | function | 593 |
+| 32 | `cacheTtl` | function | 632 |
+| 33 | `normalizePositiveInt` | function | 636 |
+| 34 | `splitSearchTerms` | function | 642 |
+| 35 | `splitFilterValues` | function | 653 |
+| 36 | `parsePositiveIds` | function | 664 |
+| 37 | `buildNamedPlaceholders` | function | 673 |
+| 38 | `appendSearchTermFilters` | function | 681 |
+| 39 | `appendNamedFilter` | function | 697 |
+| 40 | `normalizeLowerValues` | function | 713 |
+| 41 | `appendPortalProductSearchFilters` | function | 719 |
+| 42 | `collectRowValues` | function | 759 |
+| 43 | `normalizeStringList` | function | 765 |
+| 44 | `uniqueSortedStrings` | function | 776 |
+| 45 | `getPortalCatalogSearchMetadata` | function | 790 |
+| 46 | `distinctField` | const arrow | 795 |
+| 47 | `getPortalCatalogProductPage` | function | 819 |
+| 48 | `getCachedPortalConfig` | function | 882 |
+| 49 | `getCachedPortalMeta` | function | 886 |
+| 50 | `getCachedPortalProducts` | function | 890 |
+| 51 | `getPortalCatalogMeta` | function | 895 |
+| 52 | `findCustomerByMembership` | function | 935 |
+| 53 | `sanitizeScreenshots` | function | 945 |
+| 54 | `materializePortalScreenshots` | function | 958 |
+| 55 | `sanitizeAiProfile` | function | 976 |
+| 56 | `hasAiProfilePreference` | function | 987 |
+| 57 | `getVisitorFingerprint` | function | 995 |
+| 58 | `getClientKey` | function | 1001 |
+| 59 | `applyPortalRateLimit` | function | 1006 |
+| 60 | `collectRecommendationCitations` | function | 1014 |
+
+### 3.134 `backend/src/routes/products.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `asyncRoute` | function | 46 |
+| 2 | `getActiveBranches` | function | 58 |
+| 3 | `getBranchListForBootstrap` | function | 62 |
+| 4 | `settingsHasUpdatedAt` | function | 66 |
+| 5 | `getDefaultBranch` | function | 70 |
+| 6 | `getBranchById` | function | 79 |
+| 7 | `findBranchByName` | function | 86 |
+| 8 | `seedBranchRows` | function | 95 |
+| 9 | `recalcProductStock` | function | 102 |
+| 10 | `normalizeImageGallery` | function | 106 |
+| 11 | `syncProductImageGallery` | function | 113 |
+| 12 | `loadProductImageMap` | function | 132 |
+| 13 | `attachImageGallery` | function | 153 |
+| 14 | `findProductByClientRequestId` | function | 171 |
+| 15 | `assertUniqueProductFields` | function | 181 |
+| 16 | `normalizeProductIdentifier` | function | 229 |
+| 17 | `hasOwnField` | function | 234 |
+| 18 | `pickField` | function | 238 |
+| 19 | `ensureParentProductExists` | function | 242 |
+| 20 | `markParentProductAsGroup` | function | 252 |
+| 21 | `normalizeImportLookup` | function | 257 |
+| 22 | `normalizeLookup` | function | 261 |
+| 23 | `collectUniquePositiveIds` | function | 265 |
+| 24 | `collectNormalizedTokens` | function | 278 |
+| 25 | `collectBoundedValues` | function | 292 |
+| 26 | `collectSortedMapValues` | function | 301 |
+| 27 | `insertSortedValue` | function | 309 |
+| 28 | `normalizeImportFlagValue` | function | 317 |
+| 29 | `getProductImportDetailSignature` | function | 350 |
+| 30 | `chooseImportParentProduct` | function | 371 |
+| 31 | `compareImportParentProduct` | function | 379 |
+| 32 | `findImportProductWithSignature` | function | 392 |
+| 33 | `normalizeImportAction` | function | 400 |
+| 34 | `parseOptionalImportId` | function | 408 |
+| 35 | `discountInsertColumns` | function | 415 |
+| 36 | `discountValues` | function | 419 |
+| 37 | `normalizeExpiryFields` | function | 434 |
+| 38 | `normalizeBatchFields` | function | 445 |
+| 39 | `seedOpeningBatch` | function | 452 |
+| 40 | `normalizePositiveInt` | function | 467 |
+| 41 | `parseInclude` | function | 473 |
+| 42 | `splitSearchTerms` | function | 477 |
+| 43 | `getProductCatalogSnapshotVersion` | function | 481 |
+| 44 | `normalizeProductReadCacheValue` | function | 494 |
+| 45 | `buildProductReadCacheKey` | function | 499 |
+| 46 | `getCachedProductSearchPayload` | function | 512 |
+| 47 | `getCachedProductFilters` | function | 516 |
+| 48 | `parseBrandOptionsSetting` | function | 524 |
+| 49 | `sanitizeProductLookupPayload` | function | 534 |
+| 50 | `buildLookupUsageEntries` | function | 547 |
+| 51 | `buildLookupUsageSummary` | function | 614 |
+| 52 | `appendProductSearchFilters` | function | 643 |
+| 53 | `getProductSearchMetadata` | function | 720 |
+| 54 | `distinctField` | const arrow | 725 |
+| 55 | `shouldIncludeProductSearchMetadata` | function | 756 |
+| 56 | `attachBranchStock` | function | 761 |
+| 57 | `expandProductFamilyRows` | function | 798 |
+| 58 | `bindList` | const arrow | 822 |
+| 59 | `buildProductSearchPayload` | function | 866 |
+| 60 | `normalizeLookup` | const arrow | 1569 |
+| 61 | `resolveImage` | const arrow | 1679 |
+| 62 | `ensureCategory` | const arrow | 1695 |
+| 63 | `ensureUnit` | const arrow | 1710 |
+| 64 | `ensureBrand` | const arrow | 1725 |
+| 65 | `ensureSupplier` | const arrow | 1738 |
+| 66 | `determineBranch` | const arrow | 1750 |
+| 67 | `handleBranch` | const arrow | 1769 |
+| 68 | `resetBatchStock` | const arrow | 1772 |
+| 69 | `isDirectImageRef` | const arrow | 1809 |
+| 70 | `normalizeDirectImageRef` | const arrow | 1820 |
+| 71 | `parseIncomingImageRefs` | const arrow | 1827 |
+| 72 | `loadCurrentGallery` | const arrow | 1863 |
+
+### 3.135 `backend/src/routes/returns.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `deductBranchStock` | function | 24 |
+| 2 | `restoreBranchStock` | function | 32 |
+| 3 | `normalizeMovementProductName` | function | 43 |
+| 4 | `refreshProductStockQuantity` | function | 54 |
+| 5 | `refreshProductStockQuantities` | function | 58 |
+| 6 | `normalizeScope` | function | 68 |
+| 7 | `toNumber` | function | 76 |
+| 8 | `findReturnByClientRequestId` | function | 81 |
+| 9 | `assertReturnableItems` | function | 91 |
+| 10 | `assertSupplierReturnableStock` | function | 535 |
+
+### 3.136 `backend/src/routes/runtime.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `createProductFieldCounts` | function | 18 |
+| 2 | `collectSuspiciousProductFields` | function | 26 |
+| 3 | `summarizeSuspiciousProducts` | function | 36 |
+| 4 | `parseJsonArray` | function | 62 |
+| 5 | `summarizeSuspiciousTextValues` | function | 71 |
+| 6 | `requireRuntimePermission` | function | 91 |
+
+### 3.137 `backend/src/routes/sales.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `periodExpression` | function | 30 |
+| 2 | `hourExpression` | function | 37 |
+| 3 | `toDayBounds` | function | 41 |
+| 4 | `readCachedDashboardSummary` | function | 51 |
+| 5 | `writeCachedDashboardSummary` | function | 58 |
+| 6 | `readCachedDashboardAnalytics` | function | 66 |
+| 7 | `writeCachedDashboardAnalytics` | function | 73 |
+| 8 | `normalizeImportedTimestamp` | function | 81 |
+| 9 | `getSaleItemCosts` | function | 89 |
+| 10 | `assertSaleStockAvailable` | function | 115 |
+| 11 | `findSaleItemForProduct` | function | 142 |
+| 12 | `findCustomerForSaleAssignment` | function | 149 |
+| 13 | `parseBranchId` | function | 170 |
+| 14 | `getActiveBranchContext` | function | 175 |
+| 15 | `requireActiveBranch` | function | 197 |
+| 16 | `resolveSaleItemBranchId` | function | 204 |
+| 17 | `normalizeSaleItems` | function | 215 |
+| 18 | `summarizeSaleBranch` | function | 249 |
+| 19 | `refreshProductStockQuantity` | function | 281 |
+| 20 | `refreshProductStockQuantities` | function | 285 |
+| 21 | `deductBranchStock` | function | 292 |
+| 22 | `restoreBranchStock` | function | 300 |
+| 23 | `fetchSaleItemsWithBranches` | function | 308 |
+| 24 | `findSaleByClientRequestId` | function | 317 |
+| 25 | `buildDashboardSummary` | function | 1105 |
+| 26 | `buildDashboardAnalytics` | function | 1232 |
+
+### 3.138 `backend/src/routes/settings.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeLookup` | function | 21 |
+| 2 | `normalizeBrandOptionsValue` | function | 25 |
+| 3 | `hasSuspiciousCatalogValue` | function | 47 |
+| 4 | `normalizeBrandColorMapValue` | function | 54 |
+| 5 | `settingsHasUpdatedAt` | function | 83 |
+| 6 | `getSettingsSnapshot` | function | 87 |
+| 7 | `collectAttemptedSettings` | function | 94 |
+| 8 | `getSettingsUpdatedAt` | function | 106 |
+| 9 | `parseUpdatedAtMs` | function | 131 |
+| 10 | `isExpectedOlderThanCurrent` | function | 145 |
+
+### 3.139 `backend/src/routes/sync.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `stableStringify` | function | 47 |
+| 2 | `sha256` | function | 65 |
+| 3 | `verifyOperationDigest` | function | 69 |
+| 4 | `normalizeOperation` | function | 76 |
+| 5 | `normalizeOperations` | function | 89 |
+| 6 | `hasWriteConflict` | function | 98 |
+| 7 | `hasResultCode` | function | 105 |
+| 8 | `hasBlockingReplayResult` | function | 112 |
+| 9 | `buildReplayUrl` | function | 120 |
+| 10 | `replayOperation` | function | 124 |
+| 11 | `getUploadDir` | function | 218 |
+| 12 | `readManifest` | function | 222 |
+
+### 3.140 `backend/src/routes/system/index.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `auditWithActorMeta` | function | 87 |
+| 2 | `q` | function | 105 |
+| 3 | `buildSqlPlaceholders` | function | 109 |
+| 4 | `joinRemainingImportJobIds` | function | 117 |
+| 5 | `collectSystemSettingKeys` | function | 125 |
+| 6 | `buildSettingsMap` | function | 133 |
+| 7 | `buildSystemSettingEntries` | function | 141 |
+| 8 | `sumNumericValues` | function | 149 |
+| 9 | `getCustomTableNames` | function | 157 |
+| 10 | `broadcastMany` | function | 166 |
+| 11 | `dropCustomTables` | function | 172 |
+| 12 | `clearTables` | function | 179 |
+| 13 | `collectAppliedOperationIds` | function | 185 |
+| 14 | `collectSortedSetValues` | function | 193 |
+| 15 | `buildFolderEntries` | function | 202 |
+| 16 | `buildExistingFavoriteFolders` | function | 214 |
+| 17 | `listVisibleDirectories` | function | 226 |
+| 18 | `buildPickerScript` | function | 237 |
+| 19 | `getClientKey` | function | 252 |
+| 20 | `applyRouteRateLimit` | function | 258 |
+| 21 | `stopImportsBeforeDestructiveAction` | function | 270 |
+| 22 | `runFsWorker` | function | 285 |
+| 23 | `finish` | const arrow | 297 |
+| 24 | `getHostUiAvailability` | function | 341 |
+| 25 | `buildRequestBaseUrl` | function | 350 |
+| 26 | `resolveDriveRedirectUri` | function | 357 |
+| 27 | `getSafeTableCount` | function | 364 |
+| 28 | `buildMigrationTableCounts` | function | 372 |
+| 29 | `safeJsonParse` | function | 392 |
+| 30 | `readSystemSettings` | function | 401 |
+| 31 | `writeSystemSettings` | function | 409 |
+| 32 | `getMigrationSafetyBackupDestination` | function | 425 |
+| 33 | `getMigrationSafetyState` | function | 429 |
+| 34 | `createMigrationSafetyBackup` | function | 451 |
+| 35 | `runMigrationSafetyDriveSync` | function | 468 |
+| 36 | `runMigrationSafetyAutomation` | function | 506 |
+| 37 | `buildScaleMigrationStatus` | function | 521 |
+| 38 | `readFinalBackupManifest` | function | 590 |
+| 39 | `getDefaultBackupDestinationDir` | function | 594 |
+| 40 | `createFolderBackup` | function | 600 |
+| 41 | `restoreFolderBackup` | function | 637 |
+| 42 | `buildSystemDebugLogPayload` | function | 767 |
+| 43 | `buildSystemConfigPayload` | function | 773 |
+| 44 | `sendBackupVersions` | function | 1022 |
+| 45 | `listWindowsFsRoots` | const arrow | 1525 |
+| 46 | `listDriveRoots` | const arrow | 1540 |
+
+### 3.141 `backend/src/routes/units.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeLookup` | function | 13 |
+| 2 | `normalizeUnitColor` | function | 17 |
+| 3 | `updateUnitHandler` | function | 52 |
+
+### 3.142 `backend/src/routes/users.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `isGoogleAuthConfigured` | function | 35 |
+| 2 | `getGoogleAuthPublicConfig` | function | 39 |
+| 3 | `getClientKey` | function | 53 |
+| 4 | `parseJson` | function | 59 |
+| 5 | `normalizeLookupText` | function | 67 |
+| 6 | `normalizePhoneLookup` | function | 71 |
+| 7 | `findUserIdentityConflict` | function | 75 |
+| 8 | `getMergedPermissions` | function | 143 |
+| 9 | `isPrimaryAdmin` | function | 152 |
+| 10 | `hasAdminControl` | function | 159 |
+| 11 | `canManageTarget` | function | 172 |
+| 12 | `getActorFromRequest` | function | 185 |
+| 13 | `requireAdminControl` | function | 192 |
+| 14 | `getUserSecurityContext` | function | 205 |
+| 15 | `getUserWithRole` | function | 215 |
+| 16 | `syncLocalEmailVerification` | function | 230 |
+| 17 | `repairGoogleIdentityForUser` | function | 261 |
+| 18 | `sanitizeUserRow` | function | 290 |
+| 19 | `sanitizeUserRows` | function | 306 |
+| 20 | `isValidEmail` | function | 314 |
+| 21 | `getAuthIdentityList` | function | 319 |
+| 22 | `isUuid` | function | 325 |
+| 23 | `resolveAuthIdentityUuid` | function | 329 |
+| 24 | `findFirstUuid` | function | 337 |
+| 25 | `findProviderIdentity` | function | 344 |
+| 26 | `buildAuthMethodsPayload` | function | 352 |
+
+### 3.143 `backend/src/runtimeCache.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `enabled` | function | 32 |
+| 2 | `namespacedKey` | function | 40 |
+| 3 | `getClient` | function | 48 |
+| 4 | `getJson` | function | 90 |
+| 5 | `setJson` | function | 109 |
+| 6 | `getOrSetJson` | function | 129 |
+| 7 | `deleteByPrefix` | function | 141 |
+| 8 | `deletePrefixesInOrder` | function | 164 |
+| 9 | `prefixesForChannel` | function | 176 |
+| 10 | `invalidateForChannel` | function | 201 |
+| 11 | `pingRuntimeCache` | function | 213 |
+| 12 | `getRuntimeCacheStatus` | function | 227 |
+
+### 3.144 `backend/src/runtimeState/index.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `ensureRuntimeMetaDir` | function | 16 |
+| 2 | `readRuntimeState` | function | 23 |
+| 3 | `writeRuntimeState` | function | 44 |
+| 4 | `getRuntimeState` | function | 53 |
+| 5 | `bumpStorageVersion` | function | 67 |
+| 6 | `buildRuntimeDescriptor` | function | 80 |
+
+### 3.145 `backend/src/runtimeVersion.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `firstExistingDir` | function | 27 |
+| 2 | `collectExistingFiles` | function | 38 |
+| 3 | `readGitRevision` | function | 50 |
+| 4 | `collectFiles` | function | 70 |
+| 5 | `computeSourceHash` | function | 87 |
+| 6 | `emptyFrontendBuildInfo` | function | 114 |
+| 7 | `readFrontendBuildInfoFromRoot` | function | 126 |
+| 8 | `getRuntimeVersion` | function | 165 |
+
+### 3.146 `backend/src/schemaMetadata.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeName` | function | 16 |
+| 2 | `columnKey` | function | 25 |
+| 3 | `normalizeNames` | function | 33 |
+| 4 | `normalizeColumnRows` | function | 46 |
+| 5 | `candidateKey` | function | 60 |
+| 6 | `listColumns` | function | 68 |
+| 7 | `hasColumn` | function | 83 |
+| 8 | `firstExistingColumn` | function | 108 |
+| 9 | `markColumnPresent` | function | 140 |
+
+### 3.147 `backend/src/security.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeEncryptionKey` | function | 28 |
+| 2 | `isEncryptionConfigured` | function | 48 |
+| 3 | `encryptSecret` | function | 52 |
+| 4 | `decryptSecret` | function | 65 |
+| 5 | `pruneRateBucket` | function | 86 |
+| 6 | `keepRecentTimestamps` | function | 98 |
+| 7 | `checkRateLimit` | function | 113 |
+| 8 | `resetRateLimit` | function | 142 |
+| 9 | `safeCompare` | function | 149 |
+| 10 | `getAbuseBucket` | function | 160 |
+| 11 | `pruneAbuseBucket` | function | 170 |
+| 12 | `checkAbuseLock` | function | 188 |
+| 13 | `recordAbuseFailure` | function | 211 |
+| 14 | `clearAbuseFailure` | function | 235 |
+
+### 3.148 `backend/src/serverUtils.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `buildOriginFromParts` | function | 13 |
+| 2 | `parseOriginHost` | function | 24 |
+| 3 | `normalizeConfiguredHost` | function | 34 |
+| 4 | `getConfiguredPublicHosts` | function | 44 |
+| 5 | `getConfiguredCustomerPortalHosts` | function | 55 |
+| 6 | `isConfiguredCustomerPortalHost` | function | 67 |
+| 7 | `isAllowedRequestOrigin` | function | 77 |
+| 8 | `isAllowedWebSocketOrigin` | function | 86 |
+| 9 | `hostIsLoopbackPair` | function | 103 |
+| 10 | `getTrustedDocumentOrigins` | function | 108 |
+| 11 | `addOrigin` | const arrow | 110 |
+| 12 | `buildPermissionsPolicy` | function | 139 |
+| 13 | `getCloudflareAccessDiagnostics` | function | 166 |
+| 14 | `sanitizeObjectKeys` | function | 192 |
+| 15 | `sanitizeStringValue` | function | 215 |
+| 16 | `sanitizeRequestPayload` | function | 221 |
+| 17 | `sanitizeDeepStrings` | function | 228 |
+| 18 | `isApiOrHealthPath` | function | 245 |
+| 19 | `isSpaFallbackEligible` | function | 249 |
+| 20 | `setNoStoreHeaders` | function | 257 |
+| 21 | `setHtmlNoCacheHeaders` | function | 263 |
+| 22 | `isCustomerPortalRoutePath` | function | 270 |
+| 23 | `setAdminSpaHtmlHeaders` | function | 275 |
+| 24 | `setTunnelSecurityHeaders` | function | 289 |
+| 25 | `setFrontendStaticHeaders` | function | 332 |
+| 26 | `setUploadStaticHeaders` | function | 387 |
+| 27 | `mapServerError` | function | 397 |
+
+### 3.149 `backend/src/services/aiGateway.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `nowIso` | function | 6 |
+| 2 | `trim` | function | 10 |
+| 3 | `parseJsonSafe` | function | 14 |
+| 4 | `clamp` | function | 22 |
+| 5 | `maskApiKey` | function | 26 |
+| 6 | `normalizeTextList` | function | 33 |
+| 7 | `getProviderMeta` | function | 106 |
+| 8 | `normalizeProviderPayload` | function | 110 |
+| 9 | `serializeProviderRow` | function | 137 |
+| 10 | `providerCanUseWebResearch` | function | 170 |
+| 11 | `resolveProviderEndpoint` | function | 175 |
+| 12 | `buildProviderHttpError` | function | 182 |
+| 13 | `host` | const arrow | 185 |
+| 14 | `buildGoogleMessageContents` | function | 198 |
+| 15 | `joinGoogleTextParts` | function | 209 |
+| 16 | `callChatProvider` | function | 218 |
+| 17 | `testProviderConfig` | function | 307 |
+
+### 3.150 `backend/src/services/backupPackages.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `readCachedBackupVersions` | function | 30 |
+| 2 | `writeCachedBackupVersions` | function | 39 |
+| 3 | `clearBackupVersionCaches` | function | 53 |
+| 4 | `getDb` | function | 58 |
+| 5 | `q` | function | 62 |
+| 6 | `nowSafeId` | function | 66 |
+| 7 | `sha256` | function | 70 |
+| 8 | `createSha256` | function | 74 |
+| 9 | `sha256File` | function | 78 |
+| 10 | `readTableRows` | function | 88 |
+| 11 | `yieldToEventLoop` | function | 105 |
+| 12 | `throwIfAborted` | function | 109 |
+| 13 | `collectSetValues` | function | 117 |
+| 14 | `startWorkerPromises` | function | 125 |
+| 15 | `getManagedWritableState` | function | 133 |
+| 16 | `writeStream` | function | 164 |
+| 17 | `closeWriteStream` | function | 178 |
+| 18 | `handleFinish` | const arrow | 182 |
+| 19 | `handleError` | const arrow | 187 |
+| 20 | `cleanup` | const arrow | 191 |
+| 21 | `createProgressReporter` | function | 201 |
+| 22 | `getSafeTableCount` | function | 240 |
+| 23 | `streamBackupDataFile` | function | 248 |
+| 24 | `buildObjectManifest` | function | 308 |
+| 25 | `buildPackageMetadata` | function | 326 |
+| 26 | `writeTextFileWithChecksum` | function | 380 |
+| 27 | `writeJsonLinesFileWithChecksum` | function | 385 |
+| 28 | `uploadPackageFile` | function | 398 |
+| 29 | `writeAndUploadMetadataFiles` | function | 418 |
+| 30 | `retryOperation` | function | 444 |
+| 31 | `writeDestinationChunk` | function | 459 |
+| 32 | `endDestination` | function | 472 |
+| 33 | `handleFinish` | const arrow | 476 |
+| 34 | `handleError` | const arrow | 481 |
+| 35 | `cleanup` | const arrow | 485 |
+| 36 | `copyOnePackageObject` | function | 495 |
+| 37 | `abortCopy` | const arrow | 507 |
+| 38 | `copyPackageObjects` | function | 534 |
+| 39 | `worker` | function | 543 |
+| 40 | `createFinalBackupPackage` | function | 585 |
+| 41 | `validateLocalBackupPackage` | function | 700 |
+| 42 | `getLocalBackupRoot` | function | 724 |
+| 43 | `isDockerReleaseBackupRoot` | function | 729 |
+| 44 | `isLocalBackupDirectoryName` | function | 734 |
+| 45 | `listLocalBackupDirectories` | function | 740 |
+| 46 | `getDirectoryBytes` | function | 761 |
+| 47 | `planBackupPackageRetention` | function | 787 |
+| 48 | `pruneLocalBackupVersions` | function | 807 |
+| 49 | `groupRemoteBackupObjects` | function | 833 |
+| 50 | `packageIds` | function | 855 |
+| 51 | `summarizeRemovedRemotePackages` | function | 863 |
+| 52 | `collectRemoteDeleteKeys` | function | 878 |
+| 53 | `sortBackupVersionsByPackageId` | function | 888 |
+| 54 | `pruneRemoteBackupVersions` | function | 894 |
+| 55 | `pruneBackupVersions` | function | 918 |
+| 56 | `readReusableLocalBackupPackage` | function | 935 |
+| 57 | `findReusableLocalBackupPackage` | function | 960 |
+| 58 | `listLocalBackupVersions` | function | 971 |
+| 59 | `listBackupVersions` | function | 1003 |
+
+### 3.151 `backend/src/services/firebaseAuth.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `truthy` | function | 16 |
+| 2 | `trim` | function | 20 |
+| 3 | `normalizePrivateKey` | function | 24 |
+| 4 | `parseJsonSafe` | function | 28 |
+| 5 | `loadServiceAccount` | function | 36 |
+| 6 | `isFirebaseAuthConfigured` | function | 85 |
+| 7 | `isFirebasePhoneVerificationConfigured` | function | 89 |
+| 8 | `hasFirebaseAdminCredentials` | function | 93 |
+| 9 | `base64Url` | function | 97 |
+| 10 | `buildGoogleServiceJwt` | function | 106 |
+| 11 | `getGoogleAccessToken` | function | 136 |
+| 12 | `normalizeProviderError` | function | 172 |
+| 13 | `parseResponseData` | function | 189 |
+| 14 | `callFirebasePublic` | function | 193 |
+| 15 | `callFirebaseAdmin` | function | 222 |
+| 16 | `normalizeEmail` | function | 257 |
+| 17 | `normalizeE164` | function | 262 |
+| 18 | `getFirebaseAuthPublicConfig` | function | 270 |
+| 19 | `createOrUpdateAuthUser` | function | 282 |
+| 20 | `updateAuthPassword` | function | 323 |
+| 21 | `setAuthUserActive` | function | 342 |
+| 22 | `verifyPasswordWithFirebase` | function | 355 |
+
+### 3.152 `backend/src/services/googleDriveSync/index.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `nowIso` | function | 80 |
+| 2 | `trim` | function | 84 |
+| 3 | `toBool` | function | 88 |
+| 4 | `clamp` | function | 96 |
+| 5 | `escapeDriveQueryValue` | function | 102 |
+| 6 | `buildPlaceholders` | function | 106 |
+| 7 | `readSettingsMap` | function | 114 |
+| 8 | `writeSettingsMap` | function | 125 |
+| 9 | `clearDriveSyncMappings` | function | 147 |
+| 10 | `resetDriveSyncRootState` | function | 151 |
+| 11 | `getDriveSyncConfig` | function | 161 |
+| 12 | `getDriveSyncEntriesMap` | function | 197 |
+| 13 | `hasCanonicalDriveLayout` | function | 210 |
+| 14 | `upsertDriveSyncEntry` | function | 218 |
+| 15 | `deleteDriveSyncEntry` | function | 255 |
+| 16 | `deleteDriveSyncEntriesUnder` | function | 259 |
+| 17 | `inferMimeType` | function | 266 |
+| 18 | `hashFile` | function | 281 |
+| 19 | `hashFileMany` | function | 291 |
+| 20 | `yieldToEventLoop` | function | 315 |
+| 21 | `sleep` | function | 319 |
+| 22 | `buildAccessTokenKey` | function | 323 |
+| 23 | `clearCachedAccessToken` | function | 330 |
+| 24 | `describeFetchFailure` | function | 337 |
+| 25 | `joinNonEmptyParts` | function | 351 |
+| 26 | `fetchWithTimeout` | function | 359 |
+| 27 | `exchangeRefreshToken` | function | 386 |
+| 28 | `exchangeAuthorizationCode` | function | 428 |
+| 29 | `driveApiRequest` | function | 451 |
+| 30 | `driveApiUpload` | function | 468 |
+| 31 | `fetchDriveUserProfile` | function | 484 |
+| 32 | `findDriveItem` | function | 499 |
+| 33 | `findDriveItems` | function | 504 |
+| 34 | `listDriveChildren` | function | 519 |
+| 35 | `getDriveFileIfExists` | function | 528 |
+| 36 | `removeDuplicateDriveItems` | function | 540 |
+| 37 | `buildSortedDirectoryList` | function | 552 |
+| 38 | `getNonFolderDriveItems` | function | 561 |
+| 39 | `getFirstNonFolderDriveItem` | function | 571 |
+| 40 | `buildLiveSyncPathSet` | function | 578 |
+| 41 | `selectStaleDriveMappings` | function | 589 |
+| 42 | `createDriveFolder` | function | 598 |
+| 43 | `ensureRootFolder` | function | 610 |
+| 44 | `ensureDriveVersionFolder` | function | 629 |
+| 45 | `writeSnapshotManifest` | function | 676 |
+| 46 | `buildManagedSnapshotRoot` | function | 710 |
+| 47 | `ensureSnapshotLayout` | function | 714 |
+| 48 | `shouldSkipSnapshotFile` | function | 720 |
+| 49 | `createDataRootSnapshot` | function | 727 |
+| 50 | `collectSnapshotItems` | function | 769 |
+| 51 | `ensureRemoteDirectories` | function | 819 |
+| 52 | `updateRuntimeUploadProgress` | function | 870 |
+| 53 | `clearRuntimeUploadProgress` | function | 877 |
+| 54 | `initiateDriveResumableSession` | function | 884 |
+| 55 | `queryResumableOffset` | function | 912 |
+| 56 | `isInvalidUploadRequest` | function | 940 |
+| 57 | `isDriveNotFoundError` | function | 944 |
+| 58 | `isDriveWriteAccessError` | function | 948 |
+| 59 | `canRecoverDriveItemWrite` | function | 956 |
+| 60 | `putResumableChunk` | function | 960 |
+| 61 | `uploadDriveFileResumable` | function | 995 |
+| 62 | `uploadDriveFile` | function | 1069 |
+| 63 | `updateDriveFile` | function | 1074 |
+| 64 | `removeDriveFile` | function | 1079 |
+| 65 | `runDriveSync` | function | 1091 |
+| 66 | `runDriveSyncInternal` | function | 1102 |
+| 67 | `scheduleDriveSync` | function | 1341 |
+| 68 | `getDriveSyncStatus` | function | 1363 |
+| 69 | `beginGoogleDriveOAuth` | function | 1412 |
+| 70 | `prunePendingOauthStates` | function | 1436 |
+| 71 | `finalizeGoogleDriveOAuth` | function | 1443 |
+| 72 | `saveDriveSyncPreferences` | function | 1486 |
+| 73 | `disconnectDriveSync` | function | 1507 |
+| 74 | `forgetDriveSyncCredentials` | function | 1527 |
+| 75 | `schedulePeriodicDriveSync` | function | 1535 |
+
+### 3.153 `backend/src/services/googleDriveSync/versioning.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `toSafeDate` | function | 25 |
+| 2 | `toSafeVersionNumber` | function | 30 |
+| 3 | `resolveDriveSyncVersionState` | function | 36 |
+| 4 | `parseVersionName` | function | 75 |
+| 5 | `buildDriveSyncVersionRows` | function | 81 |
+| 6 | `selectDateExpiredVersions` | function | 101 |
+| 7 | `selectExpiredDriveSyncVersions` | function | 113 |
+
+### 3.154 `backend/src/services/googleOauth.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 27 |
+| 2 | `unique` | function | 31 |
+| 3 | `appendCallbackPath` | function | 43 |
+| 4 | `getGoogleLoginOrigins` | function | 53 |
+| 5 | `getGoogleLoginRedirectUris` | function | 62 |
+| 6 | `getPrimaryRedirectUri` | function | 70 |
+| 7 | `getDefaultReturnPath` | function | 74 |
+| 8 | `normalizeReturnTarget` | function | 80 |
+| 9 | `base64url` | function | 117 |
+| 10 | `sha256Base64Url` | function | 122 |
+| 11 | `getStateSecret` | function | 126 |
+| 12 | `signState` | function | 130 |
+| 13 | `verifyState` | function | 136 |
+| 14 | `getGoogleLoginPublicConfig` | function | 152 |
+| 15 | `buildGoogleOauthStartUrl` | function | 165 |
+| 16 | `exchangeGoogleOauthCode` | function | 196 |
+| 17 | `getGoogleUserFromTokens` | function | 219 |
+
+### 3.155 `backend/src/services/importJobs.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `nowIso` | function | 65 |
+| 2 | `wait` | function | 69 |
+| 3 | `yieldImportWorker` | function | 73 |
+| 4 | `countCsvRowsFromFile` | function | 78 |
+| 5 | `safeJson` | function | 123 |
+| 6 | `normalizeImportJobListLimit` | function | 128 |
+| 7 | `clearImportJobListCache` | function | 132 |
+| 8 | `readCachedImportJobList` | function | 136 |
+| 9 | `canCacheImportJobList` | function | 144 |
+| 10 | `writeCachedImportJobList` | function | 148 |
+| 11 | `stringify` | function | 161 |
+| 12 | `cleanAuditActorText` | function | 165 |
+| 13 | `normalizeAuditActor` | function | 171 |
+| 14 | `attachInternalPolicyMetadata` | function | 181 |
+| 15 | `stripInternalPolicyMetadata` | function | 192 |
+| 16 | `getPersistedAuditActor` | function | 198 |
+| 17 | `mergeAuditActors` | function | 203 |
+| 18 | `auditWithActor` | function | 213 |
+| 19 | `decorateImportJobRow` | function | 231 |
+| 20 | `isCancelRequested` | function | 241 |
+| 21 | `isImportJobStale` | function | 248 |
+| 22 | `isImportJobWorkDrained` | function | 254 |
+| 23 | `markStoredImportFilesCancelled` | function | 266 |
+| 24 | `reconcileImportJobRow` | function | 276 |
+| 25 | `ensureDir` | function | 297 |
+| 26 | `ensureImportRoot` | function | 301 |
+| 27 | `getJobRoot` | function | 305 |
+| 28 | `assertSafeImportPath` | function | 309 |
+| 29 | `deleteImportJobFiles` | function | 318 |
+| 30 | `clearImportRuntimeFiles` | function | 325 |
+| 31 | `createImportJob` | function | 336 |
+| 32 | `getImportJob` | function | 357 |
+| 33 | `buildSqlPlaceholders` | function | 363 |
+| 34 | `collectRowIds` | function | 371 |
+| 35 | `decorateImportJobRows` | function | 379 |
+| 36 | `listImportJobs` | function | 388 |
+| 37 | `updateJob` | function | 421 |
+| 38 | `addJobError` | function | 457 |
+| 39 | `getJobErrors` | function | 464 |
+| 40 | `normalizeReviewText` | function | 474 |
+| 41 | `normalizeReviewIdentifier` | function | 478 |
+| 42 | `getBarcodeReviewIssue` | function | 482 |
+| 43 | `isBlockingBarcodeIssue` | function | 499 |
+| 44 | `buildProductImportReviewState` | function | 503 |
+| 45 | `add` | const arrow | 507 |
+| 46 | `duplicateGroupCount` | const arrow | 520 |
+| 47 | `hasReviewQueryMatch` | function | 537 |
+| 48 | `normalizeReviewFilter` | function | 557 |
+| 49 | `matchesReviewFilter` | function | 565 |
+| 50 | `hasAnyIdentifierField` | function | 573 |
+| 51 | `buildProductReviewLabels` | function | 580 |
+| 52 | `buildContactReviewLabels` | function | 604 |
+| 53 | `hasMeaningfulImportRowValue` | function | 613 |
+| 54 | `addReviewConflictCounts` | function | 621 |
+| 55 | `normalizeGroupDecisions` | function | 635 |
+| 56 | `addSetValues` | function | 645 |
+| 57 | `setValuesToArray` | function | 651 |
+| 58 | `firstRowNumber` | function | 659 |
+| 59 | `buildProductReviewIndex` | function | 663 |
+| 60 | `getProductConflictForReview` | function | 690 |
+| 61 | `getReviewRowNumber` | function | 773 |
+| 62 | `summarizeImportReviewRow` | function | 778 |
+| 63 | `addProductReviewGroup` | function | 798 |
+| 64 | `finalizeProductReviewSubgroups` | function | 843 |
+| 65 | `finalizeProductReviewGroups` | function | 868 |
+| 66 | `buildContactReviewIndex` | function | 890 |
+| 67 | `getContactConflictForReview` | function | 910 |
+| 68 | `getGenericImportConflictForReview` | function | 956 |
+| 69 | `applyImportDecisionToRow` | function | 969 |
+| 70 | `getImportDecisionMap` | function | 1037 |
+| 71 | `getImportJobReview` | function | 1046 |
+| 72 | `updateImportJobDecisions` | function | 1146 |
+| 73 | `addJobFile` | function | 1174 |
+| 74 | `getJobFiles` | function | 1194 |
+| 75 | `markJobCancelled` | function | 1199 |
+| 76 | `isCancelled` | function | 1203 |
+| 77 | `waitForQueuedImportMedia` | function | 1209 |
+| 78 | `finalizeSkippedImportImages` | function | 1236 |
+| 79 | `normalizeLookup` | function | 1253 |
+| 80 | `normalizeText` | function | 1257 |
+| 81 | `getMimeTypeFromName` | function | 1261 |
+| 82 | `normalizeProductSignature` | function | 1329 |
+| 83 | `findProductWithSignature` | function | 1340 |
+| 84 | `chooseParentProduct` | function | 1348 |
+| 85 | `compareParentProductCandidate` | function | 1357 |
+| 86 | `normalizeImportAction` | function | 1369 |
+| 87 | `parseOptionalImportId` | function | 1377 |
+| 88 | `parseIncomingImageRefs` | function | 1382 |
+| 89 | `syncProductImageGallery` | function | 1413 |
+| 90 | `loadCurrentGallery` | function | 1439 |
+| 91 | `ensureParentProductExists` | function | 1451 |
+| 92 | `assertUniqueProductFields` | function | 1460 |
+| 93 | `findProductIdentifierConflict` | function | 1503 |
+| 94 | `normalizeIdentifierConflictMode` | function | 1533 |
+| 95 | `resolveNewProductIdentifiers` | function | 1541 |
+| 96 | `copyImageIntoAssets` | function | 1578 |
+| 97 | `resolveImageGallery` | function | 1617 |
+| 98 | `ensureSettingOptionMap` | function | 1673 |
+| 99 | `buildLookupMap` | function | 1692 |
+| 100 | `getDefaultBranch` | function | 1700 |
+| 101 | `upsertSettingJson` | function | 1709 |
+| 102 | `normalizeRowForProduct` | function | 1716 |
+| 103 | `createProductContext` | function | 1764 |
+| 104 | `sortProductImportRows` | function | 1793 |
+| 105 | `compareProductImportRows` | function | 1801 |
+| 106 | `insertProductImportRow` | function | 1811 |
+| 107 | `getProductsByNameForImport` | function | 1828 |
+| 108 | `rememberProductForImport` | function | 1843 |
+| 109 | `buildImportSignatureKey` | function | 1850 |
+| 110 | `ensureCategory` | function | 1856 |
+| 111 | `ensureUnit` | function | 1869 |
+| 112 | `ensureBrand` | function | 1881 |
+| 113 | `ensureSupplier` | function | 1894 |
+| 114 | `determineBranch` | function | 1908 |
+| 115 | `clearBranchBatchStockForProduct` | function | 1925 |
+| 116 | `handleBranchStock` | function | 1936 |
+| 117 | `recalcProductStock` | function | 1953 |
+| 118 | `insertInventoryMovement` | function | 1957 |
+| 119 | `seedBranchRows` | function | 1985 |
+| 120 | `processProductRow` | function | 1992 |
+| 121 | `processProductRowBatches` | function | 2282 |
+| 122 | `flushProgress` | const arrow | 2294 |
+| 123 | `processProductRows` | function | 2395 |
+| 124 | `buildSafeCatalogOptionList` | function | 2405 |
+| 125 | `preflightImportJob` | function | 2414 |
+| 126 | `addFailure` | const arrow | 2428 |
+| 127 | `buildImageLookup` | function | 2521 |
+| 128 | `addImageLookupCandidate` | function | 2531 |
+| 129 | `normalizeImageMatchKey` | function | 2536 |
+| 130 | `processImageOnlyFiles` | function | 2546 |
+| 131 | `addImageProductKey` | function | 2607 |
+| 132 | `normalizeContactMode` | function | 2612 |
+| 133 | `resolveContactValue` | function | 2617 |
+| 134 | `parseFieldRules` | function | 2625 |
+| 135 | `generateCustomerMembershipNumber` | function | 2631 |
+| 136 | `normalizeImportedMembershipNumber` | function | 2647 |
+| 137 | `processContactRowBatches` | function | 2653 |
+| 138 | `processContactRows` | function | 2822 |
+| 139 | `normalizeInventoryAction` | function | 2832 |
+| 140 | `addCsvLookupValue` | function | 2839 |
+| 141 | `buildProductCsvLookupMap` | function | 2845 |
+| 142 | `buildBranchCsvLookupMap` | function | 2856 |
+| 143 | `processInventoryRowBatches` | function | 2865 |
+| 144 | `processInventoryRows` | function | 2955 |
+| 145 | `processSalesRowBatches` | function | 2964 |
+| 146 | `processSalesRows` | function | 3167 |
+| 147 | `extractZipImages` | function | 3176 |
+| 148 | `processImportJob` | function | 3246 |
+| 149 | `runLocalJob` | function | 3384 |
+| 150 | `normalizeQueueMode` | function | 3391 |
+| 151 | `queueNameForMode` | function | 3395 |
+| 152 | `configuredQueueDriver` | function | 3399 |
+| 153 | `getImportQueueConcurrency` | function | 3404 |
+| 154 | `hasBullProducer` | function | 3408 |
+| 155 | `hasBullWorkers` | function | 3412 |
+| 156 | `removeQueuedBullJobsForImport` | function | 3416 |
+| 157 | `getBullConnection` | function | 3439 |
+| 158 | `initializeBullQueue` | function | 3452 |
+| 159 | `startImportWorkers` | function | 3471 |
+| 160 | `startWorker` | const arrow | 3478 |
+| 161 | `enqueueImportJob` | function | 3514 |
+| 162 | `resetImportJobForRetry` | function | 3557 |
+| 163 | `cancelImportJob` | function | 3610 |
+| 164 | `listCancellableImportJobs` | function | 3643 |
+| 165 | `waitForImportJobsToStop` | function | 3652 |
+| 166 | `cancelAllImportJobs` | function | 3680 |
+| 167 | `deleteImportJob` | function | 3712 |
+| 168 | `deleteAllImportJobs` | function | 3743 |
+| 169 | `approveImportJob` | function | 3760 |
+| 170 | `recoverImportJobs` | function | 3784 |
+| 171 | `getUnprocessedJobFiles` | function | 3806 |
+| 172 | `getQueueStatus` | function | 3814 |
+| 173 | `buildErrorsCsv` | function | 3831 |
+| 174 | `escape` | const arrow | 3833 |
+| 175 | `joinEscapedCsvRow` | function | 3846 |
+
+### 3.156 `backend/src/services/integrationDoctor.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 44 |
+| 2 | `hasValue` | function | 48 |
+| 3 | `redactPresence` | function | 52 |
+| 4 | `status` | function | 59 |
+| 5 | `allCriticalChecksOk` | function | 67 |
+| 6 | `unique` | function | 80 |
+| 7 | `buildExpectedOauthChecklist` | function | 92 |
+| 8 | `probeDatabase` | function | 120 |
+| 9 | `getSafeTableCount` | function | 130 |
+| 10 | `readCurrentBusinessCounts` | function | 139 |
+| 11 | `findLatestVerifiedReleaseBackup` | function | 153 |
+| 12 | `probeQueue` | function | 178 |
+| 13 | `probeBackups` | function | 199 |
+| 14 | `buildIntegrationDoctor` | function | 216 |
+
+### 3.157 `backend/src/services/mediaQueue.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `wait` | function | 19 |
+| 2 | `queueDriverRequired` | function | 23 |
+| 3 | `isImportJobCancelled` | function | 27 |
+| 4 | `getMediaConnection` | function | 34 |
+| 5 | `initializeMediaQueue` | function | 47 |
+| 6 | `processMediaOptimizationJob` | function | 65 |
+| 7 | `runLocalMediaJob` | function | 119 |
+| 8 | `enqueueMediaOptimization` | function | 131 |
+| 9 | `startMediaWorker` | function | 157 |
+| 10 | `getMediaQueueStatus` | function | 181 |
+
+### 3.158 `backend/src/services/portalAi.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 15 |
+| 2 | `toNumber` | function | 19 |
+| 3 | `tokenize` | function | 24 |
+| 4 | `nowMs` | function | 36 |
+| 5 | `getProviderPriority` | function | 40 |
+| 6 | `getProviderCapacity` | function | 45 |
+| 7 | `getProviderMaxInputChars` | function | 50 |
+| 8 | `getProviderMaxCompletionTokens` | function | 55 |
+| 9 | `getProviderTimeoutMs` | function | 60 |
+| 10 | `getProviderCooldownMs` | function | 65 |
+| 11 | `getRuntimeState` | function | 71 |
+| 12 | `pruneProviderState` | function | 86 |
+| 13 | `keepRecentTimestamps` | function | 92 |
+| 14 | `pruneVisitorActivity` | function | 100 |
+| 15 | `registerVisitorActivity` | function | 108 |
+| 16 | `countActiveVisitors` | function | 118 |
+| 17 | `getVisitorMinuteCount` | function | 123 |
+| 18 | `summarizeProfile` | function | 130 |
+| 19 | `sanitizeQuestion` | function | 140 |
+| 20 | `scoreProduct` | function | 144 |
+| 21 | `buildQueryTermSet` | function | 176 |
+| 22 | `productMatchesPreference` | function | 185 |
+| 23 | `toPromptCandidate` | function | 195 |
+| 24 | `selectCandidateProducts` | function | 212 |
+| 25 | `buildPrompt` | function | 236 |
+| 26 | `takeTrimmedStrings` | function | 266 |
+| 27 | `normalizeCitations` | function | 277 |
+| 28 | `buildRecommendationPayloads` | function | 293 |
+| 29 | `parseAssistantPayload` | function | 322 |
+| 30 | `listEnabledChatProviders` | function | 351 |
+| 31 | `chooseProviderForAttempt` | function | 373 |
+| 32 | `markProviderStart` | function | 395 |
+| 33 | `markProviderSuccess` | function | 403 |
+| 34 | `markProviderFailure` | function | 410 |
+| 35 | `sumProviderCapacity` | function | 418 |
+| 36 | `buildProviderUsageItems` | function | 426 |
+| 37 | `getPortalAiUsageStatus` | function | 445 |
+| 38 | `minProviderInputChars` | function | 460 |
+| 39 | `hasAnyProfileValue` | function | 468 |
+| 40 | `productsById` | function | 475 |
+| 41 | `remainingProviders` | function | 483 |
+| 42 | `generatePortalAiResponse` | function | 491 |
+
+### 3.159 `backend/src/services/verification.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `nowMs` | function | 8 |
+| 2 | `toIso` | function | 12 |
+| 3 | `parseBool` | function | 16 |
+| 4 | `isEmailProviderConfigured` | function | 23 |
+| 5 | `getVerificationCapabilities` | function | 30 |
+| 6 | `normalizeEmail` | function | 37 |
+| 7 | `normalizePhone` | function | 44 |
+| 8 | `maskDestination` | function | 52 |
+| 9 | `generateCode` | function | 65 |
+| 10 | `hashCode` | function | 69 |
+| 11 | `resolveChannel` | function | 73 |
+| 12 | `getDestinationForChannel` | function | 83 |
+| 13 | `cleanupExpiredCodes` | function | 88 |
+| 14 | `invalidateActiveCodes` | function | 96 |
+| 15 | `createVerificationRecord` | function | 109 |
+| 16 | `findActiveCode` | function | 136 |
+| 17 | `consumeCode` | function | 151 |
+| 18 | `verifyCode` | function | 155 |
+| 19 | `messageForPurpose` | function | 164 |
+| 20 | `sendEmail` | function | 183 |
+| 21 | `requestVerificationCode` | function | 247 |
+
+### 3.160 `backend/src/sessionAuth.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getDb` | function | 14 |
+| 2 | `hashToken` | function | 18 |
+| 3 | `buildSessionExpiry` | function | 22 |
+| 4 | `createAuthSession` | function | 38 |
+| 5 | `isSecureRequest` | function | 59 |
+| 6 | `buildSessionCookieOptions` | function | 69 |
+| 7 | `setAuthSessionCookie` | function | 79 |
+| 8 | `clearAuthSessionCookie` | function | 85 |
+| 9 | `buildRevocationTimestamp` | function | 95 |
+| 10 | `getPresentedSessionToken` | function | 100 |
+| 11 | `getSessionUser` | function | 112 |
+| 12 | `revokeAuthSession` | function | 175 |
+| 13 | `revokeUserSessions` | function | 187 |
+
+### 3.161 `backend/src/settingsSnapshot.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeUploadPublicPath` | function | 16 |
+| 2 | `isUploadPublicPath` | function | 33 |
+| 3 | `toUploadObjectKey` | function | 41 |
+| 4 | `sanitizeMediaPath` | function | 52 |
+| 5 | `sanitizeMediaPathAsync` | function | 65 |
+| 6 | `sanitizeMediaList` | function | 84 |
+| 7 | `sanitizeMediaListAsync` | function | 101 |
+| 8 | `uploadPublicPathExists` | function | 117 |
+| 9 | `sanitizeSettingValue` | function | 132 |
+| 10 | `sanitizeSettingValueAsync` | function | 140 |
+| 11 | `sanitizeSettingsSnapshot` | function | 147 |
+| 12 | `sanitizeSettingsSnapshotAsync` | function | 158 |
+
+### 3.162 `backend/src/storage/organizationFolders.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `trim` | function | 7 |
+| 2 | `sanitizeOrganizationFolderLabel` | function | 12 |
+| 3 | `buildOrganizationFolderName` | function | 23 |
+| 4 | `extractOrganizationPublicId` | function | 30 |
+| 5 | `findOrganizationFolderByPublicId` | function | 38 |
+
+### 3.163 `backend/src/systemFsWorker.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `formatBackupStamp` | function | 23 |
+| 2 | `pad` | const arrow | 25 |
+| 3 | `respond` | function | 33 |
+| 4 | `fail` | function | 41 |
+| 5 | `runExportFolder` | function | 50 |
+| 6 | `runRelocateDataRoot` | function | 94 |
+| 7 | `main` | function | 104 |
+
+### 3.164 `backend/src/systemJobs.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `nowIso` | function | 12 |
+| 2 | `makeJobId` | function | 16 |
+| 3 | `publicJob` | function | 20 |
+| 4 | `findActiveJob` | function | 44 |
+| 5 | `safeJsonParse` | function | 55 |
+| 6 | `getDb` | function | 64 |
+| 7 | `ensureTable` | function | 68 |
+| 8 | `persistJob` | function | 124 |
+| 9 | `collectFinishedJobs` | function | 171 |
+| 10 | `removeOldFinishedJobs` | function | 182 |
+| 11 | `serializeJobRows` | function | 188 |
+| 12 | `listActiveJobs` | function | 198 |
+| 13 | `cleanupJobs` | function | 207 |
+| 14 | `buildPersistSignature` | function | 224 |
+| 15 | `markPersisted` | function | 239 |
+| 16 | `flushPersistJob` | function | 244 |
+| 17 | `shouldPersistJob` | function | 256 |
+| 18 | `schedulePersistJob` | function | 274 |
+| 19 | `updateJob` | function | 285 |
+| 20 | `SystemJobCancelledError` | class | 302 |
+| 21 | `startSystemJob` | function | 310 |
+| 22 | `runWorker` | const arrow | 339 |
+| 23 | `isCancelled` | const arrow | 358 |
+| 24 | `throwIfCancelled` | const arrow | 359 |
+| 25 | `progress` | const arrow | 362 |
+| 26 | `cancelSystemJob` | function | 415 |
+| 27 | `getSystemJob` | function | 432 |
+| 28 | `listSystemJobs` | function | 444 |
+
+### 3.165 `backend/src/uploadReferenceCleanup.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `safeJsonArray` | function | 13 |
+| 2 | `repairMissingUploadReferences` | function | 22 |
+| 3 | `repairMissingUploadReferencesAsync` | function | 134 |
+
+### 3.166 `backend/src/uploadSecurity.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `bufferStartsWith` | function | 16 |
+| 2 | `isLikelyCsvBuffer` | function | 26 |
+| 3 | `detectBufferKind` | function | 42 |
+| 4 | `getExpectedUploadedKind` | function | 63 |
+| 5 | `validateImageMetadata` | function | 75 |
+| 6 | `validateUploadedBuffer` | function | 93 |
+| 7 | `validateUploadedPath` | function | 108 |
+
+### 3.167 `backend/src/websocket.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `attachWss` | function | 24 |
+
+### 3.168 `backend/src/workers/importWorker.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `start` | function | 13 |
+| 2 | `shutdown` | function | 23 |
+
+### 3.169 `backend/src/workers/mediaWorker.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `start` | function | 13 |
+| 2 | `shutdown` | function | 22 |
+
+### 3.170 `backend/test/accessControl.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 | 2 | `makeReq` | function | 22 |
 
-### 3.87 `backend/test/analyticsRuntime.test.ts`
+### 3.171 `backend/test/analyticsRuntime.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.88 `backend/test/authOtpGuards.test.ts`
+### 3.172 `backend/test/authOtpGuards.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.89 `backend/test/authSecurityFlow.test.ts`
+### 3.173 `backend/test/authSecurityFlow.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2485,29 +4532,29 @@ Code files scanned: **515**
 | 13 | `extractSessionCookie` | function | 171 |
 | 14 | `login` | function | 178 |
 
-### 3.90 `backend/test/backupDefaultDestination.test.ts`
+### 3.174 `backend/test/backupDefaultDestination.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.91 `backend/test/backupPerformanceHardening.test.ts`
+### 3.175 `backend/test/backupPerformanceHardening.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.92 `backend/test/backupRetention.test.ts`
+### 3.176 `backend/test/backupRetention.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.93 `backend/test/backupSchema.test.ts`
+### 3.177 `backend/test/backupSchema.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 17 |
 
-### 3.94 `backend/test/branchStockSearch.test.ts`
+### 3.178 `backend/test/branchStockSearch.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2522,20 +4569,20 @@ Code files scanned: **515**
 | 9 | `loginAsAdmin` | function | 105 |
 | 10 | `main` | function | 125 |
 
-### 3.95 `backend/test/contactOptions.test.ts`
+### 3.179 `backend/test/contactOptions.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.96 `backend/test/dataPath.test.ts`
+### 3.180 `backend/test/dataPath.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 16 |
 | 2 | `makeTempRoot` | function | 27 |
 
-### 3.97 `backend/test/defaultRoles.test.ts`
+### 3.181 `backend/test/defaultRoles.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2548,19 +4595,19 @@ Code files scanned: **515**
 | 7 | `login` | function | 82 |
 | 8 | `main` | function | 103 |
 
-### 3.98 `backend/test/fileAssetStorageReconcile.test.ts`
+### 3.182 `backend/test/fileAssetStorageReconcile.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.99 `backend/test/fileAssetUsageCache.test.ts`
+### 3.183 `backend/test/fileAssetUsageCache.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.100 `backend/test/fileRouteSecurityFlow.test.ts`
+### 3.184 `backend/test/fileRouteSecurityFlow.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2574,43 +4621,43 @@ Code files scanned: **515**
 | 8 | `login` | function | 108 |
 | 9 | `buildForm` | function | 129 |
 
-### 3.101 `backend/test/fullAutomation.test.ts`
+### 3.185 `backend/test/fullAutomation.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `read` | function | 9 |
 | 2 | `runTest` | function | 13 |
 
-### 3.102 `backend/test/googleDriveSyncVersioning.test.ts`
+### 3.186 `backend/test/googleDriveSyncVersioning.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.103 `backend/test/idempotency.test.ts`
+### 3.187 `backend/test/idempotency.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.104 `backend/test/importCsv.test.ts`
+### 3.188 `backend/test/importCsv.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 | 2 | `collectBatches` | function | 26 |
 
-### 3.105 `backend/test/importDecisionIntegrity.test.ts`
+### 3.189 `backend/test/importDecisionIntegrity.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.106 `backend/test/importJobPerformanceHardening.test.ts`
+### 3.190 `backend/test/importJobPerformanceHardening.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.107 `backend/test/importJobStateMachine.test.ts`
+### 3.191 `backend/test/importJobStateMachine.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2619,7 +4666,7 @@ Code files scanned: **515**
 | 3 | `writeJobFile` | function | 53 |
 | 4 | `main` | function | 60 |
 
-### 3.108 `backend/test/importScaleSmoke.test.ts`
+### 3.192 `backend/test/importScaleSmoke.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2627,24 +4674,24 @@ Code files scanned: **515**
 | 2 | `makeLargeCsv` | function | 23 |
 | 3 | `assertLargeCsvSmoke` | function | 38 |
 
-### 3.109 `backend/test/initials.test.ts`
+### 3.193 `backend/test/initials.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.110 `backend/test/integrationDoctor.test.ts`
+### 3.194 `backend/test/integrationDoctor.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.111 `backend/test/inventorySettingsMediaContracts.test.ts`
+### 3.195 `backend/test/inventorySettingsMediaContracts.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.112 `backend/test/mediaOptimization.test.ts`
+### 3.196 `backend/test/mediaOptimization.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2652,56 +4699,56 @@ Code files scanned: **515**
 | 2 | `buildDeterministicPixels` | function | 34 |
 | 3 | `buildLogoPixels` | function | 44 |
 
-### 3.113 `backend/test/netSecurity.test.ts`
+### 3.197 `backend/test/netSecurity.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 12 |
 
-### 3.114 `backend/test/notificationSummaryCache.test.ts`
+### 3.198 `backend/test/notificationSummaryCache.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 16 |
 
-### 3.115 `backend/test/offlineSecurity.test.ts`
+### 3.199 `backend/test/offlineSecurity.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `read` | function | 5 |
 | 2 | `runTest` | function | 9 |
 
-### 3.116 `backend/test/ownedGoogleAuth.test.ts`
+### 3.200 `backend/test/ownedGoogleAuth.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `read` | function | 9 |
 | 2 | `runTest` | function | 13 |
 
-### 3.117 `backend/test/permissionPolicy.test.ts`
+### 3.201 `backend/test/permissionPolicy.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.118 `backend/test/portalInventoryRegression.test.ts`
+### 3.202 `backend/test/portalInventoryRegression.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.119 `backend/test/portalUtils.test.ts`
+### 3.203 `backend/test/portalUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.120 `backend/test/postgresCutoverReadiness.test.ts`
+### 3.204 `backend/test/postgresCutoverReadiness.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 10 |
 
-### 3.121 `backend/test/postgresDatabase.test.ts`
+### 3.205 `backend/test/postgresDatabase.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2709,62 +4756,62 @@ Code files scanned: **515**
 | 2 | `FakeClient` | class | 21 |
 | 3 | `createFakeDb` | function | 37 |
 
-### 3.122 `backend/test/postgresQueryCompat.test.ts`
+### 3.206 `backend/test/postgresQueryCompat.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.123 `backend/test/productBatchHierarchy.test.ts`
+### 3.207 `backend/test/productBatchHierarchy.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `readSource` | function | 20 |
 
-### 3.124 `backend/test/productExpiry.test.ts`
+### 3.208 `backend/test/productExpiry.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.125 `backend/test/productImportPolicies.test.ts`
+### 3.209 `backend/test/productImportPolicies.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.126 `backend/test/productSearchPagination.test.ts`
+### 3.210 `backend/test/productSearchPagination.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.127 `backend/test/rfidRoutes.test.ts`
+### 3.211 `backend/test/rfidRoutes.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 7 |
 
-### 3.128 `backend/test/routeContracts.test.ts`
+### 3.212 `backend/test/routeContracts.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 | 2 | `getRoutePaths` | function | 20 |
 
-### 3.129 `backend/test/runtimeCache.test.ts`
+### 3.213 `backend/test/runtimeCache.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 24 |
 | 2 | `main` | function | 35 |
 
-### 3.130 `backend/test/runtimeVersion.test.ts`
+### 3.214 `backend/test/runtimeVersion.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 11 |
 
-### 3.131 `backend/test/schemaMetadata.test.ts`
+### 3.215 `backend/test/schemaMetadata.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2772,20 +4819,21 @@ Code files scanned: **515**
 | 2 | `loadSchemaMetadataWithColumns` | function | 18 |
 | 3 | `cleanup` | const arrow | 46 |
 
-### 3.132 `backend/test/security.test.ts`
+### 3.216 `backend/test/security.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 18 |
 
-### 3.133 `backend/test/serverUtils.test.ts`
+### 3.217 `backend/test/serverUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 22 |
-| 2 | `collectHeaders` | const arrow | 230 |
+| 1 | `runTest` | function | 23 |
+| 2 | `collectHeaders` | const arrow | 231 |
+| 3 | `collectHeaders` | const arrow | 291 |
 
-### 3.134 `backend/test/settingsSnapshotObjectStorage.test.ts`
+### 3.218 `backend/test/settingsSnapshotObjectStorage.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2794,7 +4842,7 @@ Code files scanned: **515**
 | 3 | `restore` | const arrow | 38 |
 | 4 | `createFakeCleanupDb` | function | 51 |
 
-### 3.135 `backend/test/systemJobs.test.ts`
+### 3.219 `backend/test/systemJobs.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2802,17 +4850,17 @@ Code files scanned: **515**
 | 2 | `waitForStatus` | function | 10 |
 | 3 | `main` | function | 20 |
 
-### 3.136 `backend/test/uploadSecurity.test.ts`
+### 3.220 `backend/test/uploadSecurity.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.137 `backend/test/websocket.test.ts`
+### 3.221 `backend/test/websocket.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.138 `frontend/public/runtime-noise-guard.js`
+### 3.222 `frontend/public/runtime-noise-guard.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2825,31 +4873,31 @@ Code files scanned: **515**
 | 7 | `guardedInsertRule` | const function | 85 |
 | 8 | `guardedCssRulesGetter` | const function | 101 |
 
-### 3.139 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js`
+### 3.223 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.js`
 
 - No top-level named symbols detected.
 
-### 3.140 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js`
+### 3.224 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Asm-simd-threads.worker.js`
 
 - No top-level named symbols detected.
 
-### 3.141 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js`
+### 3.225 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd-threads.js`
 
 - No top-level named symbols detected.
 
-### 3.142 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js`
+### 3.226 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core-simd.js`
 
 - No top-level named symbols detected.
 
-### 3.143 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js`
+### 3.227 `frontend/public/scanbot-web-sdk/bundle/bin/barcode-scanner/ScanbotSDK.Core.js`
 
 - No top-level named symbols detected.
 
-### 3.144 `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
+### 3.228 `frontend/public/scanbot-web-sdk/bundle/ScanbotSDK.ui2.min.js`
 
 - No top-level named symbols detected.
 
-### 3.145 `frontend/public/sw.js`
+### 3.229 `frontend/public/sw.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2878,7 +4926,7 @@ Code files scanned: **515**
 | 23 | `appShellFallback` | function | 360 |
 | 24 | `networkFirstStatic` | function | 380 |
 
-### 3.146 `frontend/public/theme-bootstrap.js`
+### 3.230 `frontend/public/theme-bootstrap.js`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2898,44 +4946,32 @@ Code files scanned: **515**
 | 14 | `safeInsertRule` | const function | 116 |
 | 15 | `safeCssRulesGetter` | const function | 132 |
 
-### 3.147 `frontend/src/api/accessControlTransport.ts`
+### 3.231 `frontend/src/AdminRoot.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `encodeId` | function | 9 |
-| 2 | `getUsers` | export function | 13 |
-| 3 | `createUser` | export function | 22 |
-| 4 | `updateUser` | export function | 31 |
-| 5 | `getUserProfile` | export function | 41 |
-| 6 | `getUserAuthMethods` | export function | 49 |
-| 7 | `updateUserProfile` | export function | 57 |
-| 8 | `disconnectUserAuthProvider` | export function | 67 |
-| 9 | `changeUserPassword` | export function | 76 |
-| 10 | `resetPassword` | export function | 85 |
-| 11 | `getRoles` | export function | 94 |
-| 12 | `createRole` | export function | 103 |
-| 13 | `updateRole` | export function | 112 |
-| 14 | `deleteRole` | export function | 122 |
+| 1 | `AdminRoot` | export default function | 6 |
 
-### 3.148 `frontend/src/api/actionHistoryTransport.ts`
+### 3.232 `frontend/src/api/actionHistoryTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getDevicePayload` | function | 7 |
 | 2 | `getActionHistory` | export function | 11 |
-| 3 | `createActionHistory` | export function | 24 |
-| 4 | `updateActionHistory` | export function | 33 |
-| 5 | `undoActionHistory` | export function | 42 |
-| 6 | `redoActionHistory` | export function | 51 |
+| 3 | `getActionHistoryUsers` | export function | 24 |
+| 4 | `createActionHistory` | export function | 32 |
+| 5 | `updateActionHistory` | export function | 41 |
+| 6 | `undoActionHistory` | export function | 50 |
+| 7 | `redoActionHistory` | export function | 59 |
 
-### 3.149 `frontend/src/api/actorQuery.ts`
+### 3.233 `frontend/src/api/actorQuery.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getCurrentUserContext` | export function | 10 |
 | 2 | `appendActorQuery` | export function | 25 |
 
-### 3.150 `frontend/src/api/aiTransport.ts`
+### 3.234 `frontend/src/api/aiTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2946,24 +4982,29 @@ Code files scanned: **515**
 | 5 | `testAiProvider` | export function | 26 |
 | 6 | `getAiResponses` | export function | 30 |
 
-### 3.151 `frontend/src/api/appBootstrapTransport.ts`
+### 3.235 `frontend/src/api/appBootstrapTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readStoredUser` | function | 26 |
-| 2 | `readErrorField` | function | 36 |
-| 3 | `buildLocalBootstrap` | function | 41 |
-| 4 | `getAppBootstrap` | export function | 53 |
+| 1 | `emptyBootstrap` | function | 25 |
+| 2 | `readStoredUser` | function | 37 |
+| 3 | `readErrorField` | function | 47 |
+| 4 | `ensureBootstrapServerUrl` | function | 52 |
+| 5 | `buildLocalBootstrap` | function | 63 |
+| 6 | `getAppBootstrap` | export function | 75 |
 
-### 3.152 `frontend/src/api/auditLogTransport.ts`
+### 3.236 `frontend/src/api/auditLogTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeAuditPageSize` | function | 10 |
-| 2 | `getAuditLogs` | export function | 15 |
-| 3 | `deleteAuditLogsRetention` | export function | 42 |
+| 1 | `getLocalDbModule` | function | 13 |
+| 2 | `getLocalMirrorsModule` | function | 18 |
+| 3 | `scheduleAuditLogMirror` | function | 23 |
+| 4 | `normalizeAuditPageSize` | function | 36 |
+| 5 | `getAuditLogs` | export function | 41 |
+| 6 | `deleteAuditLogsRetention` | export function | 70 |
 
-### 3.153 `frontend/src/api/authTransport.ts`
+### 3.237 `frontend/src/api/authTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -2986,24 +5027,24 @@ Code files scanned: **515**
 | 17 | `searchOrganizations` | export function | 97 |
 | 18 | `getCurrentOrganization` | export function | 102 |
 
-### 3.154 `frontend/src/api/branchTransport.ts`
+### 3.238 `frontend/src/api/branchTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getDevicePayload` | function | 10 |
 | 2 | `encodeId` | function | 14 |
 | 3 | `getBranches` | export function | 18 |
-| 4 | `getBranchSummary` | export function | 27 |
-| 5 | `createBranch` | export function | 42 |
-| 6 | `updateBranch` | export function | 51 |
-| 7 | `deleteBranch` | export function | 61 |
-| 8 | `getBranchStock` | export function | 75 |
-| 9 | `getTransfers` | export function | 84 |
-| 10 | `transferStock` | export function | 92 |
-| 11 | `getBranchStockIntegrity` | export function | 101 |
-| 12 | `repairBranchStockIntegrity` | export function | 109 |
+| 4 | `getBranchSummary` | export function | 30 |
+| 5 | `createBranch` | export function | 45 |
+| 6 | `updateBranch` | export function | 54 |
+| 7 | `deleteBranch` | export function | 64 |
+| 8 | `getBranchStock` | export function | 78 |
+| 9 | `getTransfers` | export function | 87 |
+| 10 | `transferStock` | export function | 98 |
+| 11 | `getBranchStockIntegrity` | export function | 107 |
+| 12 | `repairBranchStockIntegrity` | export function | 115 |
 
-### 3.155 `frontend/src/api/browserDialogs.ts`
+### 3.239 `frontend/src/api/browserDialogs.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3011,46 +5052,86 @@ Code files scanned: **515**
 | 2 | `openImageDialog` | export function | 28 |
 | 3 | `getImageDataUrl` | export function | 32 |
 
-### 3.156 `frontend/src/api/conflicts.ts`
+### 3.240 `frontend/src/api/conflicts.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildAttemptedSettings` | export function | 22 |
 | 2 | `buildAttemptedReturnItems` | export function | 31 |
 
-### 3.157 `frontend/src/api/contactsTransport.ts`
+### 3.241 `frontend/src/api/contactReadTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getDevicePayload` | function | 39 |
-| 2 | `encodeId` | function | 43 |
-| 3 | `hasPagedParams` | function | 47 |
-| 4 | `localSortedRows` | function | 52 |
-| 5 | `readContactList` | function | 56 |
-| 6 | `createContact` | function | 78 |
-| 7 | `updateContact` | function | 88 |
-| 8 | `deleteContact` | function | 102 |
-| 9 | `bulkImportContact` | function | 112 |
-| 10 | `getCustomers` | export function | 121 |
-| 11 | `getCustomerPointSummaries` | export function | 125 |
-| 12 | `createCustomer` | export function | 134 |
-| 13 | `updateCustomer` | export function | 138 |
-| 14 | `deleteCustomer` | export function | 142 |
-| 15 | `bulkImportCustomers` | export function | 146 |
-| 16 | `downloadCustomerTemplate` | export function | 150 |
-| 17 | `getSuppliers` | export function | 160 |
-| 18 | `createSupplier` | export function | 164 |
-| 19 | `updateSupplier` | export function | 168 |
-| 20 | `deleteSupplier` | export function | 172 |
-| 21 | `bulkImportSuppliers` | export function | 176 |
-| 22 | `downloadSupplierTemplate` | export function | 180 |
-| 23 | `getDeliveryContacts` | export function | 190 |
-| 24 | `createDeliveryContact` | export function | 194 |
-| 25 | `updateDeliveryContact` | export function | 198 |
-| 26 | `deleteDeliveryContact` | export function | 202 |
-| 27 | `bulkImportDeliveryContacts` | export function | 206 |
+| 1 | `readLocalContacts` | function | 43 |
+| 2 | `buildQueryString` | function | 49 |
+| 3 | `appendQuery` | function | 64 |
+| 4 | `getCachedRead` | function | 69 |
+| 5 | `setCachedRead` | function | 75 |
+| 6 | `scheduleLateMirror` | function | 80 |
+| 7 | `run` | const arrow | 83 |
+| 8 | `idle` | const arrow | 87 |
+| 9 | `readContacts` | function | 96 |
+| 10 | `getCustomers` | export function | 125 |
+| 11 | `getSuppliers` | export function | 129 |
+| 12 | `getDeliveryContacts` | export function | 133 |
 
-### 3.158 `frontend/src/api/cooldownFallbacks.ts`
+### 3.242 `frontend/src/api/contactsTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getLocalDbModule` | function | 42 |
+| 2 | `getCsvTemplateModule` | function | 47 |
+| 3 | `buildContactCsvTemplate` | function | 52 |
+| 4 | `getDevicePayload` | function | 57 |
+| 5 | `encodeId` | function | 61 |
+| 6 | `hasPagedParams` | function | 65 |
+| 7 | `localSortedRows` | function | 70 |
+| 8 | `readContactList` | function | 75 |
+| 9 | `createContact` | function | 97 |
+| 10 | `updateContact` | function | 107 |
+| 11 | `deleteContact` | function | 121 |
+| 12 | `bulkImportContact` | function | 131 |
+| 13 | `getCustomers` | export function | 140 |
+| 14 | `getCustomerPointSummaries` | export function | 144 |
+| 15 | `createCustomer` | export function | 153 |
+| 16 | `updateCustomer` | export function | 157 |
+| 17 | `deleteCustomer` | export function | 161 |
+| 18 | `bulkImportCustomers` | export function | 165 |
+| 19 | `downloadCustomerTemplate` | export function | 169 |
+| 20 | `getSuppliers` | export function | 179 |
+| 21 | `createSupplier` | export function | 183 |
+| 22 | `updateSupplier` | export function | 187 |
+| 23 | `deleteSupplier` | export function | 191 |
+| 24 | `bulkImportSuppliers` | export function | 195 |
+| 25 | `downloadSupplierTemplate` | export function | 199 |
+| 26 | `getDeliveryContacts` | export function | 209 |
+| 27 | `createDeliveryContact` | export function | 213 |
+| 28 | `updateDeliveryContact` | export function | 217 |
+| 29 | `deleteDeliveryContact` | export function | 221 |
+| 30 | `bulkImportDeliveryContacts` | export function | 225 |
+
+### 3.243 `frontend/src/api/contactWriteTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `createContactClientRequestId` | function | 7 |
+| 2 | `ensureContactClientRequestId` | function | 14 |
+| 3 | `buildContactWritePayload` | function | 23 |
+| 4 | `createContact` | function | 36 |
+| 5 | `updateContact` | function | 51 |
+| 6 | `deleteContact` | function | 68 |
+| 7 | `createCustomer` | export function | 84 |
+| 8 | `updateCustomer` | export function | 88 |
+| 9 | `deleteCustomer` | export function | 92 |
+| 10 | `createSupplier` | export function | 96 |
+| 11 | `updateSupplier` | export function | 100 |
+| 12 | `deleteSupplier` | export function | 104 |
+| 13 | `createDeliveryContact` | export function | 108 |
+| 14 | `updateDeliveryContact` | export function | 112 |
+| 15 | `deleteDeliveryContact` | export function | 116 |
+
+### 3.244 `frontend/src/api/cooldownFallbacks.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3066,7 +5147,7 @@ Code files scanned: **515**
 | 10 | `markDriveSyncStatusCooldown` | export function | 96 |
 | 11 | `clearDriveSyncStatusCooldown` | export function | 102 |
 
-### 3.159 `frontend/src/api/customTablesTransport.ts`
+### 3.245 `frontend/src/api/customTablesTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3074,20 +5155,21 @@ Code files scanned: **515**
 | 2 | `tableDataPath` | function | 28 |
 | 3 | `tableRowPath` | function | 32 |
 | 4 | `getCustomTables` | export function | 36 |
-| 5 | `createCustomTable` | export function | 44 |
-| 6 | `getCustomTableData` | export function | 53 |
-| 7 | `insertCustomRow` | export function | 61 |
-| 8 | `updateCustomRow` | export function | 70 |
-| 9 | `deleteCustomRow` | export function | 79 |
+| 5 | `createCustomTable` | export function | 47 |
+| 6 | `getCustomTableData` | export function | 56 |
+| 7 | `insertCustomRow` | export function | 64 |
+| 8 | `updateCustomRow` | export function | 73 |
+| 9 | `deleteCustomRow` | export function | 82 |
 
-### 3.160 `frontend/src/api/dashboardTransport.ts`
+### 3.246 `frontend/src/api/dashboardTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getDashboard` | export function | 4 |
 | 2 | `getAnalytics` | export function | 11 |
+| 3 | `getDashboardStartup` | export function | 19 |
 
-### 3.161 `frontend/src/api/driveSync.ts`
+### 3.247 `frontend/src/api/driveSync.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3099,144 +5181,166 @@ Code files scanned: **515**
 | 6 | `queueGoogleDriveSyncNow` | export function | 85 |
 | 7 | `syncGoogleDriveNow` | export function | 94 |
 
-### 3.162 `frontend/src/api/expectedUpdatedAt.ts`
+### 3.248 `frontend/src/api/expectedUpdatedAt.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `hasExpectedUpdatedAt` | function | 13 |
-| 2 | `withExpectedUpdatedAt` | export function | 17 |
-| 3 | `withSettingsExpectedUpdatedAt` | export function | 36 |
+| 1 | `getLocalDbModule` | function | 13 |
+| 2 | `hasExpectedUpdatedAt` | function | 18 |
+| 3 | `withExpectedUpdatedAt` | export function | 22 |
+| 4 | `withSettingsExpectedUpdatedAt` | export function | 42 |
 
-### 3.163 `frontend/src/api/fileTransport.ts`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `normalizeFileListResult` | function | 64 |
-| 2 | `appendUserAndDeviceFields` | function | 78 |
-| 3 | `dataUrlToBlob` | function | 87 |
-| 4 | `parseJsonResponse` | function | 94 |
-| 5 | `getFiles` | export function | 102 |
-| 6 | `uploadFileAsset` | export function | 112 |
-| 7 | `finish` | const arrow | 129 |
-| 8 | `deleteFileAsset` | export function | 179 |
-| 9 | `uploadProductImage` | export function | 191 |
-| 10 | `uploadUserAvatar` | export function | 228 |
-
-### 3.164 `frontend/src/api/http.ts`
+### 3.249 `frontend/src/api/fileTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSyncServerUrl` | export function | 54 |
-| 2 | `getSyncToken` | export function | 55 |
-| 3 | `setSyncServerUrl` | export function | 57 |
-| 4 | `setSyncToken` | export function | 58 |
-| 5 | `hasStoredAuthSession` | function | 77 |
-| 6 | `isProtectedAdminHost` | function | 86 |
-| 7 | `normalizeApiPath` | function | 103 |
-| 8 | `isRequiredRuntimeApiPath` | export function | 115 |
-| 9 | `getApiMismatchKey` | function | 120 |
-| 10 | `getApiVersionMismatchCooldown` | export function | 124 |
-| 11 | `dispatchApiVersionMismatch` | function | 135 |
-| 12 | `createApiVersionMismatchError` | export function | 149 |
-| 13 | `isApiVersionMismatchError` | export function | 160 |
-| 14 | `markApiVersionMismatch` | export function | 164 |
-| 15 | `cacheGet` | export function | 174 |
-| 16 | `cacheSet` | export function | 178 |
-| 17 | `cacheInvalidate` | export function | 179 |
-| 18 | `cacheClearAll` | export function | 182 |
-| 19 | `logCall` | function | 210 |
-| 20 | `getCallLog` | export function | 215 |
-| 21 | `clearCallLog` | export function | 216 |
-| 22 | `getClientMetaHeaders` | function | 218 |
-| 23 | `createApiError` | function | 222 |
-| 24 | `isCloudflareAccessRedirectResponse` | export function | 238 |
-| 25 | `createCloudflareAccessError` | function | 251 |
-| 26 | `dispatchUnauthorized` | function | 261 |
-| 27 | `shouldCompareRuntimeVersions` | export function | 273 |
-| 28 | `dispatchRuntimeVersionMismatch` | function | 289 |
-| 29 | `checkRuntimeVersionFromHealth` | function | 301 |
-| 30 | `createWriteBlockedError` | function | 308 |
-| 31 | `dispatchWriteBlocked` | function | 319 |
-| 32 | `dispatchTransientGatewayOutage` | function | 334 |
-| 33 | `isWriteConflictError` | export function | 350 |
-| 34 | `isWriteBlockedError` | export function | 354 |
-| 35 | `isInvalidSessionError` | export function | 358 |
-| 36 | `requireLiveServerWrite` | export function | 367 |
-| 37 | `getConflictRefreshChannels` | function | 399 |
-| 38 | `dispatchGlobalDataRefresh` | function | 408 |
-| 39 | `sleep` | function | 417 |
-| 40 | `hasUsableLocalData` | function | 421 |
-| 41 | `noteReadFailure` | function | 447 |
-| 42 | `stableStringifyForDedupe` | function | 468 |
-| 43 | `clampDedupeBody` | function | 478 |
-| 44 | `buildApiRequestDedupeKey` | export function | 484 |
-| 45 | `methodAllowsRequestBody` | function | 490 |
-| 46 | `__resetApiWriteDedupeForTests` | export function | 495 |
-| 47 | `apiFetch` | export function | 500 |
-| 48 | `parsed` | const arrow | 557 |
-| 49 | `isNetErr` | export function | 596 |
-| 50 | `isTransientGatewayError` | export function | 602 |
-| 51 | `isReachableServerResponseStatus` | export function | 607 |
-| 52 | `shouldDispatchUnauthorized` | function | 618 |
-| 53 | `isConnectivityError` | function | 631 |
-| 54 | `isServerOnline` | export function | 652 |
-| 55 | `setServerHealth` | function | 654 |
-| 56 | `pingServerHealth` | function | 667 |
-| 57 | `startHealthCheck` | export function | 699 |
-| 58 | `cacheGetStale` | export function | 730 |
-| 59 | `getChannelRefreshKey` | function | 739 |
-| 60 | `emitCacheRefresh` | function | 744 |
-| 61 | `clearInflight` | function | 758 |
-| 62 | `hasReusableInflight` | function | 763 |
+| 1 | `normalizeFileListResult` | function | 57 |
+| 2 | `appendUserAndDeviceFields` | function | 71 |
+| 3 | `dataUrlToBlob` | function | 80 |
+| 4 | `parseJsonResponse` | function | 87 |
+| 5 | `getFiles` | export function | 95 |
+| 6 | `uploadFileAsset` | export function | 105 |
+| 7 | `finish` | const arrow | 122 |
+| 8 | `deleteFileAsset` | export function | 172 |
+| 9 | `uploadUserAvatar` | export function | 184 |
 
-### 3.165 `frontend/src/api/importJobsTransport.ts`
+### 3.250 `frontend/src/api/http.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `encodeId` | function | 33 |
-| 2 | `getSource` | function | 37 |
-| 3 | `appendDeviceFields` | function | 41 |
-| 4 | `createImportJob` | export function | 48 |
-| 5 | `listImportJobs` | export function | 57 |
-| 6 | `getImportJob` | export function | 70 |
-| 7 | `getImportJobReview` | export function | 78 |
-| 8 | `updateImportJobDecisions` | export function | 87 |
-| 9 | `preflightImportJob` | export function | 96 |
-| 10 | `runImportJobAction` | function | 105 |
-| 11 | `startImportJob` | export function | 114 |
-| 12 | `approveImportJob` | export function | 118 |
-| 13 | `cancelImportJob` | export function | 122 |
-| 14 | `retryImportJob` | export function | 126 |
-| 15 | `deleteImportJob` | export function | 130 |
-| 16 | `getImportQueueStatus` | export function | 159 |
-| 17 | `downloadImportJobErrors` | export function | 167 |
-| 18 | `uploadImportJobCsv` | export function | 187 |
-| 19 | `uploadImportJobZip` | export function | 195 |
-| 20 | `uploadImportJobImages` | export function | 203 |
+| 1 | `hasStoredAuthSession` | function | 93 |
+| 2 | `isProtectedAdminHost` | function | 102 |
+| 3 | `normalizeApiPath` | function | 119 |
+| 4 | `isRequiredRuntimeApiPath` | export function | 131 |
+| 5 | `getApiMismatchKey` | function | 136 |
+| 6 | `getApiVersionMismatchCooldown` | export function | 140 |
+| 7 | `dispatchApiVersionMismatch` | function | 151 |
+| 8 | `createApiVersionMismatchError` | export function | 165 |
+| 9 | `isApiVersionMismatchError` | export function | 176 |
+| 10 | `markApiVersionMismatch` | export function | 180 |
+| 11 | `cacheGet` | export function | 190 |
+| 12 | `cacheSet` | export function | 194 |
+| 13 | `cacheInvalidate` | export function | 195 |
+| 14 | `cacheClearAll` | export function | 198 |
+| 15 | `ensureSyncUpdateCacheListener` | export function | 211 |
+| 16 | `logCall` | function | 230 |
+| 17 | `getCallLog` | export function | 235 |
+| 18 | `clearCallLog` | export function | 236 |
+| 19 | `getClientMetaHeaders` | function | 238 |
+| 20 | `createApiError` | function | 242 |
+| 21 | `isCloudflareAccessRedirectResponse` | export function | 258 |
+| 22 | `createCloudflareAccessError` | function | 271 |
+| 23 | `dispatchUnauthorized` | function | 281 |
+| 24 | `shouldCompareRuntimeVersions` | export function | 293 |
+| 25 | `dispatchRuntimeVersionMismatch` | function | 309 |
+| 26 | `checkRuntimeVersionFromHealth` | function | 321 |
+| 27 | `createWriteBlockedError` | function | 328 |
+| 28 | `dispatchWriteBlocked` | function | 339 |
+| 29 | `dispatchTransientGatewayOutage` | function | 354 |
+| 30 | `isWriteConflictError` | export function | 370 |
+| 31 | `isWriteBlockedError` | export function | 374 |
+| 32 | `isInvalidSessionError` | export function | 378 |
+| 33 | `requireLiveServerWrite` | export function | 387 |
+| 34 | `getConflictRefreshChannels` | function | 420 |
+| 35 | `dispatchGlobalDataRefresh` | function | 429 |
+| 36 | `sleep` | function | 438 |
+| 37 | `hasUsableLocalData` | function | 442 |
+| 38 | `noteReadFailure` | function | 468 |
+| 39 | `stableStringifyForDedupe` | function | 489 |
+| 40 | `clampDedupeBody` | function | 499 |
+| 41 | `buildApiRequestDedupeKey` | export function | 505 |
+| 42 | `methodAllowsRequestBody` | function | 511 |
+| 43 | `__resetApiWriteDedupeForTests` | export function | 516 |
+| 44 | `__resetApiHealthForTests` | export function | 520 |
+| 45 | `apiFetch` | export function | 532 |
+| 46 | `parsed` | const arrow | 591 |
+| 47 | `isNetErr` | export function | 630 |
+| 48 | `isTransientGatewayError` | export function | 636 |
+| 49 | `isReachableServerResponseStatus` | export function | 641 |
+| 50 | `shouldDispatchUnauthorized` | function | 652 |
+| 51 | `isConnectivityError` | function | 665 |
+| 52 | `isServerOnline` | export function | 691 |
+| 53 | `setServerHealth` | function | 693 |
+| 54 | `pingServerHealth` | export function | 708 |
+| 55 | `primeServerHealthFromRuntime` | export function | 780 |
+| 56 | `startHealthCheck` | export function | 801 |
+| 57 | `ensureHealthLifecycleListeners` | export function | 813 |
+| 58 | `cacheGetStale` | export function | 824 |
+| 59 | `getChannelRefreshKey` | function | 833 |
+| 60 | `emitCacheRefresh` | function | 838 |
+| 61 | `clearInflight` | function | 852 |
+| 62 | `hasReusableInflight` | function | 857 |
 
-### 3.166 `frontend/src/api/importTransport.ts`
+### 3.251 `frontend/src/api/httpState.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `buildMultipartHeaders` | export function | 13 |
-| 2 | `apiFormPost` | export function | 29 |
+| 1 | `getSyncServerUrl` | export function | 4 |
+| 2 | `getSyncToken` | export function | 8 |
+| 3 | `setSyncServerUrl` | export function | 12 |
+| 4 | `setSyncToken` | export function | 16 |
 
-### 3.167 `frontend/src/api/inventoryTransport.ts`
+### 3.252 `frontend/src/api/importJobsTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getDevicePayload` | function | 21 |
-| 2 | `adjustStock` | export function | 25 |
-| 3 | `transferInventoryStock` | export function | 34 |
-| 4 | `moveStockRow` | export function | 47 |
-| 5 | `getInventorySummary` | export function | 56 |
-| 6 | `getInventoryStats` | export function | 65 |
-| 7 | `searchInventoryProducts` | export function | 74 |
-| 8 | `getInventoryMovements` | export function | 85 |
-| 9 | `getInventoryReasons` | export function | 120 |
-| 10 | `saveInventoryReasons` | export function | 124 |
+| 1 | `encodeId` | function | 38 |
+| 2 | `getSource` | function | 42 |
+| 3 | `appendDeviceFields` | function | 46 |
+| 4 | `notifyImportJobActivity` | function | 53 |
+| 5 | `createImportJob` | export function | 63 |
+| 6 | `listImportJobs` | export function | 73 |
+| 7 | `getImportJob` | export function | 86 |
+| 8 | `getImportJobReview` | export function | 94 |
+| 9 | `updateImportJobDecisions` | export function | 103 |
+| 10 | `preflightImportJob` | export function | 112 |
+| 11 | `runImportJobAction` | function | 121 |
+| 12 | `startImportJob` | export function | 131 |
+| 13 | `approveImportJob` | export function | 135 |
+| 14 | `cancelImportJob` | export function | 139 |
+| 15 | `retryImportJob` | export function | 143 |
+| 16 | `deleteImportJob` | export function | 147 |
+| 17 | `getImportQueueStatus` | export function | 177 |
+| 18 | `downloadImportJobErrors` | export function | 185 |
+| 19 | `uploadImportJobCsv` | export function | 205 |
+| 20 | `uploadImportJobZip` | export function | 214 |
+| 21 | `uploadImportJobImages` | export function | 223 |
 
-### 3.168 `frontend/src/api/localDb.ts`
+### 3.253 `frontend/src/api/importTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `apiFormPost` | export function | 15 |
+
+### 3.254 `frontend/src/api/inventoryTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getInventorySummary` | export function | 17 |
+| 2 | `getInventoryStats` | export function | 26 |
+| 3 | `searchInventoryProducts` | export function | 35 |
+| 4 | `getInventoryBootstrap` | export function | 46 |
+| 5 | `getInventoryMovements` | export function | 57 |
+| 6 | `getInventoryReasons` | export function | 92 |
+
+### 3.255 `frontend/src/api/inventoryWriteTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getDevicePayload` | function | 7 |
+| 2 | `adjustStock` | export function | 11 |
+| 3 | `transferInventoryStock` | export function | 20 |
+| 4 | `moveStockRow` | export function | 33 |
+| 5 | `saveInventoryReasons` | export function | 42 |
+
+### 3.256 `frontend/src/api/lazyLocalDb.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getLocalDbModule` | export function | 5 |
+| 2 | `getLocalDb` | export function | 10 |
+
+### 3.257 `frontend/src/api/localDb.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3251,234 +5355,295 @@ Code files scanned: **515**
 | 9 | `splitCSVLine` | function | 268 |
 | 10 | `buildCSVTemplate` | export function | 279 |
 
-### 3.169 `frontend/src/api/localMirrors.ts`
+### 3.258 `frontend/src/api/localMirrors.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `shouldPersistLocalMirror` | export function | 29 |
-| 2 | `purgeSensitiveLiveServerMirrors` | export function | 33 |
-| 3 | `mirrorTable` | export function | 44 |
+| 1 | `getLocalDbModule` | function | 13 |
+| 2 | `scheduleMirrorWrite` | function | 18 |
+| 3 | `idle` | const arrow | 24 |
+| 4 | `shouldPersistLocalMirror` | export function | 53 |
+| 5 | `purgeSensitiveLiveServerMirrors` | export function | 57 |
+| 6 | `mirrorTable` | export function | 69 |
 
-### 3.170 `frontend/src/api/lookupTransport.ts`
+### 3.259 `frontend/src/api/lookupTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `listLookupRows` | function | 26 |
-| 2 | `createLookupRow` | function | 35 |
-| 3 | `updateLookupRow` | function | 44 |
-| 4 | `deleteLookupRow` | function | 57 |
-| 5 | `getCategories` | export function | 70 |
-| 6 | `createCategory` | export function | 74 |
-| 7 | `updateCategory` | export function | 78 |
-| 8 | `deleteCategory` | export function | 82 |
-| 9 | `getUnits` | export function | 86 |
-| 10 | `createUnit` | export function | 90 |
-| 11 | `updateUnit` | export function | 94 |
-| 12 | `deleteUnit` | export function | 98 |
+| 2 | `createLookupRow` | function | 38 |
+| 3 | `updateLookupRow` | function | 47 |
+| 4 | `deleteLookupRow` | function | 60 |
+| 5 | `getCategories` | export function | 73 |
+| 6 | `createCategory` | export function | 77 |
+| 7 | `updateCategory` | export function | 81 |
+| 8 | `deleteCategory` | export function | 85 |
+| 9 | `getUnits` | export function | 89 |
+| 10 | `createUnit` | export function | 93 |
+| 11 | `updateUnit` | export function | 97 |
+| 12 | `deleteUnit` | export function | 101 |
 
-### 3.171 `frontend/src/api/methods.ts`
+### 3.260 `frontend/src/api/methods.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getDeviceInfo` | function | 6 |
-| 2 | `discardPendingSyncQueue` | export function | 287 |
-| 3 | `getPendingSyncState` | export function | 299 |
-| 4 | `retryPendingSyncNow` | export function | 327 |
-| 5 | `canRefreshOfflineDeviceSnapshot` | function | 331 |
-| 6 | `readOfflineDeviceSnapshotMeta` | function | 338 |
-| 7 | `writeOfflineDeviceSnapshotMeta` | function | 346 |
-| 8 | `runOfflineSnapshotStep` | function | 363 |
-| 9 | `refreshOfflineDeviceSnapshot` | export function | 375 |
-| 10 | `previousMeta` | const arrow | 383 |
-| 11 | `invalidateClientRuntimeState` | function | 428 |
-| 12 | `login` | const arrow | 459 |
-| 13 | `logout` | const arrow | 461 |
-| 14 | `resetPasswordWithOtp` | const arrow | 463 |
-| 15 | `requestPasswordResetEmail` | const arrow | 465 |
-| 16 | `completePasswordReset` | const arrow | 467 |
-| 17 | `updateSessionDuration` | const arrow | 469 |
-| 18 | `getVerificationCapabilities` | const arrow | 471 |
-| 19 | `getSystemConfig` | const arrow | 473 |
-| 20 | `getNotificationSummary` | export function | 475 |
-| 21 | `getSystemDebugLog` | const arrow | 478 |
-| 22 | `startGoogleOauth` | const arrow | 480 |
-| 23 | `completeGoogleOauth` | const arrow | 482 |
-| 24 | `unlinkGoogleOauth` | const arrow | 484 |
-| 25 | `getAppBootstrap` | const arrow | 486 |
-| 26 | `getOrganizationBootstrap` | const arrow | 488 |
-| 27 | `searchOrganizations` | const arrow | 490 |
-| 28 | `getCurrentOrganization` | const arrow | 492 |
-| 29 | `getSettings` | export function | 496 |
-| 30 | `saveSettings` | export function | 517 |
-| 31 | `runSave` | const arrow | 518 |
-| 32 | `getCategories` | const arrow | 581 |
-| 33 | `updateCategory` | const arrow | 588 |
-| 34 | `deleteCategory` | const arrow | 593 |
-| 35 | `getUnits` | const arrow | 600 |
-| 36 | `updateUnit` | const arrow | 607 |
-| 37 | `deleteUnit` | const arrow | 612 |
-| 38 | `getBranches` | const arrow | 619 |
-| 39 | `getBranchSummary` | const arrow | 621 |
-| 40 | `updateBranch` | const arrow | 625 |
-| 41 | `deleteBranch` | const arrow | 627 |
-| 42 | `getBranchStock` | const arrow | 629 |
-| 43 | `getTransfers` | const arrow | 631 |
-| 44 | `getBranchStockIntegrity` | const arrow | 635 |
-| 45 | `getProducts` | const arrow | 641 |
-| 46 | `searchProducts` | const arrow | 643 |
-| 47 | `getProductsByIds` | const arrow | 645 |
-| 48 | `getProductFilters` | const arrow | 647 |
-| 49 | `getProductLookupUsage` | const arrow | 649 |
-| 50 | `replaceProductLookupValues` | const arrow | 651 |
-| 51 | `getCatalogMeta` | export function | 653 |
-| 52 | `getCatalogProducts` | export function | 656 |
-| 53 | `getPortalConfig` | export function | 659 |
-| 54 | `getPortalBootstrap` | export function | 662 |
-| 55 | `getPortalCatalogMeta` | export function | 665 |
-| 56 | `getPortalCatalogProducts` | export function | 668 |
-| 57 | `searchPortalCatalogProducts` | export function | 671 |
-| 58 | `lookupPortalMembership` | export function | 674 |
-| 59 | `createPortalSubmission` | export function | 677 |
-| 60 | `getPortalAiStatus` | export function | 680 |
-| 61 | `askPortalAi` | export function | 683 |
-| 62 | `getPortalSubmissionsForReview` | const arrow | 686 |
-| 63 | `reviewPortalSubmission` | const arrow | 688 |
-| 64 | `getAiProviders` | const arrow | 691 |
-| 65 | `createAiProvider` | const arrow | 693 |
-| 66 | `updateAiProvider` | const arrow | 695 |
-| 67 | `deleteAiProvider` | const arrow | 697 |
-| 68 | `testAiProvider` | const arrow | 699 |
-| 69 | `getAiResponses` | const arrow | 701 |
-| 70 | `createProduct` | const arrow | 703 |
-| 71 | `updateProduct` | const arrow | 705 |
-| 72 | `deleteProduct` | const arrow | 707 |
-| 73 | `otpSetup` | const arrow | 711 |
-| 74 | `otpConfirm` | const arrow | 713 |
-| 75 | `otpDisable` | const arrow | 715 |
-| 76 | `otpVerify` | const arrow | 717 |
-| 77 | `otpStatus` | const arrow | 719 |
-| 78 | `listImportJobs` | const arrow | 731 |
-| 79 | `getImportJobReview` | const arrow | 735 |
-| 80 | `updateImportJobDecisions` | const arrow | 737 |
-| 81 | `startImportJob` | const arrow | 741 |
-| 82 | `approveImportJob` | const arrow | 743 |
-| 83 | `cancelImportJob` | const arrow | 745 |
-| 84 | `retryImportJob` | const arrow | 747 |
-| 85 | `deleteImportJob` | const arrow | 749 |
-| 86 | `getImportQueueStatus` | const arrow | 751 |
-| 87 | `getFiles` | const arrow | 762 |
-| 88 | `deleteFileAsset` | const arrow | 768 |
-| 89 | `getActionHistory` | const arrow | 806 |
-| 90 | `updateActionHistory` | const arrow | 811 |
-| 91 | `getInventorySummary` | const arrow | 817 |
-| 92 | `getInventoryStats` | const arrow | 819 |
-| 93 | `searchInventoryProducts` | const arrow | 821 |
-| 94 | `getInventoryMovements` | const arrow | 823 |
-| 95 | `getInventoryReasons` | const arrow | 825 |
-| 96 | `saveInventoryReasons` | const arrow | 827 |
-| 97 | `buildOfflineSaleReceiptNumber` | function | 830 |
-| 98 | `isRetryableOfflineSaleError` | function | 836 |
-| 99 | `findQueuedSale` | function | 845 |
-| 100 | `putOfflineSaleMirror` | function | 852 |
-| 101 | `queueOfflineSale` | function | 877 |
-| 102 | `queuedSaleBackoffMs` | function | 935 |
-| 103 | `updateQueuedRow` | function | 940 |
-| 104 | `completeQueuedSale` | function | 949 |
-| 105 | `failQueuedSale` | function | 972 |
-| 106 | `markQueuedSaleConflict` | function | 985 |
-| 107 | `syncPendingSalesQueue` | function | 1007 |
-| 108 | `getRfidStatus` | const arrow | 1050 |
-| 109 | `searchRfidTags` | const arrow | 1055 |
-| 110 | `recordRfidSessionEvents` | const arrow | 1060 |
-| 111 | `applyRfidSession` | const arrow | 1064 |
-| 112 | `createSale` | export function | 1068 |
-| 113 | `getSales` | const arrow | 1080 |
-| 114 | `getDashboard` | const arrow | 1085 |
-| 115 | `getAnalytics` | const arrow | 1086 |
-| 116 | `getCustomers` | const arrow | 1089 |
-| 117 | `getCustomerPointSummaries` | const arrow | 1092 |
-| 118 | `createCustomer` | export function | 1095 |
-| 119 | `updateCustomer` | const arrow | 1098 |
-| 120 | `deleteCustomer` | const arrow | 1101 |
-| 121 | `downloadCustomerTemplate` | const arrow | 1106 |
-| 122 | `getSuppliers` | const arrow | 1110 |
-| 123 | `createSupplier` | export function | 1113 |
-| 124 | `updateSupplier` | const arrow | 1116 |
-| 125 | `deleteSupplier` | const arrow | 1119 |
-| 126 | `downloadSupplierTemplate` | const arrow | 1124 |
-| 127 | `getDeliveryContacts` | const arrow | 1128 |
-| 128 | `createDeliveryContact` | export function | 1131 |
-| 129 | `updateDeliveryContact` | const arrow | 1134 |
-| 130 | `deleteDeliveryContact` | const arrow | 1137 |
-| 131 | `getUsers` | const arrow | 1144 |
-| 132 | `updateUser` | const arrow | 1146 |
-| 133 | `getUserProfile` | const arrow | 1147 |
-| 134 | `getUserAuthMethods` | const arrow | 1148 |
-| 135 | `updateUserProfile` | const arrow | 1150 |
-| 136 | `disconnectUserAuthProvider` | const arrow | 1152 |
-| 137 | `changeUserPassword` | const arrow | 1154 |
-| 138 | `resetPassword` | const arrow | 1156 |
-| 139 | `getRoles` | const arrow | 1159 |
-| 140 | `updateRole` | const arrow | 1161 |
-| 141 | `deleteRole` | const arrow | 1162 |
-| 142 | `getCustomTables` | const arrow | 1165 |
-| 143 | `getCustomTableData` | const arrow | 1167 |
-| 144 | `insertCustomRow` | const arrow | 1168 |
-| 145 | `updateCustomRow` | const arrow | 1169 |
-| 146 | `deleteCustomRow` | const arrow | 1170 |
-| 147 | `getAuditLogs` | const arrow | 1173 |
-| 148 | `deleteAuditLogsRetention` | const arrow | 1176 |
-| 149 | `getSystemJob` | export function | 1180 |
-| 150 | `cancelSystemJob` | export function | 1184 |
-| 151 | `pollSystemJob` | export function | 1188 |
-| 152 | `getIntegrationDoctor` | const arrow | 1192 |
-| 153 | `queueBackupFolderExport` | export function | 1195 |
-| 154 | `exportBackupFolder` | export function | 1199 |
-| 155 | `queueBackupFolderRestore` | export function | 1203 |
-| 156 | `importBackupFolder` | export function | 1207 |
-| 157 | `getGoogleDriveSyncStatus` | const arrow | 1215 |
-| 158 | `saveGoogleDriveSyncPreferences` | const arrow | 1218 |
-| 159 | `startGoogleDriveSyncOauth` | const arrow | 1221 |
-| 160 | `disconnectGoogleDriveSync` | const arrow | 1224 |
-| 161 | `forgetGoogleDriveSyncCredentials` | const arrow | 1227 |
-| 162 | `queueGoogleDriveSyncNow` | const arrow | 1230 |
-| 163 | `syncGoogleDriveNow` | const arrow | 1233 |
-| 164 | `resetData` | export function | 1236 |
-| 165 | `factoryReset` | export function | 1243 |
-| 166 | `downloadImportTemplate` | export function | 1251 |
-| 167 | `openPath` | const arrow | 1298 |
-| 168 | `getReturns` | const arrow | 1302 |
-| 169 | `createReturn` | export function | 1308 |
-| 170 | `createSupplierReturn` | export function | 1314 |
-| 171 | `updateSaleStatus` | const arrow | 1323 |
-| 172 | `attachSaleCustomer` | const arrow | 1339 |
-| 173 | `getSalesExport` | const arrow | 1363 |
-| 174 | `updateReturn` | const arrow | 1367 |
-| 175 | `testSyncServer` | const arrow | 1391 |
-| 176 | `openFolderDialog` | const arrow | 1396 |
-| 177 | `getDataPath` | const arrow | 1400 |
-| 178 | `getScaleMigrationStatus` | const arrow | 1402 |
-| 179 | `prepareScaleMigration` | const arrow | 1404 |
-| 180 | `runScaleMigration` | const arrow | 1406 |
-| 181 | `setDataPath` | export function | 1408 |
-| 182 | `resetDataPath` | export function | 1413 |
-| 183 | `browseDir` | const arrow | 1418 |
+| 1 | `loadPortalTransport` | function | 46 |
+| 2 | `loadSaleWriteTransport` | function | 51 |
+| 3 | `loadCsvTemplateModule` | function | 56 |
+| 4 | `loadBrowserDialogsModule` | function | 61 |
+| 5 | `loadAiTransport` | function | 66 |
+| 6 | `loadActionHistoryTransport` | function | 71 |
+| 7 | `loadAuditLogTransport` | function | 76 |
+| 8 | `loadAuthTransport` | function | 81 |
+| 9 | `loadContactsTransport` | function | 86 |
+| 10 | `loadDashboardTransport` | function | 91 |
+| 11 | `loadFileTransport` | function | 96 |
+| 12 | `loadBranchTransport` | function | 101 |
+| 13 | `loadInventoryTransport` | function | 106 |
+| 14 | `loadInventoryWriteTransport` | function | 111 |
+| 15 | `loadImportJobsTransport` | function | 116 |
+| 16 | `loadProductWriteTransport` | function | 121 |
+| 17 | `loadProductImageUploadTransport` | function | 126 |
+| 18 | `loadRfidTransport` | function | 131 |
+| 19 | `loadSalesTransport` | function | 136 |
+| 20 | `loadSettingsTransport` | function | 141 |
+| 21 | `loadOfflineSnapshotTransport` | function | 146 |
+| 22 | `loadReturnsTransport` | function | 151 |
+| 23 | `loadPendingSyncTransport` | function | 156 |
+| 24 | `loadDriveSyncTransport` | function | 161 |
+| 25 | `loadNotificationSummaryTransport` | function | 166 |
+| 26 | `loadSystemJobsTransport` | function | 171 |
+| 27 | `loadLookupTransport` | function | 176 |
+| 28 | `loadProductReadTransport` | function | 181 |
+| 29 | `loadQueryCacheModule` | function | 186 |
+| 30 | `loadLocalMirrorsModule` | function | 191 |
+| 31 | `loadUserAdminTransport` | function | 196 |
+| 32 | `loadUserReadTransport` | function | 201 |
+| 33 | `loadCustomTablesTransport` | function | 206 |
+| 34 | `loadClientRuntimeModule` | function | 211 |
+| 35 | `loadAppRefreshModule` | function | 216 |
+| 36 | `loadHttpCoreModule` | function | 221 |
+| 37 | `buildImportCsvTemplate` | function | 226 |
+| 38 | `openCSVDialog` | export function | 239 |
+| 39 | `openImageDialog` | export function | 244 |
+| 40 | `getImageDataUrl` | export function | 249 |
+| 41 | `loadSystemRuntimeModule` | function | 258 |
+| 42 | `callSystemRuntimeMethod` | function | 263 |
+| 43 | `scheduleSensitiveMirrorPurge` | function | 270 |
+| 44 | `run` | const arrow | 271 |
+| 45 | `discardPendingSyncQueue` | export function | 289 |
+| 46 | `getPendingSyncState` | export function | 294 |
+| 47 | `retryPendingSyncNow` | export function | 299 |
+| 48 | `refreshOfflineDeviceSnapshot` | export function | 304 |
+| 49 | `invalidateClientRuntimeState` | function | 309 |
+| 50 | `dispatchRefreshAppData` | function | 327 |
+| 51 | `login` | const arrow | 351 |
+| 52 | `logout` | const arrow | 355 |
+| 53 | `resetPasswordWithOtp` | const arrow | 359 |
+| 54 | `requestPasswordResetEmail` | const arrow | 363 |
+| 55 | `completePasswordReset` | const arrow | 367 |
+| 56 | `updateSessionDuration` | const arrow | 371 |
+| 57 | `getVerificationCapabilities` | const arrow | 375 |
+| 58 | `getSystemConfig` | const arrow | 379 |
+| 59 | `getSystemBootstrap` | const arrow | 381 |
+| 60 | `getNotificationSummary` | export function | 383 |
+| 61 | `getSystemDebugLog` | const arrow | 387 |
+| 62 | `startGoogleOauth` | const arrow | 389 |
+| 63 | `completeGoogleOauth` | const arrow | 393 |
+| 64 | `unlinkGoogleOauth` | const arrow | 397 |
+| 65 | `getAppBootstrap` | const arrow | 401 |
+| 66 | `getOrganizationBootstrap` | const arrow | 405 |
+| 67 | `searchOrganizations` | const arrow | 409 |
+| 68 | `getCurrentOrganization` | const arrow | 413 |
+| 69 | `getSettings` | export function | 419 |
+| 70 | `saveSettings` | export function | 424 |
+| 71 | `getCategories` | const arrow | 430 |
+| 72 | `updateCategory` | const arrow | 440 |
+| 73 | `deleteCategory` | const arrow | 446 |
+| 74 | `getUnits` | const arrow | 454 |
+| 75 | `updateUnit` | const arrow | 464 |
+| 76 | `deleteUnit` | const arrow | 470 |
+| 77 | `getBranches` | const arrow | 478 |
+| 78 | `getBranchSummary` | const arrow | 482 |
+| 79 | `updateBranch` | const arrow | 490 |
+| 80 | `deleteBranch` | const arrow | 494 |
+| 81 | `getBranchStock` | const arrow | 498 |
+| 82 | `getTransfers` | const arrow | 502 |
+| 83 | `getBranchStockIntegrity` | const arrow | 510 |
+| 84 | `getProducts` | const arrow | 520 |
+| 85 | `searchProducts` | const arrow | 524 |
+| 86 | `getProductBootstrap` | const arrow | 528 |
+| 87 | `getProductsByIds` | const arrow | 532 |
+| 88 | `getProductFilters` | const arrow | 536 |
+| 89 | `getProductLookupUsage` | const arrow | 540 |
+| 90 | `replaceProductLookupValues` | const arrow | 544 |
+| 91 | `getCatalogMeta` | export function | 548 |
+| 92 | `getCatalogProducts` | export function | 552 |
+| 93 | `getPortalConfig` | export function | 556 |
+| 94 | `getPortalBootstrap` | export function | 560 |
+| 95 | `getPortalCatalogMeta` | export function | 564 |
+| 96 | `getPortalCatalogProducts` | export function | 568 |
+| 97 | `searchPortalCatalogProducts` | export function | 572 |
+| 98 | `lookupPortalMembership` | export function | 576 |
+| 99 | `createPortalSubmission` | export function | 580 |
+| 100 | `getPortalAiStatus` | export function | 584 |
+| 101 | `askPortalAi` | export function | 588 |
+| 102 | `getPortalSubmissionsForReview` | const arrow | 592 |
+| 103 | `reviewPortalSubmission` | const arrow | 596 |
+| 104 | `getAiProviders` | const arrow | 601 |
+| 105 | `createAiProvider` | const arrow | 605 |
+| 106 | `updateAiProvider` | const arrow | 609 |
+| 107 | `deleteAiProvider` | const arrow | 613 |
+| 108 | `testAiProvider` | const arrow | 617 |
+| 109 | `getAiResponses` | const arrow | 621 |
+| 110 | `createProduct` | const arrow | 625 |
+| 111 | `updateProduct` | const arrow | 629 |
+| 112 | `deleteProduct` | const arrow | 633 |
+| 113 | `otpSetup` | const arrow | 639 |
+| 114 | `otpConfirm` | const arrow | 643 |
+| 115 | `otpDisable` | const arrow | 647 |
+| 116 | `otpVerify` | const arrow | 651 |
+| 117 | `otpStatus` | const arrow | 655 |
+| 118 | `listImportJobs` | const arrow | 675 |
+| 119 | `getImportJobReview` | const arrow | 683 |
+| 120 | `updateImportJobDecisions` | const arrow | 687 |
+| 121 | `startImportJob` | const arrow | 695 |
+| 122 | `approveImportJob` | const arrow | 699 |
+| 123 | `cancelImportJob` | const arrow | 703 |
+| 124 | `retryImportJob` | const arrow | 707 |
+| 125 | `deleteImportJob` | const arrow | 711 |
+| 126 | `getImportQueueStatus` | const arrow | 715 |
+| 127 | `getFiles` | const arrow | 736 |
+| 128 | `deleteFileAsset` | const arrow | 746 |
+| 129 | `getActionHistory` | const arrow | 796 |
+| 130 | `updateActionHistory` | const arrow | 804 |
+| 131 | `getInventorySummary` | const arrow | 816 |
+| 132 | `getInventoryStats` | const arrow | 820 |
+| 133 | `getInventoryBootstrap` | const arrow | 824 |
+| 134 | `searchInventoryProducts` | const arrow | 828 |
+| 135 | `getInventoryMovements` | const arrow | 832 |
+| 136 | `getInventoryReasons` | const arrow | 836 |
+| 137 | `saveInventoryReasons` | const arrow | 840 |
+| 138 | `getRfidStatus` | const arrow | 845 |
+| 139 | `searchRfidTags` | const arrow | 853 |
+| 140 | `recordRfidSessionEvents` | const arrow | 861 |
+| 141 | `applyRfidSession` | const arrow | 869 |
+| 142 | `createSale` | export function | 875 |
+| 143 | `getSales` | const arrow | 880 |
+| 144 | `getDashboard` | const arrow | 886 |
+| 145 | `getAnalytics` | const arrow | 890 |
+| 146 | `getCustomers` | const arrow | 896 |
+| 147 | `getCustomerPointSummaries` | const arrow | 900 |
+| 148 | `createCustomer` | export function | 904 |
+| 149 | `updateCustomer` | const arrow | 908 |
+| 150 | `deleteCustomer` | const arrow | 912 |
+| 151 | `downloadCustomerTemplate` | const arrow | 920 |
+| 152 | `getSuppliers` | const arrow | 926 |
+| 153 | `createSupplier` | export function | 930 |
+| 154 | `updateSupplier` | const arrow | 934 |
+| 155 | `deleteSupplier` | const arrow | 938 |
+| 156 | `downloadSupplierTemplate` | const arrow | 946 |
+| 157 | `getDeliveryContacts` | const arrow | 952 |
+| 158 | `createDeliveryContact` | export function | 956 |
+| 159 | `updateDeliveryContact` | const arrow | 960 |
+| 160 | `deleteDeliveryContact` | const arrow | 964 |
+| 161 | `getUsers` | const arrow | 974 |
+| 162 | `updateUser` | const arrow | 982 |
+| 163 | `getUserProfile` | const arrow | 986 |
+| 164 | `getUserAuthMethods` | const arrow | 990 |
+| 165 | `updateUserProfile` | const arrow | 994 |
+| 166 | `disconnectUserAuthProvider` | const arrow | 998 |
+| 167 | `changeUserPassword` | const arrow | 1002 |
+| 168 | `resetPassword` | const arrow | 1006 |
+| 169 | `getRoles` | const arrow | 1012 |
+| 170 | `updateRole` | const arrow | 1020 |
+| 171 | `deleteRole` | const arrow | 1024 |
+| 172 | `getCustomTables` | const arrow | 1030 |
+| 173 | `getCustomTableData` | const arrow | 1038 |
+| 174 | `insertCustomRow` | const arrow | 1042 |
+| 175 | `updateCustomRow` | const arrow | 1046 |
+| 176 | `deleteCustomRow` | const arrow | 1050 |
+| 177 | `getAuditLogs` | const arrow | 1056 |
+| 178 | `deleteAuditLogsRetention` | const arrow | 1061 |
+| 179 | `getSystemJob` | export function | 1067 |
+| 180 | `cancelSystemJob` | export function | 1072 |
+| 181 | `pollSystemJob` | export function | 1077 |
+| 182 | `getIntegrationDoctor` | const arrow | 1082 |
+| 183 | `queueBackupFolderExport` | export function | 1085 |
+| 184 | `exportBackupFolder` | export function | 1090 |
+| 185 | `queueBackupFolderRestore` | export function | 1094 |
+| 186 | `importBackupFolder` | export function | 1099 |
+| 187 | `getGoogleDriveSyncStatus` | const arrow | 1107 |
+| 188 | `saveGoogleDriveSyncPreferences` | const arrow | 1112 |
+| 189 | `startGoogleDriveSyncOauth` | const arrow | 1117 |
+| 190 | `disconnectGoogleDriveSync` | const arrow | 1122 |
+| 191 | `forgetGoogleDriveSyncCredentials` | const arrow | 1127 |
+| 192 | `queueGoogleDriveSyncNow` | const arrow | 1132 |
+| 193 | `syncGoogleDriveNow` | const arrow | 1137 |
+| 194 | `resetData` | export function | 1142 |
+| 195 | `factoryReset` | export function | 1148 |
+| 196 | `downloadImportTemplate` | export function | 1155 |
+| 197 | `openPath` | const arrow | 1202 |
+| 198 | `getReturns` | const arrow | 1206 |
+| 199 | `createReturn` | export function | 1210 |
+| 200 | `createSupplierReturn` | export function | 1214 |
+| 201 | `getReturn` | const arrow | 1218 |
+| 202 | `updateSaleStatus` | const arrow | 1224 |
+| 203 | `attachSaleCustomer` | const arrow | 1230 |
+| 204 | `getSalesExport` | const arrow | 1235 |
+| 205 | `updateReturn` | const arrow | 1239 |
+| 206 | `testSyncServer` | const arrow | 1246 |
+| 207 | `openFolderDialog` | const arrow | 1251 |
+| 208 | `getDataPath` | const arrow | 1255 |
+| 209 | `getScaleMigrationStatus` | const arrow | 1257 |
+| 210 | `prepareScaleMigration` | const arrow | 1259 |
+| 211 | `runScaleMigration` | const arrow | 1261 |
+| 212 | `setDataPath` | export function | 1263 |
+| 213 | `resetDataPath` | export function | 1268 |
+| 214 | `browseDir` | const arrow | 1273 |
 
-### 3.172 `frontend/src/api/notificationSummary.ts`
+### 3.261 `frontend/src/api/multipartHeaders.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `buildMultipartHeaders` | export function | 10 |
+
+### 3.262 `frontend/src/api/notificationSummary.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildNotificationSummaryFallback` | function | 12 |
 | 2 | `getNotificationSummary` | export function | 22 |
 
-### 3.173 `frontend/src/api/portalHttp.ts`
+### 3.263 `frontend/src/api/offlineSnapshotTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `canRefreshOfflineDeviceSnapshot` | function | 26 |
+| 2 | `readOfflineDeviceSnapshotMeta` | function | 33 |
+| 3 | `writeOfflineDeviceSnapshotMeta` | function | 42 |
+| 4 | `getSettingsSnapshot` | function | 60 |
+| 5 | `getReturnsSnapshot` | function | 69 |
+| 6 | `runOfflineSnapshotStep` | function | 73 |
+| 7 | `refreshOfflineDeviceSnapshot` | export function | 85 |
+| 8 | `previousMeta` | const arrow | 93 |
+
+### 3.264 `frontend/src/api/pendingSyncTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `discardPendingSyncQueue` | export function | 21 |
+| 2 | `getPendingSyncState` | export function | 38 |
+| 3 | `retryPendingSyncNow` | export function | 67 |
+
+### 3.265 `frontend/src/api/portalHttp.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getPortalBaseUrl` | export function | 3 |
 | 2 | `fetchJsonWithTimeout` | export function | 8 |
 
-### 3.174 `frontend/src/api/portalTransport.ts`
+### 3.266 `frontend/src/api/portalTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3498,31 +5663,39 @@ Code files scanned: **515**
 | 14 | `getPortalSubmissionsForReview` | export function | 109 |
 | 15 | `reviewPortalSubmission` | export function | 113 |
 
-### 3.175 `frontend/src/api/productReadTransport.ts`
+### 3.267 `frontend/src/api/productImageUploadTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `dataUrlToBlob` | function | 10 |
+| 2 | `uploadProductImage` | export function | 19 |
+
+### 3.268 `frontend/src/api/productReadTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getProducts` | export function | 15 |
-| 2 | `searchProducts` | export function | 24 |
-| 3 | `getProductsByIds` | export function | 35 |
-| 4 | `getProductFilters` | export function | 47 |
-| 5 | `getProductLookupUsage` | export function | 58 |
-| 6 | `replaceProductLookupValues` | export function | 68 |
+| 2 | `searchProducts` | export function | 27 |
+| 3 | `getProductBootstrap` | export function | 38 |
+| 4 | `getProductsByIds` | export function | 49 |
+| 5 | `getProductFilters` | export function | 61 |
+| 6 | `getProductLookupUsage` | export function | 72 |
+| 7 | `replaceProductLookupValues` | export function | 82 |
 
-### 3.176 `frontend/src/api/productWriteTransport.ts`
+### 3.269 `frontend/src/api/productWriteTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getDevicePayload` | function | 9 |
 | 2 | `encodeId` | function | 13 |
 | 3 | `ensureSupplierExists` | function | 17 |
-| 4 | `createProduct` | export function | 37 |
-| 5 | `updateProduct` | export function | 48 |
-| 6 | `deleteProduct` | export function | 59 |
-| 7 | `createProductVariant` | export function | 69 |
-| 8 | `bulkImportProducts` | export function | 78 |
+| 4 | `createProduct` | export function | 38 |
+| 5 | `updateProduct` | export function | 49 |
+| 6 | `deleteProduct` | export function | 60 |
+| 7 | `createProductVariant` | export function | 70 |
+| 8 | `bulkImportProducts` | export function | 79 |
 
-### 3.177 `frontend/src/api/query.ts`
+### 3.270 `frontend/src/api/query.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3531,20 +5704,35 @@ Code files scanned: **515**
 | 3 | `normalizePositiveUniqueIds` | export function | 31 |
 | 4 | `appendQueryValue` | function | 44 |
 
-### 3.178 `frontend/src/api/queryCache.ts`
+### 3.271 `frontend/src/api/queryCache.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildQueryCacheStorageKey` | export function | 6 |
-| 2 | `clearCachedQueryResults` | export function | 38 |
+| 2 | `clearCachedQueryResults` | export function | 40 |
 
-### 3.179 `frontend/src/api/requestIds.ts`
+### 3.272 `frontend/src/api/requestIds.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createClientRequestId` | export function | 3 |
 
-### 3.180 `frontend/src/api/rfidTransport.ts`
+### 3.273 `frontend/src/api/returnsTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `encodeId` | function | 22 |
+| 2 | `getDevicePayload` | function | 26 |
+| 3 | `getResultTimestamp` | function | 30 |
+| 4 | `buildReturnNumber` | function | 35 |
+| 5 | `attachAttemptedReturnUpdate` | function | 39 |
+| 6 | `getReturns` | export function | 54 |
+| 7 | `createReturn` | export function | 69 |
+| 8 | `createSupplierReturn` | export function | 82 |
+| 9 | `getReturn` | export function | 95 |
+| 10 | `updateReturn` | export function | 103 |
+
+### 3.274 `frontend/src/api/rfidTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3558,21 +5746,64 @@ Code files scanned: **515**
 | 8 | `getRfidSessionReview` | export function | 63 |
 | 9 | `applyRfidSession` | export function | 71 |
 
-### 3.181 `frontend/src/api/salesTransport.ts`
+### 3.275 `frontend/src/api/salesTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `createSale` | export function | 9 |
-| 2 | `createSaleWithoutWriteDedupe` | export function | 18 |
-| 3 | `getSales` | export function | 28 |
+| 1 | `encodeId` | function | 21 |
+| 2 | `getDevicePayload` | function | 25 |
+| 3 | `getResultTimestamp` | function | 29 |
+| 4 | `attachAttempted` | function | 34 |
+| 5 | `createSale` | export function | 42 |
+| 6 | `createSaleWithoutWriteDedupe` | export function | 51 |
+| 7 | `getSales` | export function | 61 |
+| 8 | `updateSaleStatus` | export function | 75 |
+| 9 | `attachSaleCustomer` | export function | 103 |
+| 10 | `getSalesExport` | export function | 135 |
 
-### 3.182 `frontend/src/api/syncPreview.ts`
+### 3.276 `frontend/src/api/saleWriteTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `asText` | function | 27 |
+| 2 | `createSaleClientRequestId` | function | 31 |
+| 3 | `ensureSaleClientRequestId` | function | 38 |
+| 4 | `localTable` | function | 44 |
+| 5 | `buildOfflineSaleReceiptNumber` | function | 48 |
+| 6 | `isRetryableOfflineSaleError` | function | 54 |
+| 7 | `findQueuedSale` | function | 64 |
+| 8 | `putOfflineSaleMirror` | function | 72 |
+| 9 | `queueOfflineSale` | function | 98 |
+| 10 | `queuedSaleBackoffMs` | function | 157 |
+| 11 | `updateQueuedRow` | function | 162 |
+| 12 | `completeQueuedSale` | function | 172 |
+| 13 | `failQueuedSale` | function | 201 |
+| 14 | `markQueuedSaleConflict` | function | 215 |
+| 15 | `createSaleRequest` | function | 238 |
+| 16 | `createSaleWithoutWriteDedupe` | function | 247 |
+| 17 | `syncPendingSalesQueue` | export function | 257 |
+| 18 | `createSale` | export function | 301 |
+
+### 3.277 `frontend/src/api/settingsTransport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `asSettingsPayload` | function | 27 |
+| 2 | `asSettingsConflictError` | function | 31 |
+| 3 | `saveSettingsLocally` | function | 35 |
+| 4 | `saveSettingsMeta` | function | 39 |
+| 5 | `getServerSettings` | function | 43 |
+| 6 | `getSettings` | export function | 50 |
+| 7 | `saveSettingsOnce` | function | 64 |
+| 8 | `saveSettings` | export function | 113 |
+
+### 3.278 `frontend/src/api/syncPreview.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `serializePendingSyncPreview` | export function | 33 |
 
-### 3.183 `frontend/src/api/syncRuntime.ts`
+### 3.279 `frontend/src/api/syncRuntime.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3581,7 +5812,7 @@ Code files scanned: **515**
 | 3 | `hasStoredUserSession` | export function | 32 |
 | 4 | `registerOutboxBackgroundSync` | export function | 41 |
 
-### 3.184 `frontend/src/api/systemJobs.ts`
+### 3.280 `frontend/src/api/systemJobs.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3596,147 +5827,183 @@ Code files scanned: **515**
 | 9 | `queueBackupFolderRestore` | export function | 96 |
 | 10 | `importBackupFolder` | export function | 103 |
 
-### 3.185 `frontend/src/api/systemRuntime.ts`
+### 3.281 `frontend/src/api/systemRuntime.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getSystemConfig` | export function | 8 |
-| 2 | `getSystemDebugLog` | export function | 12 |
-| 3 | `getIntegrationDoctor` | export function | 16 |
-| 4 | `resetData` | export function | 27 |
-| 5 | `factoryReset` | export function | 36 |
-| 6 | `openPath` | export function | 45 |
-| 7 | `testSyncServer` | export function | 53 |
-| 8 | `openFolderDialog` | export function | 71 |
-| 9 | `getDataPath` | export function | 83 |
-| 10 | `getScaleMigrationStatus` | export function | 87 |
-| 11 | `prepareScaleMigration` | export function | 91 |
-| 12 | `runScaleMigration` | export function | 100 |
-| 13 | `setDataPath` | export function | 109 |
-| 14 | `resetDataPath` | export function | 118 |
-| 15 | `browseDir` | export function | 127 |
+| 2 | `getSystemBootstrap` | export function | 12 |
+| 3 | `getSystemDebugLog` | export function | 16 |
+| 4 | `getIntegrationDoctor` | export function | 20 |
+| 5 | `resetData` | export function | 31 |
+| 6 | `factoryReset` | export function | 40 |
+| 7 | `openPath` | export function | 49 |
+| 8 | `testSyncServer` | export function | 57 |
+| 9 | `openFolderDialog` | export function | 75 |
+| 10 | `getDataPath` | export function | 87 |
+| 11 | `getScaleMigrationStatus` | export function | 91 |
+| 12 | `prepareScaleMigration` | export function | 95 |
+| 13 | `runScaleMigration` | export function | 104 |
+| 14 | `setDataPath` | export function | 113 |
+| 15 | `resetDataPath` | export function | 122 |
+| 16 | `browseDir` | export function | 131 |
 
-### 3.186 `frontend/src/api/websocket.ts`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `clearReconnectTimer` | function | 21 |
-| 2 | `clearPingTimer` | function | 27 |
-| 3 | `hasStoredAuthSession` | function | 33 |
-| 4 | `isProtectedAdminHost` | function | 42 |
-| 5 | `shouldDebugWs` | function | 52 |
-| 6 | `logWs` | function | 62 |
-| 7 | `connectWS` | export function | 68 |
-| 8 | `disconnectWS` | export function | 158 |
-| 9 | `reconnectWS` | export function | 178 |
-| 10 | `scheduleReconnect` | function | 183 |
-| 11 | `isWSConnected` | export function | 202 |
-
-### 3.187 `frontend/src/App.tsx`
+### 3.282 `frontend/src/api/userAdminTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `asPageModule` | function | 178 |
-| 2 | `getAppShellApi` | function | 182 |
-| 3 | `getConnection` | function | 186 |
-| 4 | `isPageId` | function | 192 |
-| 5 | `normalizePageId` | function | 196 |
-| 6 | `getErrorMessage` | function | 200 |
-| 7 | `getChunkErrorMessage` | function | 300 |
-| 8 | `isChunkLoadError` | function | 305 |
-| 9 | `createChunkTimeoutError` | function | 314 |
-| 10 | `isRetryableImportError` | function | 320 |
-| 11 | `importWithTimeout` | function | 328 |
-| 12 | `clearRetryMarker` | function | 344 |
-| 13 | `buildChunkRecoveryUrl` | function | 351 |
-| 14 | `deleteStaleShellCaches` | function | 362 |
-| 15 | `clearStaleShellCaches` | function | 375 |
-| 16 | `triggerChunkRecoveryReload` | function | 385 |
-| 17 | `reload` | const arrow | 392 |
-| 18 | `createChunkReloadStallError` | function | 402 |
-| 19 | `shouldRetryChunk` | function | 408 |
-| 20 | `lazyWithRetry` | function | 418 |
-| 21 | `getWarmupImporters` | function | 493 |
-| 22 | `shouldSkipBackgroundWarmup` | function | 504 |
-| 23 | `shouldSkipIntentWarmup` | function | 513 |
-| 24 | `getIntentPageId` | function | 522 |
-| 25 | `scheduleIntentChunkLoad` | function | 528 |
-| 26 | `run` | const arrow | 535 |
-| 27 | `scheduleInitialPendingSyncRefresh` | function | 559 |
-| 28 | `run` | const arrow | 565 |
-| 29 | `isImportTrackerWakeEvent` | function | 587 |
-| 30 | `isNotificationCenterWakeEvent` | function | 594 |
-| 31 | `getDataWarmupLoaders` | function | 601 |
-| 32 | `createWarmupLoader` | function | 610 |
-| 33 | `runWarmupBatches` | function | 615 |
-| 34 | `scheduleWarmupAfterLoad` | function | 624 |
-| 35 | `run` | const arrow | 629 |
-| 36 | `getPageEntryWarmupLoaders` | function | 647 |
-| 37 | `useMountedPages` | function | 654 |
-| 38 | `syncProfile` | const arrow | 668 |
-| 39 | `useSyncErrorBanner` | function | 697 |
-| 40 | `refreshPendingSync` | const arrow | 707 |
-| 41 | `onSyncError` | const arrow | 712 |
-| 42 | `onTransientOutage` | const arrow | 718 |
-| 43 | `onSyncRecovered` | const arrow | 726 |
-| 44 | `onQueueChanged` | const arrow | 734 |
-| 45 | `onVaultLocked` | const arrow | 735 |
-| 46 | `onAppUpdate` | const arrow | 736 |
-| 47 | `onConflictReview` | const arrow | 737 |
-| 48 | `useDeferredImportTrackerMount` | function | 785 |
-| 49 | `enable` | const arrow | 798 |
-| 50 | `enableWhenVisible` | const arrow | 802 |
-| 51 | `onSyncUpdate` | const arrow | 807 |
-| 52 | `onVisible` | const arrow | 810 |
-| 53 | `useDeferredNotificationCenterMount` | function | 839 |
-| 54 | `enable` | const arrow | 855 |
-| 55 | `enableWhenVisible` | const arrow | 859 |
-| 56 | `onSyncUpdate` | const arrow | 863 |
-| 57 | `useVisibilityRecovery` | function | 892 |
-| 58 | `onVisible` | const arrow | 896 |
-| 59 | `onFocus` | const arrow | 906 |
-| 60 | `useChunkWarmup` | function | 924 |
-| 61 | `runWarmup` | const arrow | 935 |
-| 62 | `useIntentChunkWarmup` | function | 977 |
-| 63 | `warmIntentPage` | const arrow | 984 |
-| 64 | `useDataWarmup` | function | 1004 |
-| 65 | `runWarmup` | const arrow | 1016 |
-| 66 | `usePageEntryWarmup` | function | 1041 |
-| 67 | `run` | const arrow | 1070 |
-| 68 | `PageErrorBoundary` | class | 1099 |
-| 69 | `Notification` | function | 1152 |
-| 70 | `SyncErrorBanner` | function | 1165 |
-| 71 | `GlobalScrollControls` | function | 1187 |
-| 72 | `scrollTo` | const arrow | 1188 |
-| 73 | `formatSyncTimestamp` | function | 1225 |
-| 74 | `OfflineModeBanner` | function | 1240 |
-| 75 | `PageLoader` | function | 1389 |
-| 76 | `NotificationCenterFallback` | function | 1432 |
-| 77 | `PageSlot` | function | 1447 |
-| 78 | `PublicCatalogView` | function | 1473 |
-| 79 | `App` | export default function | 1483 |
-| 80 | `cleanupRecoveryStorageMarkers` | const arrow | 1559 |
-| 81 | `onQueued` | const arrow | 1588 |
-| 82 | `onSynced` | const arrow | 1601 |
-| 83 | `handleLocationChange` | const arrow | 1626 |
-| 84 | `processFavicon` | function | 1674 |
+| 1 | `encodeId` | function | 8 |
+| 2 | `getUsers` | export function | 12 |
+| 3 | `getRoles` | export function | 16 |
+| 4 | `getUserProfile` | export function | 28 |
+| 5 | `getUserAuthMethods` | export function | 36 |
+| 6 | `createUser` | export function | 44 |
+| 7 | `updateUser` | export function | 53 |
+| 8 | `updateUserProfile` | export function | 63 |
+| 9 | `disconnectUserAuthProvider` | export function | 73 |
+| 10 | `changeUserPassword` | export function | 82 |
+| 11 | `resetPassword` | export function | 91 |
+| 12 | `createRole` | export function | 100 |
+| 13 | `updateRole` | export function | 109 |
+| 14 | `deleteRole` | export function | 119 |
 
-### 3.188 `frontend/src/app/appShellUtils.ts`
+### 3.283 `frontend/src/api/userReadTransport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeAppPath` | export function | 61 |
-| 2 | `getAdminPageFromPath` | export function | 71 |
-| 3 | `getAdminPathForPage` | export function | 78 |
-| 4 | `isAdminAppPath` | export function | 82 |
-| 5 | `isPublicCatalogPath` | export function | 89 |
-| 6 | `updateMountedPages` | export function | 100 |
-| 7 | `getMountedPageLimit` | export function | 120 |
-| 8 | `shouldWarmPageEntries` | export function | 138 |
-| 9 | `getNotificationPrefix` | export function | 145 |
-| 10 | `getNotificationColor` | export function | 152 |
+| 1 | `getUsers` | export function | 4 |
 
-### 3.189 `frontend/src/app/publicErrorRecovery.ts`
+### 3.284 `frontend/src/api/websocket.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `clearReconnectTimer` | function | 25 |
+| 2 | `clearPingTimer` | function | 31 |
+| 3 | `clearDeferredConnectTimer` | function | 37 |
+| 4 | `hasStoredAuthSession` | function | 43 |
+| 5 | `isProtectedAdminHost` | function | 52 |
+| 6 | `shouldDebugWs` | function | 62 |
+| 7 | `logWs` | function | 72 |
+| 8 | `connectWS` | export function | 78 |
+| 9 | `scheduleConnectWS` | export function | 170 |
+| 10 | `disconnectWS` | export function | 180 |
+| 11 | `reconnectWS` | export function | 201 |
+| 12 | `resumeWS` | export function | 206 |
+| 13 | `scheduleReconnect` | function | 212 |
+| 14 | `isWSConnected` | export function | 231 |
+| 15 | `ensureWebSocketLifecycleListeners` | export function | 235 |
+
+### 3.285 `frontend/src/App.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `asPageModule` | function | 186 |
+| 2 | `getAppShellApi` | function | 190 |
+| 3 | `getConnection` | function | 194 |
+| 4 | `isPageId` | function | 200 |
+| 5 | `normalizePageId` | function | 204 |
+| 6 | `getErrorMessage` | function | 208 |
+| 7 | `getChunkErrorMessage` | function | 307 |
+| 8 | `isChunkLoadError` | function | 312 |
+| 9 | `createChunkTimeoutError` | function | 321 |
+| 10 | `isRetryableImportError` | function | 327 |
+| 11 | `importWithTimeout` | function | 335 |
+| 12 | `clearRetryMarker` | function | 351 |
+| 13 | `buildChunkRecoveryUrl` | function | 358 |
+| 14 | `deleteStaleShellCaches` | function | 369 |
+| 15 | `clearStaleShellCaches` | function | 382 |
+| 16 | `triggerChunkRecoveryReload` | function | 392 |
+| 17 | `reload` | const arrow | 399 |
+| 18 | `createChunkReloadStallError` | function | 409 |
+| 19 | `shouldRetryChunk` | function | 415 |
+| 20 | `lazyWithRetry` | function | 425 |
+| 21 | `getWarmupImporters` | function | 503 |
+| 22 | `shouldSkipBackgroundWarmup` | function | 514 |
+| 23 | `shouldSkipIntentWarmup` | function | 523 |
+| 24 | `getIntentPageId` | function | 532 |
+| 25 | `scheduleIntentChunkLoad` | function | 538 |
+| 26 | `run` | const arrow | 545 |
+| 27 | `scheduleInitialPendingSyncRefresh` | function | 569 |
+| 28 | `run` | const arrow | 575 |
+| 29 | `scheduleDeferredPendingSyncPolling` | function | 597 |
+| 30 | `isImportTrackerWakeEvent` | function | 611 |
+| 31 | `isNotificationCenterWakeEvent` | function | 626 |
+| 32 | `getDataWarmupLoaders` | function | 644 |
+| 33 | `createWarmupLoader` | function | 653 |
+| 34 | `runWarmupBatches` | function | 658 |
+| 35 | `scheduleWarmupAfterLoad` | function | 667 |
+| 36 | `run` | const arrow | 672 |
+| 37 | `getPageEntryWarmupLoaders` | function | 690 |
+| 38 | `useMountedPages` | function | 697 |
+| 39 | `syncProfile` | const arrow | 711 |
+| 40 | `useSyncErrorBanner` | function | 740 |
+| 41 | `refreshPendingSync` | const arrow | 760 |
+| 42 | `onSyncError` | const arrow | 765 |
+| 43 | `onTransientOutage` | const arrow | 771 |
+| 44 | `onSyncRecovered` | const arrow | 779 |
+| 45 | `onQueueChanged` | const arrow | 787 |
+| 46 | `onVaultLocked` | const arrow | 788 |
+| 47 | `onAppUpdate` | const arrow | 789 |
+| 48 | `onConflictReview` | const arrow | 790 |
+| 49 | `useDeferredImportTrackerMount` | function | 838 |
+| 50 | `enable` | const arrow | 851 |
+| 51 | `enableWhenVisible` | const arrow | 855 |
+| 52 | `onImportJobActivity` | const arrow | 860 |
+| 53 | `useDeferredNotificationCenterMount` | function | 885 |
+| 54 | `enable` | const arrow | 904 |
+| 55 | `enableWhenVisible` | const arrow | 908 |
+| 56 | `onSyncUpdate` | const arrow | 912 |
+| 57 | `onNotificationActivity` | const arrow | 915 |
+| 58 | `useVisibilityRecovery` | function | 950 |
+| 59 | `onVisible` | const arrow | 955 |
+| 60 | `onFocus` | const arrow | 965 |
+| 61 | `useChunkWarmup` | function | 983 |
+| 62 | `runWarmup` | const arrow | 994 |
+| 63 | `useIntentChunkWarmup` | function | 1036 |
+| 64 | `warmIntentPage` | const arrow | 1043 |
+| 65 | `useDataWarmup` | function | 1063 |
+| 66 | `runWarmup` | const arrow | 1075 |
+| 67 | `usePageEntryWarmup` | function | 1100 |
+| 68 | `run` | const arrow | 1129 |
+| 69 | `PageErrorBoundary` | class | 1158 |
+| 70 | `Notification` | function | 1211 |
+| 71 | `SyncErrorBanner` | function | 1224 |
+| 72 | `GlobalScrollControls` | function | 1246 |
+| 73 | `scrollTo` | const arrow | 1247 |
+| 74 | `formatSyncTimestamp` | function | 1284 |
+| 75 | `OfflineModeBanner` | function | 1299 |
+| 76 | `PageLoader` | function | 1448 |
+| 77 | `NotificationCenterFallback` | function | 1491 |
+| 78 | `PageSlot` | function | 1506 |
+| 79 | `PublicCatalogView` | function | 1532 |
+| 80 | `App` | export default function | 1542 |
+| 81 | `cleanupRecoveryStorageMarkers` | const arrow | 1619 |
+| 82 | `onQueued` | const arrow | 1648 |
+| 83 | `onSynced` | const arrow | 1661 |
+| 84 | `handleLocationChange` | const arrow | 1686 |
+| 85 | `processFavicon` | function | 1734 |
+
+### 3.286 `frontend/src/app/appShellUtils.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `updateMountedPages` | export function | 18 |
+| 2 | `getMountedPageLimit` | export function | 38 |
+| 3 | `shouldWarmPageEntries` | export function | 56 |
+| 4 | `getNotificationPrefix` | export function | 63 |
+| 5 | `getNotificationColor` | export function | 70 |
+
+### 3.287 `frontend/src/app/pathRouting.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeAppPath` | export function | 55 |
+| 2 | `getAdminPageFromPath` | export function | 65 |
+| 3 | `getAdminPathForPage` | export function | 72 |
+| 4 | `isAdminAppPath` | export function | 76 |
+| 5 | `isPublicCatalogPath` | export function | 83 |
+
+### 3.288 `frontend/src/app/publicErrorRecovery.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -3745,285 +6012,334 @@ Code files scanned: **515**
 | 3 | `shouldAttemptPublicDomRecovery` | export function | 16 |
 | 4 | `clearPublicDomRecoveryMarker` | export function | 32 |
 
-### 3.190 `frontend/src/AppContext.tsx`
+### 3.289 `frontend/src/AppContext.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getAppApi` | function | 197 |
-| 2 | `getErrorMessage` | function | 207 |
-| 3 | `flattenTranslationTree` | function | 211 |
-| 4 | `safeStorageGet` | function | 267 |
-| 5 | `safeStorageSet` | function | 275 |
-| 6 | `safeStorageRemove` | function | 281 |
-| 7 | `getStoredUserPayload` | function | 287 |
-| 8 | `getStoredUserExpiry` | function | 291 |
-| 9 | `clearPersistedAuthState` | function | 295 |
-| 10 | `persistAuthState` | function | 308 |
-| 11 | `computeSessionExpiryMs` | function | 330 |
-| 12 | `readDeviceSettings` | function | 346 |
-| 13 | `writeDeviceSettings` | function | 355 |
-| 14 | `writeStoredSessionDuration` | function | 361 |
-| 15 | `readPendingOauthLink` | function | 369 |
-| 16 | `clearPendingOauthLink` | function | 383 |
-| 17 | `readOauthCallbackResult` | function | 389 |
-| 18 | `clearOauthCallbackResult` | function | 400 |
-| 19 | `mergeSettingsWithDeviceOverrides` | function | 406 |
-| 20 | `normalizeDateInput` | function | 410 |
-| 21 | `isBrokenLocalizedString` | export function | 416 |
-| 22 | `buildRuntimeDescriptorFromBootstrap` | function | 428 |
-| 23 | `LoadingScreen` | function | 457 |
-| 24 | `AccessDenied` | function | 470 |
-| 25 | `AppProvider` | export function | 482 |
-| 26 | `persistAutoSyncUrl` | const arrow | 558 |
-| 27 | `onUpdate` | const arrow | 749 |
-| 28 | `onStatus` | const arrow | 781 |
-| 29 | `poll` | const arrow | 790 |
-| 30 | `onError` | const arrow | 810 |
-| 31 | `onWriteBlocked` | const arrow | 832 |
-| 32 | `onRuntimeMismatch` | const arrow | 842 |
-| 33 | `onConflict` | const arrow | 862 |
-| 34 | `onUnauthorized` | const arrow | 931 |
-| 35 | `handleOtpLogin` | const arrow | 990 |
-| 36 | `handleUserUpdated` | const arrow | 1032 |
-| 37 | `discoverSyncUrl` | const arrow | 1069 |
-| 38 | `clearCallbackUrl` | const arrow | 1458 |
-| 39 | `clearPendingLink` | const arrow | 1462 |
-| 40 | `run` | const arrow | 1466 |
+| 1 | `getAppApi` | function | 193 |
+| 2 | `getErrorMessage` | function | 203 |
+| 3 | `flattenTranslationTree` | function | 207 |
+| 4 | `safeStorageGet` | function | 339 |
+| 5 | `safeStorageSet` | function | 347 |
+| 6 | `safeStorageRemove` | function | 353 |
+| 7 | `getStoredUserPayload` | function | 359 |
+| 8 | `getStoredUserExpiry` | function | 363 |
+| 9 | `clearPersistedAuthState` | function | 367 |
+| 10 | `persistAuthState` | function | 380 |
+| 11 | `computeSessionExpiryMs` | function | 402 |
+| 12 | `readDeviceSettings` | function | 418 |
+| 13 | `writeDeviceSettings` | function | 427 |
+| 14 | `writeStoredSessionDuration` | function | 433 |
+| 15 | `readPendingOauthLink` | function | 441 |
+| 16 | `clearPendingOauthLink` | function | 455 |
+| 17 | `readOauthCallbackResult` | function | 461 |
+| 18 | `clearOauthCallbackResult` | function | 472 |
+| 19 | `mergeSettingsWithDeviceOverrides` | function | 478 |
+| 20 | `normalizeDateInput` | function | 482 |
+| 21 | `isBrokenLocalizedString` | export function | 488 |
+| 22 | `buildRuntimeDescriptorFromBootstrap` | function | 500 |
+| 23 | `getInitialAdminPage` | function | 529 |
+| 24 | `LoadingScreen` | function | 534 |
+| 25 | `AccessDenied` | function | 547 |
+| 26 | `AppProvider` | export function | 559 |
+| 27 | `persistAutoSyncUrl` | const arrow | 636 |
+| 28 | `onUpdate` | const arrow | 834 |
+| 29 | `onStatus` | const arrow | 866 |
+| 30 | `poll` | const arrow | 875 |
+| 31 | `onError` | const arrow | 895 |
+| 32 | `onWriteBlocked` | const arrow | 917 |
+| 33 | `onRuntimeMismatch` | const arrow | 927 |
+| 34 | `onConflict` | const arrow | 947 |
+| 35 | `onUnauthorized` | const arrow | 1016 |
+| 36 | `handleOtpLogin` | const arrow | 1075 |
+| 37 | `handleUserUpdated` | const arrow | 1117 |
+| 38 | `discoverSyncUrl` | const arrow | 1154 |
+| 39 | `runStartupHealthProbe` | const arrow | 1177 |
+| 40 | `loadLanguagePack` | const arrow | 1267 |
+| 41 | `scheduleDeferredLanguagePack` | const arrow | 1278 |
+| 42 | `runWhenIdle` | const arrow | 1279 |
+| 43 | `clearCallbackUrl` | const arrow | 1583 |
+| 44 | `clearPendingLink` | const arrow | 1587 |
+| 45 | `run` | const arrow | 1591 |
 
-### 3.191 `frontend/src/components/auth/Login.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getAuthApi` | function | 178 |
-| 2 | `getErrorMessage` | function | 183 |
-| 3 | `readPendingOauthLogin` | function | 187 |
-| 4 | `clearPendingOauthLogin` | function | 201 |
-| 5 | `readOauthCallbackResult` | function | 207 |
-| 6 | `clearOauthCallbackResult` | function | 218 |
-| 7 | `OauthButton` | function | 224 |
-| 8 | `ModeBackButton` | function | 238 |
-| 9 | `Login` | export default function | 251 |
-| 10 | `rememberOrganization` | const arrow | 323 |
-| 11 | `loadCapabilities` | const arrow | 359 |
-| 12 | `bootstrap` | const arrow | 379 |
-| 13 | `clearCallbackUrl` | const arrow | 458 |
-| 14 | `run` | const arrow | 463 |
-| 15 | `rememberedOrg` | const arrow | 518 |
-| 16 | `handleLogin` | const arrow | 572 |
-| 17 | `handleOtp` | const arrow | 602 |
-| 18 | `handleOtpInput` | const arrow | 636 |
-| 19 | `handleResetWithOtp` | const arrow | 641 |
-| 20 | `handleResetWithEmail` | const arrow | 678 |
-| 21 | `handleCompleteEmailReset` | const arrow | 707 |
-| 22 | `handleStartOauth` | const arrow | 740 |
-| 23 | `closeAuxMode` | const arrow | 788 |
-
-### 3.192 `frontend/src/components/branches/Branches.tsx`
+### 3.290 `frontend/src/components/auth/Login.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getBranchApi` | function | 179 |
-| 2 | `getErrorMessage` | function | 183 |
-| 3 | `isBranchRecord` | function | 187 |
-| 4 | `isTransferRecord` | function | 191 |
-| 5 | `BranchStatTile` | function | 195 |
-| 6 | `formatTransferDate` | function | 212 |
-| 7 | `Branches` | export default function | 229 |
-| 8 | `promise` | const arrow | 276 |
-| 9 | `loadBranchStock` | const arrow | 413 |
-| 10 | `loadMoreBranchStock` | const arrow | 434 |
-| 11 | `handleSaveBranch` | const arrow | 465 |
-| 12 | `handleDelete` | const arrow | 533 |
-| 13 | `handleBulkDelete` | const arrow | 581 |
-| 14 | `toggleSelect` | const arrow | 667 |
-| 15 | `toggleSelectAll` | const arrow | 676 |
+| 1 | `getAuthApi` | function | 177 |
+| 2 | `getErrorMessage` | function | 182 |
+| 3 | `readPendingOauthLogin` | function | 186 |
+| 4 | `clearPendingOauthLogin` | function | 200 |
+| 5 | `readOauthCallbackResult` | function | 206 |
+| 6 | `clearOauthCallbackResult` | function | 217 |
+| 7 | `OauthButton` | function | 223 |
+| 8 | `ModeBackButton` | function | 237 |
+| 9 | `Login` | export default function | 250 |
+| 10 | `rememberOrganization` | const arrow | 322 |
+| 11 | `loadCapabilities` | const arrow | 358 |
+| 12 | `bootstrap` | const arrow | 378 |
+| 13 | `clearCallbackUrl` | const arrow | 457 |
+| 14 | `run` | const arrow | 462 |
+| 15 | `rememberedOrg` | const arrow | 517 |
+| 16 | `handleLogin` | const arrow | 571 |
+| 17 | `handleOtp` | const arrow | 601 |
+| 18 | `handleOtpInput` | const arrow | 635 |
+| 19 | `handleResetWithOtp` | const arrow | 640 |
+| 20 | `handleResetWithEmail` | const arrow | 677 |
+| 21 | `handleCompleteEmailReset` | const arrow | 706 |
+| 22 | `handleStartOauth` | const arrow | 739 |
+| 23 | `closeAuxMode` | const arrow | 787 |
 
-### 3.193 `frontend/src/components/branches/BranchForm.tsx`
+### 3.291 `frontend/src/components/branches/Branches.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getBranchApi` | function | 206 |
+| 2 | `getErrorMessage` | function | 218 |
+| 3 | `isBranchRecord` | function | 222 |
+| 4 | `isTransferRecord` | function | 226 |
+| 5 | `BranchStatTile` | function | 230 |
+| 6 | `formatTransferDate` | function | 247 |
+| 7 | `Branches` | export default function | 264 |
+| 8 | `promise` | const arrow | 312 |
+| 9 | `loadBranchStock` | const arrow | 462 |
+| 10 | `loadMoreBranchStock` | const arrow | 483 |
+| 11 | `handleSaveBranch` | const arrow | 514 |
+| 12 | `handleDelete` | const arrow | 588 |
+| 13 | `handleBulkDelete` | const arrow | 636 |
+| 14 | `toggleSelect` | const arrow | 722 |
+| 15 | `toggleSelectAll` | const arrow | 731 |
+
+### 3.292 `frontend/src/components/branches/BranchForm.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `BranchForm` | export default function | 37 |
 | 2 | `handleSave` | const arrow | 57 |
 
-### 3.194 `frontend/src/components/branches/TransferModal.tsx`
+### 3.293 `frontend/src/components/branches/TransferModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getTransferApi` | function | 71 |
-| 2 | `getErrorMessage` | function | 76 |
-| 3 | `normalizeTransferStockRows` | function | 80 |
-| 4 | `TransferModal` | export default function | 94 |
-| 5 | `loadStock` | function | 146 |
-| 6 | `handleTransfer` | const arrow | 194 |
+| 1 | `getTransferApi` | function | 76 |
+| 2 | `getErrorMessage` | function | 83 |
+| 3 | `normalizeTransferStockRows` | function | 87 |
+| 4 | `TransferModal` | export default function | 101 |
+| 5 | `loadStock` | function | 165 |
+| 6 | `handleTransfer` | const arrow | 213 |
 
-### 3.195 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `CatalogEditorSurface` | export default function | 191 |
-
-### 3.196 `frontend/src/components/catalog/CatalogImageField.tsx`
+### 3.294 `frontend/src/components/catalog/catalogAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `CatalogImageField` | export default function | 28 |
+| 1 | `trimBaseUrl` | function | 9 |
+| 2 | `normalizeUploadPath` | function | 13 |
+| 3 | `isLocalLikeHostname` | function | 21 |
+| 4 | `getSafeCurrentOrigin` | function | 25 |
+| 5 | `getStoredCatalogAssetBaseUrl` | function | 37 |
+| 6 | `api` | const arrow | 40 |
+| 7 | `appendAssetVersion` | function | 51 |
+| 8 | `resolveCatalogAssetUrl` | export function | 66 |
 
-### 3.197 `frontend/src/components/catalog/CatalogPage.tsx`
+### 3.295 `frontend/src/components/catalog/CatalogEditorSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `loadCatalogEditorSurface` | const arrow | 93 |
-| 2 | `loadCatalogSecondaryTabs` | const arrow | 94 |
-| 3 | `loadCatalogProductsSection` | const arrow | 95 |
-| 4 | `loadCatalogPreviewSurface` | const arrow | 96 |
-| 5 | `getCatalogApi` | function | 240 |
-| 6 | `getCatalogErrorMessage` | function | 244 |
-| 7 | `normalizePortalInitialOptions` | function | 248 |
-| 8 | `normalizeCatalogOptions` | function | 257 |
-| 9 | `normalizeBrandOptions` | function | 268 |
-| 10 | `getAboutBlockLabel` | function | 273 |
-| 11 | `withAssetVersion` | function | 279 |
-| 12 | `sanitizePortalMediaValue` | function | 289 |
-| 13 | `tt` | function | 299 |
-| 14 | `toBoolean` | function | 307 |
-| 15 | `toNumber` | function | 314 |
-| 16 | `normalizePriceDisplay` | function | 321 |
-| 17 | `normalizeHexColor` | function | 327 |
-| 18 | `normalizeExternalUrl` | function | 333 |
-| 19 | `createFaqId` | function | 349 |
-| 20 | `normalizeFaqItems` | function | 353 |
-| 21 | `translatedPortalText` | function | 409 |
-| 22 | `translateConfiguredFaqText` | function | 415 |
-| 23 | `localizeConfiguredFaqItems` | function | 422 |
-| 24 | `buildFaqStarterItems` | function | 430 |
-| 25 | `buildAiFaqStarterItems` | function | 439 |
-| 26 | `hexToRgba` | function | 449 |
-| 27 | `readPortalCache` | function | 460 |
-| 28 | `writePortalCache` | function | 483 |
-| 29 | `normalizePortalPath` | function | 502 |
-| 30 | `isReservedPortalPath` | function | 515 |
-| 31 | `getPortalTabs` | function | 519 |
-| 32 | `resolvePortalActiveTab` | function | 530 |
-| 33 | `buildDraft` | function | 538 |
-| 34 | `applyDraft` | function | 638 |
-| 35 | `getBranchQty` | function | 762 |
-| 36 | `getStockStatus` | function | 769 |
-| 37 | `normalizeProductGallery` | function | 780 |
-| 38 | `normalizePortalProductSearch` | function | 797 |
-| 39 | `buildRecommendedProductOption` | function | 801 |
-| 40 | `productMatchesRecommendedSearch` | function | 811 |
-| 41 | `formatDateTime` | function | 826 |
-| 42 | `formatPortalPrice` | function | 834 |
-| 43 | `ImageField` | function | 847 |
-| 44 | `readImageFileAsDataUrl` | function | 936 |
-| 45 | `readImageFilesAsDataUrls` | function | 945 |
-| 46 | `pickImageAsDataUrl` | function | 968 |
-| 47 | `pickMultipleImagesAsDataUrls` | function | 981 |
-| 48 | `replaceVars` | function | 994 |
-| 49 | `getPortalResourceText` | function | 998 |
-| 50 | `isFirstPartyTranslateTarget` | function | 1036 |
-| 51 | `normalizePortalTranslateChoice` | function | 1043 |
-| 52 | `isDocumentVisible` | function | 1051 |
-| 53 | `sleep` | function | 1056 |
-| 54 | `CatalogPage` | export default function | 1162 |
-| 55 | `warmPublicProductsPanel` | const arrow | 1276 |
-| 56 | `warmPublicSecondaryTabs` | const arrow | 1280 |
-| 57 | `updateMediaUploadState` | const arrow | 1432 |
-| 58 | `forgetMediaUploadState` | const arrow | 1439 |
-| 59 | `loadAssistantStatus` | function | 1486 |
-| 60 | `openProductGallery` | function | 1508 |
-| 61 | `changeTranslateTarget` | function | 1521 |
-| 62 | `isPortalLoadCurrent` | function | 1569 |
-| 63 | `loadPortalEditorData` | function | 1573 |
-| 64 | `refreshPortalView` | function | 1615 |
-| 65 | `loadPortal` | function | 1644 |
-| 66 | `ensureLink` | const arrow | 1900 |
-| 67 | `updateVisibility` | const arrow | 1993 |
-| 68 | `handleScroll` | const arrow | 2023 |
-| 69 | `initWidget` | const arrow | 2068 |
-| 70 | `waitForWidget` | const arrow | 2086 |
-| 71 | `toggleFilterValue` | function | 2210 |
-| 72 | `clearPortalFilters` | function | 2218 |
-| 73 | `setDraft` | function | 2226 |
-| 74 | `toggleRecommendedProduct` | function | 2231 |
-| 75 | `openPortalImage` | function | 2240 |
-| 76 | `setAboutBlocksDraft` | function | 2251 |
-| 77 | `setPromoItemsDraft` | function | 2255 |
-| 78 | `getPortalMediaValue` | function | 2259 |
-| 79 | `setPortalMediaValue` | function | 2273 |
-| 80 | `clearPortalUploadPreview` | function | 2287 |
-| 81 | `clearPortalMediaTarget` | function | 2293 |
-| 82 | `uploadPortalMedia` | function | 2304 |
-| 83 | `cancelPortalMediaUpload` | function | 2375 |
-| 84 | `updateAboutBlock` | function | 2381 |
-| 85 | `updatePromoItem` | function | 2387 |
-| 86 | `addAboutBlock` | function | 2393 |
-| 87 | `addPromoItem` | function | 2397 |
-| 88 | `moveAboutBlockBefore` | function | 2401 |
-| 89 | `removeAboutBlock` | function | 2413 |
-| 90 | `movePromoItemBefore` | function | 2424 |
-| 91 | `removePromoItem` | function | 2436 |
-| 92 | `setFaqDraft` | function | 2447 |
-| 93 | `addFaqItem` | function | 2451 |
-| 94 | `mergeFaqStarterItems` | function | 2462 |
-| 95 | `addFaqStarterSet` | function | 2475 |
-| 96 | `addAiFaqStarterSet` | function | 2479 |
-| 97 | `updateFaqItem` | function | 2483 |
-| 98 | `removeFaqItem` | function | 2489 |
-| 99 | `clearAssistantState` | function | 2493 |
-| 100 | `uploadDraftImage` | function | 2508 |
-| 101 | `uploadAboutBlockMedia` | function | 2512 |
-| 102 | `uploadPromoItemMedia` | function | 2518 |
-| 103 | `openFilePicker` | function | 2522 |
-| 104 | `handleFilePickerSelect` | function | 2526 |
-| 105 | `savePortalDraft` | function | 2554 |
-| 106 | `askAssistant` | function | 2746 |
-| 107 | `refreshMembershipData` | function | 2792 |
-| 108 | `handleMembershipLookup` | function | 2834 |
-| 109 | `addSubmissionImages` | function | 2847 |
-| 110 | `handleSubmissionPaste` | function | 2857 |
-| 111 | `handleSubmitShareProof` | function | 2873 |
-| 112 | `handleReviewSubmission` | function | 2920 |
-| 113 | `renderCatalogSection` | function | 3083 |
-| 114 | `handleUploadSubmissionImages` | const arrow | 3109 |
-| 115 | `renderSecondaryTabPanel` | function | 3165 |
-| 116 | `renderSecondaryTabSection` | function | 3177 |
-| 117 | `scrollPublicPortal` | const arrow | 3306 |
+| 1 | `toAiProviderOptions` | function | 118 |
+| 2 | `CatalogEditorSurface` | export default function | 215 |
 
-### 3.198 `frontend/src/components/catalog/CatalogPageContext.tsx`
+### 3.296 `frontend/src/components/catalog/CatalogImageField.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `CatalogImageField` | export default function | 29 |
+
+### 3.297 `frontend/src/components/catalog/catalogImages.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getImageApi` | function | 19 |
+| 2 | `isRecentlyBrokenCatalogImage` | function | 23 |
+| 3 | `markBrokenCatalogImage` | function | 31 |
+| 4 | `CatalogProductImage` | export default function | 36 |
+| 5 | `loadImageData` | function | 78 |
+
+### 3.298 `frontend/src/components/catalog/CatalogPage.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `loadCatalogEditorSurface` | const arrow | 70 |
+| 2 | `loadCatalogSecondaryTabs` | const arrow | 71 |
+| 3 | `loadPortalTranslateControllerModule` | function | 78 |
+| 4 | `loadPortalLanguagePacksModule` | function | 84 |
+| 5 | `loadPortalContentI18nModule` | function | 90 |
+| 6 | `getCatalogApi` | function | 244 |
+| 7 | `getCatalogErrorMessage` | function | 248 |
+| 8 | `createInitialUploadState` | function | 252 |
+| 9 | `isTemporaryPreviewUrl` | function | 266 |
+| 10 | `sanitizePersistedMediaPath` | function | 271 |
+| 11 | `buildCacheBustedMediaPath` | function | 278 |
+| 12 | `reduceUploadState` | function | 296 |
+| 13 | `normalizePortalInitialOptions` | function | 363 |
+| 14 | `normalizeCatalogOptions` | function | 372 |
+| 15 | `normalizeBrandOptions` | function | 383 |
+| 16 | `getAboutBlockLabel` | function | 388 |
+| 17 | `withAssetVersion` | function | 394 |
+| 18 | `sanitizePortalMediaValue` | function | 404 |
+| 19 | `tt` | function | 414 |
+| 20 | `toBoolean` | function | 428 |
+| 21 | `toNumber` | function | 435 |
+| 22 | `normalizePriceDisplay` | function | 442 |
+| 23 | `normalizeHexColor` | function | 448 |
+| 24 | `normalizeExternalUrl` | function | 454 |
+| 25 | `createFaqId` | function | 470 |
+| 26 | `normalizeFaqItems` | function | 474 |
+| 27 | `translatedPortalText` | function | 530 |
+| 28 | `translateConfiguredFaqText` | function | 536 |
+| 29 | `localizeConfiguredFaqItems` | function | 543 |
+| 30 | `buildFaqStarterItems` | function | 551 |
+| 31 | `buildAiFaqStarterItems` | function | 560 |
+| 32 | `hexToRgba` | function | 570 |
+| 33 | `readPortalCache` | function | 581 |
+| 34 | `writePortalCache` | function | 604 |
+| 35 | `normalizePortalPath` | function | 623 |
+| 36 | `isReservedPortalPath` | function | 636 |
+| 37 | `getPortalTabs` | function | 640 |
+| 38 | `resolvePortalActiveTab` | function | 651 |
+| 39 | `buildDraft` | function | 659 |
+| 40 | `applyDraft` | function | 759 |
+| 41 | `getBranchQty` | function | 883 |
+| 42 | `getStockStatus` | function | 890 |
+| 43 | `normalizeProductGallery` | function | 901 |
+| 44 | `normalizePortalProductSearch` | function | 918 |
+| 45 | `buildRecommendedProductOption` | function | 922 |
+| 46 | `productMatchesRecommendedSearch` | function | 932 |
+| 47 | `formatDateTime` | function | 947 |
+| 48 | `formatPortalPrice` | function | 955 |
+| 49 | `ImageField` | function | 968 |
+| 50 | `readImageFileAsDataUrl` | function | 1057 |
+| 51 | `readImageFilesAsDataUrls` | function | 1066 |
+| 52 | `pickImageAsDataUrl` | function | 1089 |
+| 53 | `pickMultipleImagesAsDataUrls` | function | 1102 |
+| 54 | `replaceVars` | function | 1115 |
+| 55 | `canonicalPortalTranslateLanguage` | function | 1154 |
+| 56 | `normalizeExternalTranslateTarget` | function | 1163 |
+| 57 | `isFirstPartyTranslateTarget` | function | 1169 |
+| 58 | `normalizePortalTranslateChoice` | function | 1176 |
+| 59 | `readGoogleTranslateCookieTarget` | function | 1184 |
+| 60 | `readStoredTranslateTargetLocal` | function | 1198 |
+| 61 | `removePortalTranslateWidgetHostLocal` | function | 1211 |
+| 62 | `isDocumentVisible` | function | 1216 |
+| 63 | `sleep` | function | 1221 |
+| 64 | `CatalogPage` | export default function | 1327 |
+| 65 | `updateMediaUploadState` | const arrow | 1613 |
+| 66 | `forgetMediaUploadState` | const arrow | 1620 |
+| 67 | `loadAssistantStatus` | function | 1672 |
+| 68 | `openProductGallery` | function | 1695 |
+| 69 | `changeTranslateTarget` | function | 1708 |
+| 70 | `isPortalLoadCurrent` | function | 1768 |
+| 71 | `loadPortalEditorData` | function | 1772 |
+| 72 | `refreshPortalView` | function | 1814 |
+| 73 | `loadPortal` | function | 1843 |
+| 74 | `ensureLink` | const arrow | 2107 |
+| 75 | `renderRoundedFavicon` | const arrow | 2147 |
+| 76 | `updateVisibility` | const arrow | 2224 |
+| 77 | `handleScroll` | const arrow | 2254 |
+| 78 | `setupExternalTranslateWidget` | function | 2298 |
+| 79 | `toggleFilterValue` | function | 2411 |
+| 80 | `clearPortalFilters` | function | 2419 |
+| 81 | `setDraft` | function | 2427 |
+| 82 | `toggleRecommendedProduct` | function | 2432 |
+| 83 | `openPortalImage` | function | 2441 |
+| 84 | `setAboutBlocksDraft` | function | 2452 |
+| 85 | `setPromoItemsDraft` | function | 2456 |
+| 86 | `getPortalMediaValue` | function | 2460 |
+| 87 | `setPortalMediaValue` | function | 2474 |
+| 88 | `clearPortalUploadPreview` | function | 2488 |
+| 89 | `clearPortalMediaTarget` | function | 2494 |
+| 90 | `uploadPortalMedia` | function | 2505 |
+| 91 | `cancelPortalMediaUpload` | function | 2576 |
+| 92 | `updateAboutBlock` | function | 2582 |
+| 93 | `updatePromoItem` | function | 2588 |
+| 94 | `addAboutBlock` | function | 2594 |
+| 95 | `addPromoItem` | function | 2598 |
+| 96 | `moveAboutBlockBefore` | function | 2602 |
+| 97 | `removeAboutBlock` | function | 2614 |
+| 98 | `movePromoItemBefore` | function | 2625 |
+| 99 | `removePromoItem` | function | 2637 |
+| 100 | `setFaqDraft` | function | 2648 |
+| 101 | `addFaqItem` | function | 2652 |
+| 102 | `mergeFaqStarterItems` | function | 2663 |
+| 103 | `addFaqStarterSet` | function | 2676 |
+| 104 | `addAiFaqStarterSet` | function | 2680 |
+| 105 | `updateFaqItem` | function | 2684 |
+| 106 | `removeFaqItem` | function | 2690 |
+| 107 | `clearAssistantState` | function | 2694 |
+| 108 | `uploadDraftImage` | function | 2709 |
+| 109 | `uploadAboutBlockMedia` | function | 2713 |
+| 110 | `uploadPromoItemMedia` | function | 2719 |
+| 111 | `openFilePicker` | function | 2723 |
+| 112 | `handleFilePickerSelect` | function | 2727 |
+| 113 | `savePortalDraft` | function | 2755 |
+| 114 | `askAssistant` | function | 2947 |
+| 115 | `refreshMembershipData` | function | 2993 |
+| 116 | `handleMembershipLookup` | function | 3035 |
+| 117 | `addSubmissionImages` | function | 3048 |
+| 118 | `handleSubmissionPaste` | function | 3058 |
+| 119 | `handleSubmitShareProof` | function | 3074 |
+| 120 | `handleReviewSubmission` | function | 3121 |
+| 121 | `renderCatalogSection` | function | 3285 |
+| 122 | `handleUploadSubmissionImages` | const arrow | 3308 |
+| 123 | `handlePortalTabChange` | const arrow | 3364 |
+| 124 | `renderSecondaryTabPanel` | function | 3372 |
+| 125 | `renderSecondaryTabFallback` | function | 3384 |
+| 126 | `renderSecondaryTabSection` | function | 3408 |
+| 127 | `scrollPublicPortal` | const arrow | 3533 |
+
+### 3.299 `frontend/src/components/catalog/CatalogPageContext.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `CatalogPageProvider` | export function | 10 |
 
-### 3.199 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
+### 3.300 `frontend/src/components/catalog/catalogPagination.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `CatalogPreviewSurface` | export default function | 109 |
-| 2 | `handlePortalTabClick` | const arrow | 147 |
+| 1 | `clampCatalogPage` | function | 21 |
+| 2 | `CatalogPaginationControls` | export default function | 35 |
+| 3 | `commitPageDraft` | const arrow | 62 |
+| 4 | `handlePageInputKeyDown` | const arrow | 73 |
 
-### 3.200 `frontend/src/components/catalog/CatalogProductsSection.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getBadgeIcon` | function | 112 |
-| 2 | `getBadgeToneClass` | function | 120 |
-| 3 | `getProductInitial` | function | 129 |
-| 4 | `CatalogProductsSection` | export default function | 137 |
-
-### 3.201 `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
+### 3.301 `frontend/src/components/catalog/CatalogPreviewSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizePortalColor` | function | 269 |
-| 2 | `CatalogMembershipSection` | function | 274 |
-| 3 | `CatalogAboutSection` | function | 620 |
-| 4 | `CatalogFaqSection` | function | 834 |
-| 5 | `CatalogAiSection` | function | 888 |
-| 6 | `CatalogSecondaryTabs` | export default function | 1074 |
+| 1 | `CatalogPreviewSurface` | export default function | 113 |
+| 2 | `handlePortalTabClick` | const arrow | 151 |
 
-### 3.202 `frontend/src/components/catalog/catalogUi.tsx`
+### 3.302 `frontend/src/components/catalog/CatalogProductsSection.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getBadgeIcon` | function | 120 |
+| 2 | `getBadgeToneClass` | function | 128 |
+| 3 | `getProductInitial` | function | 137 |
+| 4 | `CatalogProductsSection` | export default function | 145 |
+
+### 3.303 `frontend/src/components/catalog/CatalogSecondaryTabs.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `toAssistantSelectOptions` | function | 204 |
+| 2 | `normalizePortalColor` | function | 275 |
+| 3 | `CatalogMembershipSection` | function | 280 |
+| 4 | `CatalogAboutSection` | function | 626 |
+| 5 | `CatalogFaqSection` | function | 847 |
+| 6 | `CatalogAiSection` | function | 901 |
+| 7 | `CatalogSecondaryTabs` | export default function | 1109 |
+
+### 3.304 `frontend/src/components/catalog/catalogUi.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4032,7 +6348,7 @@ Code files scanned: **515**
 | 3 | `SummaryTile` | export function | 45 |
 | 4 | `StatusPill` | export function | 69 |
 
-### 3.203 `frontend/src/components/catalog/portalCatalogDisplay.ts`
+### 3.305 `frontend/src/components/catalog/portalCatalogDisplay.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4046,7 +6362,7 @@ Code files scanned: **515**
 | 8 | `replaceRankVars` | function | 173 |
 | 9 | `normalizeRankBadgeLabel` | function | 177 |
 
-### 3.204 `frontend/src/components/catalog/portalContentI18n.ts`
+### 3.306 `frontend/src/components/catalog/portalContentI18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4069,7 +6385,7 @@ Code files scanned: **515**
 | 17 | `localizePortalConfig` | export function | 737 |
 | 18 | `getProductTranslationBlock` | function | 762 |
 
-### 3.205 `frontend/src/components/catalog/portalEditorUtils.ts`
+### 3.307 `frontend/src/components/catalog/portalEditorUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4084,7 +6400,14 @@ Code files scanned: **515**
 | 9 | `extractGoogleMapsEmbedUrl` | export function | 154 |
 | 10 | `normalizeGoogleMapsEmbed` | export function | 162 |
 
-### 3.206 `frontend/src/components/catalog/portalLanguagePacks.ts`
+### 3.308 `frontend/src/components/catalog/portalLanguageOptions.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `normalizeFirstPartyPortalLanguage` | export function | 35 |
+| 2 | `isFirstPartyPortalLanguage` | export function | 40 |
+
+### 3.309 `frontend/src/components/catalog/portalLanguagePacks.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4092,48 +6415,59 @@ Code files scanned: **515**
 | 2 | `isFirstPartyPortalLanguage` | export function | 1339 |
 | 3 | `getPortalLanguageText` | export function | 1343 |
 
-### 3.207 `frontend/src/components/catalog/portalTranslateController.ts`
+### 3.310 `frontend/src/components/catalog/portalTranslateController.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeLanguage` | function | 16 |
-| 2 | `canonicalTranslateLanguage` | export function | 20 |
-| 3 | `normalizeTranslateTarget` | export function | 29 |
-| 4 | `getPortalTranslateCookieTarget` | export function | 35 |
-| 5 | `hasPortalTranslatedMarker` | export function | 49 |
-| 6 | `clearGoogleTranslateCookies` | export function | 55 |
-| 7 | `writePortalTranslateTarget` | export function | 73 |
-| 8 | `storePortalTranslatePreference` | export function | 95 |
-| 9 | `ensureLinkHint` | function | 108 |
-| 10 | `warmPortalTranslateNetwork` | export function | 119 |
-| 11 | `ensurePortalTranslateScript` | export function | 124 |
-| 12 | `ensurePortalTranslateWidgetHost` | export function | 145 |
-| 13 | `removePortalTranslateWidgetHost` | export function | 168 |
-| 14 | `applyGoogleTranslateSelection` | export function | 173 |
-| 15 | `isPortalTranslateApplied` | export function | 188 |
-| 16 | `readStoredTranslateTarget` | export function | 197 |
-| 17 | `requestPortalTranslateReload` | export function | 214 |
+| 1 | `normalizeLanguage` | function | 39 |
+| 2 | `canonicalTranslateLanguage` | export function | 43 |
+| 3 | `normalizeTranslateTarget` | export function | 52 |
+| 4 | `getPortalTranslateCookieTarget` | export function | 58 |
+| 5 | `hasPortalTranslatedMarker` | export function | 72 |
+| 6 | `clearGoogleTranslateCookies` | export function | 78 |
+| 7 | `writePortalTranslateTarget` | export function | 96 |
+| 8 | `storePortalTranslatePreference` | export function | 118 |
+| 9 | `ensureLinkHint` | function | 131 |
+| 10 | `warmPortalTranslateNetwork` | export function | 142 |
+| 11 | `ensurePortalTranslateScript` | export function | 147 |
+| 12 | `ensurePortalTranslateWidgetHost` | export function | 168 |
+| 13 | `removePortalTranslateWidgetHost` | export function | 191 |
+| 14 | `setupPortalExternalTranslateWidget` | export function | 196 |
+| 15 | `initWidget` | const arrow | 216 |
+| 16 | `waitForWidget` | const arrow | 233 |
+| 17 | `applyGoogleTranslateSelection` | export function | 271 |
+| 18 | `isPortalTranslateApplied` | export function | 286 |
+| 19 | `readStoredTranslateTarget` | export function | 295 |
+| 20 | `requestPortalTranslateReload` | export function | 312 |
 
-### 3.208 `frontend/src/components/contacts/ContactImportModal.tsx`
+### 3.311 `frontend/src/components/catalog/portalTranslationData.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getContactImportApi` | function | 114 |
-| 2 | `getErrorMessage` | function | 119 |
-| 3 | `countCsvDataRowsInWorker` | function | 123 |
-| 4 | `cleanup` | const arrow | 135 |
-| 5 | `ContactImportModal` | export default function | 155 |
-| 6 | `handleDownloadTemplate` | const arrow | 227 |
-| 7 | `applyContactRulePreset` | const arrow | 231 |
-| 8 | `handleImport` | const arrow | 241 |
+| 1 | `isPlainObject` | function | 3 |
+| 2 | `normalizePortalTranslations` | export function | 7 |
+| 3 | `stringifyPortalTranslations` | export function | 21 |
 
-### 3.209 `frontend/src/components/contacts/contactImportWorker.ts`
+### 3.312 `frontend/src/components/contacts/ContactImportModal.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getContactImportApi` | function | 115 |
+| 2 | `getErrorMessage` | function | 120 |
+| 3 | `countCsvDataRowsInWorker` | function | 124 |
+| 4 | `cleanup` | const arrow | 136 |
+| 5 | `ContactImportModal` | export default function | 156 |
+| 6 | `handleDownloadTemplate` | const arrow | 228 |
+| 7 | `applyContactRulePreset` | const arrow | 232 |
+| 8 | `handleImport` | const arrow | 242 |
+
+### 3.313 `frontend/src/components/contacts/contactImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.210 `frontend/src/components/contacts/contactOptionUtils.ts`
+### 3.314 `frontend/src/components/contacts/contactOptionUtils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4148,23 +6482,25 @@ Code files scanned: **515**
 | 9 | `parseContactOptionsFromImportRow` | export function | 110 |
 | 10 | `getPrimaryContactOption` | export function | 126 |
 
-### 3.211 `frontend/src/components/contacts/Contacts.tsx`
+### 3.315 `frontend/src/components/contacts/Contacts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getContactApi` | function | 85 |
-| 2 | `getErrorMessage` | function | 90 |
-| 3 | `asExportValue` | function | 94 |
-| 4 | `normalizeContactExportRows` | function | 98 |
-| 5 | `ContactTabFallback` | function | 126 |
-| 6 | `ImportTypePicker` | function | 175 |
-| 7 | `Contacts` | export default function | 215 |
-| 8 | `handleExportAll` | const arrow | 231 |
-| 9 | `openImportPicker` | const arrow | 319 |
-| 10 | `handleTypeSelected` | const arrow | 321 |
-| 11 | `handleImportDone` | const arrow | 326 |
+| 1 | `loadContactReadTransportModule` | function | 95 |
+| 2 | `loadCsvUtilsModule` | function | 100 |
+| 3 | `getContactApi` | function | 105 |
+| 4 | `getErrorMessage` | function | 113 |
+| 5 | `asExportValue` | function | 117 |
+| 6 | `normalizeContactExportRows` | function | 121 |
+| 7 | `ContactTabFallback` | function | 152 |
+| 8 | `ImportTypePicker` | function | 201 |
+| 9 | `Contacts` | export default function | 241 |
+| 10 | `handleExportAll` | const arrow | 259 |
+| 11 | `openImportPicker` | const arrow | 348 |
+| 12 | `handleTypeSelected` | const arrow | 350 |
+| 13 | `handleImportDone` | const arrow | 355 |
 
-### 3.212 `frontend/src/components/contacts/CustomerFormModal.tsx`
+### 3.316 `frontend/src/components/contacts/CustomerFormModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4179,128 +6515,137 @@ Code files scanned: **515**
 | 9 | `updateOption` | const arrow | 130 |
 | 10 | `handleSubmit` | const arrow | 131 |
 
-### 3.213 `frontend/src/components/contacts/customerMembershipNumber.ts`
+### 3.317 `frontend/src/components/contacts/customerMembershipNumber.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `generateCustomerMembershipNumber` | export function | 4 |
 
-### 3.214 `frontend/src/components/contacts/CustomersTab.tsx`
+### 3.318 `frontend/src/components/contacts/CustomersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getCustomerApi` | function | 117 |
-| 2 | `isSectionRow` | function | 122 |
-| 3 | `normalizeCustomerRows` | function | 126 |
-| 4 | `getApiListPayload` | function | 133 |
-| 5 | `getErrorMessage` | function | 137 |
-| 6 | `formatPoints` | function | 141 |
-| 7 | `parseContactOptions` | export function | 145 |
-| 8 | `serializeContactOptions` | export function | 149 |
-| 9 | `tr` | function | 153 |
-| 10 | `CustomersTab` | function | 162 |
-| 11 | `toggleSectionCollapsed` | const arrow | 325 |
-| 12 | `isSectionFullySelected` | const arrow | 331 |
-| 13 | `isSectionPartiallySelected` | const arrow | 332 |
-| 14 | `toggleSectionSelection` | const arrow | 333 |
-| 15 | `promise` | const arrow | 367 |
-| 16 | `handleSave` | const arrow | 454 |
-| 17 | `handleDelete` | const arrow | 531 |
-| 18 | `handleBulkDelete` | const arrow | 570 |
+| 1 | `loadContactReadTransportModule` | function | 131 |
+| 2 | `loadContactWriteTransportModule` | function | 136 |
+| 3 | `loadCsvUtilsModule` | function | 141 |
+| 4 | `getCustomerApi` | function | 146 |
+| 5 | `isSectionRow` | function | 155 |
+| 6 | `normalizeCustomerRows` | function | 159 |
+| 7 | `getApiListPayload` | function | 166 |
+| 8 | `getErrorMessage` | function | 170 |
+| 9 | `formatPoints` | function | 174 |
+| 10 | `parseContactOptions` | export function | 178 |
+| 11 | `serializeContactOptions` | export function | 182 |
+| 12 | `tr` | function | 186 |
+| 13 | `CustomersTab` | function | 195 |
+| 14 | `toggleSectionCollapsed` | const arrow | 358 |
+| 15 | `isSectionFullySelected` | const arrow | 364 |
+| 16 | `isSectionPartiallySelected` | const arrow | 365 |
+| 17 | `toggleSectionSelection` | const arrow | 366 |
+| 18 | `promise` | const arrow | 400 |
+| 19 | `handleSave` | const arrow | 487 |
+| 20 | `handleDelete` | const arrow | 564 |
+| 21 | `handleBulkDelete` | const arrow | 603 |
 
-### 3.215 `frontend/src/components/contacts/DeliveryTab.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getDeliveryApi` | function | 112 |
-| 2 | `normalizeDeliveryRows` | function | 117 |
-| 3 | `isSectionRow` | function | 125 |
-| 4 | `getErrorMessage` | function | 129 |
-| 5 | `parseDeliveryOptions` | export function | 138 |
-| 6 | `serializeDeliveryOptions` | export function | 142 |
-| 7 | `BLANK_OPTION` | const arrow | 146 |
-| 8 | `OptionEditor` | function | 157 |
-| 9 | `set` | const arrow | 158 |
-| 10 | `fieldId` | const arrow | 159 |
-| 11 | `DeliveryForm` | function | 204 |
-| 12 | `set` | const arrow | 213 |
-| 13 | `addOption` | const arrow | 214 |
-| 14 | `updateOption` | const arrow | 218 |
-| 15 | `removeOption` | const arrow | 219 |
-| 16 | `handleSave` | const arrow | 220 |
-| 17 | `OptionsDisplay` | function | 290 |
-| 18 | `OptionsBadge` | function | 307 |
-| 19 | `DeliveryTab` | function | 318 |
-| 20 | `toggleSectionCollapsed` | const arrow | 458 |
-| 21 | `isSectionFullySelected` | const arrow | 464 |
-| 22 | `isSectionPartiallySelected` | const arrow | 465 |
-| 23 | `toggleSectionSelection` | const arrow | 466 |
-| 24 | `promise` | const arrow | 498 |
-| 25 | `handleSave` | const arrow | 560 |
-| 26 | `handleDelete` | const arrow | 622 |
-| 27 | `handleBulkDelete` | const arrow | 659 |
-
-### 3.216 `frontend/src/components/contacts/shared.tsx`
+### 3.319 `frontend/src/components/contacts/DeliveryTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toggleOne` | const arrow | 99 |
-| 2 | `clearSelection` | const arrow | 110 |
-| 3 | `countActiveFlags` | export function | 133 |
-| 4 | `ThreeDotMenu` | export function | 155 |
-| 5 | `menuContent` | const arrow | 164 |
-| 6 | `DetailModal` | export function | 223 |
+| 1 | `loadContactReadTransportModule` | function | 125 |
+| 2 | `loadContactWriteTransportModule` | function | 130 |
+| 3 | `loadCsvUtilsModule` | function | 135 |
+| 4 | `getDeliveryApi` | function | 140 |
+| 5 | `normalizeDeliveryRows` | function | 149 |
+| 6 | `isSectionRow` | function | 157 |
+| 7 | `getErrorMessage` | function | 161 |
+| 8 | `parseDeliveryOptions` | export function | 170 |
+| 9 | `serializeDeliveryOptions` | export function | 174 |
+| 10 | `BLANK_OPTION` | const arrow | 178 |
+| 11 | `OptionEditor` | function | 189 |
+| 12 | `set` | const arrow | 190 |
+| 13 | `fieldId` | const arrow | 191 |
+| 14 | `DeliveryForm` | function | 236 |
+| 15 | `set` | const arrow | 245 |
+| 16 | `addOption` | const arrow | 246 |
+| 17 | `updateOption` | const arrow | 250 |
+| 18 | `removeOption` | const arrow | 251 |
+| 19 | `handleSave` | const arrow | 252 |
+| 20 | `OptionsDisplay` | function | 322 |
+| 21 | `OptionsBadge` | function | 339 |
+| 22 | `DeliveryTab` | function | 350 |
+| 23 | `toggleSectionCollapsed` | const arrow | 491 |
+| 24 | `isSectionFullySelected` | const arrow | 497 |
+| 25 | `isSectionPartiallySelected` | const arrow | 498 |
+| 26 | `toggleSectionSelection` | const arrow | 499 |
+| 27 | `promise` | const arrow | 531 |
+| 28 | `handleSave` | const arrow | 605 |
+| 29 | `handleDelete` | const arrow | 667 |
+| 30 | `handleBulkDelete` | const arrow | 704 |
 
-### 3.217 `frontend/src/components/contacts/SuppliersTab.tsx`
+### 3.320 `frontend/src/components/contacts/shared.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSupplierApi` | function | 115 |
-| 2 | `normalizeSupplierRows` | function | 120 |
-| 3 | `isSectionRow` | function | 128 |
-| 4 | `getErrorMessage` | function | 132 |
-| 5 | `SupplierForm` | function | 143 |
-| 6 | `set` | const arrow | 159 |
-| 7 | `addOption` | const arrow | 160 |
-| 8 | `updateOption` | const arrow | 164 |
-| 9 | `removeOption` | const arrow | 165 |
-| 10 | `handleSubmit` | const arrow | 166 |
-| 11 | `fieldId` | const arrow | 214 |
-| 12 | `SuppliersTab` | function | 260 |
-| 13 | `toggleSectionCollapsed` | const arrow | 407 |
-| 14 | `isSectionFullySelected` | const arrow | 413 |
-| 15 | `isSectionPartiallySelected` | const arrow | 414 |
-| 16 | `toggleSectionSelection` | const arrow | 415 |
-| 17 | `promise` | const arrow | 449 |
-| 18 | `handleSave` | const arrow | 512 |
-| 19 | `handleDelete` | const arrow | 582 |
-| 20 | `handleBulkDelete` | const arrow | 621 |
+| 1 | `toggleOne` | const arrow | 100 |
+| 2 | `clearSelection` | const arrow | 111 |
+| 3 | `countActiveFlags` | export function | 134 |
+| 4 | `ThreeDotMenu` | export function | 156 |
+| 5 | `menuContent` | const arrow | 165 |
+| 6 | `DetailModal` | export function | 224 |
 
-### 3.218 `frontend/src/components/custom-tables/CustomTables.tsx`
+### 3.321 `frontend/src/components/contacts/SuppliersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getCustomTablesApi` | function | 72 |
-| 2 | `getErrorMessage` | function | 76 |
-| 3 | `getHistoryResultId` | function | 80 |
-| 4 | `formatCellValue` | function | 84 |
-| 5 | `toInputValue` | function | 91 |
-| 6 | `normalizeRowValue` | function | 98 |
-| 7 | `normalizeCustomTable` | function | 111 |
-| 8 | `parseSchema` | function | 124 |
-| 9 | `normalizeRows` | function | 145 |
-| 10 | `buildRowPayload` | function | 151 |
-| 11 | `CustomTables` | export default function | 160 |
-| 12 | `addColumn` | const arrow | 275 |
-| 13 | `updateColumn` | const arrow | 282 |
-| 14 | `removeColumn` | const arrow | 291 |
-| 15 | `handleCreateTable` | const arrow | 298 |
-| 16 | `handleSaveRow` | const arrow | 345 |
-| 17 | `handleDeleteRow` | const arrow | 443 |
-| 18 | `openAddRow` | const arrow | 495 |
-| 19 | `openEditRow` | const arrow | 502 |
+| 1 | `loadContactReadTransportModule` | function | 128 |
+| 2 | `loadContactWriteTransportModule` | function | 133 |
+| 3 | `loadCsvUtilsModule` | function | 138 |
+| 4 | `getSupplierApi` | function | 143 |
+| 5 | `normalizeSupplierRows` | function | 152 |
+| 6 | `isSectionRow` | function | 160 |
+| 7 | `getErrorMessage` | function | 164 |
+| 8 | `SupplierForm` | function | 175 |
+| 9 | `set` | const arrow | 191 |
+| 10 | `addOption` | const arrow | 192 |
+| 11 | `updateOption` | const arrow | 196 |
+| 12 | `removeOption` | const arrow | 197 |
+| 13 | `handleSubmit` | const arrow | 198 |
+| 14 | `fieldId` | const arrow | 246 |
+| 15 | `SuppliersTab` | function | 292 |
+| 16 | `toggleSectionCollapsed` | const arrow | 440 |
+| 17 | `isSectionFullySelected` | const arrow | 446 |
+| 18 | `isSectionPartiallySelected` | const arrow | 447 |
+| 19 | `toggleSectionSelection` | const arrow | 448 |
+| 20 | `promise` | const arrow | 482 |
+| 21 | `handleSave` | const arrow | 557 |
+| 22 | `handleDelete` | const arrow | 627 |
+| 23 | `handleBulkDelete` | const arrow | 666 |
 
-### 3.219 `frontend/src/components/dashboard/charts/BarChart.tsx`
+### 3.322 `frontend/src/components/custom-tables/CustomTables.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getCustomTablesApi` | function | 73 |
+| 2 | `getErrorMessage` | function | 77 |
+| 3 | `getHistoryResultId` | function | 81 |
+| 4 | `formatCellValue` | function | 85 |
+| 5 | `toInputValue` | function | 92 |
+| 6 | `normalizeRowValue` | function | 99 |
+| 7 | `normalizeCustomTable` | function | 112 |
+| 8 | `parseSchema` | function | 125 |
+| 9 | `normalizeRows` | function | 146 |
+| 10 | `buildRowPayload` | function | 152 |
+| 11 | `CustomTables` | export default function | 161 |
+| 12 | `addColumn` | const arrow | 276 |
+| 13 | `updateColumn` | const arrow | 283 |
+| 14 | `removeColumn` | const arrow | 292 |
+| 15 | `handleCreateTable` | const arrow | 299 |
+| 16 | `handleSaveRow` | const arrow | 346 |
+| 17 | `handleDeleteRow` | const arrow | 444 |
+| 18 | `openAddRow` | const arrow | 496 |
+| 19 | `openEditRow` | const arrow | 503 |
+
+### 3.323 `frontend/src/components/dashboard/charts/BarChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4310,17 +6655,17 @@ Code files scanned: **515**
 | 4 | `updateWidth` | const arrow | 53 |
 | 5 | `yPx` | function | 89 |
 
-### 3.220 `frontend/src/components/dashboard/charts/DonutChart.tsx`
+### 3.324 `frontend/src/components/dashboard/charts/DonutChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `DonutChart` | export default function | 22 |
 
-### 3.221 `frontend/src/components/dashboard/charts/index.ts`
+### 3.325 `frontend/src/components/dashboard/charts/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.222 `frontend/src/components/dashboard/charts/LineChart.tsx`
+### 3.326 `frontend/src/components/dashboard/charts/LineChart.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4332,42 +6677,72 @@ Code files scanned: **515**
 | 6 | `yPx` | function | 104 |
 | 7 | `handleMouseMove` | const arrow | 114 |
 
-### 3.223 `frontend/src/components/dashboard/charts/NoData.tsx`
+### 3.327 `frontend/src/components/dashboard/charts/NoData.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `NoData` | export default function | 7 |
 
-### 3.224 `frontend/src/components/dashboard/Dashboard.tsx`
+### 3.328 `frontend/src/components/dashboard/Dashboard.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getDashboardApi` | function | 235 |
 | 2 | `getErrorMessage` | function | 239 |
-| 3 | `getDashboardFilterStorageKey` | function | 287 |
-| 4 | `readDashboardFilterPrefs` | function | 292 |
-| 5 | `downsampleChartRows` | function | 316 |
-| 6 | `normalizeDashboardRangeId` | function | 327 |
-| 7 | `normalizeDashboardGranularity` | function | 334 |
-| 8 | `compactDashboardMetaParts` | function | 338 |
-| 9 | `formatDashboardHourLabel` | function | 344 |
-| 10 | `getSaleStatusTone` | function | 351 |
-| 11 | `isDashboardSummaryPayload` | function | 358 |
-| 12 | `isDashboardAnalyticsPayload` | function | 370 |
-| 13 | `normalizeDashboardSummaryPayload` | function | 383 |
-| 14 | `normalizeDashboardAnalyticsPayload` | function | 396 |
-| 15 | `Dashboard` | export default function | 416 |
-| 16 | `calcTrend` | const arrow | 669 |
-| 17 | `rangeLabel` | const arrow | 713 |
-| 18 | `periodShort` | const arrow | 719 |
+| 3 | `getDashboardFilterStorageKey` | function | 288 |
+| 4 | `readDashboardFilterPrefs` | function | 293 |
+| 5 | `downsampleChartRows` | function | 317 |
+| 6 | `normalizeDashboardRangeId` | function | 328 |
+| 7 | `normalizeDashboardGranularity` | function | 335 |
+| 8 | `compactDashboardMetaParts` | function | 339 |
+| 9 | `formatDashboardHourLabel` | function | 345 |
+| 10 | `getSaleStatusTone` | function | 352 |
+| 11 | `isDashboardSummaryPayload` | function | 359 |
+| 12 | `isDashboardAnalyticsPayload` | function | 371 |
+| 13 | `normalizeDashboardSummaryPayload` | function | 384 |
+| 14 | `normalizeDashboardAnalyticsPayload` | function | 397 |
+| 15 | `Dashboard` | export default function | 417 |
+| 16 | `calcTrend` | const arrow | 727 |
+| 17 | `rangeLabel` | const arrow | 771 |
+| 18 | `periodShort` | const arrow | 777 |
 
-### 3.225 `frontend/src/components/dashboard/MiniStat.tsx`
+### 3.329 `frontend/src/components/dashboard/dashboardExport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `priceCsv` | function | 91 |
+| 2 | `totals` | function | 95 |
+| 3 | `periodReturns` | function | 99 |
+| 4 | `periodSupplierReturns` | function | 103 |
+| 5 | `buildDashboardKpiRows` | function | 107 |
+| 6 | `buildDashboardFormulaRows` | function | 135 |
+| 7 | `buildDashboardManifestEntries` | function | 163 |
+| 8 | `buildDashboardSalesRows` | function | 178 |
+| 9 | `buildDashboardTopProductRows` | function | 193 |
+| 10 | `buildDashboardTopCustomerRows` | function | 202 |
+| 11 | `buildDashboardPaymentRows` | function | 215 |
+| 12 | `buildDashboardBranchRows` | function | 223 |
+| 13 | `buildDashboardLowStockRows` | function | 231 |
+| 14 | `buildDashboardOutStockRows` | function | 239 |
+| 15 | `buildDashboardRecentRows` | function | 247 |
+| 16 | `hasDashboardExportData` | function | 258 |
+| 17 | `exportDashboardFull` | export function | 262 |
+| 18 | `exportDashboardStats` | export function | 286 |
+| 19 | `exportDashboardKpis` | export function | 314 |
+| 20 | `exportDashboardSalesChart` | export function | 319 |
+| 21 | `exportDashboardTopProducts` | export function | 335 |
+| 22 | `exportDashboardTopCustomers` | export function | 339 |
+| 23 | `exportDashboardPaymentMethods` | export function | 344 |
+| 24 | `exportDashboardBranches` | export function | 349 |
+| 25 | `exportDashboardPackage` | export function | 354 |
+
+### 3.330 `frontend/src/components/dashboard/MiniStat.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `MiniStat` | export default function | 13 |
 
-### 3.226 `frontend/src/components/files/FilePickerModal.tsx`
+### 3.331 `frontend/src/components/files/FilePickerModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4380,86 +6755,119 @@ Code files scanned: **515**
 | 7 | `handleUpload` | function | 173 |
 | 8 | `handleDelete` | function | 215 |
 
-### 3.227 `frontend/src/components/files/FilesPage.tsx`
+### 3.332 `frontend/src/components/files/FilesPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `loadFilesProvidersTab` | const arrow | 30 |
-| 2 | `loadFilesResponsesTab` | const arrow | 31 |
-| 3 | `getFilesApi` | function | 225 |
-| 4 | `getErrorMessage` | function | 229 |
-| 5 | `hasMojibake` | function | 233 |
-| 6 | `sanitizeFallback` | function | 237 |
-| 7 | `AssetPreview` | function | 241 |
-| 8 | `AssetCardSkeleton` | function | 264 |
-| 9 | `formatDateTime` | function | 290 |
-| 10 | `formatFileSize` | function | 300 |
-| 11 | `emptyProviderForm` | function | 308 |
-| 12 | `compactTabLabel` | function | 331 |
-| 13 | `getDefaultFilesPageSize` | function | 337 |
-| 14 | `downloadAssetFile` | function | 342 |
-| 15 | `FilesPage` | export default function | 354 |
-| 16 | `handleUpload` | function | 632 |
-| 17 | `handleDeleteAsset` | function | 655 |
-| 18 | `toggleAssetSelection` | function | 683 |
-| 19 | `toggleSelectAllAssets` | function | 694 |
-| 20 | `handleCopySelectedPaths` | function | 701 |
-| 21 | `handleDownloadSelected` | function | 716 |
-| 22 | `handleDeleteSelectedAssets` | function | 724 |
-| 23 | `startCreateProvider` | function | 770 |
-| 24 | `startEditProvider` | function | 786 |
-| 25 | `saveProvider` | function | 811 |
-| 26 | `testProvider` | function | 895 |
-| 27 | `removeProvider` | function | 916 |
+| 1 | `loadFilesProvidersTab` | const arrow | 42 |
+| 2 | `loadFilesResponsesTab` | const arrow | 43 |
+| 3 | `getFilesApi` | function | 251 |
+| 4 | `getErrorMessage` | function | 255 |
+| 5 | `hasMojibake` | function | 259 |
+| 6 | `sanitizeFallback` | function | 263 |
+| 7 | `AssetPreview` | function | 267 |
+| 8 | `AssetCardSkeleton` | function | 290 |
+| 9 | `formatDateTime` | function | 316 |
+| 10 | `formatFileSize` | function | 326 |
+| 11 | `emptyProviderForm` | function | 334 |
+| 12 | `compactTabLabel` | function | 357 |
+| 13 | `getDefaultFilesPageSize` | function | 363 |
+| 14 | `downloadAssetFile` | function | 368 |
+| 15 | `FilesPage` | export default function | 380 |
+| 16 | `handleUpload` | function | 674 |
+| 17 | `handleDeleteAsset` | function | 697 |
+| 18 | `toggleAssetSelection` | function | 725 |
+| 19 | `toggleSelectAllAssets` | function | 736 |
+| 20 | `handleCopySelectedPaths` | function | 743 |
+| 21 | `handleDownloadSelected` | function | 758 |
+| 22 | `handleDeleteSelectedAssets` | function | 766 |
+| 23 | `startCreateProvider` | function | 812 |
+| 24 | `startEditProvider` | function | 828 |
+| 25 | `saveProvider` | function | 853 |
+| 26 | `testProvider` | function | 937 |
+| 27 | `removeProvider` | function | 958 |
 
-### 3.228 `frontend/src/components/files/FilesProvidersTab.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `ProviderStatus` | function | 123 |
-| 2 | `FilesProvidersTab` | export default function | 134 |
-
-### 3.229 `frontend/src/components/files/FilesResponsesTab.tsx`
+### 3.333 `frontend/src/components/files/FilesProvidersTab.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `FilesResponsesTab` | export default function | 66 |
+| 1 | `toProviderSelectOptions` | function | 47 |
+| 2 | `toProviderTypeOptions` | function | 51 |
+| 3 | `ProviderStatus` | function | 130 |
+| 4 | `FilesProvidersTab` | export default function | 141 |
 
-### 3.230 `frontend/src/components/inventory/DualMoney.tsx`
+### 3.334 `frontend/src/components/files/FilesResponsesTab.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `FilesResponsesTab` | export default function | 64 |
+
+### 3.335 `frontend/src/components/inventory/DualMoney.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `DualMoney` | export default function | 8 |
 
-### 3.231 `frontend/src/components/inventory/Inventory.tsx`
+### 3.336 `frontend/src/components/inventory/Inventory.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getInventoryApi` | function | 180 |
-| 2 | `normalizeFiniteIds` | function | 214 |
-| 3 | `countActiveFlags` | function | 218 |
-| 4 | `countSelectedIds` | function | 226 |
-| 5 | `renderDestinationProductOptions` | function | 234 |
-| 6 | `limitInventorySectionsForMobile` | function | 245 |
-| 7 | `priceCsv` | function | 272 |
-| 8 | `parseInventoryTimestamp` | function | 276 |
-| 9 | `InventoryDiscountBadge` | function | 290 |
-| 10 | `InventoryBatchPreview` | function | 301 |
-| 11 | `label` | const arrow | 313 |
-| 12 | `loadInventoryExportTools` | function | 368 |
-| 13 | `Inventory` | export default function | 383 |
-| 14 | `promise` | const arrow | 626 |
-| 15 | `handleAdjust` | const arrow | 992 |
-| 16 | `openAdjust` | const arrow | 1074 |
-| 17 | `openMove` | const arrow | 1081 |
-| 18 | `openTransfer` | const arrow | 1104 |
-| 19 | `handleMoveStock` | const arrow | 1159 |
-| 20 | `handleTransferStock` | const arrow | 1232 |
-| 21 | `syncViewport` | const arrow | 1389 |
-| 22 | `statsValue` | const arrow | 2008 |
-| 23 | `selectInventorySection` | const arrow | 3231 |
+| 1 | `loadBranchTransport` | function | 212 |
+| 2 | `loadDashboardTransport` | function | 217 |
+| 3 | `loadInventoryTransport` | function | 222 |
+| 4 | `loadInventoryWriteTransport` | function | 227 |
+| 5 | `loadProductReadTransport` | function | 232 |
+| 6 | `loadReturnsTransport` | function | 237 |
+| 7 | `loadRfidTransport` | function | 242 |
+| 8 | `loadUserReadTransport` | function | 247 |
+| 9 | `loadInventoryExportModule` | function | 252 |
+| 10 | `getInventoryApi` | function | 257 |
+| 11 | `normalizeFiniteIds` | function | 307 |
+| 12 | `countActiveFlags` | function | 311 |
+| 13 | `countSelectedIds` | function | 319 |
+| 14 | `buildDestinationProductOptions` | function | 327 |
+| 15 | `limitInventorySectionsForMobile` | function | 340 |
+| 16 | `parseInventoryTimestamp` | function | 367 |
+| 17 | `InventoryDiscountBadge` | function | 381 |
+| 18 | `InventoryBatchPreview` | function | 392 |
+| 19 | `label` | const arrow | 404 |
+| 20 | `Inventory` | export default function | 457 |
+| 21 | `promise` | const arrow | 706 |
+| 22 | `loadInventoryBootstrap` | const arrow | 744 |
+| 23 | `handleAdjust` | const arrow | 1147 |
+| 24 | `openAdjust` | const arrow | 1229 |
+| 25 | `openMove` | const arrow | 1236 |
+| 26 | `openTransfer` | const arrow | 1259 |
+| 27 | `handleMoveStock` | const arrow | 1314 |
+| 28 | `handleTransferStock` | const arrow | 1387 |
+| 29 | `syncViewport` | const arrow | 1551 |
+| 30 | `statsValue` | const arrow | 2172 |
+| 31 | `selectInventorySection` | const arrow | 2898 |
 
-### 3.232 `frontend/src/components/inventory/InventoryImportModal.tsx`
+### 3.337 `frontend/src/components/inventory/inventoryExport.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `loadInventoryExportTools` | function | 57 |
+| 2 | `priceCsv` | function | 72 |
+| 3 | `parseExportTimestamp` | function | 76 |
+| 4 | `getMovementActivityRows` | function | 90 |
+| 5 | `getMovementVolumeRows` | function | 108 |
+| 6 | `getStockStatusRows` | function | 126 |
+| 7 | `getTopStockValueRows` | function | 134 |
+| 8 | `getBranchComparisonRows` | function | 147 |
+| 9 | `buildInventoryStatsRows` | function | 171 |
+| 10 | `buildInventoryFormulaRows` | function | 205 |
+| 11 | `buildMovementFilterRows` | function | 246 |
+| 12 | `buildInventoryExportContextRows` | function | 261 |
+| 13 | `buildMovementRows` | function | 281 |
+| 14 | `buildInventoryProductRows` | function | 295 |
+| 15 | `exportInventoryMovementGroups` | export function | 327 |
+| 16 | `exportInventorySummary` | export function | 332 |
+| 17 | `exportInventoryStats` | export function | 337 |
+| 18 | `exportInventoryPackage` | export function | 366 |
+
+### 3.338 `frontend/src/components/inventory/InventoryImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4473,33 +6881,33 @@ Code files scanned: **515**
 | 8 | `handleDownloadTemplate` | const arrow | 181 |
 | 9 | `handleImport` | const arrow | 185 |
 
-### 3.233 `frontend/src/components/inventory/inventoryImportWorker.ts`
+### 3.339 `frontend/src/components/inventory/inventoryImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.234 `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
+### 3.340 `frontend/src/components/inventory/InventoryMovementsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `InventoryMovementsSurface` | export default function | 140 |
+| 1 | `InventoryMovementsSurface` | export default function | 143 |
 
-### 3.235 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
+### 3.341 `frontend/src/components/inventory/InventoryProductsSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `InventoryProductsSurface` | export default function | 102 |
-| 2 | `renderDesktopTableHead` | const arrow | 141 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 163 |
+| 1 | `InventoryProductsSurface` | export default function | 103 |
+| 2 | `renderDesktopTableHead` | const arrow | 142 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 164 |
 
-### 3.236 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
+### 3.342 `frontend/src/components/inventory/InventoryRfidSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `InventoryRfidSurface` | export default function | 55 |
 
-### 3.237 `frontend/src/components/inventory/movementGroups.ts`
+### 3.343 `frontend/src/components/inventory/movementGroups.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4519,101 +6927,117 @@ Code files scanned: **515**
 | 14 | `getMovementGroupPage` | export function | 257 |
 | 15 | `movementGroupHaystack` | export function | 273 |
 
-### 3.238 `frontend/src/components/inventory/ProductDetailModal.tsx`
+### 3.344 `frontend/src/components/inventory/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getBranchStockKey` | function | 61 |
 | 2 | `ProductDetailModal` | export default function | 65 |
 
-### 3.239 `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
+### 3.345 `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getLoyaltyApi` | function | 187 |
-| 2 | `toCustomerPointRows` | function | 191 |
-| 3 | `getErrorMessage` | function | 195 |
-| 4 | `sanitizeInteger` | function | 199 |
-| 5 | `sanitizeKhr` | function | 204 |
-| 6 | `formatLookupValue` | function | 210 |
-| 7 | `normalizeLoyaltySection` | function | 214 |
-| 8 | `LoyaltyPointsPage` | export default function | 218 |
-| 9 | `handleSave` | function | 327 |
-| 10 | `handleLookup` | function | 351 |
+| 1 | `getPortalTransport` | function | 191 |
+| 2 | `lookupLoyaltyPortalMembership` | function | 196 |
+| 3 | `toCustomerPointRows` | function | 201 |
+| 4 | `getErrorMessage` | function | 205 |
+| 5 | `sanitizeInteger` | function | 209 |
+| 6 | `sanitizeKhr` | function | 214 |
+| 7 | `formatLookupValue` | function | 220 |
+| 8 | `normalizeLoyaltySection` | function | 224 |
+| 9 | `LoyaltyPointsPage` | export default function | 228 |
+| 10 | `handleSave` | function | 337 |
+| 11 | `handleLookup` | function | 361 |
 
-### 3.240 `frontend/src/components/navigation/Sidebar.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getFallbackLabel` | function | 97 |
-| 2 | `getNavLabel` | function | 105 |
-| 3 | `isDarkColor` | function | 121 |
-| 4 | `withAlpha` | function | 131 |
-| 5 | `mergeStyles` | function | 137 |
-| 6 | `announcePageIntent` | function | 141 |
-| 7 | `getIconForItem` | function | 148 |
-| 8 | `isNavigationItemWithIcon` | function | 152 |
-| 9 | `Sidebar` | export default function | 156 |
-
-### 3.241 `frontend/src/components/pos/CartItem.tsx`
+### 3.346 `frontend/src/components/navigation/Sidebar.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `translate` | function | 41 |
-| 2 | `CartItem` | export default function | 45 |
+| 1 | `getFallbackLabel` | function | 95 |
+| 2 | `getNavLabel` | function | 103 |
+| 3 | `isDarkColor` | function | 119 |
+| 4 | `withAlpha` | function | 129 |
+| 5 | `mergeStyles` | function | 135 |
+| 6 | `announcePageIntent` | function | 139 |
+| 7 | `getIconForItem` | function | 146 |
+| 8 | `isNavigationItemWithIcon` | function | 150 |
+| 9 | `Sidebar` | export default function | 154 |
 
-### 3.242 `frontend/src/components/pos/FilterPanel.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `countActiveFlags` | function | 42 |
-| 2 | `SectionLabel` | function | 50 |
-| 3 | `POSFilterPanel` | export default function | 61 |
-| 4 | `clearAll` | const arrow | 94 |
-| 5 | `chip` | const arrow | 103 |
-
-### 3.243 `frontend/src/components/pos/POS.tsx`
+### 3.347 `frontend/src/components/pos/CartItem.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `isPlainRecord` | function | 287 |
-| 2 | `normalizeCategory` | function | 291 |
-| 3 | `getPosApi` | function | 306 |
-| 4 | `missingPosApiMethod` | function | 310 |
-| 5 | `normalizeOrder` | function | 314 |
-| 6 | `getErrorMessage` | function | 325 |
-| 7 | `asText` | function | 329 |
-| 8 | `asNumber` | function | 333 |
-| 9 | `allTermsMatch` | function | 337 |
-| 10 | `ProductDiscountBadge` | function | 351 |
-| 11 | `POS` | export default function | 371 |
-| 12 | `setPersistedCat` | const arrow | 402 |
-| 13 | `setPersistedBrand` | const arrow | 403 |
-| 14 | `setPersistedBranch` | const arrow | 404 |
-| 15 | `setPersistedStock` | const arrow | 405 |
-| 16 | `setPersistedGroup` | const arrow | 406 |
-| 17 | `setPersistedSupplier` | const arrow | 407 |
-| 18 | `setPersistedInitial` | const arrow | 408 |
-| 19 | `addNewOrder` | const arrow | 469 |
-| 20 | `closeOrder` | const arrow | 481 |
-| 21 | `selectCustomer` | const arrow | 802 |
-| 22 | `applyCustomerOption` | const arrow | 850 |
-| 23 | `clearCustomer` | const arrow | 864 |
-| 24 | `handleAddCustomer` | const arrow | 872 |
-| 25 | `selectDelivery` | const arrow | 910 |
-| 26 | `clearDelivery` | const arrow | 915 |
-| 27 | `handleAddDelivery` | const arrow | 917 |
-| 28 | `qty` | const arrow | 1029 |
-| 29 | `addToCart` | function | 1193 |
-| 30 | `updateQty` | const arrow | 1232 |
-| 31 | `updatePrice` | const arrow | 1240 |
-| 32 | `updateItemBranch` | const arrow | 1264 |
-| 33 | `handleDiscountUsd` | const arrow | 1313 |
-| 34 | `handleDiscountKhr` | const arrow | 1314 |
-| 35 | `handleMembershipUnits` | const arrow | 1315 |
-| 36 | `handleCheckout` | const arrow | 1354 |
+| 1 | `translate` | function | 42 |
+| 2 | `CartItem` | export default function | 46 |
 
-### 3.244 `frontend/src/components/pos/posCore.ts`
+### 3.348 `frontend/src/components/pos/FilterPanel.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `countActiveFlags` | function | 47 |
+| 2 | `SectionLabel` | function | 55 |
+| 3 | `POSFilterPanel` | export default function | 66 |
+| 4 | `clearAll` | const arrow | 100 |
+| 5 | `chip` | const arrow | 109 |
+
+### 3.349 `frontend/src/components/pos/POS.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getPosStatusLabel` | function | 106 |
+| 2 | `loadContactOptionUtilsModule` | function | 112 |
+| 3 | `parseContactOptions` | function | 143 |
+| 4 | `isPlainRecord` | function | 334 |
+| 5 | `normalizeCategory` | function | 338 |
+| 6 | `loadPosProductBootstrap` | function | 353 |
+| 7 | `searchPosCatalogProducts` | function | 357 |
+| 8 | `loadPosProductFilters` | function | 361 |
+| 9 | `loadPosCategories` | function | 365 |
+| 10 | `getContactReadTransport` | function | 374 |
+| 11 | `getContactWriteTransport` | function | 379 |
+| 12 | `getPortalTransport` | function | 384 |
+| 13 | `getSaleWriteTransport` | function | 389 |
+| 14 | `loadPosCustomers` | function | 394 |
+| 15 | `loadPosDeliveryContacts` | function | 399 |
+| 16 | `createPosCustomer` | function | 404 |
+| 17 | `createPosDeliveryContact` | function | 409 |
+| 18 | `lookupPosPortalMembership` | function | 414 |
+| 19 | `createPosSale` | function | 419 |
+| 20 | `normalizeOrder` | function | 424 |
+| 21 | `getErrorMessage` | function | 435 |
+| 22 | `asText` | function | 439 |
+| 23 | `asNumber` | function | 443 |
+| 24 | `allTermsMatch` | function | 447 |
+| 25 | `ProductDiscountBadge` | function | 461 |
+| 26 | `POS` | export default function | 481 |
+| 27 | `setPersistedCat` | const arrow | 512 |
+| 28 | `setPersistedBrand` | const arrow | 513 |
+| 29 | `setPersistedBranch` | const arrow | 514 |
+| 30 | `setPersistedStock` | const arrow | 515 |
+| 31 | `setPersistedGroup` | const arrow | 516 |
+| 32 | `setPersistedSupplier` | const arrow | 517 |
+| 33 | `setPersistedInitial` | const arrow | 518 |
+| 34 | `addNewOrder` | const arrow | 579 |
+| 35 | `closeOrder` | const arrow | 591 |
+| 36 | `promise` | const arrow | 733 |
+| 37 | `selectCustomer` | const arrow | 1064 |
+| 38 | `applyCustomerOption` | const arrow | 1112 |
+| 39 | `clearCustomer` | const arrow | 1126 |
+| 40 | `handleAddCustomer` | const arrow | 1134 |
+| 41 | `selectDelivery` | const arrow | 1171 |
+| 42 | `clearDelivery` | const arrow | 1176 |
+| 43 | `handleAddDelivery` | const arrow | 1178 |
+| 44 | `addToCart` | function | 1403 |
+| 45 | `updateQty` | const arrow | 1442 |
+| 46 | `updatePrice` | const arrow | 1450 |
+| 47 | `updateItemBranch` | const arrow | 1474 |
+| 48 | `handleDiscountUsd` | const arrow | 1543 |
+| 49 | `handleDiscountKhr` | const arrow | 1544 |
+| 50 | `handleMembershipUnits` | const arrow | 1545 |
+| 51 | `handleCheckout` | const arrow | 1584 |
+
+### 3.350 `frontend/src/components/pos/posCore.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4628,77 +7052,82 @@ Code files scanned: **515**
 | 9 | `getCartLineId` | export function | 153 |
 | 10 | `findMatchingCartLineIndex` | export function | 160 |
 
-### 3.245 `frontend/src/components/pos/ProductImage.tsx`
+### 3.351 `frontend/src/components/pos/ProductImage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductImage` | export default function | 9 |
+| 1 | `getImageApi` | function | 17 |
+| 2 | `isRecentlyBrokenProductImage` | function | 21 |
+| 3 | `markBrokenProductImage` | function | 29 |
+| 4 | `ProductImage` | export default function | 34 |
+| 5 | `loadImageData` | function | 71 |
 
-### 3.246 `frontend/src/components/pos/QuickAddModal.tsx`
+### 3.352 `frontend/src/components/pos/QuickAddModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `QuickAddModal` | export default function | 12 |
 | 2 | `T` | const arrow | 13 |
 
-### 3.247 `frontend/src/components/products/config/productPageConfig.ts`
+### 3.353 `frontend/src/components/products/config/productPageConfig.ts`
 
 - No top-level named symbols detected.
 
-### 3.248 `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
+### 3.354 `frontend/src/components/products/forms/BranchStockAdjuster.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getProductApi` | function | 72 |
-| 2 | `parseStockDelta` | function | 76 |
-| 3 | `BranchStockAdjuster` | export default function | 81 |
-| 4 | `T` | const arrow | 102 |
-| 5 | `setRow` | const arrow | 108 |
-| 6 | `handleSave` | const arrow | 114 |
+| 1 | `getProductApi` | function | 73 |
+| 2 | `parseStockDelta` | function | 77 |
+| 3 | `BranchStockAdjuster` | export default function | 82 |
+| 4 | `T` | const arrow | 103 |
+| 5 | `setRow` | const arrow | 109 |
+| 6 | `handleSave` | const arrow | 115 |
 
-### 3.249 `frontend/src/components/products/forms/BulkAddStockModal.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getProductApi` | function | 68 |
-| 2 | `parsePositiveQuantity` | function | 72 |
-| 3 | `normalizeBranchId` | function | 77 |
-| 4 | `normalizeProductId` | function | 83 |
-| 5 | `BulkAddStockModal` | export default function | 88 |
-| 6 | `handleSave` | const arrow | 101 |
-
-### 3.250 `frontend/src/components/products/forms/ProductForm.tsx`
+### 3.355 `frontend/src/components/products/forms/BulkAddStockModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getProductFormApi` | function | 188 |
-| 2 | `getErrorMessage` | function | 192 |
-| 3 | `normalizeGallery` | function | 196 |
-| 4 | `editablePrice` | function | 212 |
-| 5 | `pickImageFiles` | function | 217 |
-| 6 | `ProductForm` | export default function | 236 |
-| 7 | `loadSuppliers` | function | 371 |
-| 8 | `setField` | function | 392 |
-| 9 | `setNumericField` | function | 396 |
-| 10 | `addImages` | function | 400 |
-| 11 | `addPhoto` | function | 405 |
-| 12 | `uploadPickedImages` | function | 410 |
-| 13 | `removeImage` | function | 457 |
-| 14 | `setPrimaryImage` | function | 461 |
-| 15 | `saveForm` | function | 471 |
-| 16 | `openScanner` | function | 522 |
-| 17 | `closeScanner` | function | 527 |
-| 18 | `applyScannedValue` | function | 531 |
+| 1 | `getProductApi` | function | 69 |
+| 2 | `parsePositiveQuantity` | function | 73 |
+| 3 | `normalizeBranchId` | function | 78 |
+| 4 | `normalizeProductId` | function | 84 |
+| 5 | `BulkAddStockModal` | export default function | 89 |
+| 6 | `handleSave` | const arrow | 109 |
 
-### 3.251 `frontend/src/components/products/forms/VariantFormModal.tsx`
+### 3.356 `frontend/src/components/products/forms/ProductForm.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getProductVariantApi` | function | 104 |
-| 2 | `getErrorMessage` | function | 108 |
-| 3 | `VariantFormModal` | export default function | 112 |
+| 1 | `loadContactsTransportModule` | function | 186 |
+| 2 | `loadProductImageUploadTransportModule` | function | 191 |
+| 3 | `getErrorMessage` | function | 198 |
+| 4 | `normalizeGallery` | function | 202 |
+| 5 | `editablePrice` | function | 218 |
+| 6 | `pickImageFiles` | function | 223 |
+| 7 | `ProductForm` | export default function | 242 |
+| 8 | `loadSuppliers` | function | 423 |
+| 9 | `setField` | function | 448 |
+| 10 | `setNumericField` | function | 452 |
+| 11 | `addImages` | function | 456 |
+| 12 | `addPhoto` | function | 461 |
+| 13 | `uploadPickedImages` | function | 466 |
+| 14 | `removeImage` | function | 511 |
+| 15 | `setPrimaryImage` | function | 515 |
+| 16 | `saveForm` | function | 525 |
+| 17 | `openScanner` | function | 576 |
+| 18 | `closeScanner` | function | 581 |
+| 19 | `applyScannedValue` | function | 585 |
 
-### 3.252 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
+### 3.357 `frontend/src/components/products/forms/VariantFormModal.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getProductVariantApi` | function | 105 |
+| 2 | `getErrorMessage` | function | 109 |
+| 3 | `VariantFormModal` | export default function | 113 |
+
+### 3.358 `frontend/src/components/products/helpers/productDisplayHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4709,51 +7138,60 @@ Code files scanned: **515**
 | 5 | `getProductStockStatus` | export function | 101 |
 | 6 | `buildProductRowDisplayState` | export function | 111 |
 
-### 3.253 `frontend/src/components/products/helpers/productFilterHelpers.ts`
+### 3.359 `frontend/src/components/products/helpers/productExport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toNumber` | function | 66 |
-| 2 | `getImageGallery` | function | 71 |
-| 3 | `buildProductSearchTerms` | export function | 75 |
-| 4 | `getProductBranchQuantity` | export function | 81 |
-| 5 | `filterProductsForPage` | export function | 86 |
-| 6 | `buildProductExportRows` | export function | 153 |
-| 7 | `toImageName` | const arrow | 154 |
-| 8 | `toImageUrl` | const arrow | 155 |
-| 9 | `priceCsv` | const arrow | 156 |
+| 1 | `toNumber` | function | 49 |
+| 2 | `getImageGallery` | function | 54 |
+| 3 | `buildProductExportRows` | export function | 58 |
+| 4 | `toImageName` | const arrow | 59 |
+| 5 | `toImageUrl` | const arrow | 60 |
+| 6 | `priceCsv` | const arrow | 61 |
 
-### 3.254 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
+### 3.360 `frontend/src/components/products/helpers/productFilterHelpers.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `toNumber` | function | 43 |
+| 2 | `normalizeFilterValue` | function | 48 |
+| 3 | `buildProductSearchTerms` | export function | 52 |
+| 4 | `getProductBranchQuantity` | export function | 58 |
+| 5 | `filterProductsForPage` | export function | 63 |
+
+### 3.361 `frontend/src/components/products/helpers/productGalleryHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeProductGallery` | export function | 27 |
-| 2 | `getProductGalleryImages` | export function | 47 |
-| 3 | `buildProductThumbnailState` | export function | 51 |
-| 4 | `resolveProductImageUrl` | export function | 60 |
-| 5 | `clampProductLightboxIndex` | export function | 66 |
-| 6 | `buildProductLightboxState` | export function | 74 |
-| 7 | `buildProductLightboxGalleryInput` | export function | 85 |
-| 8 | `updateProductLightboxIndex` | export function | 91 |
+| 2 | `getProductGalleryImages` | export function | 58 |
+| 3 | `buildProductThumbnailState` | export function | 62 |
+| 4 | `resolveProductImageUrl` | export function | 71 |
+| 5 | `clampProductLightboxIndex` | export function | 77 |
+| 6 | `buildProductLightboxState` | export function | 85 |
+| 7 | `buildProductLightboxGalleryInput` | export function | 96 |
+| 8 | `updateProductLightboxIndex` | export function | 102 |
 
-### 3.255 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
+### 3.362 `frontend/src/components/products/helpers/productGroupViewHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildProductGroupPriceLabel` | export function | 22 |
 | 2 | `buildProductGroupSummaryParts` | export function | 32 |
 
-### 3.256 `frontend/src/components/products/helpers/productMenuHelpers.ts`
+### 3.363 `frontend/src/components/products/helpers/productMenuHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `asString` | function | 85 |
-| 2 | `buildProductExportItems` | export function | 89 |
-| 3 | `buildProductSupplierOptions` | export function | 117 |
-| 4 | `countActiveProductFilters` | export function | 121 |
-| 5 | `buildProductFilterSections` | export function | 147 |
+| 2 | `normalizeOptionValue` | function | 89 |
+| 3 | `safeFilterLabel` | function | 93 |
+| 4 | `buildProductExportItems` | export function | 101 |
+| 5 | `buildProductSupplierOptions` | export function | 129 |
+| 6 | `countActiveProductFilters` | export function | 133 |
+| 7 | `buildProductFilterSections` | export function | 159 |
 
-### 3.257 `frontend/src/components/products/helpers/productPageHelpers.ts`
+### 3.364 `frontend/src/components/products/helpers/productPageHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4761,7 +7199,7 @@ Code files scanned: **515**
 | 2 | `normalizeBrandLookup` | export function | 22 |
 | 3 | `waitForNextFrame` | export function | 26 |
 
-### 3.258 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
+### 3.365 `frontend/src/components/products/helpers/productSelectionHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4773,7 +7211,7 @@ Code files scanned: **515**
 | 6 | `isSelectionScopeFullySelected` | export function | 132 |
 | 7 | `isSelectionScopePartiallySelected` | export function | 136 |
 
-### 3.259 `frontend/src/components/products/helpers/productWriteHelpers.ts`
+### 3.366 `frontend/src/components/products/helpers/productWriteHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4796,69 +7234,69 @@ Code files scanned: **515**
 | 17 | `getPreferredProductRestoreBranchId` | export function | 353 |
 | 18 | `resolveRestoredProductParentId` | export function | 361 |
 
-### 3.260 `frontend/src/components/products/history/productHistoryHelpers.ts`
+### 3.367 `frontend/src/components/products/history/productHistoryHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createProductHistoryRequestId` | export function | 43 |
 
-### 3.261 `frontend/src/components/products/import/BulkImportModal.tsx`
+### 3.368 `frontend/src/components/products/import/BulkImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getProductImportApi` | function | 247 |
-| 2 | `getErrorMessage` | function | 251 |
-| 3 | `getBaseName` | function | 261 |
-| 4 | `analyzeProductCsvInWorker` | function | 269 |
-| 5 | `runFallbackAnalysis` | const arrow | 278 |
-| 6 | `cleanup` | const arrow | 290 |
-| 7 | `complete` | const arrow | 298 |
-| 8 | `getIncomingImageFilenames` | function | 347 |
-| 9 | `getExistingImageFilenames` | function | 380 |
-| 10 | `csvEscape` | function | 409 |
-| 11 | `compactImportValue` | function | 439 |
-| 12 | `isBlankImportValue` | function | 444 |
-| 13 | `hasPriceReviewIssue` | function | 448 |
-| 14 | `getProductImportIssueLabel` | function | 453 |
-| 15 | `getProductImportIssueHint` | function | 462 |
-| 16 | `getProductImportRowIssueDetails` | function | 470 |
-| 17 | `valuesDiffer` | function | 525 |
-| 18 | `normalizeImageMatchKey` | function | 529 |
-| 19 | `getImageReference` | function | 542 |
-| 20 | `findImageReferenceForRow` | function | 551 |
-| 21 | `getDecisionLabel` | function | 562 |
-| 22 | `getFamilyKeyForRow` | function | 566 |
-| 23 | `summarizeRowNumbers` | function | 570 |
-| 24 | `summarizeSubgroup` | function | 577 |
-| 25 | `getImportActionTargetSummary` | function | 582 |
-| 26 | `createFamilyContextEntry` | function | 615 |
-| 27 | `buildVisibleFamilyRows` | function | 636 |
-| 28 | `InlineImportDetailGrid` | function | 655 |
-| 29 | `buildImageOnlyCsv` | function | 696 |
-| 30 | `getBrowserImageEntries` | function | 714 |
-| 31 | `BulkImportModal` | export default function | 723 |
-| 32 | `resetCsvState` | const arrow | 854 |
-| 33 | `pickImageDirectory` | const arrow | 882 |
-| 34 | `pickImageZip` | const arrow | 907 |
-| 35 | `addLibraryImages` | const arrow | 921 |
-| 36 | `handleCancelCurrentJob` | const arrow | 1005 |
-| 37 | `handleRetryCurrentJob` | const arrow | 1026 |
-| 38 | `handleDeleteCurrentJob` | const arrow | 1050 |
-| 39 | `handleImageOnlyImport` | const arrow | 1077 |
-| 40 | `handlePickCSV` | const arrow | 1172 |
-| 41 | `handleImport` | const arrow | 1236 |
-| 42 | `toggleFamilyCollapse` | const arrow | 1486 |
-| 43 | `toggleInlineDetails` | const arrow | 1495 |
-| 44 | `toggleConflictSelection` | const arrow | 1504 |
-| 45 | `toggleSelectAllConflicts` | const arrow | 1513 |
-| 46 | `applyDecisionToSelection` | const arrow | 1521 |
-| 47 | `applyImageDecisionToSelection` | const arrow | 1531 |
-| 48 | `applyIdentifierDecisionToSelection` | const arrow | 1548 |
-| 49 | `applyFieldRulePreset` | const arrow | 1560 |
-| 50 | `renderConflictRow` | const arrow | 1573 |
-| 51 | `updateEditedRow` | const arrow | 1581 |
+| 1 | `getProductImportApi` | function | 251 |
+| 2 | `getErrorMessage` | function | 255 |
+| 3 | `getBaseName` | function | 259 |
+| 4 | `analyzeProductCsvInWorker` | function | 267 |
+| 5 | `runFallbackAnalysis` | const arrow | 276 |
+| 6 | `cleanup` | const arrow | 288 |
+| 7 | `complete` | const arrow | 296 |
+| 8 | `getIncomingImageFilenames` | function | 345 |
+| 9 | `getExistingImageFilenames` | function | 378 |
+| 10 | `csvEscape` | function | 407 |
+| 11 | `compactImportValue` | function | 437 |
+| 12 | `isBlankImportValue` | function | 442 |
+| 13 | `hasPriceReviewIssue` | function | 446 |
+| 14 | `getProductImportIssueLabel` | function | 451 |
+| 15 | `getProductImportIssueHint` | function | 460 |
+| 16 | `getProductImportRowIssueDetails` | function | 468 |
+| 17 | `valuesDiffer` | function | 523 |
+| 18 | `normalizeImageMatchKey` | function | 527 |
+| 19 | `getImageReference` | function | 540 |
+| 20 | `findImageReferenceForRow` | function | 549 |
+| 21 | `getDecisionLabel` | function | 560 |
+| 22 | `getFamilyKeyForRow` | function | 564 |
+| 23 | `summarizeRowNumbers` | function | 568 |
+| 24 | `summarizeSubgroup` | function | 575 |
+| 25 | `getImportActionTargetSummary` | function | 580 |
+| 26 | `createFamilyContextEntry` | function | 613 |
+| 27 | `buildVisibleFamilyRows` | function | 634 |
+| 28 | `InlineImportDetailGrid` | function | 653 |
+| 29 | `buildImageOnlyCsv` | function | 694 |
+| 30 | `getBrowserImageEntries` | function | 712 |
+| 31 | `BulkImportModal` | export default function | 721 |
+| 32 | `resetCsvState` | const arrow | 852 |
+| 33 | `pickImageDirectory` | const arrow | 880 |
+| 34 | `pickImageZip` | const arrow | 905 |
+| 35 | `addLibraryImages` | const arrow | 919 |
+| 36 | `handleCancelCurrentJob` | const arrow | 1003 |
+| 37 | `handleRetryCurrentJob` | const arrow | 1024 |
+| 38 | `handleDeleteCurrentJob` | const arrow | 1048 |
+| 39 | `handleImageOnlyImport` | const arrow | 1075 |
+| 40 | `handlePickCSV` | const arrow | 1170 |
+| 41 | `handleImport` | const arrow | 1234 |
+| 42 | `toggleFamilyCollapse` | const arrow | 1484 |
+| 43 | `toggleInlineDetails` | const arrow | 1493 |
+| 44 | `toggleConflictSelection` | const arrow | 1502 |
+| 45 | `toggleSelectAllConflicts` | const arrow | 1511 |
+| 46 | `applyDecisionToSelection` | const arrow | 1519 |
+| 47 | `applyImageDecisionToSelection` | const arrow | 1529 |
+| 48 | `applyIdentifierDecisionToSelection` | const arrow | 1546 |
+| 49 | `applyFieldRulePreset` | const arrow | 1558 |
+| 50 | `renderConflictRow` | const arrow | 1571 |
+| 51 | `updateEditedRow` | const arrow | 1579 |
 
-### 3.262 `frontend/src/components/products/import/productImportPlanner.ts`
+### 3.369 `frontend/src/components/products/import/productImportPlanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4881,7 +7319,7 @@ Code files scanned: **515**
 | 17 | `analyzeProductImportRows` | export function | 457 |
 | 18 | `analyzeProductImportText` | export function | 631 |
 
-### 3.263 `frontend/src/components/products/import/productImportWorker.ts`
+### 3.370 `frontend/src/components/products/import/productImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4889,7 +7327,7 @@ Code files scanned: **515**
 | 2 | `waitForNextTask` | function | 43 |
 | 3 | `getErrorMessage` | function | 49 |
 
-### 3.264 `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
+### 3.371 `frontend/src/components/products/lookups/ManageBrandsModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4899,11 +7337,12 @@ Code files scanned: **515**
 | 4 | `parseBrandColorMap` | function | 137 |
 | 5 | `toTitleCase` | function | 152 |
 | 6 | `getBrandReviewRule` | function | 160 |
-| 7 | `getBrandSortScore` | function | 164 |
-| 8 | `buildSavedLibrary` | function | 170 |
-| 9 | `ManageBrandsModal` | export default function | 192 |
+| 7 | `hasActiveBrandUsage` | function | 164 |
+| 8 | `getBrandSortScore` | function | 170 |
+| 9 | `buildSavedLibrary` | function | 176 |
+| 10 | `ManageBrandsModal` | export default function | 198 |
 
-### 3.265 `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
+### 3.372 `frontend/src/components/products/lookups/ManageCategoriesModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4913,7 +7352,7 @@ Code files scanned: **515**
 | 4 | `mergeCategoryUsage` | function | 129 |
 | 5 | `ManageCategoriesModal` | export default function | 158 |
 
-### 3.266 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
+### 3.373 `frontend/src/components/products/lookups/ManageUnitsModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4923,7 +7362,7 @@ Code files scanned: **515**
 | 4 | `mergeUnitUsage` | function | 129 |
 | 5 | `ManageUnitsModal` | export default function | 158 |
 
-### 3.267 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
+### 3.374 `frontend/src/components/products/lookups/productLookupSnapshots.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4938,36 +7377,42 @@ Code files scanned: **515**
 | 9 | `fetchProductsByIds` | function | 165 |
 | 10 | `restoreLookupProductSnapshots` | export function | 194 |
 
-### 3.268 `frontend/src/components/products/Products.tsx`
+### 3.375 `frontend/src/components/products/Products.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getProductApi` | function | 330 |
-| 2 | `getErrorMessage` | function | 334 |
-| 3 | `isObjectRecord` | function | 338 |
-| 4 | `toProductApiResponse` | function | 342 |
-| 5 | `scrollNodeWithOffset` | function | 346 |
-| 6 | `summarizeProductRun` | function | 352 |
-| 7 | `aggregateProductInitials` | function | 356 |
-| 8 | `toModalProduct` | function | 367 |
-| 9 | `toVariantParentProduct` | function | 379 |
-| 10 | `toLightboxState` | function | 385 |
-| 11 | `Products` | export default function | 395 |
-| 12 | `promise` | const arrow | 478 |
-| 13 | `handleSave` | const arrow | 653 |
-| 14 | `handleSaveWithGallery` | const arrow | 703 |
-| 15 | `handleBulkDelete` | const arrow | 770 |
-| 16 | `handleBulkOutOfStock` | const arrow | 817 |
-| 17 | `handleBulkChangeBranch` | const arrow | 860 |
-| 18 | `handleBulkAddStock` | const arrow | 890 |
-| 19 | `toggleSelect` | const arrow | 898 |
-| 20 | `toggleSelectAll` | const arrow | 905 |
-| 21 | `handleDelete` | const arrow | 912 |
-| 22 | `renderUnitChip` | const arrow | 999 |
-| 23 | `openLightbox` | const arrow | 1013 |
-| 24 | `getStockBadge` | const arrow | 1020 |
+| 1 | `loadProductReadModule` | function | 349 |
+| 2 | `loadProductWriteModule` | function | 354 |
+| 3 | `loadLookupModule` | function | 359 |
+| 4 | `loadBranchModule` | function | 364 |
+| 5 | `loadInventoryWriteModule` | function | 369 |
+| 6 | `loadProductImageUploadModule` | function | 374 |
+| 7 | `getProductApi` | function | 406 |
+| 8 | `getErrorMessage` | function | 410 |
+| 9 | `isObjectRecord` | function | 414 |
+| 10 | `toProductApiResponse` | function | 418 |
+| 11 | `scrollNodeWithOffset` | function | 422 |
+| 12 | `summarizeProductRun` | function | 428 |
+| 13 | `aggregateProductInitials` | function | 432 |
+| 14 | `toModalProduct` | function | 443 |
+| 15 | `toVariantParentProduct` | function | 455 |
+| 16 | `toLightboxState` | function | 461 |
+| 17 | `Products` | export default function | 471 |
+| 18 | `promise` | const arrow | 568 |
+| 19 | `handleSave` | const arrow | 828 |
+| 20 | `handleSaveWithGallery` | const arrow | 878 |
+| 21 | `handleBulkDelete` | const arrow | 945 |
+| 22 | `handleBulkOutOfStock` | const arrow | 992 |
+| 23 | `handleBulkChangeBranch` | const arrow | 1035 |
+| 24 | `handleBulkAddStock` | const arrow | 1065 |
+| 25 | `toggleSelect` | const arrow | 1073 |
+| 26 | `toggleSelectAll` | const arrow | 1080 |
+| 27 | `handleDelete` | const arrow | 1087 |
+| 28 | `renderUnitChip` | const arrow | 1174 |
+| 29 | `openLightbox` | const arrow | 1188 |
+| 30 | `getStockBadge` | const arrow | 1195 |
 
-### 3.269 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
+### 3.376 `frontend/src/components/products/scanning/barcodeImageScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -4977,22 +7422,22 @@ Code files scanned: **515**
 | 4 | `detectWithNativeBarcodeDetector` | function | 75 |
 | 5 | `scanBarcodeFromImageFile` | export function | 101 |
 
-### 3.270 `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
+### 3.377 `frontend/src/components/products/scanning/BarcodeScannerModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getNativeBarcodeDetector` | function | 95 |
-| 2 | `getScanErrorText` | function | 102 |
-| 3 | `stopStream` | function | 107 |
-| 4 | `BarcodeScannerModal` | export default function | 113 |
+| 1 | `getNativeBarcodeDetector` | function | 100 |
+| 2 | `getScanErrorText` | function | 107 |
+| 3 | `stopStream` | function | 112 |
+| 4 | `BarcodeScannerModal` | export default function | 118 |
 
-### 3.271 `frontend/src/components/products/scanning/barcodeScannerState.ts`
+### 3.378 `frontend/src/components/products/scanning/barcodeScannerState.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `deriveScannerPresentation` | export function | 31 |
 
-### 3.272 `frontend/src/components/products/scanning/cameraPermission.ts`
+### 3.379 `frontend/src/components/products/scanning/cameraPermission.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5002,7 +7447,7 @@ Code files scanned: **515**
 | 4 | `watchCameraPermission` | export function | 30 |
 | 5 | `handleChange` | const arrow | 35 |
 
-### 3.273 `frontend/src/components/products/scanning/scanbotScanner.ts`
+### 3.380 `frontend/src/components/products/scanning/scanbotScanner.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5015,31 +7460,31 @@ Code files scanned: **515**
 | 7 | `getInitializedScanbot` | function | 135 |
 | 8 | `scanBarcodeWithScanbot` | export function | 150 |
 
-### 3.274 `frontend/src/components/products/shared/primitives.tsx`
+### 3.381 `frontend/src/components/products/shared/primitives.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getImageApi` | function | 49 |
-| 2 | `isRecentlyBrokenProductImage` | function | 53 |
-| 3 | `markBrokenProductImage` | function | 61 |
-| 4 | `sanitizeNumericInput` | function | 66 |
-| 5 | `parseNumericInput` | function | 76 |
-| 6 | `ProductImg` | function | 82 |
-| 7 | `loadImageData` | function | 125 |
-| 8 | `ProductImagePlaceholder` | function | 169 |
-| 9 | `MarginCard` | function | 177 |
-| 10 | `DualPriceInput` | function | 209 |
-| 11 | `handleUsdChange` | const arrow | 210 |
-| 12 | `handleKhrChange` | const arrow | 211 |
+| 1 | `getImageApi` | function | 50 |
+| 2 | `isRecentlyBrokenProductImage` | function | 54 |
+| 3 | `markBrokenProductImage` | function | 62 |
+| 4 | `sanitizeNumericInput` | function | 67 |
+| 5 | `parseNumericInput` | function | 77 |
+| 6 | `ProductImg` | function | 83 |
+| 7 | `loadImageData` | function | 126 |
+| 8 | `ProductImagePlaceholder` | function | 170 |
+| 9 | `MarginCard` | function | 178 |
+| 10 | `DualPriceInput` | function | 210 |
+| 11 | `handleUsdChange` | const arrow | 211 |
+| 12 | `handleKhrChange` | const arrow | 212 |
 
-### 3.275 `frontend/src/components/products/surfaces/HeaderActions.tsx`
+### 3.382 `frontend/src/components/products/surfaces/HeaderActions.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductsHeaderActions` | export default function | 19 |
-| 2 | `tr` | const arrow | 29 |
+| 1 | `ProductsHeaderActions` | export default function | 22 |
+| 2 | `tr` | const arrow | 32 |
 
-### 3.276 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
+### 3.383 `frontend/src/components/products/surfaces/ProductDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5047,25 +7492,25 @@ Code files scanned: **515**
 | 2 | `T` | const arrow | 95 |
 | 3 | `Row` | const arrow | 121 |
 
-### 3.277 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
+### 3.384 `frontend/src/components/products/surfaces/ProductRowParts.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductDiscountBadge` | export function | 74 |
-| 2 | `ProductRowActions` | export function | 94 |
-| 3 | `label` | const arrow | 103 |
-| 4 | `ProductBatchPreview` | export function | 127 |
-| 5 | `ProductDetailsCell` | export function | 161 |
+| 1 | `ProductDiscountBadge` | export function | 75 |
+| 2 | `ProductRowActions` | export function | 95 |
+| 3 | `label` | const arrow | 104 |
+| 4 | `ProductBatchPreview` | export function | 129 |
+| 5 | `ProductDetailsCell` | export function | 163 |
 
-### 3.278 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
+### 3.385 `frontend/src/components/products/surfaces/ProductsListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductsListSurface` | export default function | 61 |
-| 2 | `renderDesktopTableHead` | const arrow | 104 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 133 |
+| 1 | `ProductsListSurface` | export default function | 62 |
+| 2 | `renderDesktopTableHead` | const arrow | 105 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 134 |
 
-### 3.279 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
+### 3.386 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5074,47 +7519,47 @@ Code files scanned: **515**
 | 3 | `T` | const arrow | 49 |
 | 4 | `toggleSection` | const arrow | 68 |
 
-### 3.280 `frontend/src/components/receipt-settings/constants.ts`
+### 3.387 `frontend/src/components/receipt-settings/constants.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getFieldItems` | export function | 109 |
 | 2 | `T` | const arrow | 110 |
 
-### 3.281 `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
+### 3.388 `frontend/src/components/receipt-settings/ErrorBoundary.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `formatError` | function | 11 |
 
-### 3.282 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
+### 3.389 `frontend/src/components/receipt-settings/FieldOrderManager.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSectionOrderItems` | function | 20 |
-| 2 | `buildList` | function | 39 |
-| 3 | `toKeys` | function | 64 |
-| 4 | `FieldOrderManager` | export default function | 68 |
-| 5 | `moveItem` | const arrow | 82 |
-| 6 | `addDivider` | const arrow | 90 |
-| 7 | `removeDivider` | const arrow | 101 |
-| 8 | `handleDragStart` | const arrow | 107 |
-| 9 | `handleDragOver` | const arrow | 112 |
+| 1 | `getSectionOrderItems` | function | 25 |
+| 2 | `buildList` | function | 44 |
+| 3 | `toKeys` | function | 69 |
+| 4 | `FieldOrderManager` | export default function | 73 |
+| 5 | `moveItem` | const arrow | 87 |
+| 6 | `addDivider` | const arrow | 95 |
+| 7 | `removeDivider` | const arrow | 106 |
+| 8 | `handleDragStart` | const arrow | 112 |
+| 9 | `handleDragOver` | const arrow | 117 |
 
-### 3.283 `frontend/src/components/receipt-settings/PrintSettings.tsx`
+### 3.390 `frontend/src/components/receipt-settings/PrintSettings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `Section` | function | 31 |
-| 2 | `buildFallbackPreviewHtml` | function | 43 |
-| 3 | `buildSafePreviewSource` | function | 61 |
-| 4 | `PrintSettings` | export default function | 73 |
-| 5 | `persistPrintSettings` | const arrow | 96 |
-| 6 | `setValue` | const arrow | 112 |
-| 7 | `resetMargins` | const arrow | 121 |
-| 8 | `getPreviewSource` | const arrow | 144 |
+| 1 | `Section` | function | 35 |
+| 2 | `buildFallbackPreviewHtml` | function | 47 |
+| 3 | `buildSafePreviewSource` | function | 65 |
+| 4 | `PrintSettings` | export default function | 77 |
+| 5 | `persistPrintSettings` | const arrow | 100 |
+| 6 | `setValue` | const arrow | 116 |
+| 7 | `resetMargins` | const arrow | 125 |
+| 8 | `getPreviewSource` | const arrow | 148 |
 
-### 3.284 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
+### 3.391 `frontend/src/components/receipt-settings/ReceiptPreview.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5122,16 +7567,16 @@ Code files scanned: **515**
 | 2 | `ReceiptPreview` | export default function | 39 |
 | 3 | `loadPreview` | function | 50 |
 
-### 3.285 `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
+### 3.392 `frontend/src/components/receipt-settings/ReceiptSettings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getErrorMessage` | function | 73 |
-| 2 | `Section` | function | 78 |
-| 3 | `Toggle` | function | 89 |
-| 4 | `ReceiptSettings` | export default function | 104 |
+| 1 | `getErrorMessage` | function | 80 |
+| 2 | `Section` | function | 85 |
+| 3 | `Toggle` | function | 96 |
+| 4 | `ReceiptSettings` | export default function | 111 |
 
-### 3.286 `frontend/src/components/receipt-settings/template.ts`
+### 3.393 `frontend/src/components/receipt-settings/template.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5140,64 +7585,66 @@ Code files scanned: **515**
 | 3 | `parseReceiptTemplate` | export function | 19 |
 | 4 | `serializeReceiptTemplate` | export function | 30 |
 
-### 3.287 `frontend/src/components/receipt/Receipt.tsx`
+### 3.394 `frontend/src/components/receipt/Receipt.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `toNumber` | function | 104 |
-| 2 | `stripEmoji` | function | 109 |
-| 3 | `stripEmoji` | function | 111 |
-| 4 | `displayAddress` | function | 116 |
-| 5 | `parseItems` | function | 125 |
-| 6 | `getErrorMessage` | function | 136 |
-| 7 | `labelFor` | function | 222 |
-| 8 | `Row` | function | 227 |
-| 9 | `Receipt` | export default function | 239 |
-| 10 | `exportReceiptPdf` | const arrow | 450 |
+| 1 | `loadReceiptPrintModule` | function | 108 |
+| 2 | `toNumber` | function | 113 |
+| 3 | `stripEmoji` | function | 118 |
+| 4 | `stripEmoji` | function | 120 |
+| 5 | `displayAddress` | function | 125 |
+| 6 | `parseItems` | function | 134 |
+| 7 | `getErrorMessage` | function | 145 |
+| 8 | `getReceiptPaperWidthMm` | function | 149 |
+| 9 | `labelFor` | function | 217 |
+| 10 | `Row` | function | 222 |
+| 11 | `Receipt` | export default function | 234 |
+| 12 | `exportReceiptPdf` | const arrow | 450 |
 
-### 3.288 `frontend/src/components/returns/EditReturnModal.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getReturnApi` | function | 90 |
-| 2 | `toNumber` | function | 95 |
-| 3 | `clampReturnQuantity` | function | 100 |
-| 4 | `isWriteConflict` | function | 106 |
-| 5 | `EditReturnModal` | export default function | 111 |
-| 6 | `updateQty` | const arrow | 144 |
-| 7 | `updateRestock` | const arrow | 147 |
-
-### 3.289 `frontend/src/components/returns/NewReturnModal.tsx`
+### 3.395 `frontend/src/components/returns/EditReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getReturnApi` | function | 119 |
-| 2 | `toNumber` | function | 124 |
-| 3 | `clampReturnQuantity` | function | 129 |
-| 4 | `getSaleItemKey` | function | 135 |
-| 5 | `NewReturnModal` | export default function | 139 |
-| 6 | `handleSearch` | const arrow | 172 |
-| 7 | `handleReturnTypeChange` | const arrow | 237 |
-| 8 | `toggleIncluded` | const arrow | 242 |
-| 9 | `updateItemQty` | const arrow | 250 |
-| 10 | `updateItemRestock` | const arrow | 258 |
-| 11 | `selectAll` | const arrow | 262 |
-| 12 | `clearAll` | const arrow | 265 |
-| 13 | `handleSubmit` | const arrow | 272 |
+| 1 | `getReturnApi` | function | 91 |
+| 2 | `toNumber` | function | 96 |
+| 3 | `clampReturnQuantity` | function | 101 |
+| 4 | `isWriteConflict` | function | 107 |
+| 5 | `EditReturnModal` | export default function | 112 |
+| 6 | `updateQty` | const arrow | 145 |
+| 7 | `updateRestock` | const arrow | 148 |
 
-### 3.290 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
+### 3.396 `frontend/src/components/returns/NewReturnModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `isSupplierReturnItem` | function | 86 |
-| 2 | `getSupplierReturnApi` | function | 90 |
-| 3 | `NewSupplierReturnModal` | export default function | 99 |
-| 4 | `loadSetup` | function | 136 |
-| 5 | `loadInventory` | function | 187 |
-| 6 | `updateQty` | const arrow | 258 |
-| 7 | `submit` | const arrow | 264 |
+| 1 | `getReturnApi` | function | 120 |
+| 2 | `toNumber` | function | 125 |
+| 3 | `clampReturnQuantity` | function | 130 |
+| 4 | `getSaleItemKey` | function | 136 |
+| 5 | `NewReturnModal` | export default function | 140 |
+| 6 | `handleSearch` | const arrow | 173 |
+| 7 | `handleReturnTypeChange` | const arrow | 238 |
+| 8 | `toggleIncluded` | const arrow | 243 |
+| 9 | `updateItemQty` | const arrow | 251 |
+| 10 | `updateItemRestock` | const arrow | 259 |
+| 11 | `selectAll` | const arrow | 263 |
+| 12 | `clearAll` | const arrow | 266 |
+| 13 | `handleSubmit` | const arrow | 273 |
 
-### 3.291 `frontend/src/components/returns/ReturnDetailModal.tsx`
+### 3.397 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `isSupplierReturnItem` | function | 89 |
+| 2 | `getSupplierReturnApi` | function | 93 |
+| 3 | `NewSupplierReturnModal` | export default function | 102 |
+| 4 | `loadSetup` | function | 139 |
+| 5 | `loadInventory` | function | 190 |
+| 6 | `updateQty` | const arrow | 278 |
+| 7 | `submit` | const arrow | 284 |
+
+### 3.398 `frontend/src/components/returns/ReturnDetailModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5206,74 +7653,74 @@ Code files scanned: **515**
 | 3 | `isPositiveMoney` | function | 60 |
 | 4 | `ReturnDetailModal` | export default function | 64 |
 
-### 3.292 `frontend/src/components/returns/Returns.tsx`
+### 3.399 `frontend/src/components/returns/Returns.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getReturnApi` | function | 148 |
-| 2 | `normalizeScope` | function | 153 |
-| 3 | `getReturnTypeKey` | function | 157 |
-| 4 | `getReturnTypeLabel` | function | 163 |
-| 5 | `normalizeFiniteIds` | function | 179 |
-| 6 | `countSelectedIds` | function | 183 |
-| 7 | `countActiveFlags` | function | 191 |
-| 8 | `toNumericAmount` | function | 199 |
-| 9 | `exportReturnRows` | function | 204 |
-| 10 | `getInitialReturnPageSize` | function | 222 |
-| 11 | `Returns` | export default function | 227 |
-| 12 | `promise` | const arrow | 300 |
+| 1 | `getReturnApi` | function | 151 |
+| 2 | `normalizeScope` | function | 156 |
+| 3 | `getReturnTypeKey` | function | 160 |
+| 4 | `getReturnTypeLabel` | function | 166 |
+| 5 | `normalizeFiniteIds` | function | 182 |
+| 6 | `countSelectedIds` | function | 186 |
+| 7 | `countActiveFlags` | function | 194 |
+| 8 | `toNumericAmount` | function | 202 |
+| 9 | `exportReturnRows` | function | 207 |
+| 10 | `getInitialReturnPageSize` | function | 225 |
+| 11 | `Returns` | export default function | 230 |
+| 12 | `promise` | const arrow | 304 |
 
-### 3.293 `frontend/src/components/returns/ReturnsListSurface.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `detectMobileViewport` | function | 70 |
-| 2 | `ReturnsDesktopSkeletonRows` | function | 75 |
-| 3 | `ReturnsMobileSkeletonCards` | function | 92 |
-| 4 | `ReturnsListSurface` | export default function | 112 |
-| 5 | `apply` | const arrow | 143 |
-
-### 3.294 `frontend/src/components/sales/ExportModal.tsx`
+### 3.400 `frontend/src/components/returns/ReturnsListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSalesExportApi` | function | 68 |
-| 2 | `getErrorMessage` | function | 73 |
-| 3 | `ExportModal` | export default function | 77 |
-| 4 | `handlePreview` | const arrow | 151 |
-| 5 | `handleExportCSV` | const arrow | 169 |
+| 1 | `detectMobileViewport` | function | 71 |
+| 2 | `ReturnsDesktopSkeletonRows` | function | 76 |
+| 3 | `ReturnsMobileSkeletonCards` | function | 93 |
+| 4 | `ReturnsListSurface` | export default function | 113 |
+| 5 | `apply` | const arrow | 144 |
 
-### 3.295 `frontend/src/components/sales/SaleDetailModal.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `toNumber` | function | 73 |
-| 2 | `InfoBlock` | function | 78 |
-| 3 | `parseItems` | function | 94 |
-| 4 | `SaleDetailModal` | export default function | 105 |
-
-### 3.296 `frontend/src/components/sales/Sales.tsx`
+### 3.401 `frontend/src/components/sales/ExportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSalesApi` | function | 126 |
-| 2 | `normalizeSaleRows` | function | 131 |
-| 3 | `normalizeUserOptions` | function | 139 |
-| 4 | `getErrorMessage` | function | 144 |
-| 5 | `isWriteConflict` | function | 148 |
-| 6 | `multiMatch` | function | 155 |
-| 7 | `normalizeFiniteIds` | function | 167 |
-| 8 | `countSelectedIds` | function | 171 |
-| 9 | `countActiveFlags` | function | 179 |
-| 10 | `getSaleBranchLabel` | function | 187 |
-| 11 | `Sales` | export default function | 195 |
-| 12 | `promise` | const arrow | 285 |
-| 13 | `toggleSelected` | const arrow | 622 |
-| 14 | `toggleSelectAll` | const arrow | 628 |
-| 15 | `handleExportSelected` | const arrow | 667 |
-| 16 | `handleBulkStatusUpdate` | const arrow | 715 |
+| 1 | `getSalesExportApi` | function | 71 |
+| 2 | `getErrorMessage` | function | 76 |
+| 3 | `ExportModal` | export default function | 80 |
+| 4 | `handlePreview` | const arrow | 154 |
+| 5 | `handleExportCSV` | const arrow | 172 |
 
-### 3.297 `frontend/src/components/sales/SalesImportModal.tsx`
+### 3.402 `frontend/src/components/sales/SaleDetailModal.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `toNumber` | function | 74 |
+| 2 | `InfoBlock` | function | 79 |
+| 3 | `parseItems` | function | 95 |
+| 4 | `SaleDetailModal` | export default function | 106 |
+
+### 3.403 `frontend/src/components/sales/Sales.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getSalesApi` | function | 128 |
+| 2 | `normalizeSaleRows` | function | 133 |
+| 3 | `normalizeUserOptions` | function | 141 |
+| 4 | `getErrorMessage` | function | 146 |
+| 5 | `isWriteConflict` | function | 150 |
+| 6 | `multiMatch` | function | 157 |
+| 7 | `normalizeFiniteIds` | function | 169 |
+| 8 | `countSelectedIds` | function | 173 |
+| 9 | `countActiveFlags` | function | 181 |
+| 10 | `getSaleBranchLabel` | function | 189 |
+| 11 | `buildSaleExportRows` | function | 197 |
+| 12 | `Sales` | export default function | 213 |
+| 13 | `promise` | const arrow | 304 |
+| 14 | `toggleSelected` | const arrow | 654 |
+| 15 | `toggleSelectAll` | const arrow | 660 |
+| 16 | `handleBulkStatusUpdate` | const arrow | 736 |
+
+### 3.404 `frontend/src/components/sales/SalesImportModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5286,20 +7733,20 @@ Code files scanned: **515**
 | 7 | `handleDownloadTemplate` | const arrow | 169 |
 | 8 | `handleImport` | const arrow | 173 |
 
-### 3.298 `frontend/src/components/sales/salesImportWorker.ts`
+### 3.405 `frontend/src/components/sales/salesImportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 27 |
 
-### 3.299 `frontend/src/components/sales/SalesListSurface.tsx`
+### 3.406 `frontend/src/components/sales/SalesListSurface.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSaleItems` | function | 66 |
-| 2 | `SalesListSurface` | export default function | 70 |
+| 1 | `getSaleItems` | function | 67 |
+| 2 | `SalesListSurface` | export default function | 71 |
 
-### 3.300 `frontend/src/components/sales/StatusBadge.tsx`
+### 3.407 `frontend/src/components/sales/StatusBadge.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5307,79 +7754,95 @@ Code files scanned: **515**
 | 2 | `getStatusLabel` | export function | 28 |
 | 3 | `StatusBadge` | export default function | 50 |
 
-### 3.301 `frontend/src/components/server/ServerPage.tsx`
+### 3.408 `frontend/src/components/server/ServerPage.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getServerApi` | function | 131 |
-| 2 | `getErrorMessage` | function | 135 |
-| 3 | `normalizePendingSyncState` | function | 139 |
-| 4 | `normalizeSystemDebugLog` | function | 150 |
-| 5 | `normalizeSystemConfig` | function | 159 |
-| 6 | `useLocalCopy` | function | 163 |
-| 7 | `isAutoDetected` | function | 174 |
-| 8 | `StatusRow` | function | 181 |
-| 9 | `InfoTab` | function | 193 |
-| 10 | `DiagnosticsPanel` | function | 346 |
-| 11 | `onErr` | const arrow | 386 |
-| 12 | `onQueueChanged` | const arrow | 391 |
-| 13 | `handleRetryQueue` | function | 438 |
-| 14 | `handleDiscardQueue` | function | 455 |
-| 15 | `ServerPage` | export default function | 646 |
-| 16 | `check` | const arrow | 673 |
-| 17 | `loadSecurityConfig` | const arrow | 701 |
-| 18 | `handleTest` | function | 719 |
-| 19 | `handleSave` | function | 748 |
-| 20 | `handleDisconnect` | function | 755 |
+| 1 | `getServerApi` | function | 139 |
+| 2 | `getErrorMessage` | function | 143 |
+| 3 | `normalizePendingSyncState` | function | 147 |
+| 4 | `normalizeSystemDebugLog` | function | 158 |
+| 5 | `normalizeSystemConfig` | function | 167 |
+| 6 | `normalizeSystemBootstrap` | function | 171 |
+| 7 | `useLocalCopy` | function | 179 |
+| 8 | `isAutoDetected` | function | 190 |
+| 9 | `StatusRow` | function | 197 |
+| 10 | `InfoTab` | function | 209 |
+| 11 | `DiagnosticsPanel` | function | 362 |
+| 12 | `onErr` | const arrow | 401 |
+| 13 | `onQueueChanged` | const arrow | 406 |
+| 14 | `handleRetryQueue` | function | 464 |
+| 15 | `handleDiscardQueue` | function | 481 |
+| 16 | `ServerPage` | export default function | 672 |
+| 17 | `check` | const arrow | 700 |
+| 18 | `loadServerBootstrap` | const arrow | 731 |
+| 19 | `handleTest` | function | 766 |
+| 20 | `handleSave` | function | 795 |
+| 21 | `handleDisconnect` | function | 802 |
 
-### 3.302 `frontend/src/components/shared/ActionHistoryBar.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `formatHistoryList` | function | 48 |
-| 2 | `formatServerStatus` | function | 52 |
-| 3 | `ActionHistoryBar` | export default function | 59 |
-
-### 3.303 `frontend/src/components/shared/BackgroundImportTracker.tsx`
+### 3.409 `frontend/src/components/shared/ActionHistoryBar.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getImportTrackerApi` | function | 99 |
-| 2 | `getErrorMessage` | function | 104 |
-| 3 | `nextImportTrackerBackoff` | function | 108 |
-| 4 | `normalizeJobStatus` | function | 115 |
-| 5 | `dedupeJobsById` | function | 119 |
-| 6 | `isRecent` | function | 131 |
-| 7 | `normalizeImportJobListResult` | function | 137 |
-| 8 | `getJobProgressDetails` | function | 152 |
-| 9 | `getJobLabel` | function | 220 |
-| 10 | `getJobResultSummary` | function | 226 |
-| 11 | `add` | const arrow | 229 |
-| 12 | `getRowsDisplay` | function | 242 |
-| 13 | `buildJobsSignature` | function | 258 |
-| 14 | `BackgroundImportTracker` | export default function | 273 |
-| 15 | `finishTrackerAction` | const arrow | 412 |
-| 16 | `handleCancel` | const arrow | 417 |
-| 17 | `handleRetry` | const arrow | 436 |
-| 18 | `handleApprove` | const arrow | 455 |
-| 19 | `handleDownloadErrors` | const arrow | 485 |
-| 20 | `handleRemove` | const arrow | 502 |
-| 21 | `handleDismiss` | const arrow | 540 |
+| 1 | `formatHistoryList` | function | 51 |
+| 2 | `formatServerStatus` | function | 55 |
+| 3 | `ActionHistoryBar` | export default function | 62 |
 
-### 3.304 `frontend/src/components/shared/ExportMenu.tsx`
+### 3.410 `frontend/src/components/shared/AppSelect.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ExportMenu` | export default function | 15 |
+| 1 | `optionValue` | function | 26 |
+| 2 | `AppSelect` | export default function | 30 |
+| 3 | `scheduleReposition` | const arrow | 80 |
+| 4 | `closeIfOutside` | const arrow | 87 |
+| 5 | `closeIfEscape` | const arrow | 93 |
+| 6 | `chooseOption` | const arrow | 115 |
+| 7 | `moveActive` | const arrow | 121 |
+| 8 | `handleKeyDown` | const arrow | 131 |
 
-### 3.305 `frontend/src/components/shared/FilterMenu.tsx`
+### 3.411 `frontend/src/components/shared/BackgroundImportTracker.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `sectionButtonClass` | function | 34 |
-| 2 | `FilterMenu` | export default function | 40 |
+| 1 | `getImportTrackerApi` | function | 105 |
+| 2 | `getErrorMessage` | function | 110 |
+| 3 | `nextImportTrackerBackoff` | function | 114 |
+| 4 | `normalizeJobStatus` | function | 121 |
+| 5 | `dedupeJobsById` | function | 125 |
+| 6 | `isRecent` | function | 137 |
+| 7 | `normalizeImportJobListResult` | function | 143 |
+| 8 | `getJobProgressDetails` | function | 158 |
+| 9 | `getJobLabel` | function | 226 |
+| 10 | `getJobResultSummary` | function | 232 |
+| 11 | `add` | const arrow | 235 |
+| 12 | `getRowsDisplay` | function | 248 |
+| 13 | `buildJobsSignature` | function | 264 |
+| 14 | `BackgroundImportTracker` | export default function | 279 |
+| 15 | `finishTrackerAction` | const arrow | 418 |
+| 16 | `handleCancel` | const arrow | 423 |
+| 17 | `handleRetry` | const arrow | 442 |
+| 18 | `handleApprove` | const arrow | 461 |
+| 19 | `handleDownloadErrors` | const arrow | 491 |
+| 20 | `handleRemove` | const arrow | 508 |
+| 21 | `handleDismiss` | const arrow | 546 |
 
-### 3.306 `frontend/src/components/shared/globalScroll.ts`
+### 3.412 `frontend/src/components/shared/ExportMenu.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `ExportMenu` | export default function | 17 |
+
+### 3.413 `frontend/src/components/shared/FilterMenu.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `sectionButtonClass` | function | 56 |
+| 2 | `getSectionFallbackLabel` | function | 62 |
+| 3 | `resolveSectionLabel` | function | 73 |
+| 4 | `FilterMenu` | export default function | 82 |
+
+### 3.414 `frontend/src/components/shared/globalScroll.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5389,98 +7852,104 @@ Code files scanned: **515**
 | 4 | `getScrollTarget` | export function | 46 |
 | 5 | `getScrollToPosition` | export function | 63 |
 
-### 3.307 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
+### 3.415 `frontend/src/components/shared/ImageGalleryLightbox.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ImageGalleryLightbox` | export default function | 29 |
-| 2 | `formatLabel` | function | 51 |
-| 3 | `setIndex` | function | 55 |
-| 4 | `renderGalleryImage` | function | 61 |
-| 5 | `onKeyDown` | function | 68 |
+| 1 | `ImageGalleryLightbox` | export default function | 31 |
+| 2 | `formatLabel` | function | 53 |
+| 3 | `setIndex` | function | 57 |
+| 4 | `renderGalleryImage` | function | 63 |
+| 5 | `onKeyDown` | function | 70 |
 
-### 3.308 `frontend/src/components/shared/LoadingWatchdog.tsx`
+### 3.416 `frontend/src/components/shared/LazyPortalMenu.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `LazyPortalMenu` | export default function | 7 |
+
+### 3.417 `frontend/src/components/shared/LoadingWatchdog.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `LoadingWatchdog` | export default function | 14 |
 
-### 3.309 `frontend/src/components/shared/Modal.tsx`
+### 3.418 `frontend/src/components/shared/Modal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `Modal` | export default function | 13 |
 
-### 3.310 `frontend/src/components/shared/navigationConfig.ts`
+### 3.419 `frontend/src/components/shared/navigationConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `parseNavSetting` | export function | 42 |
 
-### 3.311 `frontend/src/components/shared/NotificationCenter.tsx`
+### 3.420 `frontend/src/components/shared/NotificationCenter.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getNotificationApi` | function | 101 |
-| 2 | `getErrorMessage` | function | 106 |
-| 3 | `preferenceValue` | function | 233 |
-| 4 | `matchesVisibilityMode` | function | 241 |
-| 5 | `NotificationSeverityIcon` | function | 248 |
-| 6 | `NotificationCenter` | export default function | 263 |
-| 7 | `syncVisibility` | const arrow | 297 |
-| 8 | `onVisible` | const arrow | 371 |
-| 9 | `handleClickOutside` | const arrow | 394 |
+| 1 | `getNotificationApi` | function | 112 |
+| 2 | `getErrorMessage` | function | 117 |
+| 3 | `preferenceValue` | function | 244 |
+| 4 | `matchesVisibilityMode` | function | 252 |
+| 5 | `NotificationSeverityIcon` | function | 259 |
+| 6 | `NotificationCenter` | export default function | 274 |
+| 7 | `syncVisibility` | const arrow | 308 |
+| 8 | `onVisible` | const arrow | 382 |
+| 9 | `handleClickOutside` | const arrow | 405 |
 
-### 3.312 `frontend/src/components/shared/pageActivity.ts`
+### 3.421 `frontend/src/components/shared/pageActivity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `useIsPageActive` | export function | 8 |
 
-### 3.313 `frontend/src/components/shared/PageHeader.tsx`
+### 3.422 `frontend/src/components/shared/PageHeader.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `PageHeader` | export default function | 26 |
 
-### 3.314 `frontend/src/components/shared/PaginationControls.tsx`
+### 3.423 `frontend/src/components/shared/PaginationControls.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `clampPage` | export function | 26 |
-| 2 | `PaginationControls` | export default function | 40 |
-| 3 | `commitPageDraft` | const arrow | 70 |
-| 4 | `handlePageInputKeyDown` | const arrow | 81 |
+| 1 | `clampPage` | export function | 28 |
+| 2 | `PaginationControls` | export default function | 42 |
+| 3 | `commitPageDraft` | const arrow | 73 |
+| 4 | `handlePageInputKeyDown` | const arrow | 84 |
 
-### 3.315 `frontend/src/components/shared/PortalMenu.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `isPortalMenuItem` | function | 49 |
-| 2 | `PortalMenu` | export default function | 59 |
-| 3 | `closeIfClickedOutside` | const arrow | 117 |
-| 4 | `closeMenu` | const arrow | 125 |
-| 5 | `scheduleReposition` | const arrow | 126 |
-| 6 | `closeIfEscape` | const arrow | 133 |
-| 7 | `ThreeDotPortal` | export function | 243 |
-
-### 3.316 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
+### 3.424 `frontend/src/components/shared/PortalMenu.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ToggleButton` | function | 24 |
-| 2 | `QuickPreferenceToggles` | export default function | 43 |
-| 3 | `tr` | const arrow | 46 |
+| 1 | `isPortalMenuItem` | function | 50 |
+| 2 | `PortalMenu` | export default function | 60 |
+| 3 | `closeIfClickedOutside` | const arrow | 125 |
+| 4 | `closeMenu` | const arrow | 133 |
+| 5 | `scheduleReposition` | const arrow | 134 |
+| 6 | `closeIfEscape` | const arrow | 141 |
+| 7 | `ThreeDotPortal` | export function | 251 |
 
-### 3.317 `frontend/src/components/shared/SectionSwitcher.tsx`
+### 3.425 `frontend/src/components/shared/QuickPreferenceToggles.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readStoredSection` | function | 19 |
-| 2 | `SectionSwitcher` | export default function | 28 |
-| 3 | `selectValue` | const arrow | 55 |
+| 1 | `ToggleButton` | function | 26 |
+| 2 | `QuickPreferenceToggles` | export default function | 45 |
+| 3 | `tr` | const arrow | 48 |
 
-### 3.318 `frontend/src/components/shared/WriteConflictModal.tsx`
+### 3.426 `frontend/src/components/shared/SectionSwitcher.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `readStoredSection` | function | 20 |
+| 2 | `SectionSwitcher` | export default function | 29 |
+| 3 | `selectValue` | const arrow | 58 |
+
+### 3.427 `frontend/src/components/shared/WriteConflictModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5495,15 +7964,19 @@ Code files scanned: **515**
 | 9 | `getConflictFieldRows` | function | 132 |
 | 10 | `WriteConflictModal` | export default function | 226 |
 
-### 3.319 `frontend/src/components/users/PermissionEditor.tsx`
+### 3.428 `frontend/src/components/users/permissionDefinitions.ts`
+
+- No top-level named symbols detected.
+
+### 3.429 `frontend/src/components/users/PermissionEditor.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parsePermissionState` | function | 75 |
-| 2 | `PermissionEditor` | export default function | 89 |
-| 3 | `toggle` | const arrow | 104 |
+| 1 | `parsePermissionState` | function | 11 |
+| 2 | `PermissionEditor` | export default function | 25 |
+| 3 | `toggle` | const arrow | 40 |
 
-### 3.320 `frontend/src/components/users/UserDetailSheet.tsx`
+### 3.430 `frontend/src/components/users/UserDetailSheet.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5512,121 +7985,123 @@ Code files scanned: **515**
 | 3 | `parsePermissions` | function | 60 |
 | 4 | `UserDetailSheet` | export default function | 71 |
 
-### 3.321 `frontend/src/components/users/UserProfileModal.tsx`
+### 3.431 `frontend/src/components/users/UserProfileModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getProfileApi` | function | 150 |
-| 2 | `getErrorMessage` | function | 155 |
-| 3 | `parseStoredOrganization` | function | 159 |
-| 4 | `AvatarPreview` | function | 176 |
-| 5 | `ProfileSectionButton` | function | 194 |
-| 6 | `clamp` | function | 304 |
-| 7 | `loadImageElement` | function | 308 |
-| 8 | `renderAvatarCropBlob` | function | 323 |
-| 9 | `AvatarEditorModal` | function | 349 |
-| 10 | `UserProfileModal` | export default function | 410 |
-| 11 | `handleProfileSave` | const arrow | 578 |
-| 12 | `handlePasswordSave` | const arrow | 642 |
-| 13 | `handleSessionSave` | const arrow | 681 |
-| 14 | `refreshOtpState` | const arrow | 701 |
+| 1 | `getProfileApi` | function | 155 |
+| 2 | `getErrorMessage` | function | 160 |
+| 3 | `parseStoredOrganization` | function | 164 |
+| 4 | `AvatarPreview` | function | 181 |
+| 5 | `ProfileSectionButton` | function | 199 |
+| 6 | `clamp` | function | 309 |
+| 7 | `loadImageElement` | function | 313 |
+| 8 | `renderAvatarCropBlob` | function | 328 |
+| 9 | `AvatarEditorModal` | function | 354 |
+| 10 | `UserProfileModal` | export default function | 415 |
+| 11 | `handleProfileSave` | const arrow | 583 |
+| 12 | `handlePasswordSave` | const arrow | 647 |
+| 13 | `handleSessionSave` | const arrow | 686 |
+| 14 | `refreshOtpState` | const arrow | 706 |
 
-### 3.322 `frontend/src/components/users/Users.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getUsersApi` | function | 134 |
-| 2 | `normalizeUsers` | function | 139 |
-| 3 | `normalizeRoles` | function | 143 |
-| 4 | `normalizePermissionState` | function | 147 |
-| 5 | `getErrorMessage` | function | 162 |
-| 6 | `clearTimeoutRef` | function | 166 |
-| 7 | `ThreeDot` | function | 183 |
-| 8 | `formatContactValue` | function | 222 |
-| 9 | `UsersDesktopSkeletonRows` | function | 227 |
-| 10 | `UsersMobileSkeletonCards` | function | 251 |
-| 11 | `Users` | export default function | 265 |
-| 12 | `promise` | const arrow | 332 |
-| 13 | `promise` | const arrow | 370 |
-| 14 | `openCreateUser` | const arrow | 482 |
-| 15 | `openCreateRole` | const arrow | 512 |
-| 16 | `handleSaveUser` | const arrow | 573 |
-| 17 | `handleResetPassword` | const arrow | 643 |
-| 18 | `handleSaveRole` | const arrow | 700 |
-
-### 3.323 `frontend/src/components/utils-settings/AuditLog.tsx`
+### 3.432 `frontend/src/components/users/Users.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getAuditApi` | function | 94 |
-| 2 | `isRecord` | function | 98 |
-| 3 | `getErrorMessage` | function | 102 |
-| 4 | `toIso` | function | 134 |
-| 5 | `formatDateTime` | function | 141 |
-| 6 | `formatLogTime` | function | 162 |
-| 7 | `getLogEpoch` | function | 166 |
-| 8 | `formatJsonPretty` | function | 173 |
-| 9 | `parseLogJson` | function | 181 |
-| 10 | `flattenSummaryValue` | function | 189 |
-| 11 | `formatEntityName` | function | 208 |
-| 12 | `readableSummary` | function | 214 |
-| 13 | `normalizeFiniteIds` | function | 242 |
-| 14 | `countSelectedIds` | function | 246 |
-| 15 | `countActiveFlags` | function | 254 |
-| 16 | `DetailRow` | function | 262 |
-| 17 | `AuditLog` | export default function | 274 |
-| 18 | `sessionEntryLabel` | function | 668 |
+| 1 | `getUsersApi` | function | 144 |
+| 2 | `normalizeUsers` | function | 157 |
+| 3 | `normalizeRoles` | function | 161 |
+| 4 | `normalizePermissionState` | function | 165 |
+| 5 | `getErrorMessage` | function | 180 |
+| 6 | `clearTimeoutRef` | function | 184 |
+| 7 | `ThreeDot` | function | 201 |
+| 8 | `formatContactValue` | function | 244 |
+| 9 | `UsersDesktopSkeletonRows` | function | 249 |
+| 10 | `UsersMobileSkeletonCards` | function | 273 |
+| 11 | `Users` | export default function | 287 |
+| 12 | `promise` | const arrow | 355 |
+| 13 | `promise` | const arrow | 393 |
+| 14 | `openCreateUser` | const arrow | 517 |
+| 15 | `openCreateRole` | const arrow | 547 |
+| 16 | `handleSaveUser` | const arrow | 608 |
+| 17 | `handleResetPassword` | const arrow | 678 |
+| 18 | `handleSaveRole` | const arrow | 735 |
 
-### 3.324 `frontend/src/components/utils-settings/Backup.tsx`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `getBackupApi` | function | 228 |
-| 2 | `getErrorMessage` | function | 232 |
-| 3 | `unwrapJob` | function | 236 |
-| 4 | `isBackupSectionId` | function | 263 |
-| 5 | `PathActionButton` | function | 312 |
-| 6 | `PrimaryActionButton` | function | 324 |
-| 7 | `formatElapsed` | function | 336 |
-| 8 | `JobProgressCard` | function | 345 |
-| 9 | `DoctorStatusPill` | function | 405 |
-| 10 | `IntegrationDoctorCard` | function | 429 |
-| 11 | `useCopy` | function | 535 |
-| 12 | `formatDateTime` | function | 551 |
-| 13 | `formatBytes` | function | 567 |
-| 14 | `yieldToBrowser` | function | 576 |
-| 15 | `getJobSignature` | function | 584 |
-| 16 | `startJobWatcher` | function | 603 |
-| 17 | `stop` | const arrow | 619 |
-| 18 | `scheduleTick` | const arrow | 625 |
-| 19 | `tick` | const arrow | 631 |
-| 20 | `SectionChip` | function | 688 |
-| 21 | `secondsToSyncMinutes` | function | 710 |
-| 22 | `minutesToSyncSeconds` | function | 719 |
-| 23 | `GoogleDriveSyncSection` | function | 727 |
-| 24 | `handler` | const arrow | 849 |
-| 25 | `savePreferences` | const arrow | 934 |
-| 26 | `connectGoogleDrive` | const arrow | 964 |
-| 27 | `syncNow` | const arrow | 1009 |
-| 28 | `disconnect` | const arrow | 1046 |
-| 29 | `forgetCredentials` | const arrow | 1071 |
-| 30 | `BackupOverview` | function | 1301 |
-| 31 | `Backup` | export default function | 1373 |
-| 32 | `showBackupSection` | const arrow | 1388 |
-| 33 | `handleFolderExport` | const arrow | 1414 |
-| 34 | `handleFolderImport` | const arrow | 1483 |
-
-### 3.325 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
+### 3.433 `frontend/src/components/utils-settings/AuditLog.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `FontFamilyPicker` | export default function | 29 |
+| 1 | `loadCsvUtilsModule` | function | 103 |
+| 2 | `isRecord` | function | 108 |
+| 3 | `getErrorMessage` | function | 112 |
+| 4 | `toIso` | function | 144 |
+| 5 | `formatDateTime` | function | 151 |
+| 6 | `formatLogTime` | function | 172 |
+| 7 | `auditDeviceLabel` | function | 176 |
+| 8 | `auditTimezoneLabel` | function | 184 |
+| 9 | `getLogEpoch` | function | 192 |
+| 10 | `formatJsonPretty` | function | 199 |
+| 11 | `parseLogJson` | function | 207 |
+| 12 | `flattenSummaryValue` | function | 215 |
+| 13 | `formatEntityName` | function | 234 |
+| 14 | `readableSummary` | function | 240 |
+| 15 | `normalizeFiniteIds` | function | 268 |
+| 16 | `countSelectedIds` | function | 272 |
+| 17 | `countActiveFlags` | function | 280 |
+| 18 | `DetailRow` | function | 288 |
+| 19 | `AuditLog` | export default function | 300 |
+| 20 | `sessionEntryLabel` | function | 694 |
 
-### 3.326 `frontend/src/components/utils-settings/index.ts`
+### 3.434 `frontend/src/components/utils-settings/Backup.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `getBackupApi` | function | 240 |
+| 2 | `getErrorMessage` | function | 244 |
+| 3 | `unwrapJob` | function | 248 |
+| 4 | `isBackupSectionId` | function | 285 |
+| 5 | `PathActionButton` | function | 334 |
+| 6 | `PrimaryActionButton` | function | 346 |
+| 7 | `formatElapsed` | function | 358 |
+| 8 | `JobProgressCard` | function | 367 |
+| 9 | `DoctorStatusPill` | function | 427 |
+| 10 | `IntegrationDoctorCard` | function | 451 |
+| 11 | `useCopy` | function | 557 |
+| 12 | `formatDateTime` | function | 573 |
+| 13 | `formatBytes` | function | 589 |
+| 14 | `yieldToBrowser` | function | 598 |
+| 15 | `getJobSignature` | function | 606 |
+| 16 | `startJobWatcher` | function | 625 |
+| 17 | `stop` | const arrow | 641 |
+| 18 | `scheduleTick` | const arrow | 647 |
+| 19 | `tick` | const arrow | 653 |
+| 20 | `SectionChip` | function | 710 |
+| 21 | `secondsToSyncMinutes` | function | 733 |
+| 22 | `minutesToSyncSeconds` | function | 742 |
+| 23 | `GoogleDriveSyncSection` | function | 750 |
+| 24 | `handler` | const arrow | 872 |
+| 25 | `savePreferences` | const arrow | 957 |
+| 26 | `connectGoogleDrive` | const arrow | 987 |
+| 27 | `syncNow` | const arrow | 1032 |
+| 28 | `disconnect` | const arrow | 1069 |
+| 29 | `forgetCredentials` | const arrow | 1094 |
+| 30 | `BackupOverview` | function | 1324 |
+| 31 | `Backup` | export default function | 1396 |
+| 32 | `showBackupSection` | const arrow | 1412 |
+| 33 | `handleFolderExport` | const arrow | 1449 |
+| 34 | `handleFolderImport` | const arrow | 1518 |
+
+### 3.435 `frontend/src/components/utils-settings/FontFamilyPicker.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `FontFamilyPicker` | export default function | 30 |
+
+### 3.436 `frontend/src/components/utils-settings/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.327 `frontend/src/components/utils-settings/OtpModal.tsx`
+### 3.437 `frontend/src/components/utils-settings/OtpModal.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5635,53 +8110,54 @@ Code files scanned: **515**
 | 3 | `OtpModal` | export default function | 53 |
 | 4 | `loadSetup` | function | 88 |
 
-### 3.328 `frontend/src/components/utils-settings/ResetData.tsx`
+### 3.438 `frontend/src/components/utils-settings/ResetData.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ConfirmReset` | function | 72 |
-| 2 | `T` | const arrow | 85 |
-| 3 | `getResetApi` | function | 153 |
-| 4 | `getErrorMessage` | function | 157 |
-| 5 | `ResetData` | function | 161 |
-| 6 | `T` | const arrow | 163 |
-| 7 | `doReset` | const arrow | 191 |
-| 8 | `FactoryReset` | function | 261 |
-| 9 | `T` | const arrow | 263 |
-| 10 | `doFactoryReset` | function | 270 |
+| 1 | `ConfirmReset` | function | 75 |
+| 2 | `T` | const arrow | 88 |
+| 3 | `getResetApi` | function | 156 |
+| 4 | `getErrorMessage` | function | 160 |
+| 5 | `ResetData` | function | 164 |
+| 6 | `T` | const arrow | 166 |
+| 7 | `doReset` | const arrow | 194 |
+| 8 | `FactoryReset` | function | 264 |
+| 9 | `T` | const arrow | 266 |
+| 10 | `doFactoryReset` | function | 273 |
 
-### 3.329 `frontend/src/components/utils-settings/Settings.tsx`
+### 3.439 `frontend/src/components/utils-settings/Settings.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getSettingsApi` | function | 107 |
-| 2 | `getErrorMessage` | function | 111 |
-| 3 | `toStringValue` | function | 115 |
-| 4 | `toNumberValue` | function | 120 |
-| 5 | `isSettingsSectionId` | function | 208 |
-| 6 | `parseStoredColors` | function | 224 |
-| 7 | `buildColorChoices` | function | 235 |
-| 8 | `useCopy` | function | 326 |
-| 9 | `getSettingsNavLabel` | function | 334 |
-| 10 | `SwatchPicker` | function | 351 |
-| 11 | `SettingsSection` | function | 434 |
-| 12 | `Settings` | export default function | 464 |
-| 13 | `showSettingsSection` | const arrow | 490 |
-| 14 | `loadOtpStatus` | function | 560 |
-| 15 | `loadFaviconPreview` | function | 590 |
-| 16 | `setValue` | const arrow | 647 |
-| 17 | `formatPreviewDateTime` | const arrow | 673 |
-| 18 | `moveNavItem` | const arrow | 689 |
-| 19 | `toggleMobilePinned` | const arrow | 699 |
-| 20 | `movePinnedItem` | const arrow | 711 |
-| 21 | `movePinnedBefore` | const arrow | 721 |
-| 22 | `resetNavigationLayout` | const arrow | 733 |
-| 23 | `field` | const arrow | 738 |
-| 24 | `savePaymentMethods` | const arrow | 760 |
-| 25 | `uploadImageSetting` | const arrow | 780 |
-| 26 | `handleSaveSettings` | const arrow | 846 |
+| 1 | `getSettingsApi` | function | 133 |
+| 2 | `getErrorMessage` | function | 137 |
+| 3 | `toStringValue` | function | 141 |
+| 4 | `toNumberValue` | function | 146 |
+| 5 | `isSettingsSectionId` | function | 236 |
+| 6 | `parseStoredColors` | function | 252 |
+| 7 | `buildColorChoices` | function | 263 |
+| 8 | `useCopy` | function | 354 |
+| 9 | `getSettingsNavLabel` | function | 362 |
+| 10 | `SwatchPicker` | function | 379 |
+| 11 | `SettingsSection` | function | 462 |
+| 12 | `Settings` | export default function | 492 |
+| 13 | `showSettingsSection` | const arrow | 518 |
+| 14 | `loadOtpStatus` | function | 588 |
+| 15 | `loadFaviconPreview` | function | 620 |
+| 16 | `scheduleIdlePreview` | const arrow | 635 |
+| 17 | `setValue` | const arrow | 689 |
+| 18 | `formatPreviewDateTime` | const arrow | 715 |
+| 19 | `moveNavItem` | const arrow | 731 |
+| 20 | `toggleMobilePinned` | const arrow | 741 |
+| 21 | `movePinnedItem` | const arrow | 753 |
+| 22 | `movePinnedBefore` | const arrow | 763 |
+| 23 | `resetNavigationLayout` | const arrow | 775 |
+| 24 | `field` | const arrow | 780 |
+| 25 | `savePaymentMethods` | const arrow | 802 |
+| 26 | `uploadImageSetting` | const arrow | 822 |
+| 27 | `handleSaveSettings` | const arrow | 889 |
 
-### 3.330 `frontend/src/components/utils-settings/settingsConflict.ts`
+### 3.440 `frontend/src/components/utils-settings/settingsConflict.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5689,7 +8165,7 @@ Code files scanned: **515**
 | 2 | `buildSettingsConflictState` | export function | 32 |
 | 3 | `diffSettingsConflictFields` | export function | 46 |
 
-### 3.331 `frontend/src/constants.ts`
+### 3.441 `frontend/src/constants.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5697,24 +8173,24 @@ Code files scanned: **515**
 | 2 | `formatDate` | export function | 152 |
 | 3 | `isNetworkError` | export function | 181 |
 
-### 3.332 `frontend/src/index.tsx`
+### 3.442 `frontend/src/index.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `scheduleAfterLoadIdle` | function | 26 |
-| 2 | `schedule` | const arrow | 29 |
-| 3 | `registerOfflineAppShell` | function | 45 |
-| 4 | `register` | const arrow | 48 |
-| 5 | `installFormFieldAccessibility` | function | 62 |
-| 6 | `escapeSelectorValue` | const arrow | 67 |
-| 7 | `wireField` | const arrow | 72 |
-| 8 | `scan` | const arrow | 94 |
-| 9 | `safeInsertRule` | const function | 132 |
-| 10 | `safeCssRulesGetter` | const function | 150 |
-| 11 | `stopKnownStartupNoise` | const arrow | 166 |
-| 12 | `scheduleFormFieldAccessibility` | function | 201 |
+| 1 | `scheduleAfterLoadIdle` | function | 24 |
+| 2 | `schedule` | const arrow | 27 |
+| 3 | `registerOfflineAppShell` | function | 43 |
+| 4 | `register` | const arrow | 46 |
+| 5 | `installFormFieldAccessibility` | function | 60 |
+| 6 | `escapeSelectorValue` | const arrow | 65 |
+| 7 | `wireField` | const arrow | 70 |
+| 8 | `scan` | const arrow | 92 |
+| 9 | `safeInsertRule` | const function | 130 |
+| 10 | `safeCssRulesGetter` | const function | 148 |
+| 11 | `stopKnownStartupNoise` | const arrow | 164 |
+| 12 | `scheduleFormFieldAccessibility` | function | 199 |
 
-### 3.333 `frontend/src/platform/runtime/clientRuntime.ts`
+### 3.443 `frontend/src/platform/runtime/clientRuntime.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5736,7 +8212,7 @@ Code files scanned: **515**
 | 16 | `restoreStorage` | function | 203 |
 | 17 | `resetClientRuntimeState` | export function | 213 |
 
-### 3.334 `frontend/src/platform/storage/storagePolicy.ts`
+### 3.444 `frontend/src/platform/storage/storagePolicy.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5744,7 +8220,7 @@ Code files scanned: **515**
 | 2 | `maxStoredNumber` | export function | 29 |
 | 3 | `isCooldownActive` | export function | 36 |
 
-### 3.335 `frontend/src/public-runtime/runtime-noise-guard.ts`
+### 3.445 `frontend/src/public-runtime/runtime-noise-guard.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5757,7 +8233,7 @@ Code files scanned: **515**
 | 7 | `guardedInsertRule` | const function | 89 |
 | 8 | `guardedCssRulesGetter` | const function | 104 |
 
-### 3.336 `frontend/src/public-runtime/service-worker.ts`
+### 3.446 `frontend/src/public-runtime/service-worker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5786,7 +8262,7 @@ Code files scanned: **515**
 | 23 | `appShellFallback` | function | 370 |
 | 24 | `networkFirstStatic` | function | 389 |
 
-### 3.337 `frontend/src/public-runtime/theme-bootstrap.ts`
+### 3.447 `frontend/src/public-runtime/theme-bootstrap.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5806,7 +8282,21 @@ Code files scanned: **515**
 | 14 | `safeInsertRule` | const function | 132 |
 | 15 | `safeCssRulesGetter` | const function | 147 |
 
-### 3.338 `frontend/src/runtime/runtimeErrorClassifier.ts`
+### 3.448 `frontend/src/public-web-api.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `loadPortalTransport` | function | 18 |
+| 2 | `getPortalMethod` | function | 23 |
+
+### 3.449 `frontend/src/PublicCatalogRoot.tsx`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `PublicCatalogFallback` | function | 6 |
+| 2 | `PublicCatalogRoot` | export default function | 16 |
+
+### 3.450 `frontend/src/runtime/runtimeErrorClassifier.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5824,15 +8314,19 @@ Code files scanned: **515**
 | 12 | `shouldSuppressSecurityPolicyViolation` | export function | 134 |
 | 13 | `isGuardableStyleSheetError` | export function | 148 |
 
-### 3.339 `frontend/src/types/receiptContracts.ts`
+### 3.451 `frontend/src/types/lucide-react-icons.d.ts`
 
 - No top-level named symbols detected.
 
-### 3.340 `frontend/src/types/settingsContracts.ts`
+### 3.452 `frontend/src/types/receiptContracts.ts`
 
 - No top-level named symbols detected.
 
-### 3.341 `frontend/src/utils/actionGuards.ts`
+### 3.453 `frontend/src/types/settingsContracts.ts`
+
+- No top-level named symbols detected.
+
+### 3.454 `frontend/src/utils/actionGuards.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5842,30 +8336,31 @@ Code files scanned: **515**
 | 4 | `beginKeyedAction` | export function | 58 |
 | 5 | `finishKeyedAction` | export function | 70 |
 
-### 3.342 `frontend/src/utils/actionHistory.ts`
+### 3.455 `frontend/src/utils/actionHistory.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `normalizeActionHistoryId` | function | 94 |
-| 2 | `normalizeEntry` | function | 100 |
-| 3 | `parsePermissions` | function | 113 |
-| 4 | `getErrorMessage` | function | 125 |
-| 5 | `useActionHistory` | export function | 129 |
+| 1 | `loadActionHistoryTransport` | function | 83 |
+| 2 | `normalizeActionHistoryId` | function | 88 |
+| 3 | `normalizeEntry` | function | 94 |
+| 4 | `parsePermissions` | function | 107 |
+| 5 | `getErrorMessage` | function | 119 |
+| 6 | `useActionHistory` | export function | 123 |
 
-### 3.343 `frontend/src/utils/appRefresh.ts`
+### 3.456 `frontend/src/utils/appRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeRefreshChannels` | export function | 20 |
 | 2 | `refreshAppData` | export function | 28 |
 
-### 3.344 `frontend/src/utils/bulkOps.ts`
+### 3.457 `frontend/src/utils/bulkOps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runner` | function | 47 |
 
-### 3.345 `frontend/src/utils/color.ts`
+### 3.458 `frontend/src/utils/color.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5873,7 +8368,7 @@ Code files scanned: **515**
 | 2 | `relativeLuminance` | function | 12 |
 | 3 | `getContrastingTextColor` | export function | 29 |
 
-### 3.346 `frontend/src/utils/csv.ts`
+### 3.459 `frontend/src/utils/csv.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5893,13 +8388,13 @@ Code files scanned: **515**
 | 14 | `downloadZipFiles` | export function | 219 |
 | 15 | `downloadZipFilesAsync` | export function | 225 |
 
-### 3.347 `frontend/src/utils/csvExportWorker.ts`
+### 3.460 `frontend/src/utils/csvExportWorker.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `getErrorMessage` | function | 20 |
 
-### 3.348 `frontend/src/utils/csvImport.ts`
+### 3.461 `frontend/src/utils/csvImport.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5923,14 +8418,20 @@ Code files scanned: **515**
 | 18 | `normalizeCsvMoney` | export function | 299 |
 | 19 | `normalizeCsvPercent` | export function | 303 |
 
-### 3.349 `frontend/src/utils/csvRowCounter.ts`
+### 3.462 `frontend/src/utils/csvRowCounter.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `countCsvDataRows` | export function | 1 |
 | 2 | `finishRecord` | const arrow | 7 |
 
-### 3.350 `frontend/src/utils/dateHelpers.ts`
+### 3.463 `frontend/src/utils/csvTemplate.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `buildCSVTemplate` | export function | 3 |
+
+### 3.464 `frontend/src/utils/dateHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5938,7 +8439,7 @@ Code files scanned: **515**
 | 2 | `todayStr` | export function | 8 |
 | 3 | `offsetDate` | export function | 13 |
 
-### 3.351 `frontend/src/utils/deviceInfo.ts`
+### 3.465 `frontend/src/utils/deviceInfo.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5947,14 +8448,14 @@ Code files scanned: **515**
 | 3 | `getClientDeviceInfo` | export function | 30 |
 | 4 | `getClientMetaHeaders` | export function | 42 |
 
-### 3.352 `frontend/src/utils/exportPackage.ts`
+### 3.466 `frontend/src/utils/exportPackage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `buildReportManifestRows` | export function | 30 |
 | 2 | `buildReportPackageFiles` | export function | 38 |
 
-### 3.353 `frontend/src/utils/exportReports.tsx`
+### 3.467 `frontend/src/utils/exportReports.tsx`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5968,7 +8469,7 @@ Code files scanned: **515**
 | 8 | `renderNotes` | function | 374 |
 | 9 | `buildStandaloneReportHtml` | export function | 386 |
 
-### 3.354 `frontend/src/utils/favicon.ts`
+### 3.468 `frontend/src/utils/favicon.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5977,7 +8478,7 @@ Code files scanned: **515**
 | 3 | `loadImage` | function | 29 |
 | 4 | `createCircularFaviconDataUrl` | export function | 49 |
 
-### 3.355 `frontend/src/utils/formatters.ts`
+### 3.469 `frontend/src/utils/formatters.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -5987,7 +8488,7 @@ Code files scanned: **515**
 | 4 | `fmtShort` | export function | 73 |
 | 5 | `fmtCount` | export function | 85 |
 
-### 3.356 `frontend/src/utils/groupedRecords.ts`
+### 3.470 `frontend/src/utils/groupedRecords.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6000,14 +8501,14 @@ Code files scanned: **515**
 | 7 | `getTimeGroupingMode` | export function | 119 |
 | 8 | `toggleIdSet` | export function | 321 |
 
-### 3.357 `frontend/src/utils/historyHelpers.ts`
+### 3.471 `frontend/src/utils/historyHelpers.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `extractHistoryResultId` | export function | 26 |
 | 2 | `resolveCreatedHistorySnapshot` | export function | 36 |
 
-### 3.358 `frontend/src/utils/importJobRefresh.ts`
+### 3.472 `frontend/src/utils/importJobRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6019,11 +8520,11 @@ Code files scanned: **515**
 | 6 | `shouldDispatchImportCompletionRefresh` | export function | 68 |
 | 7 | `dispatchImportCompletionRefresh` | export function | 79 |
 
-### 3.359 `frontend/src/utils/index.ts`
+### 3.473 `frontend/src/utils/index.ts`
 
 - No top-level named symbols detected.
 
-### 3.360 `frontend/src/utils/initials.ts`
+### 3.474 `frontend/src/utils/initials.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6035,7 +8536,7 @@ Code files scanned: **515**
 | 6 | `aggregateInitialOptions` | export function | 79 |
 | 7 | `buildInitialOptionsFromProducts` | export function | 97 |
 
-### 3.361 `frontend/src/utils/loaders.ts`
+### 3.475 `frontend/src/utils/loaders.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6047,24 +8548,29 @@ Code files scanned: **515**
 | 6 | `getLoaderErrorMessage` | export function | 93 |
 | 7 | `getFirstLoaderError` | export function | 97 |
 
-### 3.362 `frontend/src/utils/mediaUpload.ts`
+### 3.476 `frontend/src/utils/mediaUpload.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `createInitialUploadState` | export function | 33 |
-| 2 | `isTemporaryPreviewUrl` | export function | 47 |
-| 3 | `sanitizePersistedMediaPath` | export function | 52 |
-| 4 | `buildCacheBustedMediaPath` | export function | 59 |
-| 5 | `reduceUploadState` | export function | 77 |
+| 1 | `buildCacheBustedMediaPath` | export function | 11 |
 
-### 3.363 `frontend/src/utils/permissions.ts`
+### 3.477 `frontend/src/utils/mediaUploadState.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `createInitialUploadState` | export function | 31 |
+| 2 | `isTemporaryPreviewUrl` | export function | 45 |
+| 3 | `sanitizePersistedMediaPath` | export function | 50 |
+| 4 | `reduceUploadState` | export function | 57 |
+
+### 3.478 `frontend/src/utils/permissions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `isPermissionMap` | function | 3 |
 | 2 | `parsePermissionMap` | export function | 7 |
 
-### 3.364 `frontend/src/utils/pricing.ts`
+### 3.479 `frontend/src/utils/pricing.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6077,52 +8583,57 @@ Code files scanned: **515**
 | 7 | `isProductDiscountActive` | export function | 52 |
 | 8 | `calculateProductDiscount` | export function | 65 |
 
-### 3.365 `frontend/src/utils/printReceipt.ts`
+### 3.480 `frontend/src/utils/printReceipt.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parsePrintNumber` | function | 42 |
-| 2 | `cloneElementWithInlineStyles` | function | 115 |
-| 3 | `escapeHtml` | function | 161 |
-| 4 | `blobToDataUrl` | function | 170 |
-| 5 | `inlineImageNodeSources` | function | 193 |
-| 6 | `extractUrlsFromCssValue` | function | 216 |
-| 7 | `inlineStyleAssetUrls` | function | 222 |
-| 8 | `normalizePrintableRoot` | function | 256 |
-| 9 | `mmToPt` | function | 273 |
-| 10 | `dataUrlToBytes` | function | 277 |
-| 11 | `bytesToBlobPart` | function | 287 |
-| 12 | `joinPdfChunks` | function | 291 |
-| 13 | `buildPdfStream` | function | 302 |
-| 14 | `buildSingleImagePdf` | function | 311 |
-| 15 | `escapePdfText` | function | 349 |
-| 16 | `wrapTextLine` | function | 356 |
-| 17 | `buildTextOnlyPdf` | function | 375 |
-| 18 | `buildReceiptFileName` | function | 428 |
-| 19 | `createTextOnlyReceiptCanvas` | function | 439 |
-| 20 | `canvasToPngBlob` | function | 480 |
-| 21 | `waitForElementAssets` | function | 493 |
-| 22 | `renderElementToCanvas` | function | 522 |
-| 23 | `createPrintableReceiptMarkup` | function | 633 |
-| 24 | `buildPrintablePreviewDocument` | function | 648 |
-| 25 | `attachPrintablePreviewActions` | function | 795 |
-| 26 | `schedulePrint` | const arrow | 804 |
-| 27 | `openPrintableReceiptPreview` | export function | 809 |
-| 28 | `downloadBlob` | function | 822 |
-| 29 | `getPrintSettings` | export function | 833 |
-| 30 | `savePrintSettings` | export function | 846 |
-| 31 | `getPaperWidthMm` | export function | 854 |
-| 32 | `createReceiptPdfBlob` | export function | 864 |
-| 33 | `buildTextOnlyReceiptBlob` | const arrow | 870 |
-| 34 | `renderPdfBlob` | const arrow | 884 |
-| 35 | `createReceiptImageBlob` | export function | 919 |
-| 36 | `extractReceiptLines` | function | 940 |
-| 37 | `downloadReceiptPdf` | export function | 958 |
-| 38 | `downloadReceiptImage` | export function | 977 |
-| 39 | `openReceiptPdf` | export function | 984 |
-| 40 | `printReceipt` | export function | 1008 |
+| 1 | `parsePrintNumber` | function | 46 |
+| 2 | `cloneElementWithInlineStyles` | function | 119 |
+| 3 | `escapeHtml` | function | 165 |
+| 4 | `blobToDataUrl` | function | 174 |
+| 5 | `inlineImageNodeSources` | function | 197 |
+| 6 | `extractUrlsFromCssValue` | function | 220 |
+| 7 | `inlineStyleAssetUrls` | function | 226 |
+| 8 | `normalizePrintableRoot` | function | 260 |
+| 9 | `mmToPt` | function | 277 |
+| 10 | `dataUrlToBytes` | function | 281 |
+| 11 | `bytesToBlobPart` | function | 291 |
+| 12 | `joinPdfChunks` | function | 295 |
+| 13 | `buildPdfStream` | function | 306 |
+| 14 | `buildSingleImagePdf` | function | 315 |
+| 15 | `escapePdfText` | function | 353 |
+| 16 | `wrapTextLine` | function | 360 |
+| 17 | `buildTextOnlyPdf` | function | 379 |
+| 18 | `buildReceiptFileName` | function | 432 |
+| 19 | `wrapReceiptFallbackLine` | function | 443 |
+| 20 | `classifyReceiptFallbackLine` | function | 470 |
+| 21 | `measureWrappedReceiptHeight` | function | 482 |
+| 22 | `wrapCanvasText` | function | 490 |
+| 23 | `drawClippedText` | function | 526 |
+| 24 | `createTextOnlyReceiptCanvas` | function | 535 |
+| 25 | `canvasToPngBlob` | function | 638 |
+| 26 | `waitForElementAssets` | function | 651 |
+| 27 | `renderElementToCanvas` | function | 680 |
+| 28 | `createPrintableReceiptMarkup` | function | 791 |
+| 29 | `buildPrintablePreviewDocument` | function | 814 |
+| 30 | `attachPrintablePreviewActions` | function | 969 |
+| 31 | `schedulePrint` | const arrow | 978 |
+| 32 | `openPrintableReceiptPreview` | export function | 983 |
+| 33 | `downloadBlob` | function | 996 |
+| 34 | `getPrintSettings` | export function | 1007 |
+| 35 | `savePrintSettings` | export function | 1020 |
+| 36 | `getPaperWidthMm` | export function | 1028 |
+| 37 | `createReceiptPdfBlob` | export function | 1038 |
+| 38 | `buildTextOnlyReceiptBlob` | const arrow | 1044 |
+| 39 | `renderPdfBlob` | const arrow | 1058 |
+| 40 | `createReceiptImageBlob` | export function | 1093 |
+| 41 | `extractReceiptLines` | function | 1114 |
+| 42 | `downloadReceiptPdf` | export function | 1212 |
+| 43 | `downloadReceiptImage` | export function | 1231 |
+| 44 | `openReceiptPdf` | export function | 1238 |
+| 45 | `printReceipt` | export function | 1262 |
 
-### 3.366 `frontend/src/utils/productBatches.ts`
+### 3.481 `frontend/src/utils/productBatches.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6130,7 +8641,7 @@ Code files scanned: **515**
 | 2 | `getVisibleProductBatches` | export function | 32 |
 | 3 | `buildBatchPreview` | export function | 53 |
 
-### 3.367 `frontend/src/utils/productGrouping.ts`
+### 3.482 `frontend/src/utils/productGrouping.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6148,7 +8659,7 @@ Code files scanned: **515**
 | 12 | `buildProductGroups` | export function | 175 |
 | 13 | `buildProductGroupSections` | export function | 275 |
 
-### 3.368 `frontend/src/utils/publicAssetUrls.ts`
+### 3.483 `frontend/src/utils/publicAssetUrls.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6161,7 +8672,7 @@ Code files scanned: **515**
 | 7 | `api` | const arrow | 57 |
 | 8 | `resolvePublicAssetUrl` | export function | 68 |
 
-### 3.369 `frontend/src/utils/receiptAppliedConfig.ts`
+### 3.484 `frontend/src/utils/receiptAppliedConfig.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6173,7 +8684,7 @@ Code files scanned: **515**
 | 6 | `readReceiptPrintSettingsFromSettings` | export function | 114 |
 | 7 | `buildAppliedReceiptConfig` | export function | 118 |
 
-### 3.370 `frontend/src/utils/scriptTypography.ts`
+### 3.485 `frontend/src/utils/scriptTypography.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6181,73 +8692,93 @@ Code files scanned: **515**
 | 2 | `withKhmerTextClass` | export function | 12 |
 | 3 | `getKhmerTextProps` | export function | 18 |
 
-### 3.371 `frontend/src/utils/settingsRefresh.ts`
+### 3.486 `frontend/src/utils/settingsRefresh.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeSettingKeys` | function | 62 |
 | 2 | `getSettingsRefreshChannels` | export function | 70 |
 
-### 3.372 `frontend/src/utils/settingsWriteOptions.ts`
+### 3.487 `frontend/src/utils/settingsWriteOptions.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `normalizeSettingsWriteOptions` | export function | 3 |
 
-### 3.373 `frontend/src/web-api.ts`
+### 3.488 `frontend/src/web-api.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `sanitizeBaseUrl` | function | 85 |
-| 2 | `getOfflineDb` | function | 89 |
-| 3 | `loadMethodsModule` | function | 94 |
-| 4 | `getLazyApiMethod` | function | 99 |
-| 5 | `mapOfflineFileChunkStatusUpdates` | function | 113 |
-| 6 | `asArrayBuffer` | function | 129 |
-| 7 | `bytesToBase64` | function | 133 |
-| 8 | `base64ToBytes` | function | 144 |
-| 9 | `stableStringify` | function | 151 |
-| 10 | `sha256Hex` | function | 157 |
-| 11 | `deriveOfflineVaultKey` | function | 165 |
-| 12 | `encryptOfflineVaultValue` | function | 182 |
-| 13 | `decryptOfflineVaultValue` | function | 190 |
-| 14 | `requestOfflinePersistentStorage` | function | 200 |
-| 15 | `dispatchVaultLocked` | function | 207 |
-| 16 | `scheduleOfflineVaultIdleLock` | function | 212 |
-| 17 | `lockOfflineVault` | function | 218 |
-| 18 | `unlockOfflineVault` | function | 226 |
-| 19 | `queueBusinessOutboxOperation` | function | 252 |
-| 20 | `queueOfflineFileChunks` | function | 289 |
-| 21 | `dispatchOutboxProgress` | function | 343 |
-| 22 | `dispatchOutboxFileProgress` | function | 350 |
-| 23 | `dispatchOutboxConflict` | function | 357 |
-| 24 | `getSyncOutboxKey` | function | 364 |
-| 25 | `syncUnlockedOfflineOutbox` | function | 368 |
-| 26 | `syncUnlockedOfflineFileChunks` | function | 478 |
-| 27 | `refreshOfflineSnapshotSoon` | function | 540 |
-| 28 | `run` | const arrow | 550 |
-| 29 | `refreshServiceWorkerSoon` | function | 569 |
-| 30 | `runOfflineMaintenance` | function | 579 |
-| 31 | `startOfflineMaintenanceLoop` | function | 591 |
-| 32 | `scheduleInitialOfflineMaintenance` | function | 599 |
-| 33 | `run` | const arrow | 603 |
-| 34 | `scheduleIdle` | const arrow | 607 |
-| 35 | `scheduleBootstrapStorageMaintenance` | function | 624 |
-| 36 | `run` | const arrow | 630 |
-| 37 | `forwardServiceWorkerOutboxEvent` | function | 647 |
-| 38 | `forwardServiceWorkerAppEvent` | function | 735 |
+| 1 | `sanitizeBaseUrl` | function | 119 |
+| 2 | `isPublicRuntimePath` | function | 123 |
+| 3 | `getOfflineDb` | function | 129 |
+| 4 | `loadMethodsModule` | function | 134 |
+| 5 | `loadAppBootstrapModule` | function | 139 |
+| 6 | `loadAuthTransportModule` | function | 144 |
+| 7 | `loadPortalTransportModule` | function | 149 |
+| 8 | `loadSystemRuntimeModule` | function | 154 |
+| 9 | `loadSaleWriteTransportModule` | function | 159 |
+| 10 | `loadOfflineSnapshotTransportModule` | function | 164 |
+| 11 | `loadNotificationSummaryModule` | function | 169 |
+| 12 | `loadSettingsTransportModule` | function | 174 |
+| 13 | `loadProductReadTransportModule` | function | 179 |
+| 14 | `loadProductWriteTransportModule` | function | 184 |
+| 15 | `loadLookupTransportModule` | function | 189 |
+| 16 | `loadBranchTransportModule` | function | 194 |
+| 17 | `loadUserReadTransportModule` | function | 199 |
+| 18 | `loadActionHistoryTransportModule` | function | 204 |
+| 19 | `getLazyApiMethod` | function | 242 |
+| 20 | `serializePendingSyncPreview` | function | 256 |
+| 21 | `mapOfflineFileChunkStatusUpdates` | function | 279 |
+| 22 | `asArrayBuffer` | function | 295 |
+| 23 | `bytesToBase64` | function | 299 |
+| 24 | `base64ToBytes` | function | 310 |
+| 25 | `stableStringify` | function | 317 |
+| 26 | `sha256Hex` | function | 323 |
+| 27 | `deriveOfflineVaultKey` | function | 331 |
+| 28 | `encryptOfflineVaultValue` | function | 348 |
+| 29 | `decryptOfflineVaultValue` | function | 356 |
+| 30 | `requestOfflinePersistentStorage` | function | 366 |
+| 31 | `dispatchVaultLocked` | function | 373 |
+| 32 | `scheduleOfflineVaultIdleLock` | function | 378 |
+| 33 | `lockOfflineVault` | function | 384 |
+| 34 | `unlockOfflineVault` | function | 392 |
+| 35 | `queueBusinessOutboxOperation` | function | 418 |
+| 36 | `queueOfflineFileChunks` | function | 455 |
+| 37 | `dispatchOutboxProgress` | function | 509 |
+| 38 | `dispatchOutboxFileProgress` | function | 516 |
+| 39 | `dispatchOutboxConflict` | function | 523 |
+| 40 | `getSyncOutboxKey` | function | 530 |
+| 41 | `syncUnlockedOfflineOutbox` | function | 534 |
+| 42 | `syncUnlockedOfflineFileChunks` | function | 644 |
+| 43 | `refreshOfflineSnapshotSoon` | function | 706 |
+| 44 | `run` | const arrow | 716 |
+| 45 | `refreshServiceWorkerSoon` | function | 737 |
+| 46 | `runOfflineMaintenance` | function | 747 |
+| 47 | `startOfflineMaintenanceLoop` | function | 762 |
+| 48 | `scheduleInitialOfflineMaintenance` | function | 770 |
+| 49 | `run` | const arrow | 774 |
+| 50 | `scheduleIdle` | const arrow | 778 |
+| 51 | `ensureSessionRecoveryListeners` | function | 795 |
+| 52 | `scheduleBootstrapStorageMaintenance` | function | 820 |
+| 53 | `run` | const arrow | 826 |
+| 54 | `scheduleBootstrapOfflineDbWrite` | function | 843 |
+| 55 | `run` | const arrow | 849 |
+| 56 | `write` | const arrow | 851 |
+| 57 | `forwardServiceWorkerOutboxEvent` | function | 870 |
+| 58 | `forwardServiceWorkerAppEvent` | function | 958 |
 
-### 3.374 `frontend/tailwind.config.ts`
+### 3.489 `frontend/tailwind.config.ts`
 
 - No top-level named symbols detected.
 
-### 3.375 `frontend/tests/actionGuards.test.ts`
+### 3.490 `frontend/tests/actionGuards.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.376 `frontend/tests/actionStability.test.ts`
+### 3.491 `frontend/tests/actionStability.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6255,125 +8786,125 @@ Code files scanned: **515**
 | 2 | `readRepo` | function | 16 |
 | 3 | `runTest` | function | 22 |
 
-### 3.377 `frontend/tests/adminShellMediaGuards.test.ts`
+### 3.492 `frontend/tests/adminShellMediaGuards.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.378 `frontend/tests/apiHttp.test.ts`
+### 3.493 `frontend/tests/apiHttp.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 46 |
-| 2 | `createDeferredResponse` | function | 57 |
-| 3 | `resetApiState` | function | 68 |
+| 1 | `runTest` | function | 50 |
+| 2 | `createDeferredResponse` | function | 61 |
+| 3 | `resetApiState` | function | 72 |
 
-### 3.379 `frontend/tests/appRefresh.test.ts`
+### 3.494 `frontend/tests/appRefresh.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `testNormalizeRefreshChannels` | function | 10 |
 | 2 | `testRefreshAppDataDispatchesMergedDetail` | function | 17 |
 
-### 3.380 `frontend/tests/appShellUtils.test.ts`
+### 3.495 `frontend/tests/appShellUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 10 |
+| 1 | `runTest` | function | 12 |
 
-### 3.381 `frontend/tests/assetCompression.test.ts`
+### 3.496 `frontend/tests/assetCompression.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `collectMediaFiles` | function | 12 |
 
-### 3.382 `frontend/tests/backupJobs.test.ts`
+### 3.497 `frontend/tests/backupJobs.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.383 `frontend/tests/barcodeImageScanner.test.ts`
+### 3.498 `frontend/tests/barcodeImageScanner.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createLoadedImage` | function | 13 |
 | 2 | `runTest` | function | 29 |
 
-### 3.384 `frontend/tests/barcodeScannerState.test.ts`
+### 3.499 `frontend/tests/barcodeScannerState.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.385 `frontend/tests/bulkOps.test.ts`
+### 3.500 `frontend/tests/bulkOps.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.386 `frontend/tests/contactImportWorker.test.ts`
+### 3.501 `frontend/tests/contactImportWorker.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.387 `frontend/tests/csvImport.test.ts`
+### 3.502 `frontend/tests/csvImport.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.388 `frontend/tests/dashboardDataReliability.test.ts`
+### 3.503 `frontend/tests/dashboardDataReliability.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.389 `frontend/tests/dateHelpers.test.ts`
+### 3.504 `frontend/tests/dateHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 | 2 | `parseLocalDate` | function | 19 |
 
-### 3.390 `frontend/tests/deviceInfo.test.ts`
+### 3.505 `frontend/tests/deviceInfo.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 | 2 | `withNavigator` | function | 19 |
 
-### 3.391 `frontend/tests/exportPackages.test.ts`
+### 3.506 `frontend/tests/exportPackages.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 10 |
 
-### 3.392 `frontend/tests/formatters.test.ts`
+### 3.507 `frontend/tests/formatters.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.393 `frontend/tests/globalScroll.test.ts`
+### 3.508 `frontend/tests/globalScroll.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.394 `frontend/tests/globalScrollControls.test.ts`
+### 3.509 `frontend/tests/globalScrollControls.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.395 `frontend/tests/groupedRecords.test.ts`
+### 3.510 `frontend/tests/groupedRecords.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.396 `frontend/tests/historyHelpers.test.ts`
+### 3.511 `frontend/tests/historyHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.397 `frontend/tests/importJobRefresh.test.ts`
+### 3.512 `frontend/tests/importJobRefresh.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6382,115 +8913,115 @@ Code files scanned: **515**
 | 3 | `testDispatchOnlyOnTerminalTransition` | function | 28 |
 | 4 | `testDispatchEmitsExpectedEvents` | function | 52 |
 
-### 3.398 `frontend/tests/initials.test.ts`
+### 3.513 `frontend/tests/initials.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 14 |
 
-### 3.399 `frontend/tests/inventoryImportWorker.test.ts`
+### 3.514 `frontend/tests/inventoryImportWorker.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.400 `frontend/tests/inventoryMobileCardLayout.test.ts`
+### 3.515 `frontend/tests/inventoryMobileCardLayout.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.401 `frontend/tests/inventoryMovementGroups.test.ts`
+### 3.516 `frontend/tests/inventoryMovementGroups.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.402 `frontend/tests/inventoryRfidSection.test.ts`
+### 3.517 `frontend/tests/inventoryRfidSection.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.403 `frontend/tests/loaders.test.ts`
+### 3.518 `frontend/tests/loaders.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 16 |
 
-### 3.404 `frontend/tests/mediaUploadHelpers.test.ts`
+### 3.519 `frontend/tests/mediaUploadHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.405 `frontend/tests/navigationConfig.test.ts`
+### 3.520 `frontend/tests/navigationConfig.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.406 `frontend/tests/notificationBadge.test.ts`
+### 3.521 `frontend/tests/notificationBadge.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.407 `frontend/tests/offlineSalesQueue.test.ts`
+### 3.522 `frontend/tests/offlineSalesQueue.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.408 `frontend/tests/offlineSecurityHardening.test.ts`
+### 3.523 `frontend/tests/offlineSecurityHardening.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.409 `frontend/tests/offlineSyncArchitecture.test.ts`
+### 3.524 `frontend/tests/offlineSyncArchitecture.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.410 `frontend/tests/ownedGoogleAuth.test.ts`
+### 3.525 `frontend/tests/ownedGoogleAuth.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.411 `frontend/tests/performanceLoadingUx.test.ts`
+### 3.526 `frontend/tests/performanceLoadingUx.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.412 `frontend/tests/permissionEditor.test.ts`
+### 3.527 `frontend/tests/permissionEditor.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.413 `frontend/tests/permissions.test.ts`
+### 3.528 `frontend/tests/permissions.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.414 `frontend/tests/portalCatalogDisplay.test.ts`
+### 3.529 `frontend/tests/portalCatalogDisplay.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `runTest` | function | 20 |
+| 1 | `runTest` | function | 22 |
 
-### 3.415 `frontend/tests/portalContentI18n.test.ts`
+### 3.530 `frontend/tests/portalContentI18n.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.416 `frontend/tests/portalEditorUtils.test.ts`
+### 3.531 `frontend/tests/portalEditorUtils.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 13 |
 
-### 3.417 `frontend/tests/portalFaqVocabulary.test.ts`
+### 3.532 `frontend/tests/portalFaqVocabulary.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.418 `frontend/tests/portalLanguagePacks.test.ts`
+### 3.533 `frontend/tests/portalLanguagePacks.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.419 `frontend/tests/portalTranslateController.test.ts`
+### 3.534 `frontend/tests/portalTranslateController.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6498,72 +9029,72 @@ Code files scanned: **515**
 | 2 | `createDocument` | function | 61 |
 | 3 | `TestEvent` | class | 132 |
 
-### 3.420 `frontend/tests/posCore.test.ts`
+### 3.535 `frontend/tests/posCore.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 18 |
 
-### 3.421 `frontend/tests/pricingContacts.test.ts`
+### 3.536 `frontend/tests/pricingContacts.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.422 `frontend/tests/productBatches.test.ts`
+### 3.537 `frontend/tests/productBatches.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.423 `frontend/tests/productDiscountUx.test.ts`
+### 3.538 `frontend/tests/productDiscountUx.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.424 `frontend/tests/productDisplayHelpers.test.ts`
+### 3.539 `frontend/tests/productDisplayHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.425 `frontend/tests/productFilterHelpers.test.ts`
+### 3.540 `frontend/tests/productFilterHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.426 `frontend/tests/productGalleryHelpers.test.ts`
+### 3.541 `frontend/tests/productGalleryHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.427 `frontend/tests/productGrouping.test.ts`
+### 3.542 `frontend/tests/productGrouping.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.428 `frontend/tests/productGroupViewHelpers.test.ts`
+### 3.543 `frontend/tests/productGroupViewHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `fmtUSD` | const arrow | 7 |
 | 2 | `t` | const arrow | 8 |
 
-### 3.429 `frontend/tests/productHistoryHelpers.test.ts`
+### 3.544 `frontend/tests/productHistoryHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.430 `frontend/tests/productImportPlanner.test.ts`
+### 3.545 `frontend/tests/productImportPlanner.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.431 `frontend/tests/productImportWorkerFallback.test.ts`
+### 3.546 `frontend/tests/productImportWorkerFallback.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.432 `frontend/tests/productMenuHelpers.test.ts`
+### 3.547 `frontend/tests/productMenuHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6573,104 +9104,106 @@ Code files scanned: **515**
 | 4 | `requireSection` | function | 27 |
 | 5 | `action` | const arrow | 108 |
 
-### 3.433 `frontend/tests/productPageHelpers.test.ts`
+### 3.548 `frontend/tests/productPageHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.434 `frontend/tests/productSearchPagination.test.ts`
+### 3.549 `frontend/tests/productSearchPagination.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.435 `frontend/tests/productSelectionHelpers.test.ts`
+### 3.550 `frontend/tests/productSelectionHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.436 `frontend/tests/productWriteHelpers.test.ts`
+### 3.551 `frontend/tests/productWriteHelpers.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.437 `frontend/tests/publicErrorRecovery.test.ts`
+### 3.552 `frontend/tests/publicErrorRecovery.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `createStorage` | function | 10 |
 
-### 3.438 `frontend/tests/receiptSettingsSync.test.ts`
+### 3.553 `frontend/tests/receiptSettingsSync.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.439 `frontend/tests/receiptTemplate.test.ts`
+### 3.554 `frontend/tests/receiptTemplate.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 10 |
 
-### 3.440 `frontend/tests/returnsLayout.test.ts`
+### 3.555 `frontend/tests/returnsLayout.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.441 `frontend/tests/runtimeErrorClassifier.test.ts`
+### 3.556 `frontend/tests/runtimeErrorClassifier.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.442 `frontend/tests/salesImportWorker.test.ts`
+### 3.557 `frontend/tests/salesImportWorker.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 9 |
 
-### 3.443 `frontend/tests/scanbotScanner.test.ts`
+### 3.558 `frontend/tests/scanbotScanner.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `setNavigator` | function | 19 |
 | 2 | `run` | function | 27 |
 
-### 3.444 `frontend/tests/scriptTypography.test.ts`
+### 3.559 `frontend/tests/scriptTypography.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.445 `frontend/tests/sectionNavigation.test.ts`
+### 3.560 `frontend/tests/sectionNavigation.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.446 `frontend/tests/settingsConflictHelpers.test.ts`
+### 3.561 `frontend/tests/settingsConflictHelpers.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 8 |
 
-### 3.447 `frontend/tests/settingsRefresh.test.ts`
+### 3.562 `frontend/tests/settingsRefresh.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.448 `frontend/tests/sourceSyntaxCheck.ts`
+### 3.563 `frontend/tests/sourceSyntaxCheck.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `listSourceFiles` | function | 17 |
 
-### 3.449 `frontend/tests/storagePolicy.test.ts`
+### 3.564 `frontend/tests/storagePolicy.test.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `runTest` | function | 15 |
 
-### 3.450 `frontend/tests/utilsSettingsBarrel.test.ts`
+### 3.565 `frontend/tests/utilsSettingsBarrel.test.ts`
 
 - No top-level named symbols detected.
 
-### 3.451 `frontend/vite.config.ts`
+### 3.566 `frontend/vite.config.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `readGitRevision` | function | 11 |
-| 2 | `fixCrossorigin` | function | 49 |
-| 3 | `emitBuildManifest` | function | 74 |
-| 4 | `shouldDeferModulePreload` | function | 122 |
-| 5 | `manualChunks` | function | 126 |
+| 2 | `escapeInlineScript` | function | 53 |
+| 3 | `inlinePublicRuntimeScripts` | function | 59 |
+| 4 | `fixCrossorigin` | function | 84 |
+| 5 | `emitBuildManifest` | function | 109 |
+| 6 | `shouldDeferModulePreload` | function | 294 |
+| 7 | `manualChunks` | function | 298 |
 
-### 3.452 `ops/scripts/architecture/generated-bulk-audit.ts`
+### 3.567 `ops/scripts/architecture/generated-bulk-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6693,7 +9226,7 @@ Code files scanned: **515**
 | 17 | `renderReport` | function | 453 |
 | 18 | `main` | function | 534 |
 
-### 3.453 `ops/scripts/architecture/language-runtime-audit.ts`
+### 3.568 `ops/scripts/architecture/language-runtime-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6718,7 +9251,7 @@ Code files scanned: **515**
 | 19 | `buildSummary` | function | 1502 |
 | 20 | `main` | function | 1581 |
 
-### 3.454 `ops/scripts/architecture/organization-audit.ts`
+### 3.569 `ops/scripts/architecture/organization-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6737,7 +9270,7 @@ Code files scanned: **515**
 | 13 | `buildSummary` | function | 387 |
 | 14 | `main` | function | 421 |
 
-### 3.455 `ops/scripts/architecture/phase29-audit.ts`
+### 3.570 `ops/scripts/architecture/phase29-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6756,7 +9289,7 @@ Code files scanned: **515**
 | 13 | `buildSummary` | function | 608 |
 | 14 | `main` | function | 646 |
 
-### 3.456 `ops/scripts/architecture/runtime-js-inventory.ts`
+### 3.571 `ops/scripts/architecture/runtime-js-inventory.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6767,7 +9300,7 @@ Code files scanned: **515**
 | 5 | `renderReport` | function | 142 |
 | 6 | `main` | function | 183 |
 
-### 3.457 `ops/scripts/backend/build-package-stage.ts`
+### 3.572 `ops/scripts/backend/build-package-stage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6782,7 +9315,7 @@ Code files scanned: **515**
 | 9 | `assertStage` | function | 109 |
 | 10 | `main` | function | 131 |
 
-### 3.458 `ops/scripts/backend/build-server-entry.ts`
+### 3.573 `ops/scripts/backend/build-server-entry.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6792,7 +9325,7 @@ Code files scanned: **515**
 | 4 | `writeIfChanged` | function | 59 |
 | 5 | `main` | function | 66 |
 
-### 3.459 `ops/scripts/backend/schema-audit.ts`
+### 3.574 `ops/scripts/backend/schema-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6822,7 +9355,7 @@ Code files scanned: **515**
 | 24 | `buildSummary` | function | 398 |
 | 25 | `main` | function | 430 |
 
-### 3.460 `ops/scripts/backend/schema-primary-key-preflight.ts`
+### 3.575 `ops/scripts/backend/schema-primary-key-preflight.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6832,7 +9365,7 @@ Code files scanned: **515**
 | 4 | `buildPreflightSql` | function | 70 |
 | 5 | `summarize` | function | 178 |
 
-### 3.461 `ops/scripts/backend/verify-data-integrity.ts`
+### 3.576 `ops/scripts/backend/verify-data-integrity.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6864,7 +9397,7 @@ Code files scanned: **515**
 | 26 | `writeReport` | function | 646 |
 | 27 | `run` | function | 656 |
 
-### 3.462 `ops/scripts/frontend/build-public-runtime-scripts.ts`
+### 3.577 `ops/scripts/frontend/build-public-runtime-scripts.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6874,7 +9407,7 @@ Code files scanned: **515**
 | 4 | `writeIfChanged` | function | 67 |
 | 5 | `main` | function | 74 |
 
-### 3.463 `ops/scripts/frontend/verify-i18n.ts`
+### 3.578 `ops/scripts/frontend/verify-i18n.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6885,7 +9418,7 @@ Code files scanned: **515**
 | 5 | `printList` | function | 95 |
 | 6 | `main` | function | 102 |
 
-### 3.464 `ops/scripts/frontend/verify-performance.ts`
+### 3.579 `ops/scripts/frontend/verify-performance.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6894,7 +9427,7 @@ Code files scanned: **515**
 | 3 | `trackedFiles` | function | 37 |
 | 4 | `assert` | function | 47 |
 
-### 3.465 `ops/scripts/frontend/verify-ui.ts`
+### 3.580 `ops/scripts/frontend/verify-ui.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6910,7 +9443,7 @@ Code files scanned: **515**
 | 10 | `printAuditSummary` | function | 202 |
 | 11 | `main` | function | 220 |
 
-### 3.466 `ops/scripts/lib/fs-utils.ts`
+### 3.581 `ops/scripts/lib/fs-utils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6928,7 +9461,7 @@ Code files scanned: **515**
 | 12 | `collectRootFiles` | function | 193 |
 | 13 | `isProbablyText` | function | 212 |
 
-### 3.467 `ops/scripts/lib/report-utils.ts`
+### 3.582 `ops/scripts/lib/report-utils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6938,7 +9471,7 @@ Code files scanned: **515**
 | 4 | `outputTail` | function | 44 |
 | 5 | `formatBytes` | function | 51 |
 
-### 3.468 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
+### 3.583 `ops/scripts/runtime/audits/action-history-undo-redo-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6948,7 +9481,7 @@ Code files scanned: **515**
 | 4 | `cleanupActionHistoryData` | function | 111 |
 | 5 | `main` | function | 144 |
 
-### 3.469 `ops/scripts/runtime/audits/audit-auth.ts`
+### 3.584 `ops/scripts/runtime/audits/audit-auth.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6959,7 +9492,7 @@ Code files scanned: **515**
 | 5 | `applySessionToPlaywrightContext` | export function | 155 |
 | 6 | `hydratePlaywrightPage` | export function | 181 |
 
-### 3.470 `ops/scripts/runtime/audits/audit-manifest.ts`
+### 3.585 `ops/scripts/runtime/audits/audit-manifest.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6967,7 +9500,7 @@ Code files scanned: **515**
 | 2 | `resolveAuditRoutes` | export function | 256 |
 | 3 | `getAuditProfiles` | export function | 297 |
 
-### 3.471 `ops/scripts/runtime/audits/audit-report-html.ts`
+### 3.586 `ops/scripts/runtime/audits/audit-report-html.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -6983,7 +9516,7 @@ Code files scanned: **515**
 | 10 | `writeFullAuditHtmlReport` | export function | 307 |
 | 11 | `writeBrowserActionHtmlReport` | export function | 368 |
 
-### 3.472 `ops/scripts/runtime/audits/deep-live-audit.ts`
+### 3.587 `ops/scripts/runtime/audits/deep-live-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7030,7 +9563,7 @@ Code files scanned: **515**
 | 41 | `compareWithPreviousBaseline` | function | 1357 |
 | 42 | `main` | function | 1405 |
 
-### 3.473 `ops/scripts/runtime/audits/full-app-audit.ts`
+### 3.588 `ops/scripts/runtime/audits/full-app-audit.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7057,7 +9590,7 @@ Code files scanned: **515**
 | 21 | `writeSummary` | function | 601 |
 | 22 | `main` | function | 612 |
 
-### 3.474 `ops/scripts/runtime/browser-action-smoke.ts`
+### 3.589 `ops/scripts/runtime/browser-action-smoke.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7094,7 +9627,7 @@ Code files scanned: **515**
 | 31 | `runProfile` | function | 772 |
 | 32 | `main` | function | 840 |
 
-### 3.475 `ops/scripts/runtime/build-ecosystem-config.ts`
+### 3.590 `ops/scripts/runtime/build-ecosystem-config.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7104,7 +9637,7 @@ Code files scanned: **515**
 | 4 | `writeIfChanged` | function | 56 |
 | 5 | `main` | function | 63 |
 
-### 3.476 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
+### 3.591 `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7125,7 +9658,7 @@ Code files scanned: **515**
 | 15 | `main` | function | 150 |
 | 16 | `requestJson` | function | 205 |
 
-### 3.477 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
+### 3.592 `ops/scripts/runtime/cloudflare/update-cloudflare-tunnel-origin.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7136,7 +9669,7 @@ Code files scanned: **515**
 | 5 | `main` | function | 58 |
 | 6 | `requestJson` | function | 103 |
 
-### 3.478 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
+### 3.593 `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7157,7 +9690,7 @@ Code files scanned: **515**
 | 15 | `applyCloudflareAutomation` | function | 179 |
 | 16 | `main` | function | 223 |
 
-### 3.479 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
+### 3.594 `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7170,56 +9703,89 @@ Code files scanned: **515**
 | 7 | `verifyRuntimeObjectStoreFallback` | function | 86 |
 | 8 | `main` | function | 94 |
 
-### 3.480 `ops/scripts/runtime/live-checks/all-pages-control-audit.ts`
+### 3.595 `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 197 |
-| 2 | `readArgs` | function | 204 |
-| 3 | `safeName` | function | 220 |
-| 4 | `addFinding` | function | 227 |
-| 5 | `isExternalNoise` | function | 231 |
-| 6 | `isAppConsoleIssue` | function | 235 |
-| 7 | `isAppNetworkIssue` | function | 242 |
-| 8 | `routeRoot` | function | 248 |
-| 9 | `textForLabel` | function | 253 |
-| 10 | `buttonSkipReason` | function | 257 |
-| 11 | `expectedButtonNavigation` | function | 267 |
-| 12 | `escapeRegExp` | function | 272 |
-| 13 | `attachCollectors` | function | 276 |
-| 14 | `writeJson` | function | 311 |
-| 15 | `writeText` | function | 316 |
-| 16 | `incrementCount` | function | 321 |
-| 17 | `markdownCell` | function | 325 |
-| 18 | `markdownTable` | function | 331 |
-| 19 | `percentage` | function | 338 |
-| 20 | `computeControlCoverage` | function | 343 |
-| 21 | `routeCoverageRows` | function | 385 |
-| 22 | `seededRollbackCategory` | function | 397 |
-| 23 | `seededRollbackHarness` | function | 411 |
-| 24 | `seededRollbackCandidates` | function | 420 |
-| 25 | `seededRollbackSummaryRows` | function | 453 |
-| 26 | `renderSeededRollbackMarkdown` | function | 463 |
-| 27 | `renderCoverageMarkdown` | function | 496 |
-| 28 | `addCoverageGateFindings` | function | 556 |
-| 29 | `persistSummary` | function | 616 |
-| 30 | `saveScreenshot` | function | 647 |
-| 31 | `dismissTransientUi` | function | 654 |
-| 32 | `waitForRouteReady` | function | 672 |
-| 33 | `navigateRoute` | function | 688 |
-| 34 | `countVisible` | function | 703 |
-| 35 | `activeButtonCandidates` | function | 712 |
-| 36 | `clickButtonCandidate` | function | 743 |
-| 37 | `exerciseSearchInputs` | function | 831 |
-| 38 | `exerciseSelects` | function | 875 |
-| 39 | `collectLayoutIssues` | function | 932 |
-| 40 | `hasScrollableAncestor` | const arrow | 953 |
-| 41 | `runRoute` | function | 992 |
-| 42 | `createAuthedPage` | function | 1060 |
-| 43 | `runProfile` | function | 1079 |
-| 44 | `main` | function | 1114 |
+| 1 | `assertInsideWorkspace` | function | 17 |
+| 2 | `normalizeBaseUrl` | function | 23 |
+| 3 | `parsePositiveInt` | function | 29 |
+| 4 | `sleep` | function | 34 |
+| 5 | `shouldRetryDocumentFetch` | function | 38 |
+| 6 | `parseArgs` | function | 42 |
+| 7 | `asAbsoluteUrl` | function | 69 |
+| 8 | `isWarmableAsset` | function | 77 |
+| 9 | `extractStartupAssets` | function | 89 |
+| 10 | `fetchWithTimeout` | function | 109 |
+| 11 | `runLimited` | function | 152 |
+| 12 | `fetchDocumentWithRetry` | function | 166 |
+| 13 | `warmSurface` | function | 195 |
+| 14 | `summarizeCache` | function | 218 |
+| 15 | `main` | function | 227 |
 
-### 3.481 `ops/scripts/runtime/live-checks/live-check-utils.ts`
+### 3.596 `ops/scripts/runtime/live-checks/all-pages-control-audit.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `readArg` | function | 207 |
+| 2 | `readArgs` | function | 214 |
+| 3 | `safeName` | function | 230 |
+| 4 | `addFinding` | function | 237 |
+| 5 | `isExternalNoise` | function | 241 |
+| 6 | `isAppConsoleIssue` | function | 245 |
+| 7 | `isAppNetworkIssue` | function | 252 |
+| 8 | `routeRoot` | function | 258 |
+| 9 | `textForLabel` | function | 263 |
+| 10 | `buttonSkipReason` | function | 267 |
+| 11 | `expectedButtonNavigation` | function | 277 |
+| 12 | `buttonMayOpenFileChooser` | function | 282 |
+| 13 | `buttonInteractionPriority` | function | 286 |
+| 14 | `timeBudgetExceeded` | function | 293 |
+| 15 | `escapeRegExp` | function | 297 |
+| 16 | `attachCollectors` | function | 301 |
+| 17 | `writeJson` | function | 336 |
+| 18 | `writeText` | function | 341 |
+| 19 | `incrementCount` | function | 346 |
+| 20 | `markdownCell` | function | 350 |
+| 21 | `markdownTable` | function | 356 |
+| 22 | `percentage` | function | 363 |
+| 23 | `computeControlCoverage` | function | 368 |
+| 24 | `routeCoverageRows` | function | 410 |
+| 25 | `seededRollbackCategory` | function | 422 |
+| 26 | `seededRollbackHarness` | function | 436 |
+| 27 | `seededRollbackCandidates` | function | 445 |
+| 28 | `seededRollbackSummaryRows` | function | 478 |
+| 29 | `renderSeededRollbackMarkdown` | function | 488 |
+| 30 | `renderCoverageMarkdown` | function | 521 |
+| 31 | `addCoverageGateFindings` | function | 581 |
+| 32 | `persistSummary` | function | 641 |
+| 33 | `saveScreenshot` | function | 672 |
+| 34 | `dismissTransientUi` | function | 679 |
+| 35 | `waitForRouteReady` | function | 697 |
+| 36 | `navigateRoute` | function | 713 |
+| 37 | `countVisible` | function | 730 |
+| 38 | `activeButtonCandidates` | function | 739 |
+| 39 | `clickButtonCandidate` | function | 775 |
+| 40 | `exerciseSearchInputs` | function | 865 |
+| 41 | `exerciseSelects` | function | 909 |
+| 42 | `collectLayoutIssues` | function | 966 |
+| 43 | `hasScrollableAncestor` | const arrow | 1002 |
+| 44 | `runRoute` | function | 1041 |
+| 45 | `createAuthedPage` | function | 1111 |
+| 46 | `runProfile` | function | 1130 |
+| 47 | `main` | function | 1175 |
+
+### 3.597 `ops/scripts/runtime/live-checks/filter-burst-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `waitForPage` | function | 25 |
+| 2 | `clickIfPresent` | function | 33 |
+| 3 | `runBurst` | function | 40 |
+| 4 | `onResponse` | const arrow | 43 |
+| 5 | `main` | function | 75 |
+
+### 3.598 `ops/scripts/runtime/live-checks/live-check-utils.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7232,28 +9798,72 @@ Code files scanned: **515**
 | 7 | `waitForRead` | export function | 101 |
 | 8 | `closeTopModal` | export function | 118 |
 
-### 3.482 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
+### 3.599 `ops/scripts/runtime/live-checks/move766-product-write-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 24 |
+| 2 | `assetName` | function | 28 |
+| 3 | `observeResponse` | function | 36 |
+| 4 | `openAddProductModal` | function | 51 |
+| 5 | `saveNewProduct` | function | 58 |
+| 6 | `searchProduct` | function | 72 |
+| 7 | `deleteVisibleProduct` | function | 82 |
+| 8 | `main` | function | 97 |
+
+### 3.600 `ops/scripts/runtime/live-checks/phase84-account-loyalty-select-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 34 |
+| 2 | `openSharedSelect` | function | 38 |
+| 3 | `main` | function | 54 |
+
+### 3.601 `ops/scripts/runtime/live-checks/phase84-branches-actions-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 33 |
+| 2 | `readFirstActiveBranch` | function | 37 |
+| 3 | `api` | const arrow | 39 |
+| 4 | `main` | function | 48 |
+
+### 3.602 `ops/scripts/runtime/live-checks/phase84-catalog-editor-select-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 35 |
+| 2 | `openSharedSelect` | function | 39 |
+| 3 | `showEditorSection` | function | 55 |
+| 4 | `main` | function | 62 |
+
+### 3.603 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 36 |
 
-### 3.483 `ops/scripts/runtime/live-checks/phase84-contacts-live-check.ts`
-
-| No. | Symbol | Kind | Line |
-|---:|---|---|---:|
-| 1 | `assert` | function | 28 |
-| 2 | `main` | function | 36 |
-
-### 3.484 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
+### 3.604 `ops/scripts/runtime/live-checks/phase84-files-providers-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 29 |
 | 2 | `main` | function | 36 |
 
-### 3.485 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
+### 3.605 `ops/scripts/runtime/live-checks/phase84-filter-menu-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 58 |
+| 2 | `openFilters` | function | 62 |
+| 3 | `readFilterMenu` | function | 71 |
+| 4 | `openSharedSelect` | function | 95 |
+| 5 | `openDashboardCustomRange` | function | 116 |
+| 6 | `readPosFilterPanel` | function | 148 |
+| 7 | `main` | function | 170 |
+
+### 3.606 `ops/scripts/runtime/live-checks/phase84-inventory-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7261,38 +9871,69 @@ Code files scanned: **515**
 | 2 | `openFirstProductDetail` | function | 37 |
 | 3 | `main` | function | 46 |
 
-### 3.486 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
+### 3.607 `ops/scripts/runtime/live-checks/phase84-inventory-section-restore-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `parseArgs` | function | 78 |
-| 2 | `assertInsideWorkspace` | function | 101 |
-| 3 | `tail` | function | 107 |
-| 4 | `readJsonIfExists` | function | 111 |
-| 5 | `latestReportPathForPrefix` | function | 116 |
-| 6 | `relativePath` | function | 134 |
-| 7 | `summarizeReport` | function | 139 |
-| 8 | `readStepReport` | function | 172 |
-| 9 | `runNodeStep` | function | 182 |
-| 10 | `skippedStep` | function | 202 |
-| 11 | `runSuite` | function | 212 |
+| 1 | `assert` | function | 28 |
+| 2 | `matchingRequests` | function | 32 |
+| 3 | `main` | function | 36 |
 
-### 3.487 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
+### 3.608 `ops/scripts/runtime/live-checks/phase84-live-suite.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 33 |
-| 2 | `verifiedContextGet` | function | 39 |
-| 3 | `main` | function | 46 |
+| 1 | `parseArgs` | function | 97 |
+| 2 | `assertInsideWorkspace` | function | 122 |
+| 3 | `tail` | function | 128 |
+| 4 | `readJsonIfExists` | function | 132 |
+| 5 | `latestReportPathForPrefix` | function | 137 |
+| 6 | `relativePath` | function | 155 |
+| 7 | `summarizeReport` | function | 160 |
+| 8 | `readStepReport` | function | 203 |
+| 9 | `runNodeStep` | function | 213 |
+| 10 | `skippedStep` | function | 233 |
+| 11 | `runSuite` | function | 243 |
 
-### 3.488 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
+### 3.609 `ops/scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 48 |
+| 2 | `headers` | function | 52 |
+| 3 | `getSettings` | function | 74 |
+| 4 | `saveSettings` | function | 80 |
+| 5 | `loyaltySnapshot` | function | 86 |
+| 6 | `waitForSettingsPost` | function | 90 |
+| 7 | `chooseBasis` | function | 97 |
+| 8 | `clickSave` | function | 104 |
+| 9 | `main` | function | 112 |
+
+### 3.610 `ops/scripts/runtime/live-checks/phase84-product-brands-actions-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 41 |
+| 2 | `verifiedContextGet` | function | 47 |
+| 3 | `main` | function | 60 |
+
+### 3.611 `ops/scripts/runtime/live-checks/phase84-product-categories-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 35 |
 
-### 3.489 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
+### 3.612 `ops/scripts/runtime/live-checks/phase84-product-form-dropdown-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 36 |
+| 2 | `getProductForm` | function | 40 |
+| 3 | `openDropdown` | function | 48 |
+| 4 | `main` | function | 62 |
+
+### 3.613 `ops/scripts/runtime/live-checks/phase84-product-page-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7300,46 +9941,68 @@ Code files scanned: **515**
 | 2 | `openFirstActionMenu` | function | 37 |
 | 3 | `main` | function | 46 |
 
-### 3.490 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
+### 3.614 `ops/scripts/runtime/live-checks/phase84-product-scanning-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 29 |
 | 2 | `main` | function | 36 |
 
-### 3.491 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
+### 3.615 `ops/scripts/runtime/live-checks/phase84-product-stock-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 36 |
 
-### 3.492 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
+### 3.616 `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 28 |
 | 2 | `main` | function | 35 |
 
-### 3.493 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
+### 3.617 `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 29 |
 | 2 | `openFirstVariantModal` | function | 36 |
-| 3 | `main` | function | 53 |
+| 3 | `main` | function | 56 |
 
-### 3.494 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
+### 3.618 `ops/scripts/runtime/live-checks/phase84-public-assistant-select-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 57 |
-| 2 | `isRelevantConsole` | function | 61 |
-| 3 | `isCloudflareScriptMonitorReportOnlyCsp` | function | 65 |
-| 4 | `endpointStatus` | function | 70 |
-| 5 | `main` | function | 74 |
+| 1 | `assert` | function | 33 |
+| 2 | `openSharedSelect` | function | 37 |
+| 3 | `main` | function | 53 |
 
-### 3.495 `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts`
+### 3.619 `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 60 |
+| 2 | `isRelevantConsole` | function | 64 |
+| 3 | `isCloudflareScriptMonitorReportOnlyCsp` | function | 68 |
+| 4 | `endpointStatus` | function | 73 |
+| 5 | `main` | function | 77 |
+
+### 3.620 `ops/scripts/runtime/live-checks/phase84-receipt-export-layout-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 35 |
+| 2 | `waitForAppSettled` | function | 39 |
+| 3 | `getReceiptOverflow` | function | 45 |
+| 4 | `assertReceiptNotOverflowing` | function | 84 |
+| 5 | `assertReceiptContentPolicy` | function | 92 |
+| 6 | `screenshot` | function | 99 |
+| 7 | `openReceiptPrintPreview` | function | 106 |
+| 8 | `downloadReceiptImage` | function | 118 |
+| 9 | `main` | function | 139 |
+
+### 3.621 `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7353,28 +10016,74 @@ Code files scanned: **515**
 | 8 | `clickLanguage` | function | 115 |
 | 9 | `main` | function | 125 |
 
-### 3.496 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
+### 3.622 `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 33 |
 | 2 | `main` | function | 40 |
 
-### 3.497 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
+### 3.623 `ops/scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 29 |
-| 2 | `main` | function | 36 |
+| 1 | `assert` | function | 36 |
+| 2 | `headers` | function | 40 |
+| 3 | `getSettings` | function | 62 |
+| 4 | `saveSettings` | function | 68 |
+| 5 | `waitForSettingsPost` | function | 74 |
+| 6 | `clickSave` | function | 81 |
+| 7 | `main` | function | 89 |
 
-### 3.498 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
+### 3.624 `ops/scripts/runtime/live-checks/phase84-settings-select-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 35 |
+| 2 | `getSessionUserId` | function | 39 |
+| 3 | `openSectionForControl` | function | 45 |
+| 4 | `openSharedSelect` | function | 55 |
+| 5 | `main` | function | 70 |
+
+### 3.625 `ops/scripts/runtime/live-checks/phase84-shared-select-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 36 |
+| 2 | `openAppSelect` | function | 40 |
+| 3 | `openNotificationPageSizeSelect` | function | 54 |
+| 4 | `main` | function | 71 |
+
+### 3.626 `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `assert` | function | 34 |
+| 2 | `readFirstActiveBranch` | function | 38 |
+| 3 | `api` | const arrow | 40 |
+| 4 | `main` | function | 49 |
+
+### 3.627 `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `assert` | function | 32 |
 | 2 | `main` | function | 40 |
 
-### 3.499 `ops/scripts/runtime/smoke/check-public-url.ts`
+### 3.628 `ops/scripts/runtime/live-checks/route-load-trace.ts`
+
+| No. | Symbol | Kind | Line |
+|---:|---|---|---:|
+| 1 | `readArgs` | function | 51 |
+| 2 | `normalizeRouteNames` | function | 67 |
+| 3 | `absoluteUrl` | function | 75 |
+| 4 | `isExternalNoise` | function | 79 |
+| 5 | `waitForRouteReady` | function | 83 |
+| 6 | `recordResponse` | function | 99 |
+| 7 | `traceRoute` | function | 110 |
+| 8 | `main` | function | 163 |
+
+### 3.629 `ops/scripts/runtime/smoke/check-public-url.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7390,7 +10099,7 @@ Code files scanned: **515**
 | 10 | `checkHttpsViaIp` | function | 123 |
 | 11 | `main` | function | 160 |
 
-### 3.500 `ops/scripts/runtime/smoke/check-route-contract.ts`
+### 3.630 `ops/scripts/runtime/smoke/check-route-contract.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7398,7 +10107,7 @@ Code files scanned: **515**
 | 2 | `checkRoute` | function | 40 |
 | 3 | `main` | function | 67 |
 
-### 3.501 `ops/scripts/runtime/smoke/live-smoke.ts`
+### 3.631 `ops/scripts/runtime/smoke/live-smoke.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7409,7 +10118,7 @@ Code files scanned: **515**
 | 5 | `main` | function | 86 |
 | 6 | `record` | const arrow | 91 |
 
-### 3.502 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
+### 3.632 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7421,7 +10130,7 @@ Code files scanned: **515**
 | 6 | `writeReport` | function | 115 |
 | 7 | `main` | function | 121 |
 
-### 3.503 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
+### 3.633 `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7434,7 +10143,7 @@ Code files scanned: **515**
 | 7 | `buildSql` | function | 191 |
 | 8 | `runPsql` | function | 200 |
 
-### 3.504 `ops/scripts/runtime/storage/cleanup-test-data.ts`
+### 3.634 `ops/scripts/runtime/storage/cleanup-test-data.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7460,7 +10169,7 @@ Code files scanned: **515**
 | 20 | `cleanupAuditImportFiles` | function | 376 |
 | 21 | `countMatchedRows` | function | 399 |
 
-### 3.505 `ops/scripts/runtime/storage/dataset-readiness.ts`
+### 3.635 `ops/scripts/runtime/storage/dataset-readiness.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7470,7 +10179,7 @@ Code files scanned: **515**
 | 4 | `buildCountsSql` | function | 56 |
 | 5 | `summarizeDataset` | function | 74 |
 
-### 3.506 `ops/scripts/runtime/storage/post-live-hygiene.ts`
+### 3.636 `ops/scripts/runtime/storage/post-live-hygiene.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7486,29 +10195,32 @@ Code files scanned: **515**
 | 10 | `runChecks` | function | 184 |
 | 11 | `main` | function | 192 |
 
-### 3.507 `ops/scripts/runtime/storage/prune-storage.ts`
+### 3.637 `ops/scripts/runtime/storage/prune-storage.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `readJsonFile` | function | 12 |
 | 2 | `numberFromPolicy` | function | 20 |
 | 3 | `parseArgs` | function | 25 |
-| 4 | `runDockerCommand` | function | 101 |
-| 5 | `pruneDockerSafe` | function | 109 |
-| 6 | `loadEnvFile` | function | 156 |
-| 7 | `loadRuntimeEnv` | function | 174 |
-| 8 | `assertInsideWorkspace` | function | 183 |
-| 9 | `directoryBytes` | function | 192 |
-| 10 | `pathBytes` | function | 218 |
-| 11 | `pruneDirectoryChildren` | function | 227 |
-| 12 | `pruneDirectoryEntries` | function | 231 |
-| 13 | `collectLogFiles` | function | 268 |
-| 14 | `compactLogFile` | function | 296 |
-| 15 | `compactRuntimeLogs` | function | 324 |
-| 16 | `findBackupRoots` | function | 357 |
-| 17 | `main` | function | 371 |
+| 4 | `runDockerCommand` | function | 115 |
+| 5 | `pruneDockerSafe` | function | 123 |
+| 6 | `parseDockerImageRows` | function | 170 |
+| 7 | `parseDockerRunningImageRefs` | function | 189 |
+| 8 | `pruneDockerBusinessOsImages` | function | 193 |
+| 9 | `loadEnvFile` | function | 255 |
+| 10 | `loadRuntimeEnv` | function | 273 |
+| 11 | `assertInsideWorkspace` | function | 282 |
+| 12 | `directoryBytes` | function | 291 |
+| 13 | `pathBytes` | function | 317 |
+| 14 | `pruneDirectoryChildren` | function | 326 |
+| 15 | `pruneDirectoryEntries` | function | 330 |
+| 16 | `collectLogFiles` | function | 367 |
+| 17 | `compactLogFile` | function | 395 |
+| 18 | `compactRuntimeLogs` | function | 423 |
+| 19 | `findBackupRoots` | function | 456 |
+| 20 | `main` | function | 470 |
 
-### 3.508 `ops/scripts/runtime/storage/restore-candidates.ts`
+### 3.638 `ops/scripts/runtime/storage/restore-candidates.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7521,7 +10233,7 @@ Code files scanned: **515**
 | 7 | `findBackupPackages` | function | 136 |
 | 8 | `chooseRecommendation` | function | 150 |
 
-### 3.509 `ops/scripts/runtime/storage/restore-rehearsal.ts`
+### 3.639 `ops/scripts/runtime/storage/restore-rehearsal.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7540,7 +10252,7 @@ Code files scanned: **515**
 | 13 | `countRestoredTables` | function | 152 |
 | 14 | `compareCounts` | function | 159 |
 
-### 3.510 `ops/scripts/verification/verify-backup-reliability.ts`
+### 3.640 `ops/scripts/verification/verify-backup-reliability.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7551,23 +10263,23 @@ Code files scanned: **515**
 | 5 | `checkNeedles` | function | 47 |
 | 6 | `main` | function | 58 |
 
-### 3.511 `ops/scripts/verification/verify-docker-release.ts`
+### 3.641 `ops/scripts/verification/verify-docker-release.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `read` | function | 63 |
-| 2 | `rel` | function | 67 |
-| 3 | `requireFile` | function | 71 |
-| 4 | `requireToken` | function | 75 |
-| 5 | `buildCloudflareRuntimeCoverage` | function | 79 |
-| 6 | `assertCloudflareRuntimeCoverage` | function | 199 |
-| 7 | `walk` | function | 201 |
-| 8 | `buildTestDataCleanupCoverage` | function | 214 |
-| 9 | `assertBooleanCoverage` | function | 315 |
-| 10 | `walk` | function | 317 |
-| 11 | `main` | function | 328 |
+| 1 | `read` | function | 64 |
+| 2 | `rel` | function | 68 |
+| 3 | `requireFile` | function | 72 |
+| 4 | `requireToken` | function | 76 |
+| 5 | `buildCloudflareRuntimeCoverage` | function | 80 |
+| 6 | `assertCloudflareRuntimeCoverage` | function | 200 |
+| 7 | `walk` | function | 202 |
+| 8 | `buildTestDataCleanupCoverage` | function | 215 |
+| 9 | `assertBooleanCoverage` | function | 316 |
+| 10 | `walk` | function | 318 |
+| 11 | `main` | function | 329 |
 
-### 3.512 `ops/scripts/verification/verify-hardening-policy.ts`
+### 3.642 `ops/scripts/verification/verify-hardening-policy.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7582,7 +10294,7 @@ Code files scanned: **515**
 | 9 | `assertFullAutomationIncludesPolicy` | function | 102 |
 | 10 | `main` | function | 118 |
 
-### 3.513 `ops/scripts/verification/verify-runtime-deps.ts`
+### 3.643 `ops/scripts/verification/verify-runtime-deps.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7602,7 +10314,7 @@ Code files scanned: **515**
 | 14 | `assertCoverageComplete` | function | 292 |
 | 15 | `main` | function | 305 |
 
-### 3.514 `ops/scripts/verification/verify-scale-services.ts`
+### 3.644 `ops/scripts/verification/verify-scale-services.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
@@ -7616,7 +10328,7 @@ Code files scanned: **515**
 | 8 | `pushDockerAvailabilityMessage` | function | 103 |
 | 9 | `main` | function | 108 |
 
-### 3.515 `ops/scripts/verification/verify-secret-hygiene.ts`
+### 3.645 `ops/scripts/verification/verify-secret-hygiene.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|

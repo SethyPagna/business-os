@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 834.
+- Latest completed implementation move in this roadmap: Move 835.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -8068,8 +8068,8 @@ Move 687 status:
   after reference refresh.
 
 Move 688 status:
-- Move 688 extracts access-control transport from the large frontend API
-  registry. `frontend/src/api/accessControlTransport.ts` now owns user,
+- Move 688 extracted access-control transport from the large frontend API
+  registry. A dedicated access-control transport owned user,
   profile, auth-method, password, role, and permission-management transport
   with actor-attributed reads, mirrored user/role fallbacks, encoded row ids,
   provider disconnect paths, and expected-updated-at security mutations.
@@ -13070,9 +13070,9 @@ Move 828 status:
 - The focused transports remain the behavior owners:
   `productReadTransport.ts` for product search/bootstrap/lookup replacement,
   `lookupTransport.ts` for category/unit route mirroring and expected-update
-  writes, `accessControlTransport.ts` for Users/Roles reads and mutations, and
+  writes, the then-current access-control transport for Users/Roles reads and mutations, and
   `customTablesTransport.ts` for custom-table row operations.
-- Build wiring adds named `access-control-api` and `custom-tables-api` intent
+- Build wiring added named access-control and `custom-tables-api` intent
   chunks and excludes both from eager module preload. The existing
   `product-read-api` chunk stays focused and is no longer statically imported
   by the emitted `app-api-methods` registry.
@@ -13082,7 +13082,7 @@ Move 828 status:
   reference refresh, Phase 29 audit, schema audit, organization audit, storage
   prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
   -- --skip-rollback` passed. The production build emitted
-  `access-control-api` at 2.07 KB, `custom-tables-api` at 1.28 KB, retained
+  the then-current access-control chunk at 2.07 KB, `custom-tables-api` at 1.28 KB, retained
   `product-read-api` as a 7.00 KB lazy dependency, and reduced
   `app-api-methods` from 23.51 KB to 23.26 KB. Compiled inspection confirmed no
   static `import ... from "./product-read-api"` remains in `app-api-methods`;
@@ -13271,6 +13271,39 @@ Move 834 status:
   secrets, env files, Docker volumes, active images, newest local backup sets,
   and the newest R2 backup.
 - Current plan position after Move 834: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 835 status:
+- Move 835 retires the obsolete combined legacy access-control transport after
+  user behavior was split into focused read/admin transports.
+- `frontend/src/api/methods.ts` now lazy-loads `userReadTransport.ts` for the
+  legacy user-list wrapper and `userAdminTransport.ts` for profile,
+  authentication-method, password, and role wrappers. `userAdminTransport.ts`
+  reuses the read transport for list reads and lazy-loads Dexie only for the
+  roles fallback path.
+- `frontend/vite.config.ts` no longer emits a named access-control chunk.
+  Production build proof: `user-read-api` emitted at 0.91 KB,
+  `user-admin-api` emitted at 2.54 KB, `app-api-methods` emitted at 25.24 KB,
+  `api-http-core` stayed at 21.90 KB, and no access-control asset was emitted
+  or preloaded by `index.html`.
+- Source guardrails reject the retired loader and chunk rule, require user
+  reads through `loadUserReadTransport()`, and require user/profile/password
+  and role operations through `loadUserAdminTransport()`.
+- Verification proof: focused API/performance source tests, standalone
+  frontend typecheck, JSX/source check, full frontend utility suite, frontend
+  production build, backend utility suite, schema audit, organization audit,
+  generated reference refresh, Phase 29 audit, storage prune, local health
+  check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The in-app Browser path was attempted first but
+  remains blocked locally by the kernel asset path error; repo Playwright
+  checks supplied browser proof with 66 UI signals, zero relevant console
+  messages, 20 public portal products, zero failed responses/page errors, and
+  passing post-live hygiene. Storage prune removed 0 bytes because retention
+  policies were already satisfied.
+- Current plan position after Move 835: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

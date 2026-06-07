@@ -33,7 +33,8 @@ let lookupTransportPromise = null
 let productReadTransportPromise = null
 let queryCacheModulePromise = null
 let localMirrorsModulePromise = null
-let accessControlTransportPromise = null
+let userAdminTransportPromise = null
+let userReadTransportPromise = null
 let customTablesTransportPromise = null
 let clientRuntimeModulePromise = null
 let appRefreshModulePromise = null
@@ -192,9 +193,14 @@ function loadLocalMirrorsModule() {
   return localMirrorsModulePromise
 }
 
-function loadAccessControlTransport() {
-  if (!accessControlTransportPromise) accessControlTransportPromise = import('./accessControlTransport.ts')
-  return accessControlTransportPromise
+function loadUserAdminTransport() {
+  if (!userAdminTransportPromise) userAdminTransportPromise = import('./userAdminTransport.ts')
+  return userAdminTransportPromise
+}
+
+function loadUserReadTransport() {
+  if (!userReadTransportPromise) userReadTransportPromise = import('./userReadTransport.ts')
+  return userReadTransportPromise
 }
 
 function loadCustomTablesTransport() {
@@ -966,57 +972,57 @@ export const bulkImportDeliveryContacts = async d => {
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 export const getUsers = async () => {
-  const { getUsers: getUsersRequest } = await loadAccessControlTransport()
+  const { getUsers: getUsersRequest } = await loadUserReadTransport()
   return getUsersRequest()
 }
 export const createUser = async d => {
-  const { createUser: createUserRequest } = await loadAccessControlTransport()
+  const { createUser: createUserRequest } = await loadUserAdminTransport()
   return createUserRequest(d)
 }
 export const updateUser = async (id, d) => {
-  const { updateUser: updateUserRequest } = await loadAccessControlTransport()
+  const { updateUser: updateUserRequest } = await loadUserAdminTransport()
   return updateUserRequest(id, d)
 }
 export const getUserProfile = async (id) => {
-  const { getUserProfile: getUserProfileRequest } = await loadAccessControlTransport()
+  const { getUserProfile: getUserProfileRequest } = await loadUserAdminTransport()
   return getUserProfileRequest(id)
 }
 export const getUserAuthMethods = async (id) => {
-  const { getUserAuthMethods: getUserAuthMethodsRequest } = await loadAccessControlTransport()
+  const { getUserAuthMethods: getUserAuthMethodsRequest } = await loadUserAdminTransport()
   return getUserAuthMethodsRequest(id)
 }
 export const updateUserProfile = async (id, d) => {
-  const { updateUserProfile: updateUserProfileRequest } = await loadAccessControlTransport()
+  const { updateUserProfile: updateUserProfileRequest } = await loadUserAdminTransport()
   return updateUserProfileRequest(id, d)
 }
 export const disconnectUserAuthProvider = async (id, d) => {
-  const { disconnectUserAuthProvider: disconnectUserAuthProviderRequest } = await loadAccessControlTransport()
+  const { disconnectUserAuthProvider: disconnectUserAuthProviderRequest } = await loadUserAdminTransport()
   return disconnectUserAuthProviderRequest(id, d)
 }
 export const changeUserPassword = async (id, d) => {
-  const { changeUserPassword: changeUserPasswordRequest } = await loadAccessControlTransport()
+  const { changeUserPassword: changeUserPasswordRequest } = await loadUserAdminTransport()
   return changeUserPasswordRequest(id, d)
 }
 export const resetPassword = async (id, d) => {
-  const { resetPassword: resetPasswordRequest } = await loadAccessControlTransport()
+  const { resetPassword: resetPasswordRequest } = await loadUserAdminTransport()
   return resetPasswordRequest(id, d)
 }
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
 export const getRoles = async () => {
-  const { getRoles: getRolesRequest } = await loadAccessControlTransport()
+  const { getRoles: getRolesRequest } = await loadUserAdminTransport()
   return getRolesRequest()
 }
 export const createRole = async d => {
-  const { createRole: createRoleRequest } = await loadAccessControlTransport()
+  const { createRole: createRoleRequest } = await loadUserAdminTransport()
   return createRoleRequest(d)
 }
 export const updateRole = async (id, d) => {
-  const { updateRole: updateRoleRequest } = await loadAccessControlTransport()
+  const { updateRole: updateRoleRequest } = await loadUserAdminTransport()
   return updateRoleRequest(id, d)
 }
 export const deleteRole = async (id, payload) => {
-  const { deleteRole: deleteRoleRequest } = await loadAccessControlTransport()
+  const { deleteRole: deleteRoleRequest } = await loadUserAdminTransport()
   return deleteRoleRequest(id, payload)
 }
 
