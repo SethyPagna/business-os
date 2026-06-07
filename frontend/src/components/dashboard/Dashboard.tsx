@@ -11,7 +11,6 @@ import MiniStat from './MiniStat'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
-import AppSelect from '../shared/AppSelect'
 import { useIsPageActive } from '../shared/pageActivity'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
@@ -203,7 +202,6 @@ interface DashboardFilterPrefs {
   rangeId: DashboardRangeId
   customStart: string
   customEnd: string
-  granularity: DashboardGranularity
 }
 
 interface DashboardRangePreset {
@@ -305,7 +303,6 @@ function readDashboardFilterPrefs(storageKeys: string | string[]): DashboardFilt
         rangeId: typeof parsed.rangeId === 'string' ? normalizeDashboardRangeId(parsed.rangeId) : 'month',
         customStart: typeof parsed.customStart === 'string' ? parsed.customStart : offsetDate(-29),
         customEnd: typeof parsed.customEnd === 'string' ? parsed.customEnd : todayStr(),
-        granularity: ['day', 'week', 'month'].includes(parsed.granularity) ? parsed.granularity : 'day',
       }
     }
     return null
@@ -330,10 +327,6 @@ function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId {
   if (rangeId === '90d') return 'year'
   if (rangeId === 'today' || rangeId === '7d' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
   return 'month'
-}
-
-function normalizeDashboardGranularity(value: unknown): DashboardGranularity {
-  return value === 'week' || value === 'month' ? value : 'day'
 }
 
 function compactDashboardMetaParts(parts: unknown[] = []): string[] {
@@ -427,7 +420,6 @@ export default function Dashboard() {
   }, [isKhmer, t])
   const exportLabel = translateOr('export', 'Export')
   const refreshLabel = translateOr('refresh', 'Refresh')
-  const dayLabel = translateOr('day', 'Day')
   const dashboardFilterStorageKey = useMemo(() => getDashboardFilterStorageKey(user), [user?.email, user?.id, user?.username])
   const dashboardFilterStorageKeys = useMemo(
     () => [dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY],
@@ -457,7 +449,6 @@ export default function Dashboard() {
   const [rangeId, setRangeId]     = useState<DashboardRangeId>(() => normalizeDashboardRangeId(initialFilterPrefs?.rangeId || 'month'))
   const [customStart, setCustomStart] = useState(() => initialFilterPrefs?.customStart || offsetDate(-29))
   const [customEnd, setCustomEnd]     = useState(() => initialFilterPrefs?.customEnd || todayStr())
-  const [granularity, setGranularity] = useState<DashboardGranularity>(() => normalizeDashboardGranularity(initialFilterPrefs?.granularity || 'day'))
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [showAllCustomers, setShowAllCustomers] = useState(false)
@@ -512,8 +503,8 @@ export default function Dashboard() {
       const range = preset.getRange()
       return { start: range.start, end: range.end, granularity: range.gran }
     }
-    return { start: customStart, end: customEnd, granularity }
-  }, [customEnd, customStart, granularity, rangeId]) // eslint-disable-line
+    return { start: customStart, end: customEnd, granularity: 'day' as DashboardGranularity }
+  }, [customEnd, customStart, rangeId]) // eslint-disable-line
 
   const loadDashboardStartup = useCallback(async () => {
     const requestId = beginTrackedRequest(startupRequestRef)
@@ -637,7 +628,6 @@ export default function Dashboard() {
     setRangeId(normalizeDashboardRangeId(nextPrefs?.rangeId || 'month'))
     setCustomStart(nextPrefs?.customStart || offsetDate(-29))
     setCustomEnd(nextPrefs?.customEnd || todayStr())
-    setGranularity(normalizeDashboardGranularity(nextPrefs?.granularity || 'day'))
   }, [dashboardFilterStorageKey])
 
   useEffect(() => {
@@ -647,14 +637,13 @@ export default function Dashboard() {
         rangeId,
         customStart,
         customEnd,
-        granularity,
       })
       window.localStorage.setItem(dashboardFilterStorageKey, serialized)
       window.localStorage.setItem(DASHBOARD_FILTER_STORAGE_FALLBACK_KEY, serialized)
     } catch {
       // Ignore persistence failures and keep the dashboard usable.
     }
-  }, [customEnd, customStart, dashboardFilterStorageKey, granularity, rangeId])
+  }, [customEnd, customStart, dashboardFilterStorageKey, rangeId])
 
   useEffect(() => {
     if (!isActive) {
@@ -1175,12 +1164,12 @@ export default function Dashboard() {
 
       {/* Range selector */}
       <div className="card p-2.5 sm:p-3">
-        <div className="flex flex-col gap-2">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-2">
+          <div className="flex min-w-0 items-center gap-2 lg:max-w-[18rem]">
             <span className="shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-300 sm:text-sm">{translateOr('period_label', 'Range', 'ជ្រើសពេល')}:</span>
             <span className="min-w-0 flex-1 truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300 sm:text-sm">{rangeLabel}</span>
           </div>
-          <div className="flex gap-1 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible">
+          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible lg:flex-none lg:pb-0">
               {RANGE_PRESETS.map(p => (
                 <button key={p.id} onClick={() => setRangeId(p.id)}
                 className={`min-h-7 whitespace-nowrap rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors sm:min-h-8 sm:px-3 sm:text-xs ${rangeId===p.id ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}>
@@ -1189,40 +1178,25 @@ export default function Dashboard() {
             ))}
           </div>
           {rangeId === 'custom' && (
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:gap-1.5">
+            <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5 sm:w-auto sm:min-w-[22rem] lg:min-w-[18rem] lg:max-w-[23rem]">
               <input
                 id="dashboard-custom-start-date"
                 name="dashboard_custom_start_date"
                 aria-label="Dashboard custom start date"
                 type="date"
-                className="input min-h-10 w-full py-2 text-sm sm:w-36"
+                className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
                 value={customStart}
                 onChange={e => setCustomStart(e.target.value)}
               />
-              <span className="text-gray-400 text-xs sm:text-sm">to</span>
+              <span className="text-[11px] font-medium text-gray-400 sm:text-xs">to</span>
               <input
                 id="dashboard-custom-end-date"
                 name="dashboard_custom_end_date"
                 aria-label="Dashboard custom end date"
                 type="date"
-                className="input min-h-10 w-full py-2 text-sm sm:w-36"
+                className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
                 value={customEnd}
                 onChange={e => setCustomEnd(e.target.value)}
-              />
-              <AppSelect
-                id="dashboard-granularity"
-                name="dashboard_granularity"
-                ariaLabel="Dashboard period granularity"
-                className="w-full sm:w-28"
-                buttonClassName="min-h-10 w-full rounded-xl py-2 text-sm"
-                menuClassName="min-w-[7rem]"
-                value={granularity}
-                onChange={nextValue => setGranularity(normalizeDashboardGranularity(nextValue))}
-                options={[
-                  { value: 'day', label: dayLabel },
-                  { value: 'week', label: t('this_week') },
-                  { value: 'month', label: t('this_month') },
-                ]}
               />
             </div>
           )}

@@ -245,6 +245,30 @@ export default function InventoryMovementsSurface({
                 >
                   {tr('custom_range', 'Custom range')}
                 </button>
+                {showMovementDateFilter ? (
+                  <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5 sm:w-auto sm:min-w-[20rem]">
+                    <label className="min-w-0">
+                      <span className="sr-only">{tr('start_date', 'Start date')}</span>
+                      <input
+                        type="date"
+                        className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
+                        value={movementStartDate}
+                        onChange={(event) => setMovementStartDate(event.target.value)}
+                      />
+                    </label>
+                    <span className="text-[11px] font-medium text-gray-400 sm:text-xs">to</span>
+                    <label className="min-w-0">
+                      <span className="sr-only">{tr('end_date', 'End date')}</span>
+                      <input
+                        type="date"
+                        className="input min-h-8 w-full px-2 py-1.5 text-xs sm:min-h-9 sm:text-sm"
+                        value={movementEndDate}
+                        min={movementStartDate || undefined}
+                        onChange={(event) => setMovementEndDate(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                ) : null}
                 <div className="max-w-full truncate rounded-full bg-slate-100 px-2 py-1 text-[11px] text-slate-500 dark:bg-slate-800 dark:text-slate-300">
                   {movementDateRangeLabel}
                 </div>
@@ -263,29 +287,6 @@ export default function InventoryMovementsSurface({
                 ) : null}
               </div>
             </div>
-            {showMovementDateFilter ? (
-              <div className="mt-3 grid gap-3 sm:grid-cols-2 md:max-w-xl">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('start_date', 'Start date')}</span>
-                  <input
-                    type="date"
-                    className="input text-sm"
-                    value={movementStartDate}
-                    onChange={(event) => setMovementStartDate(event.target.value)}
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('end_date', 'End date')}</span>
-                  <input
-                    type="date"
-                    className="input text-sm"
-                    value={movementEndDate}
-                    min={movementStartDate || undefined}
-                    onChange={(event) => setMovementEndDate(event.target.value)}
-                  />
-                </label>
-              </div>
-            ) : null}
           </div>
 
           <PaginationControls
