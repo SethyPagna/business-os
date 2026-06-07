@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 832 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 833 in this file.
 
 ## Goal
 
@@ -9270,6 +9270,38 @@ Decision rule:
   preserving uploads, secrets, env files, Docker volumes, active images, newest
   local backup sets, and the newest R2 backup.
 - Current plan position after Move 832: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 833: Remove duplicate legacy reset cache clears
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The shared
+  `invalidateClientRuntimeState()` helper remains the single owner for legacy
+  reset runtime invalidation, HTTP cache clearing, and runtime sync events.
+- Code-flow slice: `resetData()` and `factoryReset()` no longer call
+  `loadHttpCoreModule()` and `cacheClearAll()` after
+  `invalidateClientRuntimeState()` has already completed the same cache clear.
+  This keeps reset behavior intact while avoiding one duplicate async module
+  lookup and one duplicate in-memory cache walk per reset/factory-reset intent.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` now reject reset/factory-reset
+  wrappers that re-clear the HTTP cache after runtime invalidation.
+- Build slice: production build emitted `api-http-state` at 0.18 KB,
+  `api-http-core` at 21.90 KB, and reduced `app-api-methods` from 25.00 KB to
+  24.93 KB.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses or page errors, and passed post-live hygiene. The storage
+  prune removed 321,343 bytes of stale retained report directories while
+  preserving uploads, secrets, env files, Docker volumes, active images, newest
+  local backup sets, and the newest R2 backup.
+- Current plan position after Move 833: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 832.
+- Latest completed implementation move in this roadmap: Move 833.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13208,6 +13208,34 @@ Move 832 status:
   preserving uploads, secrets, env files, Docker volumes, active images, newest
   local backup sets, and the newest R2 backup.
 - Current plan position after Move 832: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 833 status:
+- Move 833 removes duplicate legacy reset cache clearing from
+  `frontend/src/api/methods.ts`.
+- `resetData()` and `factoryReset()` now rely on
+  `invalidateClientRuntimeState()` as the single reset invalidation path. That
+  helper still resets client runtime state, clears the HTTP cache, and emits
+  the runtime sync event; the outer reset wrappers no longer import the HTTP
+  core and clear the same in-memory cache a second time.
+- Source guardrails now reject reset/factory-reset wrappers that reintroduce a
+  second `cacheClearAll()` after runtime invalidation. Production build proof:
+  `api-http-state` stayed at 0.18 KB, `api-http-core` stayed at 21.90 KB, and
+  `app-api-methods` fell from 25.00 KB to 24.93 KB.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses or page errors, and passed post-live hygiene. The storage
+  prune removed 321,343 bytes of stale retained report directories while
+  preserving uploads, secrets, env files, Docker volumes, active images, newest
+  local backup sets, and the newest R2 backup.
+- Current plan position after Move 833: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

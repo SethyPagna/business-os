@@ -679,20 +679,20 @@ Total files documented: **265**
 | 157 | `forgetGoogleDriveSyncCredentials` | const arrow | 1115 |
 | 158 | `queueGoogleDriveSyncNow` | const arrow | 1120 |
 | 159 | `syncGoogleDriveNow` | const arrow | 1125 |
-| 160 | `openPath` | const arrow | 1194 |
-| 161 | `getReturns` | const arrow | 1198 |
-| 162 | `getReturn` | const arrow | 1210 |
-| 163 | `updateSaleStatus` | const arrow | 1216 |
-| 164 | `attachSaleCustomer` | const arrow | 1222 |
-| 165 | `getSalesExport` | const arrow | 1227 |
-| 166 | `updateReturn` | const arrow | 1231 |
-| 167 | `testSyncServer` | const arrow | 1238 |
-| 168 | `openFolderDialog` | const arrow | 1243 |
-| 169 | `getDataPath` | const arrow | 1247 |
-| 170 | `getScaleMigrationStatus` | const arrow | 1249 |
-| 171 | `prepareScaleMigration` | const arrow | 1251 |
-| 172 | `runScaleMigration` | const arrow | 1253 |
-| 173 | `browseDir` | const arrow | 1265 |
+| 160 | `openPath` | const arrow | 1190 |
+| 161 | `getReturns` | const arrow | 1194 |
+| 162 | `getReturn` | const arrow | 1206 |
+| 163 | `updateSaleStatus` | const arrow | 1212 |
+| 164 | `attachSaleCustomer` | const arrow | 1218 |
+| 165 | `getSalesExport` | const arrow | 1223 |
+| 166 | `updateReturn` | const arrow | 1227 |
+| 167 | `testSyncServer` | const arrow | 1234 |
+| 168 | `openFolderDialog` | const arrow | 1239 |
+| 169 | `getDataPath` | const arrow | 1243 |
+| 170 | `getScaleMigrationStatus` | const arrow | 1245 |
+| 171 | `prepareScaleMigration` | const arrow | 1247 |
+| 172 | `runScaleMigration` | const arrow | 1249 |
+| 173 | `browseDir` | const arrow | 1261 |
 
 ### 3.32 `frontend/src/api/multipartHeaders.ts`
 

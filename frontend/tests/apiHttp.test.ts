@@ -1116,6 +1116,8 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /from '\.\/http\.ts'/, 'legacy registry should not statically import the heavy HTTP core')
   assert.match(source, /import \{ getSyncServerUrl \} from '\.\/httpState\.ts'/, 'legacy registry should keep synchronous server URL access through the tiny HTTP state module')
   assert.match(source, /function loadHttpCoreModule\(\) \{[\s\S]*import\('\.\/http\.ts'\)/, 'legacy runtime cache clears should lazy-load the HTTP core only when needed')
+  assert.doesNotMatch(source, /export async function resetData[\s\S]*?invalidateClientRuntimeState[\s\S]*?cacheClearAll\(\)[\s\S]*?return result/, 'legacy resetData should clear runtime cache once through invalidateClientRuntimeState')
+  assert.doesNotMatch(source, /export async function factoryReset[\s\S]*?invalidateClientRuntimeState[\s\S]*?cacheClearAll\(\)[\s\S]*?return result/, 'legacy factoryReset should clear runtime cache once through invalidateClientRuntimeState')
   assert.match(source, /function loadClientRuntimeModule\(\) \{[\s\S]*import\('\.\.\/platform\/runtime\/clientRuntime\.ts'\)/, 'legacy runtime invalidation should lazy-load runtime reset helpers')
   assert.match(source, /function loadAppRefreshModule\(\) \{[\s\S]*import\('\.\.\/utils\/appRefresh\.ts'\)/, 'legacy lookup mutations should lazy-load app refresh helpers')
   assert.match(source, /export const createCategory = async payload => \{[\s\S]*loadLookupTransport\(\)[\s\S]*createCategoryRequest\(payload\)[\s\S]*dispatchRefreshAppData\(CATEGORY_REFRESH_CHANNELS/, 'legacy category writes should lazy-load lookup transport and preserve refresh behavior')

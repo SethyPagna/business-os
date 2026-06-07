@@ -1130,16 +1130,12 @@ export const syncGoogleDriveNow = async () => {
 export async function resetData(mode = 'sales') {
   const result = await callSystemRuntimeMethod('resetData', mode)
   await invalidateClientRuntimeState(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
-  const { cacheClearAll } = await loadHttpCoreModule()
-  cacheClearAll()
   return result
 }
 
 export async function factoryReset() {
   const result = await callSystemRuntimeMethod('factoryReset')
   await invalidateClientRuntimeState('factory-reset')
-  const { cacheClearAll } = await loadHttpCoreModule()
-  cacheClearAll()
   return result
 }
 
