@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 829, lazy-load legacy branch and inventory read/transfer paths behind focused transports.
+- Latest completed move: Move 830, lazy-load legacy auth, organization, OAuth, and OTP paths behind the focused auth transport.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T03-35-19-094Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T03-49-05-892Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T03-36-01-327Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T03-49-47-619Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -79,6 +79,27 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 830 continues the startup/preload cleanup by turning legacy auth,
+  organization, Google OAuth, and OTP wrappers in `frontend/src/api/methods.ts`
+  into lazy facades. The focused `authTransport.ts` remains the behavior owner
+  for login/logout, password reset, session duration, verification
+  capabilities, organization bootstrap/search/current-organization reads,
+  Google OAuth, and OTP setup/confirm/disable/verify/status. Build proof:
+  `app-auth` emitted at 1.96 KB as an intent chunk; compiled
+  `app-api-methods` no longer has a static source import for `authTransport.ts`
+  and references the emitted auth chunk only through Vite's dynamic import
+  dependency map. The compatibility facade grew from 23.84 KB to 24.39 KB
+  because of the lazy wrapper metadata, but it now avoids automatic auth
+  transport request and evaluation on legacy API registry load. Verification
+  proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses, and passed post-live hygiene. The storage prune removed 0
+  bytes because local/R2 backup retention, report retention, and Docker safety
+  policies were already satisfied.
 - Move 829 continues the startup/preload cleanup by turning legacy Branches and
   Inventory read/transfer wrappers in `frontend/src/api/methods.ts` into lazy
   facades. The focused `branchTransport.ts` remains the behavior owner for

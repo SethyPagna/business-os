@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 829.
+- Latest completed implementation move in this roadmap: Move 830.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13121,6 +13121,35 @@ Move 829 status:
   321,689 bytes of stale retained report directories while preserving uploads,
   secrets, env files, Docker volumes, active images, and newest backup sets.
 - Current plan position after Move 829: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 830 status:
+- Move 830 continues the startup/preload cleanup by lazy-loading legacy auth,
+  organization, Google OAuth, and OTP wrappers out of
+  `frontend/src/api/methods.ts`.
+- The focused `authTransport.ts` remains the behavior owner for login/logout,
+  password reset, session-duration updates, verification capabilities,
+  organization bootstrap/search/current-organization reads, Google OAuth, and
+  OTP setup/confirm/disable/verify/status.
+- The existing `app-auth` chunk stays excluded from eager module preload. The
+  production build emitted `app-auth` at 1.96 KB; compiled `app-api-methods`
+  no longer has a static source import for `authTransport.ts` and references
+  the emitted auth chunk only through Vite's dynamic import dependency map. The
+  compatibility facade grew from 23.84 KB to 24.39 KB because of the lazy
+  wrapper metadata, but it now avoids automatic auth transport request and
+  evaluation on legacy API registry load.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses, and passed post-live hygiene. The storage prune removed 0
+  bytes because all retention targets were already within policy.
+- Current plan position after Move 830: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

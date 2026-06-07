@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 829 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 830 in this file.
 
 ## Goal
 
@@ -9154,6 +9154,47 @@ Decision rule:
   321,689 bytes of stale retained report directories while preserving uploads,
   secrets, env files, Docker volumes, active images, and newest backup sets.
 - Current plan position after Move 829: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 830: Lazy-load legacy auth and organization helpers
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/authTransport.ts` module remains the behavior owner while
+  `frontend/src/api/methods.ts` becomes a lazy facade for the older `window.api`
+  compatibility surface.
+- Code-flow slice: auth wrappers (`login`, `logout`,
+  `resetPasswordWithOtp`, `requestPasswordResetEmail`,
+  `completePasswordReset`, `updateSessionDuration`,
+  `getVerificationCapabilities`), organization wrappers
+  (`getOrganizationBootstrap`, `searchOrganizations`,
+  `getCurrentOrganization`), Google OAuth wrappers (`startGoogleOauth`,
+  `completeGoogleOauth`, `unlinkGoogleOauth`), and OTP wrappers
+  (`otpSetup`, `otpConfirm`, `otpDisable`, `otpVerify`, `otpStatus`) now
+  resolve the memoized auth module only when those flows are used.
+- Build slice: the existing `app-auth` chunk stays excluded from eager module
+  preload. The production build emitted `app-auth` at 1.96 KB; compiled
+  `app-api-methods` no longer has a static source import for
+  `authTransport.ts` and references the emitted auth chunk only through Vite's
+  dynamic import dependency map. The compatibility facade grew from 23.84 KB to
+  24.39 KB because of the lazy wrapper metadata, but it now avoids automatic
+  auth transport request and evaluation on legacy API registry load.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` verify no static import from
+  the auth transport remains in the legacy registry while focused auth tests
+  keep login, device fingerprinting, organization bootstrap/search, OAuth, and
+  OTP behavior anchored in `authTransport.ts`.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses, and passed post-live hygiene. The storage prune removed 0
+  bytes because all retention targets were already within policy.
+- Current plan position after Move 830: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

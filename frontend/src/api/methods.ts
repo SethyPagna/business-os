@@ -10,6 +10,7 @@ let browserDialogsPromise = null
 let aiTransportPromise = null
 let actionHistoryTransportPromise = null
 let auditLogTransportPromise = null
+let authTransportPromise = null
 let contactsTransportPromise = null
 let dashboardTransportPromise = null
 let fileTransportPromise = null
@@ -67,6 +68,11 @@ function loadActionHistoryTransport() {
 function loadAuditLogTransport() {
   if (!auditLogTransportPromise) auditLogTransportPromise = import('./auditLogTransport.ts')
   return auditLogTransportPromise
+}
+
+function loadAuthTransport() {
+  if (!authTransportPromise) authTransportPromise = import('./authTransport.ts')
+  return authTransportPromise
 }
 
 function loadContactsTransport() {
@@ -206,26 +212,6 @@ import {
   CATEGORY_REFRESH_CHANNELS,
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
-import {
-  completeGoogleOauth as completeGoogleOauthRequest,
-  completePasswordReset as completePasswordResetRequest,
-  getCurrentOrganization as getCurrentOrganizationRequest,
-  getOrganizationBootstrap as getOrganizationBootstrapRequest,
-  getVerificationCapabilities as getVerificationCapabilitiesRequest,
-  login as loginRequest,
-  logout as logoutRequest,
-  otpConfirm as otpConfirmRequest,
-  otpDisable as otpDisableRequest,
-  otpSetup as otpSetupRequest,
-  otpStatus as otpStatusRequest,
-  otpVerify as otpVerifyRequest,
-  requestPasswordResetEmail as requestPasswordResetEmailRequest,
-  resetPasswordWithOtp as resetPasswordWithOtpRequest,
-  searchOrganizations as searchOrganizationsRequest,
-  startGoogleOauth as startGoogleOauthRequest,
-  unlinkGoogleOauth as unlinkGoogleOauthRequest,
-  updateSessionDuration as updateSessionDurationRequest,
-} from './authTransport.ts'
 export async function openCSVDialog() {
   const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
   return openBrowserCSVDialog()
@@ -331,20 +317,34 @@ if (typeof window !== 'undefined') {
 }
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
-export const login = (payload) =>
-  loginRequest(payload)
-export const logout = () =>
-  logoutRequest()
-export const resetPasswordWithOtp = (payload) =>
-  resetPasswordWithOtpRequest(payload)
-export const requestPasswordResetEmail = (payload) =>
-  requestPasswordResetEmailRequest(payload)
-export const completePasswordReset = (payload) =>
-  completePasswordResetRequest(payload)
-export const updateSessionDuration = (payload) =>
-  updateSessionDurationRequest(payload)
-export const getVerificationCapabilities = () =>
-  getVerificationCapabilitiesRequest()
+export const login = async (payload) => {
+  const { login: loginRequest } = await loadAuthTransport()
+  return loginRequest(payload)
+}
+export const logout = async () => {
+  const { logout: logoutRequest } = await loadAuthTransport()
+  return logoutRequest()
+}
+export const resetPasswordWithOtp = async (payload) => {
+  const { resetPasswordWithOtp: resetPasswordWithOtpRequest } = await loadAuthTransport()
+  return resetPasswordWithOtpRequest(payload)
+}
+export const requestPasswordResetEmail = async (payload) => {
+  const { requestPasswordResetEmail: requestPasswordResetEmailRequest } = await loadAuthTransport()
+  return requestPasswordResetEmailRequest(payload)
+}
+export const completePasswordReset = async (payload) => {
+  const { completePasswordReset: completePasswordResetRequest } = await loadAuthTransport()
+  return completePasswordResetRequest(payload)
+}
+export const updateSessionDuration = async (payload) => {
+  const { updateSessionDuration: updateSessionDurationRequest } = await loadAuthTransport()
+  return updateSessionDurationRequest(payload)
+}
+export const getVerificationCapabilities = async () => {
+  const { getVerificationCapabilities: getVerificationCapabilitiesRequest } = await loadAuthTransport()
+  return getVerificationCapabilitiesRequest()
+}
 export const getSystemConfig = () =>
   callSystemRuntimeMethod('getSystemConfig')
 export const getSystemBootstrap = () =>
@@ -355,22 +355,34 @@ export async function getNotificationSummary() {
 }
 export const getSystemDebugLog = () =>
   callSystemRuntimeMethod('getSystemDebugLog')
-export const startGoogleOauth = (payload) =>
-  startGoogleOauthRequest(payload)
-export const completeGoogleOauth = (payload) =>
-  completeGoogleOauthRequest(payload)
-export const unlinkGoogleOauth = (payload) =>
-  unlinkGoogleOauthRequest(payload)
+export const startGoogleOauth = async (payload) => {
+  const { startGoogleOauth: startGoogleOauthRequest } = await loadAuthTransport()
+  return startGoogleOauthRequest(payload)
+}
+export const completeGoogleOauth = async (payload) => {
+  const { completeGoogleOauth: completeGoogleOauthRequest } = await loadAuthTransport()
+  return completeGoogleOauthRequest(payload)
+}
+export const unlinkGoogleOauth = async (payload) => {
+  const { unlinkGoogleOauth: unlinkGoogleOauthRequest } = await loadAuthTransport()
+  return unlinkGoogleOauthRequest(payload)
+}
 export const getAppBootstrap = async () => {
   const { getAppBootstrap: getAppBootstrapRequest } = await import('./appBootstrapTransport.ts')
   return getAppBootstrapRequest()
 }
-export const getOrganizationBootstrap = () =>
-  getOrganizationBootstrapRequest()
-export const searchOrganizations = (query) =>
-  searchOrganizationsRequest(query)
-export const getCurrentOrganization = () =>
-  getCurrentOrganizationRequest()
+export const getOrganizationBootstrap = async () => {
+  const { getOrganizationBootstrap: getOrganizationBootstrapRequest } = await loadAuthTransport()
+  return getOrganizationBootstrapRequest()
+}
+export const searchOrganizations = async (query) => {
+  const { searchOrganizations: searchOrganizationsRequest } = await loadAuthTransport()
+  return searchOrganizationsRequest(query)
+}
+export const getCurrentOrganization = async () => {
+  const { getCurrentOrganization: getCurrentOrganizationRequest } = await loadAuthTransport()
+  return getCurrentOrganizationRequest()
+}
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 export async function getSettings(options = {}) {
@@ -593,16 +605,26 @@ export const deleteProduct = async (id) => {
 }
 
 // ─── OTP / 2FA ────────────────────────────────────────────────────────────────
-export const otpSetup = (payload) =>
-  otpSetupRequest(payload)
-export const otpConfirm = (payload) =>
-  otpConfirmRequest(payload)
-export const otpDisable = (payload) =>
-  otpDisableRequest(payload)
-export const otpVerify = (payload) =>
-  otpVerifyRequest(payload)
-export const otpStatus = (id) =>
-  otpStatusRequest(id)
+export const otpSetup = async (payload) => {
+  const { otpSetup: otpSetupRequest } = await loadAuthTransport()
+  return otpSetupRequest(payload)
+}
+export const otpConfirm = async (payload) => {
+  const { otpConfirm: otpConfirmRequest } = await loadAuthTransport()
+  return otpConfirmRequest(payload)
+}
+export const otpDisable = async (payload) => {
+  const { otpDisable: otpDisableRequest } = await loadAuthTransport()
+  return otpDisableRequest(payload)
+}
+export const otpVerify = async (payload) => {
+  const { otpVerify: otpVerifyRequest } = await loadAuthTransport()
+  return otpVerifyRequest(payload)
+}
+export const otpStatus = async (id) => {
+  const { otpStatus: otpStatusRequest } = await loadAuthTransport()
+  return otpStatusRequest(id)
+}
 
 // ─── Product Variants ─────────────────────────────────────────────────────────
 export const createProductVariant = async payload => {
