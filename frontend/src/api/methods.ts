@@ -251,7 +251,6 @@ import {
 import {
   clearCachedQueryResults,
 } from './queryCache.ts'
-import { withExpectedUpdatedAt } from './expectedUpdatedAt.ts'
 import { purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
 import {
   DISCARD_SYNC_UPDATE_CHANNELS,
@@ -1108,50 +1107,19 @@ export const getReturn = async (id) => {
 
 // ─── Sale status update ───────────────────────────────────────────────────────
 export const updateSaleStatus = async (id, sale_status, notes) => {
-  const payload = await withExpectedUpdatedAt('sales', id, { ...getDeviceInfo(), sale_status, notes })
-  try {
-    const result = await route('sales:updateStatus', () => apiFetch('PATCH', `/api/sales/${id}/status`, payload), null, true)
-    const db = await getLocalDb()
-    await db.sales.update(id, {
-      sale_status,
-      updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
-    }).catch(() => {})
-    return result
-  } catch (error) {
-    error.attempted = { sale_status, notes }
-    throw error
-  }
+  const { updateSaleStatus: updateSaleStatusRequest } = await loadSalesTransport()
+  return updateSaleStatusRequest(id, sale_status, notes)
 }
 
 // ─── Sales export ─────────────────────────────────────────────────────────────
 export const attachSaleCustomer = async (id, payload) => {
-  const body = await withExpectedUpdatedAt('sales', id, { ...getDeviceInfo(), ...(payload || {}) })
-  try {
-    const result = await route('sales:attachCustomer', () => apiFetch('PATCH', `/api/sales/${id}/customer`, body), null, true)
-    const db = await getLocalDb()
-    await db.sales.update(id, {
-      customer_id: result?.customer?.id || null,
-      customer_name: result?.customer?.name || null,
-      customer_membership_number: result?.customer?.membership_number || null,
-      customer_phone: result?.customer?.phone || null,
-      customer_address: result?.customer?.address || null,
-      updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
-    }).catch(() => {})
-    return result
-  } catch (error) {
-    error.attempted = {
-      customer_id: payload?.customer_id || null,
-      customer_name: payload?.customer_name || '',
-      customer_phone: payload?.customer_phone || '',
-      customer_address: payload?.customer_address || '',
-    }
-    throw error
-  }
+  const { attachSaleCustomer: attachSaleCustomerRequest } = await loadSalesTransport()
+  return attachSaleCustomerRequest(id, payload)
 }
 
-export const getSalesExport = (params) => {
-  const q = buildQueryString(params, { skipEmpty: false })
-  return route('sales:export', () => apiFetch('GET', appendQuery('/api/sales/export', q)), () => ({}))
+export const getSalesExport = async (params) => {
+  const { getSalesExport: getSalesExportRequest } = await loadSalesTransport()
+  return getSalesExportRequest(params)
 }
 export const updateReturn = async (id, d) => {
   const { updateReturn: updateReturnRequest } = await loadReturnsTransport()

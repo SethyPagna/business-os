@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 822, route legacy return APIs through the typed returns transport.
+- Latest completed move: Move 823, route legacy sales mutation and export APIs through the typed sales transport.
 
 ## Current Baseline
 
@@ -79,6 +79,20 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 823 moves the remaining legacy sales mutation/export implementation out
+  of `frontend/src/api/methods.ts` and into `frontend/src/api/salesTransport.ts`.
+  The typed transport now owns sales status updates, customer membership
+  attachment, sales export query construction, encoded sale IDs, expected
+  `updated_at` guards, local sales row updates, and attempted conflict metadata.
+  The legacy registry keeps the same `window.api` names but now lazy-loads the
+  focused transport. Proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\actionStability.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, the full frontend utility
+  suite, standalone frontend typecheck, frontend production build, Phase 29
+  audit, storage prune, local health check, and `npm.cmd --prefix ops run
+  phase84:live-suite -- --skip-rollback` passed. The build emitted
+  `sales-read-api` at 2.40 KB and reduced `app-api-methods` to 26.58 KB. The
+  storage prune removed 302,307 bytes of stale retained reports.
 - Move 822 moves the remaining legacy return API implementation out of
   `frontend/src/api/methods.ts` and into `frontend/src/api/returnsTransport.ts`.
   The typed transport now owns return reads, return detail reads, customer and

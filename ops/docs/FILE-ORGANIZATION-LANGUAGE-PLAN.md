@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 822 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 823 in this file.
 
 ## Goal
 
@@ -8912,6 +8912,30 @@ Decision rule:
   `app-api-methods` to 27.90 KB. The storage prune removed 267,804 bytes of
   stale retained reports.
 - Current plan position after Move 822: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 823: Route legacy sales status and export APIs through typed transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/salesTransport.ts` now owns sales status updates, sales
+  customer attachment, and sales export reads.
+- Code-flow slice: `frontend/src/api/methods.ts` lazy-loads the typed sales
+  transport for `updateSaleStatus`, `attachSaleCustomer`, and `getSalesExport`
+  instead of carrying duplicate mutation/export route, expected-updated-at,
+  local sales update, and conflict-attempt logic.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` now verifies that encoded
+  sale IDs, expected `updated_at` guards, device metadata, local sales row
+  updates, export query construction, and attempted conflict metadata live in
+  the typed transport while the legacy registry is only a facade.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\actionStability.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, the full frontend utility
+  suite, and frontend production build passed. The production build emitted the
+  sales transport chunk at 2.40 KB and reduced `app-api-methods` to 26.58 KB.
+- Current plan position after Move 823: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

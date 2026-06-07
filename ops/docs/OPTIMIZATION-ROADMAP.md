@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 822.
+- Latest completed implementation move in this roadmap: Move 823.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12930,6 +12930,29 @@ Move 822 status:
   `app-api-methods` to 27.90 KB. The storage prune removed 267,804 bytes of
   stale retained reports.
 - Current plan position after Move 822: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 823 status:
+- Move 823 continues the typed API split by routing legacy sales status,
+  customer attachment, and sales export APIs through
+  `frontend/src/api/salesTransport.ts`. `frontend/src/api/methods.ts` now
+  lazy-loads `updateSaleStatus`, `attachSaleCustomer`, and `getSalesExport`
+  instead of carrying duplicate mutation/export route, expected-updated-at,
+  local sales update, and conflict-attempt logic.
+- The source guards now protect the new boundary: encoded sale IDs, client
+  device metadata, expected `updated_at` guards, sales export query
+  construction, local sales row updates, and attempted conflict metadata live
+  in the typed transport, while the legacy registry remains a compatibility
+  facade.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\actionStability.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, the full frontend utility
+  suite, and frontend production build passed. The production build emitted the
+  sales transport chunk at 2.40 KB and reduced `app-api-methods` to 26.58 KB.
+- Current plan position after Move 823: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

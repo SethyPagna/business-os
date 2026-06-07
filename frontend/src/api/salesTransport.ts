@@ -1,10 +1,43 @@
 import { SYNC } from '../constants.ts'
+import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
 import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 
-type SalePayload = Record<string, unknown>
+type SalePayload = ExpectedUpdatedAtPayload
+type ResultRecord = Record<string, unknown>
+type CustomerRecord = {
+  id?: unknown
+  name?: unknown
+  membership_number?: unknown
+  phone?: unknown
+  address?: unknown
+}
+type SaleAttachCustomerResult = ResultRecord & { customer?: CustomerRecord }
+type AttemptedError = Error & { attempted?: unknown }
+
+function encodeId(id: number | string): string {
+  return encodeURIComponent(String(id))
+}
+
+function getDevicePayload(): SalePayload {
+  return { ...getClientDeviceInfo() }
+}
+
+function getResultTimestamp(result: unknown): string {
+  const row = (result || {}) as ResultRecord
+  return String(row.updated_at || row.updatedAt || new Date().toISOString())
+}
+
+function attachAttempted(error: unknown, attempted: unknown): never {
+  if (error && typeof error === 'object') {
+    const attemptedError = error as AttemptedError
+    attemptedError.attempted = attempted
+  }
+  throw error
+}
 
 export function createSale(payload: SalePayload): Promise<unknown> {
   return route(
@@ -36,5 +69,74 @@ export function getSales(params: QueryParams = {}): Promise<unknown> {
       return db.table('sales').orderBy('created_at').reverse().limit(1000).toArray()
     },
     mirror,
+  )
+}
+
+export async function updateSaleStatus(
+  id: number | string,
+  saleStatus: unknown,
+  notes?: unknown,
+): Promise<unknown> {
+  const payload = await withExpectedUpdatedAt('sales', id, {
+    ...getDevicePayload(),
+    sale_status: saleStatus,
+    notes,
+  })
+  try {
+    const result = await route(
+      'sales:updateStatus',
+      () => apiFetch('PATCH', `/api/sales/${encodeId(id)}/status`, payload),
+      null,
+      true,
+    )
+    const db = await getLocalDb()
+    await db.table('sales').update(id, {
+      sale_status: saleStatus,
+      updated_at: getResultTimestamp(result),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    attachAttempted(error, { sale_status: saleStatus, notes })
+  }
+}
+
+export async function attachSaleCustomer(
+  id: number | string,
+  payload: SalePayload = {},
+): Promise<unknown> {
+  const body = await withExpectedUpdatedAt('sales', id, { ...getDevicePayload(), ...(payload || {}) })
+  try {
+    const result = await route(
+      'sales:attachCustomer',
+      () => apiFetch('PATCH', `/api/sales/${encodeId(id)}/customer`, body),
+      null,
+      true,
+    ) as SaleAttachCustomerResult
+    const db = await getLocalDb()
+    await db.table('sales').update(id, {
+      customer_id: result?.customer?.id || null,
+      customer_name: result?.customer?.name || null,
+      customer_membership_number: result?.customer?.membership_number || null,
+      customer_phone: result?.customer?.phone || null,
+      customer_address: result?.customer?.address || null,
+      updated_at: getResultTimestamp(result),
+    }).catch(() => {})
+    return result
+  } catch (error) {
+    attachAttempted(error, {
+      customer_id: payload?.customer_id || null,
+      customer_name: payload?.customer_name || '',
+      customer_phone: payload?.customer_phone || '',
+      customer_address: payload?.customer_address || '',
+    })
+  }
+}
+
+export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    'sales:export',
+    () => apiFetch('GET', appendQuery('/api/sales/export', query)),
+    () => ({}),
   )
 }
