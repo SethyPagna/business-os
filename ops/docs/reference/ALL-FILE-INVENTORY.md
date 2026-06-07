@@ -433,7 +433,7 @@ Total files documented: **715**
 | 421 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | frontend-ui | 536 | 29.4 | UI component/page |
 | 422 | `frontend/src/components/receipt-settings/template.ts` | frontend-ui | 33 | 0.9 | UI component/page |
 | 423 | `frontend/src/components/receipt/Receipt.tsx` | frontend-ui | 584 | 27.9 | UI component/page |
-| 424 | `frontend/src/components/returns/EditReturnModal.tsx` | frontend-ui | 357 | 16.5 | UI component/page |
+| 424 | `frontend/src/components/returns/EditReturnModal.tsx` | frontend-ui | 361 | 16.8 | UI component/page |
 | 425 | `frontend/src/components/returns/NewReturnModal.tsx` | frontend-ui | 647 | 33.1 | UI component/page |
 | 426 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | frontend-ui | 586 | 27.0 | UI component/page |
 | 427 | `frontend/src/components/returns/ReturnDetailModal.tsx` | frontend-ui | 186 | 8.5 | UI component/page |
@@ -534,7 +534,7 @@ Total files documented: **715**
 | 522 | `frontend/src/web-api.ts` | frontend-core | 1328 | 52.2 | Project source/support file |
 | 523 | `frontend/tailwind.config.ts` | frontend-root | 19 | 0.5 | Project source/support file |
 | 524 | `frontend/tests/actionGuards.test.ts` | frontend-root | 74 | 2.3 | Project source/support file |
-| 525 | `frontend/tests/actionStability.test.ts` | frontend-root | 759 | 62.2 | Project source/support file |
+| 525 | `frontend/tests/actionStability.test.ts` | frontend-root | 762 | 62.5 | Project source/support file |
 | 526 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 527 | `frontend/tests/apiHttp.test.ts` | frontend-root | 1241 | 75.0 | Project source/support file |
 | 528 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
@@ -569,7 +569,7 @@ Total files documented: **715**
 | 557 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 558 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 100 | 5.1 | Project source/support file |
 | 559 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 560 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3400 | 237.0 | Project source/support file |
+| 560 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3410 | 237.5 | Project source/support file |
 | 561 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 39 | 1.5 | Project source/support file |
 | 562 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 563 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 140 | 6.5 | Project source/support file |

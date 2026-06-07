@@ -1647,8 +1647,18 @@ assert.match(
 )
 assert.match(
   editReturnModal,
-  /const api = getReturnApi\(\)[\s\S]*const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => api\.updateReturn\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
-  'customer return update should timeout slow return writes',
+  /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)[\s\S]*async function updateReturnRequest\(id: number \| string, payload: ReturnUpdatePayload\): Promise<unknown>[\s\S]*updateReturn\(id, payload\)/,
+  'customer return update should use the focused returns transport instead of the broad API registry',
+)
+assert.match(
+  editReturnModal,
+  /const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => updateReturnRequest\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/,
+  'customer return update should timeout slow return writes through the focused returns transport',
+)
+assert.doesNotMatch(
+  editReturnModal,
+  /getReturnApi|window\.api|api\.updateReturn/,
+  'edit return modal should not wake the broad window.api registry for update paths',
 )
 assert.doesNotMatch(
   newReturnModal,

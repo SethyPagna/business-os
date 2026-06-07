@@ -9607,6 +9607,38 @@ Decision rule:
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
   schema, cleanup, TypeScript, runtime, and performance guardrail.
 
+### Move 842: Route customer-return edit updates through focused transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. Customer-return edit
+  updates now belong to the focused returns transport instead of the broad
+  `window.api` compatibility facade.
+- Code-flow slice: `frontend/src/components/returns/EditReturnModal.tsx` now
+  lazy-loads `returnsTransport.ts` directly and calls `updateReturn` through a
+  focused `updateReturnRequest(...)` helper. The modal keeps the same bounded
+  update timeout and same-tick submit guard, while reusing the transport's
+  expected-updated-at/device metadata path.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` and
+  `frontend/tests/actionStability.test.ts` now reject `getReturnApi`,
+  `window.api`, and broad `api.updateReturn` access returning to the edit modal
+  while proving focused lazy transport ownership.
+- Live proof: the in-app Browser loaded the Vite dev `/returns` route, signed
+  in with the documented local default, verified the Returns page, empty state,
+  and New Return control rendered, and recorded zero relevant console errors.
+  The local dev data had no existing returns, so the edit modal was not opened
+  to avoid creating disposable test business records. Browser screenshot capture
+  timed out through the bridge, so DOM/log proof is the accepted evidence for
+  this slice.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, the full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, and `git diff --check` passed.
+- Current plan position after Move 842: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

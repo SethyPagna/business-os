@@ -44,7 +44,7 @@ interface ExistingReturn {
   items?: ExistingReturnItem[] | null
 }
 
-interface ReturnUpdatePayload {
+interface ReturnUpdatePayload extends Record<string, unknown> {
   reason: string
   return_type: ReturnType
   notes: string | null
@@ -66,10 +66,6 @@ interface ReturnUpdatePayload {
   }>
 }
 
-interface ReturnApi {
-  updateReturn: (id: number | string, payload: ReturnUpdatePayload) => Promise<unknown>
-}
-
 interface EditReturnModalProps {
   ret: ExistingReturn
   onClose: () => void
@@ -88,9 +84,18 @@ const useApp = useAppHook as () => {
   t?: TranslateFn
 }
 
-function getReturnApi(): ReturnApi {
-  if (!window.api) throw new Error('Return API is not available.')
-  return window.api as ReturnApi
+type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
+
+let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
+
+function loadReturnsTransport(): Promise<ReturnsTransportModule> {
+  if (!returnsTransportPromise) returnsTransportPromise = import('../../api/returnsTransport.ts')
+  return returnsTransportPromise
+}
+
+async function updateReturnRequest(id: number | string, payload: ReturnUpdatePayload): Promise<unknown> {
+  const { updateReturn } = await loadReturnsTransport()
+  return updateReturn(id, payload)
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -158,7 +163,6 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
-      const api = getReturnApi()
       const payload: ReturnUpdatePayload = {
         reason:            finalReason,
         return_type:       returnType,
@@ -181,7 +185,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
         })),
       }
       const result = await withLoaderTimeout(
-        () => api.updateReturn(ret.id, payload),
+        () => updateReturnRequest(ret.id, payload),
         'Update return',
         RETURN_UPDATE_TIMEOUT_MS,
       )

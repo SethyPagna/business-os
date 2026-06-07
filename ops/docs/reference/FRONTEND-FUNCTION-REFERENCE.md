@@ -174,7 +174,7 @@ Total files documented: **264**
 | 162 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 4 |
 | 163 | `frontend/src/components/receipt-settings/template.ts` | 2 |
 | 164 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
-| 165 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
+| 165 | `frontend/src/components/returns/EditReturnModal.tsx` | 8 |
 | 166 | `frontend/src/components/returns/NewReturnModal.tsx` | 17 |
 | 167 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 14 |
 | 168 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
@@ -2377,13 +2377,14 @@ Total files documented: **264**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getReturnApi` | function | 91 |
-| 2 | `toNumber` | function | 96 |
-| 3 | `clampReturnQuantity` | function | 101 |
-| 4 | `isWriteConflict` | function | 107 |
-| 5 | `EditReturnModal` | component/function | 112 |
-| 6 | `updateQty` | const arrow | 145 |
-| 7 | `updateRestock` | const arrow | 148 |
+| 1 | `loadReturnsTransport` | function | 91 |
+| 2 | `updateReturnRequest` | function | 96 |
+| 3 | `toNumber` | function | 101 |
+| 4 | `clampReturnQuantity` | function | 106 |
+| 5 | `isWriteConflict` | function | 112 |
+| 6 | `EditReturnModal` | component/function | 117 |
+| 7 | `updateQty` | const arrow | 150 |
+| 8 | `updateRestock` | const arrow | 153 |
 
 ### 3.166 `frontend/src/components/returns/NewReturnModal.tsx`
 

@@ -404,7 +404,7 @@ Code files scanned: **645**
 | 392 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 4 |
 | 393 | `frontend/src/components/receipt-settings/template.ts` | 4 |
 | 394 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
-| 395 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
+| 395 | `frontend/src/components/returns/EditReturnModal.tsx` | 8 |
 | 396 | `frontend/src/components/returns/NewReturnModal.tsx` | 17 |
 | 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 14 |
 | 398 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
@@ -7599,13 +7599,14 @@ Code files scanned: **645**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getReturnApi` | function | 91 |
-| 2 | `toNumber` | function | 96 |
-| 3 | `clampReturnQuantity` | function | 101 |
-| 4 | `isWriteConflict` | function | 107 |
-| 5 | `EditReturnModal` | export default function | 112 |
-| 6 | `updateQty` | const arrow | 145 |
-| 7 | `updateRestock` | const arrow | 148 |
+| 1 | `loadReturnsTransport` | function | 91 |
+| 2 | `updateReturnRequest` | function | 96 |
+| 3 | `toNumber` | function | 101 |
+| 4 | `clampReturnQuantity` | function | 106 |
+| 5 | `isWriteConflict` | function | 112 |
+| 6 | `EditReturnModal` | export default function | 117 |
+| 7 | `updateQty` | const arrow | 150 |
+| 8 | `updateRestock` | const arrow | 153 |
 
 ### 3.396 `frontend/src/components/returns/NewReturnModal.tsx`
 

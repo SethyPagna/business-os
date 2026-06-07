@@ -282,7 +282,7 @@ Code files documented: **645**
 | 270 | `frontend/src/api/query.ts` | 0 | 3 | 0 | 21 |
 | 271 | `frontend/src/api/queryCache.ts` | 1 | 4 | 1 | 5 |
 | 272 | `frontend/src/api/requestIds.ts` | 0 | 2 | 0 | 5 |
-| 273 | `frontend/src/api/returnsTransport.ts` | 8 | 5 | 8 | 5 |
+| 273 | `frontend/src/api/returnsTransport.ts` | 8 | 5 | 8 | 6 |
 | 274 | `frontend/src/api/rfidTransport.ts` | 3 | 7 | 3 | 2 |
 | 275 | `frontend/src/api/salesTransport.ts` | 7 | 6 | 7 | 4 |
 | 276 | `frontend/src/api/saleWriteTransport.ts` | 3 | 2 | 2 | 4 |
@@ -404,7 +404,7 @@ Code files documented: **645**
 | 392 | `frontend/src/components/receipt-settings/ReceiptSettings.tsx` | 20 | 1 | 10 | 1 |
 | 393 | `frontend/src/components/receipt-settings/template.ts` | 1 | 2 | 1 | 4 |
 | 394 | `frontend/src/components/receipt/Receipt.tsx` | 9 | 1 | 4 | 3 |
-| 395 | `frontend/src/components/returns/EditReturnModal.tsx` | 5 | 1 | 4 | 1 |
+| 395 | `frontend/src/components/returns/EditReturnModal.tsx` | 6 | 1 | 5 | 1 |
 | 396 | `frontend/src/components/returns/NewReturnModal.tsx` | 7 | 1 | 6 | 1 |
 | 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 8 | 1 | 7 | 1 |
 | 398 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
@@ -5780,9 +5780,10 @@ Code files documented: **645**
   - `frontend/src/api/query.ts`
   - `frontend/src/api/requestIds.ts`
   - `frontend/src/utils/deviceInfo.ts`
-- Referenced by (5)
+- Referenced by (6)
   - `frontend/src/api/methods.ts`
   - `frontend/src/components/inventory/Inventory.tsx`
+  - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.tsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/components/returns/Returns.tsx`
@@ -8229,14 +8230,16 @@ Code files documented: **645**
 ### 3.395 `frontend/src/components/returns/EditReturnModal.tsx`
 
 - Declared exports: `function`
-- Imports (5)
+- Imports (6)
   - `../../AppContext.tsx`
+  - `../../api/returnsTransport.ts`
   - `../../utils/actionGuards.ts`
   - `../../utils/loaders.ts`
   - `../shared/AppSelect.tsx`
   - `react`
-- Internal dependencies (4)
+- Internal dependencies (5)
   - `frontend/src/AppContext.tsx`
+  - `frontend/src/api/returnsTransport.ts`
   - `frontend/src/components/shared/AppSelect.tsx`
   - `frontend/src/utils/actionGuards.ts`
   - `frontend/src/utils/loaders.ts`

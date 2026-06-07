@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 841, route customer-return modal sale search, history lookup, and create paths through focused lazy transports.
+- Latest completed move: Move 842, route customer-return edit updates through focused lazy returns transport.
 
 ## Current Baseline
 
@@ -78,6 +78,33 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 842 continues the returns cleanup by routing customer-return edit-submit
+  updates away from the broad `window.api` compatibility facade. The edit modal
+  now lazy-loads `frontend/src/api/returnsTransport.ts` directly for
+  `updateReturn`, preserving expected-updated-at/device metadata handling from
+  the focused transport.
+- Source guardrails now reject `getReturnApi`, `window.api`, and broad
+  `api.updateReturn` access returning to
+  `frontend/src/components/returns/EditReturnModal.tsx`, while still proving
+  the edit payload keeps bounded loader timeout and same-tick submit guard
+  behavior.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, `git diff --check`, and in-app Browser DOM/log checks passed. Browser
+  proof loaded the Vite dev `/returns` route, signed in with the documented local default,
+  verified the Returns page/empty state/New Return control rendered, and
+  recorded zero relevant console errors. The local dev data had no existing
+  returns, so the edit modal was not opened to avoid creating disposable test
+  business records. Browser screenshot capture timed out through the bridge, so
+  DOM/log state is the accepted live evidence for this slice.
+- Current plan position after Move 842: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 841 continues the startup/preload cleanup by routing the customer-return
   modal away from the broad `window.api` compatibility facade. The modal now
