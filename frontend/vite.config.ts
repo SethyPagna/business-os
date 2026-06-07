@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import type { IndexHtmlTransformContext, Plugin, UserConfig } from 'vite'
+import type { OutputBundle, OutputChunk } from 'rollup'
 import react from '@vitejs/plugin-react'
 import autoprefixer from 'autoprefixer'
 import { execSync } from 'node:child_process'
@@ -134,6 +135,118 @@ function emitBuildManifest(): Plugin {
       } catch {
         // Ignore missing service worker output during non-standard builds.
       }
+    },
+  }
+}
+
+const routePreloadChunkNames = {
+  admin: [
+    'AdminRoot',
+    'auth-login',
+    'app-auth',
+    'app-bootstrap',
+  ],
+  public: [
+    'PublicCatalogRoot',
+    'catalog',
+    'app-portal',
+    'portal-language-options',
+    'portal-tools',
+  ],
+}
+
+function isBundleChunk(value: unknown): value is OutputChunk {
+  return Boolean(value && typeof value === 'object' && (value as OutputChunk).type === 'chunk')
+}
+
+function toRoutePreloadFiles(bundle: OutputBundle, names: string[]): string[] {
+  const wanted = new Set(names)
+  const files = Object.values(bundle)
+    .filter(isBundleChunk)
+    .filter((chunk) => wanted.has(chunk.name))
+    .map((chunk) => chunk.fileName)
+    .sort()
+  return Array.from(new Set(files))
+}
+
+function buildRoutePreloadScript(preloads: Record<'admin' | 'public', string[]>): string {
+  return `<script data-business-os-route-preloads>${escapeInlineScript(`(function installBusinessOsRoutePreloads() {
+  var preloads = ${JSON.stringify(preloads)};
+  function normalizePath(value) {
+    return String(value || '/')
+      .split('?')[0]
+      .split('#')[0]
+      .replace(/\\/{2,}/g, '/')
+      .replace(/\\/+$/g, '')
+      .toLowerCase() || '/';
+  }
+  function isAdminAppPath(pathname) {
+    if (pathname === '/') return true;
+    var segment = pathname.split('/').filter(Boolean)[0] || '';
+    return [
+      'admin',
+      'app',
+      'login',
+      'dashboard',
+      'products',
+      'product',
+      'pos',
+      'point-of-sale',
+      'inventory',
+      'sales',
+      'returns',
+      'branches',
+      'contacts',
+      'catalog',
+      'loyalty-points',
+      'loyalty',
+      'users',
+      'audit-log',
+      'audit',
+      'receipt-settings',
+      'receipts',
+      'backup',
+      'backups',
+      'settings',
+      'files',
+      'library',
+      'server'
+    ].indexOf(segment) !== -1;
+  }
+  function isPublicCatalogPath(pathname) {
+    if (!pathname || pathname === '/' || pathname === '/health') return false;
+    if (pathname.indexOf('/api/') === 0 || pathname.indexOf('/uploads/') === 0) return false;
+    if (/\\.[a-z0-9]+$/i.test(pathname)) return false;
+    return !isAdminAppPath(pathname);
+  }
+  var pathname = normalizePath(window.location && window.location.pathname);
+  var files = isPublicCatalogPath(pathname) ? preloads.public : preloads.admin;
+  files.forEach(function preload(file) {
+    var href = '/' + String(file || '').replace(/^\\/+/, '');
+    if (!href || document.querySelector('link[rel="modulepreload"][href="' + href + '"]')) return;
+    var link = document.createElement('link');
+    link.rel = 'modulepreload';
+    link.href = href;
+    document.head.appendChild(link);
+  });
+}());`)}</script>`
+}
+
+function injectRouteAwareModulePreloads(): Plugin {
+  return {
+    name: 'business-os-route-aware-module-preloads',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html: string, ctx?: IndexHtmlTransformContext): string {
+        const bundle = ctx?.bundle
+        if (!bundle || html.includes('data-business-os-route-preloads')) return html
+        const preloads = {
+          admin: toRoutePreloadFiles(bundle, routePreloadChunkNames.admin),
+          public: toRoutePreloadFiles(bundle, routePreloadChunkNames.public),
+        }
+        const script = buildRoutePreloadScript(preloads)
+        return html.replace(/(\s*<script type="module")/, `\n    ${script}$1`)
+      },
     },
   }
 }
@@ -504,7 +617,7 @@ function manualChunks(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), inlinePublicRuntimeScripts(), fixCrossorigin(), emitBuildManifest()],
+  plugins: [react(), inlinePublicRuntimeScripts(), fixCrossorigin(), emitBuildManifest(), injectRouteAwareModulePreloads()],
 
   build: {
     outDir: 'dist',

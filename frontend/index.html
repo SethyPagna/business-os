@@ -128,6 +128,60 @@
         </div>
       </div>
     </div>
+    <script>
+      (function syncInitialShellWithRoute() {
+        var pathname = String(window.location && window.location.pathname || '/')
+          .split('?')[0]
+          .split('#')[0]
+          .replace(/\/{2,}/g, '/')
+          .replace(/\/+$/g, '')
+          .toLowerCase() || '/'
+        var adminRoutes = {
+          '/': true,
+          '/admin': true,
+          '/app': true,
+          '/login': true,
+          '/dashboard': true,
+          '/products': true,
+          '/product': true,
+          '/pos': true,
+          '/point-of-sale': true,
+          '/inventory': true,
+          '/sales': true,
+          '/returns': true,
+          '/branches': true,
+          '/contacts': true,
+          '/catalog': true,
+          '/loyalty-points': true,
+          '/loyalty': true,
+          '/users': true,
+          '/audit-log': true,
+          '/audit': true,
+          '/receipt-settings': true,
+          '/receipts': true,
+          '/backup': true,
+          '/backups': true,
+          '/settings': true,
+          '/files': true,
+          '/library': true,
+          '/server': true
+        }
+        var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
+        var publicRoute = pathname !== '/'
+          && pathname !== '/health'
+          && pathname.indexOf('/api/') !== 0
+          && pathname.indexOf('/uploads/') !== 0
+          && !/\.[a-z0-9]+$/i.test(pathname)
+          && !adminRoutes[segment]
+        if (!publicRoute) return
+        var mark = document.querySelector('.business-os-initial-mark')
+        var title = document.querySelector('.business-os-initial-title')
+        var copy = document.querySelector('.business-os-initial-copy')
+        if (mark) mark.textContent = 'LE'
+        if (title) title.textContent = 'Leang Cosmetic'
+        if (copy) copy.textContent = 'Loading the customer portal...'
+      }())
+    </script>
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>
