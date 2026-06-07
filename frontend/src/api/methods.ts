@@ -9,7 +9,6 @@ let csvTemplatePromise = null
 let browserDialogsPromise = null
 let aiTransportPromise = null
 let actionHistoryTransportPromise = null
-let auditLogTransportPromise = null
 let authTransportPromise = null
 let contactsTransportPromise = null
 let dashboardTransportPromise = null
@@ -70,11 +69,6 @@ function loadAiTransport() {
 function loadActionHistoryTransport() {
   if (!actionHistoryTransportPromise) actionHistoryTransportPromise = import('./actionHistoryTransport.ts')
   return actionHistoryTransportPromise
-}
-
-function loadAuditLogTransport() {
-  if (!auditLogTransportPromise) auditLogTransportPromise = import('./auditLogTransport.ts')
-  return auditLogTransportPromise
 }
 
 function loadAuthTransport() {
@@ -1018,17 +1012,6 @@ export const updateRole = async (id, d) => {
 export const deleteRole = async (id, payload) => {
   const { deleteRole: deleteRoleRequest } = await loadUserAdminTransport()
   return deleteRoleRequest(id, payload)
-}
-
-// ─── Audit log ────────────────────────────────────────────────────────────────
-export const getAuditLogs = async (params = {}) => {
-  const module = await loadAuditLogTransport()
-  return module.getAuditLogs(params)
-}
-
-export const deleteAuditLogsRetention = async (olderThanDays = 30) => {
-  const module = await loadAuditLogTransport()
-  return module.deleteAuditLogsRetention(olderThanDays)
 }
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
