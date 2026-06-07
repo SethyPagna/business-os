@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-07T10:33:26.516Z
+Generated: 2026-06-07T12:49:28.479Z
 
 ## Summary
 
@@ -63,18 +63,18 @@ Generated: 2026-06-07T10:33:26.516Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 13443 | ops/docs |
-| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12050 | ops/docs/reference |
-| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10330 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9560 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 13478 | ops/docs |
+| ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12062 | ops/docs/reference |
+| ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10337 | ops/docs/reference |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9594 | ops/docs |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4006 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3623 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3453 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3460 | ops/docs/reference |
 | ops/docs/reference/PHASE29-AUDIT.json | 3419 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3355 | frontend/tests/performanceLoadingUx.test.ts |
-| ops/docs/OPTIMIZATION-STATUS.md | 3294 | ops/docs |
+| frontend/tests/performanceLoadingUx.test.ts | 3385 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-STATUS.md | 3325 | ops/docs |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |
@@ -126,8 +126,8 @@ Generated: 2026-06-07T10:33:26.516Z
 | frontend/src/components/products/forms/ProductForm.tsx | 13 | frontend/components/products |
 | backend/src/routes/portal.ts | 12 | backend/routes |
 | frontend/src/api/contactsTransport.ts | 12 | frontend/api |
+| frontend/src/components/returns/NewSupplierReturnModal.tsx | 12 | frontend/components/returns |
 | backend/src/routes/inventory.ts | 11 | backend/routes |
-| frontend/src/components/receipt-settings/ReceiptSettings.tsx | 11 | frontend/components/receipt-settings |
 
 ## Compatibility Wrappers
 

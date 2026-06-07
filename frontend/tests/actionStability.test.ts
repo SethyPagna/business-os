@@ -145,7 +145,10 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(editReturn, /const RETURN_UPDATE_TIMEOUT_MS = 15000/)
   assert.match(editReturn, /const api = getReturnApi\(\)[\s\S]*const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => api\.updateReturn\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/)
   assert.match(supplierReturn, /const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000/)
-  assert.match(supplierReturn, /const api = getSupplierReturnApi\(\)[\s\S]*api\.createSupplierReturn\(\{[\s\S]*\}\)[\s\S]*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.match(supplierReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
+  assert.match(supplierReturn, /async function createSupplierReturnRequest\(payload: SupplierReturnPayload\): Promise<unknown>[\s\S]*createSupplierReturn\(payload\)/)
+  assert.match(supplierReturn, /withLoaderTimeout\(\s*\(\) => createSupplierReturnRequest\(\{[\s\S]*\}\),\s*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.doesNotMatch(supplierReturn, /getSupplierReturnApi|window\.api|api\.createSupplierReturn/)
 
   assert.match(newReturn, /const searchInFlightRef = useRef\(false\)/)
   assert.match(newReturn, /if \(!beginSingleAction\(searchInFlightRef\)\) return/)

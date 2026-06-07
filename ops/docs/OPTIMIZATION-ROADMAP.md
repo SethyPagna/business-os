@@ -13440,3 +13440,41 @@ Move 839 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 840 status:
+- Move 840 routes supplier-return setup, inventory refresh, and create-submit
+  paths through focused lazy transports instead of the broad `window.api`
+  compatibility facade.
+- `frontend/src/components/returns/NewSupplierReturnModal.tsx` now lazy-loads
+  `frontend/src/api/branchTransport.ts`,
+  `frontend/src/api/contactReadTransport.ts`,
+  `frontend/src/api/inventoryTransport.ts`, and
+  `frontend/src/api/returnsTransport.ts` directly. This keeps the same bounded
+  loader budgets and same-tick submit guard while avoiding the broad legacy API
+  registry for the supplier-return modal path.
+- The in-app Browser pass found a real dev/live stability bug: React dev
+  StrictMode cleanup could mark the modal as unmounted and the next setup pass
+  did not restore the mounted ref, so setup timeouts and finalizers ignored
+  themselves and left `Loading......` visible. Move 840 restores the mounted
+  ref on setup and adds a supplier-return setup watchdog to exit the skeleton if
+  setup stalls.
+- Source guardrails now reject `getSupplierReturnApi`, `window.api`, and broad
+  supplier-return API method access returning to the modal while still proving
+  focused lazy transport ownership and bounded create behavior.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, `git diff --check`, and in-app Browser DOM/log/interaction checks
+  passed. Browser proof loaded `/returns`, switched to Supplier Returns, opened
+  Return to Supplier, verified the modal was not pinned in `Loading......`,
+  filled product search with `mask`, filled the reason input, saw filtered
+  products, and recorded zero relevant console errors. Storage prune removed
+  zero bytes because retained artifacts were already within policy. Browser
+  screenshot capture timed out through the bridge, so DOM/log/interaction proof
+  is the accepted live evidence for this slice.
+- Current plan position after Move 840: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

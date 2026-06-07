@@ -11,6 +11,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
+const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
 const SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000
 
@@ -59,23 +60,18 @@ interface SupplierReturnItem {
   cost_price_khr: number
 }
 
-interface SupplierReturnApi {
-  getBranches?: () => Promise<BranchRow[]>
-  getSuppliers?: () => Promise<SupplierRow[]>
-  getInventorySummary?: (options: { branchId: number }) => Promise<InventoryProductRow[]>
-  createSupplierReturn?: (payload: {
-    cashier_id: number | string | null
-    cashier_name: string | null
-    branch_id: number
-    supplier_id: number
-    supplier_name: string | null
-    reason: string
-    notes: string | null
-    settlement: SettlementMethod
-    supplier_compensation_usd: number
-    supplier_compensation_khr: number
-    items: SupplierReturnItem[]
-  }) => Promise<unknown>
+interface SupplierReturnPayload extends Record<string, unknown> {
+  cashier_id: number | string | null
+  cashier_name: string | null
+  branch_id: number
+  supplier_id: number
+  supplier_name: string | null
+  reason: string
+  notes: string | null
+  settlement: SettlementMethod
+  supplier_compensation_usd: number
+  supplier_compensation_khr: number
+  items: SupplierReturnItem[]
 }
 
 interface NewSupplierReturnModalProps {
@@ -90,13 +86,65 @@ function isSupplierReturnItem(item: SupplierReturnItem | null): item is Supplier
   return item != null
 }
 
-function getSupplierReturnApi(): SupplierReturnApi {
-  return typeof window === 'undefined' ? {} : (window as Window & { api?: SupplierReturnApi }).api || {}
-}
-
 const useApp = useAppHook as () => {
   user?: AppUser | null
   t?: (key: string) => string
+}
+
+type BranchTransportModule = typeof import('../../api/branchTransport.ts')
+type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
+type InventoryTransportModule = typeof import('../../api/inventoryTransport.ts')
+type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
+
+let branchTransportPromise: Promise<BranchTransportModule> | null = null
+let contactReadTransportPromise: Promise<ContactReadTransportModule> | null = null
+let inventoryTransportPromise: Promise<InventoryTransportModule> | null = null
+let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
+
+function loadBranchTransport(): Promise<BranchTransportModule> {
+  if (!branchTransportPromise) branchTransportPromise = import('../../api/branchTransport.ts')
+  return branchTransportPromise
+}
+
+function loadContactReadTransport(): Promise<ContactReadTransportModule> {
+  if (!contactReadTransportPromise) contactReadTransportPromise = import('../../api/contactReadTransport.ts')
+  return contactReadTransportPromise
+}
+
+function loadInventoryTransport(): Promise<InventoryTransportModule> {
+  if (!inventoryTransportPromise) inventoryTransportPromise = import('../../api/inventoryTransport.ts')
+  return inventoryTransportPromise
+}
+
+function loadReturnsTransport(): Promise<ReturnsTransportModule> {
+  if (!returnsTransportPromise) returnsTransportPromise = import('../../api/returnsTransport.ts')
+  return returnsTransportPromise
+}
+
+async function loadSupplierReturnSetup(): Promise<[BranchRow[], SupplierRow[]]> {
+  const [branchModule, contactReadModule] = await Promise.all([
+    loadBranchTransport(),
+    loadContactReadTransport(),
+  ])
+  const [branchRows, supplierRows] = await Promise.all([
+    branchModule.getBranches(),
+    contactReadModule.getSuppliers(),
+  ])
+  return [
+    (branchRows || []) as BranchRow[],
+    (supplierRows || []) as SupplierRow[],
+  ]
+}
+
+async function loadSupplierReturnInventory(branchId: string): Promise<InventoryProductRow[]> {
+  const { getInventorySummary } = await loadInventoryTransport()
+  const rows = await getInventorySummary({ branchId: Number(branchId) })
+  return (rows || []) as InventoryProductRow[]
+}
+
+async function createSupplierReturnRequest(payload: SupplierReturnPayload): Promise<unknown> {
+  const { createSupplierReturn } = await loadReturnsTransport()
+  return createSupplierReturn(payload)
 }
 
 export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmtUSD, fmtKHR }: NewSupplierReturnModalProps) {
@@ -127,26 +175,35 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
   const aliveRef = useRef(true)
   const submitInFlightRef = useRef(false)
 
-  useEffect(() => () => {
-    aliveRef.current = false
-    invalidateTrackedRequest(bootstrapRequestRef)
-    invalidateTrackedRequest(inventoryRequestRef)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+      invalidateTrackedRequest(bootstrapRequestRef)
+      invalidateTrackedRequest(inventoryRequestRef)
+    }
   }, [])
 
   useEffect(() => {
     const requestId = beginTrackedRequest(bootstrapRequestRef)
+    let setupWatchdogFired = false
     setLoading(true)
+    const setupWatchdog = window.setTimeout(() => {
+      if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
+      setupWatchdogFired = true
+      notify(
+        tr('supplier_return_setup_slow', 'Supplier return setup is taking too long. You can retry or close and reopen the form.'),
+        'warning',
+      )
+      setLoading(false)
+    }, SUPPLIER_RETURN_SETUP_WATCHDOG_MS)
+    const clearSetupWatchdog = () => {
+      window.clearTimeout(setupWatchdog)
+    }
     async function loadSetup() {
       try {
         const [branchRows, supplierRows] = await withLoaderTimeout(
-          () => {
-            const api = getSupplierReturnApi()
-            if (!api.getBranches || !api.getSuppliers) throw new Error(tr('failed_to_load_data', 'Failed to load data'))
-            return Promise.all([
-              api.getBranches(),
-              api.getSuppliers(),
-            ])
-          },
+          () => loadSupplierReturnSetup(),
           'Supplier return setup',
           SUPPLIER_RETURN_SETUP_TIMEOUT_MS,
         )
@@ -161,14 +218,24 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
         })
       } catch (error) {
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
-        notify(getLoaderErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'error')
+        notify(
+          getLoaderErrorMessage(
+            error,
+            setupWatchdogFired
+              ? tr('supplier_return_setup_slow', 'Supplier return setup is taking too long. You can retry or close and reopen the form.')
+              : tr('failed_to_load_data', 'Failed to load data'),
+          ),
+          setupWatchdogFired ? 'warning' : 'error',
+        )
       } finally {
+        clearSetupWatchdog()
         if (!aliveRef.current || !isTrackedRequestCurrent(bootstrapRequestRef, requestId)) return
         setLoading(false)
       }
     }
     loadSetup()
     return () => {
+      clearSetupWatchdog()
       invalidateTrackedRequest(bootstrapRequestRef)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -190,11 +257,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     async function loadInventory() {
       try {
         const rows = await withLoaderTimeout(
-          () => {
-            const api = getSupplierReturnApi()
-            if (!api.getInventorySummary) throw new Error(tr('failed_to_load_data', 'Failed to load data'))
-            return api.getInventorySummary({ branchId: Number(branchId) })
-          },
+          () => loadSupplierReturnInventory(branchId),
           'Supplier return inventory',
           SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS,
         )
@@ -291,23 +354,19 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     setSubmitting(true)
     try {
       const result = await withLoaderTimeout(
-        () => {
-          const api = getSupplierReturnApi()
-          if (!api.createSupplierReturn) throw new Error(tr('error', 'Error'))
-          return api.createSupplierReturn({
-            cashier_id: user?.id || null,
-            cashier_name: user?.name || user?.username || null,
-            branch_id: Number(branchId),
-            supplier_id: Number(supplierId),
-            supplier_name: supplier?.name || null,
-            reason: reason.trim(),
-            notes: notes.trim() || null,
-            settlement,
-            supplier_compensation_usd: effectiveCompensationUsd,
-            supplier_compensation_khr: effectiveCompensationKhr,
-            items: selectedItems,
-          })
-        },
+        () => createSupplierReturnRequest({
+          cashier_id: user?.id || null,
+          cashier_name: user?.name || user?.username || null,
+          branch_id: Number(branchId),
+          supplier_id: Number(supplierId),
+          supplier_name: supplier?.name || null,
+          reason: reason.trim(),
+          notes: notes.trim() || null,
+          settlement,
+          supplier_compensation_usd: effectiveCompensationUsd,
+          supplier_compensation_khr: effectiveCompensationKhr,
+          items: selectedItems,
+        }),
         'Create supplier return',
         SUPPLIER_RETURN_CREATE_TIMEOUT_MS,
       )

@@ -176,7 +176,7 @@ Total files documented: **264**
 | 164 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
 | 165 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
 | 166 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
-| 167 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
+| 167 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 14 |
 | 168 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 169 | `frontend/src/components/returns/Returns.tsx` | 12 |
 | 170 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
@@ -2407,13 +2407,20 @@ Total files documented: **264**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `isSupplierReturnItem` | function | 89 |
-| 2 | `getSupplierReturnApi` | function | 93 |
-| 3 | `NewSupplierReturnModal` | component/function | 102 |
-| 4 | `loadSetup` | function | 139 |
-| 5 | `loadInventory` | function | 190 |
-| 6 | `updateQty` | const arrow | 278 |
-| 7 | `submit` | const arrow | 284 |
+| 1 | `isSupplierReturnItem` | function | 85 |
+| 2 | `loadBranchTransport` | function | 104 |
+| 3 | `loadContactReadTransport` | function | 109 |
+| 4 | `loadInventoryTransport` | function | 114 |
+| 5 | `loadReturnsTransport` | function | 119 |
+| 6 | `loadSupplierReturnSetup` | function | 124 |
+| 7 | `loadSupplierReturnInventory` | function | 139 |
+| 8 | `createSupplierReturnRequest` | function | 145 |
+| 9 | `NewSupplierReturnModal` | component/function | 150 |
+| 10 | `clearSetupWatchdog` | const arrow | 200 |
+| 11 | `loadSetup` | function | 203 |
+| 12 | `loadInventory` | function | 257 |
+| 13 | `updateQty` | const arrow | 341 |
+| 14 | `submit` | const arrow | 347 |
 
 ### 3.168 `frontend/src/components/returns/ReturnDetailModal.tsx`
 

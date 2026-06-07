@@ -2631,6 +2631,11 @@ assert.match(
 )
 assert.match(
   newSupplierReturnModal,
+  /const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS \+ 1500/,
+  'supplier return setup should have a bounded component watchdog after the transport timeout',
+)
+assert.match(
+  newSupplierReturnModal,
   /const SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS = 12000/,
   'supplier return inventory should use an explicit timeout',
 )
@@ -2646,13 +2651,38 @@ assert.match(
 )
 assert.match(
   newSupplierReturnModal,
+  /window\.setTimeout\(\(\) => \{[\s\S]*supplier_return_setup_slow[\s\S]*setLoading\(false\)[\s\S]*SUPPLIER_RETURN_SETUP_WATCHDOG_MS/,
+  'supplier return setup watchdog should exit the skeleton and notify when setup stalls',
+)
+assert.match(
+  newSupplierReturnModal,
+  /useEffect\(\(\) => \{[\s\S]*aliveRef\.current = true[\s\S]*return \(\) => \{[\s\S]*aliveRef\.current = false[\s\S]*invalidateTrackedRequest\(bootstrapRequestRef\)[\s\S]*invalidateTrackedRequest\(inventoryRequestRef\)/,
+  'supplier return modal should reset its mounted flag on setup so React StrictMode cleanup does not pin loaders',
+)
+assert.match(
+  newSupplierReturnModal,
+  /const clearSetupWatchdog = \(\) => \{[\s\S]*window\.clearTimeout\(setupWatchdog\)[\s\S]*\}[\s\S]*finally \{[\s\S]*clearSetupWatchdog\(\)[\s\S]*setLoading\(false\)/,
+  'supplier return setup should clear the watchdog and finish loading on success or failure',
+)
+assert.match(
+  newSupplierReturnModal,
   /'Supplier return inventory',\s*SUPPLIER_RETURN_INVENTORY_TIMEOUT_MS,/,
   'supplier return inventory should timeout slow inventory reads',
 )
 assert.match(
   newSupplierReturnModal,
-  /const api = getSupplierReturnApi\(\)[\s\S]*api\.createSupplierReturn\(\{[\s\S]*\}\)[\s\S]*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => createSupplierReturnRequest\(\{[\s\S]*\}\),\s*'Create supplier return',\s*SUPPLIER_RETURN_CREATE_TIMEOUT_MS,\s*\)/,
   'supplier return create should timeout slow supplier-return writes',
+)
+assert.match(
+  newSupplierReturnModal,
+  /function loadBranchTransport\(\): Promise<BranchTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/branchTransport\.ts'\)[\s\S]*function loadContactReadTransport\(\): Promise<ContactReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)[\s\S]*function loadInventoryTransport\(\): Promise<InventoryTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/inventoryTransport\.ts'\)[\s\S]*function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/,
+  'supplier return modal should use focused lazy transports for branch, supplier, inventory, and create-return work',
+)
+assert.doesNotMatch(
+  newSupplierReturnModal,
+  /getSupplierReturnApi|window\.api|api\.(?:getBranches|getSuppliers|getInventorySummary|createSupplierReturn)/,
+  'supplier return modal should not wake the broad window.api registry for setup, inventory, or create paths',
 )
 assert.doesNotMatch(
   newSupplierReturnModal,

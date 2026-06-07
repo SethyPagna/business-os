@@ -406,7 +406,7 @@ Code files scanned: **645**
 | 394 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
 | 395 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
 | 396 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
-| 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 7 |
+| 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 14 |
 | 398 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 399 | `frontend/src/components/returns/Returns.tsx` | 12 |
 | 400 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
@@ -7629,13 +7629,20 @@ Code files scanned: **645**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `isSupplierReturnItem` | function | 89 |
-| 2 | `getSupplierReturnApi` | function | 93 |
-| 3 | `NewSupplierReturnModal` | export default function | 102 |
-| 4 | `loadSetup` | function | 139 |
-| 5 | `loadInventory` | function | 190 |
-| 6 | `updateQty` | const arrow | 278 |
-| 7 | `submit` | const arrow | 284 |
+| 1 | `isSupplierReturnItem` | function | 85 |
+| 2 | `loadBranchTransport` | function | 104 |
+| 3 | `loadContactReadTransport` | function | 109 |
+| 4 | `loadInventoryTransport` | function | 114 |
+| 5 | `loadReturnsTransport` | function | 119 |
+| 6 | `loadSupplierReturnSetup` | function | 124 |
+| 7 | `loadSupplierReturnInventory` | function | 139 |
+| 8 | `createSupplierReturnRequest` | function | 145 |
+| 9 | `NewSupplierReturnModal` | export default function | 150 |
+| 10 | `clearSetupWatchdog` | const arrow | 200 |
+| 11 | `loadSetup` | function | 203 |
+| 12 | `loadInventory` | function | 257 |
+| 13 | `updateQty` | const arrow | 341 |
+| 14 | `submit` | const arrow | 347 |
 
 ### 3.398 `frontend/src/components/returns/ReturnDetailModal.tsx`
 

@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 839, retire legacy Product image upload facade and harden Dashboard labels.
+- Latest completed move: Move 840, route supplier-return modal setup, inventory, and create paths through focused lazy transports.
 
 ## Current Baseline
 
@@ -78,6 +78,40 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 840 continues the startup/preload cleanup by routing the supplier-return
+  modal away from the broad `window.api` compatibility facade. The modal now
+  lazy-loads focused branch, contact-read, inventory-read, and returns-write
+  transports directly for setup, inventory refresh, and create-submit paths.
+- The live browser pass exposed a real React dev StrictMode lifecycle issue:
+  modal cleanup could mark the component as unmounted, then the next setup pass
+  did not restore the mounted flag. That pinned setup loaders and ignored
+  timeout/finally callbacks. Move 840 now resets the mounted flag on setup and
+  adds a bounded setup watchdog so the supplier-return modal exits its loading
+  skeleton instead of freezing.
+- Source guardrails now reject `getSupplierReturnApi`, `window.api`, and broad
+  `api.getBranches`/`api.getSuppliers`/`api.getInventorySummary`/
+  `api.createSupplierReturn` access returning to
+  `frontend/src/components/returns/NewSupplierReturnModal.tsx`, while still
+  proving the setup, inventory, and create operations keep bounded loader
+  timeouts and same-tick submit guards.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, `git diff --check`, and in-app Browser DOM/log/interaction checks
+  passed. Browser proof loaded `/returns`, switched to Supplier Returns, opened
+  Return to Supplier, verified the modal no longer stayed in `Loading......`,
+  filled product search with `mask`, filled the reason input, saw filtered
+  products, and recorded zero relevant console errors. Storage prune removed
+  zero bytes because retained report, backup, R2, Docker, and log policies were
+  already within limits. Browser screenshot capture timed out through the
+  bridge, so the accepted proof is the DOM/log/interaction state.
+- Current plan position after Move 840: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 839 continues the startup/preload cleanup by removing the Product image
   upload wrapper from the broad legacy `window.api` compatibility facade. The

@@ -247,10 +247,10 @@ Code files documented: **645**
 | 235 | `frontend/src/api/appBootstrapTransport.ts` | 2 | 1 | 2 | 2 |
 | 236 | `frontend/src/api/auditLogTransport.ts` | 4 | 2 | 4 | 0 |
 | 237 | `frontend/src/api/authTransport.ts` | 2 | 18 | 2 | 2 |
-| 238 | `frontend/src/api/branchTransport.ts` | 6 | 10 | 6 | 5 |
+| 238 | `frontend/src/api/branchTransport.ts` | 6 | 10 | 6 | 6 |
 | 239 | `frontend/src/api/browserDialogs.ts` | 1 | 3 | 1 | 2 |
 | 240 | `frontend/src/api/conflicts.ts` | 0 | 3 | 0 | 3 |
-| 241 | `frontend/src/api/contactReadTransport.ts` | 4 | 3 | 4 | 6 |
+| 241 | `frontend/src/api/contactReadTransport.ts` | 4 | 3 | 4 | 7 |
 | 242 | `frontend/src/api/contactsTransport.ts` | 9 | 18 | 9 | 3 |
 | 243 | `frontend/src/api/contactWriteTransport.ts` | 3 | 9 | 3 | 4 |
 | 244 | `frontend/src/api/cooldownFallbacks.ts` | 0 | 8 | 0 | 0 |
@@ -263,7 +263,7 @@ Code files documented: **645**
 | 251 | `frontend/src/api/httpState.ts` | 0 | 4 | 0 | 1 |
 | 252 | `frontend/src/api/importJobsTransport.ts` | 4 | 16 | 4 | 2 |
 | 253 | `frontend/src/api/importTransport.ts` | 3 | 2 | 3 | 2 |
-| 254 | `frontend/src/api/inventoryTransport.ts` | 4 | 6 | 4 | 3 |
+| 254 | `frontend/src/api/inventoryTransport.ts` | 4 | 6 | 4 | 4 |
 | 255 | `frontend/src/api/inventoryWriteTransport.ts` | 3 | 4 | 3 | 3 |
 | 256 | `frontend/src/api/lazyLocalDb.ts` | 1 | 2 | 1 | 15 |
 | 257 | `frontend/src/api/localDb.ts` | 3 | 10 | 2 | 8 |
@@ -282,7 +282,7 @@ Code files documented: **645**
 | 270 | `frontend/src/api/query.ts` | 0 | 3 | 0 | 21 |
 | 271 | `frontend/src/api/queryCache.ts` | 1 | 4 | 1 | 5 |
 | 272 | `frontend/src/api/requestIds.ts` | 0 | 2 | 0 | 5 |
-| 273 | `frontend/src/api/returnsTransport.ts` | 8 | 5 | 8 | 3 |
+| 273 | `frontend/src/api/returnsTransport.ts` | 8 | 5 | 8 | 4 |
 | 274 | `frontend/src/api/rfidTransport.ts` | 3 | 7 | 3 | 2 |
 | 275 | `frontend/src/api/salesTransport.ts` | 7 | 6 | 7 | 3 |
 | 276 | `frontend/src/api/saleWriteTransport.ts` | 3 | 2 | 2 | 4 |
@@ -406,7 +406,7 @@ Code files documented: **645**
 | 394 | `frontend/src/components/receipt/Receipt.tsx` | 9 | 1 | 4 | 3 |
 | 395 | `frontend/src/components/returns/EditReturnModal.tsx` | 5 | 1 | 4 | 1 |
 | 396 | `frontend/src/components/returns/NewReturnModal.tsx` | 5 | 1 | 4 | 1 |
-| 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 4 | 1 | 3 | 1 |
+| 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 8 | 1 | 7 | 1 |
 | 398 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
 | 399 | `frontend/src/components/returns/Returns.tsx` | 23 | 1 | 18 | 1 |
 | 400 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 3 | 1 | 0 | 1 |
@@ -5077,11 +5077,12 @@ Code files documented: **645**
   - `frontend/src/api/localMirrors.ts`
   - `frontend/src/api/query.ts`
   - `frontend/src/utils/deviceInfo.ts`
-- Referenced by (5)
+- Referenced by (6)
   - `frontend/src/api/methods.ts`
   - `frontend/src/api/offlineSnapshotTransport.ts`
   - `frontend/src/components/inventory/Inventory.tsx`
   - `frontend/src/components/products/Products.tsx`
+  - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/web-api.ts`
 
 ### 3.239 `frontend/src/api/browserDialogs.ts`
@@ -5120,13 +5121,14 @@ Code files documented: **645**
   - `frontend/src/api/lazyLocalDb.ts`
   - `frontend/src/api/localMirrors.ts`
   - `frontend/src/api/query.ts`
-- Referenced by (6)
+- Referenced by (7)
   - `frontend/src/components/contacts/Contacts.tsx`
   - `frontend/src/components/contacts/CustomersTab.tsx`
   - `frontend/src/components/contacts/DeliveryTab.tsx`
   - `frontend/src/components/contacts/SuppliersTab.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/pos/POS.tsx`
+  - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
 ### 3.242 `frontend/src/api/contactsTransport.ts`
 
@@ -5363,10 +5365,11 @@ Code files documented: **645**
   - `frontend/src/api/localMirrors.ts`
   - `frontend/src/api/query.ts`
   - `frontend/src/api/queryCache.ts`
-- Referenced by (3)
+- Referenced by (4)
   - `frontend/src/api/methods.ts`
   - `frontend/src/api/offlineSnapshotTransport.ts`
   - `frontend/src/components/inventory/Inventory.tsx`
+  - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
 ### 3.255 `frontend/src/api/inventoryWriteTransport.ts`
 
@@ -5777,9 +5780,10 @@ Code files documented: **645**
   - `frontend/src/api/query.ts`
   - `frontend/src/api/requestIds.ts`
   - `frontend/src/utils/deviceInfo.ts`
-- Referenced by (3)
+- Referenced by (4)
   - `frontend/src/api/methods.ts`
   - `frontend/src/components/inventory/Inventory.tsx`
+  - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
   - `frontend/src/components/returns/Returns.tsx`
 
 ### 3.274 `frontend/src/api/rfidTransport.ts`
@@ -8257,13 +8261,21 @@ Code files documented: **645**
 ### 3.397 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 
 - Declared exports: `function`
-- Imports (4)
+- Imports (8)
   - `../../AppContext.tsx`
+  - `../../api/branchTransport.ts`
+  - `../../api/contactReadTransport.ts`
+  - `../../api/inventoryTransport.ts`
+  - `../../api/returnsTransport.ts`
   - `../../utils/actionGuards.ts`
   - `../shared/AppSelect.tsx`
   - `react`
-- Internal dependencies (3)
+- Internal dependencies (7)
   - `frontend/src/AppContext.tsx`
+  - `frontend/src/api/branchTransport.ts`
+  - `frontend/src/api/contactReadTransport.ts`
+  - `frontend/src/api/inventoryTransport.ts`
+  - `frontend/src/api/returnsTransport.ts`
   - `frontend/src/components/shared/AppSelect.tsx`
   - `frontend/src/utils/actionGuards.ts`
 - Referenced by (1)
