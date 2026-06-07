@@ -11,6 +11,7 @@ type SuiteArgs = {
   output: string
   skipUi: boolean
   skipPublic: boolean
+  skipRollback: boolean
   skipHygiene: boolean
   keepGoing: boolean
 }
@@ -18,7 +19,7 @@ type SuiteArgs = {
 type SuiteStep = {
   name: string
   script: string
-  flag: keyof Pick<SuiteArgs, 'skipUi' | 'skipPublic' | 'skipHygiene'>
+  flag: keyof Pick<SuiteArgs, 'skipUi' | 'skipPublic' | 'skipRollback' | 'skipHygiene'>
   reportPrefix?: string
   reportPath?: string
 }
@@ -68,6 +69,18 @@ const SUITE_STEPS: SuiteStep[] = [
     reportPrefix: 'phase84-public-portal-cloudflare-check-',
   },
   {
+    name: 'receipt settings rollback check',
+    script: 'ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts',
+    flag: 'skipRollback',
+    reportPrefix: 'phase84-receipt-settings-rollback-check-',
+  },
+  {
+    name: 'loyalty points rollback check',
+    script: 'ops/scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts',
+    flag: 'skipRollback',
+    reportPrefix: 'phase84-loyalty-points-rollback-check-',
+  },
+  {
     name: 'post-live hygiene gate',
     script: 'ops/scripts/runtime/storage/post-live-hygiene.ts',
     flag: 'skipHygiene',
@@ -80,6 +93,7 @@ function parseArgs(argv = process.argv.slice(2)): SuiteArgs {
     output: DEFAULT_REPORT,
     skipUi: false,
     skipPublic: false,
+    skipRollback: false,
     skipHygiene: false,
     keepGoing: false,
   }
@@ -89,6 +103,7 @@ function parseArgs(argv = process.argv.slice(2)): SuiteArgs {
     if (value === '--output') args.output = argv[++index] || args.output
     else if (value === '--skip-ui') args.skipUi = true
     else if (value === '--skip-public') args.skipPublic = true
+    else if (value === '--skip-rollback') args.skipRollback = true
     else if (value === '--skip-hygiene') args.skipHygiene = true
     else if (value === '--keep-going') args.keepGoing = true
     else throw new Error(`Unknown argument: ${value}`)
@@ -166,6 +181,16 @@ function summarizeReport(step: SuiteStep, report: StepReport): Record<string, un
       frameworkOverlayVisible: checks.frameworkOverlayVisible,
     }
   }
+  if (step.reportPrefix?.includes('rollback-check')) {
+    return {
+      ok: report.ok,
+      restored: report.restored,
+      steps: Array.isArray(report.steps) ? report.steps.length : undefined,
+      saveStatus: report.saveStatus,
+      targetBasis: report.targetBasis,
+      relevantConsoleMessages: Array.isArray(report.consoleMessages) ? report.consoleMessages.length : undefined,
+    }
+  }
   return null
 }
 
@@ -230,6 +255,7 @@ try {
     options: {
       skipUi: args.skipUi,
       skipPublic: args.skipPublic,
+      skipRollback: args.skipRollback,
       skipHygiene: args.skipHygiene,
       keepGoing: args.keepGoing,
     },

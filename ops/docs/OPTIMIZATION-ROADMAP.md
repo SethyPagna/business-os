@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 817.
+- Latest completed implementation move in this roadmap: Move 818.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12811,6 +12811,29 @@ Move 817 status:
 - Runtime/live proof:
   `ops/runtime/reports/all-pages-control-audit-2026-06-07T00-22-18-993Z/summary.json`.
 - Current plan position after Move 817: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 818 status:
+- Move 818 adds rollback-safe Loyalty Points save coverage. The new
+  `ops/scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts`
+  snapshots point-rule settings, changes the earning basis through the real UI,
+  clicks Save, verifies the expected `/api/settings` values, and restores the
+  original setting snapshot in a `finally` block.
+- The Phase 8.4 live suite now includes both rollback-sensitive settings checks
+  by default: Receipt Settings language rollback and Loyalty Points point-rule
+  rollback. A new `--skip-rollback` flag can omit those steps for faster suite
+  runs without weakening the default QA gate.
+- Verification proof: `npm.cmd --prefix ops run
+  phase84:loyalty-points-rollback` passed, then the expanded
+  `npm.cmd --prefix ops run phase84:live-suite` passed UI, public portal,
+  receipt rollback, loyalty rollback, and post-live hygiene.
+- Runtime/live proof:
+  `ops/runtime/reports/phase84-loyalty-points-rollback-check-2026-06-07T00-41-14-929Z/report.json`
+  and `ops/runtime/reports/phase84-live-suite-latest.json`.
+- Current plan position after Move 818: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

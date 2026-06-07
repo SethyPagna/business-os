@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-07T00:27:08.124Z
+Generated: 2026-06-07T00:42:41.850Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 640
+- Files scanned: 641
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-07T00:27:08.124Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 435 |
+| .ts | 436 |
 | .tsx | 113 |
 | .md | 45 |
 | .json | 17 |
@@ -31,8 +31,8 @@ Generated: 2026-06-07T00:27:08.124Z
 | frontend/api | 53 |
 | frontend/utils | 34 |
 | frontend/components/products | 33 |
+| ops/scripts/runtime/live-checks | 33 |
 | ops/docs/reference | 32 |
-| ops/scripts/runtime/live-checks | 32 |
 | backend/routes | 24 |
 | frontend/components/shared | 19 |
 | frontend/components/catalog | 18 |
@@ -63,9 +63,9 @@ Generated: 2026-06-07T00:27:08.124Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 12818 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 12841 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8812 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8835 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4006 | frontend/components/inventory |
@@ -74,7 +74,7 @@ Generated: 2026-06-07T00:27:08.124Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3435 | ops/docs/reference |
 | frontend/tests/performanceLoadingUx.test.ts | 3271 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-STATUS.md | 2782 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 2820 | ops/docs |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |

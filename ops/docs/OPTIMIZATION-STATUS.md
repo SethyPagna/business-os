@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 817, strengthen all-pages control audit coverage.
+- Latest completed move: Move 818, add Loyalty Points rollback live coverage.
 
 ## Current Baseline
 
@@ -31,7 +31,11 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-06T22-15-06-108Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T00-40-14-444Z/report.json`
+- latest Phase 8.4 live suite:
+  `ops/runtime/reports/phase84-live-suite-latest.json`
+- latest Loyalty Points rollback check:
+  `ops/runtime/reports/phase84-loyalty-points-rollback-check-latest.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T23-29-11-677Z/report.json`
 - latest focused shared select live check:
@@ -73,6 +77,17 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 818 adds dedicated rollback-safe live coverage for Loyalty Points save.
+  The new `ops/scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts`
+  snapshots loyalty settings, uses the real UI to switch the earning basis,
+  clicks Save, verifies `/api/settings` persisted the expected values, then
+  restores the exact snapshot. It is available as `npm.cmd --prefix ops run
+  phase84:loyalty-points-rollback` and is now included in the default
+  `phase84:live-suite` behind the new `--skip-rollback` suite option. Proof:
+  `ops/runtime/reports/phase84-loyalty-points-rollback-check-2026-06-07T00-41-14-929Z/report.json`
+  and `ops/runtime/reports/phase84-live-suite-latest.json`, where the suite
+  passed UI, public portal, receipt rollback, loyalty rollback, and hygiene
+  steps with zero relevant console messages.
 - Move 817 strengthened the Phase 8.4 all-pages control audit. The audit now
   skips mutating/file/print/settings-toggle controls before applying the
   long-label stability guard, uses a configurable 96-character stable label
@@ -2638,7 +2653,30 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 817
+## Latest Move 818
+
+- Loyalty Points save now has a dedicated rollback-safe live check. The harness
+  snapshots the customer portal point-rule settings, uses the real Loyalty
+  Points page to change the earning basis and save, verifies the persisted
+  settings through `/api/settings`, and restores the original settings in a
+  `finally` block.
+- The Phase 8.4 live suite now runs both rollback-sensitive settings checks by
+  default: Receipt Settings language rollback and Loyalty Points point-rule
+  rollback. A new `--skip-rollback` option keeps fast suite runs possible.
+- Verification passed: `npm.cmd --prefix ops run
+  phase84:loyalty-points-rollback` and the expanded `npm.cmd --prefix ops run
+  phase84:live-suite`.
+- Live proof: `ops/runtime/reports/phase84-loyalty-points-rollback-check-2026-06-07T00-41-14-929Z/report.json`
+  saved target basis `khr` with HTTP 200, observed the expected settings, and
+  restored the original snapshot. `ops/runtime/reports/phase84-live-suite-latest.json`
+  passed UI, public portal, receipt rollback, loyalty rollback, and post-live
+  hygiene.
+- Current plan position after Move 818: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Previous Move 817
 
 - The all-pages control audit is now more independent and higher coverage.
   Safe button clicks are isolated by returning the page to its route between

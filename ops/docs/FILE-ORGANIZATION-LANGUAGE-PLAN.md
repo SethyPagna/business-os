@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 817 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 818 in this file.
 
 ## Goal
 
@@ -8786,6 +8786,29 @@ Decision rule:
   controls, 56 guarded skips, 0 failed controls, 0 findings, and 68
   screenshots.
 - Current plan position after Move 817: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 818: Add rollback-safe Loyalty Points save coverage
+
+- Ownership slice: Phase 8.4 rollback-sensitive live coverage. The new
+  `ops/scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts`
+  covers Loyalty Points settings save without leaving persistent test data.
+- Safety slice: the check snapshots the loyalty point-rule settings, changes
+  the earning basis through the UI, clicks Save, verifies the expected settings
+  through `/api/settings`, and restores the exact snapshot in a `finally` block.
+- Suite slice: `phase84-live-suite.ts` now includes Receipt Settings rollback
+  and Loyalty Points rollback by default, with a shared `--skip-rollback` flag
+  for faster explicit runs. `ops/package.json` exposes
+  `phase84:loyalty-points-rollback`.
+- Verification proof: `npm.cmd --prefix ops run
+  phase84:loyalty-points-rollback` passed, and the expanded
+  `npm.cmd --prefix ops run phase84:live-suite` passed all five default steps:
+  broad UI, public portal, receipt rollback, loyalty rollback, and post-live
+  hygiene.
+- Current plan position after Move 818: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
