@@ -177,6 +177,7 @@ const deferredModulePreloadPrefixes = [
   'assets/notification-api-',
   'assets/pending-sync-api-',
   'assets/product-export-',
+  'assets/product-image-upload-api-',
   'assets/product-write-api-',
   'assets/rfid-api-',
   'assets/sale-write-api-',

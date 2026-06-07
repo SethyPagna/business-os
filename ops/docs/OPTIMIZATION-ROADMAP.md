@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 833.
+- Latest completed implementation move in this roadmap: Move 834.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13236,6 +13236,41 @@ Move 833 status:
   preserving uploads, secrets, env files, Docker volumes, active images, newest
   local backup sets, and the newest R2 backup.
 - Current plan position after Move 833: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 834 status:
+- Move 834 routes the legacy `window.api.uploadProductImage` compatibility
+  wrapper through `frontend/src/api/productImageUploadTransport.ts` instead of
+  the broader `frontend/src/api/fileTransport.ts` library-file transport.
+- `fileTransport.ts` no longer carries duplicate product-image upload endpoint
+  logic, live-write channel text, or product-specific browser `FormData`
+  handling. The file transport remains focused on file list reads, file asset
+  upload/delete, and avatar upload.
+- `frontend/vite.config.ts` now excludes the focused
+  `product-image-upload-api` chunk from eager modulepreload. Source guardrails
+  reject reintroducing product image upload logic in `fileTransport.ts` and
+  require the legacy wrapper to lazy-load the narrow product image transport.
+- Production build proof: `file-api` emitted at 3.70 KB,
+  `product-image-upload-api` emitted at 1.29 KB, `api-http-core` emitted at
+  21.90 KB, `api-http-state` emitted at 0.18 KB, and `app-api-methods` emitted
+  at 25.05 KB. Built `index.html` has no eager preload entry for `file-api`,
+  `product-image-upload-api`, or `app-api-methods`.
+- Verification proof: focused API/performance source tests, standalone
+  frontend typecheck, JSX/source check, full frontend utility suite, frontend
+  production build, backend utility suite, schema audit, organization audit,
+  storage prune, local health check, and `npm.cmd --prefix ops run
+  phase84:live-suite -- --skip-rollback` passed. The in-app Browser path was
+  attempted first but remains blocked locally by the kernel asset path error;
+  repo Playwright checks supplied browser proof with 66 UI signals, zero
+  relevant console messages, 20 public portal products, zero failed responses
+  or page errors, and passing post-live hygiene. Storage prune removed 643,340
+  bytes of stale retained report directories while preserving uploads,
+  secrets, env files, Docker volumes, active images, newest local backup sets,
+  and the newest R2 backup.
+- Current plan position after Move 834: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

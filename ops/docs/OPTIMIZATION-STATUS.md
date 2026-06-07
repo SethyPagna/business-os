@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 833, remove duplicate legacy reset cache clears.
+- Latest completed move: Move 834, split legacy product image upload from file transport.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T05-16-38-120Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T06-11-54-954Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T05-17-21-156Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T06-12-36-483Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -79,6 +79,32 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 834 continues the startup/preload cleanup by routing the legacy
+  `window.api.uploadProductImage` wrapper through the focused
+  `frontend/src/api/productImageUploadTransport.ts` chunk instead of the broad
+  `frontend/src/api/fileTransport.ts` library-file transport. The duplicate
+  product-image upload implementation was removed from `fileTransport.ts`, so
+  the file-library chunk no longer carries product upload endpoint, live-write
+  channel, or browser `FormData` image logic that only product image intent
+  needs. `frontend/vite.config.ts` now also excludes
+  `product-image-upload-api` from eager modulepreload. Build proof: production
+  emitted `file-api` at 3.70 KB, `product-image-upload-api` at 1.29 KB,
+  `api-http-core` at 21.90 KB, `api-http-state` at 0.18 KB, and
+  `app-api-methods` at 25.05 KB; the built `index.html` has no eager preload
+  entry for `file-api`, `product-image-upload-api`, or `app-api-methods`.
+  Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  JSX/source check, the full frontend utility suite, frontend production build,
+  backend utility suite, schema audit, organization audit, storage prune, local
+  health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The in-app Browser path was attempted first but is
+  still blocked locally by the kernel asset path error, so the repo Playwright
+  live suite was used for browser proof. The live suite checked 66 UI signals
+  with zero relevant console messages, rendered 20 public portal products with
+  zero failed responses or page errors, and passed post-live hygiene. The
+  storage prune removed 643,340 bytes of stale retained live-check report
+  directories while preserving uploads, secrets, env files, Docker volumes,
+  active images, newest local backup sets, and the newest R2 backup.
 - Move 833 continues the reset/runtime cleanup by removing duplicate
   `cacheClearAll()` calls from legacy `resetData()` and `factoryReset()`
   wrappers in `frontend/src/api/methods.ts`. Both flows still clear cache once

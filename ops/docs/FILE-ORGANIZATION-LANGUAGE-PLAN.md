@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 833 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 834 in this file.
 
 ## Goal
 
@@ -9302,6 +9302,48 @@ Decision rule:
   preserving uploads, secrets, env files, Docker volumes, active images, newest
   local backup sets, and the newest R2 backup.
 - Current plan position after Move 833: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 834: Split legacy product image upload from file transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. Product image upload
+  intent is now owned only by `frontend/src/api/productImageUploadTransport.ts`;
+  `frontend/src/api/fileTransport.ts` remains focused on library file reads,
+  file asset upload/delete, and avatar upload.
+- Code-flow slice: the legacy `window.api.uploadProductImage` compatibility
+  wrapper in `frontend/src/api/methods.ts` now lazy-loads
+  `productImageUploadTransport.ts` instead of waking `fileTransport.ts`. The
+  duplicate product image `FormData` endpoint logic was removed from
+  `fileTransport.ts`, so product upload no longer rides along with the Library
+  file API chunk.
+- Preload slice: `frontend/vite.config.ts` keeps the
+  `product-image-upload-api` manual chunk and now excludes that upload-only
+  chunk from eager modulepreload.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` now reject product-image upload
+  endpoint logic inside `fileTransport.ts`, require the legacy wrapper to use
+  `loadProductImageUploadTransport()`, and require the product image upload
+  chunk to stay out of eager modulepreload.
+- Build slice: production build emitted `file-api` at 3.70 KB,
+  `product-image-upload-api` at 1.29 KB, `api-http-core` at 21.90 KB,
+  `api-http-state` at 0.18 KB, and `app-api-methods` at 25.05 KB. Built
+  `index.html` has no eager preload entry for `file-api`,
+  `product-image-upload-api`, or `app-api-methods`.
+- Verification proof: focused API and performance tests, standalone frontend
+  typecheck, JSX/source check, full frontend utility suite, frontend production
+  build, backend utility suite, schema audit, organization audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The in-app Browser path was attempted first but
+  remains blocked locally by the kernel asset path error, so repo Playwright
+  live checks supplied browser proof: 66 UI signals, zero relevant console
+  messages, 20 public portal products, zero failed responses/page errors, and
+  post-live hygiene passed. Storage prune removed 643,340 bytes of stale
+  retained reports while preserving uploads, secrets, env files, Docker
+  volumes, active images, newest local backup sets, and the newest R2 backup.
+- Current plan position after Move 834: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

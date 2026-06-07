@@ -48,13 +48,6 @@ type FileUploadPayload = {
   onProgress?: (progress: UploadProgress) => void
 }
 
-type ImageUploadPayload = {
-  productId?: string | number
-  file?: File
-  filePath?: string
-  fileName?: string
-}
-
 type AvatarUploadPayload = {
   file?: File
   filePath?: string
@@ -186,43 +179,6 @@ export function deleteFileAsset(id: string | number, payload: Record<string, unk
     null,
     true,
   )
-}
-
-export async function uploadProductImage({
-  productId,
-  file,
-  filePath,
-  fileName,
-}: ImageUploadPayload): Promise<unknown> {
-  void productId
-  requireLiveServerWrite('products:uploadImage', {
-    offlineMessage: 'Server is offline. Product image uploads are invalid until the server reconnects.',
-    notConfiguredMessage: 'Server is not connected. Product image uploads are invalid until a live server is configured.',
-  })
-
-  const form = new FormData()
-  if (file instanceof File) {
-    form.append('image', file, file.name || fileName || 'product.jpg')
-  } else if (filePath?.startsWith('data:')) {
-    form.append('image', dataUrlToBlob(filePath), fileName || 'product.jpg')
-  } else if (filePath) {
-    throw new Error('Native file path upload not supported in browser mode')
-  } else {
-    throw new Error('No image file provided')
-  }
-
-  const base = getSyncServerUrl().replace(/\/$/, '')
-  const res = await fetch(`${base}/api/products/upload-image`, {
-    method: 'POST',
-    headers: { 'bypass-tunnel-reminder': 'true' },
-    credentials: 'include',
-    body: form,
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`Image upload failed: ${text || res.status}`)
-  }
-  return res.json()
 }
 
 export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploadPayload): Promise<unknown> {

@@ -19,6 +19,7 @@ let inventoryTransportPromise = null
 let inventoryWriteTransportPromise = null
 let importJobsTransportPromise = null
 let productWriteTransportPromise = null
+let productImageUploadTransportPromise = null
 let rfidTransportPromise = null
 let salesTransportPromise = null
 let settingsTransportPromise = null
@@ -119,6 +120,11 @@ function loadImportJobsTransport() {
 function loadProductWriteTransport() {
   if (!productWriteTransportPromise) productWriteTransportPromise = import('./productWriteTransport.ts')
   return productWriteTransportPromise
+}
+
+function loadProductImageUploadTransport() {
+  if (!productImageUploadTransportPromise) productImageUploadTransportPromise = import('./productImageUploadTransport.ts')
+  return productImageUploadTransportPromise
 }
 
 function loadRfidTransport() {
@@ -737,7 +743,7 @@ export const deleteFileAsset = async (id, payload = {}) => {
 }
 
 export const uploadProductImage = async payload => {
-  const module = await loadFileTransport()
+  const module = await loadProductImageUploadTransport()
   return module.uploadProductImage(payload)
 }
 
