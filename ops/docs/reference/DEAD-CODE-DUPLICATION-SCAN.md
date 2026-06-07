@@ -14,7 +14,7 @@ longer active entrypoints. The latest organization audit reports zero remaining
 compatibility wrappers.
 
 The latest optimization passes also reduced duplicate documentation scan logic:
-`generate-full-project-docs.js` and `generate-doc-reference.js` now use the
+`generate-full-project-docs.ts` and `generate-doc-reference.ts` now use the
 shared filesystem helper library for source traversal, path normalization,
 reads, JSON parsing, line counts where needed, root file collection, and text
 detection where needed.

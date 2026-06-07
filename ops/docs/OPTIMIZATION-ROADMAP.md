@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 820.
+- Latest completed implementation move in this roadmap: Move 821.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12881,6 +12881,30 @@ Move 820 status:
 - Runtime/live proof:
   `ops/runtime/reports/phase84-settings-save-rollback-check-2026-06-07T01-27-43-770Z/report.json`.
 - Current plan position after Move 820: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 821 status:
+- Move 821 continues the typed API split by routing legacy offline snapshot
+  refresh calls through `frontend/src/api/offlineSnapshotTransport.ts`.
+  `frontend/src/api/methods.ts` now lazy-loads the typed transport for
+  `refreshOfflineDeviceSnapshot` instead of carrying duplicate untyped server
+  guards, snapshot metadata, throttling, and local mirror refresh logic.
+- The source guard now protects the new boundary: `offlineSnapshotTransport.ts`
+  owns `offline_device_snapshot_meta`, settings/product/branch/sales/returns
+  refresh steps, and the `pageSize: 5000` inventory-movement snapshot request,
+  while the legacy registry remains a thin compatibility facade.
+- Verification proof: `node frontend\tests\offlineSalesQueue.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\offlineSecurityHardening.test.ts`, the full frontend utility
+  suite, frontend production build, Phase 29 audit, storage prune, local health
+  check, and `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback`
+  passed. The production build split `offline-snapshot-api` to a 2.67 KB chunk
+  and reduced `app-api-methods` to 28.85 KB.
+- Current plan position after Move 821: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

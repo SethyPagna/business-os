@@ -19,6 +19,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const saleWriteTransportSource = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
+const offlineSnapshotTransportSource = fs.readFileSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const serverPageSource = fs.readFileSync(new URL('../src/components/server/ServerPage.tsx', import.meta.url), 'utf8')
@@ -52,13 +53,15 @@ await runTest('browser startup and online recovery retry queued work without cle
 
 await runTest('online device snapshots refresh local mirrors for server-offline reopening', () => {
   assert.match(methodsSource, /export async function refreshOfflineDeviceSnapshot/)
-  assert.match(methodsSource, /offline_device_snapshot_meta/)
-  assert.match(methodsSource, /getSettings\(\{ force: true \}\)/)
-  assert.match(methodsSource, /getProducts\(\)/)
-  assert.match(methodsSource, /getBranches\(\)/)
-  assert.match(methodsSource, /getSales\(\{\}\)/)
-  assert.match(methodsSource, /getReturns\(\{\}\)/)
-  assert.match(methodsSource, /getInventoryMovements\(\{\}, 5000\)/)
+  assert.match(methodsSource, /loadOfflineSnapshotTransport\(\)/)
+  assert.doesNotMatch(methodsSource, /offline_device_snapshot_meta/)
+  assert.match(offlineSnapshotTransportSource, /offline_device_snapshot_meta/)
+  assert.match(offlineSnapshotTransportSource, /getSettingsSnapshot\(\)/)
+  assert.match(offlineSnapshotTransportSource, /getProducts\(\)/)
+  assert.match(offlineSnapshotTransportSource, /getBranches\(\)/)
+  assert.match(offlineSnapshotTransportSource, /getSales\(\{\}\)/)
+  assert.match(offlineSnapshotTransportSource, /getReturnsSnapshot\(\)/)
+  assert.match(offlineSnapshotTransportSource, /getInventoryMovements\(\{ pageSize: 5000 \}\)/)
 })
 
 await runTest('offline mode banner stays visible while offline and announces sync timestamps', () => {

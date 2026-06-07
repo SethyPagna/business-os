@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 820 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 821 in this file.
 
 ## Goal
 
@@ -8855,6 +8855,33 @@ Decision rule:
   check:jsx`, `npm.cmd --prefix frontend run build`, and `npm.cmd --prefix ops
   run phase84:settings-save-rollback` passed.
 - Current plan position after Move 820: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 821: Route offline snapshot refresh through typed transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/offlineSnapshotTransport.ts` is now the single
+  implementation owner for offline device snapshot refresh.
+- Code-flow slice: `frontend/src/api/methods.ts` lazy-loads the offline
+  snapshot transport for `refreshOfflineDeviceSnapshot` instead of carrying
+  duplicate untyped server/session guards, snapshot metadata persistence,
+  five-minute throttling, and local mirror refresh steps.
+- Guardrail slice: `frontend/tests/offlineSalesQueue.test.ts` now verifies the
+  legacy registry is only a compatibility facade and that the typed transport
+  owns the snapshot metadata key, settings/products/branches/sales/returns
+  refresh steps, and inventory movement snapshot request.
+- Verification proof: `node frontend\tests\offlineSalesQueue.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\offlineSecurityHardening.test.ts`, the full frontend utility
+  suite, frontend production build, Phase 29 audit, storage prune, local health
+  check, and `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback`
+  passed. The production build split `offline-snapshot-api` to a 2.67 KB chunk
+  and reduced `app-api-methods` to 28.85 KB.
+- Current plan position after Move 821: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

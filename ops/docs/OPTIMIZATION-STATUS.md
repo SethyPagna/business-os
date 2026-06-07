@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 820, route legacy settings API calls through the typed settings transport.
+- Latest completed move: Move 821, route legacy offline snapshot refresh through the typed offline snapshot transport.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T00-40-14-444Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T01-46-13-481Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T00-02-46-596Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T01-46-55-689Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -79,6 +79,22 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 821 removes the duplicated untyped offline snapshot refresh
+  implementation from `frontend/src/api/methods.ts`. The legacy API registry
+  now lazy-loads `frontend/src/api/offlineSnapshotTransport.ts` for
+  `refreshOfflineDeviceSnapshot`, keeping server/session guards, five-minute
+  refresh throttling, local snapshot metadata, settings snapshot persistence,
+  and local mirror refresh steps in the typed transport chunk. This removes the
+  old inline snapshot loop from the broad registry while preserving the
+  `window.api.refreshOfflineDeviceSnapshot` contract. Proof:
+  `node frontend\tests\offlineSalesQueue.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\apiHttp.test.ts`, and `node
+  frontend\tests\offlineSecurityHardening.test.ts` passed, then the full
+  frontend utility suite, frontend production build, Phase 29 audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The build emitted `offline-snapshot-api` at 2.67
+  KB and reduced `app-api-methods` to 28.85 KB.
 - Move 820 removes the duplicated untyped Settings read/save implementation
   from `frontend/src/api/methods.ts`. The legacy API registry now lazy-loads
   `frontend/src/api/settingsTransport.ts` for `getSettings` and `saveSettings`,
