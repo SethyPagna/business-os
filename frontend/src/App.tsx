@@ -1465,19 +1465,37 @@ function PageLoader() {
   }, [])
 
   return (
-    <div className="flex-1 flex items-center justify-center text-gray-400 dark:text-gray-600">
-      <div className="text-center">
-        <div className="text-3xl mb-2 animate-pulse">...</div>
-        <p className="text-sm">{stalled ? 'Page bundle is still loading' : 'Loading...'}</p>
+    <div
+      className="flex-1 flex items-center justify-center bg-slate-50 px-4 py-6 text-slate-600 dark:bg-slate-950 dark:text-slate-300"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/95">
+        <div className="mb-3 flex items-center gap-3">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-600 text-sm font-extrabold text-white">
+            OS
+          </div>
+          <div>
+            <p className="m-0 text-base font-extrabold leading-tight text-slate-950 dark:text-slate-100">
+              Business OS
+            </p>
+            <p className="m-0 text-xs text-slate-500 dark:text-slate-400">
+              {stalled ? 'Page bundle is still loading' : 'Loading this workspace view...'}
+            </p>
+          </div>
+        </div>
+        <div className="relative h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" aria-hidden="true">
+          <div className="h-full w-2/5 animate-[business-os-initial-progress_1.1s_ease-in-out_infinite_alternate] rounded-full bg-blue-600" />
+        </div>
         {stalled ? (
-          <p className="mt-1 max-w-xs text-xs text-gray-500 dark:text-gray-400">
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
             The app is still fetching this page chunk. Reload only if the connection has recovered and the page does not continue.
           </p>
         ) : null}
         {stalled ? (
           <button
             type="button"
-            className="mt-3 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-600 transition hover:border-blue-400 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
+            className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-blue-400 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
             onClick={() => window.location.reload()}
           >
             Reload page
@@ -1782,10 +1800,24 @@ export default function App() {
 
   if (!authReady && !user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="text-center text-gray-500 dark:text-gray-400">
-          <div className="text-3xl mb-2 animate-pulse">...</div>
-          <p className="text-sm">Signing you in...</p>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 text-slate-600 dark:bg-slate-950 dark:text-slate-300" role="status" aria-live="polite">
+        <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/95">
+          <div className="mb-3 flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-600 text-sm font-extrabold text-white">
+              OS
+            </div>
+            <div>
+              <p className="m-0 text-lg font-extrabold leading-tight text-slate-950 dark:text-slate-100">
+                Business OS
+              </p>
+              <p className="m-0 text-sm text-slate-500 dark:text-slate-400">
+                Preparing secure sign-in...
+              </p>
+            </div>
+          </div>
+          <div className="relative h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" aria-hidden="true">
+            <div className="h-full w-2/5 animate-[business-os-initial-progress_1.1s_ease-in-out_infinite_alternate] rounded-full bg-blue-600" />
+          </div>
         </div>
       </div>
     )
