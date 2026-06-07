@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 840, route supplier-return modal setup, inventory, and create paths through focused lazy transports.
+- Latest completed move: Move 841, route customer-return modal sale search, history lookup, and create paths through focused lazy transports.
 
 ## Current Baseline
 
@@ -78,6 +78,31 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 841 continues the startup/preload cleanup by routing the customer-return
+  modal away from the broad `window.api` compatibility facade. The modal now
+  lazy-loads focused sales-read and returns-write transports directly for sale
+  search, existing-return history lookup, and create-submit paths.
+- Source guardrails now reject `getReturnApi`, `window.api`, and broad
+  `api.getSales`/`api.getReturns`/`api.createReturn` access returning to
+  `frontend/src/components/returns/NewReturnModal.tsx`, while still proving
+  the sale search, history lookup, and create operations keep bounded loader
+  timeouts and same-tick submit guards.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, `git diff --check`, and in-app Browser DOM/log/interaction checks
+  passed. Browser proof loaded `/returns`, opened New Return, searched for unmatched receipt
+  `codex-no-sale-841`, confirmed the expected `Sale not found` state, verified
+  the search was not stuck, and recorded zero relevant console errors. Browser
+  screenshot capture timed out through the bridge, so DOM/log/interaction proof
+  is the accepted live evidence for this slice.
+- Current plan position after Move 841: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 840 continues the startup/preload cleanup by routing the supplier-return
   modal away from the broad `window.api` compatibility facade. The modal now

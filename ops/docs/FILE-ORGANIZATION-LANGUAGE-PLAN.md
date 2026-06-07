@@ -9576,6 +9576,37 @@ Decision rule:
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
   schema, cleanup, TypeScript, runtime, and performance guardrail.
 
+### Move 841: Route customer-return modal through focused transports
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. Customer-return sale
+  search, existing-return history lookup, and create-submit work now belongs to
+  focused lazy transports instead of the broad `window.api` compatibility
+  facade.
+- Code-flow slice: `frontend/src/components/returns/NewReturnModal.tsx` now
+  lazy-loads `salesTransport.ts` and `returnsTransport.ts` directly. The modal
+  keeps bounded search, history, and create timeouts plus its same-tick submit
+  guard, but avoids loading the broad legacy API registry for this modal intent
+  path.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` and
+  `frontend/tests/actionStability.test.ts` now reject `getReturnApi`,
+  `window.api`, and broad `api.getSales`/`api.getReturns`/`api.createReturn`
+  access returning to the modal while proving focused lazy transport ownership.
+- Live proof: the in-app Browser loaded `/returns`, opened New Return, searched
+  unmatched receipt `codex-no-sale-841`, reached the expected `Sale not found`
+  state, verified search was no longer active, and recorded zero relevant
+  console errors. Browser screenshot capture timed out through the bridge, so
+  DOM/log/interaction proof is the accepted evidence for this slice.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, the full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, and `git diff --check` passed.
+- Current plan position after Move 841: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

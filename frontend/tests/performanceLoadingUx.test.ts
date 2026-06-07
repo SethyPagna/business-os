@@ -1612,18 +1612,33 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getSales\(\{ limit: 500 \}\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
+  /function loadSalesTransport\(\): Promise<SalesTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)[\s\S]*async function searchReturnSales\(options: \{ limit: number \}\): Promise<SaleRow\[]>[\s\S]*getSales\(options\)/,
+  'customer return sale search should use the focused sales transport instead of the broad API registry',
+)
+assert.match(
+  newReturnModal,
+  /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)[\s\S]*async function loadExistingSaleReturns\(saleId: number \| string \| null \| undefined\): Promise<ExistingReturnRow\[]>[\s\S]*getReturns\(\{ saleId \}\)/,
+  'customer return history lookup should use the focused returns transport instead of the broad API registry',
+)
+assert.match(
+  newReturnModal,
+  /withLoaderTimeout\(\s*\(\) => searchReturnSales\(\{ limit: 500 \}\),\s*'Return sale search',\s*RETURN_SALE_SEARCH_TIMEOUT_MS,\s*\)/,
   'customer return sale search should timeout slow sales reads',
 )
 assert.match(
   newReturnModal,
-  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getReturns\(\{ saleId: found\.id \}\),\s*'Return history lookup',\s*RETURN_HISTORY_LOOKUP_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => loadExistingSaleReturns\(found\.id\),\s*'Return history lookup',\s*RETURN_HISTORY_LOOKUP_TIMEOUT_MS,\s*\)/,
   'customer return history lookup should timeout slow return history reads',
 )
 assert.match(
   newReturnModal,
-  /const api = getReturnApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.createReturn\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/,
-  'customer return create should timeout slow return writes',
+  /async function createReturnRequest\(payload: ReturnCreatePayload\): Promise<unknown>[\s\S]*createReturn\(payload\)[\s\S]*withLoaderTimeout\(\s*\(\) => createReturnRequest\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/,
+  'customer return create should timeout slow return writes through the focused returns transport',
+)
+assert.doesNotMatch(
+  newReturnModal,
+  /getReturnApi|window\.api|api\.(?:getSales|getReturns|createReturn)/,
+  'customer return modal should not wake the broad window.api registry for sale search, history, or create paths',
 )
 assert.match(
   editReturnModal,

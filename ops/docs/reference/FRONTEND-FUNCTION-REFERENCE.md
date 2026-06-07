@@ -175,7 +175,7 @@ Total files documented: **264**
 | 163 | `frontend/src/components/receipt-settings/template.ts` | 2 |
 | 164 | `frontend/src/components/receipt/Receipt.tsx` | 12 |
 | 165 | `frontend/src/components/returns/EditReturnModal.tsx` | 7 |
-| 166 | `frontend/src/components/returns/NewReturnModal.tsx` | 13 |
+| 166 | `frontend/src/components/returns/NewReturnModal.tsx` | 17 |
 | 167 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 14 |
 | 168 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
 | 169 | `frontend/src/components/returns/Returns.tsx` | 12 |
@@ -2389,19 +2389,23 @@ Total files documented: **264**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getReturnApi` | function | 120 |
-| 2 | `toNumber` | function | 125 |
-| 3 | `clampReturnQuantity` | function | 130 |
-| 4 | `getSaleItemKey` | function | 136 |
-| 5 | `NewReturnModal` | component/function | 140 |
-| 6 | `handleSearch` | const arrow | 173 |
-| 7 | `handleReturnTypeChange` | const arrow | 238 |
-| 8 | `toggleIncluded` | const arrow | 243 |
-| 9 | `updateItemQty` | const arrow | 251 |
-| 10 | `updateItemRestock` | const arrow | 259 |
-| 11 | `selectAll` | const arrow | 263 |
-| 12 | `clearAll` | const arrow | 266 |
-| 13 | `handleSubmit` | const arrow | 273 |
+| 1 | `loadSalesTransport` | function | 120 |
+| 2 | `loadReturnsTransport` | function | 125 |
+| 3 | `searchReturnSales` | function | 130 |
+| 4 | `loadExistingSaleReturns` | function | 136 |
+| 5 | `createReturnRequest` | function | 142 |
+| 6 | `toNumber` | function | 147 |
+| 7 | `clampReturnQuantity` | function | 152 |
+| 8 | `getSaleItemKey` | function | 158 |
+| 9 | `NewReturnModal` | component/function | 162 |
+| 10 | `handleSearch` | const arrow | 195 |
+| 11 | `handleReturnTypeChange` | const arrow | 260 |
+| 12 | `toggleIncluded` | const arrow | 265 |
+| 13 | `updateItemQty` | const arrow | 273 |
+| 14 | `updateItemRestock` | const arrow | 281 |
+| 15 | `selectAll` | const arrow | 285 |
+| 16 | `clearAll` | const arrow | 288 |
+| 17 | `handleSubmit` | const arrow | 295 |
 
 ### 3.167 `frontend/src/components/returns/NewSupplierReturnModal.tsx`
 

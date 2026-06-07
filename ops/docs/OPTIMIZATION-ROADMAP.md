@@ -13478,3 +13478,32 @@ Move 840 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 841 status:
+- Move 841 routes customer-return sale search, existing-return history lookup,
+  and create-submit paths through focused lazy transports instead of the broad
+  `window.api` compatibility facade.
+- `frontend/src/components/returns/NewReturnModal.tsx` now lazy-loads
+  `frontend/src/api/salesTransport.ts` and
+  `frontend/src/api/returnsTransport.ts` directly. This preserves the same
+  bounded loader budgets and same-tick submit guard while avoiding the broad
+  legacy API registry for the customer-return modal path.
+- Source guardrails now reject `getReturnApi`, `window.api`, and broad
+  `api.getSales`/`api.getReturns`/`api.createReturn` access returning to the
+  modal while still proving focused lazy transport ownership and bounded
+  create behavior.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, `git diff --check`, and in-app Browser DOM/log/interaction checks
+  passed. Browser proof loaded `/returns`, opened New Return, searched unmatched receipt
+  `codex-no-sale-841`, confirmed the expected `Sale not found` state, verified
+  search was no longer active, and recorded zero relevant console errors.
+  Browser screenshot capture timed out through the bridge, so DOM/log/
+  interaction proof is the accepted live evidence for this slice.
+- Current plan position after Move 841: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

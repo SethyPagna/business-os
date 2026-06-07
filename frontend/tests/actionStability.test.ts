@@ -141,7 +141,11 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   }
 
   assert.match(newReturn, /const RETURN_CREATE_TIMEOUT_MS = 15000/)
-  assert.match(newReturn, /const api = getReturnApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.createReturn\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.match(newReturn, /function loadSalesTransport\(\): Promise<SalesTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/salesTransport\.ts'\)/)
+  assert.match(newReturn, /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/)
+  assert.match(newReturn, /async function createReturnRequest\(payload: ReturnCreatePayload\): Promise<unknown>[\s\S]*createReturn\(payload\)/)
+  assert.match(newReturn, /withLoaderTimeout\(\s*\(\) => createReturnRequest\(\{[\s\S]*\}\),\s*'Create return',\s*RETURN_CREATE_TIMEOUT_MS,\s*\)/)
+  assert.doesNotMatch(newReturn, /getReturnApi|window\.api|api\.createReturn/)
   assert.match(editReturn, /const RETURN_UPDATE_TIMEOUT_MS = 15000/)
   assert.match(editReturn, /const api = getReturnApi\(\)[\s\S]*const payload: ReturnUpdatePayload = \{[\s\S]*withLoaderTimeout\(\s*\(\) => api\.updateReturn\(ret\.id, payload\),\s*'Update return',\s*RETURN_UPDATE_TIMEOUT_MS,\s*\)/)
   assert.match(supplierReturn, /const SUPPLIER_RETURN_CREATE_TIMEOUT_MS = 15000/)

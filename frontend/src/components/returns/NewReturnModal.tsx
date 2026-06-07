@@ -70,7 +70,7 @@ interface ExistingReturnRow {
   }> | null
 }
 
-interface ReturnCreatePayload {
+interface ReturnCreatePayload extends Record<string, unknown> {
   sale_id: number | string | null
   receipt_number: string | null
   cashier_id: number | string | null | undefined
@@ -97,12 +97,6 @@ interface ReturnCreatePayload {
   }>
 }
 
-interface ReturnApi {
-  getSales: (options: { limit: number }) => Promise<SaleRow[]>
-  getReturns: (options: { saleId: number | string | null | undefined }) => Promise<ExistingReturnRow[]>
-  createReturn: (payload: ReturnCreatePayload) => Promise<unknown>
-}
-
 interface NewReturnModalProps {
   onClose: () => void
   onSuccess?: (result?: unknown) => void | Promise<void>
@@ -117,9 +111,37 @@ const useApp = useAppHook as () => {
   t?: TranslateFn
 }
 
-function getReturnApi(): ReturnApi {
-  if (!window.api) throw new Error('Return API is not available.')
-  return window.api as ReturnApi
+type SalesTransportModule = typeof import('../../api/salesTransport.ts')
+type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
+
+let salesTransportPromise: Promise<SalesTransportModule> | null = null
+let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
+
+function loadSalesTransport(): Promise<SalesTransportModule> {
+  if (!salesTransportPromise) salesTransportPromise = import('../../api/salesTransport.ts')
+  return salesTransportPromise
+}
+
+function loadReturnsTransport(): Promise<ReturnsTransportModule> {
+  if (!returnsTransportPromise) returnsTransportPromise = import('../../api/returnsTransport.ts')
+  return returnsTransportPromise
+}
+
+async function searchReturnSales(options: { limit: number }): Promise<SaleRow[]> {
+  const { getSales } = await loadSalesTransport()
+  const rows = await getSales(options)
+  return (Array.isArray(rows) ? rows : []) as SaleRow[]
+}
+
+async function loadExistingSaleReturns(saleId: number | string | null | undefined): Promise<ExistingReturnRow[]> {
+  const { getReturns } = await loadReturnsTransport()
+  const rows = await getReturns({ saleId })
+  return (Array.isArray(rows) ? rows : []) as ExistingReturnRow[]
+}
+
+async function createReturnRequest(payload: ReturnCreatePayload): Promise<unknown> {
+  const { createReturn } = await loadReturnsTransport()
+  return createReturn(payload)
 }
 
 function toNumber(value: number | string | null | undefined): number {
@@ -177,7 +199,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     setSearching(true)
     try {
       const sales = await withLoaderTimeout(
-        () => getReturnApi().getSales({ limit: 500 }),
+        () => searchReturnSales({ limit: 500 }),
         'Return sale search',
         RETURN_SALE_SEARCH_TIMEOUT_MS,
       )
@@ -191,7 +213,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
         const alreadyReturned: ReturnedQuantityMap = {}
         try {
           const existingReturns = await withLoaderTimeout(
-            () => getReturnApi().getReturns({ saleId: found.id }),
+            () => loadExistingSaleReturns(found.id),
             'Return history lookup',
             RETURN_HISTORY_LOOKUP_TIMEOUT_MS,
           )
@@ -276,9 +298,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
-      const api = getReturnApi()
       const result = await withLoaderTimeout(
-        () => api.createReturn({
+        () => createReturnRequest({
           sale_id:          foundSale?.id   || null,
           receipt_number:   foundSale?.receipt_number || null,
           cashier_id:       user?.id,
