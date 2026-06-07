@@ -424,7 +424,7 @@ await runTest('client API query strings use one shared builder', () => {
   const productWriteTransportSource = fs.readFileSync(new URL('../src/api/productWriteTransport.ts', import.meta.url), 'utf8')
   const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
   const returnsTransportSource = fs.readFileSync(new URL('../src/api/returnsTransport.ts', import.meta.url), 'utf8')
-  assert.match(source, /import \{ appendQuery, buildQueryString \} from '\.\/query\.ts'/)
+  assert.doesNotMatch(source, /from '\.\/query\.ts'/)
   assert.match(productReadTransportSource, /import \{ appendQuery, buildQueryString, normalizePositiveUniqueIds, type QueryParams \} from '\.\/query\.ts'/)
   assert.match(
     querySource,
@@ -782,6 +782,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const dashboardTransportSource = fs.readFileSync(new URL('../src/api/dashboardTransport.ts', import.meta.url), 'utf8')
   const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
   const returnsTransportSource = fs.readFileSync(new URL('../src/api/returnsTransport.ts', import.meta.url), 'utf8')
+  const pendingSyncTransportSource = fs.readFileSync(new URL('../src/api/pendingSyncTransport.ts', import.meta.url), 'utf8')
   const queryCacheSource = fs.readFileSync(new URL('../src/api/queryCache.ts', import.meta.url), 'utf8')
   const syncRuntimeSource = fs.readFileSync(new URL('../src/api/syncRuntime.ts', import.meta.url), 'utf8')
   const systemJobsSource = fs.readFileSync(new URL('../src/api/systemJobs.ts', import.meta.url), 'utf8')
@@ -828,7 +829,10 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(salesTransportSource, /import \{ withExpectedUpdatedAt, type ExpectedUpdatedAtPayload \} from '\.\/expectedUpdatedAt\.ts'/)
   assert.match(source, /import \{ purgeSensitiveLiveServerMirrors \} from '\.\/localMirrors\.ts'/)
   assert.match(returnsTransportSource, /import \{ mirrorTable, routeMirrored \} from '\.\/localMirrors\.ts'/)
-  assert.match(source, /from '\.\/syncRuntime\.ts'/)
+  assert.doesNotMatch(source, /from '\.\/syncRuntime\.ts'/)
+  assert.doesNotMatch(source, /from '\.\/syncPreview\.ts'/)
+  assert.doesNotMatch(source, /import\('\.\/localDb\.ts'\)/)
+  assert.match(source, /function loadPendingSyncTransport\(\) \{[\s\S]*import\('\.\/pendingSyncTransport\.ts'\)/)
   assert.match(source, /from '\.\/systemJobs\.ts'/)
   assert.doesNotMatch(source, /from '\.\/systemRuntime\.ts'/)
   assert.match(source, /function loadSystemRuntimeModule\(\) \{[\s\S]*import\('\.\/systemRuntime\.ts'\)/)
@@ -978,6 +982,14 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(returnsTransportSource, /export async function updateReturn\(id: number \| string, payload: ReturnPayload = \{\}\)/)
   assert.match(returnsTransportSource, /withExpectedUpdatedAt\('returns', id/)
   assert.match(returnsTransportSource, /buildAttemptedReturnItems\(Array\.isArray\(payload\.items\) \? payload\.items : \[\]\)/)
+  assert.match(pendingSyncTransportSource, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'/)
+  assert.match(pendingSyncTransportSource, /export async function discardPendingSyncQueue/)
+  assert.match(pendingSyncTransportSource, /db\.table\('sync_queue'\)\.clear\(\)/)
+  assert.match(pendingSyncTransportSource, /dispatchSyncUpdates\(DISCARD_SYNC_UPDATE_CHANNELS, 'discard-pending-sync-queue'\)/)
+  assert.match(pendingSyncTransportSource, /export async function getPendingSyncState/)
+  assert.match(pendingSyncTransportSource, /serializePendingSyncPreview\(sorted\)/)
+  assert.match(pendingSyncTransportSource, /export function retryPendingSyncNow\(\): Promise<unknown>[\s\S]*syncPendingSalesQueue\(\{ force: true \}\)/)
+  assert.doesNotMatch(source, /sync_queue|serializePendingSyncPreview|syncPendingSalesQueue\(\{ force: true \}\)/)
   assert.match(
     queryCacheSource,
     /export async function clearCachedQueryResults\(prefixes: string\[\] = \[\]\): Promise<void>[\s\S]*const keys: string\[\] = \[\][\s\S]*for \(const value of Array\.isArray\(prefixes\) \? prefixes : \[\]\)[\s\S]*const matchingKeys: string\[\] = \[\][\s\S]*for \(const row of rows\)[\s\S]*for \(const prefix of keys\)/,

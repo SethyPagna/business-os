@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-07T02:12:55.986Z
+Generated: 2026-06-07T02:26:14.882Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 642
+- Files scanned: 643
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -14,7 +14,7 @@ Generated: 2026-06-07T02:12:55.986Z
 
 | Extension | Files |
 | --- | --- |
-| .ts | 437 |
+| .ts | 438 |
 | .tsx | 113 |
 | .md | 45 |
 | .json | 17 |
@@ -28,7 +28,7 @@ Generated: 2026-06-07T02:12:55.986Z
 
 | Area | Files |
 | --- | --- |
-| frontend/api | 53 |
+| frontend/api | 54 |
 | frontend/utils | 34 |
 | ops/scripts/runtime/live-checks | 34 |
 | frontend/components/products | 33 |
@@ -63,18 +63,18 @@ Generated: 2026-06-07T02:12:55.986Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 12960 | ops/docs |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8962 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 12986 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8992 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4006 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3623 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3441 | ops/docs/reference |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3444 | ops/docs/reference |
 | ops/docs/reference/PHASE29-AUDIT.json | 3418 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3274 | frontend/tests/performanceLoadingUx.test.ts |
-| ops/docs/OPTIMIZATION-STATUS.md | 2933 | ops/docs |
+| frontend/tests/performanceLoadingUx.test.ts | 3278 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-STATUS.md | 2950 | ops/docs |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |
@@ -100,8 +100,8 @@ Generated: 2026-06-07T02:12:55.986Z
 | --- | --- | --- |
 | frontend/src/components/products/Products.tsx | 55 | frontend/components/products |
 | frontend/src/components/inventory/Inventory.tsx | 46 | frontend/components/inventory |
-| frontend/src/api/methods.ts | 42 | frontend/api |
 | frontend/src/components/pos/POS.tsx | 38 | frontend/components/pos |
+| frontend/src/api/methods.ts | 37 | frontend/api |
 | frontend/src/web-api.ts | 36 | frontend/src/web-api.ts |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |
 | frontend/src/components/catalog/CatalogPage.tsx | 24 | frontend/components/catalog |

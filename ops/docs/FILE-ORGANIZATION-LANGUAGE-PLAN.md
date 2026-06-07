@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 823 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 824 in this file.
 
 ## Goal
 
@@ -8936,6 +8936,38 @@ Decision rule:
   suite, and frontend production build passed. The production build emitted the
   sales transport chunk at 2.40 KB and reduced `app-api-methods` to 26.58 KB.
 - Current plan position after Move 823: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 824: Route pending sync queue APIs through typed transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/pendingSyncTransport.ts` now owns pending sync queue reads,
+  queue discard, and manual retry delegation.
+- Code-flow slice: `frontend/src/api/methods.ts` lazy-loads the typed pending
+  sync transport for `getPendingSyncState`, `discardPendingSyncQueue`, and
+  `retryPendingSyncNow` instead of carrying local DB, sync preview, sync
+  runtime, and retry implementation details.
+- Build slice: `frontend/vite.config.ts` gives the pending sync transport a
+  named `pending-sync-api` intent chunk and excludes it from eager module
+  preload.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/offlineSalesQueue.test.ts`, and
+  `frontend/tests/performanceLoadingUx.test.ts` verify that queue Dexie
+  reads/clears, compact preview serialization, queue events, discard update
+  broadcasts, and retry delegation live in the typed transport while the legacy
+  registry is only a facade.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\offlineSalesQueue.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, and frontend production build passed. The
+  Phase 29 audit, storage prune, local health check, and `npm.cmd --prefix ops
+  run phase84:live-suite -- --skip-rollback` also passed. The production build
+  emitted `pending-sync-api` at 1.66 KB and reduced `app-api-methods` to 25.07
+  KB. The storage prune removed 238,300 bytes of stale retained reports.
+- Current plan position after Move 824: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

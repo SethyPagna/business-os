@@ -170,6 +170,7 @@ const deferredModulePreloadPrefixes = [
   'assets/inventory-write-api-',
   'assets/import-jobs-api-',
   'assets/multipart-headers-api-',
+  'assets/pending-sync-api-',
   'assets/product-export-',
   'assets/product-write-api-',
   'assets/rfid-api-',
@@ -345,6 +346,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
     if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
     if (normalized.endsWith('/src/api/offlineSnapshotTransport.ts')) return 'offline-snapshot-api'
+    if (normalized.endsWith('/src/api/pendingSyncTransport.ts')) return 'pending-sync-api'
     if (normalized.endsWith('/src/api/settingsTransport.ts')) return 'settings-api'
     if (normalized.endsWith('/src/api/requestIds.ts')) return 'request-ids'
     if (normalized.endsWith('/src/api/conflicts.ts')) return 'api-conflicts'

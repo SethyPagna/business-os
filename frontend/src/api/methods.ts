@@ -3,12 +3,7 @@
 // Legacy domain API registry. This file is now a TypeScript module so callers,
 // tests, and bundling use the same extension path; the next slices should move
 // typed domain groups out of this boundary and remove ts-nocheck.
-function getDeviceInfo() {
-  return getClientDeviceInfo()
-}
-
 let portalTransportPromise = null
-let localDbModulePromise = null
 let saleWriteTransportPromise = null
 let csvTemplatePromise = null
 let browserDialogsPromise = null
@@ -26,6 +21,7 @@ let salesTransportPromise = null
 let settingsTransportPromise = null
 let offlineSnapshotTransportPromise = null
 let returnsTransportPromise = null
+let pendingSyncTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -35,11 +31,6 @@ function loadPortalTransport() {
 function loadSaleWriteTransport() {
   if (!saleWriteTransportPromise) saleWriteTransportPromise = import('./saleWriteTransport.ts')
   return saleWriteTransportPromise
-}
-
-function loadLocalDbModule() {
-  if (!localDbModulePromise) localDbModulePromise = import('./localDb.ts')
-  return localDbModulePromise
 }
 
 function loadCsvTemplateModule() {
@@ -122,40 +113,33 @@ function loadReturnsTransport() {
   return returnsTransportPromise
 }
 
+function loadPendingSyncTransport() {
+  if (!pendingSyncTransportPromise) pendingSyncTransportPromise = import('./pendingSyncTransport.ts')
+  return pendingSyncTransportPromise
+}
+
 async function buildImportCsvTemplate(headers, filename) {
   const { buildCSVTemplate } = await loadCsvTemplateModule()
   return buildCSVTemplate(headers, filename)
 }
 
-async function getLocalDb() {
-  const { dexieDb } = await loadLocalDbModule()
-  return dexieDb
-}
-
 /**
  * api/methods.ts — All window.api domain methods.
  *
- * Each method calls route() with a server function (apiFetch) and,
- * where available, a local Dexie fallback for offline-first reads.
+ * Each method either delegates to a focused typed transport or exposes a small
+ * runtime compatibility wrapper for legacy window.api callers.
  */
 
 import {
-  apiFetch,
-  route,
   getSyncServerUrl,
   cacheClearAll,
-  isInvalidSessionError,
 } from './http.ts'
-import { appendQuery, buildQueryString } from './query.ts'
 import { resetClientRuntimeState } from '../platform/runtime/clientRuntime.ts'
-import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
 import {
   CATEGORY_REFRESH_CHANNELS,
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
-import { ensureClientRequestId } from './requestIds.ts'
-import { serializePendingSyncPreview } from './syncPreview.ts'
 import {
   createCategory as createCategoryRequest,
   createUnit as createUnitRequest,
@@ -253,11 +237,6 @@ import {
 } from './queryCache.ts'
 import { purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
 import {
-  DISCARD_SYNC_UPDATE_CHANNELS,
-  dispatchSyncUpdates,
-  emitSyncQueueChanged,
-} from './syncRuntime.ts'
-import {
   cancelSystemJob as cancelSystemJobRequest,
   getSystemJob as getSystemJobRequest,
   pollSystemJob as pollSystemJobRequest,
@@ -314,50 +293,18 @@ function scheduleSensitiveMirrorPurge() {
 }
 
 export async function discardPendingSyncQueue(reason = 'Offline changes were cleared.') {
-  const db = await getLocalDb()
-  const existing = await db.sync_queue.toArray().catch(() => [])
-  await db.sync_queue.clear().catch(() => {})
-  emitSyncQueueChanged({ reason, discarded: existing.length })
-  dispatchSyncUpdates(DISCARD_SYNC_UPDATE_CHANNELS, 'discard-pending-sync-queue')
-  return {
-    success: true,
-    discarded: existing.length,
-    reason,
-  }
+  const { discardPendingSyncQueue: discardPendingSyncQueueRequest } = await loadPendingSyncTransport()
+  return discardPendingSyncQueueRequest(reason)
 }
 
 export async function getPendingSyncState() {
-  const db = await getLocalDb()
-  const items = await db.sync_queue
-    .orderBy('_seq')
-    .toArray()
-    .catch(() => [])
-  const sorted = [...items].sort((a, b) => {
-    const byCreated = String(a?.created_at || '').localeCompare(String(b?.created_at || ''))
-    if (byCreated !== 0) return byCreated
-    return Number(a?._seq || 0) - Number(b?._seq || 0)
-  })
-  const counts = sorted.reduce((acc, item) => {
-    const status = String(item?.status || 'pending')
-    acc.total += 1
-    if (status === 'syncing') acc.syncing += 1
-    else if (status === 'conflict') acc.conflict += 1
-    else if (status === 'failed') acc.failed += 1
-    else acc.pending += 1
-    return acc
-  }, { total: 0, pending: 0, syncing: 0, failed: 0, conflict: 0 })
-  const oldest = sorted[0]?.created_at || null
-  return {
-    ...counts,
-    oldest_created_at: oldest,
-    writes_require_server: true,
-    items: serializePendingSyncPreview(sorted),
-  }
+  const { getPendingSyncState: getPendingSyncStateRequest } = await loadPendingSyncTransport()
+  return getPendingSyncStateRequest()
 }
 
 export async function retryPendingSyncNow() {
-  const { syncPendingSalesQueue } = await loadSaleWriteTransport()
-  return syncPendingSalesQueue({ force: true })
+  const { retryPendingSyncNow: retryPendingSyncNowRequest } = await loadPendingSyncTransport()
+  return retryPendingSyncNowRequest()
 }
 
 export async function refreshOfflineDeviceSnapshot(options = {}) {

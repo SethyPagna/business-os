@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 823.
+- Latest completed implementation move in this roadmap: Move 824.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12953,6 +12953,35 @@ Move 823 status:
   suite, and frontend production build passed. The production build emitted the
   sales transport chunk at 2.40 KB and reduced `app-api-methods` to 26.58 KB.
 - Current plan position after Move 823: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 824 status:
+- Move 824 continues the typed API split by moving pending sync queue reads,
+  queue discard, and manual retry out of `frontend/src/api/methods.ts` and into
+  the focused `frontend/src/api/pendingSyncTransport.ts` module.
+- The pending-sync transport now owns Dexie `sync_queue` reads/clears, compact
+  pending queue preview serialization, sync queue change events, discard sync
+  update broadcasts, and manual retry delegation to the sale write transport.
+- `frontend/src/api/methods.ts` now lazy-loads the pending-sync transport for
+  `getPendingSyncState`, `discardPendingSyncQueue`, and
+  `retryPendingSyncNow`, and no longer imports local DB, sync preview, query,
+  or sync runtime helpers for those paths.
+- Build wiring now gives the pending sync transport a separate
+  `pending-sync-api` intent chunk and excludes that chunk from eager module
+  preload.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\offlineSalesQueue.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend
+  typecheck, the full frontend utility suite, and frontend production build
+  passed. Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` also
+  passed. The production build emitted `pending-sync-api` at 1.66 KB and
+  reduced `app-api-methods` to 25.07 KB. The storage prune removed 238,300
+  bytes of stale retained reports.
+- Current plan position after Move 824: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

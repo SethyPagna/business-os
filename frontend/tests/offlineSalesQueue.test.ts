@@ -19,6 +19,7 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 const methodsSource = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const saleWriteTransportSource = fs.readFileSync(new URL('../src/api/saleWriteTransport.ts', import.meta.url), 'utf8')
 const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
+const pendingSyncTransportSource = fs.readFileSync(new URL('../src/api/pendingSyncTransport.ts', import.meta.url), 'utf8')
 const offlineSnapshotTransportSource = fs.readFileSync(new URL('../src/api/offlineSnapshotTransport.ts', import.meta.url), 'utf8')
 const webApiSource = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const appSource = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
@@ -39,8 +40,10 @@ await runTest('retryPendingSyncNow syncs pending sales instead of discarding the
   assert.match(salesTransportSource, /apiFetch\(\s*'POST',\s*'\/api\/sales'/)
   assert.match(salesTransportSource, /skipWriteDedupe:\s*true/)
   const retryBody = methodsSource.match(/export async function retryPendingSyncNow\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
-  assert.match(retryBody, /syncPendingSalesQueue/)
+  assert.match(retryBody, /loadPendingSyncTransport\(\)/)
   assert.doesNotMatch(retryBody, /discardPendingSyncQueue/)
+  assert.match(pendingSyncTransportSource, /export function retryPendingSyncNow\(\): Promise<unknown>[\s\S]*syncPendingSalesQueue\(\{ force: true \}\)/)
+  assert.doesNotMatch(methodsSource, /syncPendingSalesQueue\(\{ force: true \}\)/)
 })
 
 await runTest('browser startup and online recovery retry queued work without clearing it', () => {
