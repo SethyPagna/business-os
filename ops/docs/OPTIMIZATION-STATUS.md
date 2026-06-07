@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 819, add Settings save rollback live coverage.
+- Latest completed move: Move 820, route legacy settings API calls through the typed settings transport.
 
 ## Current Baseline
 
@@ -79,6 +79,16 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 820 removes the duplicated untyped Settings read/save implementation
+  from `frontend/src/api/methods.ts`. The legacy API registry now lazy-loads
+  `frontend/src/api/settingsTransport.ts` for `getSettings` and `saveSettings`,
+  keeping conflict retries, inline `updatedAt` handling, local mirror writes,
+  and refresh-channel logic in the typed transport. This removes 100 lines from
+  the broad registry while preserving the `window.api` contract. Proof:
+  `node frontend\tests\performanceLoadingUx.test.ts`, frontend typecheck,
+  JSX/source check, frontend production build, and `npm.cmd --prefix ops run
+  phase84:settings-save-rollback` passed. The build emitted
+  `settings-api` at 2.10 KB and `app-api-methods` at 30.22 KB.
 - Move 819 adds rollback-safe live coverage for the Settings page Save action.
   The new `ops/scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts`
   snapshots `business_name`, uses the real Settings UI to change it, clicks
@@ -2666,7 +2676,33 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 819
+## Latest Move 820
+
+- The legacy domain API registry no longer owns a second untyped copy of
+  Settings read/save logic. `frontend/src/api/methods.ts` now lazy-loads
+  `frontend/src/api/settingsTransport.ts` for `getSettings` and
+  `saveSettings`.
+- The typed settings transport remains the single owner for `/api/settings`
+  reads, conflict retry payloads, inline `updatedAt` metadata, local settings
+  mirror writes, and refresh-channel dispatch.
+- The performance/source guard now verifies that `settingsTransport.ts` owns
+  the `/api/settings` call, that `methods.ts` lazy-loads the typed transport,
+  that the legacy registry does not duplicate settings read logic, and that
+  `/api/settings/meta` is still blocked as a startup waterfall.
+- Verification passed: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  check:jsx`, `npm.cmd --prefix frontend run build`, and `npm.cmd --prefix ops
+  run phase84:settings-save-rollback`.
+- Live proof:
+  `ops/runtime/reports/phase84-settings-save-rollback-check-2026-06-07T01-27-43-770Z/report.json`
+  saved `business_name` with HTTP 200, observed the temporary value, and
+  restored the original value.
+- Current plan position after Move 820: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Previous Move 819
 
 - Settings page Save now has a dedicated rollback-safe live check. The harness
   snapshots the current `business_name`, changes it through the real Settings

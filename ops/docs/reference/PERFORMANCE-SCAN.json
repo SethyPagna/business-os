@@ -2,15 +2,15 @@
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 444,
-  "distAssets": 0,
-  "totalSourceBytes": 6998287,
-  "totalSourceLines": 160928,
+  "distAssets": 159,
+  "totalSourceBytes": 6994882,
+  "totalSourceLines": 160842,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
   "largestSourceLines": 4006,
-  "largestBuiltChunk": null,
-  "largestBuiltChunkBytes": 0,
+  "largestBuiltChunk": "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js",
+  "largestBuiltChunkBytes": 446639,
   "oversizedSourceFiles": [
     "backend/src/routes/inventory.ts",
     "backend/src/routes/products.ts",
@@ -33,7 +33,13 @@
     "frontend/src/lang/km.json",
     "ops/scripts/architecture/language-runtime-audit.ts"
   ],
-  "oversizedBuiltChunks": [],
+  "oversizedBuiltChunks": [
+    "frontend/dist/assets/index-DbL1XvZE.css",
+    "frontend/dist/assets/lang-en-DND0-37b.js",
+    "frontend/dist/assets/lang-km-c87vG7oG.js",
+    "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
+    "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js"
+  ],
   "topSourceBySize": [
     {
       "file": "frontend/src/lang/km.json",
@@ -273,11 +279,6 @@
       "lines": 1407
     },
     {
-      "file": "frontend/src/api/methods.ts",
-      "size": 56437,
-      "lines": 1390
-    },
-    {
       "file": "frontend/src/components/catalog/portalLanguagePacks.ts",
       "size": 64016,
       "lines": 1349
@@ -286,9 +287,140 @@
       "file": "frontend/src/web-api.ts",
       "size": 53439,
       "lines": 1328
+    },
+    {
+      "file": "frontend/src/components/users/UserProfileModal.tsx",
+      "size": 69863,
+      "lines": 1326
     }
   ],
-  "topBuiltChunks": [],
+  "topBuiltChunks": [
+    {
+      "file": "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js",
+      "size": 446639,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/lang-km-c87vG7oG.js",
+      "size": 289241,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
+      "size": 212166,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/lang-en-DND0-37b.js",
+      "size": 173880,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/index-DbL1XvZE.css",
+      "size": 158511,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/Inventory-pRtOAI-U.js",
+      "size": 132912,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/catalog-1yYfxVm5.js",
+      "size": 127616,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/Products-bMkOPD1s.js",
+      "size": 87005,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/POS-B9z4_c_y.js",
+      "size": 76577,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/catalog-editor-D4CsvGu6.js",
+      "size": 75639,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/vendor-dexie-2jmnBxhj.js",
+      "size": 74288,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/BulkImportModal-u4MaQNVH.js",
+      "size": 69424,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/AdminRoot-BtxgBy-y.js",
+      "size": 64141,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/Dashboard-cv-cnmNK.js",
+      "size": 63616,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/app-shared-BRwFDzi7.js",
+      "size": 57280,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/Settings-B1lEm-an.js",
+      "size": 56128,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/portal-language-packs-DGxmKkW_.js",
+      "size": 53370,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/Backup-B9UcENyI.js",
+      "size": 52407,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/user-profile-modal-CLC9Fpo1.js",
+      "size": 44792,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/ReceiptSettings-DxKJt3NF.js",
+      "size": 41084,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/portal-content-i18n-BJnSIXBN.js",
+      "size": 39382,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/catalog-secondary-tabs-BU0R8ffD.js",
+      "size": 38211,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/Sales-B-707IRK.js",
+      "size": 37708,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/ProductForm-DZ78w6Nl.js",
+      "size": 36697,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/AuditLog-DneJIRcF.js",
+      "size": 36451,
+      "lines": 0
+    }
+  ],
   "sourceReadMode": "bounded-parallel",
   "sourceReadConcurrency": 24,
   "chunkStatConcurrency": 32,

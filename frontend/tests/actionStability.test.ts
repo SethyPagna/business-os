@@ -260,7 +260,7 @@ await runTest('profile saves and avatar upload keep same-tick guards', () => {
 
 await runTest('settings save and app favicon upload keep synchronous guards', () => {
   const source = readFrontend('src/components/utils-settings/Settings.tsx')
-  const methods = readFrontend('src/api/methods.ts')
+  const settingsTransport = readFrontend('src/api/settingsTransport.ts')
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const \[savingSettings, setSavingSettings\] = useState\(false\)/)
@@ -275,8 +275,8 @@ await runTest('settings save and app favicon upload keep synchronous guards', ()
   assert.match(source, /beginSingleAction\(settingsSaveInFlightRef, \{ blocked: savingSettings \}\)[\s\S]*setSavingSettings\(true\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(settingsSaveInFlightRef\)[\s\S]*setSavingSettings\(false\)/)
   assert.match(source, /disabled=\{savingSettings \|\| uploadingImage\}/)
-  assert.match(methods, /let settingsSaveQueue = Promise\.resolve\(\)/)
-  assert.match(methods, /const queuedSave = settingsSaveQueue\.catch\(\(\) => \{\}\)\.then\(runSave\)/)
+  assert.match(settingsTransport, /let settingsSaveQueue: Promise<unknown> = Promise\.resolve\(\)/)
+  assert.match(settingsTransport, /const queuedSave = settingsSaveQueue\.catch\(\(\) => \{\}\)\.then\(\(\) => saveSettingsOnce\(updates, options\)\)/)
 })
 
 await runTest('reset data and factory reset use guarded bounded actions', () => {

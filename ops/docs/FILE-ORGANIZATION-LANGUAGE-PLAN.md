@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 819 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 820 in this file.
 
 ## Goal
 
@@ -8832,6 +8832,29 @@ Decision rule:
   broad UI, public portal, receipt rollback, loyalty rollback, settings
   rollback, and post-live hygiene.
 - Current plan position after Move 819: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 820: Route legacy Settings API calls through typed transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup and Phase 8.4
+  settings-save stability. `frontend/src/api/settingsTransport.ts` is now the
+  single implementation owner for Settings reads and writes.
+- Code-flow slice: `frontend/src/api/methods.ts` lazy-loads the typed settings
+  transport for `getSettings` and `saveSettings` instead of carrying duplicate
+  untyped conflict retry, inline `updatedAt`, local mirror, and refresh-channel
+  logic.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` now verifies
+  that the settings transport owns `/api/settings`, the legacy registry
+  lazy-loads that transport, the registry does not duplicate the settings read
+  implementation, and `/api/settings/meta` is not reintroduced.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  check:jsx`, `npm.cmd --prefix frontend run build`, and `npm.cmd --prefix ops
+  run phase84:settings-save-rollback` passed.
+- Current plan position after Move 820: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

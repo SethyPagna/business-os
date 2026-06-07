@@ -23,6 +23,7 @@ let importJobsTransportPromise = null
 let productWriteTransportPromise = null
 let rfidTransportPromise = null
 let salesTransportPromise = null
+let settingsTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -104,6 +105,11 @@ function loadSalesTransport() {
   return salesTransportPromise
 }
 
+function loadSettingsTransport() {
+  if (!settingsTransportPromise) settingsTransportPromise = import('./settingsTransport.ts')
+  return settingsTransportPromise
+}
+
 async function buildImportCsvTemplate(headers, filename) {
   const { buildCSVTemplate } = await loadCsvTemplateModule()
   return buildCSVTemplate(headers, filename)
@@ -112,21 +118,6 @@ async function buildImportCsvTemplate(headers, filename) {
 async function getLocalDb() {
   const { dexieDb } = await loadLocalDbModule()
   return dexieDb
-}
-
-async function localGetSettings() {
-  const { localGetSettings: readSettings } = await loadLocalDbModule()
-  return readSettings()
-}
-
-async function localSaveSettings(updates) {
-  const { localSaveSettings: writeSettings } = await loadLocalDbModule()
-  return writeSettings(updates)
-}
-
-async function localSaveSettingsMeta(updatedAt) {
-  const { localSaveSettingsMeta: writeSettingsMeta } = await loadLocalDbModule()
-  return writeSettingsMeta(updatedAt)
 }
 
 /**
@@ -140,9 +131,7 @@ import {
   apiFetch,
   route,
   getSyncServerUrl,
-  cacheInvalidate,
   cacheClearAll,
-  isWriteConflictError,
   isInvalidSessionError,
   isServerOnline,
 } from './http.ts'
@@ -152,10 +141,9 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { refreshAppData } from '../utils/appRefresh.ts'
 import {
   CATEGORY_REFRESH_CHANNELS,
-  getSettingsRefreshChannels,
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
-import { buildAttemptedReturnItems, buildAttemptedSettings } from './conflicts.ts'
+import { buildAttemptedReturnItems } from './conflicts.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import {
@@ -253,7 +241,7 @@ import {
 import {
   clearCachedQueryResults,
 } from './queryCache.ts'
-import { withExpectedUpdatedAt, withSettingsExpectedUpdatedAt } from './expectedUpdatedAt.ts'
+import { withExpectedUpdatedAt } from './expectedUpdatedAt.ts'
 import { mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored } from './localMirrors.ts'
 import {
   DISCARD_SYNC_UPDATE_CHANNELS,
@@ -539,87 +527,13 @@ export const getCurrentOrganization = () =>
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 export async function getSettings(options = {}) {
-  if (options?.force) {
-    cacheInvalidate('settings')
-  }
-  return routeMirrored('settings:get', async () => {
-    const settingsResponse = await apiFetch('GET', '/api/settings')
-    const {
-      updatedAt: inlineUpdatedAt,
-      ...settings
-    } = settingsResponse || {}
-    if (inlineUpdatedAt) {
-      await localSaveSettingsMeta(inlineUpdatedAt).catch(() => {})
-    }
-    return settings
-  }, localGetSettings, async (settings) => {
-    await localSaveSettings(settings)
-    return settings
-  })
+  const { getSettings: getSettingsRequest } = await loadSettingsTransport()
+  return getSettingsRequest(options)
 }
-let settingsSaveQueue = Promise.resolve()
 
 export async function saveSettings(updates, options = {}) {
-  const runSave = async () => {
-    const attempted = buildAttemptedSettings(updates)
-    const refreshChannels = getSettingsRefreshChannels(attempted, options?.refreshChannels)
-    const refreshDetail = {
-      reason: String(options?.reason || 'settings-saved').trim() || 'settings-saved',
-      source: String(options?.source || 'settings:save').trim() || 'settings:save',
-    }
-    let payload = options?.skipExpectedUpdatedAt ? { ...updates } : await withSettingsExpectedUpdatedAt(updates)
-    try {
-      const result = await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true)
-      if (result?.updatedAt) {
-        await localSaveSettingsMeta(result.updatedAt).catch(() => {})
-      }
-      await localSaveSettings(updates).catch(() => {})
-      refreshAppData(refreshChannels, refreshDetail)
-      return result
-    } catch (error) {
-      const attemptedSettings = error?.attempted || attempted
-      const attemptedKeys = Object.keys(attemptedSettings || {})
-      if (
-        isWriteConflictError(error)
-        && error?.actualUpdatedAt
-        && attemptedKeys.length > 0
-        && attemptedKeys.length <= 2
-      ) {
-        let nextExpectedUpdatedAt = error.actualUpdatedAt
-        for (let retryAttempt = 0; retryAttempt < 3 && nextExpectedUpdatedAt; retryAttempt += 1) {
-          const retryPayload = {
-            ...attemptedSettings,
-            expectedUpdatedAt: nextExpectedUpdatedAt,
-          }
-          try {
-            const retryResult = await route('settings:save', () => apiFetch('POST', '/api/settings', retryPayload), null, true)
-            if (retryResult?.updatedAt) {
-              await localSaveSettingsMeta(retryResult.updatedAt).catch(() => {})
-            }
-            await localSaveSettings(attemptedSettings).catch(() => {})
-            refreshAppData(refreshChannels, refreshDetail)
-            return retryResult
-          } catch (retryError) {
-            error = retryError
-            if (!isWriteConflictError(retryError) || !retryError?.actualUpdatedAt) break
-            nextExpectedUpdatedAt = retryError.actualUpdatedAt
-          }
-        }
-      }
-      error.attempted = error?.attempted || attemptedSettings
-      if (error?.actualUpdatedAt) {
-        await localSaveSettingsMeta(error.actualUpdatedAt).catch(() => {})
-      }
-      if (error?.currentSettings && typeof error.currentSettings === 'object') {
-        await localSaveSettings(error.currentSettings).catch(() => {})
-      }
-      throw error
-    }
-  }
-
-  const queuedSave = settingsSaveQueue.catch(() => {}).then(runSave)
-  settingsSaveQueue = queuedSave.catch(() => {})
-  return queuedSave
+  const { saveSettings: saveSettingsRequest } = await loadSettingsTransport()
+  return saveSettingsRequest(updates, options)
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────

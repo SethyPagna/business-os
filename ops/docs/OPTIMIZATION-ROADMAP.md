@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 819.
+- Latest completed implementation move in this roadmap: Move 820.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12857,6 +12857,30 @@ Move 819 status:
   `ops/runtime/reports/phase84-settings-save-rollback-check-2026-06-07T00-47-55-940Z/report.json`
   and `ops/runtime/reports/phase84-live-suite-latest.json`.
 - Current plan position after Move 819: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 820 status:
+- Move 820 continues the typed API split by routing legacy Settings calls
+  through `frontend/src/api/settingsTransport.ts`. `frontend/src/api/methods.ts`
+  now lazy-loads the typed transport for `getSettings` and `saveSettings`
+  instead of carrying duplicate untyped settings read/save, conflict retry,
+  local mirror, and refresh-channel code.
+- The source guard now protects the new boundary: `settingsTransport.ts` owns
+  the `/api/settings` read, the legacy registry lazy-loads that typed
+  transport, the registry does not duplicate the settings read logic, and
+  `/api/settings/meta` remains blocked as a startup waterfall.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  check:jsx`, `npm.cmd --prefix frontend run build`, and `npm.cmd --prefix ops
+  run phase84:settings-save-rollback` passed. The production build kept
+  `settings-api` as a small 2.10 KB chunk and reduced the legacy settings
+  logic in `app-api-methods`.
+- Runtime/live proof:
+  `ops/runtime/reports/phase84-settings-save-rollback-check-2026-06-07T01-27-43-770Z/report.json`.
+- Current plan position after Move 820: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

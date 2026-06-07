@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-07T00:52:24.383Z
+Generated: 2026-06-07T01:34:41.774Z
 
 ## Summary
 
@@ -63,24 +63,24 @@ Generated: 2026-06-07T00:52:24.383Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 12864 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 12888 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 8928 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8858 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 8881 | ops/docs |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 7625 | ops/docs/reference |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
 | frontend/src/components/inventory/Inventory.tsx | 4006 | frontend/components/inventory |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/src/components/catalog/CatalogPage.tsx | 3623 | frontend/components/catalog |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3435 | ops/docs/reference |
-| frontend/tests/performanceLoadingUx.test.ts | 3271 | frontend/tests/performanceLoadingUx.test.ts |
-| ops/docs/reference/PHASE29-AUDIT.json | 3263 | ops/docs/reference |
-| ops/docs/OPTIMIZATION-STATUS.md | 2855 | ops/docs |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3432 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3418 | ops/docs/reference |
+| frontend/tests/performanceLoadingUx.test.ts | 3274 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/OPTIMIZATION-STATUS.md | 2891 | ops/docs |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
 | frontend/src/components/products/Products.tsx | 2553 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2453 | frontend/components/pos |
 | backend/src/routes/products.ts | 2277 | backend/routes |
-| ops/docs/reference/PERFORMANCE-SCAN.md | 2179 | ops/docs/reference |
+| ops/docs/reference/PERFORMANCE-SCAN.md | 2203 | ops/docs/reference |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2148 | backend/db |
@@ -100,7 +100,7 @@ Generated: 2026-06-07T00:52:24.383Z
 | --- | --- | --- |
 | frontend/src/components/products/Products.tsx | 55 | frontend/components/products |
 | frontend/src/components/inventory/Inventory.tsx | 46 | frontend/components/inventory |
-| frontend/src/api/methods.ts | 41 | frontend/api |
+| frontend/src/api/methods.ts | 42 | frontend/api |
 | frontend/src/components/pos/POS.tsx | 38 | frontend/components/pos |
 | frontend/src/web-api.ts | 36 | frontend/src/web-api.ts |
 | frontend/src/App.tsx | 29 | frontend/src/App.tsx |

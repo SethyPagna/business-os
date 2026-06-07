@@ -66,15 +66,39 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1543 | 104.6 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
 | `backend/src/routes/portal.ts` | 1407 | 51.5 |
-| `frontend/src/api/methods.ts` | 1390 | 55.1 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `frontend/src/web-api.ts` | 1328 | 52.2 |
+| `frontend/src/components/users/UserProfileModal.tsx` | 1326 | 68.2 |
 
 ## 4. Largest Built Chunks
 
 | Asset | Size (KB) |
 |---|---:|
-| _No build output found_ | - |
+| `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
+| `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
+| `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
+| `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
+| `frontend/dist/assets/index-DbL1XvZE.css` | 154.8 |
+| `frontend/dist/assets/Inventory-pRtOAI-U.js` | 129.8 |
+| `frontend/dist/assets/catalog-1yYfxVm5.js` | 124.6 |
+| `frontend/dist/assets/Products-bMkOPD1s.js` | 85.0 |
+| `frontend/dist/assets/POS-B9z4_c_y.js` | 74.8 |
+| `frontend/dist/assets/catalog-editor-D4CsvGu6.js` | 73.9 |
+| `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
+| `frontend/dist/assets/BulkImportModal-u4MaQNVH.js` | 67.8 |
+| `frontend/dist/assets/AdminRoot-BtxgBy-y.js` | 62.6 |
+| `frontend/dist/assets/Dashboard-cv-cnmNK.js` | 62.1 |
+| `frontend/dist/assets/app-shared-BRwFDzi7.js` | 55.9 |
+| `frontend/dist/assets/Settings-B1lEm-an.js` | 54.8 |
+| `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
+| `frontend/dist/assets/Backup-B9UcENyI.js` | 51.2 |
+| `frontend/dist/assets/user-profile-modal-CLC9Fpo1.js` | 43.7 |
+| `frontend/dist/assets/ReceiptSettings-DxKJt3NF.js` | 40.1 |
+| `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
+| `frontend/dist/assets/catalog-secondary-tabs-BU0R8ffD.js` | 37.3 |
+| `frontend/dist/assets/Sales-B-707IRK.js` | 36.8 |
+| `frontend/dist/assets/ProductForm-DZ78w6Nl.js` | 35.8 |
+| `frontend/dist/assets/AuditLog-DneJIRcF.js` | 35.6 |
 
 ## 5. Notes
 
