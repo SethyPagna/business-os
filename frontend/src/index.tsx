@@ -209,13 +209,32 @@ const publicCatalogMode = typeof window !== 'undefined'
   ? isPublicCatalogPath(window.location.pathname)
   : false
 
+function InitialShellFallback({ publicMode }: { publicMode: boolean }) {
+  return (
+    <div className="business-os-initial-shell" role="status" aria-live="polite">
+      <div className="business-os-initial-panel">
+        <div className="business-os-initial-brand">
+          <div className="business-os-initial-mark">{publicMode ? 'LE' : 'OS'}</div>
+          <div>
+            <h1 className="business-os-initial-title">{publicMode ? 'Leang Cosmetic' : 'Business OS'}</h1>
+            <p className="business-os-initial-copy">
+              {publicMode ? 'Loading the customer portal...' : 'Loading the workspace securely...'}
+            </p>
+          </div>
+        </div>
+        <div className="business-os-initial-bar" aria-hidden="true" />
+      </div>
+    </div>
+  )
+}
+
 const rootElement = document.getElementById('root')
 if (!rootElement) throw new Error('Missing root element')
 const RootComponent = publicCatalogMode ? PublicCatalogRoot : AdminRoot
 
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
-    <Suspense fallback={null}>
+    <Suspense fallback={<InitialShellFallback publicMode={publicCatalogMode} />}>
       <RootComponent />
     </Suspense>
   </React.StrictMode>

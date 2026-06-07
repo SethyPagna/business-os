@@ -3,6 +3,7 @@ import fs from 'node:fs'
 
 const app = fs.readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const appContext = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+const indexHtml = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8')
 const index = fs.readFileSync(new URL('../src/index.tsx', import.meta.url), 'utf8')
 const webApi = fs.readFileSync(new URL('../src/web-api.ts', import.meta.url), 'utf8')
 const httpApi = fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8')
@@ -219,6 +220,9 @@ assert.match(index, /const FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS = 3000/, 'fo
 assert.match(index, /function scheduleAfterLoadIdle\(task: \(\) => void, idleTimeoutMs: number, fallbackDelayMs: number\)/, 'startup helpers should share an after-load idle scheduler')
 assert.match(index, /scheduleAfterLoadIdle\(\s*\(\) => \{ register\(\)\.catch\(\(\) => \{\}\) \},\s*SERVICE_WORKER_REGISTER_IDLE_TIMEOUT_MS,\s*SERVICE_WORKER_REGISTER_FALLBACK_DELAY_MS,\s*\)/, 'service worker registration should use the after-load idle scheduler')
 assert.match(index, /scheduleAfterLoadIdle\(\s*installFormFieldAccessibility,\s*FORM_FIELD_ACCESSIBILITY_IDLE_TIMEOUT_MS,\s*FORM_FIELD_ACCESSIBILITY_FALLBACK_DELAY_MS,\s*\)/, 'form field accessibility scan should use the after-load idle scheduler')
+assert.match(indexHtml, /<style data-business-os-initial-shell>[\s\S]*\.business-os-initial-shell[\s\S]*Loading the workspace securely\.\.\./, 'index html should paint an immediate static startup shell before JavaScript loads')
+assert.match(index, /function InitialShellFallback\(\{ publicMode \}: \{ publicMode: boolean \}\)[\s\S]*publicMode \? 'Leang Cosmetic' : 'Business OS'/, 'lazy root loading should keep the startup shell visible while route chunks load')
+assert.match(index, /<Suspense fallback=\{<InitialShellFallback publicMode=\{publicCatalogMode\} \/>\}>/, 'root suspense fallback should not clear the static startup shell to a blank page')
 assert.match(index, /ReactDOM\.createRoot\(rootElement\)\.render\([\s\S]*\)\s*\n\s*registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)/, 'React should render before startup maintenance jobs are scheduled')
 assert.doesNotMatch(index, /registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)\s*\n\s*const publicCatalogMode/, 'startup maintenance jobs should not be scheduled before root render setup')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000/, 'offline queue and snapshot maintenance should stay out of the first-load network window')
