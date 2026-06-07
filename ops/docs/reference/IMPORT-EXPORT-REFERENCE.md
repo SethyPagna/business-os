@@ -282,7 +282,7 @@ Code files documented: **645**
 | 270 | `frontend/src/api/query.ts` | 0 | 3 | 0 | 21 |
 | 271 | `frontend/src/api/queryCache.ts` | 1 | 4 | 1 | 5 |
 | 272 | `frontend/src/api/requestIds.ts` | 0 | 2 | 0 | 5 |
-| 273 | `frontend/src/api/returnsTransport.ts` | 8 | 5 | 8 | 6 |
+| 273 | `frontend/src/api/returnsTransport.ts` | 8 | 5 | 8 | 5 |
 | 274 | `frontend/src/api/rfidTransport.ts` | 3 | 7 | 3 | 2 |
 | 275 | `frontend/src/api/salesTransport.ts` | 7 | 6 | 7 | 4 |
 | 276 | `frontend/src/api/saleWriteTransport.ts` | 3 | 2 | 2 | 4 |
@@ -408,7 +408,7 @@ Code files documented: **645**
 | 396 | `frontend/src/components/returns/NewReturnModal.tsx` | 7 | 1 | 6 | 1 |
 | 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 8 | 1 | 7 | 1 |
 | 398 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 2 | 1 | 2 | 1 |
-| 399 | `frontend/src/components/returns/Returns.tsx` | 23 | 1 | 18 | 1 |
+| 399 | `frontend/src/components/returns/Returns.tsx` | 22 | 1 | 17 | 1 |
 | 400 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 3 | 1 | 0 | 1 |
 | 401 | `frontend/src/components/sales/ExportModal.tsx` | 8 | 1 | 3 | 1 |
 | 402 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 | 1 | 3 | 1 |
@@ -5780,13 +5780,12 @@ Code files documented: **645**
   - `frontend/src/api/query.ts`
   - `frontend/src/api/requestIds.ts`
   - `frontend/src/utils/deviceInfo.ts`
-- Referenced by (6)
+- Referenced by (5)
   - `frontend/src/api/methods.ts`
   - `frontend/src/components/inventory/Inventory.tsx`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.tsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`
-  - `frontend/src/components/returns/Returns.tsx`
 
 ### 3.274 `frontend/src/api/rfidTransport.ts`
 
@@ -8305,9 +8304,8 @@ Code files documented: **645**
 ### 3.399 `frontend/src/components/returns/Returns.tsx`
 
 - Declared exports: `function`
-- Imports (23)
+- Imports (22)
   - `../../AppContext.tsx`
-  - `../../api/returnsTransport.ts`
   - `../../utils/actionGuards.ts`
   - `../../utils/actionHistory.ts`
   - `../../utils/csv.ts`
@@ -8329,9 +8327,8 @@ Code files documented: **645**
   - `lucide-react/dist/esm/icons/search.js`
   - `lucide-react/dist/esm/icons/undo-2.js`
   - `react`
-- Internal dependencies (18)
+- Internal dependencies (17)
   - `frontend/src/AppContext.tsx`
-  - `frontend/src/api/returnsTransport.ts`
   - `frontend/src/components/returns/EditReturnModal.tsx`
   - `frontend/src/components/returns/NewReturnModal.tsx`
   - `frontend/src/components/returns/NewSupplierReturnModal.tsx`

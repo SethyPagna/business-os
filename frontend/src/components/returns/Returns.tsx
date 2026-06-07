@@ -21,7 +21,11 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { getReturns as fetchReturns } from '../../api/returnsTransport.ts'
+import {
+  getReturn as fetchReturnDetail,
+  getReturns as fetchReturns,
+  updateReturn as updateReturnRequest,
+} from '../../api/returnsTransport.ts'
 const ReturnDetailModal = lazy(() => import('./ReturnDetailModal'))
 const EditReturnModal = lazy(() => import('./EditReturnModal'))
 const NewReturnModal = lazy(() => import('./NewReturnModal'))
@@ -125,11 +129,6 @@ interface ReturnSection {
   groups: ReturnGroup[]
 }
 
-interface ReturnApi {
-  getReturn: (id: number | string | null | undefined) => Promise<unknown>
-  updateReturn: (id: number | string, payload: ReturnHistoryPayload) => Promise<unknown>
-}
-
 interface AppContextValue {
   t: (key: string) => string
   fmtUSD: (value: number | string | null | undefined) => string
@@ -147,11 +146,6 @@ interface SyncContextValue {
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
-
-function getReturnApi(): ReturnApi {
-  if (typeof window === 'undefined' || !window.api) throw new Error('Return API is not available.')
-  return window.api as ReturnApi
-}
 
 function normalizeScope(value: unknown): ReturnScope {
   return value === SUPPLIER_SCOPE ? SUPPLIER_SCOPE : CUSTOMER_SCOPE
@@ -402,7 +396,7 @@ export default function Returns() {
     setDetailRet(null)
     try {
       const fresh = await withLoaderTimeout(
-        () => getReturnApi().getReturn(ret.id),
+        () => fetchReturnDetail(ret.id),
         'Return details',
         RETURNS_DETAIL_TIMEOUT_MS,
       )
@@ -444,7 +438,7 @@ export default function Returns() {
     if (!numericId) return cloneHistorySnapshot(fallback || null) as ReturnRow | null
     try {
       const latest = await withLoaderTimeout(
-        () => getReturnApi().getReturn(numericId),
+        () => fetchReturnDetail(numericId),
         'Return snapshot',
         RETURNS_SNAPSHOT_TIMEOUT_MS,
       )
@@ -459,7 +453,7 @@ export default function Returns() {
     if (!beginSingleAction(historyRestoreInFlightRef)) return
     try {
       await withLoaderTimeout(
-        () => getReturnApi().updateReturn(snapshot.id as number | string, {
+        () => updateReturnRequest(snapshot.id as number | string, {
           ...buildReturnHistoryPayload(snapshot),
           notes: historyReason || snapshot.notes || '',
         }),

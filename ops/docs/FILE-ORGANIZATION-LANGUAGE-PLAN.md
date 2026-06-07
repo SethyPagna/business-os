@@ -9639,6 +9639,39 @@ Decision rule:
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
   schema, cleanup, TypeScript, runtime, and performance guardrail.
 
+### Move 843: Route Returns detail and history restore through focused transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. Returns page
+  detail-read, history snapshot-read, and undo/redo restore-write paths now
+  belong to the focused returns transport instead of the broad `window.api`
+  compatibility facade.
+- Code-flow slice: `frontend/src/components/returns/Returns.tsx` now imports
+  `getReturn`, `getReturns`, and `updateReturn` from
+  `frontend/src/api/returnsTransport.ts` directly. The page keeps the same
+  bounded list, detail, snapshot, and restore timeouts while avoiding the broad
+  legacy API registry for return detail and history actions.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` and
+  `frontend/tests/actionStability.test.ts` now reject `getReturnApi`,
+  `window.api`, and broad `api.getReturn`/`api.updateReturn` access returning
+  to the Returns page while proving focused transport ownership and bounded
+  restore behavior.
+- Live proof: the in-app Browser loaded the Vite dev `/returns` route in
+  2609 ms, verified the authenticated Returns empty state and controls
+  rendered, filled the route search input with `codex-no-return-843`, preserved
+  the empty-state result, and recorded zero relevant console errors. Browser
+  screenshot capture timed out through the CDP bridge, so DOM/log/interaction
+  proof is the accepted evidence for this slice.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, the full frontend
+  utility suite, backend utility suite, schema audit, organization audit,
+  generated reference refresh, Phase 29 audit, storage prune, and
+  `git diff --check` passed.
+- Current plan position after Move 843: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
 ## Safety Gates
 
 - No broad folder rename without `rg` proving every old path is updated.

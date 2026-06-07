@@ -408,7 +408,7 @@ Code files scanned: **645**
 | 396 | `frontend/src/components/returns/NewReturnModal.tsx` | 17 |
 | 397 | `frontend/src/components/returns/NewSupplierReturnModal.tsx` | 14 |
 | 398 | `frontend/src/components/returns/ReturnDetailModal.tsx` | 4 |
-| 399 | `frontend/src/components/returns/Returns.tsx` | 12 |
+| 399 | `frontend/src/components/returns/Returns.tsx` | 11 |
 | 400 | `frontend/src/components/returns/ReturnsListSurface.tsx` | 5 |
 | 401 | `frontend/src/components/sales/ExportModal.tsx` | 5 |
 | 402 | `frontend/src/components/sales/SaleDetailModal.tsx` | 4 |
@@ -7662,18 +7662,17 @@ Code files scanned: **645**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getReturnApi` | function | 151 |
-| 2 | `normalizeScope` | function | 156 |
-| 3 | `getReturnTypeKey` | function | 160 |
-| 4 | `getReturnTypeLabel` | function | 166 |
-| 5 | `normalizeFiniteIds` | function | 182 |
-| 6 | `countSelectedIds` | function | 186 |
-| 7 | `countActiveFlags` | function | 194 |
-| 8 | `toNumericAmount` | function | 202 |
-| 9 | `exportReturnRows` | function | 207 |
-| 10 | `getInitialReturnPageSize` | function | 225 |
-| 11 | `Returns` | export default function | 230 |
-| 12 | `promise` | const arrow | 304 |
+| 1 | `normalizeScope` | function | 150 |
+| 2 | `getReturnTypeKey` | function | 154 |
+| 3 | `getReturnTypeLabel` | function | 160 |
+| 4 | `normalizeFiniteIds` | function | 176 |
+| 5 | `countSelectedIds` | function | 180 |
+| 6 | `countActiveFlags` | function | 188 |
+| 7 | `toNumericAmount` | function | 196 |
+| 8 | `exportReturnRows` | function | 201 |
+| 9 | `getInitialReturnPageSize` | function | 219 |
+| 10 | `Returns` | export default function | 224 |
+| 11 | `promise` | const arrow | 298 |
 
 ### 3.400 `frontend/src/components/returns/ReturnsListSurface.tsx`
 

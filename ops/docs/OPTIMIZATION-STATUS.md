@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 842, route customer-return edit updates through focused lazy returns transport.
+- Latest completed move: Move 843, route Returns page detail and history restore through focused returns transport.
 
 ## Current Baseline
 

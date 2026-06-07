@@ -162,10 +162,12 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(newReturn, /finally \{[\s\S]*finishSingleAction\(searchInFlightRef\)[\s\S]*setSearching\(false\)/)
   assert.match(returns, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(returns, /const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000/)
+  assert.match(returns, /getReturn as fetchReturnDetail[\s\S]*getReturns as fetchReturns[\s\S]*updateReturn as updateReturnRequest[\s\S]*from '\.\.\/\.\.\/api\/returnsTransport\.ts'/)
   assert.match(returns, /const historyRestoreInFlightRef = useRef\(false\)/)
   assert.match(returns, /if \(!beginSingleAction\(historyRestoreInFlightRef\)\) return/)
-  assert.match(returns, /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.updateReturn\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/)
+  assert.match(returns, /withLoaderTimeout\(\s*\(\) => updateReturnRequest\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/)
   assert.match(returns, /finally \{[\s\S]*finishSingleAction\(historyRestoreInFlightRef\)/)
+  assert.doesNotMatch(returns, /getReturnApi|window\.api|api\.(?:getReturn|updateReturn)/)
 
   assert.match(methods, /export async function createReturn\(d\) \{[\s\S]*loadReturnsTransport\(\)/)
   assert.match(methods, /export async function createSupplierReturn\(d\) \{[\s\S]*loadReturnsTransport\(\)/)

@@ -1752,8 +1752,8 @@ assert.match(
 )
 assert.match(
   returns,
-  /import \{ getReturns as fetchReturns \} from '\.\.\/\.\.\/api\/returnsTransport\.ts'/,
-  'returns route-start list reads should use the focused returns transport instead of app-api-methods',
+  /getReturn as fetchReturnDetail[\s\S]*getReturns as fetchReturns[\s\S]*updateReturn as updateReturnRequest[\s\S]*from '\.\.\/\.\.\/api\/returnsTransport\.ts'/,
+  'returns list/detail/restore paths should use the focused returns transport instead of app-api-methods',
 )
 assert.match(
   returns,
@@ -1767,18 +1767,23 @@ assert.doesNotMatch(
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getReturn\(ret\.id\),\s*'Return details',\s*RETURNS_DETAIL_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => fetchReturnDetail\(ret\.id\),\s*'Return details',\s*RETURNS_DETAIL_TIMEOUT_MS,\s*\)/,
   'return details should timeout slow detail reads',
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.getReturn\(numericId\),\s*'Return snapshot',\s*RETURNS_SNAPSHOT_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => fetchReturnDetail\(numericId\),\s*'Return snapshot',\s*RETURNS_SNAPSHOT_TIMEOUT_MS,\s*\)/,
   'return snapshot should timeout slow history snapshot reads',
 )
 assert.match(
   returns,
-  /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.updateReturn\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => updateReturnRequest\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/,
   'return history undo/redo restore should timeout slow return writes',
+)
+assert.doesNotMatch(
+  returns,
+  /getReturnApi|window\.api|api\.(?:getReturn|updateReturn)/,
+  'returns details and history restore should not wake the broad window.api registry',
 )
 assert.match(
   returns,

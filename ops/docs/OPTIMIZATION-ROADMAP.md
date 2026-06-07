@@ -13535,3 +13535,32 @@ Move 842 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 843 status:
+- Move 843 routes the Returns page detail-read, history snapshot-read, and
+  undo/redo restore-write paths through focused returns transport instead of
+  the broad `window.api` compatibility facade.
+- `frontend/src/components/returns/Returns.tsx` now imports `getReturn`,
+  `getReturns`, and `updateReturn` from
+  `frontend/src/api/returnsTransport.ts` directly. This preserves the same
+  bounded list, detail, snapshot, and restore timeouts while avoiding the broad
+  legacy API registry for return detail and history actions.
+- Source guardrails now reject `getReturnApi`, `window.api`, and broad
+  `api.getReturn`/`api.updateReturn` access returning to the Returns page
+  while still proving focused transport ownership and bounded restore behavior.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, full frontend
+  utility suite, backend utility suite, schema audit, organization audit,
+  generated reference refresh, Phase 29 audit, storage prune,
+  `git diff --check`, and in-app Browser DOM/log/interaction checks passed.
+  Browser proof loaded the Vite dev `/returns` route in 2609 ms, verified the
+  authenticated Returns empty state and controls rendered, filled the route
+  search input with `codex-no-return-843`, preserved the empty-state result,
+  and recorded zero relevant console errors. Browser screenshot capture timed
+  out through the CDP bridge, so DOM/log/interaction proof is the accepted live
+  evidence for this slice.
+- Current plan position after Move 843: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
