@@ -596,7 +596,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const canProbeServerSession = typeof window !== 'undefined' && typeof getAppApi().getAppBootstrap === 'function'
     if (hasStoredSession && canProbeServerSession) return false
     if (hasStoredSession) return true
-    if (canProbeServerSession) return false
+    if (canProbeServerSession) return true
     return true
   })
   // Initialize from actual WS state to avoid showing a disconnected badge
