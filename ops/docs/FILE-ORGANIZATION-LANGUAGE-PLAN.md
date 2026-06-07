@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 835 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 836 in this file.
 
 ## Goal
 
@@ -9381,6 +9381,44 @@ Decision rule:
   Storage prune removed 0 bytes because retention policies were already
   satisfied.
 - Current plan position after Move 835: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 836: Route Custom Tables through focused transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The dormant Custom
+  Tables surface now owns its focused API transport directly instead of
+  depending on the broad legacy API facade.
+- Code-flow slice: `frontend/src/components/custom-tables/CustomTables.tsx`
+  lazy-loads `frontend/src/api/customTablesTransport.ts` only when the
+  component is opened. Reads, creates, row inserts, row updates, row deletes,
+  undo, and redo all continue through the existing bounded loader/action
+  guards.
+- Cleanup slice: `frontend/src/api/methods.ts` no longer keeps custom-table
+  compatibility wrappers or a custom-table transport loader. The focused
+  transport stays available for any future routed Custom Tables page.
+- Guardrail slice: source tests now reject `window.api`/`getCustomTablesApi`
+  use in the component and reject custom-table wrappers returning to the
+  legacy registry.
+- Build slice: production build emitted `app-api-methods` at 24.42 KB, down
+  from 25.24 KB in Move 835. No custom-table API asset was emitted or preloaded
+  because the Custom Tables component is not part of the active routed bundle.
+- Verification proof: focused API/performance/action-stability tests,
+  standalone frontend typecheck, JSX/source check, full frontend utility
+  suite, frontend production build, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The in-app Browser path was attempted first but
+  remains blocked locally by the kernel asset path error; repo Playwright
+  checks supplied browser proof with 66 UI signals, zero relevant console
+  messages, 20 public portal products, zero failed responses/page errors, and
+  passing post-live hygiene. Storage prune removed 321,677 bytes of stale
+  retained report directories while preserving uploads, secrets, env files,
+  Docker volumes, active images, newest local backup sets, and the newest R2
+  backup.
+- Current plan position after Move 836: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

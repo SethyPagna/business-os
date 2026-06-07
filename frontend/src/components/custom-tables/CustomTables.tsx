@@ -50,28 +50,49 @@ type SyncContextValue = {
     channel?: string
   } | null
 }
-type CustomTablesApi = {
-  getCustomTables?: () => Promise<unknown>
-  createCustomTable?: (payload: Record<string, unknown>) => Promise<unknown>
-  getCustomTableData?: (payload: { tableName: string }) => Promise<unknown>
-  insertCustomRow?: (payload: { tableName: string; data: Record<string, unknown> }) => Promise<unknown>
-  updateCustomRow?: (payload: {
-    tableName: string
-    id: string | number | undefined
-    data: Record<string, unknown>
-    expectedUpdatedAt?: string
-  }) => Promise<unknown>
-  deleteCustomRow?: (payload: {
-    tableName: string
-    id: string | number
-    payload: Record<string, unknown>
-  }) => Promise<unknown>
-}
+type CustomTablesApi = typeof import('../../api/customTablesTransport.ts')
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
 type HistoryResultInput = Parameters<typeof extractHistoryResultId>[0]
 
-function getCustomTablesApi(): CustomTablesApi {
-  return (window as Window & { api?: CustomTablesApi }).api || {}
+let customTablesApiPromise: Promise<CustomTablesApi> | null = null
+
+function loadCustomTablesApi(): Promise<CustomTablesApi> {
+  if (!customTablesApiPromise) customTablesApiPromise = import('../../api/customTablesTransport.ts')
+  return customTablesApiPromise
+}
+
+function getCustomTablesRequest(): Promise<unknown> {
+  return loadCustomTablesApi().then((api) => api.getCustomTables())
+}
+
+function createCustomTableRequest(payload: Record<string, unknown>): Promise<unknown> {
+  return loadCustomTablesApi().then((api) => api.createCustomTable(payload))
+}
+
+function getCustomTableDataRequest(tableName: string): Promise<unknown> {
+  return loadCustomTablesApi().then((api) => api.getCustomTableData({ tableName }))
+}
+
+function insertCustomRowRequest(tableName: string, data: Record<string, unknown>): Promise<unknown> {
+  return loadCustomTablesApi().then((api) => api.insertCustomRow({ tableName, data }))
+}
+
+function updateCustomRowRequest(
+  tableName: string,
+  id: string | number | undefined,
+  data: Record<string, unknown>,
+  expectedUpdatedAt?: string,
+): Promise<unknown> {
+  if (id === undefined) return Promise.reject(new Error('Missing custom row id'))
+  return loadCustomTablesApi().then((api) => api.updateCustomRow({ tableName, id, data, expectedUpdatedAt }))
+}
+
+function deleteCustomRowRequest(
+  tableName: string,
+  id: string | number,
+  payload: Record<string, unknown> = {},
+): Promise<unknown> {
+  return loadCustomTablesApi().then((api) => api.deleteCustomRow({ tableName, id, payload }))
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -197,7 +218,7 @@ export default function CustomTables() {
     setTablesError('')
     try {
       const nextTables = await withLoaderTimeout(
-        () => getCustomTablesApi().getCustomTables?.(),
+        () => getCustomTablesRequest(),
         'Custom tables',
         CUSTOM_TABLES_LOAD_TIMEOUT_MS,
       )
@@ -238,7 +259,7 @@ export default function CustomTables() {
     setRowsError('')
     try {
       const rows = await withLoaderTimeout(
-        () => getCustomTablesApi().getCustomTableData?.({ tableName }),
+        () => getCustomTableDataRequest(tableName),
         `Custom table ${tableName}`,
         CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS,
       )
@@ -325,7 +346,7 @@ export default function CustomTables() {
         })),
       }
       const result = await withLoaderTimeout(
-        () => getCustomTablesApi().createCustomTable?.(payload),
+        () => createCustomTableRequest(payload),
         'Create custom table',
         CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
       )
@@ -353,19 +374,14 @@ export default function CustomTables() {
       let nextRow: unknown = null
       if (rowModal === 'create') {
         nextRow = await withLoaderTimeout(
-          () => getCustomTablesApi().insertCustomRow?.({ tableName: activeTable.name, data: payload }),
+          () => insertCustomRowRequest(activeTable.name, payload),
           `Add row to ${activeTable.display_name || activeTable.name}`,
           CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
         )
         notify(t('row_added') || 'Row added')
       } else {
         nextRow = await withLoaderTimeout(
-          () => getCustomTablesApi().updateCustomRow?.({
-            tableName: activeTable.name,
-            id: editingRow?.id,
-            data: payload,
-            expectedUpdatedAt: editingRow?.updated_at || undefined,
-          }),
+          () => updateCustomRowRequest(activeTable.name, editingRow?.id, payload, editingRow?.updated_at || undefined),
           `Update row in ${activeTable.display_name || activeTable.name}`,
           CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
         )
@@ -382,11 +398,7 @@ export default function CustomTables() {
             label: `Add row to ${activeTable.display_name || activeTable.name}`,
             undo: async () => {
               await withLoaderTimeout(
-                () => getCustomTablesApi().deleteCustomRow?.({
-                  tableName: activeTable.name,
-                  id: createdRowId,
-                  payload: {},
-                }),
+                () => deleteCustomRowRequest(activeTable.name, createdRowId),
                 `Undo add row in ${activeTable.display_name || activeTable.name}`,
                 CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
               )
@@ -394,7 +406,7 @@ export default function CustomTables() {
             },
             redo: async () => {
               const redoResult = await withLoaderTimeout(
-                () => getCustomTablesApi().insertCustomRow?.({ tableName: activeTable.name, data: buildRowPayload(activeSchema, createdSnapshot) }),
+                () => insertCustomRowRequest(activeTable.name, buildRowPayload(activeSchema, createdSnapshot)),
                 `Redo add row in ${activeTable.display_name || activeTable.name}`,
                 CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
               )
@@ -409,11 +421,7 @@ export default function CustomTables() {
           label: `Edit row in ${activeTable.display_name || activeTable.name}`,
           undo: async () => {
             await withLoaderTimeout(
-              () => getCustomTablesApi().updateCustomRow?.({
-                tableName: activeTable.name,
-                id: previousSnapshot.id,
-                data: buildRowPayload(activeSchema, previousSnapshot),
-              }),
+              () => updateCustomRowRequest(activeTable.name, previousSnapshot.id, buildRowPayload(activeSchema, previousSnapshot)),
               `Undo row edit in ${activeTable.display_name || activeTable.name}`,
               CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
             )
@@ -421,11 +429,7 @@ export default function CustomTables() {
           },
           redo: async () => {
             await withLoaderTimeout(
-              () => getCustomTablesApi().updateCustomRow?.({
-                tableName: activeTable.name,
-                id: nextSnapshot.id,
-                data: buildRowPayload(activeSchema, nextSnapshot),
-              }),
+              () => updateCustomRowRequest(activeTable.name, nextSnapshot.id, buildRowPayload(activeSchema, nextSnapshot)),
               `Redo row edit in ${activeTable.display_name || activeTable.name}`,
               CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
             )
@@ -451,11 +455,7 @@ export default function CustomTables() {
     try {
       const row = cloneHistorySnapshot(tableData.find((entry) => Number(entry.id) === Number(id))) as CustomRow | null
       await withLoaderTimeout(
-        () => getCustomTablesApi().deleteCustomRow?.({
-          tableName: activeTable.name,
-          id,
-          payload: { expectedUpdatedAt: row?.updated_at || undefined },
-        }),
+        () => deleteCustomRowRequest(activeTable.name, id, { expectedUpdatedAt: row?.updated_at || undefined }),
         `Delete row from ${activeTable.display_name || activeTable.name}`,
         CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
       )
@@ -466,7 +466,7 @@ export default function CustomTables() {
           label: `Delete row from ${activeTable.display_name || activeTable.name}`,
           undo: async () => {
             const undoResult = await withLoaderTimeout(
-              () => getCustomTablesApi().insertCustomRow?.({ tableName: activeTable.name, data: buildRowPayload(activeSchema, row) }),
+              () => insertCustomRowRequest(activeTable.name, buildRowPayload(activeSchema, row)),
               `Undo delete row from ${activeTable.display_name || activeTable.name}`,
               CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
             )
@@ -477,7 +477,7 @@ export default function CustomTables() {
             const targetId = restoredRowId || Number(row.id || 0)
             if (!targetId) return
             await withLoaderTimeout(
-              () => getCustomTablesApi().deleteCustomRow?.({ tableName: activeTable.name, id: targetId, payload: {} }),
+              () => deleteCustomRowRequest(activeTable.name, targetId),
               `Redo delete row from ${activeTable.display_name || activeTable.name}`,
               CUSTOM_TABLE_MUTATION_TIMEOUT_MS,
             )

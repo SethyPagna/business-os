@@ -35,7 +35,6 @@ let queryCacheModulePromise = null
 let localMirrorsModulePromise = null
 let userAdminTransportPromise = null
 let userReadTransportPromise = null
-let customTablesTransportPromise = null
 let clientRuntimeModulePromise = null
 let appRefreshModulePromise = null
 let httpCoreModulePromise = null
@@ -201,11 +200,6 @@ function loadUserAdminTransport() {
 function loadUserReadTransport() {
   if (!userReadTransportPromise) userReadTransportPromise = import('./userReadTransport.ts')
   return userReadTransportPromise
-}
-
-function loadCustomTablesTransport() {
-  if (!customTablesTransportPromise) customTablesTransportPromise = import('./customTablesTransport.ts')
-  return customTablesTransportPromise
 }
 
 function loadClientRuntimeModule() {
@@ -1024,32 +1018,6 @@ export const updateRole = async (id, d) => {
 export const deleteRole = async (id, payload) => {
   const { deleteRole: deleteRoleRequest } = await loadUserAdminTransport()
   return deleteRoleRequest(id, payload)
-}
-
-// ─── Custom tables ────────────────────────────────────────────────────────────
-export const getCustomTables = async () => {
-  const { getCustomTables: getCustomTablesRequest } = await loadCustomTablesTransport()
-  return getCustomTablesRequest()
-}
-export const createCustomTable = async d => {
-  const { createCustomTable: createCustomTableRequest } = await loadCustomTablesTransport()
-  return createCustomTableRequest(d)
-}
-export const getCustomTableData = async ({ tableName }) => {
-  const { getCustomTableData: getCustomTableDataRequest } = await loadCustomTablesTransport()
-  return getCustomTableDataRequest({ tableName })
-}
-export const insertCustomRow = async ({ tableName, data }) => {
-  const { insertCustomRow: insertCustomRowRequest } = await loadCustomTablesTransport()
-  return insertCustomRowRequest({ tableName, data })
-}
-export const updateCustomRow = async ({ tableName, id, data, expectedUpdatedAt }) => {
-  const { updateCustomRow: updateCustomRowRequest } = await loadCustomTablesTransport()
-  return updateCustomRowRequest({ tableName, id, data, expectedUpdatedAt })
-}
-export const deleteCustomRow = async ({ tableName, id, payload }) => {
-  const { deleteCustomRow: deleteCustomRowRequest } = await loadCustomTablesTransport()
-  return deleteCustomRowRequest({ tableName, id, payload })
 }
 
 // ─── Audit log ────────────────────────────────────────────────────────────────

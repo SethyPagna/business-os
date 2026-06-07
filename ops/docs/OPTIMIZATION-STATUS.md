@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 835, retire legacy access-control transport.
+- Latest completed move: Move 836, route Custom Tables through focused transport.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T07-19-19-252Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T08-19-28-772Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T07-20-03-531Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T08-20-09-330Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -78,6 +78,34 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 836 continues the startup/preload cleanup by removing Custom Tables
+  operations from the broad legacy `window.api` compatibility facade. The
+  Custom Tables component now lazy-loads
+  `frontend/src/api/customTablesTransport.ts` directly when that dormant
+  admin surface is opened, and `frontend/src/api/methods.ts` no longer
+  carries custom-table wrappers or a custom-table loader. Build proof:
+  production emitted `app-api-methods` at 24.42 KB after the cleanup, down
+  from 25.24 KB in Move 835, and no custom-table API asset was emitted or
+  preloaded because the Custom Tables component is not part of the active
+  routed bundle.
+- Verification proof: focused API/performance/action-stability source tests,
+  standalone frontend typecheck, JSX/source check, full frontend utility
+  suite, frontend production build, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The in-app Browser path was attempted first but
+  remains blocked locally by the kernel asset path error; repo Playwright
+  checks supplied browser proof with 66 UI signals, zero relevant console
+  messages, 20 public portal products, zero failed responses/page errors, and
+  passing post-live hygiene. Storage prune removed 321,677 bytes of stale
+  retained reports while preserving uploads, secrets, env files, Docker
+  volumes, active images, newest local backup sets, and the newest R2 backup.
+- Current plan position after Move 836: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 835 continues the startup/preload cleanup by retiring the obsolete
   combined access-control wrapper after its behavior was split into narrower

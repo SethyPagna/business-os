@@ -828,7 +828,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.doesNotMatch(source, /import \{ getAppBootstrap as getAppBootstrapRequest \} from '\.\/appBootstrapTransport\.ts'/)
   assert.match(source, /await import\('\.\/appBootstrapTransport\.ts'\)/)
   assert.doesNotMatch(source, /from '\.\/customTablesTransport\.ts'/)
-  assert.match(source, /function loadCustomTablesTransport\(\) \{[\s\S]*import\('\.\/customTablesTransport\.ts'\)/)
+  assert.doesNotMatch(source, /customTablesTransport\.ts|loadCustomTablesTransport|export const getCustomTables|export const createCustomTable|export const getCustomTableData|export const insertCustomRow|export const updateCustomRow|export const deleteCustomRow/)
   assert.doesNotMatch(source, /from '\.\/auditLogTransport\.ts'/)
   assert.match(source, /function loadAuditLogTransport\(\) \{[\s\S]*import\('\.\/auditLogTransport\.ts'\)/)
   assert.doesNotMatch(source, /from '\.\/dashboardTransport\.ts'/)
