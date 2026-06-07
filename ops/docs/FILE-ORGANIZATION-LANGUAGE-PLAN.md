@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 827 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 828 in this file.
 
 ## Goal
 
@@ -9070,6 +9070,49 @@ Decision rule:
   `app-api-methods` to 23.51 KB. The storage prune removed 89,157 bytes of
   stale retained reports.
 - Current plan position after Move 827: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 828: Lazy-load legacy product/read lookup and admin data transports
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused product,
+  lookup, access-control, custom-table, query-cache, and local-mirror modules
+  remain the behavior owners while `frontend/src/api/methods.ts` becomes a
+  lazy facade for the older `window.api` compatibility surface.
+- Code-flow slice: product read wrappers (`getProducts`, `searchProducts`,
+  `getProductBootstrap`, `getProductsByIds`, `getProductFilters`,
+  `getProductLookupUsage`, `replaceProductLookupValues`), category/unit lookup
+  wrappers, Users/Roles wrappers, custom-table wrappers, sync-update cache
+  cleanup, and delayed sensitive mirror purge now resolve memoized dynamic
+  modules only when those flows are used.
+- Build slice: `frontend/vite.config.ts` gives access-control and custom-table
+  operations named `access-control-api` and `custom-tables-api` chunks and
+  excludes them from eager module preload. The existing `product-read-api`
+  chunk stays the focused product/lookup/mirror/cache owner instead of being
+  statically imported by `app-api-methods`.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` verify no static imports from
+  product read, lookup, access-control, custom-table, query-cache, or
+  local-mirror modules remain in the legacy registry, while the focused
+  transports still own their route/mirror/expected-update behavior.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, generated
+  reference refresh, Phase 29 audit, schema audit, organization audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The production build emitted
+  `access-control-api` at 2.07 KB, `custom-tables-api` at 1.28 KB, retained
+  `product-read-api` as a 7.00 KB lazy dependency, and reduced
+  `app-api-methods` from 23.51 KB to 23.26 KB. Inspection of the emitted
+  `app-api-methods-*.js` confirmed no static `import ... from
+  "./product-read-api"` remains; `product-read-api` only appears in the dynamic
+  dependency map for lazy calls. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses, and passed post-live hygiene. The storage prune removed 0
+  bytes because all retention targets were already within policy.
+- Current plan position after Move 828: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

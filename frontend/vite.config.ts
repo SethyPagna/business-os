@@ -157,11 +157,13 @@ const deferredModulePreloadPrefixes = [
   'assets/app-shell-',
   'assets/app-shell-icons-',
   'assets/app-system-',
+  'assets/access-control-api-',
   'assets/action-history-api-',
   'assets/ai-api-',
   'assets/audit-log-api-',
   'assets/branch-api-',
   'assets/contacts-api-',
+  'assets/custom-tables-api-',
   'assets/dashboard-api-',
   'assets/dashboard-export-',
   'assets/drive-sync-api-',
@@ -343,6 +345,8 @@ function manualChunks(id: string): string | undefined {
     ) return 'import-jobs-api'
     if (normalized.endsWith('/src/api/userAdminTransport.ts')) return 'user-admin-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
+    if (normalized.endsWith('/src/api/accessControlTransport.ts')) return 'access-control-api'
+    if (normalized.endsWith('/src/api/customTablesTransport.ts')) return 'custom-tables-api'
     if (normalized.endsWith('/src/api/driveSync.ts')) return 'drive-sync-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'
     if (normalized.includes('/src/components/dashboard/charts/')) return 'dashboard-charts'

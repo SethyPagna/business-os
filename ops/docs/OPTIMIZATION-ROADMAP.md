@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 824.
+- Latest completed implementation move in this roadmap: Move 828.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13057,6 +13057,41 @@ Move 827 status:
   `app-api-methods` to 23.51 KB. The storage prune removed 89,157 bytes of
   stale retained reports.
 - Current plan position after Move 827: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 828 status:
+- Move 828 continues the startup/preload cleanup by lazy-loading legacy product
+  reads, category/unit lookup calls, Users/Roles access-control calls,
+  custom-table calls, sync-update query-cache cleanup, and delayed sensitive
+  mirror purge out of `frontend/src/api/methods.ts`.
+- The focused transports remain the behavior owners:
+  `productReadTransport.ts` for product search/bootstrap/lookup replacement,
+  `lookupTransport.ts` for category/unit route mirroring and expected-update
+  writes, `accessControlTransport.ts` for Users/Roles reads and mutations, and
+  `customTablesTransport.ts` for custom-table row operations.
+- Build wiring adds named `access-control-api` and `custom-tables-api` intent
+  chunks and excludes both from eager module preload. The existing
+  `product-read-api` chunk stays focused and is no longer statically imported
+  by the emitted `app-api-methods` registry.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, generated
+  reference refresh, Phase 29 audit, schema audit, organization audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The production build emitted
+  `access-control-api` at 2.07 KB, `custom-tables-api` at 1.28 KB, retained
+  `product-read-api` as a 7.00 KB lazy dependency, and reduced
+  `app-api-methods` from 23.51 KB to 23.26 KB. Compiled inspection confirmed no
+  static `import ... from "./product-read-api"` remains in `app-api-methods`;
+  `product-read-api` only appears in the dynamic dependency map for lazy calls.
+  The live suite checked 66 UI signals with zero relevant console messages,
+  rendered 20 public portal products with zero failed responses, and passed
+  post-live hygiene. The storage prune removed 0 bytes because all retention
+  targets were already within policy.
+- Current plan position after Move 828: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

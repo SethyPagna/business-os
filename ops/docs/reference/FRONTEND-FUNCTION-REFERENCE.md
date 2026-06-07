@@ -39,7 +39,7 @@ Total files documented: **264**
 | 27 | `frontend/src/api/localDb.ts` | 1 |
 | 28 | `frontend/src/api/localMirrors.ts` | 3 |
 | 29 | `frontend/src/api/lookupTransport.ts` | 4 |
-| 30 | `frontend/src/api/methods.ts` | 160 |
+| 30 | `frontend/src/api/methods.ts` | 166 |
 | 31 | `frontend/src/api/multipartHeaders.ts` | 0 |
 | 32 | `frontend/src/api/notificationSummary.ts` | 1 |
 | 33 | `frontend/src/api/offlineSnapshotTransport.ts` | 7 |
@@ -515,166 +515,172 @@ Total files documented: **264**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `loadPortalTransport` | function | 29 |
-| 2 | `loadSaleWriteTransport` | function | 34 |
-| 3 | `loadCsvTemplateModule` | function | 39 |
-| 4 | `loadBrowserDialogsModule` | function | 44 |
-| 5 | `loadAiTransport` | function | 49 |
-| 6 | `loadActionHistoryTransport` | function | 54 |
-| 7 | `loadAuditLogTransport` | function | 59 |
-| 8 | `loadContactsTransport` | function | 64 |
-| 9 | `loadDashboardTransport` | function | 69 |
-| 10 | `loadFileTransport` | function | 74 |
-| 11 | `loadInventoryWriteTransport` | function | 79 |
-| 12 | `loadImportJobsTransport` | function | 84 |
-| 13 | `loadProductWriteTransport` | function | 89 |
-| 14 | `loadRfidTransport` | function | 94 |
-| 15 | `loadSalesTransport` | function | 99 |
-| 16 | `loadSettingsTransport` | function | 104 |
-| 17 | `loadOfflineSnapshotTransport` | function | 109 |
-| 18 | `loadReturnsTransport` | function | 114 |
-| 19 | `loadPendingSyncTransport` | function | 119 |
-| 20 | `loadDriveSyncTransport` | function | 124 |
-| 21 | `loadNotificationSummaryTransport` | function | 129 |
-| 22 | `loadSystemJobsTransport` | function | 134 |
-| 23 | `buildImportCsvTemplate` | function | 139 |
-| 24 | `loadSystemRuntimeModule` | function | 266 |
-| 25 | `callSystemRuntimeMethod` | function | 271 |
-| 26 | `scheduleSensitiveMirrorPurge` | function | 278 |
-| 27 | `run` | const arrow | 279 |
-| 28 | `invalidateClientRuntimeState` | function | 315 |
-| 29 | `login` | const arrow | 346 |
-| 30 | `logout` | const arrow | 348 |
-| 31 | `resetPasswordWithOtp` | const arrow | 350 |
-| 32 | `requestPasswordResetEmail` | const arrow | 352 |
-| 33 | `completePasswordReset` | const arrow | 354 |
-| 34 | `updateSessionDuration` | const arrow | 356 |
-| 35 | `getVerificationCapabilities` | const arrow | 358 |
-| 36 | `getSystemConfig` | const arrow | 360 |
-| 37 | `getSystemBootstrap` | const arrow | 362 |
-| 38 | `getSystemDebugLog` | const arrow | 368 |
-| 39 | `startGoogleOauth` | const arrow | 370 |
-| 40 | `completeGoogleOauth` | const arrow | 372 |
-| 41 | `unlinkGoogleOauth` | const arrow | 374 |
-| 42 | `getAppBootstrap` | const arrow | 376 |
-| 43 | `getOrganizationBootstrap` | const arrow | 380 |
-| 44 | `searchOrganizations` | const arrow | 382 |
-| 45 | `getCurrentOrganization` | const arrow | 384 |
-| 46 | `getCategories` | const arrow | 399 |
-| 47 | `updateCategory` | const arrow | 406 |
-| 48 | `deleteCategory` | const arrow | 411 |
-| 49 | `getUnits` | const arrow | 418 |
-| 50 | `updateUnit` | const arrow | 425 |
-| 51 | `deleteUnit` | const arrow | 430 |
-| 52 | `getBranches` | const arrow | 437 |
-| 53 | `getBranchSummary` | const arrow | 439 |
-| 54 | `updateBranch` | const arrow | 443 |
-| 55 | `deleteBranch` | const arrow | 445 |
-| 56 | `getBranchStock` | const arrow | 447 |
-| 57 | `getTransfers` | const arrow | 449 |
-| 58 | `getBranchStockIntegrity` | const arrow | 453 |
-| 59 | `getProducts` | const arrow | 459 |
-| 60 | `searchProducts` | const arrow | 461 |
-| 61 | `getProductBootstrap` | const arrow | 463 |
-| 62 | `getProductsByIds` | const arrow | 465 |
-| 63 | `getProductFilters` | const arrow | 467 |
-| 64 | `getProductLookupUsage` | const arrow | 469 |
-| 65 | `replaceProductLookupValues` | const arrow | 471 |
-| 66 | `getPortalSubmissionsForReview` | const arrow | 517 |
-| 67 | `reviewPortalSubmission` | const arrow | 521 |
-| 68 | `getAiProviders` | const arrow | 526 |
-| 69 | `createAiProvider` | const arrow | 530 |
-| 70 | `updateAiProvider` | const arrow | 534 |
-| 71 | `deleteAiProvider` | const arrow | 538 |
-| 72 | `testAiProvider` | const arrow | 542 |
-| 73 | `getAiResponses` | const arrow | 546 |
-| 74 | `createProduct` | const arrow | 550 |
-| 75 | `updateProduct` | const arrow | 554 |
-| 76 | `deleteProduct` | const arrow | 558 |
-| 77 | `otpSetup` | const arrow | 564 |
-| 78 | `otpConfirm` | const arrow | 566 |
-| 79 | `otpDisable` | const arrow | 568 |
-| 80 | `otpVerify` | const arrow | 570 |
-| 81 | `otpStatus` | const arrow | 572 |
-| 82 | `listImportJobs` | const arrow | 590 |
-| 83 | `getImportJobReview` | const arrow | 598 |
-| 84 | `updateImportJobDecisions` | const arrow | 602 |
-| 85 | `startImportJob` | const arrow | 610 |
-| 86 | `approveImportJob` | const arrow | 614 |
-| 87 | `cancelImportJob` | const arrow | 618 |
-| 88 | `retryImportJob` | const arrow | 622 |
-| 89 | `deleteImportJob` | const arrow | 626 |
-| 90 | `getImportQueueStatus` | const arrow | 630 |
-| 91 | `getFiles` | const arrow | 651 |
-| 92 | `deleteFileAsset` | const arrow | 661 |
-| 93 | `getActionHistory` | const arrow | 711 |
-| 94 | `updateActionHistory` | const arrow | 719 |
-| 95 | `getInventorySummary` | const arrow | 731 |
-| 96 | `getInventoryStats` | const arrow | 733 |
-| 97 | `getInventoryBootstrap` | const arrow | 735 |
-| 98 | `searchInventoryProducts` | const arrow | 737 |
-| 99 | `getInventoryMovements` | const arrow | 739 |
-| 100 | `getInventoryReasons` | const arrow | 741 |
-| 101 | `saveInventoryReasons` | const arrow | 743 |
-| 102 | `getRfidStatus` | const arrow | 748 |
-| 103 | `searchRfidTags` | const arrow | 756 |
-| 104 | `recordRfidSessionEvents` | const arrow | 764 |
-| 105 | `applyRfidSession` | const arrow | 772 |
-| 106 | `getSales` | const arrow | 783 |
-| 107 | `getDashboard` | const arrow | 789 |
-| 108 | `getAnalytics` | const arrow | 793 |
-| 109 | `getCustomers` | const arrow | 799 |
-| 110 | `getCustomerPointSummaries` | const arrow | 803 |
-| 111 | `updateCustomer` | const arrow | 811 |
-| 112 | `deleteCustomer` | const arrow | 815 |
-| 113 | `downloadCustomerTemplate` | const arrow | 823 |
-| 114 | `getSuppliers` | const arrow | 829 |
-| 115 | `updateSupplier` | const arrow | 837 |
-| 116 | `deleteSupplier` | const arrow | 841 |
-| 117 | `downloadSupplierTemplate` | const arrow | 849 |
-| 118 | `getDeliveryContacts` | const arrow | 855 |
-| 119 | `updateDeliveryContact` | const arrow | 863 |
-| 120 | `deleteDeliveryContact` | const arrow | 867 |
-| 121 | `getUsers` | const arrow | 877 |
-| 122 | `updateUser` | const arrow | 879 |
-| 123 | `getUserProfile` | const arrow | 880 |
-| 124 | `getUserAuthMethods` | const arrow | 881 |
-| 125 | `updateUserProfile` | const arrow | 883 |
-| 126 | `disconnectUserAuthProvider` | const arrow | 885 |
-| 127 | `changeUserPassword` | const arrow | 887 |
-| 128 | `resetPassword` | const arrow | 889 |
-| 129 | `getRoles` | const arrow | 892 |
-| 130 | `updateRole` | const arrow | 894 |
-| 131 | `deleteRole` | const arrow | 895 |
-| 132 | `getCustomTables` | const arrow | 898 |
-| 133 | `getCustomTableData` | const arrow | 900 |
-| 134 | `insertCustomRow` | const arrow | 901 |
-| 135 | `updateCustomRow` | const arrow | 902 |
-| 136 | `deleteCustomRow` | const arrow | 903 |
-| 137 | `getAuditLogs` | const arrow | 906 |
-| 138 | `deleteAuditLogsRetention` | const arrow | 911 |
-| 139 | `getIntegrationDoctor` | const arrow | 932 |
-| 140 | `getGoogleDriveSyncStatus` | const arrow | 957 |
-| 141 | `saveGoogleDriveSyncPreferences` | const arrow | 962 |
-| 142 | `startGoogleDriveSyncOauth` | const arrow | 967 |
-| 143 | `disconnectGoogleDriveSync` | const arrow | 972 |
-| 144 | `forgetGoogleDriveSyncCredentials` | const arrow | 977 |
-| 145 | `queueGoogleDriveSyncNow` | const arrow | 982 |
-| 146 | `syncGoogleDriveNow` | const arrow | 987 |
-| 147 | `openPath` | const arrow | 1054 |
-| 148 | `getReturns` | const arrow | 1058 |
-| 149 | `getReturn` | const arrow | 1070 |
-| 150 | `updateSaleStatus` | const arrow | 1076 |
-| 151 | `attachSaleCustomer` | const arrow | 1082 |
-| 152 | `getSalesExport` | const arrow | 1087 |
-| 153 | `updateReturn` | const arrow | 1091 |
-| 154 | `testSyncServer` | const arrow | 1098 |
-| 155 | `openFolderDialog` | const arrow | 1103 |
-| 156 | `getDataPath` | const arrow | 1107 |
-| 157 | `getScaleMigrationStatus` | const arrow | 1109 |
-| 158 | `prepareScaleMigration` | const arrow | 1111 |
-| 159 | `runScaleMigration` | const arrow | 1113 |
-| 160 | `browseDir` | const arrow | 1125 |
+| 1 | `loadPortalTransport` | function | 35 |
+| 2 | `loadSaleWriteTransport` | function | 40 |
+| 3 | `loadCsvTemplateModule` | function | 45 |
+| 4 | `loadBrowserDialogsModule` | function | 50 |
+| 5 | `loadAiTransport` | function | 55 |
+| 6 | `loadActionHistoryTransport` | function | 60 |
+| 7 | `loadAuditLogTransport` | function | 65 |
+| 8 | `loadContactsTransport` | function | 70 |
+| 9 | `loadDashboardTransport` | function | 75 |
+| 10 | `loadFileTransport` | function | 80 |
+| 11 | `loadInventoryWriteTransport` | function | 85 |
+| 12 | `loadImportJobsTransport` | function | 90 |
+| 13 | `loadProductWriteTransport` | function | 95 |
+| 14 | `loadRfidTransport` | function | 100 |
+| 15 | `loadSalesTransport` | function | 105 |
+| 16 | `loadSettingsTransport` | function | 110 |
+| 17 | `loadOfflineSnapshotTransport` | function | 115 |
+| 18 | `loadReturnsTransport` | function | 120 |
+| 19 | `loadPendingSyncTransport` | function | 125 |
+| 20 | `loadDriveSyncTransport` | function | 130 |
+| 21 | `loadNotificationSummaryTransport` | function | 135 |
+| 22 | `loadSystemJobsTransport` | function | 140 |
+| 23 | `loadLookupTransport` | function | 145 |
+| 24 | `loadProductReadTransport` | function | 150 |
+| 25 | `loadQueryCacheModule` | function | 155 |
+| 26 | `loadLocalMirrorsModule` | function | 160 |
+| 27 | `loadAccessControlTransport` | function | 165 |
+| 28 | `loadCustomTablesTransport` | function | 170 |
+| 29 | `buildImportCsvTemplate` | function | 175 |
+| 30 | `loadSystemRuntimeModule` | function | 256 |
+| 31 | `callSystemRuntimeMethod` | function | 261 |
+| 32 | `scheduleSensitiveMirrorPurge` | function | 268 |
+| 33 | `run` | const arrow | 269 |
+| 34 | `invalidateClientRuntimeState` | function | 307 |
+| 35 | `login` | const arrow | 342 |
+| 36 | `logout` | const arrow | 344 |
+| 37 | `resetPasswordWithOtp` | const arrow | 346 |
+| 38 | `requestPasswordResetEmail` | const arrow | 348 |
+| 39 | `completePasswordReset` | const arrow | 350 |
+| 40 | `updateSessionDuration` | const arrow | 352 |
+| 41 | `getVerificationCapabilities` | const arrow | 354 |
+| 42 | `getSystemConfig` | const arrow | 356 |
+| 43 | `getSystemBootstrap` | const arrow | 358 |
+| 44 | `getSystemDebugLog` | const arrow | 364 |
+| 45 | `startGoogleOauth` | const arrow | 366 |
+| 46 | `completeGoogleOauth` | const arrow | 368 |
+| 47 | `unlinkGoogleOauth` | const arrow | 370 |
+| 48 | `getAppBootstrap` | const arrow | 372 |
+| 49 | `getOrganizationBootstrap` | const arrow | 376 |
+| 50 | `searchOrganizations` | const arrow | 378 |
+| 51 | `getCurrentOrganization` | const arrow | 380 |
+| 52 | `getCategories` | const arrow | 395 |
+| 53 | `updateCategory` | const arrow | 405 |
+| 54 | `deleteCategory` | const arrow | 411 |
+| 55 | `getUnits` | const arrow | 419 |
+| 56 | `updateUnit` | const arrow | 429 |
+| 57 | `deleteUnit` | const arrow | 435 |
+| 58 | `getBranches` | const arrow | 443 |
+| 59 | `getBranchSummary` | const arrow | 445 |
+| 60 | `updateBranch` | const arrow | 449 |
+| 61 | `deleteBranch` | const arrow | 451 |
+| 62 | `getBranchStock` | const arrow | 453 |
+| 63 | `getTransfers` | const arrow | 455 |
+| 64 | `getBranchStockIntegrity` | const arrow | 459 |
+| 65 | `getProducts` | const arrow | 465 |
+| 66 | `searchProducts` | const arrow | 469 |
+| 67 | `getProductBootstrap` | const arrow | 473 |
+| 68 | `getProductsByIds` | const arrow | 477 |
+| 69 | `getProductFilters` | const arrow | 481 |
+| 70 | `getProductLookupUsage` | const arrow | 485 |
+| 71 | `replaceProductLookupValues` | const arrow | 489 |
+| 72 | `getPortalSubmissionsForReview` | const arrow | 537 |
+| 73 | `reviewPortalSubmission` | const arrow | 541 |
+| 74 | `getAiProviders` | const arrow | 546 |
+| 75 | `createAiProvider` | const arrow | 550 |
+| 76 | `updateAiProvider` | const arrow | 554 |
+| 77 | `deleteAiProvider` | const arrow | 558 |
+| 78 | `testAiProvider` | const arrow | 562 |
+| 79 | `getAiResponses` | const arrow | 566 |
+| 80 | `createProduct` | const arrow | 570 |
+| 81 | `updateProduct` | const arrow | 574 |
+| 82 | `deleteProduct` | const arrow | 578 |
+| 83 | `otpSetup` | const arrow | 584 |
+| 84 | `otpConfirm` | const arrow | 586 |
+| 85 | `otpDisable` | const arrow | 588 |
+| 86 | `otpVerify` | const arrow | 590 |
+| 87 | `otpStatus` | const arrow | 592 |
+| 88 | `listImportJobs` | const arrow | 610 |
+| 89 | `getImportJobReview` | const arrow | 618 |
+| 90 | `updateImportJobDecisions` | const arrow | 622 |
+| 91 | `startImportJob` | const arrow | 630 |
+| 92 | `approveImportJob` | const arrow | 634 |
+| 93 | `cancelImportJob` | const arrow | 638 |
+| 94 | `retryImportJob` | const arrow | 642 |
+| 95 | `deleteImportJob` | const arrow | 646 |
+| 96 | `getImportQueueStatus` | const arrow | 650 |
+| 97 | `getFiles` | const arrow | 671 |
+| 98 | `deleteFileAsset` | const arrow | 681 |
+| 99 | `getActionHistory` | const arrow | 731 |
+| 100 | `updateActionHistory` | const arrow | 739 |
+| 101 | `getInventorySummary` | const arrow | 751 |
+| 102 | `getInventoryStats` | const arrow | 753 |
+| 103 | `getInventoryBootstrap` | const arrow | 755 |
+| 104 | `searchInventoryProducts` | const arrow | 757 |
+| 105 | `getInventoryMovements` | const arrow | 759 |
+| 106 | `getInventoryReasons` | const arrow | 761 |
+| 107 | `saveInventoryReasons` | const arrow | 763 |
+| 108 | `getRfidStatus` | const arrow | 768 |
+| 109 | `searchRfidTags` | const arrow | 776 |
+| 110 | `recordRfidSessionEvents` | const arrow | 784 |
+| 111 | `applyRfidSession` | const arrow | 792 |
+| 112 | `getSales` | const arrow | 803 |
+| 113 | `getDashboard` | const arrow | 809 |
+| 114 | `getAnalytics` | const arrow | 813 |
+| 115 | `getCustomers` | const arrow | 819 |
+| 116 | `getCustomerPointSummaries` | const arrow | 823 |
+| 117 | `updateCustomer` | const arrow | 831 |
+| 118 | `deleteCustomer` | const arrow | 835 |
+| 119 | `downloadCustomerTemplate` | const arrow | 843 |
+| 120 | `getSuppliers` | const arrow | 849 |
+| 121 | `updateSupplier` | const arrow | 857 |
+| 122 | `deleteSupplier` | const arrow | 861 |
+| 123 | `downloadSupplierTemplate` | const arrow | 869 |
+| 124 | `getDeliveryContacts` | const arrow | 875 |
+| 125 | `updateDeliveryContact` | const arrow | 883 |
+| 126 | `deleteDeliveryContact` | const arrow | 887 |
+| 127 | `getUsers` | const arrow | 897 |
+| 128 | `updateUser` | const arrow | 905 |
+| 129 | `getUserProfile` | const arrow | 909 |
+| 130 | `getUserAuthMethods` | const arrow | 913 |
+| 131 | `updateUserProfile` | const arrow | 917 |
+| 132 | `disconnectUserAuthProvider` | const arrow | 921 |
+| 133 | `changeUserPassword` | const arrow | 925 |
+| 134 | `resetPassword` | const arrow | 929 |
+| 135 | `getRoles` | const arrow | 935 |
+| 136 | `updateRole` | const arrow | 943 |
+| 137 | `deleteRole` | const arrow | 947 |
+| 138 | `getCustomTables` | const arrow | 953 |
+| 139 | `getCustomTableData` | const arrow | 961 |
+| 140 | `insertCustomRow` | const arrow | 965 |
+| 141 | `updateCustomRow` | const arrow | 969 |
+| 142 | `deleteCustomRow` | const arrow | 973 |
+| 143 | `getAuditLogs` | const arrow | 979 |
+| 144 | `deleteAuditLogsRetention` | const arrow | 984 |
+| 145 | `getIntegrationDoctor` | const arrow | 1005 |
+| 146 | `getGoogleDriveSyncStatus` | const arrow | 1030 |
+| 147 | `saveGoogleDriveSyncPreferences` | const arrow | 1035 |
+| 148 | `startGoogleDriveSyncOauth` | const arrow | 1040 |
+| 149 | `disconnectGoogleDriveSync` | const arrow | 1045 |
+| 150 | `forgetGoogleDriveSyncCredentials` | const arrow | 1050 |
+| 151 | `queueGoogleDriveSyncNow` | const arrow | 1055 |
+| 152 | `syncGoogleDriveNow` | const arrow | 1060 |
+| 153 | `openPath` | const arrow | 1127 |
+| 154 | `getReturns` | const arrow | 1131 |
+| 155 | `getReturn` | const arrow | 1143 |
+| 156 | `updateSaleStatus` | const arrow | 1149 |
+| 157 | `attachSaleCustomer` | const arrow | 1155 |
+| 158 | `getSalesExport` | const arrow | 1160 |
+| 159 | `updateReturn` | const arrow | 1164 |
+| 160 | `testSyncServer` | const arrow | 1171 |
+| 161 | `openFolderDialog` | const arrow | 1176 |
+| 162 | `getDataPath` | const arrow | 1180 |
+| 163 | `getScaleMigrationStatus` | const arrow | 1182 |
+| 164 | `prepareScaleMigration` | const arrow | 1184 |
+| 165 | `runScaleMigration` | const arrow | 1186 |
+| 166 | `browseDir` | const arrow | 1198 |
 
 ### 3.31 `frontend/src/api/multipartHeaders.ts`
 
@@ -3437,8 +3443,8 @@ Total files documented: **264**
 | 3 | `inlinePublicRuntimeScripts` | function | 59 |
 | 4 | `fixCrossorigin` | function | 84 |
 | 5 | `emitBuildManifest` | function | 109 |
-| 6 | `shouldDeferModulePreload` | function | 291 |
-| 7 | `manualChunks` | function | 295 |
+| 6 | `shouldDeferModulePreload` | function | 293 |
+| 7 | `manualChunks` | function | 297 |
 
 ### 3.264 `frontend/tailwind.config.ts`
 

@@ -25,6 +25,12 @@ let pendingSyncTransportPromise = null
 let driveSyncTransportPromise = null
 let notificationSummaryTransportPromise = null
 let systemJobsTransportPromise = null
+let lookupTransportPromise = null
+let productReadTransportPromise = null
+let queryCacheModulePromise = null
+let localMirrorsModulePromise = null
+let accessControlTransportPromise = null
+let customTablesTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -136,6 +142,36 @@ function loadSystemJobsTransport() {
   return systemJobsTransportPromise
 }
 
+function loadLookupTransport() {
+  if (!lookupTransportPromise) lookupTransportPromise = import('./lookupTransport.ts')
+  return lookupTransportPromise
+}
+
+function loadProductReadTransport() {
+  if (!productReadTransportPromise) productReadTransportPromise = import('./productReadTransport.ts')
+  return productReadTransportPromise
+}
+
+function loadQueryCacheModule() {
+  if (!queryCacheModulePromise) queryCacheModulePromise = import('./queryCache.ts')
+  return queryCacheModulePromise
+}
+
+function loadLocalMirrorsModule() {
+  if (!localMirrorsModulePromise) localMirrorsModulePromise = import('./localMirrors.ts')
+  return localMirrorsModulePromise
+}
+
+function loadAccessControlTransport() {
+  if (!accessControlTransportPromise) accessControlTransportPromise = import('./accessControlTransport.ts')
+  return accessControlTransportPromise
+}
+
+function loadCustomTablesTransport() {
+  if (!customTablesTransportPromise) customTablesTransportPromise = import('./customTablesTransport.ts')
+  return customTablesTransportPromise
+}
+
 async function buildImportCsvTemplate(headers, filename) {
   const { buildCSVTemplate } = await loadCsvTemplateModule()
   return buildCSVTemplate(headers, filename)
@@ -159,16 +195,6 @@ import {
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
 import {
-  createCategory as createCategoryRequest,
-  createUnit as createUnitRequest,
-  deleteCategory as deleteCategoryRequest,
-  deleteUnit as deleteUnitRequest,
-  getCategories as getCategoriesRequest,
-  getUnits as getUnitsRequest,
-  updateCategory as updateCategoryRequest,
-  updateUnit as updateUnitRequest,
-} from './lookupTransport.ts'
-import {
   createBranch as createBranchRequest,
   deleteBranch as deleteBranchRequest,
   getBranches as getBranchesRequest,
@@ -181,15 +207,6 @@ import {
   updateBranch as updateBranchRequest,
 } from './branchTransport.ts'
 import {
-  getProductFilters as getProductFiltersRequest,
-  getProductBootstrap as getProductBootstrapRequest,
-  getProductLookupUsage as getProductLookupUsageRequest,
-  getProducts as getProductsRequest,
-  getProductsByIds as getProductsByIdsRequest,
-  replaceProductLookupValues as replaceProductLookupValuesRequest,
-  searchProducts as searchProductsRequest,
-} from './productReadTransport.ts'
-import {
   getInventoryBootstrap as getInventoryBootstrapRequest,
   getInventoryMovements as getInventoryMovementsRequest,
   getInventoryReasons as getInventoryReasonsRequest,
@@ -197,29 +214,6 @@ import {
   getInventorySummary as getInventorySummaryRequest,
   searchInventoryProducts as searchInventoryProductsRequest,
 } from './inventoryTransport.ts'
-import {
-  changeUserPassword as changeUserPasswordRequest,
-  createRole as createRoleRequest,
-  createUser as createUserRequest,
-  deleteRole as deleteRoleRequest,
-  disconnectUserAuthProvider as disconnectUserAuthProviderRequest,
-  getRoles as getRolesRequest,
-  getUserAuthMethods as getUserAuthMethodsRequest,
-  getUserProfile as getUserProfileRequest,
-  getUsers as getUsersRequest,
-  resetPassword as resetPasswordRequest,
-  updateRole as updateRoleRequest,
-  updateUser as updateUserRequest,
-  updateUserProfile as updateUserProfileRequest,
-} from './accessControlTransport.ts'
-import {
-  createCustomTable as createCustomTableRequest,
-  deleteCustomRow as deleteCustomRowRequest,
-  getCustomTableData as getCustomTableDataRequest,
-  getCustomTables as getCustomTablesRequest,
-  insertCustomRow as insertCustomRowRequest,
-  updateCustomRow as updateCustomRowRequest,
-} from './customTablesTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
@@ -240,10 +234,6 @@ import {
   unlinkGoogleOauth as unlinkGoogleOauthRequest,
   updateSessionDuration as updateSessionDurationRequest,
 } from './authTransport.ts'
-import {
-  clearCachedQueryResults,
-} from './queryCache.ts'
-import { purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
 export async function openCSVDialog() {
   const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
   return openBrowserCSVDialog()
@@ -277,7 +267,9 @@ async function callSystemRuntimeMethod(name, ...args) {
 
 function scheduleSensitiveMirrorPurge() {
   const run = () => {
-    purgeSensitiveLiveServerMirrors().catch(() => {})
+    loadLocalMirrorsModule()
+      .then(({ purgeSensitiveLiveServerMirrors }) => purgeSensitiveLiveServerMirrors())
+      .catch(() => {})
   }
   if (typeof window === 'undefined') {
     run()
@@ -334,10 +326,14 @@ if (typeof window !== 'undefined') {
     const channel = String(event?.detail?.channel || '').trim().toLowerCase()
     if (!channel) return
     if (['products', 'categories', 'units', 'settings'].includes(channel)) {
-      void clearCachedQueryResults(['products:search:', 'products:filters:', 'products:lookups:usage'])
+      void loadQueryCacheModule().then(({ clearCachedQueryResults }) =>
+        clearCachedQueryResults(['products:search:', 'products:filters:', 'products:lookups:usage']),
+      )
     }
     if (['inventory', 'products', 'branches', 'sales', 'returns'].includes(channel)) {
-      void clearCachedQueryResults(['inventory:products:search:'])
+      void loadQueryCacheModule().then(({ clearCachedQueryResults }) =>
+        clearCachedQueryResults(['inventory:products:search:']),
+      )
     }
   })
 }
@@ -396,38 +392,48 @@ export async function saveSettings(updates, options = {}) {
 }
 
 // ─── Categories ───────────────────────────────────────────────────────────────
-export const getCategories = () =>
-  getCategoriesRequest()
+export const getCategories = async () => {
+  const { getCategories: getCategoriesRequest } = await loadLookupTransport()
+  return getCategoriesRequest()
+}
 export const createCategory = async payload => {
+  const { createCategory: createCategoryRequest } = await loadLookupTransport()
   const result = await createCategoryRequest(payload)
   refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:create' })
   return result
 }
 export const updateCategory = async (id, payload) => {
+  const { updateCategory: updateCategoryRequest } = await loadLookupTransport()
   const result = await updateCategoryRequest(id, payload)
   refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-saved', source: 'categories:update' })
   return result
 }
 export const deleteCategory = async (id, payload) => {
+  const { deleteCategory: deleteCategoryRequest } = await loadLookupTransport()
   const result = await deleteCategoryRequest(id, payload)
   refreshAppData(CATEGORY_REFRESH_CHANNELS, { reason: 'category-deleted', source: 'categories:delete' })
   return result
 }
 
 // ─── Units ────────────────────────────────────────────────────────────────────
-export const getUnits = () =>
-  getUnitsRequest()
+export const getUnits = async () => {
+  const { getUnits: getUnitsRequest } = await loadLookupTransport()
+  return getUnitsRequest()
+}
 export const createUnit = async payload => {
+  const { createUnit: createUnitRequest } = await loadLookupTransport()
   const result = await createUnitRequest(payload)
   refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:create' })
   return result
 }
 export const updateUnit = async (id, payload) => {
+  const { updateUnit: updateUnitRequest } = await loadLookupTransport()
   const result = await updateUnitRequest(id, payload)
   refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-saved', source: 'units:update' })
   return result
 }
 export const deleteUnit = async (id, payload) => {
+  const { deleteUnit: deleteUnitRequest } = await loadLookupTransport()
   const result = await deleteUnitRequest(id, payload)
   refreshAppData(UNIT_REFRESH_CHANNELS, { reason: 'unit-deleted', source: 'units:delete' })
   return result
@@ -456,20 +462,34 @@ export const repairBranchStockIntegrity = payload =>
   repairBranchStockIntegrityRequest(payload)
 
 // ─── Products ─────────────────────────────────────────────────────────────────
-export const getProducts = () =>
-  getProductsRequest()
-export const searchProducts = (params = {}) =>
-  searchProductsRequest(params)
-export const getProductBootstrap = (params = {}) =>
-  getProductBootstrapRequest(params)
-export const getProductsByIds = (ids = [], params = {}) =>
-  getProductsByIdsRequest(ids, params)
-export const getProductFilters = (params = {}) =>
-  getProductFiltersRequest(params)
-export const getProductLookupUsage = () =>
-  getProductLookupUsageRequest()
-export const replaceProductLookupValues = (payload = {}) =>
-  replaceProductLookupValuesRequest(payload)
+export const getProducts = async () => {
+  const { getProducts: getProductsRequest } = await loadProductReadTransport()
+  return getProductsRequest()
+}
+export const searchProducts = async (params = {}) => {
+  const { searchProducts: searchProductsRequest } = await loadProductReadTransport()
+  return searchProductsRequest(params)
+}
+export const getProductBootstrap = async (params = {}) => {
+  const { getProductBootstrap: getProductBootstrapRequest } = await loadProductReadTransport()
+  return getProductBootstrapRequest(params)
+}
+export const getProductsByIds = async (ids = [], params = {}) => {
+  const { getProductsByIds: getProductsByIdsRequest } = await loadProductReadTransport()
+  return getProductsByIdsRequest(ids, params)
+}
+export const getProductFilters = async (params = {}) => {
+  const { getProductFilters: getProductFiltersRequest } = await loadProductReadTransport()
+  return getProductFiltersRequest(params)
+}
+export const getProductLookupUsage = async () => {
+  const { getProductLookupUsage: getProductLookupUsageRequest } = await loadProductReadTransport()
+  return getProductLookupUsageRequest()
+}
+export const replaceProductLookupValues = async (payload = {}) => {
+  const { replaceProductLookupValues: replaceProductLookupValuesRequest } = await loadProductReadTransport()
+  return replaceProductLookupValuesRequest(payload)
+}
 export async function getCatalogMeta() {
   const module = await loadPortalTransport()
   return module.getCatalogMeta()
@@ -874,33 +894,86 @@ export const bulkImportDeliveryContacts = async d => {
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────
-export const getUsers      = ()       => getUsersRequest()
-export const createUser    = d        => createUserRequest(d)
-export const updateUser    = (id, d)  => updateUserRequest(id, d)
-export const getUserProfile = (id)    => getUserProfileRequest(id)
-export const getUserAuthMethods = (id) =>
-  getUserAuthMethodsRequest(id)
-export const updateUserProfile = (id, d) =>
-  updateUserProfileRequest(id, d)
-export const disconnectUserAuthProvider = (id, d) =>
-  disconnectUserAuthProviderRequest(id, d)
-export const changeUserPassword = (id, d) =>
-  changeUserPasswordRequest(id, d)
-export const resetPassword = (id, d)  => resetPasswordRequest(id, d)
+export const getUsers = async () => {
+  const { getUsers: getUsersRequest } = await loadAccessControlTransport()
+  return getUsersRequest()
+}
+export const createUser = async d => {
+  const { createUser: createUserRequest } = await loadAccessControlTransport()
+  return createUserRequest(d)
+}
+export const updateUser = async (id, d) => {
+  const { updateUser: updateUserRequest } = await loadAccessControlTransport()
+  return updateUserRequest(id, d)
+}
+export const getUserProfile = async (id) => {
+  const { getUserProfile: getUserProfileRequest } = await loadAccessControlTransport()
+  return getUserProfileRequest(id)
+}
+export const getUserAuthMethods = async (id) => {
+  const { getUserAuthMethods: getUserAuthMethodsRequest } = await loadAccessControlTransport()
+  return getUserAuthMethodsRequest(id)
+}
+export const updateUserProfile = async (id, d) => {
+  const { updateUserProfile: updateUserProfileRequest } = await loadAccessControlTransport()
+  return updateUserProfileRequest(id, d)
+}
+export const disconnectUserAuthProvider = async (id, d) => {
+  const { disconnectUserAuthProvider: disconnectUserAuthProviderRequest } = await loadAccessControlTransport()
+  return disconnectUserAuthProviderRequest(id, d)
+}
+export const changeUserPassword = async (id, d) => {
+  const { changeUserPassword: changeUserPasswordRequest } = await loadAccessControlTransport()
+  return changeUserPasswordRequest(id, d)
+}
+export const resetPassword = async (id, d) => {
+  const { resetPassword: resetPasswordRequest } = await loadAccessControlTransport()
+  return resetPasswordRequest(id, d)
+}
 
 // ─── Roles ────────────────────────────────────────────────────────────────────
-export const getRoles   = ()       => getRolesRequest()
-export const createRole = d        => createRoleRequest(d)
-export const updateRole = (id, d)  => updateRoleRequest(id, d)
-export const deleteRole = (id, payload) => deleteRoleRequest(id, payload)
+export const getRoles = async () => {
+  const { getRoles: getRolesRequest } = await loadAccessControlTransport()
+  return getRolesRequest()
+}
+export const createRole = async d => {
+  const { createRole: createRoleRequest } = await loadAccessControlTransport()
+  return createRoleRequest(d)
+}
+export const updateRole = async (id, d) => {
+  const { updateRole: updateRoleRequest } = await loadAccessControlTransport()
+  return updateRoleRequest(id, d)
+}
+export const deleteRole = async (id, payload) => {
+  const { deleteRole: deleteRoleRequest } = await loadAccessControlTransport()
+  return deleteRoleRequest(id, payload)
+}
 
 // ─── Custom tables ────────────────────────────────────────────────────────────
-export const getCustomTables    = ()                      => getCustomTablesRequest()
-export const createCustomTable  = d                       => createCustomTableRequest(d)
-export const getCustomTableData = ({ tableName })         => getCustomTableDataRequest({ tableName })
-export const insertCustomRow    = ({ tableName, data })   => insertCustomRowRequest({ tableName, data })
-export const updateCustomRow    = ({ tableName, id, data, expectedUpdatedAt }) => updateCustomRowRequest({ tableName, id, data, expectedUpdatedAt })
-export const deleteCustomRow    = ({ tableName, id, payload })     => deleteCustomRowRequest({ tableName, id, payload })
+export const getCustomTables = async () => {
+  const { getCustomTables: getCustomTablesRequest } = await loadCustomTablesTransport()
+  return getCustomTablesRequest()
+}
+export const createCustomTable = async d => {
+  const { createCustomTable: createCustomTableRequest } = await loadCustomTablesTransport()
+  return createCustomTableRequest(d)
+}
+export const getCustomTableData = async ({ tableName }) => {
+  const { getCustomTableData: getCustomTableDataRequest } = await loadCustomTablesTransport()
+  return getCustomTableDataRequest({ tableName })
+}
+export const insertCustomRow = async ({ tableName, data }) => {
+  const { insertCustomRow: insertCustomRowRequest } = await loadCustomTablesTransport()
+  return insertCustomRowRequest({ tableName, data })
+}
+export const updateCustomRow = async ({ tableName, id, data, expectedUpdatedAt }) => {
+  const { updateCustomRow: updateCustomRowRequest } = await loadCustomTablesTransport()
+  return updateCustomRowRequest({ tableName, id, data, expectedUpdatedAt })
+}
+export const deleteCustomRow = async ({ tableName, id, payload }) => {
+  const { deleteCustomRow: deleteCustomRowRequest } = await loadCustomTablesTransport()
+  return deleteCustomRowRequest({ tableName, id, payload })
+}
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
 export const getAuditLogs = async (params = {}) => {
