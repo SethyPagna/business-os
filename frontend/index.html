@@ -13,6 +13,54 @@
     <link rel="icon" type="image/png" href="/icon.png" />
     <link rel="apple-touch-icon" href="/icon.png" />
     <title>Business OS</title>
+    <script>
+      (function setInitialBusinessOsRoute() {
+        var pathname = String(window.location && window.location.pathname || '/')
+          .split('?')[0]
+          .split('#')[0]
+          .replace(/\/{2,}/g, '/')
+          .replace(/\/+$/g, '')
+          .toLowerCase() || '/'
+        var adminRoutes = {
+          '/': true,
+          '/admin': true,
+          '/app': true,
+          '/login': true,
+          '/dashboard': true,
+          '/products': true,
+          '/product': true,
+          '/pos': true,
+          '/point-of-sale': true,
+          '/inventory': true,
+          '/sales': true,
+          '/returns': true,
+          '/branches': true,
+          '/contacts': true,
+          '/catalog': true,
+          '/loyalty-points': true,
+          '/loyalty': true,
+          '/users': true,
+          '/audit-log': true,
+          '/audit': true,
+          '/receipt-settings': true,
+          '/receipts': true,
+          '/backup': true,
+          '/backups': true,
+          '/settings': true,
+          '/files': true,
+          '/library': true,
+          '/server': true
+        }
+        var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
+        var publicRoute = pathname !== '/'
+          && pathname !== '/health'
+          && pathname.indexOf('/api/') !== 0
+          && pathname.indexOf('/uploads/') !== 0
+          && !/\.[a-z0-9]+$/i.test(pathname)
+          && !adminRoutes[segment]
+        document.documentElement.setAttribute('data-business-os-initial-route', publicRoute ? 'public' : 'admin')
+      }())
+    </script>
     <style data-business-os-initial-shell>
       :root {
         color-scheme: light dark;
@@ -58,6 +106,10 @@
         color: #fff;
         font-weight: 800;
         letter-spacing: 0;
+      }
+      [data-business-os-initial-route="admin"] [data-business-os-public],
+      [data-business-os-initial-route="public"] [data-business-os-admin] {
+        display: none !important;
       }
       .business-os-initial-title {
         margin: 0;
@@ -118,10 +170,19 @@
       <div class="business-os-initial-shell" role="status" aria-live="polite">
         <div class="business-os-initial-panel">
           <div class="business-os-initial-brand">
-            <div class="business-os-initial-mark">OS</div>
+            <div class="business-os-initial-mark">
+              <span data-business-os-admin>OS</span>
+              <span data-business-os-public>LE</span>
+            </div>
             <div>
-              <h1 class="business-os-initial-title">Business OS</h1>
-              <p class="business-os-initial-copy">Loading the workspace securely...</p>
+              <h1 class="business-os-initial-title">
+                <span data-business-os-admin>Business OS</span>
+                <span data-business-os-public>Leang Cosmetic</span>
+              </h1>
+              <p class="business-os-initial-copy">
+                <span data-business-os-admin>Loading the workspace securely...</span>
+                <span data-business-os-public>Loading the customer portal...</span>
+              </p>
             </div>
           </div>
           <div class="business-os-initial-bar" aria-hidden="true"></div>
