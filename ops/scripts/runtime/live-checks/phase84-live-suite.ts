@@ -81,6 +81,12 @@ const SUITE_STEPS: SuiteStep[] = [
     reportPrefix: 'phase84-loyalty-points-rollback-check-',
   },
   {
+    name: 'settings save rollback check',
+    script: 'ops/scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts',
+    flag: 'skipRollback',
+    reportPrefix: 'phase84-settings-save-rollback-check-',
+  },
+  {
     name: 'post-live hygiene gate',
     script: 'ops/scripts/runtime/storage/post-live-hygiene.ts',
     flag: 'skipHygiene',

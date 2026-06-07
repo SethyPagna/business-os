@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 818 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 819 in this file.
 
 ## Goal
 
@@ -8809,6 +8809,29 @@ Decision rule:
   broad UI, public portal, receipt rollback, loyalty rollback, and post-live
   hygiene.
 - Current plan position after Move 818: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 819: Add rollback-safe Settings save coverage
+
+- Ownership slice: Phase 8.4 rollback-sensitive live coverage for the Settings
+  page Save action. The new
+  `ops/scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts`
+  covers a real Settings save without leaving persistent test data.
+- Safety slice: the check snapshots `business_name`, changes the Settings form
+  through the UI, clicks Save, verifies `/api/settings`, and restores the
+  original value in a `finally` block.
+- Suite slice: `phase84-live-suite.ts` now includes the Settings save rollback
+  check in the default rollback group, and `ops/package.json` exposes
+  `phase84:settings-save-rollback`.
+- Verification proof: `npm.cmd --prefix ops run
+  phase84:settings-save-rollback` passed, and the expanded
+  `npm.cmd --prefix ops run phase84:live-suite` passed all six default steps:
+  broad UI, public portal, receipt rollback, loyalty rollback, settings
+  rollback, and post-live hygiene.
+- Current plan position after Move 819: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

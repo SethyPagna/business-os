@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 818, add Loyalty Points rollback live coverage.
+- Latest completed move: Move 819, add Settings save rollback live coverage.
 
 ## Current Baseline
 
@@ -36,6 +36,8 @@ Latest verified reports:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
   `ops/runtime/reports/phase84-loyalty-points-rollback-check-latest.json`
+- latest Settings save rollback check:
+  `ops/runtime/reports/phase84-settings-save-rollback-check-latest.json`
 - latest focused filter/dropdown live check:
   `ops/runtime/reports/phase84-filter-menu-live-check-2026-06-06T23-29-11-677Z/report.json`
 - latest focused shared select live check:
@@ -77,6 +79,17 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 819 adds rollback-safe live coverage for the Settings page Save action.
+  The new `ops/scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts`
+  snapshots `business_name`, uses the real Settings UI to change it, clicks
+  Save, verifies `/api/settings` persisted the temporary value, then restores
+  the original value. It is exposed as `npm.cmd --prefix ops run
+  phase84:settings-save-rollback` and is now included in the default
+  `phase84:live-suite` rollback group. Proof:
+  `ops/runtime/reports/phase84-settings-save-rollback-check-2026-06-07T00-47-55-940Z/report.json`
+  and `ops/runtime/reports/phase84-live-suite-latest.json`, where the suite
+  passed UI, public portal, receipt rollback, loyalty rollback, settings
+  rollback, and hygiene steps.
 - Move 818 adds dedicated rollback-safe live coverage for Loyalty Points save.
   The new `ops/scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts`
   snapshots loyalty settings, uses the real UI to switch the earning basis,
@@ -2653,7 +2666,29 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
-## Latest Move 818
+## Latest Move 819
+
+- Settings page Save now has a dedicated rollback-safe live check. The harness
+  snapshots the current `business_name`, changes it through the real Settings
+  form, clicks Save, verifies the persisted value through `/api/settings`, and
+  restores the original value in a `finally` block.
+- The Phase 8.4 live suite now includes three rollback-sensitive settings
+  checks by default: Receipt Settings language rollback, Loyalty Points
+  point-rule rollback, and Settings save rollback. The shared `--skip-rollback`
+  option remains available for explicit faster runs.
+- Verification passed: `npm.cmd --prefix ops run
+  phase84:settings-save-rollback` and the expanded `npm.cmd --prefix ops run
+  phase84:live-suite`.
+- Live proof: `ops/runtime/reports/phase84-settings-save-rollback-check-2026-06-07T00-47-55-940Z/report.json`
+  saved `business_name` with HTTP 200, observed the temporary value, and
+  restored the original value. `ops/runtime/reports/phase84-live-suite-latest.json`
+  passed all six default steps.
+- Current plan position after Move 819: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
+## Previous Move 818
 
 - Loyalty Points save now has a dedicated rollback-safe live check. The harness
   snapshots the customer portal point-rule settings, uses the real Loyalty
