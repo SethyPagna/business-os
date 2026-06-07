@@ -234,6 +234,7 @@ assert.match(index, /ReactDOM\.createRoot\(rootElement\)\.render\([\s\S]*\)\s*\n
 assert.doesNotMatch(index, /registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)\s*\n\s*const publicCatalogMode/, 'startup maintenance jobs should not be scheduled before root render setup')
 assert.match(viteConfig, /routePreloadChunkNames[\s\S]*function injectRouteAwareModulePreloads\(\): Plugin \{[\s\S]*data-business-os-route-preloads/, 'built HTML should inject route-aware preload links for admin and public route chunks')
 assert.match(viteConfig, /public:\s*\[[\s\S]*'PublicCatalogRoot'[\s\S]*'catalog'[\s\S]*'app-portal'/, 'public routes should start fetching portal root, catalog, and portal transport chunks before React finishes loading')
+assert.match(viteConfig, /public:\s*\[[\s\S]*'action-guards'[\s\S]*'initials-utils'[\s\S]*'script-typography'/, 'public routes should preload small first-viewport helper chunks instead of waiting on a late catalog waterfall')
 assert.match(viteConfig, /admin:\s*\[[\s\S]*'AdminRoot'[\s\S]*'auth-login'[\s\S]*'app-auth'[\s\S]*'app-bootstrap'/, 'admin routes should start fetching shell and sign-in chunks before React finishes loading')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000/, 'offline queue and snapshot maintenance should stay out of the first-load network window')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000/, 'initial offline maintenance should still run during a long-lived authenticated session')

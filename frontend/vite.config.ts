@@ -149,6 +149,9 @@ const routePreloadChunkNames = {
   public: [
     'PublicCatalogRoot',
     'catalog',
+    'action-guards',
+    'initials-utils',
+    'script-typography',
     'app-portal',
     'portal-language-options',
     'portal-tools',
