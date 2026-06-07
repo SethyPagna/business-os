@@ -24,6 +24,7 @@ let returnsTransportPromise = null
 let pendingSyncTransportPromise = null
 let driveSyncTransportPromise = null
 let notificationSummaryTransportPromise = null
+let systemJobsTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -128,6 +129,11 @@ function loadDriveSyncTransport() {
 function loadNotificationSummaryTransport() {
   if (!notificationSummaryTransportPromise) notificationSummaryTransportPromise = import('./notificationSummary.ts')
   return notificationSummaryTransportPromise
+}
+
+function loadSystemJobsTransport() {
+  if (!systemJobsTransportPromise) systemJobsTransportPromise = import('./systemJobs.ts')
+  return systemJobsTransportPromise
 }
 
 async function buildImportCsvTemplate(headers, filename) {
@@ -238,14 +244,6 @@ import {
   clearCachedQueryResults,
 } from './queryCache.ts'
 import { purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
-import {
-  cancelSystemJob as cancelSystemJobRequest,
-  getSystemJob as getSystemJobRequest,
-  pollSystemJob as pollSystemJobRequest,
-  queueBackupFolderExport as queueBackupFolderExportRequest,
-  queueBackupFolderRestore as queueBackupFolderRestoreRequest,
-} from './systemJobs.ts'
-
 export async function openCSVDialog() {
   const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
   return openBrowserCSVDialog()
@@ -917,14 +915,17 @@ export const deleteAuditLogsRetention = async (olderThanDays = 30) => {
 
 // ─── Backup ───────────────────────────────────────────────────────────────────
 export async function getSystemJob(id) {
+  const { getSystemJob: getSystemJobRequest } = await loadSystemJobsTransport()
   return getSystemJobRequest(id)
 }
 
 export async function cancelSystemJob(id, reason = 'Cancelled by user') {
+  const { cancelSystemJob: cancelSystemJobRequest } = await loadSystemJobsTransport()
   return cancelSystemJobRequest(id, reason)
 }
 
 export async function pollSystemJob(jobId, options = {}) {
+  const { pollSystemJob: pollSystemJobRequest } = await loadSystemJobsTransport()
   return pollSystemJobRequest(jobId, options)
 }
 
@@ -932,6 +933,7 @@ export const getIntegrationDoctor = (options = {}) =>
   callSystemRuntimeMethod('getIntegrationDoctor', options)
 
 export async function queueBackupFolderExport(destinationDir = '') {
+  const { queueBackupFolderExport: queueBackupFolderExportRequest } = await loadSystemJobsTransport()
   return queueBackupFolderExportRequest(destinationDir)
 }
 
@@ -940,6 +942,7 @@ export async function exportBackupFolder(destinationDir) {
 }
 
 export async function queueBackupFolderRestore(sourceDir) {
+  const { queueBackupFolderRestore: queueBackupFolderRestoreRequest } = await loadSystemJobsTransport()
   return queueBackupFolderRestoreRequest(sourceDir)
 }
 

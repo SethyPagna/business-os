@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 826 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 827 in this file.
 
 ## Goal
 
@@ -9037,6 +9037,39 @@ Decision rule:
   import from the legacy registry. The storage prune removed 89,315 bytes of
   stale retained reports.
 - Current plan position after Move 826: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 827: Lazy-load system jobs and backup queue APIs
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/systemJobs.ts` transport remains the sole owner for system
+  job reads, cancel requests, polling loops, backup export queueing, and backup
+  restore queueing.
+- Code-flow slice: `frontend/src/api/methods.ts` lazy-loads the system jobs
+  transport for `getSystemJob`, `cancelSystemJob`, `pollSystemJob`,
+  `queueBackupFolderExport`, and `queueBackupFolderRestore`; the legacy
+  `exportBackupFolder` and `importBackupFolder` compatibility names continue
+  to delegate through the queued APIs.
+- Build slice: `frontend/vite.config.ts` gives system jobs a named
+  `system-jobs-api` intent chunk and excludes it from eager module preload.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`, and
+  `frontend/tests/backupJobs.test.ts` verify that polling, queued backup job
+  flows, and Backup page status/cancel behavior remain on the focused
+  transport while the legacy registry is only a lazy facade.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\backupJobs.test.ts`, standalone frontend typecheck, the full
+  frontend utility suite, frontend production build, generated reference
+  refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  production build emitted `system-jobs-api` at 1.48 KB and reduced
+  `app-api-methods` to 23.51 KB. The storage prune removed 89,157 bytes of
+  stale retained reports.
+- Current plan position after Move 827: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

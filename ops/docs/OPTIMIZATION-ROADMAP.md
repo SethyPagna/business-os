@@ -13036,3 +13036,28 @@ Move 826 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 827 status:
+- Move 827 continues the typed API split by lazy-loading system job status,
+  cancel, poll, backup export queue, and backup restore queue calls through
+  `frontend/src/api/systemJobs.ts`.
+- The system jobs transport continues to own job ID validation, long polling,
+  queued backup timeouts, and backup export/restore payloads while
+  `frontend/src/api/methods.ts` keeps the same public `window.api` names as
+  thin lazy facades.
+- Build wiring now gives system jobs a separate `system-jobs-api` intent chunk
+  and excludes that chunk from eager module preload.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\backupJobs.test.ts`, standalone frontend typecheck, the full
+  frontend utility suite, frontend production build, generated reference
+  refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  production build emitted `system-jobs-api` at 1.48 KB and reduced
+  `app-api-methods` to 23.51 KB. The storage prune removed 89,157 bytes of
+  stale retained reports.
+- Current plan position after Move 827: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

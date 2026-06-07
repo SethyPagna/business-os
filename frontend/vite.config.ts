@@ -179,6 +179,7 @@ const deferredModulePreloadPrefixes = [
   'assets/sale-write-api-',
   'assets/sales-read-api-',
   'assets/shared-action-history-',
+  'assets/system-jobs-api-',
   'assets/catalog-',
   'assets/catalog-secondary-tabs-',
   'assets/catalog-editor-',
@@ -325,6 +326,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/aiTransport.ts')) return 'ai-api'
     if (normalized.endsWith('/src/api/salesTransport.ts')) return 'sales-read-api'
     if (normalized.endsWith('/src/api/saleWriteTransport.ts')) return 'sale-write-api'
+    if (normalized.endsWith('/src/api/systemJobs.ts')) return 'system-jobs-api'
     if (
       normalized.endsWith('/src/api/notificationSummary.ts')
       || normalized.endsWith('/src/api/cooldownFallbacks.ts')
