@@ -171,6 +171,7 @@ const deferredModulePreloadPrefixes = [
   'assets/inventory-write-api-',
   'assets/import-jobs-api-',
   'assets/multipart-headers-api-',
+  'assets/notification-api-',
   'assets/pending-sync-api-',
   'assets/product-export-',
   'assets/product-write-api-',

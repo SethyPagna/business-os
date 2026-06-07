@@ -23,6 +23,7 @@ let offlineSnapshotTransportPromise = null
 let returnsTransportPromise = null
 let pendingSyncTransportPromise = null
 let driveSyncTransportPromise = null
+let notificationSummaryTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -122,6 +123,11 @@ function loadPendingSyncTransport() {
 function loadDriveSyncTransport() {
   if (!driveSyncTransportPromise) driveSyncTransportPromise = import('./driveSync.ts')
   return driveSyncTransportPromise
+}
+
+function loadNotificationSummaryTransport() {
+  if (!notificationSummaryTransportPromise) notificationSummaryTransportPromise = import('./notificationSummary.ts')
+  return notificationSummaryTransportPromise
 }
 
 async function buildImportCsvTemplate(headers, filename) {
@@ -228,7 +234,6 @@ import {
   unlinkGoogleOauth as unlinkGoogleOauthRequest,
   updateSessionDuration as updateSessionDurationRequest,
 } from './authTransport.ts'
-import { getNotificationSummary as getNotificationSummaryRequest } from './notificationSummary.ts'
 import {
   clearCachedQueryResults,
 } from './queryCache.ts'
@@ -359,6 +364,7 @@ export const getSystemConfig = () =>
 export const getSystemBootstrap = () =>
   callSystemRuntimeMethod('getSystemBootstrap')
 export async function getNotificationSummary() {
+  const { getNotificationSummary: getNotificationSummaryRequest } = await loadNotificationSummaryTransport()
   return getNotificationSummaryRequest()
 }
 export const getSystemDebugLog = () =>

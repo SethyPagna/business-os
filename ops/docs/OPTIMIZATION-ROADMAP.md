@@ -13011,3 +13011,28 @@ Move 825 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 826 status:
+- Move 826 continues the startup/preload cleanup by lazy-loading notification
+  summary reads through `frontend/src/api/notificationSummary.ts`.
+- The notification summary transport continues to own transient-gateway
+  fallback, missing-route cooldown, fallback payloads, and in-flight request
+  reuse while `frontend/src/api/methods.ts` keeps `getNotificationSummary` as a
+  thin lazy facade.
+- Build wiring now excludes the existing `notification-api` chunk from eager
+  module preload, keeping notification fallback code intent-loaded.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\notificationBadge.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, generated
+  reference refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  production build emitted `notification-api` at 1.63 KB and kept
+  `app-api-methods` at 24.39 KB while removing the static notification summary
+  import from the legacy registry. The storage prune removed 89,315 bytes of
+  stale retained reports.
+- Current plan position after Move 826: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

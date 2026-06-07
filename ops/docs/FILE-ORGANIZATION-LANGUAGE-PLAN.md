@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 825 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 826 in this file.
 
 ## Goal
 
@@ -9004,6 +9004,39 @@ Decision rule:
   `app-api-methods` to 24.31 KB. The storage prune removed 137,941 bytes of
   stale retained reports.
 - Current plan position after Move 825: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 826: Lazy-load notification summary through focused transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/notificationSummary.ts` transport remains the sole owner
+  for notification summary reads, transient-gateway fallback, 404/missing
+  cooldown, fallback payloads, and in-flight request reuse.
+- Code-flow slice: `frontend/src/api/methods.ts` lazy-loads the notification
+  summary transport for `getNotificationSummary` instead of statically
+  importing that fallback-heavy path during registry startup.
+- Build slice: `frontend/vite.config.ts` already keeps notification summary
+  code in the named `notification-api` chunk; this move also excludes that
+  chunk from eager module preload so it loads only on notification intent.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`, and
+  `frontend/tests/notificationBadge.test.ts` verify that the legacy registry is
+  only a lazy facade while the focused transport owns cooldown and fallback
+  behavior.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\notificationBadge.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, generated
+  reference refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  production build emitted `notification-api` at 1.63 KB and kept
+  `app-api-methods` at 24.39 KB while removing the static notification summary
+  import from the legacy registry. The storage prune removed 89,315 bytes of
+  stale retained reports.
+- Current plan position after Move 826: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
