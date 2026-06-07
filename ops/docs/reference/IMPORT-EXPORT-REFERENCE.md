@@ -255,7 +255,7 @@ Code files documented: **645**
 | 243 | `frontend/src/api/contactWriteTransport.ts` | 3 | 9 | 3 | 4 |
 | 244 | `frontend/src/api/cooldownFallbacks.ts` | 0 | 8 | 0 | 0 |
 | 245 | `frontend/src/api/customTablesTransport.ts` | 2 | 6 | 2 | 1 |
-| 246 | `frontend/src/api/dashboardTransport.ts` | 2 | 3 | 2 | 3 |
+| 246 | `frontend/src/api/dashboardTransport.ts` | 2 | 3 | 2 | 2 |
 | 247 | `frontend/src/api/driveSync.ts` | 3 | 7 | 3 | 1 |
 | 248 | `frontend/src/api/expectedUpdatedAt.ts` | 1 | 2 | 1 | 10 |
 | 249 | `frontend/src/api/fileTransport.ts` | 4 | 4 | 4 | 1 |
@@ -269,7 +269,7 @@ Code files documented: **645**
 | 257 | `frontend/src/api/localDb.ts` | 3 | 10 | 2 | 8 |
 | 258 | `frontend/src/api/localMirrors.ts` | 3 | 5 | 3 | 12 |
 | 259 | `frontend/src/api/lookupTransport.ts` | 4 | 8 | 4 | 5 |
-| 260 | `frontend/src/api/methods.ts` | 37 | 195 | 37 | 1 |
+| 260 | `frontend/src/api/methods.ts` | 36 | 193 | 36 | 1 |
 | 261 | `frontend/src/api/multipartHeaders.ts` | 1 | 1 | 1 | 2 |
 | 262 | `frontend/src/api/notificationSummary.ts` | 2 | 1 | 2 | 2 |
 | 263 | `frontend/src/api/offlineSnapshotTransport.ts` | 10 | 1 | 10 | 2 |
@@ -5204,8 +5204,7 @@ Code files documented: **645**
 - Internal dependencies (2)
   - `frontend/src/api/http.ts`
   - `frontend/src/api/query.ts`
-- Referenced by (3)
-  - `frontend/src/api/methods.ts`
+- Referenced by (2)
   - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/inventory/Inventory.tsx`
 
@@ -5476,8 +5475,8 @@ Code files documented: **645**
 
 ### 3.260 `frontend/src/api/methods.ts`
 
-- Declared exports: `adjustStock`, `applyRfidSession`, `approveImportJob`, `askPortalAi`, `attachSaleCustomer`, `browseDir`, `bulkImportCustomers`, `bulkImportDeliveryContacts`, `bulkImportProducts`, `bulkImportSuppliers`, `cancelImportJob`, `cancelSystemJob`, `changeUserPassword`, `completeGoogleOauth`, `completePasswordReset`, `createActionHistory`, `createAiProvider`, `createBranch`, `createCategory`, `createCustomer`, `createDeliveryContact`, `createImportJob`, `createPortalSubmission`, `createProduct`, `createProductVariant`, `createReturn`, `createRfidSession`, `createRfidTag`, `createRole`, `createSale`, `createSupplier`, `createSupplierReturn`, `createUnit`, `createUser`, `deleteAiProvider`, `deleteBranch`, `deleteCategory`, `deleteCustomer`, `deleteDeliveryContact`, `deleteFileAsset`, `deleteImportJob`, `deleteProduct`, `deleteRole`, `deleteSupplier`, `deleteUnit`, `discardPendingSyncQueue`, `disconnectGoogleDriveSync`, `disconnectUserAuthProvider`, `downloadCustomerTemplate`, `downloadImportJobErrors`, `downloadImportTemplate`, `downloadSupplierTemplate`, `exportBackupFolder`, `factoryReset`, `forgetGoogleDriveSyncCredentials`, `getActionHistory`, `getAiProviders`, `getAiResponses`, `getAnalytics`, `getAppBootstrap`, `getBranchStock`, `getBranchStockIntegrity`, `getBranchSummary`, `getBranches`, `getCatalogMeta`, `getCatalogProducts`, `getCategories`, `getCurrentOrganization`, `getCustomerPointSummaries`, `getCustomers`, `getDashboard`, `getDataPath`, `getDeliveryContacts`, `getFiles`, `getGoogleDriveSyncStatus`, `getImageDataUrl`, `getImportJob`, `getImportJobReview`, `getImportQueueStatus`, `getIntegrationDoctor`, `getInventoryBootstrap`, `getInventoryMovements`, `getInventoryReasons`, `getInventoryStats`, `getInventorySummary`, `getNotificationSummary`, `getOrganizationBootstrap`, `getPendingSyncState`, `getPortalAiStatus`, `getPortalBootstrap`, `getPortalCatalogMeta`, `getPortalCatalogProducts`, `getPortalConfig`, `getPortalSubmissionsForReview`, `getProductBootstrap`, `getProductFilters`, `getProductLookupUsage`, `getProducts`, `getProductsByIds`, `getReturn`, `getReturns`, `getRfidSessionReview`, `getRfidStatus`, `getRoles`, `getSales`, `getSalesExport`, `getScaleMigrationStatus`, `getSettings`, `getSuppliers`, `getSystemBootstrap`, `getSystemConfig`, `getSystemDebugLog`, `getSystemJob`, `getTransfers`, `getUnits`, `getUserAuthMethods`, `getUserProfile`, `getUsers`, `getVerificationCapabilities`, `importBackupFolder`, `listImportJobs`, `login`, `logout`, `lookupPortalMembership`, `moveStockRow`, `openCSVDialog`, `openFolderDialog`, `openImageDialog`, `openPath`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `pollSystemJob`, `preflightImportJob`, `prepareScaleMigration`, `queueBackupFolderExport`, `queueBackupFolderRestore`, `queueGoogleDriveSyncNow`, `recordRfidSessionEvents`, `redoActionHistory`, `refreshOfflineDeviceSnapshot`, `repairBranchStockIntegrity`, `replaceProductLookupValues`, `requestPasswordResetEmail`, `resetData`, `resetDataPath`, `resetPassword`, `resetPasswordWithOtp`, `retryImportJob`, `retryPendingSyncNow`, `reviewPortalSubmission`, `runScaleMigration`, `saveGoogleDriveSyncPreferences`, `saveInventoryReasons`, `saveSettings`, `searchInventoryProducts`, `searchOrganizations`, `searchPortalCatalogProducts`, `searchProducts`, `searchRfidTags`, `setDataPath`, `startGoogleDriveSyncOauth`, `startGoogleOauth`, `startImportJob`, `syncGoogleDriveNow`, `testAiProvider`, `testSyncServer`, `transferInventoryStock`, `transferStock`, `undoActionHistory`, `unlinkGoogleOauth`, `updateActionHistory`, `updateAiProvider`, `updateBranch`, `updateCategory`, `updateCustomer`, `updateDeliveryContact`, `updateImportJobDecisions`, `updateProduct`, `updateReturn`, `updateRole`, `updateSaleStatus`, `updateSessionDuration`, `updateSupplier`, `updateUnit`, `updateUser`, `updateUserProfile`, `uploadFileAsset`, `uploadImportJobCsv`, `uploadImportJobImages`, `uploadImportJobZip`, `uploadProductImage`, `uploadUserAvatar`
-- Imports (37)
+- Declared exports: `adjustStock`, `applyRfidSession`, `approveImportJob`, `askPortalAi`, `attachSaleCustomer`, `browseDir`, `bulkImportCustomers`, `bulkImportDeliveryContacts`, `bulkImportProducts`, `bulkImportSuppliers`, `cancelImportJob`, `cancelSystemJob`, `changeUserPassword`, `completeGoogleOauth`, `completePasswordReset`, `createActionHistory`, `createAiProvider`, `createBranch`, `createCategory`, `createCustomer`, `createDeliveryContact`, `createImportJob`, `createPortalSubmission`, `createProduct`, `createProductVariant`, `createReturn`, `createRfidSession`, `createRfidTag`, `createRole`, `createSale`, `createSupplier`, `createSupplierReturn`, `createUnit`, `createUser`, `deleteAiProvider`, `deleteBranch`, `deleteCategory`, `deleteCustomer`, `deleteDeliveryContact`, `deleteFileAsset`, `deleteImportJob`, `deleteProduct`, `deleteRole`, `deleteSupplier`, `deleteUnit`, `discardPendingSyncQueue`, `disconnectGoogleDriveSync`, `disconnectUserAuthProvider`, `downloadCustomerTemplate`, `downloadImportJobErrors`, `downloadImportTemplate`, `downloadSupplierTemplate`, `exportBackupFolder`, `factoryReset`, `forgetGoogleDriveSyncCredentials`, `getActionHistory`, `getAiProviders`, `getAiResponses`, `getAppBootstrap`, `getBranchStock`, `getBranchStockIntegrity`, `getBranchSummary`, `getBranches`, `getCatalogMeta`, `getCatalogProducts`, `getCategories`, `getCurrentOrganization`, `getCustomerPointSummaries`, `getCustomers`, `getDataPath`, `getDeliveryContacts`, `getFiles`, `getGoogleDriveSyncStatus`, `getImageDataUrl`, `getImportJob`, `getImportJobReview`, `getImportQueueStatus`, `getIntegrationDoctor`, `getInventoryBootstrap`, `getInventoryMovements`, `getInventoryReasons`, `getInventoryStats`, `getInventorySummary`, `getNotificationSummary`, `getOrganizationBootstrap`, `getPendingSyncState`, `getPortalAiStatus`, `getPortalBootstrap`, `getPortalCatalogMeta`, `getPortalCatalogProducts`, `getPortalConfig`, `getPortalSubmissionsForReview`, `getProductBootstrap`, `getProductFilters`, `getProductLookupUsage`, `getProducts`, `getProductsByIds`, `getReturn`, `getReturns`, `getRfidSessionReview`, `getRfidStatus`, `getRoles`, `getSales`, `getSalesExport`, `getScaleMigrationStatus`, `getSettings`, `getSuppliers`, `getSystemBootstrap`, `getSystemConfig`, `getSystemDebugLog`, `getSystemJob`, `getTransfers`, `getUnits`, `getUserAuthMethods`, `getUserProfile`, `getUsers`, `getVerificationCapabilities`, `importBackupFolder`, `listImportJobs`, `login`, `logout`, `lookupPortalMembership`, `moveStockRow`, `openCSVDialog`, `openFolderDialog`, `openImageDialog`, `openPath`, `otpConfirm`, `otpDisable`, `otpSetup`, `otpStatus`, `otpVerify`, `pollSystemJob`, `preflightImportJob`, `prepareScaleMigration`, `queueBackupFolderExport`, `queueBackupFolderRestore`, `queueGoogleDriveSyncNow`, `recordRfidSessionEvents`, `redoActionHistory`, `refreshOfflineDeviceSnapshot`, `repairBranchStockIntegrity`, `replaceProductLookupValues`, `requestPasswordResetEmail`, `resetData`, `resetDataPath`, `resetPassword`, `resetPasswordWithOtp`, `retryImportJob`, `retryPendingSyncNow`, `reviewPortalSubmission`, `runScaleMigration`, `saveGoogleDriveSyncPreferences`, `saveInventoryReasons`, `saveSettings`, `searchInventoryProducts`, `searchOrganizations`, `searchPortalCatalogProducts`, `searchProducts`, `searchRfidTags`, `setDataPath`, `startGoogleDriveSyncOauth`, `startGoogleOauth`, `startImportJob`, `syncGoogleDriveNow`, `testAiProvider`, `testSyncServer`, `transferInventoryStock`, `transferStock`, `undoActionHistory`, `unlinkGoogleOauth`, `updateActionHistory`, `updateAiProvider`, `updateBranch`, `updateCategory`, `updateCustomer`, `updateDeliveryContact`, `updateImportJobDecisions`, `updateProduct`, `updateReturn`, `updateRole`, `updateSaleStatus`, `updateSessionDuration`, `updateSupplier`, `updateUnit`, `updateUser`, `updateUserProfile`, `uploadFileAsset`, `uploadImportJobCsv`, `uploadImportJobImages`, `uploadImportJobZip`, `uploadProductImage`, `uploadUserAvatar`
+- Imports (36)
   - `../platform/runtime/clientRuntime.ts`
   - `../utils/appRefresh.ts`
   - `../utils/csvTemplate.ts`
@@ -5488,7 +5487,6 @@ Code files documented: **645**
   - `./branchTransport.ts`
   - `./browserDialogs.ts`
   - `./contactsTransport.ts`
-  - `./dashboardTransport.ts`
   - `./driveSync.ts`
   - `./fileTransport.ts`
   - `./http.ts`
@@ -5515,7 +5513,7 @@ Code files documented: **645**
   - `./systemRuntime.ts`
   - `./userAdminTransport.ts`
   - `./userReadTransport.ts`
-- Internal dependencies (37)
+- Internal dependencies (36)
   - `frontend/src/api/actionHistoryTransport.ts`
   - `frontend/src/api/aiTransport.ts`
   - `frontend/src/api/appBootstrapTransport.ts`
@@ -5523,7 +5521,6 @@ Code files documented: **645**
   - `frontend/src/api/branchTransport.ts`
   - `frontend/src/api/browserDialogs.ts`
   - `frontend/src/api/contactsTransport.ts`
-  - `frontend/src/api/dashboardTransport.ts`
   - `frontend/src/api/driveSync.ts`
   - `frontend/src/api/fileTransport.ts`
   - `frontend/src/api/http.ts`

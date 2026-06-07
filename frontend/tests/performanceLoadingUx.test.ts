@@ -272,6 +272,7 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/systemRuntime\.ts'\)\) return 'app-system'/, 'Vite should keep Server page diagnostics transport out of app-api-methods and local DB chunks')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/portalTransport\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/portalHttp\.ts'\)[\s\S]*return 'app-portal'/, 'Vite should keep public portal transport out of app-api-methods and local DB chunks')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'/, 'Vite should keep Dashboard summary transport in a focused read chunk instead of app-api-methods')
+assert.doesNotMatch(apiMethods, /dashboardTransport\.ts|loadDashboardTransport|export const getDashboard|export const getAnalytics/, 'legacy API registry should not retain dashboard wrappers after Dashboard and Inventory own the focused transport')
 assert.match(
   viteConfig,
   /normalized\.endsWith\('\/src\/api\/http\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/query\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/actorQuery\.ts'\)[\s\S]*return 'api-http-core'/,

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 837.
+- Latest completed implementation move in this roadmap: Move 838.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13368,6 +13368,36 @@ Move 837 status:
   retained reports while preserving uploads, secrets, env files, Docker
   volumes, active images, newest local backup sets, and the newest R2 backup.
 - Current plan position after Move 837: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 838 status:
+- Move 838 retires the legacy Dashboard compatibility wrappers after Dashboard
+  and Inventory had already moved dashboard reads to
+  `frontend/src/api/dashboardTransport.ts`.
+- `frontend/src/api/methods.ts` no longer keeps `getDashboard`,
+  `getAnalytics`, or `loadDashboardTransport`, removing another dead facade
+  path from the normal legacy API registry.
+- Source guardrails now reject dashboard wrappers returning to the legacy
+  registry while still proving the focused transport owns startup, analytics,
+  and Inventory stats reads. Production build proof: `app-api-methods` emitted
+  at 23.94 KB, down from 24.16 KB in Move 837, while the focused
+  `dashboard-api` route chunk remains available at 0.47 KB.
+- Verification proof: focused API/performance/dashboard reliability tests,
+  standalone frontend typecheck, JSX/source check, frontend production build,
+  the full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The in-app Browser path was attempted first but
+  remains blocked locally by the kernel asset path error; repo Playwright
+  checks supplied browser proof with 66 UI signals, zero relevant console
+  messages, 20 public portal products, zero failed responses/page errors, and
+  passing post-live hygiene. Storage prune removed 321,843 bytes of stale
+  retained reports while preserving uploads, secrets, env files, Docker
+  volumes, active images, newest local backup sets, and the newest R2 backup.
+- Current plan position after Move 838: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

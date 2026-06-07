@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-07T09:11:26.116Z",
+  "generatedAt": "2026-06-07T09:44:25.511Z",
   "report": "ops/docs/reference/PHASE29-AUDIT.md",
   "summary": "ops/docs/reference/PHASE29-AUDIT.json",
   "policy": "ops/automation/business-os-automation.json",
@@ -14,97 +14,97 @@
   "failures": 0,
   "failedChecks": [],
   "durationSummary": {
-    "totalMs": 2518,
+    "totalMs": 2584,
     "byCheck": [
       {
         "label": "Generated bulk audit",
         "runs": 1,
-        "totalMs": 948,
-        "maxMs": 948,
-        "averageMs": 948
+        "totalMs": 994,
+        "maxMs": 994,
+        "averageMs": 994
       },
       {
         "label": "PM2 ecosystem config guardrail",
         "runs": 1,
-        "totalMs": 311,
-        "maxMs": 311,
-        "averageMs": 311
+        "totalMs": 338,
+        "maxMs": 338,
+        "averageMs": 338
       },
       {
         "label": "Organization audit",
         "runs": 1,
-        "totalMs": 297,
-        "maxMs": 297,
-        "averageMs": 297
+        "totalMs": 292,
+        "maxMs": 292,
+        "averageMs": 292
       },
       {
         "label": "Language/runtime audit",
         "runs": 1,
-        "totalMs": 242,
-        "maxMs": 242,
-        "averageMs": 242
+        "totalMs": 247,
+        "maxMs": 247,
+        "averageMs": 247
       },
       {
         "label": "Performance/code-flow scan",
         "runs": 1,
-        "totalMs": 185,
-        "maxMs": 185,
-        "averageMs": 185
+        "totalMs": 176,
+        "maxMs": 176,
+        "averageMs": 176
       },
       {
         "label": "Runtime JavaScript inventory",
         "runs": 1,
-        "totalMs": 143,
-        "maxMs": 143,
-        "averageMs": 143
-      },
-      {
-        "label": "Schema audit",
-        "runs": 1,
-        "totalMs": 143,
-        "maxMs": 143,
-        "averageMs": 143
+        "totalMs": 141,
+        "maxMs": 141,
+        "averageMs": 141
       },
       {
         "label": "Runtime dependency guardrail",
         "runs": 1,
-        "totalMs": 126,
-        "maxMs": 126,
-        "averageMs": 126
+        "totalMs": 134,
+        "maxMs": 134,
+        "averageMs": 134
+      },
+      {
+        "label": "Schema audit",
+        "runs": 1,
+        "totalMs": 132,
+        "maxMs": 132,
+        "averageMs": 132
       },
       {
         "label": "Docker release guardrail",
         "runs": 1,
-        "totalMs": 123,
-        "maxMs": 123,
-        "averageMs": 123
+        "totalMs": 130,
+        "maxMs": 130,
+        "averageMs": 130
       }
     ],
     "slowestRuns": [
       {
         "cycle": 1,
         "label": "Generated bulk audit",
-        "durationMs": 948
+        "durationMs": 994
       },
       {
         "cycle": 1,
         "label": "PM2 ecosystem config guardrail",
-        "durationMs": 311
+        "durationMs": 338
       },
       {
         "cycle": 1,
         "label": "Organization audit",
-        "durationMs": 297
+        "durationMs": 292
       },
       {
         "cycle": 1,
         "label": "Language/runtime audit",
-        "durationMs": 242
+        "durationMs": 247
       },
       {
         "cycle": 1,
         "label": "Performance/code-flow scan",
-        "durationMs": 185
+        "durationMs": 176
       }
     ]
   },
@@ -119,14 +119,14 @@
       "label": "Generated bulk audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 948,
+      "durationMs": 994,
       "command": "node.exe ops/scripts/architecture/generated-bulk-audit.ts --policy ops/automation/business-os-automation.json",
       "reports": [
         "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "ops/docs/reference/GENERATED-BULK-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-06-07T09:11:24.626Z",
+        "generatedAt": "2026-06-07T09:44:24.016Z",
         "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
         "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
         "measurementMode": "bounded-parallel-targets",
@@ -136,9 +136,9 @@
         "fileStatConcurrency": 32,
         "targets": 15,
         "existingTargets": 8,
-        "totalBytes": 550225893,
-        "protectedBytes": 225891906,
-        "cleanupCandidateBytes": 324333987,
+        "totalBytes": 550225333,
+        "protectedBytes": 225891566,
+        "cleanupCandidateBytes": 324333767,
         "nestedTargetOverlaps": [
           {
             "parent": "business-os-data",
@@ -158,9 +158,9 @@
           }
         ],
         "nestedOverlapBytes": 15496556,
-        "adjustedTotalBytes": 534729337,
-        "adjustedProtectedBytes": 210395350,
-        "adjustedCleanupCandidateBytes": 324333987,
+        "adjustedTotalBytes": 534728777,
+        "adjustedProtectedBytes": 210395010,
+        "adjustedCleanupCandidateBytes": 324333767,
         "largestProtectedTargets": [
           {
             "path": "business-os-data",
@@ -172,7 +172,7 @@
           },
           {
             "path": "ops/runtime",
-            "bytes": 47087980,
+            "bytes": 47087640,
             "files": 618,
             "folders": 60,
             "category": "runtime state",
@@ -214,7 +214,7 @@
           },
           {
             "path": "frontend/dist",
-            "bytes": 31833995,
+            "bytes": 31833775,
             "files": 199,
             "folders": 6,
             "category": "build output",
@@ -232,7 +232,7 @@
         "slowestTargetMeasurements": [
           {
             "path": "backend/node_modules",
-            "measureMs": 783,
+            "measureMs": 848,
             "bytes": 120569968,
             "files": 8618,
             "folders": 1654,
@@ -241,7 +241,7 @@
           },
           {
             "path": "frontend/node_modules",
-            "measureMs": 527,
+            "measureMs": 546,
             "bytes": 158132222,
             "files": 11264,
             "folders": 986,
@@ -250,7 +250,7 @@
           },
           {
             "path": "ops/node_modules",
-            "measureMs": 40,
+            "measureMs": 49,
             "bytes": 13797802,
             "files": 605,
             "folders": 71,
@@ -259,8 +259,8 @@
           },
           {
             "path": "ops/runtime",
-            "measureMs": 28,
-            "bytes": 47087980,
+            "measureMs": 35,
+            "bytes": 47087640,
             "files": 618,
             "folders": 60,
             "category": "runtime state",
@@ -268,7 +268,7 @@
           },
           {
             "path": "business-os-data",
-            "measureMs": 11,
+            "measureMs": 10,
             "bytes": 163307370,
             "files": 52,
             "folders": 35,
@@ -278,7 +278,7 @@
           {
             "path": "frontend/dist",
             "measureMs": 6,
-            "bytes": 31833995,
+            "bytes": 31833775,
             "files": 199,
             "folders": 6,
             "category": "build output",
@@ -286,7 +286,7 @@
           },
           {
             "path": "business-os-data/organizations/org_leangcosmetics (Leang Cosmetics)/uploads",
-            "measureMs": 3,
+            "measureMs": 2,
             "bytes": 15495843,
             "files": 12,
             "folders": 1,
@@ -295,7 +295,7 @@
           },
           {
             "path": "ops/runtime/secrets",
-            "measureMs": 3,
+            "measureMs": 1,
             "bytes": 713,
             "files": 4,
             "folders": 1,
@@ -311,7 +311,7 @@
             "targets": 3
           },
           "retention": {
-            "bytes": 47087980,
+            "bytes": 47087640,
             "files": 618,
             "folders": 60,
             "targets": 1
@@ -329,7 +329,7 @@
             "targets": 1
           },
           "regenerable": {
-            "bytes": 31833995,
+            "bytes": 31833775,
             "files": 199,
             "folders": 6,
             "targets": 1
@@ -377,7 +377,7 @@
       "label": "Schema audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 143,
+      "durationMs": 132,
       "command": "node.exe ops/scripts/backend/schema-audit.ts",
       "reports": [
         "ops/docs/reference/SCHEMA-AUDIT.md",
@@ -556,7 +556,7 @@
       "label": "Performance/code-flow scan",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 185,
+      "durationMs": 176,
       "command": "node.exe ops/scripts/docs/performance-scan.ts",
       "reports": [
         "ops/docs/reference/PERFORMANCE-SCAN.md",
@@ -567,8 +567,8 @@
         "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
         "sourceFiles": 445,
         "distAssets": 163,
-        "totalSourceBytes": 6998611,
-        "totalSourceLines": 160942,
+        "totalSourceBytes": 6998143,
+        "totalSourceLines": 160927,
         "largestSourceFile": "frontend/src/lang/km.json",
         "largestSourceFileBytes": 252664,
         "largestSourceLinesFile": "frontend/src/components/inventory/Inventory.tsx",
@@ -885,27 +885,27 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Inventory-BxVpmibv.js",
+            "file": "frontend/dist/assets/Inventory-9bAUu3kW.js",
             "size": 132993,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-_rMQsMXH.js",
+            "file": "frontend/dist/assets/catalog-Bs7qGScX.js",
             "size": 127616,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Products-BiulL3jM.js",
+            "file": "frontend/dist/assets/Products-MhbEUrxd.js",
             "size": 86993,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/POS-GAQEQwpF.js",
+            "file": "frontend/dist/assets/POS-D5RLGTJJ.js",
             "size": 76614,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-editor-p8kUGFI-.js",
+            "file": "frontend/dist/assets/catalog-editor-Cs6V69L2.js",
             "size": 75676,
             "lines": 0
           },
@@ -915,27 +915,27 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/BulkImportModal-Br13fxYo.js",
+            "file": "frontend/dist/assets/BulkImportModal-Ey-S-Xv8.js",
             "size": 69461,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/AdminRoot-sMtKMPcy.js",
+            "file": "frontend/dist/assets/AdminRoot-DddPZk4T.js",
             "size": 64141,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Dashboard-CJPOGTgf.js",
+            "file": "frontend/dist/assets/Dashboard-CeWim--o.js",
             "size": 63653,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/app-shared-DN0RrxTp.js",
+            "file": "frontend/dist/assets/app-shared-B3c9uxX9.js",
             "size": 58236,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Settings-dFz64fh2.js",
+            "file": "frontend/dist/assets/Settings-DlRsCsGT.js",
             "size": 56165,
             "lines": 0
           },
@@ -945,17 +945,17 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Backup-BUz_vtDS.js",
+            "file": "frontend/dist/assets/Backup-y1WdBtds.js",
             "size": 52444,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/user-profile-modal-DQjnvbAC.js",
+            "file": "frontend/dist/assets/user-profile-modal-CpbRiozf.js",
             "size": 44792,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ReceiptSettings-DFilp7JO.js",
+            "file": "frontend/dist/assets/ReceiptSettings-or-Vn4Rj.js",
             "size": 41121,
             "lines": 0
           },
@@ -965,22 +965,22 @@
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/catalog-secondary-tabs-D3K3Nfvz.js",
+            "file": "frontend/dist/assets/catalog-secondary-tabs-Cn8vlyWZ.js",
             "size": 38248,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/Sales-CdvfzZ2t.js",
+            "file": "frontend/dist/assets/Sales-6VbISaDz.js",
             "size": 37708,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/ProductForm-CfE9ZPfr.js",
+            "file": "frontend/dist/assets/ProductForm-6Uy0bXUD.js",
             "size": 36648,
             "lines": 0
           },
           {
-            "file": "frontend/dist/assets/AuditLog-DeXrg0m5.js",
+            "file": "frontend/dist/assets/AuditLog-DqJRz4uq.js",
             "size": 36454,
             "lines": 0
           }
@@ -997,14 +997,14 @@
       "label": "Language/runtime audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 242,
+      "durationMs": 247,
       "command": "node.exe ops/scripts/architecture/language-runtime-audit.ts",
       "reports": [
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json"
       ],
       "parsedOutput": {
-        "generatedAt": "2026-06-07T09:11:25.204Z",
+        "generatedAt": "2026-06-07T09:44:24.582Z",
         "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
         "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
         "mode": "non-mutating",
@@ -2894,7 +2894,7 @@
       "label": "Runtime JavaScript inventory",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 143,
+      "durationMs": 141,
       "command": "node.exe ops/scripts/architecture/runtime-js-inventory.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-JS-INVENTORY.md",
@@ -2913,7 +2913,7 @@
       "label": "Docker release guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 123,
+      "durationMs": 130,
       "command": "node.exe ops/scripts/verification/verify-docker-release.ts",
       "reports": [
         "ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json"
@@ -3075,7 +3075,7 @@
       "label": "Runtime dependency guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 126,
+      "durationMs": 134,
       "command": "node.exe ops/scripts/verification/verify-runtime-deps.ts",
       "reports": [
         "ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json"
@@ -3156,7 +3156,7 @@
       "label": "PM2 ecosystem config guardrail",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 311,
+      "durationMs": 338,
       "command": "node.exe ops/scripts/runtime/build-ecosystem-config.ts --check",
       "reports": [],
       "parsedOutput": null,
@@ -3166,7 +3166,7 @@
       "label": "Organization audit",
       "status": "passed",
       "exitCode": 0,
-      "durationMs": 297,
+      "durationMs": 292,
       "command": "node.exe ops/scripts/architecture/organization-audit.ts",
       "reports": [
         "ops/docs/reference/ORGANIZATION-AUDIT.md",

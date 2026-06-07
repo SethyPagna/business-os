@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 837 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 838 in this file.
 
 ## Goal
 
@@ -9455,6 +9455,43 @@ Decision rule:
   Docker volumes, active images, newest local backup sets, and the newest R2
   backup.
 - Current plan position after Move 837: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 838: Retire legacy Dashboard facade wrappers
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. Dashboard analytics
+  and summary reads are now owned by
+  `frontend/src/api/dashboardTransport.ts` plus the Dashboard route direct
+  import and Inventory route-owned narrow lazy loader.
+- Code-flow slice: `frontend/src/api/methods.ts` no longer keeps the dead
+  `getDashboard`, `getAnalytics`, or dashboard transport loader wrappers.
+  Dashboard still imports `getAnalytics`, `getDashboard`, and
+  `getDashboardStartup` directly, while Inventory keeps its own focused
+  lazy loader for stats.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` now reject dashboard wrappers
+  returning to the legacy registry while still proving the focused transport
+  owns dashboard startup and analytics paths.
+- Build slice: production build emitted `app-api-methods` at 23.94 KB, down
+  from 24.16 KB in Move 837. The focused `dashboard-api` route chunk remains
+  available at 0.47 KB.
+- Verification proof: focused API/performance/dashboard reliability tests,
+  standalone frontend typecheck, JSX/source check, frontend production build,
+  the full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, Phase 29 audit, storage
+  prune, local health check, and `npm.cmd --prefix ops run phase84:live-suite
+  -- --skip-rollback` passed. The in-app Browser path was attempted first but
+  remains blocked locally by the kernel asset path error; repo Playwright
+  checks supplied browser proof with 66 UI signals, zero relevant console
+  messages, 20 public portal products, zero failed responses/page errors, and
+  passing post-live hygiene. Storage prune removed 321,843 bytes of stale
+  retained report directories while preserving uploads, secrets, env files,
+  Docker volumes, active images, newest local backup sets, and the newest R2
+  backup.
+- Current plan position after Move 838: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

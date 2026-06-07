@@ -11,7 +11,6 @@ let aiTransportPromise = null
 let actionHistoryTransportPromise = null
 let authTransportPromise = null
 let contactsTransportPromise = null
-let dashboardTransportPromise = null
 let fileTransportPromise = null
 let branchTransportPromise = null
 let inventoryTransportPromise = null
@@ -79,11 +78,6 @@ function loadAuthTransport() {
 function loadContactsTransport() {
   if (!contactsTransportPromise) contactsTransportPromise = import('./contactsTransport.ts')
   return contactsTransportPromise
-}
-
-function loadDashboardTransport() {
-  if (!dashboardTransportPromise) dashboardTransportPromise = import('./dashboardTransport.ts')
-  return dashboardTransportPromise
 }
 
 function loadFileTransport() {
@@ -871,15 +865,6 @@ export const getSales = async (params) => {
 }
 
 // ─── Dashboard & analytics ────────────────────────────────────────────────────
-export const getDashboard = async () => {
-  const module = await loadDashboardTransport()
-  return module.getDashboard()
-}
-export const getAnalytics = async (params) => {
-  const module = await loadDashboardTransport()
-  return module.getAnalytics(params)
-}
-
 // ─── Customers ────────────────────────────────────────────────────────────────
 export const getCustomers = async (params = {}) => {
   const module = await loadContactsTransport()
