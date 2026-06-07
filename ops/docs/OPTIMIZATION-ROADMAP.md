@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 821.
+- Latest completed implementation move in this roadmap: Move 822.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -12905,6 +12905,31 @@ Move 821 status:
   passed. The production build split `offline-snapshot-api` to a 2.67 KB chunk
   and reduced `app-api-methods` to 28.85 KB.
 - Current plan position after Move 821: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 822 status:
+- Move 822 continues the typed API split by routing legacy return APIs through
+  `frontend/src/api/returnsTransport.ts`. `frontend/src/api/methods.ts` now
+  lazy-loads `getReturns`, `getReturn`, `createReturn`,
+  `createSupplierReturn`, and `updateReturn` instead of carrying duplicate
+  untyped route, mirror, request-id, expected-updated-at, and conflict-attempt
+  logic.
+- The source guards now protect the new boundary: return query building,
+  local return mirroring, encoded return IDs, client request IDs, and
+  `buildAttemptedReturnItems` conflict metadata live in the typed transport,
+  while the legacy registry remains a compatibility facade.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\actionStability.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, the full frontend utility
+  suite, frontend production build, Phase 29 audit, storage prune, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  production build emitted `returns-api` as a 1.93 KB chunk and reduced
+  `app-api-methods` to 27.90 KB. The storage prune removed 267,804 bytes of
+  stale retained reports.
+- Current plan position after Move 822: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

@@ -129,6 +129,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   const editReturn = readFrontend('src/components/returns/EditReturnModal.tsx')
   const supplierReturn = readFrontend('src/components/returns/NewSupplierReturnModal.tsx')
   const methods = readFrontend('src/api/methods.ts')
+  const returnsTransport = readFrontend('src/api/returnsTransport.ts')
   const returnsRoute = readRepo('backend/src/routes/returns.ts')
 
   for (const source of [newReturn, editReturn, supplierReturn]) {
@@ -156,8 +157,10 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(returns, /withLoaderTimeout\(\s*\(\) => getReturnApi\(\)\.updateReturn\(snapshot\.id as number \| string, \{[\s\S]*\}\),\s*'Restore return snapshot',\s*RETURNS_HISTORY_RESTORE_TIMEOUT_MS,\s*\)/)
   assert.match(returns, /finally \{[\s\S]*finishSingleAction\(historyRestoreInFlightRef\)/)
 
-  assert.match(methods, /export async function createReturn\(d\) \{[\s\S]*ensureClientRequestId\(\{ \.\.\.getDeviceInfo\(\), \.\.\.d \}, 'return'\)/)
-  assert.match(methods, /export async function createSupplierReturn\(d\) \{[\s\S]*ensureClientRequestId\(\{ \.\.\.getDeviceInfo\(\), \.\.\.d \}, 'supplier_return'\)/)
+  assert.match(methods, /export async function createReturn\(d\) \{[\s\S]*loadReturnsTransport\(\)/)
+  assert.match(methods, /export async function createSupplierReturn\(d\) \{[\s\S]*loadReturnsTransport\(\)/)
+  assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return'\)/)
+  assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
   assert.match(returnsRoute, /function findReturnByClientRequestId\(clientRequestId\)/)
   assert.match(returnsRoute, /const existingReturn = findReturnByClientRequestId\(clientRequestId\)[\s\S]*duplicate: true/)
   assert.match(returnsRoute, /const duplicateReturn = findReturnByClientRequestId\(clientRequestId\)[\s\S]*duplicate: true/)

@@ -25,6 +25,7 @@ let rfidTransportPromise = null
 let salesTransportPromise = null
 let settingsTransportPromise = null
 let offlineSnapshotTransportPromise = null
+let returnsTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -116,6 +117,11 @@ function loadOfflineSnapshotTransport() {
   return offlineSnapshotTransportPromise
 }
 
+function loadReturnsTransport() {
+  if (!returnsTransportPromise) returnsTransportPromise = import('./returnsTransport.ts')
+  return returnsTransportPromise
+}
+
 async function buildImportCsvTemplate(headers, filename) {
   const { buildCSVTemplate } = await loadCsvTemplateModule()
   return buildCSVTemplate(headers, filename)
@@ -148,7 +154,6 @@ import {
   CATEGORY_REFRESH_CHANNELS,
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
-import { buildAttemptedReturnItems } from './conflicts.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { serializePendingSyncPreview } from './syncPreview.ts'
 import {
@@ -247,7 +252,7 @@ import {
   clearCachedQueryResults,
 } from './queryCache.ts'
 import { withExpectedUpdatedAt } from './expectedUpdatedAt.ts'
-import { mirrorTable, purgeSensitiveLiveServerMirrors, routeMirrored } from './localMirrors.ts'
+import { purgeSensitiveLiveServerMirrors } from './localMirrors.ts'
 import {
   DISCARD_SYNC_UPDATE_CHANNELS,
   dispatchSyncUpdates,
@@ -1084,28 +1089,22 @@ export const openPath = (targetPath) =>
   callSystemRuntimeMethod('openPath', targetPath)
 
 // ─── Returns ──────────────────────────────────────────────────────────────────
-export const getReturns  = (params) => {
-  const q = buildQueryString(params, { skipEmpty: false })
-  const cacheKey = q ? `returns:get:${q}` : 'returns:get'
-  const mirror = q ? null : mirrorTable('returns')
-  return routeMirrored(cacheKey, () => apiFetch('GET', appendQuery('/api/returns', q)), async () => {
-    const db = await getLocalDb()
-    return db.returns.orderBy('created_at').reverse().toArray()
-  }, mirror)
+export const getReturns = async (params) => {
+  const { getReturns: getReturnsRequest } = await loadReturnsTransport()
+  return getReturnsRequest(params)
 }
 export async function createReturn(d) {
-  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'return')
-  const returnNumber = String(payload.return_number || '').trim() || `RET-${Date.now()}`
-  const finalPayload = { ...payload, return_number: returnNumber }
-  return route('returns:create', () => apiFetch('POST', '/api/returns', finalPayload), null, true)
+  const { createReturn: createReturnRequest } = await loadReturnsTransport()
+  return createReturnRequest(d)
 }
 export async function createSupplierReturn(d) {
-  const payload = ensureClientRequestId({ ...getDeviceInfo(), ...d }, 'supplier_return')
-  const returnNumber = String(payload.return_number || '').trim() || `SRET-${Date.now()}`
-  const finalPayload = { ...payload, return_number: returnNumber }
-  return route('returns:createSupplier', () => apiFetch('POST', '/api/returns/supplier', finalPayload), null, true)
+  const { createSupplierReturn: createSupplierReturnRequest } = await loadReturnsTransport()
+  return createSupplierReturnRequest(d)
 }
-export const getReturn    = id => route('returns:getOne', () => apiFetch('GET', `/api/returns/${id}`), () => null)
+export const getReturn = async (id) => {
+  const { getReturn: getReturnRequest } = await loadReturnsTransport()
+  return getReturnRequest(id)
+}
 
 // ─── Sale status update ───────────────────────────────────────────────────────
 export const updateSaleStatus = async (id, sale_status, notes) => {
@@ -1155,26 +1154,8 @@ export const getSalesExport = (params) => {
   return route('sales:export', () => apiFetch('GET', appendQuery('/api/sales/export', q)), () => ({}))
 }
 export const updateReturn = async (id, d) => {
-  const payload = await withExpectedUpdatedAt('returns', id, { ...getDeviceInfo(), ...(d || {}) })
-  try {
-    const result = await route('returns:update', () => apiFetch('PATCH', `/api/returns/${id}`, payload), null, true)
-    const db = await getLocalDb()
-    await db.returns.update(id, {
-      ...d,
-      updated_at: result?.updated_at || result?.updatedAt || new Date().toISOString(),
-    }).catch(() => {})
-    return result
-  } catch (error) {
-    error.attempted = {
-      reason: d?.reason || '',
-      return_type: d?.return_type || '',
-      notes: d?.notes || '',
-      total_refund_usd: d?.total_refund_usd || 0,
-      total_refund_khr: d?.total_refund_khr || 0,
-      items: buildAttemptedReturnItems(d?.items),
-    }
-    throw error
-  }
+  const { updateReturn: updateReturnRequest } = await loadReturnsTransport()
+  return updateReturnRequest(id, d)
 }
 
 // ─── Sync server health test ──────────────────────────────────────────────────

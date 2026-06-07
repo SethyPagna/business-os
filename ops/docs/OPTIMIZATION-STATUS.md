@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 821, route legacy offline snapshot refresh through the typed offline snapshot transport.
+- Latest completed move: Move 822, route legacy return APIs through the typed returns transport.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T01-46-13-481Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T01-59-59-789Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T01-46-55-689Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T02-00-38-214Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -79,6 +79,21 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 822 moves the remaining legacy return API implementation out of
+  `frontend/src/api/methods.ts` and into `frontend/src/api/returnsTransport.ts`.
+  The typed transport now owns return reads, return detail reads, customer and
+  supplier return creation, return updates, return request IDs, encoded return
+  IDs, local return mirror/update behavior, and return conflict-attempt
+  metadata. The legacy registry keeps the same `window.api` names but now
+  lazy-loads the focused transport. Proof: `node
+  frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\actionStability.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, the full frontend utility
+  suite, frontend production build, Phase 29 audit, storage prune, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  build emitted `returns-api` at 1.93 KB and reduced `app-api-methods` to 27.90
+  KB. The storage prune removed 267,804 bytes of stale retained reports without
+  touching uploads, secrets, env files, newest backups, or running data.
 - Move 821 removes the duplicated untyped offline snapshot refresh
   implementation from `frontend/src/api/methods.ts`. The legacy API registry
   now lazy-loads `frontend/src/api/offlineSnapshotTransport.ts` for
