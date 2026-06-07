@@ -1184,12 +1184,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
           if (canProbeServerSession) {
             if (!hasStoredSession) {
-              setAuthReady(false)
+              setAuthReady(true)
+              loadSettings().catch(() => {})
             }
             let settled = false
             const authReadyWatchdog = window.setTimeout(() => {
               if (settled) return
-              console.warn('[AppContext] App bootstrap is taking too long; showing the shell with stored session data.')
+              console.warn(`[AppContext] App bootstrap is taking too long; showing ${hasStoredSession ? 'the shell with stored session data' : 'the sign-in shell'}.`)
               setAuthReady(true)
               loadSettings().catch(() => {})
             }, 10_000)
