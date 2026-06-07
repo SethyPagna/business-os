@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 824 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 825 in this file.
 
 ## Goal
 
@@ -8968,6 +8968,42 @@ Decision rule:
   emitted `pending-sync-api` at 1.66 KB and reduced `app-api-methods` to 25.07
   KB. The storage prune removed 238,300 bytes of stale retained reports.
 - Current plan position after Move 824: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 825: Lazy-load Google Drive sync APIs through typed transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/driveSync.ts` transport now remains the sole owner for
+  Google Drive sync status, preference save, OAuth start, disconnect,
+  credential-forget, queued sync, and immediate sync route calls.
+- Code-flow slice: `frontend/src/api/methods.ts` lazy-loads the Drive sync
+  transport for `getGoogleDriveSyncStatus`, `saveGoogleDriveSyncPreferences`,
+  `startGoogleDriveSyncOauth`, `disconnectGoogleDriveSync`,
+  `forgetGoogleDriveSyncCredentials`, `queueGoogleDriveSyncNow`, and
+  `syncGoogleDriveNow` instead of statically importing the focused transport
+  during startup.
+- Build slice: `frontend/vite.config.ts` gives the Drive sync transport a
+  named `drive-sync-api` intent chunk and excludes it from eager module
+  preload.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts`,
+  `frontend/tests/performanceLoadingUx.test.ts`, and
+  `frontend/tests/backupJobs.test.ts` verify that Drive status cooldown
+  fallback, in-flight request reuse, queue-now behavior, and backup-page job
+  flows stay in the focused transport while the legacy registry is only a lazy
+  facade.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\backupJobs.test.ts`, standalone frontend typecheck, the full
+  frontend utility suite, frontend production build, generated reference
+  refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  production build emitted `drive-sync-api` at 1.82 KB and reduced
+  `app-api-methods` to 24.31 KB. The storage prune removed 137,941 bytes of
+  stale retained reports.
+- Current plan position after Move 825: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

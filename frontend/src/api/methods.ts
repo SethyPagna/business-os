@@ -22,6 +22,7 @@ let settingsTransportPromise = null
 let offlineSnapshotTransportPromise = null
 let returnsTransportPromise = null
 let pendingSyncTransportPromise = null
+let driveSyncTransportPromise = null
 
 function loadPortalTransport() {
   if (!portalTransportPromise) portalTransportPromise = import('./portalTransport.ts')
@@ -116,6 +117,11 @@ function loadReturnsTransport() {
 function loadPendingSyncTransport() {
   if (!pendingSyncTransportPromise) pendingSyncTransportPromise = import('./pendingSyncTransport.ts')
   return pendingSyncTransportPromise
+}
+
+function loadDriveSyncTransport() {
+  if (!driveSyncTransportPromise) driveSyncTransportPromise = import('./driveSync.ts')
+  return driveSyncTransportPromise
 }
 
 async function buildImportCsvTemplate(headers, filename) {
@@ -223,15 +229,6 @@ import {
   updateSessionDuration as updateSessionDurationRequest,
 } from './authTransport.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from './notificationSummary.ts'
-import {
-  disconnectGoogleDriveSync as disconnectGoogleDriveSyncRequest,
-  forgetGoogleDriveSyncCredentials as forgetGoogleDriveSyncCredentialsRequest,
-  getGoogleDriveSyncStatus as getGoogleDriveSyncStatusRequest,
-  queueGoogleDriveSyncNow as queueGoogleDriveSyncNowRequest,
-  saveGoogleDriveSyncPreferences as saveGoogleDriveSyncPreferencesRequest,
-  startGoogleDriveSyncOauth as startGoogleDriveSyncOauthRequest,
-  syncGoogleDriveNow as syncGoogleDriveNowRequest,
-} from './driveSync.ts'
 import {
   clearCachedQueryResults,
 } from './queryCache.ts'
@@ -948,26 +945,40 @@ export async function importBackupFolder(sourceDir) {
 // After any reset or factory-reset, wipe the entire in-memory cache so that
 // Dashboard, Inventory, Sales, Returns, Contacts, Branches, etc. all reload
 // fresh data immediately instead of showing stale results for up to 45 s.
-export const getGoogleDriveSyncStatus = () =>
-  getGoogleDriveSyncStatusRequest()
+export const getGoogleDriveSyncStatus = async () => {
+  const { getGoogleDriveSyncStatus: getGoogleDriveSyncStatusRequest } = await loadDriveSyncTransport()
+  return getGoogleDriveSyncStatusRequest()
+}
 
-export const saveGoogleDriveSyncPreferences = (payload) =>
-  saveGoogleDriveSyncPreferencesRequest(payload)
+export const saveGoogleDriveSyncPreferences = async (payload) => {
+  const { saveGoogleDriveSyncPreferences: saveGoogleDriveSyncPreferencesRequest } = await loadDriveSyncTransport()
+  return saveGoogleDriveSyncPreferencesRequest(payload)
+}
 
-export const startGoogleDriveSyncOauth = (payload) =>
-  startGoogleDriveSyncOauthRequest(payload)
+export const startGoogleDriveSyncOauth = async (payload) => {
+  const { startGoogleDriveSyncOauth: startGoogleDriveSyncOauthRequest } = await loadDriveSyncTransport()
+  return startGoogleDriveSyncOauthRequest(payload)
+}
 
-export const disconnectGoogleDriveSync = () =>
-  disconnectGoogleDriveSyncRequest()
+export const disconnectGoogleDriveSync = async () => {
+  const { disconnectGoogleDriveSync: disconnectGoogleDriveSyncRequest } = await loadDriveSyncTransport()
+  return disconnectGoogleDriveSyncRequest()
+}
 
-export const forgetGoogleDriveSyncCredentials = (payload = {}) =>
-  forgetGoogleDriveSyncCredentialsRequest(payload)
+export const forgetGoogleDriveSyncCredentials = async (payload = {}) => {
+  const { forgetGoogleDriveSyncCredentials: forgetGoogleDriveSyncCredentialsRequest } = await loadDriveSyncTransport()
+  return forgetGoogleDriveSyncCredentialsRequest(payload)
+}
 
-export const queueGoogleDriveSyncNow = () =>
-  queueGoogleDriveSyncNowRequest()
+export const queueGoogleDriveSyncNow = async () => {
+  const { queueGoogleDriveSyncNow: queueGoogleDriveSyncNowRequest } = await loadDriveSyncTransport()
+  return queueGoogleDriveSyncNowRequest()
+}
 
-export const syncGoogleDriveNow = () =>
-  syncGoogleDriveNowRequest()
+export const syncGoogleDriveNow = async () => {
+  const { syncGoogleDriveNow: syncGoogleDriveNowRequest } = await loadDriveSyncTransport()
+  return syncGoogleDriveNowRequest()
+}
 
 export async function resetData(mode = 'sales') {
   const result = await callSystemRuntimeMethod('resetData', mode)

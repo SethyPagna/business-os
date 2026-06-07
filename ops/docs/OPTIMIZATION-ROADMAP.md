@@ -12986,3 +12986,28 @@ Move 824 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 825 status:
+- Move 825 continues the typed API split by lazy-loading Google Drive sync
+  status, preference save, OAuth start, disconnect, credential-forget, queued
+  sync, and immediate sync calls through `frontend/src/api/driveSync.ts`.
+- The Drive sync transport continues to own status cooldown fallback,
+  in-flight status request reuse, Drive preference/job routes, and manual sync
+  trigger behavior while `frontend/src/api/methods.ts` keeps the same public
+  `window.api` names as thin lazy facades.
+- Build wiring now gives the Drive sync transport a separate `drive-sync-api`
+  intent chunk and excludes that chunk from eager module preload.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\backupJobs.test.ts`, standalone frontend typecheck, the full
+  frontend utility suite, frontend production build, generated reference
+  refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  production build emitted `drive-sync-api` at 1.82 KB and reduced
+  `app-api-methods` to 24.31 KB. The storage prune removed 137,941 bytes of
+  stale retained reports.
+- Current plan position after Move 825: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

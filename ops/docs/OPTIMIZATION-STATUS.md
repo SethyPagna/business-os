@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 824, route pending sync queue APIs through the typed pending sync transport.
+- Latest completed move: Move 825, lazy-load Google Drive sync APIs through the typed Drive sync transport.
 
 ## Current Baseline
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T01-59-59-789Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-07T02-38-59-854Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,7 +45,7 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T02-00-38-214Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-07T02-39-40-556Z/report.json`
 - latest focused local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-07T00-02-47-494Z.json`
 - latest Inventory persisted-section live check:
@@ -79,6 +79,21 @@ Latest verified reports:
 
 Latest cleanup run:
 
+- Move 825 moves Google Drive sync status, preference save, OAuth start,
+  disconnect, credential-forget, queued sync, and immediate sync calls out of
+  the legacy eager API registry and behind the focused
+  `frontend/src/api/driveSync.ts` transport. The typed transport continues to
+  own Drive status cooldown fallback, in-flight status request reuse, Drive
+  preference/job routes, and manual sync trigger behavior. Build wiring now
+  emits a separate `drive-sync-api` intent chunk and excludes it from eager
+  module preload. Proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, `node
+  frontend\tests\backupJobs.test.ts`, standalone frontend typecheck, the full
+  frontend utility suite, frontend production build, generated reference
+  refresh, Phase 29 audit, storage prune, local health check, and
+  `npm.cmd --prefix ops run phase84:live-suite -- --skip-rollback` passed. The
+  build emitted `drive-sync-api` at 1.82 KB and reduced `app-api-methods` to
+  24.31 KB. The storage prune removed 137,941 bytes of stale retained reports.
 - Move 824 moves pending sync queue reads, queue discard, and manual retry out
   of `frontend/src/api/methods.ts` and into
   `frontend/src/api/pendingSyncTransport.ts`. The typed transport now owns

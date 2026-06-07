@@ -164,6 +164,7 @@ const deferredModulePreloadPrefixes = [
   'assets/contacts-api-',
   'assets/dashboard-api-',
   'assets/dashboard-export-',
+  'assets/drive-sync-api-',
   'assets/file-api-',
   'assets/inventory-api-',
   'assets/inventory-export-',
@@ -339,6 +340,7 @@ function manualChunks(id: string): string | undefined {
     ) return 'import-jobs-api'
     if (normalized.endsWith('/src/api/userAdminTransport.ts')) return 'user-admin-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
+    if (normalized.endsWith('/src/api/driveSync.ts')) return 'drive-sync-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'
     if (normalized.includes('/src/components/dashboard/charts/')) return 'dashboard-charts'
     if (normalized.endsWith('/src/components/dashboard/dashboardExport.ts')) return 'dashboard-export'
