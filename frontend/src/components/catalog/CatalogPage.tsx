@@ -111,6 +111,7 @@ const CATALOG_SUBMISSION_MAX_SCREENSHOTS = 8
 const CATALOG_IMAGE_READ_CONCURRENCY = 2
 const PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PORTAL_CACHE_PRODUCT_LIMIT = 80
+const PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 
 type LegacyCatalogRecord = Record<string, any>
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -580,17 +581,29 @@ function hexToRgba(hex: unknown, alpha: unknown): string {
 /** Read cached portal payload to reduce visible loading delays on hard reload. */
 function readPortalCache(): LegacyCatalogRecord | null {
   if (typeof window === 'undefined') return null
+  const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
   try {
-    const raw = sessionStorage.getItem(PORTAL_CACHE_KEY)
+    let raw = ''
+    let sourceStore: Storage | null = null
+    for (const store of stores) {
+      raw = store.getItem(PORTAL_CACHE_KEY) || ''
+      if (raw) {
+        sourceStore = store
+        break
+      }
+    }
     if (!raw) return null
     if (raw.length > 1_500_000) {
-      sessionStorage.removeItem(PORTAL_CACHE_KEY)
+      for (const store of stores) store.removeItem(PORTAL_CACHE_KEY)
       return null
     }
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return null
     const ageMs = Date.now() - Number(parsed.cachedAt || 0)
-    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > (1000 * 60 * 20)) return null
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > PORTAL_CACHE_MAX_AGE_MS) {
+      sourceStore?.removeItem(PORTAL_CACHE_KEY)
+      return null
+    }
     if (Array.isArray(parsed.products) && parsed.products.length > PORTAL_CACHE_PRODUCT_LIMIT) {
       parsed.products = parsed.products.slice(0, PORTAL_CACHE_PRODUCT_LIMIT)
     }
@@ -609,13 +622,12 @@ function writePortalCache(payload: LegacyCatalogRecord): void {
       products: Array.isArray(payload?.products) ? payload.products.slice(0, PORTAL_CACHE_PRODUCT_LIMIT) : [],
       reviewItems: Array.isArray(payload?.reviewItems) ? payload.reviewItems.slice(0, 30) : [],
     }
-    sessionStorage.setItem(
-      PORTAL_CACHE_KEY,
-      JSON.stringify({
-        cachedAt: Date.now(),
-        ...lightweightPayload,
-      })
-    )
+    const serialized = JSON.stringify({
+      cachedAt: Date.now(),
+      ...lightweightPayload,
+    })
+    sessionStorage.setItem(PORTAL_CACHE_KEY, serialized)
+    localStorage.setItem(PORTAL_CACHE_KEY, serialized)
   } catch (_) {}
 }
 

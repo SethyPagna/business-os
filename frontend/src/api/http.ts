@@ -84,7 +84,7 @@ const HEALTH_CHECK_INTERVAL_MS = 30_000
 const HEALTH_CHECK_INITIAL_DELAY_MS = 2_500
 const HEALTH_PROBE_TIMEOUT_MS = 4_000
 const HEALTH_PROBE_REUSE_MS = 8_000
-const HEALTHY_SERVER_LOCAL_FALLBACK_MS = 1_200
+const HEALTHY_SERVER_LOCAL_FALLBACK_MS = 350
 export const FRONTEND_BUILD_INFO = {
   hash: typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev',
   revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
