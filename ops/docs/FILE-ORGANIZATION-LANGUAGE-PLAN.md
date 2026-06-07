@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 844 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 845 in this file.
 
 ## Goal
 
@@ -9700,6 +9700,37 @@ Decision rule:
   Phase 29 audit, storage prune, and in-app Browser DOM/log/interaction checks
   passed.
 - Current plan position after Move 844: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 845: Route notification summary through focused transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. Notification summary
+  reads now belong to `frontend/src/api/notificationSummary.ts` instead of the
+  broad `window.api` compatibility facade.
+- Code-flow slice: `frontend/src/components/shared/NotificationCenter.tsx`
+  imports the focused summary transport directly while preserving the existing
+  explicit timeout. The notification panel also now separates visible-loader
+  request tracking from silent summary refresh tracking, preventing background
+  refreshes from stranding the loading indicator after notification data
+  renders.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` now rejects
+  `getNotificationApi`, `window.api`, and broad `api.getNotificationSummary`
+  access returning to the notification center while proving the focused
+  transport and separate visible-loader tracker.
+- Live proof: the in-app Browser loaded the Vite dev `/dashboard` route,
+  clicked the Notifications bell, verified notification content rendered,
+  confirmed `Loading notifications...` settled to `No active notifications.`,
+  and recorded zero relevant console warnings/errors after timestamped retest.
+- Verification proof: focused notification badge guard, focused
+  performance-loading guards, standalone frontend typecheck, JSX/source check,
+  frontend production build, full frontend utility suite, backend utility
+  suite, schema audit, organization audit, generated reference refresh, full
+  project-doc refresh, Phase 29 audit, storage prune, and in-app Browser
+  DOM/log/interaction checks passed.
+- Current plan position after Move 845: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

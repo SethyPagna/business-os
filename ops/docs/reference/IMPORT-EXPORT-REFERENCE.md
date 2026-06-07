@@ -271,7 +271,7 @@ Code files documented: **645**
 | 259 | `frontend/src/api/lookupTransport.ts` | 4 | 8 | 4 | 5 |
 | 260 | `frontend/src/api/methods.ts` | 35 | 192 | 35 | 1 |
 | 261 | `frontend/src/api/multipartHeaders.ts` | 1 | 1 | 1 | 2 |
-| 262 | `frontend/src/api/notificationSummary.ts` | 2 | 1 | 2 | 2 |
+| 262 | `frontend/src/api/notificationSummary.ts` | 2 | 1 | 2 | 3 |
 | 263 | `frontend/src/api/offlineSnapshotTransport.ts` | 10 | 1 | 10 | 2 |
 | 264 | `frontend/src/api/pendingSyncTransport.ts` | 3 | 3 | 3 | 1 |
 | 265 | `frontend/src/api/portalHttp.ts` | 1 | 2 | 1 | 2 |
@@ -429,7 +429,7 @@ Code files documented: **645**
 | 417 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
 | 418 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
 | 419 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
-| 420 | `frontend/src/components/shared/NotificationCenter.tsx` | 15 | 1 | 2 | 1 |
+| 420 | `frontend/src/components/shared/NotificationCenter.tsx` | 16 | 1 | 3 | 1 |
 | 421 | `frontend/src/components/shared/pageActivity.ts` | 2 | 1 | 1 | 15 |
 | 422 | `frontend/src/components/shared/PageHeader.tsx` | 1 | 1 | 0 | 6 |
 | 423 | `frontend/src/components/shared/PaginationControls.tsx` | 4 | 4 | 1 | 8 |
@@ -5574,8 +5574,9 @@ Code files documented: **645**
 - Internal dependencies (2)
   - `frontend/src/api/http.ts`
   - `frontend/src/platform/storage/storagePolicy.ts`
-- Referenced by (2)
+- Referenced by (3)
   - `frontend/src/api/methods.ts`
+  - `frontend/src/components/shared/NotificationCenter.tsx`
   - `frontend/src/web-api.ts`
 
 ### 3.263 `frontend/src/api/offlineSnapshotTransport.ts`
@@ -8766,8 +8767,9 @@ Code files documented: **645**
 ### 3.420 `frontend/src/components/shared/NotificationCenter.tsx`
 
 - Declared exports: `function`
-- Imports (15)
+- Imports (16)
   - `../../AppContext.tsx`
+  - `../../api/notificationSummary.ts`
   - `./AppSelect`
   - `lucide-react`
   - `lucide-react/dist/esm/icons/alert-circle.js`
@@ -8782,8 +8784,9 @@ Code files documented: **645**
   - `lucide-react/dist/esm/icons/x.js`
   - `react`
   - `react-dom`
-- Internal dependencies (2)
+- Internal dependencies (3)
   - `frontend/src/AppContext.tsx`
+  - `frontend/src/api/notificationSummary.ts`
   - `frontend/src/components/shared/AppSelect.tsx`
 - Referenced by (1)
   - `frontend/src/App.tsx`

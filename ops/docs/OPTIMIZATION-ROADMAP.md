@@ -13598,3 +13598,36 @@ Move 844 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 845 status:
+- Move 845 routes notification-center summary reads through the focused
+  notification summary transport instead of the broad `window.api`
+  compatibility facade.
+- `frontend/src/components/shared/NotificationCenter.tsx` now imports
+  `getNotificationSummary` from `frontend/src/api/notificationSummary.ts`
+  directly. This preserves the existing cooldown-aware fallback, request
+  sharing, and explicit notification timeout while avoiding the broad legacy
+  API registry when the deferred notification chunk opens.
+- The same slice fixes a live stale-loading bug: visible panel loading now has
+  its own request tracker, so silent background refreshes cannot invalidate the
+  original visible request and leave `Loading notifications...` on screen after
+  data renders.
+- Source guardrails now reject `getNotificationApi`, `window.api`, and broad
+  `api.getNotificationSummary` access returning to the notification center
+  while still proving focused transport ownership and separate visible-loader
+  tracking.
+- Verification proof: focused notification badge guard, focused
+  performance-loading guards, standalone frontend typecheck, JSX/source check,
+  frontend production build, full frontend utility suite, backend utility
+  suite, schema audit, organization audit, generated reference refresh, full
+  project-doc refresh, Phase 29 audit, storage prune, and in-app Browser
+  DOM/log/interaction checks passed. Browser proof loaded the Vite dev
+  `/dashboard` route, clicked the Notifications bell, verified notification
+  content rendered, confirmed `Loading notifications...` settled to
+  `No active notifications.`, and recorded zero relevant console warnings/
+  errors after timestamped retest.
+- Current plan position after Move 845: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

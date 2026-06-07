@@ -18,6 +18,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
 import AppSelect from './AppSelect'
 
 type Tone = 'danger' | 'warning' | 'success' | 'info'
@@ -76,10 +77,6 @@ type NotificationSummary = {
   cooldownUntil?: number
 }
 
-type NotificationApi = {
-  getNotificationSummary: () => Promise<Partial<NotificationSummary>>
-}
-
 type AppContextValue = {
   navigateTo: (pageId: string) => void
   notify: (message: string, tone?: 'error' | 'info' | 'success' | 'warning') => void
@@ -108,11 +105,6 @@ type NotificationSeverityIconProps = {
 
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
-
-function getNotificationApi(): NotificationApi {
-  if (!window.api) throw new Error('Notification API is not available.')
-  return window.api as NotificationApi
-}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error || '')
@@ -300,6 +292,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const containerRef = useRef<HTMLDivElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
   const requestRef = useRef(0)
+  const visibleLoadRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const refreshTimerRef = useRef<number | null>(null)
   const failureCountRef = useRef(0)
@@ -323,11 +316,11 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
 
   const loadSummary = useCallback(async (silent = false) => {
     const requestId = beginTrackedRequest(requestRef)
-    if (!silent && aliveRef.current) setLoading(true)
+    const visibleRequestId = !silent && aliveRef.current ? beginTrackedRequest(visibleLoadRequestRef) : 0
+    if (visibleRequestId) setLoading(true)
     try {
-      const api = getNotificationApi()
       const result = await withLoaderTimeout(
-        () => api.getNotificationSummary(),
+        () => getNotificationSummaryRequest() as Promise<Partial<NotificationSummary>>,
         'Notifications',
         NOTIFICATION_SUMMARY_TIMEOUT_MS,
       )
@@ -365,7 +358,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         console.error('[NotificationCenter] load failed:', getErrorMessage(error) || error)
       }
     } finally {
-      if (!silent && aliveRef.current && isTrackedRequestCurrent(requestRef, requestId)) {
+      if (visibleRequestId && aliveRef.current && isTrackedRequestCurrent(visibleLoadRequestRef, visibleRequestId)) {
         setLoading(false)
       }
     }
@@ -374,6 +367,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   useEffect(() => {
     if (!visibilityActive) {
       invalidateTrackedRequest(requestRef)
+      invalidateTrackedRequest(visibleLoadRequestRef)
       if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
       return undefined
     }
@@ -389,6 +383,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       aliveRef.current = false
       document.removeEventListener('visibilitychange', onVisible)
       invalidateTrackedRequest(requestRef)
+      invalidateTrackedRequest(visibleLoadRequestRef)
       if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
     }
   }, [loadSummary, visibilityActive])

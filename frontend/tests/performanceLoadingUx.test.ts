@@ -962,8 +962,18 @@ assert.match(
 )
 assert.match(
   notificationCenter,
-  /const api = getNotificationApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.getNotificationSummary\(\),\s*'Notifications',\s*NOTIFICATION_SUMMARY_TIMEOUT_MS,\s*\)/,
-  'notification center should timeout slow summary reads',
+  /import \{ getNotificationSummary as getNotificationSummaryRequest \} from '\.\.\/\.\.\/api\/notificationSummary\.ts'[\s\S]*withLoaderTimeout\(\s*\(\) => getNotificationSummaryRequest\(\) as Promise<Partial<NotificationSummary>>,\s*'Notifications',\s*NOTIFICATION_SUMMARY_TIMEOUT_MS,\s*\)/,
+  'notification center should use the focused notification summary transport with a slow-read timeout',
+)
+assert.match(
+  notificationCenter,
+  /const visibleLoadRequestRef = useRef\(0\)[\s\S]*const visibleRequestId = !silent && aliveRef\.current \? beginTrackedRequest\(visibleLoadRequestRef\) : 0[\s\S]*isTrackedRequestCurrent\(visibleLoadRequestRef, visibleRequestId\)[\s\S]*invalidateTrackedRequest\(visibleLoadRequestRef\)/,
+  'notification center should keep visible loading state separate from silent background refresh request tracking',
+)
+assert.doesNotMatch(
+  notificationCenter,
+  /getNotificationApi|window\.api|api\.getNotificationSummary/,
+  'notification center should not wake the broad window.api registry for summary reads',
 )
 assert.match(
   dashboard,

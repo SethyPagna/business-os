@@ -199,7 +199,7 @@ Total files documented: **264**
 | 187 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
 | 188 | `frontend/src/components/shared/Modal.tsx` | 1 |
 | 189 | `frontend/src/components/shared/navigationConfig.ts` | 0 |
-| 190 | `frontend/src/components/shared/NotificationCenter.tsx` | 9 |
+| 190 | `frontend/src/components/shared/NotificationCenter.tsx` | 8 |
 | 191 | `frontend/src/components/shared/pageActivity.ts` | 0 |
 | 192 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
 | 193 | `frontend/src/components/shared/PaginationControls.tsx` | 3 |
@@ -2668,15 +2668,14 @@ Total files documented: **264**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getNotificationApi` | function | 112 |
-| 2 | `getErrorMessage` | function | 117 |
-| 3 | `preferenceValue` | function | 244 |
-| 4 | `matchesVisibilityMode` | function | 252 |
-| 5 | `NotificationSeverityIcon` | function | 259 |
-| 6 | `NotificationCenter` | component/function | 274 |
-| 7 | `syncVisibility` | const arrow | 308 |
-| 8 | `onVisible` | const arrow | 382 |
-| 9 | `handleClickOutside` | const arrow | 405 |
+| 1 | `getErrorMessage` | function | 109 |
+| 2 | `preferenceValue` | function | 236 |
+| 3 | `matchesVisibilityMode` | function | 244 |
+| 4 | `NotificationSeverityIcon` | function | 251 |
+| 5 | `NotificationCenter` | component/function | 266 |
+| 6 | `syncVisibility` | const arrow | 301 |
+| 7 | `onVisible` | const arrow | 376 |
+| 8 | `handleClickOutside` | const arrow | 400 |
 
 ### 3.191 `frontend/src/components/shared/pageActivity.ts`
 

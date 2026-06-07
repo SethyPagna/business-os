@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-07T14:33:01.019Z",
+  "generatedAt": "2026-06-07T14:46:42.839Z",
   "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
   "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
   "measurementMode": "bounded-parallel-targets",
@@ -9,9 +9,9 @@
   "fileStatConcurrency": 32,
   "targets": 15,
   "existingTargets": 8,
-  "totalBytes": 546695197,
+  "totalBytes": 546695204,
   "protectedBytes": 225568140,
-  "cleanupCandidateBytes": 321127057,
+  "cleanupCandidateBytes": 321127064,
   "nestedTargetOverlaps": [
     {
       "parent": "business-os-data",
@@ -31,9 +31,9 @@
     }
   ],
   "nestedOverlapBytes": 15496556,
-  "adjustedTotalBytes": 531198641,
+  "adjustedTotalBytes": 531198648,
   "adjustedProtectedBytes": 210071584,
-  "adjustedCleanupCandidateBytes": 321127057,
+  "adjustedCleanupCandidateBytes": 321127064,
   "largestProtectedTargets": [
     {
       "path": "business-os-data",
@@ -87,7 +87,7 @@
     },
     {
       "path": "frontend/dist",
-      "bytes": 31837121,
+      "bytes": 31837128,
       "files": 199,
       "folders": 6,
       "category": "build output",
@@ -105,7 +105,7 @@
   "slowestTargetMeasurements": [
     {
       "path": "backend/node_modules",
-      "measureMs": 767,
+      "measureMs": 738,
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
@@ -114,7 +114,7 @@
     },
     {
       "path": "frontend/node_modules",
-      "measureMs": 493,
+      "measureMs": 480,
       "bytes": 154922166,
       "files": 11514,
       "folders": 986,
@@ -123,7 +123,7 @@
     },
     {
       "path": "ops/node_modules",
-      "measureMs": 51,
+      "measureMs": 52,
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
@@ -132,7 +132,7 @@
     },
     {
       "path": "ops/runtime",
-      "measureMs": 33,
+      "measureMs": 37,
       "bytes": 46764214,
       "files": 613,
       "folders": 58,
@@ -141,7 +141,7 @@
     },
     {
       "path": "business-os-data",
-      "measureMs": 9,
+      "measureMs": 10,
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
@@ -151,7 +151,7 @@
     {
       "path": "frontend/dist",
       "measureMs": 6,
-      "bytes": 31837121,
+      "bytes": 31837128,
       "files": 199,
       "folders": 6,
       "category": "build output",
@@ -202,7 +202,7 @@
       "targets": 1
     },
     "regenerable": {
-      "bytes": 31837121,
+      "bytes": 31837128,
       "files": 199,
       "folders": 6,
       "targets": 1
@@ -250,7 +250,7 @@
       "bytes": 163307370,
       "files": 52,
       "folders": 35,
-      "measureMs": 9,
+      "measureMs": 10,
       "category": "business data",
       "disposition": "preserve",
       "protected": true,
@@ -264,7 +264,7 @@
       "bytes": 154922166,
       "files": 11514,
       "folders": 986,
-      "measureMs": 493,
+      "measureMs": 480,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -278,7 +278,7 @@
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
-      "measureMs": 767,
+      "measureMs": 738,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -292,7 +292,7 @@
       "bytes": 46764214,
       "files": 613,
       "folders": 58,
-      "measureMs": 33,
+      "measureMs": 37,
       "category": "runtime state",
       "disposition": "retention",
       "protected": true,
@@ -303,7 +303,7 @@
     {
       "path": "frontend/dist",
       "exists": true,
-      "bytes": 31837121,
+      "bytes": 31837128,
       "files": 199,
       "folders": 6,
       "measureMs": 6,
@@ -334,7 +334,7 @@
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
-      "measureMs": 51,
+      "measureMs": 52,
       "category": "dependencies",
       "disposition": "safe cleanup",
       "protected": false,
@@ -362,7 +362,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 1,
+      "measureMs": 0,
       "category": "browser artifact",
       "disposition": "safe cleanup",
       "protected": false,
@@ -446,7 +446,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "local render artifact",
       "disposition": "safe cleanup",
       "protected": false,

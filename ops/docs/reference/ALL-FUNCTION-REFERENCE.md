@@ -429,7 +429,7 @@ Code files scanned: **645**
 | 417 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 |
 | 418 | `frontend/src/components/shared/Modal.tsx` | 1 |
 | 419 | `frontend/src/components/shared/navigationConfig.ts` | 1 |
-| 420 | `frontend/src/components/shared/NotificationCenter.tsx` | 9 |
+| 420 | `frontend/src/components/shared/NotificationCenter.tsx` | 8 |
 | 421 | `frontend/src/components/shared/pageActivity.ts` | 1 |
 | 422 | `frontend/src/components/shared/PageHeader.tsx` | 1 |
 | 423 | `frontend/src/components/shared/PaginationControls.tsx` | 4 |
@@ -7895,15 +7895,14 @@ Code files scanned: **645**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getNotificationApi` | function | 112 |
-| 2 | `getErrorMessage` | function | 117 |
-| 3 | `preferenceValue` | function | 244 |
-| 4 | `matchesVisibilityMode` | function | 252 |
-| 5 | `NotificationSeverityIcon` | function | 259 |
-| 6 | `NotificationCenter` | export default function | 274 |
-| 7 | `syncVisibility` | const arrow | 308 |
-| 8 | `onVisible` | const arrow | 382 |
-| 9 | `handleClickOutside` | const arrow | 405 |
+| 1 | `getErrorMessage` | function | 109 |
+| 2 | `preferenceValue` | function | 236 |
+| 3 | `matchesVisibilityMode` | function | 244 |
+| 4 | `NotificationSeverityIcon` | function | 251 |
+| 5 | `NotificationCenter` | export default function | 266 |
+| 6 | `syncVisibility` | const arrow | 301 |
+| 7 | `onVisible` | const arrow | 376 |
+| 8 | `handleClickOutside` | const arrow | 400 |
 
 ### 3.421 `frontend/src/components/shared/pageActivity.ts`
 

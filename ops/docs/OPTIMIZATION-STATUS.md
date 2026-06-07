@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 844, route file picker list/upload/delete through focused file transport and stabilize picker open-load effects.
+- Latest completed move: Move 845, route notification summary through focused transport and fix visible loader tracking.
 
 ## Current Baseline
 
@@ -78,6 +78,37 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 845 continues the startup/preload cleanup by routing the notification
+  center summary read away from the broad `window.api` compatibility facade.
+  `frontend/src/components/shared/NotificationCenter.tsx` now imports
+  `getNotificationSummary` from `frontend/src/api/notificationSummary.ts`
+  directly, preserving the existing cooldown-aware fallback and request sharing
+  in the focused transport.
+- Code-flow cleanup also fixes a live stale-loading bug. Notification summary
+  data requests still share the normal summary request tracker, but visible
+  panel loading now has its own tracker so silent background refreshes cannot
+  invalidate the original visible request and strand `Loading notifications...`
+  after data has rendered.
+- Source guardrails now reject `getNotificationApi`, `window.api`, and broad
+  `api.getNotificationSummary` access returning to
+  `frontend/src/components/shared/NotificationCenter.tsx`, while proving the
+  focused transport and separate visible-loader tracking stay in place.
+- Verification proof: focused notification badge guard, focused
+  performance-loading guards, standalone frontend typecheck, JSX/source check,
+  frontend production build, full frontend utility suite, backend utility
+  suite, schema audit, organization audit, generated reference refresh, full
+  project-doc refresh, Phase 29 audit, storage prune, and in-app Browser
+  DOM/log/interaction checks passed. Browser proof loaded the Vite dev
+  `/dashboard` route, clicked the Notifications bell, verified notification
+  content rendered, confirmed `Loading notifications...` settled to
+  `No active notifications.`, and recorded zero relevant console warnings/
+  errors after timestamped retest.
+- Current plan position after Move 845: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 844 continues the startup/preload cleanup by routing the reusable file
   picker away from the broad `window.api` compatibility facade. The picker now
