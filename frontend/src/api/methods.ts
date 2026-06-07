@@ -13,6 +13,8 @@ let auditLogTransportPromise = null
 let contactsTransportPromise = null
 let dashboardTransportPromise = null
 let fileTransportPromise = null
+let branchTransportPromise = null
+let inventoryTransportPromise = null
 let inventoryWriteTransportPromise = null
 let importJobsTransportPromise = null
 let productWriteTransportPromise = null
@@ -80,6 +82,16 @@ function loadDashboardTransport() {
 function loadFileTransport() {
   if (!fileTransportPromise) fileTransportPromise = import('./fileTransport.ts')
   return fileTransportPromise
+}
+
+function loadBranchTransport() {
+  if (!branchTransportPromise) branchTransportPromise = import('./branchTransport.ts')
+  return branchTransportPromise
+}
+
+function loadInventoryTransport() {
+  if (!inventoryTransportPromise) inventoryTransportPromise = import('./inventoryTransport.ts')
+  return inventoryTransportPromise
 }
 
 function loadInventoryWriteTransport() {
@@ -194,26 +206,6 @@ import {
   CATEGORY_REFRESH_CHANNELS,
   UNIT_REFRESH_CHANNELS,
 } from '../utils/settingsRefresh.ts'
-import {
-  createBranch as createBranchRequest,
-  deleteBranch as deleteBranchRequest,
-  getBranches as getBranchesRequest,
-  getBranchStock as getBranchStockRequest,
-  getBranchStockIntegrity as getBranchStockIntegrityRequest,
-  getBranchSummary as getBranchSummaryRequest,
-  getTransfers as getTransfersRequest,
-  repairBranchStockIntegrity as repairBranchStockIntegrityRequest,
-  transferStock as transferStockRequest,
-  updateBranch as updateBranchRequest,
-} from './branchTransport.ts'
-import {
-  getInventoryBootstrap as getInventoryBootstrapRequest,
-  getInventoryMovements as getInventoryMovementsRequest,
-  getInventoryReasons as getInventoryReasonsRequest,
-  getInventoryStats as getInventoryStatsRequest,
-  getInventorySummary as getInventorySummaryRequest,
-  searchInventoryProducts as searchInventoryProductsRequest,
-} from './inventoryTransport.ts'
 import {
   completeGoogleOauth as completeGoogleOauthRequest,
   completePasswordReset as completePasswordResetRequest,
@@ -440,26 +432,46 @@ export const deleteUnit = async (id, payload) => {
 }
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
-export const getBranches = () =>
-  getBranchesRequest()
-export const getBranchSummary = () =>
-  getBranchSummaryRequest()
-export const createBranch = payload =>
-  createBranchRequest(payload)
-export const updateBranch = (id, payload) =>
-  updateBranchRequest(id, payload)
-export const deleteBranch = (id, userId, userName) =>
-  deleteBranchRequest(id, userId, userName)
-export const getBranchStock = (id, params = {}) =>
-  getBranchStockRequest(id, params)
-export const getTransfers = () =>
-  getTransfersRequest()
-export const transferStock = payload =>
-  transferStockRequest(payload)
-export const getBranchStockIntegrity = () =>
-  getBranchStockIntegrityRequest()
-export const repairBranchStockIntegrity = payload =>
-  repairBranchStockIntegrityRequest(payload)
+export const getBranches = async () => {
+  const { getBranches: getBranchesRequest } = await loadBranchTransport()
+  return getBranchesRequest()
+}
+export const getBranchSummary = async () => {
+  const { getBranchSummary: getBranchSummaryRequest } = await loadBranchTransport()
+  return getBranchSummaryRequest()
+}
+export const createBranch = async payload => {
+  const { createBranch: createBranchRequest } = await loadBranchTransport()
+  return createBranchRequest(payload)
+}
+export const updateBranch = async (id, payload) => {
+  const { updateBranch: updateBranchRequest } = await loadBranchTransport()
+  return updateBranchRequest(id, payload)
+}
+export const deleteBranch = async (id, userId, userName) => {
+  const { deleteBranch: deleteBranchRequest } = await loadBranchTransport()
+  return deleteBranchRequest(id, userId, userName)
+}
+export const getBranchStock = async (id, params = {}) => {
+  const { getBranchStock: getBranchStockRequest } = await loadBranchTransport()
+  return getBranchStockRequest(id, params)
+}
+export const getTransfers = async () => {
+  const { getTransfers: getTransfersRequest } = await loadBranchTransport()
+  return getTransfersRequest()
+}
+export const transferStock = async payload => {
+  const { transferStock: transferStockRequest } = await loadBranchTransport()
+  return transferStockRequest(payload)
+}
+export const getBranchStockIntegrity = async () => {
+  const { getBranchStockIntegrity: getBranchStockIntegrityRequest } = await loadBranchTransport()
+  return getBranchStockIntegrityRequest()
+}
+export const repairBranchStockIntegrity = async payload => {
+  const { repairBranchStockIntegrity: repairBranchStockIntegrityRequest } = await loadBranchTransport()
+  return repairBranchStockIntegrityRequest(payload)
+}
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 export const getProducts = async () => {
@@ -748,18 +760,30 @@ export const redoActionHistory = async id => {
   const module = await loadActionHistoryTransport()
   return module.redoActionHistory(id)
 }
-export const getInventorySummary = (params = {}) =>
-  getInventorySummaryRequest(params)
-export const getInventoryStats = (params = {}) =>
-  getInventoryStatsRequest(params)
-export const getInventoryBootstrap = (params = {}) =>
-  getInventoryBootstrapRequest(params)
-export const searchInventoryProducts = (params = {}) =>
-  searchInventoryProductsRequest(params)
-export const getInventoryMovements = (params = {}) =>
-  getInventoryMovementsRequest(params)
-export const getInventoryReasons = () =>
-  getInventoryReasonsRequest()
+export const getInventorySummary = async (params = {}) => {
+  const { getInventorySummary: getInventorySummaryRequest } = await loadInventoryTransport()
+  return getInventorySummaryRequest(params)
+}
+export const getInventoryStats = async (params = {}) => {
+  const { getInventoryStats: getInventoryStatsRequest } = await loadInventoryTransport()
+  return getInventoryStatsRequest(params)
+}
+export const getInventoryBootstrap = async (params = {}) => {
+  const { getInventoryBootstrap: getInventoryBootstrapRequest } = await loadInventoryTransport()
+  return getInventoryBootstrapRequest(params)
+}
+export const searchInventoryProducts = async (params = {}) => {
+  const { searchInventoryProducts: searchInventoryProductsRequest } = await loadInventoryTransport()
+  return searchInventoryProductsRequest(params)
+}
+export const getInventoryMovements = async (params = {}) => {
+  const { getInventoryMovements: getInventoryMovementsRequest } = await loadInventoryTransport()
+  return getInventoryMovementsRequest(params)
+}
+export const getInventoryReasons = async () => {
+  const { getInventoryReasons: getInventoryReasonsRequest } = await loadInventoryTransport()
+  return getInventoryReasonsRequest()
+}
 export const saveInventoryReasons = async (items = []) => {
   const module = await loadInventoryWriteTransport()
   return module.saveInventoryReasons(items)

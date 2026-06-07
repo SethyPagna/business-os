@@ -79,26 +79,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
 | `frontend/dist/assets/index-DbL1XvZE.css` | 154.8 |
-| `frontend/dist/assets/Inventory-DCWKulDd.js` | 129.8 |
-| `frontend/dist/assets/catalog-BQIOFh9k.js` | 124.6 |
-| `frontend/dist/assets/Products-B1txjBv1.js` | 85.0 |
-| `frontend/dist/assets/POS-BTrMRqrO.js` | 74.8 |
-| `frontend/dist/assets/catalog-editor-D_G9LySU.js` | 73.9 |
+| `frontend/dist/assets/Inventory-x1cQ3ky9.js` | 129.8 |
+| `frontend/dist/assets/catalog-Q3vFs4qj.js` | 124.6 |
+| `frontend/dist/assets/Products-BH6OPpyv.js` | 85.0 |
+| `frontend/dist/assets/POS-ICZOY-oH.js` | 74.8 |
+| `frontend/dist/assets/catalog-editor-CYQ6lypR.js` | 73.9 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-Bwf5D_RD.js` | 67.8 |
-| `frontend/dist/assets/AdminRoot-C-WMR7sk.js` | 62.6 |
-| `frontend/dist/assets/Dashboard-B8iAvLtY.js` | 62.1 |
-| `frontend/dist/assets/app-shared-CQyDXLMR.js` | 55.9 |
-| `frontend/dist/assets/Settings-C7BTtx4s.js` | 54.8 |
+| `frontend/dist/assets/BulkImportModal-ONHs_30c.js` | 67.8 |
+| `frontend/dist/assets/AdminRoot-B2bWpUMW.js` | 62.6 |
+| `frontend/dist/assets/Dashboard-D0w1Nj0M.js` | 62.1 |
+| `frontend/dist/assets/app-shared-CDquSy08.js` | 55.9 |
+| `frontend/dist/assets/Settings-D8GS-qzY.js` | 54.8 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-BvYZxucu.js` | 51.2 |
-| `frontend/dist/assets/user-profile-modal-Desrphi7.js` | 43.7 |
-| `frontend/dist/assets/ReceiptSettings-C2RdPY1K.js` | 40.1 |
+| `frontend/dist/assets/Backup-9kh05jnF.js` | 51.2 |
+| `frontend/dist/assets/user-profile-modal-CUFz9nhZ.js` | 43.7 |
+| `frontend/dist/assets/ReceiptSettings-DxK9gAoa.js` | 40.1 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-CU8WHrS8.js` | 37.3 |
-| `frontend/dist/assets/Sales-DJ8H07nL.js` | 36.8 |
-| `frontend/dist/assets/ProductForm-BN4dWwAv.js` | 35.8 |
-| `frontend/dist/assets/AuditLog-BZBanQ3-.js` | 35.6 |
+| `frontend/dist/assets/catalog-secondary-tabs-Bw--w1KA.js` | 37.3 |
+| `frontend/dist/assets/Sales-BMPqKlI_.js` | 36.8 |
+| `frontend/dist/assets/ProductForm-Bjv8_rU9.js` | 35.8 |
+| `frontend/dist/assets/AuditLog-B5zM1ybN.js` | 35.6 |
 
 ## 5. Notes
 

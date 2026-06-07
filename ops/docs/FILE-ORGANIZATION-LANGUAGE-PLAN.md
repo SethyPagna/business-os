@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 828 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 829 in this file.
 
 ## Goal
 
@@ -9113,6 +9113,47 @@ Decision rule:
   failed responses, and passed post-live hygiene. The storage prune removed 0
   bytes because all retention targets were already within policy.
 - Current plan position after Move 828: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 829: Lazy-load legacy branch and inventory read transports
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The focused
+  `frontend/src/api/branchTransport.ts` and
+  `frontend/src/api/inventoryTransport.ts` modules remain the behavior owners
+  while `frontend/src/api/methods.ts` becomes a lazy facade for the older
+  `window.api` compatibility surface.
+- Code-flow slice: branch wrappers (`getBranches`, `getBranchSummary`,
+  `createBranch`, `updateBranch`, `deleteBranch`, `getBranchStock`,
+  `getTransfers`, `transferStock`, `getBranchStockIntegrity`,
+  `repairBranchStockIntegrity`) and inventory read wrappers
+  (`getInventorySummary`, `getInventoryStats`, `getInventoryBootstrap`,
+  `searchInventoryProducts`, `getInventoryMovements`, `getInventoryReasons`)
+  now resolve memoized dynamic modules only when those flows are used.
+- Build slice: the existing `branch-api` and `inventory-api` chunks stay
+  excluded from eager module preload. The production build emitted
+  `branch-api` at 1.96 KB and `inventory-api` at 1.55 KB; compiled
+  `app-api-methods` no longer has static imports for either transport and only
+  references them through dynamic calls. The compatibility facade grew from
+  23.26 KB to 23.84 KB, but it now avoids automatic branch/inventory transport
+  request and evaluation on legacy API registry load.
+- Guardrail slice: `frontend/tests/apiHttp.test.ts` and
+  `frontend/tests/performanceLoadingUx.test.ts` verify no static imports from
+  branch or inventory transports remain in the legacy registry, while the
+  focused transports still own branch mirror/expected-update behavior,
+  inventory bootstrap/search cache behavior, and user-filtered movement reads.
+- Verification proof: `node frontend\tests\apiHttp.test.ts`, `node
+  frontend\tests\performanceLoadingUx.test.ts`, standalone frontend typecheck,
+  the full frontend utility suite, frontend production build, storage prune,
+  local health check, and `npm.cmd --prefix ops run phase84:live-suite --
+  --skip-rollback` passed. The live suite checked 66 UI signals with zero
+  relevant console messages, rendered 20 public portal products with zero
+  failed responses, and passed post-live hygiene. The storage prune removed
+  321,689 bytes of stale retained report directories while preserving uploads,
+  secrets, env files, Docker volumes, active images, and newest backup sets.
+- Current plan position after Move 829: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
