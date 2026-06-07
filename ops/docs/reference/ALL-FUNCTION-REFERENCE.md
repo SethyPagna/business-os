@@ -340,7 +340,7 @@ Code files scanned: **645**
 | 328 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
 | 329 | `frontend/src/components/dashboard/dashboardExport.ts` | 25 |
 | 330 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
-| 331 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
+| 331 | `frontend/src/components/files/FilePickerModal.tsx` | 9 |
 | 332 | `frontend/src/components/files/FilesPage.tsx` | 27 |
 | 333 | `frontend/src/components/files/FilesProvidersTab.tsx` | 4 |
 | 334 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
@@ -6739,14 +6739,15 @@ Code files scanned: **645**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getFilePickerApi` | function | 60 |
-| 2 | `getErrorMessage` | function | 65 |
-| 3 | `normalizeFileAssets` | function | 69 |
-| 4 | `AssetPreview` | function | 73 |
-| 5 | `FilePickerModal` | export default function | 96 |
-| 6 | `toggleSelectedPath` | function | 163 |
-| 7 | `handleUpload` | function | 173 |
-| 8 | `handleDelete` | function | 215 |
+| 1 | `getErrorMessage` | function | 60 |
+| 2 | `normalizeFileAssets` | function | 64 |
+| 3 | `uploadFileAssetRequest` | function | 68 |
+| 4 | `deleteFileAssetRequest` | function | 72 |
+| 5 | `AssetPreview` | function | 76 |
+| 6 | `FilePickerModal` | export default function | 99 |
+| 7 | `toggleSelectedPath` | function | 176 |
+| 8 | `handleUpload` | function | 186 |
+| 9 | `handleDelete` | function | 228 |
 
 ### 3.332 `frontend/src/components/files/FilesPage.tsx`
 

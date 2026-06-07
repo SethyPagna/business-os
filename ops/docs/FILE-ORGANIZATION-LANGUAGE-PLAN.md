@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 839 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 844 in this file.
 
 ## Goal
 
@@ -9667,6 +9667,39 @@ Decision rule:
   generated reference refresh, Phase 29 audit, storage prune, and
   `git diff --check` passed.
 - Current plan position after Move 843: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 844: Route file picker through focused file transport
+
+- Ownership slice: Phase 29 TypeScript/code-flow cleanup. The reusable file
+  picker list, upload, and delete paths now belong to
+  `frontend/src/api/fileTransport.ts` instead of the broad `window.api`
+  compatibility facade.
+- Code-flow slice: `frontend/src/components/files/FilePickerModal.tsx` now
+  imports focused file transport functions directly, keeps the same bounded
+  load/upload/delete timeouts, and removes `getFilePickerApi`. The picker also
+  stabilizes its open-load loop by using a stable empty default selection,
+  normalized initial-selection keys, and a notification ref for loader failures.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` and
+  `frontend/tests/actionStability.test.ts` now reject `getFilePickerApi`,
+  `window.api`, and broad file-library access returning to the picker while
+  proving focused transport ownership and bounded file actions.
+- Live proof: the in-app Browser loaded the Vite dev `/users` route, opened
+  Profile, opened Files, verified the picker search and Upload file controls
+  rendered with the `No files yet` empty state, confirmed loading was not
+  stuck, and recorded zero relevant console warnings/errors after timestamped
+  retests. Browser screenshot capture timed out through the bridge, so
+  DOM/log/interaction proof is the accepted evidence for this slice.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, full project-doc refresh,
+  Phase 29 audit, storage prune, and in-app Browser DOM/log/interaction checks
+  passed.
+- Current plan position after Move 844: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

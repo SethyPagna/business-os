@@ -204,9 +204,10 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
 
   assert.match(picker, /const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000/)
   assert.match(picker, /const FILE_PICKER_DELETE_TIMEOUT_MS = 12000/)
-  assert.match(picker, /function getFilePickerApi\(\): FilePickerApi/)
-  assert.match(picker, /withLoaderTimeout<FileAsset>\(\s*\(\) => getFilePickerApi\(\)\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/)
-  assert.match(picker, /withLoaderTimeout\(\s*\(\) => getFilePickerApi\(\)\.deleteFileAsset\(assetId, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/)
+  assert.match(picker, /deleteFileAsset as deletePickerFileAsset[\s\S]*getFiles as fetchPickerFiles[\s\S]*uploadFileAsset as uploadPickerFileAsset[\s\S]*from '\.\.\/\.\.\/api\/fileTransport\.ts'/)
+  assert.match(picker, /withLoaderTimeout<FileAsset>\(\s*\(\) => uploadFileAssetRequest\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(picker, /withLoaderTimeout\(\s*\(\) => deleteFileAssetRequest\(assetId, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/)
+  assert.doesNotMatch(picker, /getFilePickerApi|window\.api|api\.(?:getFiles|uploadFileAsset|deleteFileAsset)/)
 
   assert.match(fileTransport, /export async function uploadFileAsset\(payload: FileUploadPayload = \{\}\): Promise<unknown> \{[\s\S]*requireLiveServerWrite\('files:upload'/)
   assert.match(fileTransport, /return route\([\s\S]*'files:delete'[\s\S]*apiFetch\('DELETE', `\/api\/files\/\$\{encodeURIComponent\(String\(id\)\)\}`/)

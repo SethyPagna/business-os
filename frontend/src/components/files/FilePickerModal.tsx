@@ -9,10 +9,16 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import {
+  deleteFileAsset as deletePickerFileAsset,
+  getFiles as fetchPickerFiles,
+  uploadFileAsset as uploadPickerFileAsset,
+} from '../../api/fileTransport.ts'
 
 const FILE_PICKER_LOAD_TIMEOUT_MS = 8000
 const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000
 const FILE_PICKER_DELETE_TIMEOUT_MS = 12000
+const EMPTY_INITIAL_SELECTED: string[] = []
 
 type MediaTypeFilter = 'all' | 'image' | 'video' | 'document'
 type TranslateFunction = (key: string) => string
@@ -48,19 +54,8 @@ type AppContextValue = {
   t?: TranslateFunction
 }
 
-type FilePickerApi = {
-  getFiles: (options: { search: string; mediaType: MediaTypeFilter }) => Promise<unknown>
-  uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string }) => Promise<FileAsset>
-  deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string }) => Promise<unknown>
-}
-
 const Modal = ModalBase as ComponentType<{ title: ReactNode; onClose: () => void; wide?: boolean; children: ReactNode }>
 const useApp = useAppHook as () => AppContextValue
-
-function getFilePickerApi(): FilePickerApi {
-  if (!window.api) throw new Error('File library API is not available.')
-  return window.api as FilePickerApi
-}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
@@ -68,6 +63,14 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 function normalizeFileAssets(value: unknown): FileAsset[] {
   return Array.isArray(value) ? value.filter((asset): asset is FileAsset => !!asset && typeof asset === 'object') : []
+}
+
+async function uploadFileAssetRequest(payload: { file: File; userId?: string | number; userName?: string }): Promise<FileAsset> {
+  return await uploadPickerFileAsset(payload) as FileAsset
+}
+
+function deleteFileAssetRequest(id: string | number, options: { expectedUpdatedAt?: string }): Promise<unknown> {
+  return deletePickerFileAsset(id, options)
 }
 
 function AssetPreview({ asset }: { asset: FileAsset }) {
@@ -101,9 +104,10 @@ export default function FilePickerModal({
   mediaType = 'all',
   title = 'Choose file',
   multiple = false,
-  initialSelected = [],
+  initialSelected = EMPTY_INITIAL_SELECTED,
 }: FilePickerModalProps) {
   const { notify, user, t } = useApp()
+  const normalizedInitialSelectedKey = Array.isArray(initialSelected) ? initialSelected.filter(Boolean).join('\u0000') : ''
   const [files, setFiles] = useState<FileAsset[]>([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState('')
@@ -114,6 +118,11 @@ export default function FilePickerModal({
   const loadRequestRef = useRef(0)
   const uploadInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
+  const notifyRef = useRef(notify)
+
+  useEffect(() => {
+    notifyRef.current = notify
+  }, [notify])
 
   const tr = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : null
@@ -124,22 +133,26 @@ export default function FilePickerModal({
     const requestId = beginTrackedRequest(loadRequestRef)
     setLoading(true)
     try {
-      const result = await withLoaderTimeout(() => getFilePickerApi().getFiles({ search, mediaType }), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS)
+      const result = await withLoaderTimeout(() => fetchPickerFiles({ search, mediaType }), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
       setFiles(normalizeFileAssets(result))
     } catch (error) {
       if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-      notify(getErrorMessage(error, 'Failed to load files'), 'error')
+      notifyRef.current(getErrorMessage(error, 'Failed to load files'), 'error')
     } finally {
       if (isTrackedRequestCurrent(loadRequestRef, requestId)) setLoading(false)
     }
-  }, [mediaType, notify, search])
+  }, [mediaType, search])
 
   useEffect(() => {
     if (!open) return undefined
-    setSelectedPaths(Array.isArray(initialSelected) ? initialSelected.filter(Boolean) : [])
+    setSelectedPaths((current) => {
+      const next = normalizedInitialSelectedKey ? normalizedInitialSelectedKey.split('\u0000') : EMPTY_INITIAL_SELECTED
+      if (current.length === next.length && current.every((entry, index) => entry === next[index])) return current
+      return next
+    })
     loadFiles()
-  }, [initialSelected, loadFiles, open])
+  }, [normalizedInitialSelectedKey, loadFiles, open])
 
   useEffect(() => {
     if (!open) return undefined
@@ -181,7 +194,7 @@ export default function FilePickerModal({
       const uploadedAssets: FileAsset[] = []
       for (const file of selectedFiles) {
         const asset = await withLoaderTimeout<FileAsset>(
-          () => getFilePickerApi().uploadFileAsset({ file, userId: user?.id, userName: user?.name }),
+          () => uploadFileAssetRequest({ file, userId: user?.id, userName: user?.name }),
           'Upload picker file asset',
           FILE_PICKER_UPLOAD_TIMEOUT_MS,
         )
@@ -227,7 +240,7 @@ export default function FilePickerModal({
     setDeletingAssetId(assetId)
     try {
       await withLoaderTimeout(
-        () => getFilePickerApi().deleteFileAsset(assetId, { expectedUpdatedAt: asset.updated_at || undefined }),
+        () => deleteFileAssetRequest(assetId, { expectedUpdatedAt: asset.updated_at || undefined }),
         'Delete picker file asset',
         FILE_PICKER_DELETE_TIMEOUT_MS,
       )

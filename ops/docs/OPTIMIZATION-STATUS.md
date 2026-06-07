@@ -8,7 +8,7 @@ Last updated: 2026-06-07
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 843, route Returns page detail and history restore through focused returns transport.
+- Latest completed move: Move 844, route file picker list/upload/delete through focused file transport and stabilize picker open-load effects.
 
 ## Current Baseline
 
@@ -78,6 +78,37 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 844 continues the startup/preload cleanup by routing the reusable file
+  picker away from the broad `window.api` compatibility facade. The picker now
+  imports `getFiles`, `uploadFileAsset`, and `deleteFileAsset` from
+  `frontend/src/api/fileTransport.ts` directly for list, upload, and delete
+  paths.
+- Code-flow cleanup also stabilizes the picker open-load effect. The default
+  initial selection now uses a stable empty array, content-equivalent
+  `initialSelected` arrays are keyed by normalized value instead of object
+  identity, and load failures use a notification ref so changing app context
+  callbacks do not restart the loader loop.
+- Source guardrails now reject `getFilePickerApi`, `window.api`, and broad
+  `api.getFiles`/`api.uploadFileAsset`/`api.deleteFileAsset` access returning
+  to `frontend/src/components/files/FilePickerModal.tsx`, while still proving
+  bounded load, upload, and delete timeouts.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, full project-doc refresh,
+  Phase 29 audit, storage prune, and in-app Browser DOM/log/interaction checks
+  passed. Browser proof loaded the Vite dev `/users` route, opened Profile,
+  opened Files, verified the picker search and Upload file controls rendered
+  with the `No files yet` empty state, confirmed loading was not stuck, and
+  recorded zero relevant console warnings/errors after timestamped retests.
+  Browser screenshot capture timed out through the bridge, so DOM/log/
+  interaction proof is the accepted live evidence for this slice.
+- Current plan position after Move 844: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 842 continues the returns cleanup by routing customer-return edit-submit
   updates away from the broad `window.api` compatibility facade. The edit modal

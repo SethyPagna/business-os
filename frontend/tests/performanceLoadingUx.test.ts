@@ -2731,7 +2731,27 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout\(\(\) => getFilePickerApi\(\)\.getFiles\(\{ search, mediaType \}\), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS\)/,
+  /const EMPTY_INITIAL_SELECTED: string\[] = \[\][\s\S]*initialSelected = EMPTY_INITIAL_SELECTED/,
+  'file picker should use a stable empty initial selection instead of allocating a new default array every render',
+)
+assert.match(
+  filePickerModal,
+  /normalizedInitialSelectedKey = Array\.isArray\(initialSelected\) \? initialSelected\.filter\(Boolean\)\.join\('\\u0000'\) : ''[\s\S]*normalizedInitialSelectedKey \? normalizedInitialSelectedKey\.split\('\\u0000'\) : EMPTY_INITIAL_SELECTED[\s\S]*current\.length === next\.length && current\.every\(\(entry, index\) => entry === next\[index\]\)[\s\S]*\}, \[normalizedInitialSelectedKey, loadFiles, open\]\)/,
+  'file picker should not reset selected state or reload only because the normalized initial selection array identity changed',
+)
+assert.match(
+  filePickerModal,
+  /const notifyRef = useRef\(notify\)[\s\S]*notifyRef\.current = notify[\s\S]*notifyRef\.current\(getErrorMessage\(error, 'Failed to load files'\), 'error'\)[\s\S]*\}, \[mediaType, search\]\)/,
+  'file picker load effect should avoid unstable notify dependencies that can restart the modal loader every render',
+)
+assert.match(
+  filePickerModal,
+  /deleteFileAsset as deletePickerFileAsset[\s\S]*getFiles as fetchPickerFiles[\s\S]*uploadFileAsset as uploadPickerFileAsset[\s\S]*from '\.\.\/\.\.\/api\/fileTransport\.ts'/,
+  'file picker library should use focused file transport instead of the broad app-api registry',
+)
+assert.match(
+  filePickerModal,
+  /withLoaderTimeout\(\(\) => fetchPickerFiles\(\{ search, mediaType \}\), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS\)/,
   'file picker library should timeout slow file reads',
 )
 assert.match(
@@ -2746,13 +2766,18 @@ assert.match(
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout<FileAsset>\(\s*\(\) => getFilePickerApi\(\)\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout<FileAsset>\(\s*\(\) => uploadFileAssetRequest\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload picker file asset',\s*FILE_PICKER_UPLOAD_TIMEOUT_MS,\s*\)/,
   'file picker uploads should timeout slow upload requests',
 )
 assert.match(
   filePickerModal,
-  /withLoaderTimeout\(\s*\(\) => getFilePickerApi\(\)\.deleteFileAsset\(assetId, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => deleteFileAssetRequest\(assetId, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete picker file asset',\s*FILE_PICKER_DELETE_TIMEOUT_MS,\s*\)/,
   'file picker deletes should timeout slow delete requests',
+)
+assert.doesNotMatch(
+  filePickerModal,
+  /getFilePickerApi|window\.api|api\.(?:getFiles|uploadFileAsset|deleteFileAsset)/,
+  'file picker should not wake the broad window.api registry for list, upload, or delete paths',
 )
 assert.doesNotMatch(
   filePickerModal,

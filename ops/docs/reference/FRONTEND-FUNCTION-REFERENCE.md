@@ -110,7 +110,7 @@ Total files documented: **264**
 | 98 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
 | 99 | `frontend/src/components/dashboard/dashboardExport.ts` | 16 |
 | 100 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
-| 101 | `frontend/src/components/files/FilePickerModal.tsx` | 8 |
+| 101 | `frontend/src/components/files/FilePickerModal.tsx` | 9 |
 | 102 | `frontend/src/components/files/FilesPage.tsx` | 27 |
 | 103 | `frontend/src/components/files/FilesProvidersTab.tsx` | 4 |
 | 104 | `frontend/src/components/files/FilesResponsesTab.tsx` | 1 |
@@ -1613,14 +1613,15 @@ Total files documented: **264**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getFilePickerApi` | function | 60 |
-| 2 | `getErrorMessage` | function | 65 |
-| 3 | `normalizeFileAssets` | function | 69 |
-| 4 | `AssetPreview` | function | 73 |
-| 5 | `FilePickerModal` | component/function | 96 |
-| 6 | `toggleSelectedPath` | function | 163 |
-| 7 | `handleUpload` | function | 173 |
-| 8 | `handleDelete` | function | 215 |
+| 1 | `getErrorMessage` | function | 60 |
+| 2 | `normalizeFileAssets` | function | 64 |
+| 3 | `uploadFileAssetRequest` | function | 68 |
+| 4 | `deleteFileAssetRequest` | function | 72 |
+| 5 | `AssetPreview` | function | 76 |
+| 6 | `FilePickerModal` | component/function | 99 |
+| 7 | `toggleSelectedPath` | function | 176 |
+| 8 | `handleUpload` | function | 186 |
+| 9 | `handleDelete` | function | 228 |
 
 ### 3.102 `frontend/src/components/files/FilesPage.tsx`
 

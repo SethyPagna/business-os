@@ -13564,3 +13564,37 @@ Move 843 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 844 status:
+- Move 844 routes the reusable file picker list, upload, and delete paths
+  through focused file transport instead of the broad `window.api`
+  compatibility facade.
+- `frontend/src/components/files/FilePickerModal.tsx` now imports `getFiles`,
+  `uploadFileAsset`, and `deleteFileAsset` from
+  `frontend/src/api/fileTransport.ts` directly. This preserves the same
+  bounded load/upload/delete timeout budgets while avoiding the broad legacy
+  API registry for picker reads and file mutations.
+- The same slice fixes a live render-loop risk in the picker: empty
+  `initialSelected` defaults are stable, content-equivalent initial-selection
+  arrays use a normalized primitive key, and loader failures use a notification
+  ref so changing app-context callbacks do not restart the load effect.
+- Source guardrails now reject `getFilePickerApi`, `window.api`, and broad
+  `api.getFiles`/`api.uploadFileAsset`/`api.deleteFileAsset` access returning
+  to the picker while still proving focused transport ownership and bounded
+  file actions.
+- Verification proof: focused performance-loading guards, action stability
+  guards, standalone frontend typecheck, JSX/source check, frontend production
+  build, full frontend utility suite, backend utility suite, schema audit,
+  organization audit, generated reference refresh, full project-doc refresh,
+  Phase 29 audit, storage prune, and in-app Browser DOM/log/interaction checks
+  passed. Browser proof loaded the Vite dev `/users` route, opened Profile,
+  opened Files, verified the picker search and Upload file controls rendered
+  with the `No files yet` empty state, confirmed loading was not stuck, and
+  recorded zero relevant console warnings/errors after timestamped retests.
+  Browser screenshot capture timed out through the bridge, so DOM/log/
+  interaction proof is the accepted live evidence for this slice.
+- Current plan position after Move 844: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
