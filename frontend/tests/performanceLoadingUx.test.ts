@@ -712,6 +712,8 @@ assert.match(products, /const PRODUCTS_HISTORY_READY_DELAY_MS = 1800/, 'Products
 assert.match(products, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Products should have an explicit post-ready action-history gate')
 assert.match(products, /useActionHistory\(\{ limit: 10, notify, scope: 'products', enabled: historyReady \}\)/, 'Products should not fetch server action history during first route load')
 assert.match(products, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*PRODUCTS_HISTORY_READY_DELAY_MS/, 'Products should enable history only after the first product data load settles')
+assert.match(products, /const ActionHistoryBar = lazy\(\(\) => import\('\.\.\/shared\/ActionHistoryBar'\)\)/, 'Products should lazy-load action history chrome after first route-ready work')
+assert.doesNotMatch(products, /import ActionHistoryBar from '\.\.\/shared\/ActionHistoryBar'/, 'Products should not statically import action history chrome during first route render')
 
 assert.match(backup, /useState<BackupSectionId>\('all'\)/, 'Backup should default to the lightweight overview tab without showing duplicate All and Overview tabs')
 assert.match(backup, /BackupOverview/, 'Backup overview should provide lightweight section entry points')

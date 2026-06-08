@@ -254,6 +254,7 @@ async function main(): Promise<void> {
     assert(productSearchStatus === 200, `Products search read returned HTTP ${productSearchStatus}`)
     assert(productFiltersStatus === 200, `Product filters read returned HTTP ${productFiltersStatus}`)
     assert(productActionHistoryStatus === 200, `Products action history read returned HTTP ${productActionHistoryStatus}`)
+    await page.getByRole('button', { name: /History/i }).first().waitFor({ state: 'visible', timeout: 15_000 })
     await page.getByRole('button', { name: 'Import', exact: true }).click()
     const productImportModal = page.locator('.fixed.inset-0').filter({ hasText: /Products \+ CSV|Images Only|Upload CSV/i }).last()
     await productImportModal.getByText(/Products \+ CSV|Upload CSV/i).first().waitFor({ state: 'visible', timeout: 15_000 })

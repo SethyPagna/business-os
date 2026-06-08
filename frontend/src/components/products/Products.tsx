@@ -19,7 +19,6 @@ import {
   ProductDiscountBadge,
   ProductRowActions,
 } from './surfaces/ProductRowParts'
-import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildProductGroupSections } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -126,6 +125,7 @@ const VariantFormModal = lazy(() => import('./forms/VariantFormModal'))
 const ProductForm = lazy(() => import('./forms/ProductForm'))
 const ProductDetailModal = lazy(() => import('./surfaces/ProductDetailModal'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
+const ActionHistoryBar = lazy(() => import('../shared/ActionHistoryBar'))
 
 const PRODUCTS_HISTORY_READY_DELAY_MS = 1800
 const PRODUCTS_FILTER_META_READY_DELAY_MS = 1800
@@ -2096,7 +2096,13 @@ export default function Products() {
       </div>
 
       <div className="mb-3 flex min-w-0 items-center gap-2">
-        <ActionHistoryBar history={actionHistory} className="mb-0 min-w-0 flex-1" />
+        {historyReady ? (
+          <Suspense fallback={<div className="min-w-0 flex-1" aria-hidden="true" />}>
+            <ActionHistoryBar history={actionHistory} className="mb-0 min-w-0 flex-1" />
+          </Suspense>
+        ) : (
+          <div className="min-w-0 flex-1" aria-hidden="true" />
+        )}
         <FilterMenu
           label={t('filters') || 'Filters'}
           activeCount={activeFilters}
