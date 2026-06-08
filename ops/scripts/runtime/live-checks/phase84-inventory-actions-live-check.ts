@@ -85,6 +85,12 @@ async function main(): Promise<void> {
     const adjustSaveEnabled = !(await adjustModal.locator('button.btn-primary').first().isDisabled())
     assert(adjustSaveEnabled, 'Adjust save button should be enabled for the default valid draft')
     const inventoryReasonsStatus = await reasonsRead
+    await adjustModal.getByRole('button', { name: /Manage reasons/i }).click()
+    const reasonManagerModal = page.locator('.fixed.inset-0').last()
+    await reasonManagerModal.getByRole('heading', { name: 'Saved reasons' }).waitFor({ state: 'visible', timeout: 15_000 })
+    await reasonManagerModal.getByRole('button', { name: /^transfer$/i }).click()
+    await reasonManagerModal.getByRole('button', { name: /^move$/i }).click()
+    await closeTopModal(page)
     await closeTopModal(page)
 
     const transferDetailModal = await openFirstProductDetail(page)
@@ -141,6 +147,8 @@ async function main(): Promise<void> {
         productRows: rowCount,
         adjustModalOpened: true,
         adjustSaveEnabled,
+        reasonManagerOpened: true,
+        reasonManagerTypeSwitchesVisible: true,
         transferModalOpened: true,
         transferButtonVisible,
         moveModalOpened: true,
