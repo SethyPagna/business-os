@@ -1955,6 +1955,13 @@ CREATE INDEX idx_returns_status_created_pg ON public.returns USING btree (status
 
 
 --
+-- Name: idx_returns_scope_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_returns_scope_created_pg ON public.returns USING btree (COALESCE(return_scope, 'customer'::text), created_at DESC, id DESC);
+
+
+--
 -- Name: idx_returns_client_request_unique_pg; Type: INDEX; Schema: public; Owner: -
 --
 

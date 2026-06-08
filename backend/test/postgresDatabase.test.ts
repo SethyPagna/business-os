@@ -102,6 +102,7 @@ runTest('startup creates read-path indexes for search and movement history', () 
     'idx_sales_client_request_unique_pg',
     'idx_sale_items_product_branch_sale_pg',
     'idx_sale_items_sale_id_pg',
+    'idx_returns_scope_created_pg',
     'idx_returns_client_request_unique_pg',
     'idx_return_items_return_id_pg',
     'idx_product_images_product_sort_pg',

@@ -394,6 +394,7 @@ class PostgresCompatDatabase {
       'CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id_pg ON sale_items(sale_id, id)',
       'CREATE INDEX IF NOT EXISTS idx_returns_created_pg ON returns(created_at DESC, id DESC)',
       'CREATE INDEX IF NOT EXISTS idx_returns_status_created_pg ON returns(status, created_at DESC, id DESC)',
+      "CREATE INDEX IF NOT EXISTS idx_returns_scope_created_pg ON returns((COALESCE(return_scope, 'customer')), created_at DESC, id DESC)",
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_returns_client_request_unique_pg ON returns(client_request_id) WHERE client_request_id IS NOT NULL AND client_request_id <> ''",
       'CREATE INDEX IF NOT EXISTS idx_return_items_return_id_pg ON return_items(return_id, id)',
       'CREATE INDEX IF NOT EXISTS idx_product_images_product_sort_pg ON product_images(product_id, sort_order, id)',
