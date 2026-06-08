@@ -96,7 +96,7 @@ const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'Receipt-',
   'CustomersTab-',
 ]
-const SPA_GLOBAL_MODULE_PRELOAD_CHUNKS = ['app-bootstrap']
+const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = ['app-bootstrap']
 const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
   { match: (routePath) => routePath === '/' || routePath === '/index.html' || routePath.startsWith('/dashboard'), chunks: ['Dashboard'] },
   { match: (routePath) => routePath.startsWith('/pos'), chunks: ['POS'] },
@@ -177,10 +177,12 @@ function resolveFrontendChunkAssetName(chunkBase = '') {
 
 function getSpaModulePreloadChunks(routePath = '/') {
   const normalizedPath = String(routePath || '/').split('?')[0] || '/'
+  const isPublicPortalRoute = normalizedPath.startsWith('/public') || normalizedPath.startsWith('/customer-portal')
   const routeChunks = SPA_ROUTE_MODULE_PRELOAD_CHUNKS
     .filter((entry) => entry.match(normalizedPath))
     .flatMap((entry) => entry.chunks)
-  return [...new Set([...SPA_GLOBAL_MODULE_PRELOAD_CHUNKS, ...routeChunks])]
+  const baseChunks = isPublicPortalRoute ? [] : SPA_ADMIN_MODULE_PRELOAD_CHUNKS
+  return [...new Set([...baseChunks, ...routeChunks])]
 }
 
 function appendLinkHeader(res, value) {

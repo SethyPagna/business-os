@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 851, keep authenticated admin startup from mounting the login route or requesting the login chunk.
+- Latest completed move: Move 852, keep public portal startup off the authenticated admin bootstrap preload.
 
 ## Current Baseline
 
@@ -16,9 +16,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `40d6419e815cddbb`
+  `d89391073231d012`
 - latest verified source hash from the most recent Docker-served live check:
-  `9cb28cddba119d87`
+  `542f5c165aab068e`
 
 Latest verified reports:
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-08T20-39-01-221Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-08T21-29-53-373Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,39 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 852 keeps the public portal startup path off authenticated admin-only
+  assets. `backend/server.ts` now treats `/public` and `/customer-portal` as
+  public portal routes when building SPA `Link: rel=modulepreload` headers, so
+  those routes keep only their route-owned `app-portal` and `catalog` hints.
+  Admin routes still receive `/api/auth/bootstrap`, `app-bootstrap`, and their
+  route chunk preload hints.
+- Verification proof: backend utility suite, frontend utility suite,
+  JSX/source check, production build, `git diff --check`, Docker release
+  update, local and Cloudflare header checks, focused Playwright public portal
+  asset probe, route-load trace, health check, Docker container check, and
+  storage prune passed.
+- Live proof on Docker image `business-os:v6.0.0-202606090500-move852`,
+  frontend hash `d89391073231d012`, source hash `542f5c165aab068e`: local
+  `/public` and Cloudflare `/public` headers contain only `app-portal` and
+  `catalog` modulepreloads, while `/dashboard` still includes the admin
+  bootstrap preload. Focused Playwright found zero `app-bootstrap` downloads
+  and zero request failures on `/public`.
+- Route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-08T21-29-53-373Z.json`
+  passed with zero failures/errors: Dashboard 135 ms at 26 requests / 20
+  scripts; Products 221 ms at 32 / 24; Inventory 211 ms at 34 / 27; POS
+  234 ms at 28 / 21; Returns 205 ms at 29 / 24; public catalog 154 ms at
+  18 / 13. Public catalog is one request and one script lower than Move 851.
+- Cleanup proof: storage prune removed 435,578 bytes of stale reports,
+  5,345,195 bytes of old Docker-release backup data, and 4.848 GB of Docker
+  builder cache while preserving uploads, secrets, env files, Docker volumes,
+  the active image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 852: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 851 fixes the cookie-only authenticated startup path. `AppContext`
   now keeps `authReady` false whenever a server bootstrap probe is available

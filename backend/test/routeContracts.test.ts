@@ -122,7 +122,9 @@ runTest('sales router registers combined dashboard startup route', () => {
 
 runTest('SPA shell sends route-owned modulepreload hints for direct visits', () => {
   const source = fs.readFileSync(path.join(__dirname, '../server.ts'), 'utf8')
-  assert.match(source, /const SPA_GLOBAL_MODULE_PRELOAD_CHUNKS = \['app-bootstrap'\]/)
+  assert.match(source, /const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = \['app-bootstrap'\]/)
+  assert.match(source, /const isPublicPortalRoute = normalizedPath\.startsWith\('\/public'\) \|\| normalizedPath\.startsWith\('\/customer-portal'\)/)
+  assert.match(source, /const baseChunks = isPublicPortalRoute \? \[\] : SPA_ADMIN_MODULE_PRELOAD_CHUNKS/)
   assert.match(source, /routePath\.startsWith\('\/pos'\), chunks: \['POS'\]/)
   assert.match(source, /routePath\.startsWith\('\/products'\), chunks: \['Products'\]/)
   assert.match(source, /routePath\.startsWith\('\/audit-log'\), chunks: \['AuditLog'\]/)

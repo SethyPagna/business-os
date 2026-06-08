@@ -13876,3 +13876,34 @@ Move 851 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 852 status:
+- Move 852 removes the authenticated admin bootstrap modulepreload from public
+  portal shell responses. `backend/server.ts` now uses an admin preload list
+  only for non-public routes and leaves `/public` plus `/customer-portal`
+  with their route-owned `app-portal` and `catalog` modulepreloads.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090500-move852` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `d89391073231d012` and source hash `542f5c165aab068e`.
+- Header proof: local and Cloudflare `/public` responses preload only
+  `app-portal` and `catalog`; local and Cloudflare `/dashboard` responses
+  still preload `/api/auth/bootstrap`, `app-bootstrap`, and the dashboard
+  route chunk.
+- Live proof: route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T21-29-53-373Z.json` passed
+  with zero failures/errors. Public catalog improved to 154 ms at 18 requests /
+  13 scripts, down one request and one script from Move 851. Dashboard,
+  Products, Inventory, POS, and Returns stayed healthy.
+- Verification proof: backend utility suite, frontend utility suite,
+  JSX/source check, frontend production build, `git diff --check`, Docker
+  release update, focused Playwright public asset probe, Cloudflare public/admin
+  header checks, health check, Docker container check, and storage prune passed.
+- Cleanup proof: storage prune removed 435,578 bytes of stale reports,
+  5,345,195 bytes of old Docker-release backup data, and 4.848 GB of Docker
+  builder cache while preserving data, uploads, secrets, env files, Docker
+  volumes, active image, and latest local/R2 backup sets.
+- Current plan position after Move 852: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

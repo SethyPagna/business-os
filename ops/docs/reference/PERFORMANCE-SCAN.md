@@ -2309,3 +2309,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   relevant app logs. Storage prune removed 1,031,387 bytes of stale reports,
   26,686,028 bytes of old Docker-release backup data, two old Docker rollback
   tags, and 4.571 GB of Docker builder cache.
+- Move 852 records the public portal admin-bootstrap preload split. SPA shell
+  modulepreload headers now keep `app-bootstrap` on authenticated admin routes
+  but omit it from `/public` and `/customer-portal`, where only `app-portal`
+  and `catalog` are hinted. Docker image
+  `business-os:v6.0.0-202606090500-move852` served frontend hash
+  `d89391073231d012` and source hash `542f5c165aab068e`. Local and Cloudflare
+  `/public` headers no longer include `app-bootstrap`; local and Cloudflare
+  `/dashboard` headers still include `/api/auth/bootstrap`, `app-bootstrap`,
+  and the dashboard chunk. Focused Playwright found zero `app-bootstrap`
+  downloads and zero request failures on `/public`. Route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T21-29-53-373Z.json` passed
+  with zero failures/errors: public catalog 154 ms at 18 requests / 13
+  scripts, Dashboard 135 ms at 26 / 20, Products 221 ms at 32 / 24, Inventory
+  211 ms at 34 / 27, POS 234 ms at 28 / 21, and Returns 205 ms at 29 / 24.
+  Storage prune removed 435,578 bytes of stale reports, 5,345,195 bytes of old
+  Docker-release backup data, and 4.848 GB of Docker builder cache.
