@@ -407,6 +407,7 @@ assert.match(viteConfig, /OtpModal\.tsx'\)\) return 'settings-otp-modal'/, 'Sett
 assert.match(viteConfig, /formatters\.ts'\)\) \{[\s\S]*return 'shared-formatters'/, 'shared date/number formatters should not be owned by a lazy user detail chunk')
 assert.match(viteConfig, /permissionDefinitions\.ts'\)\) return 'user-permission-definitions'/, 'lightweight user permission metadata should not be owned by the lazy permission editor chunk')
 assert.match(viteConfig, /historyHelpers\.ts'\)\) return 'shared-action-history'/, 'history snapshot helpers should share the action-history chunk instead of costing a separate startup request')
+assert.match(viteConfig, /bulkOps\.ts'\)\) return 'shared-action-history'/, 'bulk action concurrency helpers should share the action-history chunk instead of costing a separate startup request')
 assert.match(viteConfig, /actionHistory\.ts'\)\) \{[\s\S]*return 'shared-action-history'/, 'action-history hook should not be owned by the lazy user profile modal chunk')
 assert.match(viteConfig, /UserProfileModal\.tsx'\)\) return 'user-profile-modal'/, 'Users profile modal should have an action-only chunk')
 assert.match(viteConfig, /UserDetailSheet\.tsx'\)\) return 'user-detail-sheet'/, 'Users detail sheet should have an action-only chunk')

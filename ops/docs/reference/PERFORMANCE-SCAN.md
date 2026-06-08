@@ -2231,3 +2231,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   portal check passed. Storage prune removed 719,667 bytes of stale reports,
   5,272,836 bytes of old Docker-release backup data, one old Docker rollback
   tag, and 3.579 GB of Docker builder cache.
+- Move 848 records the bulk action helper chunk consolidation. Vite now assigns
+  `frontend/src/utils/bulkOps.ts` to `shared-action-history`, removing the
+  separate `bulkOps-*.js` request from Products and Inventory startup without
+  changing Dashboard, POS, Returns, or public catalog startup. Production build
+  proof emitted `shared-action-history-DXTzoB3i.js` at 12.53 kB / 4.34 kB gzip
+  and no standalone bulkOps asset. Docker image
+  `business-os:v6.0.0-202606090119` served frontend hash
+  `a17aafcbe9a0d3d4` and source hash `24d1c2a2a89e8dcc`. Live route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T17-42-53-495Z.json` passed
+  with zero failures/errors: Products 36 requests / 26 scripts, Inventory
+  37 / 28, Dashboard 29 / 21, POS 31 / 22, Returns 32 / 25, and public catalog
+  20 / 15. Full Phase 8.4 live suite and public Cloudflare portal check passed.
+  Storage prune removed 719,265 bytes of stale reports, 5,295,169 bytes of old
+  Docker-release backup data, one old Docker rollback tag, and 3.579 GB of
+  Docker builder cache.

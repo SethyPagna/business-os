@@ -525,6 +525,7 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.endsWith('/src/utils/actionGuards.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/historyHelpers.ts')) return 'shared-action-history'
+    if (normalized.endsWith('/src/utils/bulkOps.ts')) return 'shared-action-history'
     if (normalized.endsWith('/src/utils/actionHistory.ts')) {
       return 'shared-action-history'
     }
