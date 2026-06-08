@@ -293,8 +293,10 @@ const deferredModulePreloadPrefixes = [
   'assets/pending-sync-api-',
   'assets/product-export-',
   'assets/product-image-upload-api-',
+  'assets/product-read-api-',
   'assets/product-write-api-',
   'assets/rfid-api-',
+  'assets/returns-write-api-',
   'assets/sale-write-api-',
   'assets/sales-read-api-',
   'assets/shared-action-history-',
@@ -434,6 +436,7 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.endsWith('/src/api/httpState.ts')) return 'api-http-state'
     if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
+    if (normalized.endsWith('/src/utils/groupedRecords.ts')) return 'record-groups'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
     if (normalized.endsWith('/src/api/contactWriteTransport.ts')) return 'contact-write-api'
@@ -468,7 +471,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'
     if (normalized.includes('/src/components/dashboard/charts/')) return 'dashboard-charts'
     if (normalized.endsWith('/src/components/dashboard/dashboardExport.ts')) return 'dashboard-export'
-    if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-api'
+    if (normalized.endsWith('/src/api/returnsReadTransport.ts')) return 'returns-read-api'
+    if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-write-api'
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
     if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
     if (normalized.endsWith('/src/api/offlineSnapshotTransport.ts')) return 'offline-snapshot-api'

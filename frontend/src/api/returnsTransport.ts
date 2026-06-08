@@ -3,9 +3,8 @@ import { buildAttemptedReturnItems } from './conflicts.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { apiFetch, route } from './http.ts'
 import { getLocalDb } from './lazyLocalDb.ts'
-import { mirrorTable, routeMirrored } from './localMirrors.ts'
-import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { ensureClientRequestId } from './requestIds.ts'
+import { getReturn, getReturns } from './returnsReadTransport.ts'
 
 type ReturnPayload = ExpectedUpdatedAtPayload
 type ReturnUpdateAttempt = {
@@ -51,20 +50,7 @@ function attachAttemptedReturnUpdate(error: unknown, payload: ReturnPayload): ne
   throw error
 }
 
-export function getReturns(params: QueryParams = {}): Promise<unknown> {
-  const query = buildQueryString(params, { skipEmpty: false })
-  const cacheKey = query ? `returns:get:${query}` : 'returns:get'
-  const mirror = query ? undefined : mirrorTable('returns')
-  return routeMirrored(
-    cacheKey,
-    () => apiFetch('GET', appendQuery('/api/returns', query)),
-    async () => {
-      const db = await getLocalDb()
-      return db.table('returns').orderBy('created_at').reverse().toArray()
-    },
-    mirror,
-  )
-}
+export { getReturn, getReturns }
 
 export function createReturn(payload: ReturnPayload = {}): Promise<unknown> {
   const body = ensureClientRequestId({ ...getDevicePayload(), ...(payload || {}) }, 'return')
@@ -89,14 +75,6 @@ export function createSupplierReturn(payload: ReturnPayload = {}): Promise<unkno
     }),
     null,
     true,
-  )
-}
-
-export function getReturn(id: number | string): Promise<unknown> {
-  return route(
-    'returns:getOne',
-    () => apiFetch('GET', `/api/returns/${encodeId(id)}`),
-    () => null,
   )
 }
 

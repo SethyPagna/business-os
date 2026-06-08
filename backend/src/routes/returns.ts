@@ -39,6 +39,55 @@ function restoreBranchStock(productId, branchId, quantity) {
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
+const RETURNS_LIST_CACHE_TTL_MS = 5 * 1000
+const RETURNS_LIST_CACHE_MAX = 32
+const returnsListCache = new Map()
+
+function cloneReturnRows(rows = []) {
+  if (!Array.isArray(rows)) return []
+  return rows.map((row) => ({
+    ...row,
+    items: Array.isArray(row?.items) ? row.items.map((item) => ({ ...item })) : row?.items,
+  }))
+}
+
+function buildReturnsListCacheKey(filters = {}) {
+  return JSON.stringify({
+    scope: filters.scope || CUSTOMER_SCOPE,
+    startDate: filters.startDate || '',
+    endDate: filters.endDate || '',
+    saleId: filters.saleId || '',
+    search: filters.search || '',
+    type: filters.type || '',
+    includeItems: !!filters.includeItems,
+    limit: filters.limit || 500,
+  })
+}
+
+function readCachedReturnsList(cacheKey, now = Date.now()) {
+  const cached = returnsListCache.get(cacheKey)
+  if (!cached) return null
+  if ((now - cached.builtAt) > RETURNS_LIST_CACHE_TTL_MS) {
+    returnsListCache.delete(cacheKey)
+    return null
+  }
+  return cloneReturnRows(cached.rows)
+}
+
+function setCachedReturnsList(cacheKey, rows = [], now = Date.now()) {
+  if (returnsListCache.size >= RETURNS_LIST_CACHE_MAX && !returnsListCache.has(cacheKey)) {
+    const oldestKey = returnsListCache.keys().next().value
+    if (oldestKey) returnsListCache.delete(oldestKey)
+  }
+  returnsListCache.set(cacheKey, {
+    builtAt: now,
+    rows: cloneReturnRows(rows),
+  })
+}
+
+function invalidateReturnsListCache() {
+  returnsListCache.clear()
+}
 
 function normalizeMovementProductName(...values) {
   for (const value of values) {
@@ -168,6 +217,13 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
   const search = String(req.query.search || req.query.q || '').trim().toLowerCase()
   const type = String(req.query.type || req.query.returnType || '').trim().toLowerCase()
   const includeItems = Boolean(saleId) || ['1', 'true', 'yes'].includes(String(req.query.includeItems || '').trim().toLowerCase())
+  const safeLimit = Math.min(1000, Math.max(1, parseInt(limit, 10) || 500))
+  const cacheKey = buildReturnsListCacheKey({ startDate, endDate, saleId, scope, search, type, includeItems, limit: safeLimit })
+  const cached = readCachedReturnsList(cacheKey)
+  if (cached) {
+    res.json(cached)
+    return
+  }
   let q = `SELECT r.* FROM returns r WHERE 1=1`
   const params = []
   if (startDate) { q += ' AND date(r.created_at) >= ?'; params.push(startDate) }
@@ -204,10 +260,11 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
     }
   }
   q += ' ORDER BY r.created_at DESC LIMIT ?'
-  params.push(parseInt(limit))
+  params.push(safeLimit)
 
   const returns = db.prepare(q).all(...params)
   if (!includeItems) {
+    setCachedReturnsList(cacheKey, returns)
     res.json(returns)
     return
   }
@@ -217,6 +274,7 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
   for (const returnRow of returns) {
     payload.push({ ...returnRow, items: getItems.all(returnRow.id) })
   }
+  setCachedReturnsList(cacheKey, payload)
   res.json(payload)
 })
 
@@ -517,6 +575,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
       return rid
     })()
 
+    invalidateReturnsListCache()
     broadcast('returns')
     broadcast('products')
     broadcast('sales')
@@ -773,6 +832,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
       return rid
     })()
 
+    invalidateReturnsListCache()
     broadcast('returns')
     broadcast('products')
     broadcast('inventory')
@@ -1038,6 +1098,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
     return err(res, e.message)
   }
 
+  invalidateReturnsListCache()
   broadcast('returns')
   broadcast('products')
   broadcast('sales')
@@ -1047,3 +1108,12 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
 })
 
 module.exports = router
+module.exports._test = {
+  RETURNS_LIST_CACHE_TTL_MS,
+  buildReturnsListCacheKey,
+  cloneReturnRows,
+  invalidateReturnsListCache,
+  readCachedReturnsList,
+  returnsListCache,
+  setCachedReturnsList,
+}

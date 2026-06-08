@@ -24,8 +24,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import {
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
-  updateReturn as updateReturnRequest,
-} from '../../api/returnsTransport.ts'
+} from '../../api/returnsReadTransport.ts'
 const ReturnDetailModal = lazy(() => import('./ReturnDetailModal'))
 const EditReturnModal = lazy(() => import('./EditReturnModal'))
 const NewReturnModal = lazy(() => import('./NewReturnModal'))
@@ -34,6 +33,7 @@ const ReturnsListSurface = lazy(() => import('./ReturnsListSurface'))
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
 type ReturnsListSurfaceProps = ComponentProps<typeof ReturnsListSurface>
+type ReturnsWriteTransportModule = typeof import('../../api/returnsTransport.ts')
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
@@ -42,6 +42,13 @@ const RETURNS_DETAIL_TIMEOUT_MS = 10000
 const RETURNS_SNAPSHOT_TIMEOUT_MS = 10000
 const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000
 const RETURNS_HISTORY_READY_DELAY_MS = 1800
+
+let returnsWriteTransportPromise: Promise<ReturnsWriteTransportModule> | null = null
+
+function loadReturnsWriteTransport(): Promise<ReturnsWriteTransportModule> {
+  if (!returnsWriteTransportPromise) returnsWriteTransportPromise = import('../../api/returnsTransport.ts')
+  return returnsWriteTransportPromise
+}
 
 type ReturnScope = typeof CUSTOMER_SCOPE | typeof SUPPLIER_SCOPE
 type ReturnGroupMode = 'time' | 'time+action'
@@ -85,7 +92,7 @@ interface ReturnRow extends Record<string, unknown> {
   items?: ReturnItem[] | null
 }
 
-interface ReturnHistoryPayload {
+interface ReturnHistoryPayload extends Record<string, unknown> {
   reason: string
   return_type: string
   notes: string
@@ -105,6 +112,11 @@ interface ReturnHistoryPayload {
     return_to_stock: boolean
     branch_id: number | string | null
   }>
+}
+
+async function updateReturnRequest(id: number | string, payload: ReturnHistoryPayload): Promise<unknown> {
+  const { updateReturn } = await loadReturnsWriteTransport()
+  return updateReturn(id, payload)
 }
 
 interface ReturnMutation {

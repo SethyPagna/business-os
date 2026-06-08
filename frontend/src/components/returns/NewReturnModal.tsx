@@ -113,9 +113,11 @@ const useApp = useAppHook as () => {
 
 type SalesTransportModule = typeof import('../../api/salesTransport.ts')
 type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
+type ReturnsReadTransportModule = typeof import('../../api/returnsReadTransport.ts')
 
 let salesTransportPromise: Promise<SalesTransportModule> | null = null
 let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
+let returnsReadTransportPromise: Promise<ReturnsReadTransportModule> | null = null
 
 function loadSalesTransport(): Promise<SalesTransportModule> {
   if (!salesTransportPromise) salesTransportPromise = import('../../api/salesTransport.ts')
@@ -127,6 +129,11 @@ function loadReturnsTransport(): Promise<ReturnsTransportModule> {
   return returnsTransportPromise
 }
 
+function loadReturnsReadTransport(): Promise<ReturnsReadTransportModule> {
+  if (!returnsReadTransportPromise) returnsReadTransportPromise = import('../../api/returnsReadTransport.ts')
+  return returnsReadTransportPromise
+}
+
 async function searchReturnSales(options: { limit: number }): Promise<SaleRow[]> {
   const { getSales } = await loadSalesTransport()
   const rows = await getSales(options)
@@ -134,7 +141,7 @@ async function searchReturnSales(options: { limit: number }): Promise<SaleRow[]>
 }
 
 async function loadExistingSaleReturns(saleId: number | string | null | undefined): Promise<ExistingReturnRow[]> {
-  const { getReturns } = await loadReturnsTransport()
+  const { getReturns } = await loadReturnsReadTransport()
   const rows = await getReturns({ saleId })
   return (Array.isArray(rows) ? rows : []) as ExistingReturnRow[]
 }

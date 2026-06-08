@@ -189,7 +189,7 @@ type BranchTransportModule = typeof import('../../api/branchTransport.ts')
 type DashboardTransportModule = typeof import('../../api/dashboardTransport.ts')
 type InventoryTransportModule = typeof import('../../api/inventoryTransport.ts')
 type ProductReadTransportModule = typeof import('../../api/productReadTransport.ts')
-type ReturnsTransportModule = typeof import('../../api/returnsTransport.ts')
+type ReturnsReadTransportModule = typeof import('../../api/returnsReadTransport.ts')
 type RfidTransportModule = typeof import('../../api/rfidTransport.ts')
 type UserReadTransportModule = typeof import('../../api/userReadTransport.ts')
 type InventoryWriteTransportModule = typeof import('../../api/inventoryWriteTransport.ts')
@@ -203,7 +203,7 @@ let branchTransportPromise: Promise<BranchTransportModule> | null = null
 let dashboardTransportPromise: Promise<DashboardTransportModule> | null = null
 let inventoryTransportPromise: Promise<InventoryTransportModule> | null = null
 let productReadTransportPromise: Promise<ProductReadTransportModule> | null = null
-let returnsTransportPromise: Promise<ReturnsTransportModule> | null = null
+let returnsReadTransportPromise: Promise<ReturnsReadTransportModule> | null = null
 let rfidTransportPromise: Promise<RfidTransportModule> | null = null
 let userReadTransportPromise: Promise<UserReadTransportModule> | null = null
 let inventoryWriteTransportPromise: Promise<InventoryWriteTransportModule> | null = null
@@ -234,9 +234,9 @@ function loadProductReadTransport(): Promise<ProductReadTransportModule> {
   return productReadTransportPromise
 }
 
-function loadReturnsTransport(): Promise<ReturnsTransportModule> {
-  if (!returnsTransportPromise) returnsTransportPromise = import('../../api/returnsTransport.ts')
-  return returnsTransportPromise
+function loadReturnsReadTransport(): Promise<ReturnsReadTransportModule> {
+  if (!returnsReadTransportPromise) returnsReadTransportPromise = import('../../api/returnsReadTransport.ts')
+  return returnsReadTransportPromise
 }
 
 function loadRfidTransport(): Promise<RfidTransportModule> {
@@ -263,7 +263,7 @@ function getInventoryApi(): InventoryApi {
     getInventoryReasons: async () => (await loadInventoryTransport()).getInventoryReasons(),
     getInventoryStats: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryStats(params),
     getProductsByIds: async (ids: unknown[] = [], params: QueryParams = {}) => (await loadProductReadTransport()).getProductsByIds(ids, params),
-    getReturns: async (params: QueryParams = {}) => (await loadReturnsTransport()).getReturns(params),
+    getReturns: async (params: QueryParams = {}) => (await loadReturnsReadTransport()).getReturns(params),
     getRfidStatus: async (params: QueryParams = {}) => (await loadRfidTransport()).getRfidStatus(params),
     getUsers: async () => (await loadUserReadTransport()).getUsers(),
     saveInventoryReasons: async (items: unknown[] = []) => (await loadInventoryWriteTransport()).saveInventoryReasons(items),

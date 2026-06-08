@@ -343,7 +343,8 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/branchTransport\.ts
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userAdminTransport\.ts'\)\) return 'user-admin-api'[\s\S]*normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'/, 'Users admin reads and mutations should use a focused route chunk instead of app-api-methods')
 assert.doesNotMatch(viteConfig, /normalized\.endsWith\('\/src\/api\/accessControlTransport\.ts'\)\) return 'access-control-api'/, 'retired access-control wrapper should not keep a manual chunk rule')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/customTablesTransport\.ts'\)\) return 'custom-tables-api'/, 'custom-table route operations should have a focused lazy custom-tables chunk')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsTransport\.ts'\)\) return 'returns-api'[\s\S]*normalized\.endsWith\('\/src\/api\/rfidTransport\.ts'\)\) return 'rfid-api'/, 'Inventory user, dashboard, returns, and RFID reads should use focused chunks instead of app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsReadTransport\.ts'\)\) return 'returns-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsTransport\.ts'\)\) return 'returns-write-api'[\s\S]*normalized\.endsWith\('\/src\/api\/rfidTransport\.ts'\)\) return 'rfid-api'/, 'Inventory user, dashboard, returns reads, returns writes, and RFID should use focused chunks instead of app-api-methods')
+assert.match(viteConfig, /'assets\/product-read-api-',[\s\S]*'assets\/returns-write-api-',/, 'dynamic product reads and return writes should stay out of eager modulepreload on read-only route startup')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'action-history-api'/, 'action history reads/writes and admin user filter reads should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/offlineSnapshotTransport\.ts'\)\) return 'offline-snapshot-api'/, 'idle offline snapshot refresh should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/requestIds\.ts'\)\) return 'request-ids'/, 'small request-id helpers used by focused write transports should not drag app-api-methods into product writes')
@@ -542,7 +543,7 @@ assert.doesNotMatch(auditLogTransport, /import \{ getLocalDb \} from '\.\/lazyLo
 assert.match(auditLogTransport, /const AUDIT_LOG_MIRROR_IDLE_DELAY_MS = 10_000[\s\S]*getLocalMirrorsModule\(\)[\s\S]*window\.setTimeout\(run, AUDIT_LOG_MIRROR_IDLE_DELAY_MS\)/, 'Audit Log mirroring should run after startup instead of blocking the first read')
 assert.match(auditLogTransport, /const \{ getLocalDb \} = await getLocalDbModule\(\)[\s\S]*db\.table\('audit_logs'\)/, 'Audit Log local DB should load only for offline fallback reads')
 assert.doesNotMatch(products, /\(window as Window & \{ api\?: ProductApi \}\)\.api|window\.api\.(?:createProduct|updateProduct|deleteProduct|adjustStock|transferStock|uploadProductImage)/, 'Products route should not depend on window.api for product write or stock/image intent paths')
-assert.match(inventory, /function loadInventoryTransport\(\): Promise<InventoryTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/inventoryTransport\.ts'\)[\s\S]*function loadProductReadTransport\(\): Promise<ProductReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)[\s\S]*function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/, 'Inventory route should lazy-load focused inventory, product-read, and returns transports instead of the broad API registry')
+assert.match(inventory, /function loadInventoryTransport\(\): Promise<InventoryTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/inventoryTransport\.ts'\)[\s\S]*function loadProductReadTransport\(\): Promise<ProductReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)[\s\S]*function loadReturnsReadTransport\(\): Promise<ReturnsReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsReadTransport\.ts'\)/, 'Inventory route should lazy-load focused inventory, product-read, and return-read transports instead of the broad API registry')
 assert.match(inventory, /function loadUserReadTransport\(\): Promise<UserReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/userReadTransport\.ts'\)/, 'Inventory route should lazy-load the tiny user read transport for admin movement filters')
 assert.match(inventory, /function loadBranchTransport\(\): Promise<BranchTransportModule>[\s\S]*function loadDashboardTransport\(\): Promise<DashboardTransportModule>[\s\S]*function loadRfidTransport\(\): Promise<RfidTransportModule>/, 'Inventory route should own narrow lazy loaders for branch, dashboard, and RFID transport paths')
 assert.match(inventory, /function loadInventoryExportModule\(\): Promise<InventoryExportModule>[\s\S]*import\('\.\/inventoryExport\.ts'\)/, 'Inventory route should lazy-load export assembly only when an export action is requested')
@@ -1645,8 +1646,8 @@ assert.match(
 )
 assert.match(
   newReturnModal,
-  /function loadReturnsTransport\(\): Promise<ReturnsTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)[\s\S]*async function loadExistingSaleReturns\(saleId: number \| string \| null \| undefined\): Promise<ExistingReturnRow\[]>[\s\S]*getReturns\(\{ saleId \}\)/,
-  'customer return history lookup should use the focused returns transport instead of the broad API registry',
+  /function loadReturnsReadTransport\(\): Promise<ReturnsReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsReadTransport\.ts'\)[\s\S]*async function loadExistingSaleReturns\(saleId: number \| string \| null \| undefined\): Promise<ExistingReturnRow\[]>[\s\S]*getReturns\(\{ saleId \}\)/,
+  'customer return history lookup should use the focused return-read transport instead of the broad API registry',
 )
 assert.match(
   newReturnModal,
@@ -1780,8 +1781,8 @@ assert.match(
 )
 assert.match(
   returns,
-  /getReturn as fetchReturnDetail[\s\S]*getReturns as fetchReturns[\s\S]*updateReturn as updateReturnRequest[\s\S]*from '\.\.\/\.\.\/api\/returnsTransport\.ts'/,
-  'returns list/detail/restore paths should use the focused returns transport instead of app-api-methods',
+  /getReturn as fetchReturnDetail[\s\S]*getReturns as fetchReturns[\s\S]*from '\.\.\/\.\.\/api\/returnsReadTransport\.ts'[\s\S]*function loadReturnsWriteTransport\(\): Promise<ReturnsWriteTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/returnsTransport\.ts'\)/,
+  'returns list/detail reads should use the read transport while restore writes stay lazy',
 )
 assert.match(
   returns,
