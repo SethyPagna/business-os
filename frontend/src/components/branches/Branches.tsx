@@ -266,6 +266,10 @@ export default function Branches() {
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('branches')
   const branchApi = useMemo(() => getBranchApi(), [])
+  const tr = useCallback((key: string, fallback: string): string => {
+    const value = t(key)
+    return value && value !== key ? value : fallback
+  }, [t])
 
   /**
    * 2. Page State
@@ -317,7 +321,7 @@ export default function Branches() {
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
           setLoading(false)
-          setLoadError(t('branches_load_slow') || 'Branches are taking longer than expected. Tap Retry or revisit in a moment.')
+          setLoadError(tr('branches_load_slow', 'Branches are taking longer than expected. Tap Retry or revisit in a moment.'))
         }, 15_000)
       }
 
@@ -349,7 +353,7 @@ export default function Branches() {
         if (Array.isArray(result.values.transfers)) setTransfers(result.values.transfers.filter(isTransferRecord))
 
         if (!result.hasAnySuccess) {
-          throw new Error(getFirstLoaderError(result.errors, t('failed_to_load_data') || 'Failed to load data'))
+          throw new Error(getFirstLoaderError(result.errors, tr('failed_to_load_data', 'Failed to load data')))
         }
 
         loadedOnceRef.current = true
@@ -357,11 +361,11 @@ export default function Branches() {
         return result
       } catch (error) {
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return null
-        const message = getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data')
+        const message = getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data'))
         if (!silent && !loadedOnceRef.current) {
           setLoadError(message)
         } else if (!silent) {
-          setLoadError(t('branches_refresh_failed') || 'Branches could not refresh right now. Showing the latest loaded data.')
+          setLoadError(tr('branches_refresh_failed', 'Branches could not refresh right now. Showing the latest loaded data.'))
           notify(message, 'warning')
         }
         return null
@@ -381,7 +385,7 @@ export default function Branches() {
     loadPromiseRef.current = wrappedPromise
     loadPromiseModeRef.current = requestedMode
     return wrappedPromise
-  }, [branchApi, notify, t, tab])
+  }, [branchApi, notify, tr, tab])
 
   useEffect(() => {
     if (!isActive) {
@@ -473,7 +477,7 @@ export default function Branches() {
         )
         setBranchStocks((prev) => ({ ...prev, [branchId]: stock }))
       } catch (error) {
-        notify(getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data'), 'warning')
+        notify(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'warning')
         return
       }
     }
@@ -504,7 +508,7 @@ export default function Branches() {
         },
       }))
     } catch (error) {
-      notify(getErrorMessage(error, t('failed_to_load_data') || 'Failed to load data'), 'warning')
+      notify(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data')), 'warning')
     }
   }
 
@@ -574,7 +578,7 @@ export default function Branches() {
           },
         })
       }
-      notify(selected ? (t('branch_updated') || 'Branch updated') : (t('branch_created') || 'Branch created'))
+      notify(selected ? tr('branch_updated', 'Branch updated') : tr('branch_created', 'Branch created'))
       setModal(null)
       setSelected(null)
       await load()
@@ -624,7 +628,7 @@ export default function Branches() {
           await load()
         },
       })
-      notify(t('branch_deleted') || 'Branch deleted')
+      notify(tr('branch_deleted', 'Branch deleted'))
       await load()
     } catch (error) {
       notify(getErrorMessage(error, 'Failed to delete branch'), 'error')
@@ -639,7 +643,7 @@ export default function Branches() {
     const toDelete = branches.filter((branch) => selectedIds.has(branch.id) && !branch.is_default)
     if (!toDelete.length) {
       finishSingleAction(bulkDeleteInFlightRef)
-      notify(t('cannot_delete_default_branch') || 'Cannot delete default branch', 'error')
+      notify(tr('cannot_delete_default_branch', 'Cannot delete default branch'), 'error')
       return
     }
     if (!window.confirm(`Delete ${toDelete.length} branch(es)? This cannot be undone.`)) {
@@ -706,10 +710,10 @@ export default function Branches() {
         })
       }
       if (failed > 0) {
-        notify((t('bulk_delete_partial_fail') || '{n} branch(es) could not be deleted.').replace('{n}', String(failed)), 'error')
+        notify(tr('bulk_delete_partial_fail', '{n} branch(es) could not be deleted.').replace('{n}', String(failed)), 'error')
         return
       }
-      notify((t('bulk_deleted_count') || '{n} branch(es) deleted').replace('{n}', String(toDelete.length)))
+      notify(tr('bulk_deleted_count', '{n} branch(es) deleted').replace('{n}', String(toDelete.length)))
     } finally {
       finishSingleAction(bulkDeleteInFlightRef)
       setBulkDeleteBusy(false)
@@ -741,8 +745,8 @@ export default function Branches() {
       <PageHeader
         icon={Building2}
         tone="blue"
-        title={t('branches') || 'Branches'}
-        subtitle={t('branch_default_hint') || 'Manage locations, transfer stock between branches, and review movement history from one place.'}
+        title={tr('branches', 'Branches')}
+        subtitle={tr('branch_default_hint', 'Manage locations, transfer stock between branches, and review movement history from one place.')}
         className="mb-4"
         stackOnMobile={false}
         actionsClassName="self-start pl-2 sm:pl-0"
@@ -751,16 +755,16 @@ export default function Branches() {
           {selectedCount > 0 ? (
             <button className="btn-danger flex-shrink-0 text-sm" onClick={handleBulkDelete} disabled={bulkDeleteBusy}>
               <Trash2 className="h-4 w-4" />
-              <span>{(t('delete') || 'Delete')} ({selectedCount})</span>
+              <span>{tr('delete', 'Delete')} ({selectedCount})</span>
             </button>
           ) : null}
           <button className="btn-secondary flex-shrink-0 px-3 py-1.5 text-xs sm:text-sm" onClick={() => setModal('transfer')}>
             <ArrowRightLeft className="h-4 w-4" />
-            <span>{t('transfer') || 'Transfer'}</span>
+            <span>{tr('transfer', 'Transfer')}</span>
           </button>
           <button className="btn-primary flex-shrink-0 px-3 py-1.5 text-xs sm:text-sm" onClick={() => { setSelected(null); setModal('form') }}>
             <Plus className="h-4 w-4" />
-            <span>{t('add_branch') || 'Add Branch'}</span>
+            <span>{tr('add_branch', 'Add Branch')}</span>
           </button>
         </div>
         )}
@@ -771,12 +775,12 @@ export default function Branches() {
       {branchSummary ? (
         <div className="mb-4 grid grid-cols-3 gap-1.5 sm:gap-2 xl:grid-cols-6">
           {[
-            { key: 'branches', label: t('branches_short') || t('branches') || 'Branches', value: branchSummary.branch_count ?? activeBranches.length, color: 'text-blue-600 dark:text-blue-300', detail: t('branch_stat_branches_detail') || 'Active branch locations available for stock review and transfer.' },
-            { key: 'items', label: t('items_short') || 'Items', value: branchSummary.total_products || 0, color: 'text-slate-700 dark:text-slate-100', detail: t('branch_stat_products_detail') || 'Unique products counted across branch stock records.' },
-            { key: 'in-stock', label: t('in_stock_short') || 'In', value: branchSummary.in_stock || 0, color: 'text-emerald-600 dark:text-emerald-300', detail: t('branch_stat_in_stock_detail') || 'Products with positive stock in at least one branch.' },
-            { key: 'low-stock', label: t('low_stock_short') || 'Low', value: branchSummary.low_stock || 0, color: 'text-amber-600 dark:text-amber-300', detail: t('branch_stat_low_stock_detail') || 'Products at or below their low stock threshold.' },
-            { key: 'out-stock', label: t('out_of_stock_short') || 'Out', value: branchSummary.out_of_stock || 0, color: 'text-red-600 dark:text-red-300', detail: t('branch_stat_out_stock_detail') || 'Products at or below their out of stock threshold.' },
-            { key: 'value', label: t('stock_value_short') || 'Value', value: fmtUSD(Number(branchSummary.stock_value_usd || 0)), color: 'text-cyan-600 dark:text-cyan-300', detail: t('branch_stat_value_detail') || 'Estimated stock value using available branch stock and product cost.' },
+            { key: 'branches', label: tr('branches_short', tr('branches', 'Branches')), value: branchSummary.branch_count ?? activeBranches.length, color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stat_branches_detail', 'Active branch locations available for stock review and transfer.') },
+            { key: 'items', label: tr('items_short', 'Items'), value: branchSummary.total_products || 0, color: 'text-slate-700 dark:text-slate-100', detail: tr('branch_stat_products_detail', 'Unique products counted across branch stock records.') },
+            { key: 'in-stock', label: tr('in_stock_short', 'In'), value: branchSummary.in_stock || 0, color: 'text-emerald-600 dark:text-emerald-300', detail: tr('branch_stat_in_stock_detail', 'Products with positive stock in at least one branch.') },
+            { key: 'low-stock', label: tr('low_stock_short', 'Low'), value: branchSummary.low_stock || 0, color: 'text-amber-600 dark:text-amber-300', detail: tr('branch_stat_low_stock_detail', 'Products at or below their low stock threshold.') },
+            { key: 'out-stock', label: tr('out_of_stock_short', 'Out'), value: branchSummary.out_of_stock || 0, color: 'text-red-600 dark:text-red-300', detail: tr('branch_stat_out_stock_detail', 'Products at or below their out of stock threshold.') },
+            { key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(Number(branchSummary.stock_value_usd || 0)), color: 'text-cyan-600 dark:text-cyan-300', detail: tr('branch_stat_value_detail', 'Estimated stock value using available branch stock and product cost.') },
           ].map(({ key, label, value, color, detail }) => (
             <BranchStatTile
               key={key}
@@ -792,22 +796,22 @@ export default function Branches() {
 
       {loadError && !loading && !branches.length && !transfers.length ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          <div className="font-semibold">{t('page_load_warning') || 'Page could not finish loading'}</div>
+          <div className="font-semibold">{tr('page_load_warning', 'Page could not finish loading')}</div>
           <div className="mt-1">{loadError}</div>
           <button
             type="button"
             className="mt-3 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
             onClick={() => load(false)}
           >
-            {t('retry') || 'Retry'}
+            {tr('retry', 'Retry')}
           </button>
         </div>
       ) : null}
 
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
         {[
-          { id: 'branches' as BranchTab, label: t('branches') || 'Branches' },
-          { id: 'transfers' as BranchTab, label: t('transfer_history') || 'Transfer History' },
+          { id: 'branches' as BranchTab, label: tr('branches', 'Branches') },
+          { id: 'transfers' as BranchTab, label: tr('transfer_history', 'Transfer History') },
         ].map(({ id, label }) => (
           <button
             key={id}
@@ -862,14 +866,14 @@ export default function Branches() {
               <span className="text-xs text-gray-500 dark:text-gray-400">
                 {selectedCount > 0
                   ? `${selectedCount} selected`
-                  : `${t('select_all') || 'Select all'} (${branches.length})`}
+                  : `${tr('select_all', 'Select all')} (${branches.length})`}
               </span>
             </div>
           ) : null}
 
           {!loading && branches.length === 0 ? (
             <div className="py-12 text-center text-gray-400">
-              <p>{t('no_data') || 'No data'}</p>
+              <p>{tr('no_data', 'No data')}</p>
             </div>
           ) : null}
 
@@ -903,10 +907,10 @@ export default function Branches() {
                         <div className="min-w-0 flex-1">
                           <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
                             <span className="text-base font-bold text-gray-900 dark:text-white">{branch.name}</span>
-                            {branch.is_default ? <span className="badge-blue text-xs">{t('default_branch') || 'Default'}</span> : null}
+                            {branch.is_default ? <span className="badge-blue text-xs">{tr('default_branch', 'Default')}</span> : null}
                             {branch.is_active
-                              ? <span className="badge-green text-xs">{t('active') || 'Active'}</span>
-                              : <span className="badge-red text-xs">{t('inactive') || 'Inactive'}</span>}
+                              ? <span className="badge-green text-xs">{tr('active', 'Active')}</span>
+                              : <span className="badge-red text-xs">{tr('inactive', 'Inactive')}</span>}
                           </div>
                           <div className="flex flex-wrap gap-x-3 gap-y-0 text-xs text-gray-500 dark:text-gray-400">
                             {branch.location ? <span>{branch.location}</span> : null}
@@ -918,16 +922,16 @@ export default function Branches() {
                         <div className="flex max-w-full flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1">
                           <button onClick={() => loadBranchStock(branch.id)} className="btn-secondary flex-shrink-0 px-2.5 py-1 text-xs">
                             <Warehouse className="h-3.5 w-3.5" />
-                            <span>{isExpanded ? (t('hide_stock') || 'Hide Stock') : (t('stock') || 'Stock')}</span>
+                            <span>{isExpanded ? tr('hide_stock', 'Hide Stock') : tr('stock', 'Stock')}</span>
                           </button>
                           <button onClick={() => { setSelected(branch); setModal('form') }} className="btn-secondary flex-shrink-0 px-2.5 py-1 text-xs">
                             <Pencil className="h-3.5 w-3.5" />
-                            <span>{t('edit') || 'Edit'}</span>
+                            <span>{tr('edit', 'Edit')}</span>
                           </button>
                           {!branch.is_default ? (
                             <button onClick={() => handleDelete(branch)} className="btn-danger flex-shrink-0 px-2.5 py-1 text-xs">
                               <Trash2 className="h-3.5 w-3.5" />
-                              <span>{t('delete') || 'Delete'}</span>
+                              <span>{tr('delete', 'Delete')}</span>
                             </button>
                           ) : null}
                         </div>
@@ -938,11 +942,11 @@ export default function Branches() {
                           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <div className="grid w-full min-w-0 grid-cols-3 gap-1.5 sm:max-w-3xl sm:gap-2 lg:grid-cols-5">
                               {[
-                                { key: 'total', label: t('total_short') || 'Total', value: totalProducts, color: 'text-gray-900 dark:text-white', detail: t('branch_stock_total_detail') || 'All products returned by this branch stock view.' },
-                                { key: 'in', label: t('in_stock_short') || 'In', value: stockCount, color: 'text-green-600 dark:text-green-300', detail: t('branch_stock_in_detail') || 'Products with positive quantity in this branch.' },
-                                { key: 'low', label: t('low_stock_short') || 'Low', value: lowStockCount, color: 'text-amber-600 dark:text-amber-300', detail: t('branch_stock_low_detail') || 'Products in this branch at or below low stock threshold.' },
-                                { key: 'out', label: t('out_of_stock_short') || 'Out', value: outStockCount, color: 'text-red-600 dark:text-red-300', detail: t('branch_stock_out_detail') || 'Products in this branch at or below out of stock threshold.' },
-                                { key: 'value', label: t('stock_value_short') || 'Value', value: fmtUSD(totalValue), color: 'text-blue-600 dark:text-blue-300', detail: t('branch_stock_value_detail') || 'Estimated value for positive branch stock.' },
+                                { key: 'total', label: tr('total_short', 'Total'), value: totalProducts, color: 'text-gray-900 dark:text-white', detail: tr('branch_stock_total_detail', 'All products returned by this branch stock view.') },
+                                { key: 'in', label: tr('in_stock_short', 'In'), value: stockCount, color: 'text-green-600 dark:text-green-300', detail: tr('branch_stock_in_detail', 'Products with positive quantity in this branch.') },
+                                { key: 'low', label: tr('low_stock_short', 'Low'), value: lowStockCount, color: 'text-amber-600 dark:text-amber-300', detail: tr('branch_stock_low_detail', 'Products in this branch at or below low stock threshold.') },
+                                { key: 'out', label: tr('out_of_stock_short', 'Out'), value: outStockCount, color: 'text-red-600 dark:text-red-300', detail: tr('branch_stock_out_detail', 'Products in this branch at or below out of stock threshold.') },
+                                { key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(totalValue), color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stock_value_detail', 'Estimated value for positive branch stock.') },
                               ].map(({ key, label, value, color, detail }) => (
                                 <BranchStatTile
                                   key={`${branch.id}-${key}`}
@@ -955,18 +959,18 @@ export default function Branches() {
                               ))}
                             </div>
                             <span className="hidden text-sm font-semibold text-gray-700 dark:text-gray-300">
-                              {(t('branch_stock_count') || '{n} products in stock').replace('{n}', String(stockCount))}
+                              {tr('branch_stock_count', '{n} products in stock').replace('{n}', String(stockCount))}
                               {' | '}
-                              {t('branch_stock_value') || 'Value'}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
+                              {tr('branch_stock_value', 'Value')}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
                             </span>
                             <button onClick={() => setModal('transfer')} className="text-xs text-blue-500 hover:underline">
-                              {t('transfer_stock_link') || 'Transfer stock'}
+                              {tr('transfer_stock_link', 'Transfer stock')}
                             </button>
                           </div>
 
                           {inStock.length === 0 ? (
                             <p className="rounded-lg bg-gray-50 py-4 text-center text-sm text-gray-400 dark:bg-gray-700/30">
-                              {t('no_branch_stock') || 'No stock in this branch. Use Transfer or Adjust Stock to add items.'}
+                              {tr('no_branch_stock', 'No stock in this branch. Use Transfer or Adjust Stock to add items.')}
                             </p>
                           ) : (
                             <>
@@ -1022,9 +1026,9 @@ export default function Branches() {
         <>
           <div className="space-y-2 sm:hidden">
             {loading && !transfers.length ? (
-              <div className="card py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
+              <div className="card py-10 text-center text-gray-400">{tr('loading', 'Loading...')}</div>
             ) : transfers.length === 0 ? (
-              <div className="card py-10 text-center text-gray-400">{t('no_data') || 'No data'}</div>
+              <div className="card py-10 text-center text-gray-400">{tr('no_data', 'No data')}</div>
             ) : transfers.map((transfer) => (
               <div key={transfer.id} className="card p-3">
                 <div className="flex items-start justify-between gap-3">
@@ -1034,7 +1038,7 @@ export default function Branches() {
                   </div>
                   <div className="text-right">
                     <div className="text-lg font-bold text-gray-900 dark:text-white">{transfer.quantity}</div>
-                    <div className="text-[10px] text-gray-400">{t('quantity') || 'Qty'}</div>
+                    <div className="text-[10px] text-gray-400">{tr('quantity', 'Qty')}</div>
                   </div>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -1054,20 +1058,20 @@ export default function Branches() {
             <table className="table-bordered w-full text-sm" style={{ minWidth: 640 }}>
               <thead className="sticky top-0 z-10">
                 <tr>
-                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('date') || 'Date'}</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('product_name') || 'Product'}</th>
-                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('from_branch') || 'From'}</th>
-                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('to_branch') || 'To'}</th>
-                  <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('quantity') || 'Qty'}</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('transfer_note') || 'Note'}</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('user') || 'User'}</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('date', 'Date')}</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('product_name', 'Product')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('from_branch', 'From')}</th>
+                  <th className="whitespace-nowrap px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('to_branch', 'To')}</th>
+                  <th className="px-4 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{tr('quantity', 'Qty')}</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('transfer_note', 'Note')}</th>
+                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{tr('user', 'User')}</th>
                 </tr>
               </thead>
               <tbody>
                 {loading && !transfers.length ? (
-                  <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
+                  <tr><td colSpan={7} className="py-10 text-center text-gray-400">{tr('loading', 'Loading...')}</td></tr>
                 ) : transfers.length === 0 ? (
-                  <tr><td colSpan={7} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
+                  <tr><td colSpan={7} className="py-10 text-center text-gray-400">{tr('no_data', 'No data')}</td></tr>
                 ) : transfers.map((transfer) => (
                   <tr key={transfer.id} className="table-row">
                     <td className="whitespace-nowrap px-4 py-2.5 text-xs text-gray-400">{formatTransferDate(transfer.created_at)}</td>
@@ -1083,14 +1087,14 @@ export default function Branches() {
             </table>
           </div>
           <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-            {(t('transfers_count') || '{n} transfers').replace('{n}', String(transfers.length))}
+            {tr('transfers_count', '{n} transfers').replace('{n}', String(transfers.length))}
           </div>
         </div>
         </>
       ) : null}
 
       {modal === 'form' ? (
-        <Modal title={selected ? `${t('edit_branch') || 'Edit Branch'}: ${selected.name}` : `+ ${t('add_branch') || 'Add Branch'}`} onClose={() => setModal(null)}>
+        <Modal title={selected ? `${tr('edit_branch', 'Edit Branch')}: ${selected.name}` : `+ ${tr('add_branch', 'Add Branch')}`} onClose={() => setModal(null)}>
           <BranchForm branch={selected} onSave={handleSaveBranch} onClose={() => setModal(null)} />
         </Modal>
       ) : null}
@@ -1121,7 +1125,7 @@ export default function Branches() {
             <p className="text-sm leading-6 text-slate-600 dark:text-slate-300">{statDetail.detail}</p>
             <div className="flex justify-end">
               <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setStatDetail(null)}>
-                {t('close') || 'Close'}
+                {tr('close', 'Close')}
               </button>
             </div>
           </div>
