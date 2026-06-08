@@ -53,8 +53,11 @@ let fileAssetListingWarmPromise = null
 let lastFileAssetListingWarmAt = 0
 const FILE_ASSET_LISTING_WARM_TTL_MS = 15 * 60 * 1000
 const FILE_USAGE_REFERENCE_CACHE_TTL_MS = 15 * 1000
+const FILE_ASSET_LIST_CACHE_TTL_MS = 8 * 1000
+const FILE_ASSET_LIST_CACHE_MAX = 32
 let cachedSettingsUsageReferences = { builtAt: 0, usageMap: null }
 let cachedSubmissionUsageReferences = { builtAt: 0, usageMap: null }
+let cachedFileAssetLists = new Map()
 
 function getDb() {
   return require('./database.ts').db
@@ -448,6 +451,7 @@ function createFileAssetRecord(payload = {}) {
     created_by_id: payload.created_by_id || null,
     created_by_name: payload.created_by_name || null,
   })
+  clearFileAssetListCache()
   return getFileAssetByPublicPath(payload.public_path)
 }
 
@@ -465,6 +469,59 @@ function buildFileAssetFilterParams(search = '', mediaType = 'all') {
     search: `%${String(search || '').trim().toLowerCase()}%`,
     mediaType: String(mediaType || 'all').trim().toLowerCase(),
   }
+}
+
+function buildFileAssetListCacheKey({ search = '', mediaType = 'all', page = 1, pageSize = 24, offset = 0 } = {}) {
+  return [
+    String(search || '').trim().toLowerCase(),
+    String(mediaType || 'all').trim().toLowerCase(),
+    Math.max(1, Number(page || 1) || 1),
+    Math.max(1, Number(pageSize || 24) || 24),
+    Math.max(0, Number(offset || 0) || 0),
+  ].join('|')
+}
+
+function cloneUsageList(usages = []) {
+  return Array.isArray(usages) ? usages.map((usage) => ({ ...(usage || {}) })) : []
+}
+
+function cloneFileAssetListPayload(payload = {}) {
+  return {
+    ...payload,
+    items: Array.isArray(payload.items)
+      ? payload.items.map((item) => ({
+        ...(item || {}),
+        usages: cloneUsageList(item?.usages),
+      }))
+      : [],
+  }
+}
+
+function clearFileAssetListCache() {
+  cachedFileAssetLists.clear()
+}
+
+function readCachedFileAssetList(filters = {}) {
+  const key = buildFileAssetListCacheKey(filters)
+  const cached = cachedFileAssetLists.get(key)
+  if (!cached) return null
+  if ((Date.now() - cached.builtAt) > FILE_ASSET_LIST_CACHE_TTL_MS) {
+    cachedFileAssetLists.delete(key)
+    return null
+  }
+  return cloneFileAssetListPayload(cached.payload)
+}
+
+function writeCachedFileAssetList(filters = {}, payload = {}) {
+  const key = buildFileAssetListCacheKey(filters)
+  if (cachedFileAssetLists.size >= FILE_ASSET_LIST_CACHE_MAX && !cachedFileAssetLists.has(key)) {
+    const oldestKey = cachedFileAssetLists.keys().next().value
+    if (oldestKey) cachedFileAssetLists.delete(oldestKey)
+  }
+  cachedFileAssetLists.set(key, {
+    builtAt: Date.now(),
+    payload: cloneFileAssetListPayload(payload),
+  })
 }
 
 function listAssetRows(search = '', mediaType = 'all', { limit = 24, offset = 0 } = {}) {
@@ -569,11 +626,12 @@ function collectUploadPathsFromValue(value, referenced) {
 }
 
 function pruneInvalidReferenceBackfillAssets() {
-  getDb().prepare(`
+  const result = getDb().prepare(`
     DELETE FROM file_assets
     WHERE source = 'reference_backfill'
       AND (public_path IS NULL OR public_path NOT LIKE '/uploads/%')
   `).run()
+  if (result?.changes) clearFileAssetListCache()
 }
 
 function collectReferencedUploadPaths() {
@@ -1190,6 +1248,16 @@ async function backfillUploadAssets() {
 }
 
 async function listFileAssets({ search = '', mediaType = 'all', page = 1, pageSize = 24, offset = 0 } = {}) {
+  const normalizedFilters = {
+    search: String(search || '').trim(),
+    mediaType: String(mediaType || 'all').trim().toLowerCase(),
+    page: Math.max(1, Number(page || 1) || 1),
+    pageSize: Math.max(1, Number(pageSize || 24) || 24),
+    offset: Math.max(0, Number(offset || 0) || 0),
+  }
+  const cached = readCachedFileAssetList(normalizedFilters)
+  if (cached) return cached
+
   setImmediate(() => {
     ensureFileAssetListingWarm().catch(() => {})
   })
@@ -1198,18 +1266,23 @@ async function listFileAssets({ search = '', mediaType = 'all', page = 1, pageSi
       requestUploadStorageReconcile().catch(() => {})
     })
   }
-  const rows = listAssetRows(search, mediaType, { limit: pageSize, offset })
+  const rows = listAssetRows(normalizedFilters.search, normalizedFilters.mediaType, {
+    limit: normalizedFilters.pageSize,
+    offset: normalizedFilters.offset,
+  })
   const items = serializeAssetRows(rows)
   const total = rows.length
     ? Math.max(0, Number(rows[0]?.total_count || items.length || 0))
-    : countAssetRows(search, mediaType)
-  return {
+    : countAssetRows(normalizedFilters.search, normalizedFilters.mediaType)
+  const result = {
     items,
     total,
-    page: Math.max(1, Number(page || 1) || 1),
-    pageSize: Math.max(1, Number(pageSize || 24) || 24),
-    hasMore: offset + items.length < total,
+    page: normalizedFilters.page,
+    pageSize: normalizedFilters.pageSize,
+    hasMore: normalizedFilters.offset + items.length < total,
   }
+  writeCachedFileAssetList(normalizedFilters, result)
+  return result
 }
 
 function getFileAssetById(id) {
@@ -1227,6 +1300,7 @@ async function deleteFileAsset(id) {
   if (fs.existsSync(absPath)) fs.unlinkSync(absPath)
   if (isObjectStorageEnabled()) await deleteObject(String(asset.public_path || '').replace(/^\/+/, ''))
   getDb().prepare('DELETE FROM file_assets WHERE id = ?').run(id)
+  clearFileAssetListCache()
   return asset
 }
 
@@ -1235,6 +1309,7 @@ module.exports = {
   __resetFileUsageReferenceCaches: () => {
     cachedSettingsUsageReferences = { builtAt: 0, usageMap: null }
     cachedSubmissionUsageReferences = { builtAt: 0, usageMap: null }
+    clearFileAssetListCache()
   },
   buildUploadReferenceUsageMap,
   buildVideoOptimizationArgs,

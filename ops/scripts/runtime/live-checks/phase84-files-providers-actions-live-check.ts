@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+import type { Page } from 'playwright'
 import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from '../audits/audit-auth.ts'
 import { readJson, isIgnoredConsole, waitForRead, attachConsoleCollector } from './live-check-utils.ts'
 
@@ -25,13 +26,29 @@ type RuntimeHealth = {
   }
 }
 type AiProvidersResponse = { items?: unknown[] }
+type SelectCheck = {
+  id: string
+  optionCount: number
+  selectedText: string
+}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 
-
-
+async function openAppSelect(page: Page, selector: string, id: string): Promise<SelectCheck> {
+  const button = page.locator(selector)
+  await button.waitFor({ state: 'visible', timeout: 10_000 })
+  const selectedText = (await button.innerText()).trim()
+  await button.click()
+  const listbox = page.getByRole('listbox').last()
+  await listbox.waitFor({ state: 'visible', timeout: 10_000 })
+  const optionCount = await listbox.getByRole('option').count()
+  assert(optionCount > 0, `${id} opened with no options`)
+  await page.keyboard.press('Escape')
+  await listbox.waitFor({ state: 'hidden', timeout: 5_000 }).catch(() => {})
+  return { id, optionCount, selectedText }
+}
 
 async function main(): Promise<void> {
   await fs.mkdir(REPORT_DIR, { recursive: true })
@@ -72,8 +89,8 @@ async function main(): Promise<void> {
     await page.locator('#provider-form-provider').waitFor({ state: 'visible', timeout: 15_000 })
     await page.locator('#provider-form-name').waitFor({ state: 'visible', timeout: 15_000 })
     await page.locator('#provider-form-api-key').waitFor({ state: 'visible', timeout: 15_000 })
-    const providerOptions = await page.locator('#provider-form-provider option').count()
-    assert(providerOptions > 0, 'Provider select did not render any provider options')
+    const providerSelect = await openAppSelect(page, '#provider-form-provider', 'provider')
+    const providerTypeSelect = await openAppSelect(page, '#provider-form-type', 'provider-type')
     const saveProviderButtonVisible = await page.getByRole('button', { name: /Add provider|Save provider/i }).isVisible()
     assert(saveProviderButtonVisible, 'Provider save button did not render')
 
@@ -110,7 +127,8 @@ async function main(): Promise<void> {
         providersStatus,
         responsesStatus,
         providersTabOpened: true,
-        providerOptions,
+        providerSelect,
+        providerTypeSelect,
         saveProviderButtonVisible,
         providerCount,
         providerActionButtons,

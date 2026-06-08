@@ -6,6 +6,7 @@ const {
   __resetFileUsageReferenceCaches,
   buildUploadReferenceUsageMap,
   collectUsagesByPublicPath,
+  listFileAssets,
 } = require('../src/fileAssets.ts')
 
 let failed = 0
@@ -112,6 +113,86 @@ runTest('collectUsagesByPublicPath reuses cached settings and submission referen
     collectUsagesByPublicPath(['/uploads/a.png'], { useCache: false })
     assert.equal(queryCounts.settings, 2)
     assert.equal(queryCounts.submissions, 2)
+  } finally {
+    databaseModule.db = originalDb
+    __resetFileUsageReferenceCaches()
+  }
+})
+
+runTest('listFileAssets reuses short-lived page payload cache for repeated list views', async () => {
+  const originalDb = databaseModule.db
+  const queryCounts = {
+    assets: 0,
+    settings: 0,
+    submissions: 0,
+    products: 0,
+    productImages: 0,
+    users: 0,
+  }
+
+  databaseModule.db = {
+    prepare(sql) {
+      const normalizedSql = String(sql || '')
+      return {
+        all() {
+          if (normalizedSql.includes('COUNT(*) OVER()') && normalizedSql.includes('FROM file_assets')) {
+            queryCounts.assets += 1
+            return [{
+              id: 1,
+              original_name: 'a.png',
+              stored_name: 'a.png',
+              public_path: '/uploads/a.png',
+              mime_type: 'image/png',
+              media_type: 'image',
+              byte_size: 100,
+              total_count: 1,
+            }]
+          }
+          if (normalizedSql.includes('FROM settings')) {
+            queryCounts.settings += 1
+            return []
+          }
+          if (normalizedSql.includes('FROM customer_share_submissions')) {
+            queryCounts.submissions += 1
+            return []
+          }
+          if (normalizedSql.includes('FROM product_images pi')) {
+            queryCounts.productImages += 1
+            return []
+          }
+          if (normalizedSql.includes('FROM users')) {
+            queryCounts.users += 1
+            return []
+          }
+          if (normalizedSql.includes('FROM products')) {
+            queryCounts.products += 1
+            return [{ id: 9, name: 'Product A', image_path: '/uploads/a.png' }]
+          }
+          throw new Error(`Unexpected SQL in test double: ${normalizedSql}`)
+        },
+        get() {
+          throw new Error(`Unexpected get SQL in test double: ${normalizedSql}`)
+        },
+        run() {
+          return { changes: 0 }
+        },
+      }
+    },
+  }
+
+  try {
+    __resetFileUsageReferenceCaches()
+    const first = await listFileAssets({ mediaType: 'all', page: 1, pageSize: 24, offset: 0 })
+    const second = await listFileAssets({ mediaType: 'all', page: 1, pageSize: 24, offset: 0 })
+
+    assert.equal(queryCounts.assets, 1)
+    assert.equal(queryCounts.products, 1)
+    assert.equal(first.total, 1)
+    assert.equal(second.total, 1)
+    assert.deepEqual(first.items[0].usages, [{ type: 'product', label: 'Product A' }])
+    second.items[0].usages.push({ type: 'mutated', label: 'Should not leak' })
+    const third = await listFileAssets({ mediaType: 'all', page: 1, pageSize: 24, offset: 0 })
+    assert.deepEqual(third.items[0].usages, [{ type: 'product', label: 'Product A' }])
   } finally {
     databaseModule.db = originalDb
     __resetFileUsageReferenceCaches()
