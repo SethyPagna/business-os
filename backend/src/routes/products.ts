@@ -497,7 +497,7 @@ function getProductCatalogSnapshotVersion() {
     ) AS snapshot_version
     FROM products
   `).get()
-  const value = String(row?.snapshot_version || '').trim() || new Date().toISOString()
+  const value = String(row?.snapshot_version || '').trim() || 'empty'
   productCatalogSnapshotVersionMemo = { value, builtAt: now }
   return value
 }

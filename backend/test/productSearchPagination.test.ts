@@ -13,6 +13,7 @@ assert(productsRoute.includes('p.parent_id IN'), 'product family expansion shoul
 assert(productsRoute.includes("const { getOrSetJson } = require('../runtimeCache.ts')"), 'product read routes should use the shared runtime cache')
 assert(productsRoute.includes("buildProductReadCacheKey('search', query)"), 'product search cache should key payloads by query and catalog snapshot')
 assert(productsRoute.includes('PRODUCT_CATALOG_SNAPSHOT_VERSION_MEMO_MS'), 'product snapshot version reads should use a short in-process memo for startup bursts')
+assert(productsRoute.includes("snapshot_version || '').trim() || 'empty'"), 'product snapshot fallback should be stable for legacy rows with null timestamps')
 assert(productsRoute.includes('function broadcastProductsUpdate'), 'product writes should invalidate the in-process snapshot memo before broadcasting')
 assert(!productsRoute.includes("broadcast('products')"), 'product route writes should use broadcastProductsUpdate instead of raw product broadcasts')
 assert(!productsRoute.includes("include.has('batches') || include.has('family')"), 'POS family expansion should not imply batch hydration unless batches are requested')
