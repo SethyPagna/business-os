@@ -3359,6 +3359,32 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
+## Current Move 847
+
+- Action-history route startup is leaner. `historyHelpers.ts` now belongs to
+  `shared-action-history` instead of emitting a separate `historyHelpers-*.js`
+  request.
+- Guardrail added in `frontend/tests/performanceLoadingUx.test.ts` so history
+  snapshot helpers stay with the shared action-history chunk.
+- Build proof: production build emitted `shared-action-history-opXl0TYw.js`
+  at 12.00 kB / 4.12 kB gzip and no standalone `historyHelpers-*.js`.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090044` is healthy
+  with frontend hash `c542cd5c37ee937b`.
+- Live route proof: Products improved to 37 requests / 27 scripts, Inventory
+  to 38 / 29, and Returns to 32 / 25, each one request and one script lower
+  than the prior Docker trace. Dashboard, POS, and public catalog stayed
+  stable, and all six routes had zero failed responses and zero page errors.
+- Live suite proof: Phase 8.4 UI check, public Cloudflare portal check,
+  receipt settings rollback, loyalty points rollback, settings rollback, and
+  post-live hygiene all passed.
+- Cleanup proof: storage prune removed 719,667 bytes of stale reports,
+  5,272,836 bytes of old Docker-release backup data, one old Docker rollback
+  tag, and 3.579 GB of Docker builder cache.
+- Current plan position after Move 847: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
 ## Current Move 846
 
 - Product-driven route startup is leaner. `productGrouping.ts` now belongs to

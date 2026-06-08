@@ -13667,3 +13667,38 @@ Move 846 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 847 status:
+- Move 847 removes another tiny normal-startup request from action-history
+  routes by folding `frontend/src/utils/historyHelpers.ts` into the existing
+  `shared-action-history` Vite chunk. Every first-route consumer of the helper
+  already renders or opens through the action-history surface, while the public
+  catalog does not use the helper, so the merge cuts a round trip without
+  adding public-route work.
+- `frontend/vite.config.ts` now assigns `historyHelpers.ts` to
+  `shared-action-history`, and `frontend/tests/performanceLoadingUx.test.ts`
+  requires that ownership beside the existing `actionHistory.ts` guardrail.
+- Build proof: `npm.cmd --prefix frontend run build` emitted
+  `shared-action-history-opXl0TYw.js` at 12.00 kB / 4.12 kB gzip and no
+  `historyHelpers-*.js` asset.
+- Live proof on Docker image `business-os:v6.0.0-202606090044`, frontend hash
+  `c542cd5c37ee937b`: route-load trace passed with zero failed responses and
+  zero page errors. Products dropped from 38 requests / 28 scripts to
+  37 requests / 27 scripts; Inventory dropped from 39 / 30 to 38 / 29; Returns
+  dropped from 33 / 26 to 32 / 25. Dashboard stayed at 29 / 21, POS stayed at
+  31 / 22, and public catalog stayed at 20 / 15, proving unrelated startup
+  routes were not made heavier.
+- Verification proof: frontend utility suite, JSX/source check, production
+  build, `git diff --check`, Docker release, Docker update, live route-load
+  trace, full Phase 8.4 live suite, public Cloudflare portal check, rollback
+  checks, post-live hygiene, and storage prune passed.
+- Cleanup proof: storage prune removed 719,667 bytes of stale reports,
+  5,272,836 bytes of old Docker-release backup data, one old
+  `business-os:v6.0.0-202606081714` rollback tag, and 3.579 GB of Docker
+  builder cache while preserving uploads, secrets, env files, Docker volumes,
+  the active image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 847: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

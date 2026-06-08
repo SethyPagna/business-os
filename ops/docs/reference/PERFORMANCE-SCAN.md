@@ -2216,3 +2216,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   portal check passed. Storage prune removed 719,979 bytes of stale reports,
   5,286,447 bytes of old Docker-release backup data, one old Docker rollback
   tag, and 3.579 GB of Docker builder cache.
+- Move 847 records the action-history helper chunk consolidation. Vite now
+  assigns `frontend/src/utils/historyHelpers.ts` to `shared-action-history`,
+  removing the separate `historyHelpers-*.js` request from Products, Inventory,
+  and Returns without changing Dashboard, POS, or public catalog startup.
+  Production build proof emitted `shared-action-history-opXl0TYw.js` at
+  12.00 kB / 4.12 kB gzip and no standalone historyHelpers asset. Docker image
+  `business-os:v6.0.0-202606090044` served frontend hash
+  `c542cd5c37ee937b`. Live route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T17-07-07-532Z.json`
+  passed with zero failures/errors: Products 37 requests / 27 scripts,
+  Inventory 38 / 29, Returns 32 / 25, Dashboard 29 / 21, POS 31 / 22, and
+  public catalog 20 / 15. Full Phase 8.4 live suite and public Cloudflare
+  portal check passed. Storage prune removed 719,667 bytes of stale reports,
+  5,272,836 bytes of old Docker-release backup data, one old Docker rollback
+  tag, and 3.579 GB of Docker builder cache.
