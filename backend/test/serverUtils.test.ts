@@ -287,7 +287,7 @@ runTest('setHtmlNoCacheHeaders serves SPA shell in standards UTF-8 HTML mode', (
   assert.equal(headers.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
 })
 
-runTest('setAdminSpaHtmlHeaders preloads the route-owned bootstrap endpoint', () => {
+runTest('setAdminSpaHtmlHeaders preloads admin bootstrap and avoids noisy public API preloads', () => {
   const collectHeaders = (path) => {
     const headers = new Map()
     const res = {
@@ -314,8 +314,8 @@ runTest('setAdminSpaHtmlHeaders preloads the route-owned bootstrap endpoint', ()
 
   const publicHeaders = collectHeaders('/public')
   assert.equal(publicHeaders.get('Content-Type'), 'text/html; charset=utf-8')
-  assert.match(publicHeaders.get('Link') || '', /\/api\/portal\/bootstrap/)
-  assert.match(publicHeaders.get('Link') || '', /crossorigin=anonymous/)
+  assert.equal(publicHeaders.get('Link') || '', '')
+  assert.doesNotMatch(publicHeaders.get('Link') || '', /\/api\/portal\/bootstrap/)
   assert.doesNotMatch(publicHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
 })
 

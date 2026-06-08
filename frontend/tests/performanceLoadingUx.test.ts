@@ -3242,8 +3242,18 @@ assert.doesNotMatch(
 )
 assert.match(
   pos,
-  /import \{ buildProductSupplierOptions \} from '\.\.\/products\/helpers\/productMenuHelpers\.ts'/,
-  'POS should reuse shared product supplier option normalization',
+  /import \{ buildProductSupplierOptions \} from '\.\.\/products\/helpers\/productSupplierOptions\.ts'/,
+  'POS should reuse the lightweight supplier option helper without pulling Products menu helpers',
+)
+assert.doesNotMatch(
+  pos,
+  /productMenuHelpers\.ts/,
+  'POS should not load the heavier Products menu helper chunk for supplier options',
+)
+assert.match(
+  viteConfig,
+  /productSupplierOptions\.ts'[\s\S]*return 'product-shared'/,
+  'supplier option normalization should ride with the shared product primitives chunk',
 )
 assert.doesNotMatch(
   pos,

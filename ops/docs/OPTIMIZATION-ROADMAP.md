@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 839.
+- Latest completed implementation move in this roadmap: Move 850.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -13774,6 +13774,49 @@ Move 849 status:
   builder cache while preserving uploads, secrets, env files, Docker volumes,
   the active image, `business-os:latest`, and latest local/R2 backup sets.
 - Current plan position after Move 849: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 850 status:
+- Move 850 splits the supplier-option normalization used by POS and Products
+  from `frontend/src/components/products/helpers/productMenuHelpers.ts` into
+  `frontend/src/components/products/helpers/productSupplierOptions.ts`. POS
+  now imports only the tiny supplier helper instead of the heavier Products
+  menu/filter helper module.
+- `frontend/vite.config.ts` assigns `productSupplierOptions.ts` to
+  `product-shared`, and `frontend/tests/performanceLoadingUx.test.ts` now
+  rejects POS importing `productMenuHelpers.ts` for supplier normalization.
+- Public portal startup noise was also fixed by removing the public
+  `/api/portal/bootstrap` `Link: rel=preload` hint from
+  `backend/src/serverUtils.ts`. The portal already fetches bootstrap through
+  its loader, and Cloudflare Early Hints reported the preload as unused.
+- Build proof: `npm.cmd --prefix frontend run build` emitted
+  `product-shared-DEk7U8Qi.js` at 12.05 kB / 4.25 kB gzip and no standalone
+  `productMenuHelpers-*.js` asset in the local production build.
+- Live proof on Docker image `business-os:v6.0.0-202606090302`, frontend hash
+  `fb52a37577b666c6`, source hash `9cb28cddba119d87`: route-load trace passed
+  with zero failures/errors. Dashboard loaded in 168 ms at 29 requests /
+  21 scripts; Products 310 ms at 35 / 25; Inventory 261 ms at 37 / 28; POS
+  230 ms at 31 / 22 while no longer requesting `productMenuHelpers`; Returns
+  198 ms at 32 / 25; public catalog 173 ms at 19 / 14.
+- Verification proof: backend utility suite, frontend utility suite,
+  JSX/source check, production build, `git diff --check`, Docker release,
+  Docker update, live route-load trace, full Phase 8.4 live suite, public
+  Cloudflare portal check, receipt/loyalty/settings rollback checks,
+  post-live hygiene, health check, storage prune, and in-app Browser
+  POS/public checks passed. Browser proof: POS search filtered to AHC with
+  zero console messages and no horizontal overflow; public portal loaded
+  5,539 products with zero relevant console messages and no horizontal
+  overflow.
+- Cleanup proof: storage prune removed 1,075,543 bytes of stale reports,
+  10,630,217 bytes of old Docker-release backup data, two old Docker rollback
+  tags (`business-os:v6.0.0-202606090010` and
+  `business-os:v6.0.0-202606082331`), and 3.65 GB of Docker builder cache
+  while preserving uploads, secrets, env files, Docker volumes, the active
+  image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 850: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance

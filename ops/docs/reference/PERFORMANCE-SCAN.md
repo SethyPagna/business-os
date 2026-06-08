@@ -2263,3 +2263,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   Storage prune removed 727,812 bytes of stale reports, 5,303,141 bytes of old
   Docker-release backup data, one old Docker rollback tag, and 2.923 GB of
   Docker builder cache.
+- Move 850 records the POS supplier-option helper split and public preload
+  cleanup. `buildProductSupplierOptions` moved into
+  `frontend/src/components/products/helpers/productSupplierOptions.ts`, POS now
+  imports that small helper directly, and Vite assigns it to `product-shared`
+  so POS no longer requests the heavier Products menu helper. The public
+  `/api/portal/bootstrap` `Link: rel=preload` header was removed because
+  Cloudflare Early Hints reported it as unused while the portal already loads
+  bootstrap through its own data loader. Production build proof emitted
+  `product-shared-DEk7U8Qi.js` at 12.05 kB / 4.25 kB gzip and no standalone
+  `productMenuHelpers-*.js` asset. Docker image
+  `business-os:v6.0.0-202606090302` served frontend hash
+  `fb52a37577b666c6` and source hash `9cb28cddba119d87`. Live route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T19-04-46-912Z.json` passed
+  with zero failures/errors: Dashboard 168 ms at 29 requests / 21 scripts,
+  Products 310 ms at 35 / 25, Inventory 261 ms at 37 / 28, POS 230 ms at
+  31 / 22 with no `productMenuHelpers` request, Returns 198 ms at 32 / 25, and
+  public catalog 173 ms at 19 / 14. Full Phase 8.4 live suite passed; public
+  Cloudflare rendered 20 products with zero relevant console messages. In-app
+  Browser proof verified POS search filtering for `AHC` and public portal
+  product loading with no horizontal overflow and zero relevant console
+  messages. Storage prune removed 1,075,543 bytes of stale reports,
+  10,630,217 bytes of old Docker-release backup data, two old Docker rollback
+  tags, and 3.65 GB of Docker builder cache.

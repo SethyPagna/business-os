@@ -518,6 +518,7 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.includes('/src/components/products/shared/')
       || normalized.includes('/src/components/products/helpers/productGalleryHelpers.ts')
+      || normalized.includes('/src/components/products/helpers/productSupplierOptions.ts')
       || normalized.includes('/src/utils/productBatches.ts')
       || normalized.endsWith('/src/utils/productGrouping.ts')
       || normalized.includes('/src/utils/color.ts')

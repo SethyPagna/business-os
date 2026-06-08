@@ -95,9 +95,9 @@ import {
 import {
   buildProductExportItems,
   buildProductFilterSections,
-  buildProductSupplierOptions,
   countActiveProductFilters,
 } from './helpers/productMenuHelpers.ts'
+import { buildProductSupplierOptions } from './helpers/productSupplierOptions.ts'
 
 const ManageCategoriesModal = lazy(() => import('./lookups/ManageCategoriesModal'))
 const ManageBrandsModal = lazy(() => import('./lookups/ManageBrandsModal'))

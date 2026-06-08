@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import {
   buildProductExportItems,
   buildProductFilterSections,
-  buildProductSupplierOptions,
   countActiveProductFilters,
 } from '../src/components/products/helpers/productMenuHelpers.ts'
+import { buildProductSupplierOptions } from '../src/components/products/helpers/productSupplierOptions.ts'
 
 type ProductRow = Record<string, unknown>
 type ExportCall = { rows: ProductRow[]; prefix: string }

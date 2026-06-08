@@ -64,7 +64,7 @@ import {
 } from '../products/helpers/productGalleryHelpers.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
-import { buildProductSupplierOptions } from '../products/helpers/productMenuHelpers.ts'
+import { buildProductSupplierOptions } from '../products/helpers/productSupplierOptions.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const FilterPanel = lazy(() => import('./FilterPanel'))

@@ -126,10 +126,6 @@ export function buildProductExportItems({
   ].filter(Boolean) as ProductExportMenuItem[]
 }
 
-export function buildProductSupplierOptions(metaSuppliers: unknown[] = []): string[] {
-  return [...new Set((metaSuppliers || []).filter(Boolean).map((supplier) => String(supplier)))].sort((a, b) => a.localeCompare(b))
-}
-
 export function countActiveProductFilters({
   brandFilter = 'all',
   branchFilter = 'all',

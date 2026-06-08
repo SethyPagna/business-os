@@ -274,9 +274,10 @@ function isCustomerPortalRoutePath(reqPath) {
 
 function setAdminSpaHtmlHeaders(req, res) {
   setHtmlNoCacheHeaders(res)
-  const bootstrapPreload = isCustomerPortalRoutePath(req?.path)
-    ? '</api/portal/bootstrap>; rel=preload; as=fetch; crossorigin=anonymous'
-    : '</api/auth/bootstrap>; rel=preload; as=fetch; crossorigin=use-credentials'
+  if (isCustomerPortalRoutePath(req?.path)) {
+    return
+  }
+  const bootstrapPreload = '</api/auth/bootstrap>; rel=preload; as=fetch; crossorigin=use-credentials'
   if (typeof res.append === 'function') {
     res.append('Link', bootstrapPreload)
     return
