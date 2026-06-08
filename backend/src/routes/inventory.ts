@@ -10,6 +10,7 @@ const { getStockMetrics } = require('../businessMetrics.ts')
 const { normalizeCatalogText } = require('../catalogTextIntegrity.ts')
 const { normalizeClientRequestId } = require('../idempotency.ts')
 const { firstExistingColumn } = require('../schemaMetadata.ts')
+const { getOrSetJson } = require('../runtimeCache.ts')
 const {
   allocateProductBatches,
   cloneAllocationsToProduct,
@@ -24,6 +25,12 @@ const {
 } = require('../productBatches.ts')
 
 const router = express.Router()
+const INVENTORY_PRODUCT_SNAPSHOT_VERSION_MEMO_MS = 1000
+let inventoryProductSnapshotVersionMemo = { value: '', builtAt: 0 }
+
+function asyncRoute(handler) {
+  return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
+}
 
 function normalizeImportedTimestamp(value) {
   const raw = String(value || '').trim()
@@ -277,6 +284,49 @@ function appendInventoryProductFilters(query = {}) {
 
 function getInventoryBootstrapBranches() {
   return db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all()
+}
+
+function getInventoryProductSnapshotVersion() {
+  const now = Date.now()
+  if (
+    inventoryProductSnapshotVersionMemo.value
+    && (now - inventoryProductSnapshotVersionMemo.builtAt) < INVENTORY_PRODUCT_SNAPSHOT_VERSION_MEMO_MS
+  ) {
+    return inventoryProductSnapshotVersionMemo.value
+  }
+  const row = db.prepare(`
+    SELECT GREATEST(
+      COALESCE((SELECT MAX(updated_at)::text FROM products), ''),
+      COALESCE((SELECT MAX(updated_at)::text FROM branches), ''),
+      COALESCE((SELECT MAX(updated_at)::text FROM product_batches), ''),
+      COALESCE((SELECT MAX(updated_at)::text FROM branch_batch_stock), '')
+    ) AS snapshot_version
+  `).get()
+  const value = String(row?.snapshot_version || '').trim() || 'empty'
+  inventoryProductSnapshotVersionMemo = { value, builtAt: now }
+  return value
+}
+
+function normalizeInventoryReadCacheValue(value) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry ?? '').trim()).sort()
+  return String(value ?? '').trim()
+}
+
+function buildInventoryProductReadCacheKey(kind, query = {}) {
+  const entries = []
+  for (const key of Object.keys(query || {}).sort()) {
+    const value = normalizeInventoryReadCacheValue(query[key])
+    if (Array.isArray(value)) {
+      entries.push([key, value])
+      continue
+    }
+    if (value) entries.push([key, value])
+  }
+  return `inventory:${kind}:${getInventoryProductSnapshotVersion()}:${JSON.stringify(entries)}`
+}
+
+function getCachedInventoryProductSearchPayload(query = {}) {
+  return getOrSetJson(buildInventoryProductReadCacheKey('products', query), 12, () => buildInventoryProductSearchPayload(query))
 }
 
 function buildInventoryProductSearchPayload(query = {}) {
@@ -1227,27 +1277,27 @@ router.post('/move-row', authToken, requirePermission('inventory'), (req, res) =
 })
 
 // GET /api/inventory/bootstrap
-router.get('/bootstrap', authToken, requirePermission('inventory'), (req, res) => {
+router.get('/bootstrap', authToken, requirePermission('inventory'), asyncRoute(async (req, res) => {
   try {
     ok(res, {
       branches: getInventoryBootstrapBranches(),
-      products: buildInventoryProductSearchPayload(req.query),
+      products: await getCachedInventoryProductSearchPayload(req.query),
     })
   } catch (e) {
     console.error('[inventory/bootstrap] error:', e.message)
     err(res, 'Failed to bootstrap inventory: ' + e.message)
   }
-})
+}))
 
 // GET /api/inventory/products/search
-router.get('/products/search', authToken, requirePermission('inventory'), (req, res) => {
+router.get('/products/search', authToken, requirePermission('inventory'), asyncRoute(async (req, res) => {
   try {
-    res.json(buildInventoryProductSearchPayload(req.query))
+    res.json(await getCachedInventoryProductSearchPayload(req.query))
   } catch (e) {
     console.error('[inventory/products/search] error:', e.message)
     err(res, 'Failed to search inventory: ' + e.message)
   }
-})
+}))
 
 function normalizeRfidId(value) {
   return String(value || '').trim().toUpperCase()

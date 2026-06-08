@@ -53,6 +53,19 @@ runTest('inventory movements accept large page sizes and use text-safe created_a
   assert.match(source, /ORDER BY COALESCE\(NULLIF\(im\.created_at::text,\s*''\), CURRENT_TIMESTAMP::text\) DESC, im\.id DESC/, 'movement ordering should avoid timestamp/text COALESCE mismatches')
 })
 
+runTest('inventory product reads reuse the shared runtime cache', () => {
+  const source = readSource('src/routes/inventory.ts')
+  assert.match(source, /const \{ getOrSetJson \} = require\('\.\.\/runtimeCache\.ts'\)/, 'inventory route should use the shared runtime cache helper')
+  assert.match(source, /INVENTORY_PRODUCT_SNAPSHOT_VERSION_MEMO_MS/, 'inventory cache keys should use a short memoized snapshot version')
+  assert.match(source, /function getInventoryProductSnapshotVersion\(\)/, 'inventory product reads should include a live data snapshot token')
+  assert.match(source, /snapshot_version \|\| ''\)\.trim\(\) \|\| 'empty'/, 'inventory snapshot fallback should be stable for legacy rows with null timestamps')
+  assert.match(source, /function buildInventoryProductReadCacheKey\(kind, query = \{\}\)/, 'inventory product reads should have a bounded query-specific cache key')
+  assert.match(source, /inventory:\$\{kind\}:\$\{getInventoryProductSnapshotVersion\(\)\}:/, 'inventory product cache keys should include the snapshot version')
+  assert.match(source, /function getCachedInventoryProductSearchPayload\(query = \{\}\) \{[\s\S]*getOrSetJson\(buildInventoryProductReadCacheKey\('products', query\), 12,/m, 'inventory product search should cache repeated bootstrap/search payloads briefly')
+  assert.match(source, /products: await getCachedInventoryProductSearchPayload\(req\.query\)/, 'inventory bootstrap should reuse cached product payloads')
+  assert.match(source, /res\.json\(await getCachedInventoryProductSearchPayload\(req\.query\)\)/, 'inventory product search should reuse cached product payloads')
+})
+
 runTest('sales and returns stock upserts qualify branch_stock quantity for Postgres', () => {
   const salesSource = readSource('src/routes/sales.ts')
   const returnsSource = readSource('src/routes/returns.ts')
