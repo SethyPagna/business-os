@@ -444,6 +444,22 @@ async function main(): Promise<void> {
     const posMembershipLookupStatus = (await posMembershipLookupResponse).status()
     assert(posMembershipLookupStatus === 200, `POS membership lookup returned HTTP ${posMembershipLookupStatus}`)
     await page.getByText(posMember.membershipNumber, { exact: false }).first().waitFor({ state: 'visible', timeout: 15_000 })
+    await page.locator('button').filter({ hasText: /\+ New|Add New/i }).first().click()
+    const posCustomerQuickAddModal = page.locator('.fixed.inset-0').filter({ has: page.locator('#pos-quick-customer-name') }).last()
+    await posCustomerQuickAddModal.locator('#pos-quick-customer-name').waitFor({ state: 'visible', timeout: 15_000 })
+    await posCustomerQuickAddModal.getByRole('button', { name: /Cancel/i }).click()
+    const posDeliveryToggle = page.locator('button.relative.ml-2.w-9.h-5').first()
+    if (!(await page.locator('#pos-delivery-search').isVisible().catch(() => false))) {
+      await page.locator('button').filter({ hasText: /Delivery/i }).filter({ hasText: /Show|Hide/i }).first().click()
+    }
+    if (!(await page.locator('#pos-delivery-search').isVisible().catch(() => false))) {
+      await posDeliveryToggle.click()
+    }
+    await page.locator('#pos-delivery-search').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.locator('button').filter({ hasText: /\+ New|Add New/i }).last().click()
+    const posDeliveryQuickAddModal = page.locator('.fixed.inset-0').filter({ has: page.locator('#pos-quick-delivery-name') }).last()
+    await posDeliveryQuickAddModal.locator('#pos-quick-delivery-name').waitFor({ state: 'visible', timeout: 15_000 })
+    await posDeliveryQuickAddModal.getByRole('button', { name: /Cancel/i }).click()
 
     console.log('[phase84] exercising product lookup manager loaders')
     await page.goto('/products', { waitUntil: 'domcontentloaded', timeout: 30_000 })

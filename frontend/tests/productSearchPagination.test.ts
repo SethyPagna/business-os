@@ -7,6 +7,7 @@ const productMenuHelpers = readFileSync(new URL('../src/components/products/help
 const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
 const posPage = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
+const posQuickAddModals = readFileSync(new URL('../src/components/pos/POSQuickAddModals.tsx', import.meta.url), 'utf8')
 const apiMethods = readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const productReadTransport = readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
 
@@ -147,7 +148,7 @@ assert.doesNotMatch(
   'POS should not keep the removed quick-filter controls wired',
 )
 assert.match(
-  posPage,
+  posQuickAddModals,
   /membership_number[\s\S]*Auto-generated if blank/,
   'POS quick-add customer form should expose optional membership id and allow generated memberships',
 )

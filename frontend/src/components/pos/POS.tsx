@@ -1,7 +1,7 @@
 // POS
 /**
  * Point-of-Sale screen.
- * Sub-components (ProductImage, CartItem, QuickAddModal) are imported from
+ * Sub-components (ProductImage, CartItem) are imported from
  * sibling files.
  *
  * Key features:
@@ -30,7 +30,6 @@ import {
 } from '../../constants'
 import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
-import QuickAddModal from './QuickAddModal'
 import PaginationControls from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -70,6 +69,7 @@ const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const FilterPanel = lazy(() => import('./FilterPanel'))
 const ProductDetailSheet = lazy(() => import('./ProductDetailSheet'))
+const POSQuickAddModals = lazy(() => import('./POSQuickAddModals'))
 
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
 const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
@@ -2276,29 +2276,26 @@ export default function POS() {
         </div>
       )}
 
-      {/* Quick-add customer modal */}
-      {showAddCustomer && (
-        <QuickAddModal title={t('add_new_customer')} saving={savingCustomer} onSave={handleAddCustomer} t={t} onClose={closeAddCustomerModal}>
-          <div><label htmlFor="pos-quick-customer-name" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('name')} *</label><input id="pos-quick-customer-name" name="pos_quick_customer_name" className="input" value={newCustomerForm.name} onChange={e => setNewCustomerForm(f => ({ ...f, name: e.target.value }))} autoComplete="name" autoFocus /></div>
-          <div><label htmlFor="pos-quick-customer-membership" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{posCopy('Membership ID', 'Membership ID')} <span className="font-normal text-gray-400">({posCopy('optional', 'optional')})</span></label><input id="pos-quick-customer-membership" name="pos_quick_customer_membership" className="input" value={newCustomerForm.membership_number} onChange={e => setNewCustomerForm(f => ({ ...f, membership_number: e.target.value }))} placeholder={posCopy('Auto-generated if blank', 'Auto-generated if blank')} autoComplete="off" /></div>
-          <div className="grid grid-cols-2 gap-2">
-            <div><label htmlFor="pos-quick-customer-phone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('phone')}</label><input id="pos-quick-customer-phone" name="pos_quick_customer_phone" className="input" value={newCustomerForm.phone} onChange={e => setNewCustomerForm(f => ({ ...f, phone: e.target.value }))} autoComplete="tel" /></div>
-            <div><label htmlFor="pos-quick-customer-address" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('address')}</label><input id="pos-quick-customer-address" name="pos_quick_customer_address" className="input" value={newCustomerForm.address} onChange={e => setNewCustomerForm(f => ({ ...f, address: e.target.value }))} autoComplete="street-address" /></div>
-          </div>
-        </QuickAddModal>
-      )}
-
-      {/* Quick-add delivery contact modal */}
-      {showAddDelivery && (
-        <QuickAddModal title={t('add_delivery_contact')||'Add Delivery Contact'} saving={savingDelivery} onSave={handleAddDelivery} t={t} onClose={closeAddDeliveryModal}>
-          <div><label htmlFor="pos-quick-delivery-name" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Driver / Rider Name</label><input id="pos-quick-delivery-name" name="pos_quick_delivery_name" className="input" value={newDeliveryForm.name} onChange={e => setNewDeliveryForm(f => ({ ...f, name: e.target.value }))} autoComplete="name" autoFocus /></div>
-          <div className="grid grid-cols-2 gap-2">
-            <div><label htmlFor="pos-quick-delivery-phone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Phone</label><input id="pos-quick-delivery-phone" name="pos_quick_delivery_phone" className="input" value={newDeliveryForm.phone} onChange={e => setNewDeliveryForm(f => ({ ...f, phone: e.target.value }))} placeholder="012 345 678" autoComplete="tel" /></div>
-            <div><label htmlFor="pos-quick-delivery-area" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Area / Zone</label><input id="pos-quick-delivery-area" name="pos_quick_delivery_area" className="input" value={newDeliveryForm.area} onChange={e => setNewDeliveryForm(f => ({ ...f, area: e.target.value }))} placeholder="Central, North" autoComplete="address-level2" /></div>
-          </div>
-          <p className="text-xs text-gray-400">Enter at least a driver name or phone number.</p>
-        </QuickAddModal>
-      )}
+      {showAddCustomer || showAddDelivery ? (
+        <Suspense fallback={null}>
+          <POSQuickAddModals
+            closeAddCustomerModal={closeAddCustomerModal}
+            closeAddDeliveryModal={closeAddDeliveryModal}
+            handleAddCustomer={handleAddCustomer}
+            handleAddDelivery={handleAddDelivery}
+            newCustomerForm={newCustomerForm}
+            newDeliveryForm={newDeliveryForm}
+            posCopy={posCopy}
+            savingCustomer={savingCustomer}
+            savingDelivery={savingDelivery}
+            setNewCustomerForm={setNewCustomerForm}
+            setNewDeliveryForm={setNewDeliveryForm}
+            showAddCustomer={showAddCustomer}
+            showAddDelivery={showAddDelivery}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Product detail bottom-sheet */}
       {detailProduct ? (

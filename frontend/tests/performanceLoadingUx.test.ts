@@ -62,6 +62,7 @@ const suppliers = fs.readFileSync(new URL('../src/components/contacts/SuppliersT
 const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab.tsx', import.meta.url), 'utf8')
 const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
+const posQuickAddModals = fs.readFileSync(new URL('../src/components/pos/POSQuickAddModals.tsx', import.meta.url), 'utf8')
 const sales = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
 const salesExportModal = fs.readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
 const salesImportModal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
@@ -3018,6 +3019,26 @@ assert.match(
   pos,
   /const ProductDetailSheet = lazy\(\(\) => import\('\.\/ProductDetailSheet'\)\)/,
   'POS product detail sheet should stay in a click-only lazy chunk',
+)
+assert.match(
+  pos,
+  /const POSQuickAddModals = lazy\(\(\) => import\('\.\/POSQuickAddModals'\)\)/,
+  'POS quick-add customer and delivery forms should stay in a click-only lazy chunk',
+)
+assert.doesNotMatch(
+  pos,
+  /import QuickAddModal from '\.\/QuickAddModal'/,
+  'POS should not statically load the quick-add modal frame during first route render',
+)
+assert.doesNotMatch(
+  pos,
+  /pos-quick-customer-name|pos-quick-delivery-name/,
+  'POS should not keep quick-add form fields in the first route chunk',
+)
+assert.match(
+  posQuickAddModals,
+  /export default function POSQuickAddModals/,
+  'POS quick-add modal markup should live in the lazy quick-add component',
 )
 assert.doesNotMatch(
   pos,
