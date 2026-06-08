@@ -2200,3 +2200,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   415,957,346 bytes from regenerable `release`, `frontend/dist`, and `output`
   folders, and the follow-up Phase 29 audit passed with zero failures.
 <!-- phase29-manual-notes:end -->
+
+- Move 846 records the product route startup chunk consolidation. Vite now
+  assigns `frontend/src/utils/productGrouping.ts` to `product-shared`, removing
+  the separate `productGrouping-*.js` request from Products, Inventory, and POS
+  without affecting Dashboard, Returns, or the public catalog. Production build
+  proof emitted `product-shared-BTlFGq5T.js` at 11.93 kB / 4.21 kB gzip and no
+  standalone productGrouping asset. Docker image
+  `business-os:v6.0.0-202606090010` served frontend hash
+  `55303e93b37a9590`. Live route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T16-34-44-268Z.json`
+  passed with zero failures/errors: Products 38 requests / 28 scripts,
+  Inventory 39 / 30, POS 31 / 22, Dashboard 29 / 21, Returns 33 / 26, and
+  public catalog 20 / 15. Full Phase 8.4 live suite and public Cloudflare
+  portal check passed. Storage prune removed 719,979 bytes of stale reports,
+  5,286,447 bytes of old Docker-release backup data, one old Docker rollback
+  tag, and 3.579 GB of Docker builder cache.

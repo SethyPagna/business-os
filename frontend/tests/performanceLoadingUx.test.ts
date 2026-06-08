@@ -332,7 +332,7 @@ assert.match(viteConfig, /'assets\/user-detail-sheet-',/, 'Users detail sheet sh
 assert.match(viteConfig, /'assets\/user-permission-editor-',/, 'Users role permission editor should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /'assets\/branch-transfer-modal-',/, 'Branch transfer modal should not be eagerly modulepreloaded into the normal Branches route')
 assert.match(viteConfig, /'assets\/browser-dialogs-',/, 'CSV and image file dialogs should not be eagerly modulepreloaded into normal route startup')
-assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*productBatches\.ts[\s\S]*color\.ts[\s\S]*return 'product-shared'/, 'product image, color, and visible batch primitives should not be owned by heavy route or detail chunks')
+assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*productBatches\.ts[\s\S]*productGrouping\.ts[\s\S]*color\.ts[\s\S]*return 'product-shared'/, 'product image, grouping, color, and visible batch primitives should not be owned by heavy route or detail chunks')
 assert.doesNotMatch(viteConfig, /return 'product-detail'[\s\S]{0,240}productBatches\.ts/, 'visible row batch preview helpers should not force product detail modals into route startup')
 assert.doesNotMatch(viteConfig, /return 'product-detail'[\s\S]{0,240}color\.ts/, 'visible color contrast helpers should not force product detail modals into route startup')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/actionGuards\.ts'\)\) return 'route-sync-utils'/, 'shared synchronous action guards should not be owned by the heavy catalog route chunk')

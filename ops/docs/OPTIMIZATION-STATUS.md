@@ -3359,6 +3359,32 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
+## Current Move 846
+
+- Product-driven route startup is leaner. `productGrouping.ts` now belongs to
+  the existing `product-shared` chunk instead of emitting a separate
+  `productGrouping-*.js` request.
+- Guardrail added in `frontend/tests/performanceLoadingUx.test.ts` so the
+  grouping helper remains with product shared primitives.
+- Build proof: production build emitted `product-shared-BTlFGq5T.js` at
+  11.93 kB / 4.21 kB gzip and no standalone `productGrouping-*.js`.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090010` is healthy
+  with frontend hash `55303e93b37a9590`.
+- Live route proof: Products improved to 38 requests / 28 scripts, Inventory
+  to 39 / 30, and POS to 31 / 22, each one request and one script lower than
+  the prior Docker trace. Dashboard, Returns, and public catalog stayed stable,
+  and all six routes had zero failed responses and zero page errors.
+- Live suite proof: Phase 8.4 UI check, public Cloudflare portal check,
+  receipt settings rollback, loyalty points rollback, settings rollback, and
+  post-live hygiene all passed.
+- Cleanup proof: storage prune removed 719,979 bytes of stale reports,
+  5,286,447 bytes of old Docker-release backup data, one old Docker rollback
+  tag, and 3.579 GB of Docker builder cache.
+- Current plan position after Move 846: Phase 8.4 active; Phase 26 at 51
+  completed organization moves; Phase 28 active with R2/access follow-up open;
+  Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
+  runtime, and performance sweeps.
+
 ## Previous Move 815
 
 - Rounded dropdown hardening is now live. `AppSelect` exposes stable trigger

@@ -13631,3 +13631,39 @@ Move 845 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 846 status:
+- Move 846 removes one normal-startup request from the three product-driven
+  routes by folding `frontend/src/utils/productGrouping.ts` into the existing
+  `product-shared` Vite chunk. Products, Inventory, and POS already need the
+  shared product primitives on first render, so this keeps the bytes route-local
+  while avoiding a separate network round trip for grouped product sections and
+  family cards.
+- `frontend/vite.config.ts` now assigns `productGrouping.ts` to
+  `product-shared`, and `frontend/tests/performanceLoadingUx.test.ts` requires
+  that ownership beside the product gallery, batch, and color primitives so the
+  helper does not drift back into its own startup chunk.
+- Build proof: `npm.cmd --prefix frontend run build` emitted
+  `product-shared-BTlFGq5T.js` at 11.93 kB / 4.21 kB gzip and no
+  `productGrouping-*.js` asset.
+- Live proof on Docker image `business-os:v6.0.0-202606090010`, frontend hash
+  `55303e93b37a9590`: route-load trace passed with zero failed responses and
+  zero page errors. Products dropped from 39 requests / 29 scripts to
+  38 requests / 28 scripts; Inventory dropped from 40 / 31 to 39 / 30; POS
+  dropped from 32 / 23 to 31 / 22. Dashboard stayed at 29 / 21, Returns stayed
+  at 33 / 26, and public catalog stayed at 20 / 15, proving the merge did not
+  push product-only code onto unrelated startup routes.
+- Verification proof: frontend utility suite, JSX/source check, production
+  build, `git diff --check`, Docker release, Docker update, live route-load
+  trace, full Phase 8.4 live suite, public Cloudflare portal check, rollback
+  checks, post-live hygiene, and storage prune passed.
+- Cleanup proof: storage prune removed 719,979 bytes of stale reports,
+  5,286,447 bytes of old Docker-release backup data, one old
+  `business-os:v6.0.0-202606081630` rollback tag, and 3.579 GB of Docker
+  builder cache while preserving uploads, secrets, env files, Docker volumes,
+  the active image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 846: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
