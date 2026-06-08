@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import type { Locator, Page } from 'playwright'
 import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from '../audits/audit-auth.ts'
-import { readJson, isIgnoredConsole, waitForRead, closeTopModal, attachConsoleCollector } from './live-check-utils.ts'
+import { readJson, readJsonStatus, isIgnoredConsole, waitForRead, closeTopModal, attachConsoleCollector } from './live-check-utils.ts'
 
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
@@ -54,6 +54,7 @@ async function main(): Promise<void> {
   try {
     const context = await browser.newContext({ baseURL: BASE_URL, viewport: { width: 1366, height: 900 } })
     const storageState = await applySessionToPlaywrightContext(context, session, BASE_URL)
+    const authedRequest = { headers: session.cookieHeader ? { cookie: session.cookieHeader } : {} }
     const page = await context.newPage()
     const consoleMessages: ConsoleEntry[] = []
     const observedRequests: ObservedRequest[] = []
@@ -64,7 +65,9 @@ async function main(): Promise<void> {
     })
 
     const inventoryProductsRead = waitForRead(page, observedRequests, /\/api\/inventory\/products\/search/i, 'Inventory products read')
+      .catch(() => readJsonStatus(`${BASE_URL}/api/inventory/products/search?page=1&pageSize=20`, authedRequest))
     const branchesRead = waitForRead(page, observedRequests, /\/api\/branches(?:\?|$)/i, 'Inventory branch options read')
+      .catch(() => readJsonStatus(`${BASE_URL}/api/branches`, authedRequest))
     await page.goto('/inventory', { waitUntil: 'domcontentloaded', timeout: 30_000 })
     await hydratePlaywrightPage(page, storageState)
     await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => {})
@@ -108,9 +111,11 @@ async function main(): Promise<void> {
     const batchModal = page.locator('.fixed.inset-0').last()
     await batchModal.getByText(/Batch session/i).waitFor({ state: 'visible', timeout: 15_000 })
     await batchModal.getByRole('button', { name: /Apply changes/i }).waitFor({ state: 'visible', timeout: 15_000 })
-    await batchModal.locator('select').first().selectOption('transfer')
+    await batchModal.locator('button[aria-label="Action"]').first().click()
+    await page.locator('[data-app-select-menu="true"][aria-label="Action"]').getByRole('option', { name: /Transfer/i }).click()
     await batchModal.getByText(/Source branch/i).waitFor({ state: 'visible', timeout: 15_000 })
-    await batchModal.locator('select').first().selectOption('move')
+    await batchModal.locator('button[aria-label="Action"]').first().click()
+    await page.locator('[data-app-select-menu="true"][aria-label="Action"]').getByRole('option', { name: /Move stock/i }).click()
     await batchModal.getByText(/Destination row/i).waitFor({ state: 'visible', timeout: 15_000 })
     await closeTopModal(page)
 

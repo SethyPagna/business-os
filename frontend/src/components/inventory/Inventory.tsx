@@ -26,6 +26,7 @@ const InventoryImportModal = lazy(() => import('./InventoryImportModal')) as any
 const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface')) as any
 const InventoryProductsSurface = lazy(() => import('./InventoryProductsSurface')) as any
 const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface')) as any
+const InventoryStockModals = lazy(() => import('./InventoryStockModals')) as any
 
 const INVENTORY_HISTORY_READY_DELAY_MS = 1800
 
@@ -1142,6 +1143,15 @@ export default function Inventory() {
     { value: 'special_price', label: tr('reason_special_price', 'Special price') },
     { value: 'other', label: t('other') || 'Other' },
   ], [reasonsByType.move, t, tr])
+  const moveDestinationProductOptions = useMemo(
+    () => moveModal
+      ? buildDestinationProductOptions(summary, moveModal.id, tr('choose_destination_product', 'Choose a destination product row'))
+      : [],
+    [moveModal, summary, tr],
+  )
+  const adjustCurrentQuantity = adjustModal
+    ? getStockQty(summaryById.get(Number(adjustForm.product_id || adjustModal.id)) || adjustModal)
+    : 0
 
   const handleAdjust = async () => {
     if (adjustSaving) return
@@ -3359,335 +3369,46 @@ export default function Inventory() {
         </div>
       )}
 
-      {adjustModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setAdjustModal(null)}>
-          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md flex flex-col max-h-[92vh]" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-              <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="text-xs text-gray-400 mt-0.5">{adjustModal.name} - Current: {getStockQty(summaryById.get(Number(adjustForm.product_id || adjustModal.id)) || adjustModal)} {adjustModal.unit}</div>
-              </div>
-              <button onClick={() => setAdjustModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="modal-scroll p-4 space-y-3">
-              {adjustTargetOptions.length > 1 ? (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target')}</label>
-                  <AppSelect
-                    value={adjustForm.product_id || adjustModal.id || ''}
-                    onChange={(nextValue) => setAdjustForm((current) => ({ ...current, product_id: nextValue }))}
-                    ariaLabel={tr('adjust_target', 'Adjust target')}
-                    className="w-full"
-                    buttonClassName="h-10 w-full text-sm"
-                    menuClassName="min-w-[15rem]"
-                    optionClassName="text-sm"
-                    options={adjustTargetSelectOptions}
-                  />
-                </div>
-              ) : null}
-              <div className="grid grid-cols-3 gap-2">
-                {([['add', t('adjust_add') || 'Add'], ['remove', t('adjust_remove') || 'Remove'], ['set', t('adjust_set') || 'Set']] as [string, string][]).map(([v,lbl]) => (
-                  <button key={v} onClick={() => setAdjustForm(f=>({...f, type:v}))}
-                    className={`py-2 rounded-xl border-2 text-xs font-medium ${adjustForm.type===v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
-                    {lbl}
-                  </button>
-                ))}
-              </div>
-              <div>
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('quantity')} *</label>
-                <input
-                  id="inventory-adjust-quantity"
-                  name="inventory_adjust_quantity"
-                  className="input text-sm"
-                  type="number"
-                  step="any"
-                  min="0"
-                  value={adjustForm.quantity}
-                  onChange={e => setAdjustForm(f=>({...f, quantity:e.target.value}))} />
-              </div>
-              {adjustForm.type === 'add' && (
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Cost ({usdSymbol})</label>
-                    <input
-                      id="inventory-adjust-cost-usd"
-                      name="inventory_adjust_cost_usd"
-                      className="input text-sm"
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={adjustForm.unit_cost_usd}
-                      onChange={e => setAdjustForm(f=>({...f, unit_cost_usd:e.target.value}))} />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">Cost (KHR)</label>
-                    <input
-                      id="inventory-adjust-cost-khr"
-                      name="inventory_adjust_cost_khr"
-                      className="input text-sm"
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={adjustForm.unit_cost_khr}
-                      onChange={e => setAdjustForm(f=>({...f, unit_cost_khr:e.target.value}))} />
-                  </div>
-                </div>
-              )}
-              {branches.length > 1 && (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('branch')}</label>
-                  <AppSelect
-                    id="inventory-adjust-branch"
-                    name="inventory_adjust_branch"
-                    value={adjustForm.branch_id}
-                    onChange={(nextValue) => setAdjustForm((current) => ({ ...current, branch_id: nextValue }))}
-                    ariaLabel={t('branch') || 'Branch'}
-                    className="w-full"
-                    buttonClassName="h-10 w-full text-sm"
-                    menuClassName="min-w-[13rem]"
-                    optionClassName="text-sm"
-                    options={adjustBranchSelectOptions}
-                  />
-                </div>
-              )}
-              <div>
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block">{t('reason')}</label>
-                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'adjust' })}>
-                    {tr('manage_reasons', 'Manage reasons')}
-                  </button>
-                </div>
-                {reasonsByType.adjust.length ? (
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    {reasonsByType.adjust.map((entry) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${adjustForm.reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
-                        onClick={() => setAdjustForm((current) => ({ ...current, reason: entry.label }))}
-                      >
-                        {entry.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <input
-                  id="inventory-adjust-reason"
-                  name="inventory_adjust_reason"
-                  className="input text-sm"
-                  placeholder={t('reason_placeholder')}
-                  value={adjustForm.reason} onChange={e => setAdjustForm(f=>({...f, reason:e.target.value}))} />
-              </div>
-              <div className="flex gap-2 pt-1">
-                <button onClick={handleAdjust} className="btn-primary flex-1 text-sm" disabled={adjustSaving}>{adjustSaving ? (t('saving') || 'Saving...') : t('save')}</button>
-                <button onClick={() => setAdjustModal(null)} className="btn-secondary text-sm" disabled={adjustSaving}>{t('cancel')}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {transferModal && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setTransferModal(null)}>
-          <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-              <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer')}</h2>
-                <div className="mt-0.5 text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
-              </div>
-              <button type="button" onClick={() => setTransferModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="modal-scroll space-y-3 p-4">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
-                <AppSelect
-                  value={transferForm.from_branch_id}
-                  onChange={(nextValue) => setTransferForm((current) => ({ ...current, from_branch_id: nextValue }))}
-                  ariaLabel={tr('source_branch', 'Source branch')}
-                  className="w-full"
-                  buttonClassName="h-10 w-full text-sm"
-                  menuClassName="min-w-[13rem]"
-                  optionClassName="text-sm"
-                  options={transferSourceBranchOptions}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch')}</span>
-                <AppSelect
-                  value={transferForm.to_branch_id}
-                  onChange={(nextValue) => setTransferForm((current) => ({ ...current, to_branch_id: nextValue }))}
-                  ariaLabel={tr('destination_branch', 'Destination branch')}
-                  className="w-full"
-                  buttonClassName="h-10 w-full text-sm"
-                  menuClassName="min-w-[13rem]"
-                  optionClassName="text-sm"
-                  options={branchWithPlaceholderOptions}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'} *</span>
-                <input className="input text-sm" type="number" min="0" step="any" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} />
-              </label>
-              <label className="block">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'} *</span>
-                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'transfer' })}>
-                    {tr('manage_reasons', 'Manage reasons')}
-                  </button>
-                </div>
-                {reasonsByType.transfer.length ? (
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    {reasonsByType.transfer.map((entry) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${transferForm.reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
-                        onClick={() => setTransferForm((current) => ({ ...current, reason: entry.label }))}
-                      >
-                        {entry.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder')} />
-              </label>
-              <div className="flex gap-2 pt-1">
-                <button type="button" onClick={handleTransferStock} className="btn-primary flex-1 text-sm" disabled={transferSaving}>
-                  {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
-                </button>
-                <button type="button" onClick={() => setTransferModal(null)} className="btn-secondary text-sm" disabled={transferSaving}>
-                  {t('cancel') || 'Cancel'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {moveModal && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setMoveModal(null)}>
-          <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-              <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{tr('move_stock', 'Move stock')}</h2>
-                <div className="mt-0.5 text-xs text-gray-400">{moveModal.name} - {getStockQty(moveModal)} {moveModal.unit}</div>
-              </div>
-              <button type="button" onClick={() => setMoveModal(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={t('close') || 'Close'}>
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="modal-scroll space-y-3 p-4">
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'existing' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
-                  onClick={() => setMoveForm((current) => ({ ...current, mode: 'existing' }))}
-                >
-                  {tr('existing_row', 'Existing row')}
-                </button>
-                <button
-                  type="button"
-                  className={`rounded-xl border-2 py-2 text-xs font-semibold ${moveForm.mode === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-200' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
-                  onClick={() => setMoveForm((current) => ({ ...current, mode: 'new' }))}
-                >
-                  {tr('quick_create_row', 'Quick-create row')}
-                </button>
-              </div>
-
-              {moveForm.mode === 'existing' ? (
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_product', 'Destination product row')}</span>
-                  <AppSelect
-                    value={moveForm.destination_product_id}
-                    onChange={(nextValue) => setMoveForm((current) => ({ ...current, destination_product_id: nextValue }))}
-                    ariaLabel={tr('destination_product', 'Destination product row')}
-                    className="w-full"
-                    buttonClassName="h-10 w-full text-sm"
-                    menuClassName="min-w-[16rem]"
-                    optionClassName="text-sm"
-                    options={buildDestinationProductOptions(summary, moveModal.id, tr('choose_destination_product', 'Choose a destination product row'))}
-                  />
-                </label>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <label className="block sm:col-span-2">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('name') || 'Name'}</span>
-                    <input className="input text-sm" value={moveForm.destination_name} onChange={(event) => setMoveForm((current) => ({ ...current, destination_name: event.target.value }))} autoComplete="off" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('selling_price_usd_full', 'Selling Price (USD)')}</span>
-                    <input className="input text-sm" type="number" step="any" min="0" value={moveForm.selling_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, selling_price_usd: event.target.value }))} autoComplete="off" />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('special_price_usd_full', 'Special Price (USD)')}</span>
-                    <input className="input text-sm" type="number" step="any" min="0" value={moveForm.special_price_usd} onChange={(event) => setMoveForm((current) => ({ ...current, special_price_usd: event.target.value }))} autoComplete="off" />
-                  </label>
-                  <label className="flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 dark:bg-rose-950/30 dark:text-rose-200">
-                    <input type="checkbox" checked={!!moveForm.discount_enabled} onChange={(event) => setMoveForm((current) => ({ ...current, discount_enabled: event.target.checked }))} />
-                    {tr('product_discount', 'Discounts')}
-                  </label>
-                  {moveForm.discount_enabled ? (
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{moveForm.discount_type === 'fixed' ? tr('discount_amount_usd', 'Discount amount (USD)') : tr('discount_percent', 'Percent off')}</span>
-                      <input className="input text-sm" type="number" step="any" min="0" value={moveForm.discount_type === 'fixed' ? moveForm.discount_amount_usd : moveForm.discount_percent} onChange={(event) => setMoveForm((current) => current.discount_type === 'fixed' ? { ...current, discount_amount_usd: event.target.value } : { ...current, discount_percent: event.target.value })} autoComplete="off" />
-                    </label>
-                  ) : null}
-                </div>
-              )}
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'} *</span>
-                  <input className="input text-sm" type="number" step="any" min="0" value={moveForm.quantity} onChange={(event) => setMoveForm((current) => ({ ...current, quantity: event.target.value }))} autoComplete="off" />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
-                  <AppSelect
-                    value={moveForm.branch_id}
-                    onChange={(nextValue) => setMoveForm((current) => ({ ...current, branch_id: nextValue }))}
-                    ariaLabel={t('branch') || 'Branch'}
-                    className="w-full"
-                    buttonClassName="h-10 w-full text-sm"
-                    menuClassName="min-w-[13rem]"
-                    optionClassName="text-sm"
-                    options={branchSelectOptions}
-                  />
-                </label>
-              </div>
-              <label className="block">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'}</span>
-                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'move' })}>
-                    {tr('manage_reasons', 'Manage reasons')}
-                  </button>
-                </div>
-                <AppSelect
-                  value={moveForm.reason}
-                  onChange={(nextValue) => setMoveForm((current) => ({ ...current, reason: nextValue }))}
-                  ariaLabel={t('reason') || 'Reason'}
-                  className="w-full"
-                  buttonClassName="h-10 w-full text-sm"
-                  menuClassName="min-w-[13rem]"
-                  optionClassName="text-sm"
-                  options={moveReasonOptions}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('notes') || 'Notes'}</span>
-                <textarea className="input min-h-[76px] text-sm" value={moveForm.note} onChange={(event) => setMoveForm((current) => ({ ...current, note: event.target.value }))} />
-              </label>
-              <div className="flex gap-2 pt-1">
-                <button type="button" onClick={handleMoveStock} className="btn-primary flex-1 text-sm" disabled={moveSaving}>{moveSaving ? (t('saving') || 'Saving...') : tr('move_stock', 'Move stock')}</button>
-                <button type="button" onClick={() => setMoveModal(null)} className="btn-secondary text-sm" disabled={moveSaving}>{t('cancel') || 'Cancel'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {adjustModal || transferModal || moveModal ? (
+        <Suspense fallback={null}>
+          <InventoryStockModals
+            adjustBranchSelectOptions={adjustBranchSelectOptions}
+            adjustCurrentQuantity={adjustCurrentQuantity}
+            adjustForm={adjustForm}
+            adjustModal={adjustModal}
+            adjustSaving={adjustSaving}
+            adjustTargetOptions={adjustTargetOptions}
+            adjustTargetSelectOptions={adjustTargetSelectOptions}
+            branchCount={branches.length}
+            branchSelectOptions={branchSelectOptions}
+            branchWithPlaceholderOptions={branchWithPlaceholderOptions}
+            getStockQty={getStockQty}
+            moveDestinationProductOptions={moveDestinationProductOptions}
+            moveForm={moveForm}
+            moveModal={moveModal}
+            moveReasonOptions={moveReasonOptions}
+            moveSaving={moveSaving}
+            onAdjust={handleAdjust}
+            onCloseAdjust={() => setAdjustModal(null)}
+            onCloseMove={() => setMoveModal(null)}
+            onCloseTransfer={() => setTransferModal(null)}
+            onMove={handleMoveStock}
+            onTransfer={handleTransferStock}
+            reasonsByType={reasonsByType}
+            setAdjustForm={setAdjustForm}
+            setMoveForm={setMoveForm}
+            setReasonManager={setReasonManager}
+            setTransferForm={setTransferForm}
+            t={t}
+            tr={tr}
+            transferForm={transferForm}
+            transferModal={transferModal}
+            transferSaving={transferSaving}
+            transferSourceBranchOptions={transferSourceBranchOptions}
+            usdSymbol={usdSymbol}
+          />
+        </Suspense>
+      ) : null}
 
       {reasonManager.open ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setReasonManager((current) => ({ ...current, open: false }))}>
