@@ -42,6 +42,8 @@ const {
 } = require('../productBatches.ts')
 
 const router = express.Router()
+const PRODUCT_CATALOG_SNAPSHOT_VERSION_MEMO_MS = 1000
+let productCatalogSnapshotVersionMemo = { value: '', builtAt: 0 }
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
@@ -479,6 +481,13 @@ function splitSearchTerms(value = '') {
 }
 
 function getProductCatalogSnapshotVersion() {
+  const now = Date.now()
+  if (
+    productCatalogSnapshotVersionMemo.value
+    && (now - productCatalogSnapshotVersionMemo.builtAt) < PRODUCT_CATALOG_SNAPSHOT_VERSION_MEMO_MS
+  ) {
+    return productCatalogSnapshotVersionMemo.value
+  }
   const row = db.prepare(`
     SELECT GREATEST(
       COALESCE(MAX(updated_at)::text, ''),
@@ -488,7 +497,18 @@ function getProductCatalogSnapshotVersion() {
     ) AS snapshot_version
     FROM products
   `).get()
-  return String(row?.snapshot_version || '').trim() || new Date().toISOString()
+  const value = String(row?.snapshot_version || '').trim() || new Date().toISOString()
+  productCatalogSnapshotVersionMemo = { value, builtAt: now }
+  return value
+}
+
+function invalidateProductCatalogSnapshotVersion() {
+  productCatalogSnapshotVersionMemo = { value: '', builtAt: 0 }
+}
+
+function broadcastProductsUpdate(data = {}) {
+  invalidateProductCatalogSnapshotVersion()
+  broadcast('products', data)
 }
 
 function normalizeProductReadCacheValue(value) {
@@ -1031,7 +1051,7 @@ router.post('/lookups/replace', authToken, requirePermission('products'), (req, 
       deviceTz: actor.deviceTz || null,
       clientTime: actor.clientTime || null,
     })
-    broadcast('products')
+    broadcastProductsUpdate()
     ok(res, {
       updatedCount: Number(result.rowCount || result.changes || 0),
       snapshotVersion: getProductCatalogSnapshotVersion(),
@@ -1159,7 +1179,7 @@ router.post('/variant', authToken, requirePermission('products'), (req, res) => 
       redoPayload: { action: 'product.create', productId: pid, productName: sanitizedText.name },
     })
     logOp('products:create', Date.now() - t0)
-    broadcast('products')
+    broadcastProductsUpdate()
     ok(res, { id: pid })
   } catch (e) { err(res, e.message) }
 })
@@ -1236,7 +1256,7 @@ router.post('/', authToken, requirePermission('products'), (req, res) => {
       redoPayload: { action: 'product.create', productId: pid, productName: sanitizedText.name },
     })
     logOp('products:create', Date.now() - t0)
-    broadcast('products')
+    broadcastProductsUpdate()
     ok(res, { id: pid })
   } catch (e) {
     if (clientRequestId && /client_request_id/i.test(String(e?.message || ''))) {
@@ -1498,7 +1518,7 @@ router.put('/:id', authToken, requirePermission('products'), (req, res) => {
       })
     })()
     logOp('products:update', Date.now() - t0)
-    broadcast('products')
+    broadcastProductsUpdate()
     ok(res, {})
   } catch (e) {
     if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
@@ -1534,7 +1554,7 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
       createdByName: actor.userName,
       redoPayload: { action: 'product.delete', productId: req.params.id, productName: String(p?.name || '').trim() },
     })
-    broadcast('products')
+    broadcastProductsUpdate()
     ok(res, {})
   } catch (e) {
     if (e instanceof WriteConflictError) return sendWriteConflict(res, e)
@@ -1628,7 +1648,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
       deviceTz: deviceTz || null,
       clientTime: clientTime || null,
     })
-    broadcast('products')
+    broadcastProductsUpdate()
     return ok(res, { imported: 0, updated: 0, images_matched, errors })
   }
 
@@ -2269,7 +2289,7 @@ router.post('/bulk-import', authToken, requirePermission('products'), routeRateL
   if (brandsChanged) broadcast('settings')
   if (branchesChanged) broadcast('branches')
   if (suppliersChanged) broadcast('suppliers')
-  broadcast('products')
+  broadcastProductsUpdate()
   ok(res, { imported, updated, errors })
 })
 
