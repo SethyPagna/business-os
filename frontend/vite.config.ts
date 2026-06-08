@@ -433,6 +433,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/httpState.ts')) return 'api-http-state'
     if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
     if (normalized.endsWith('/src/utils/searchTerms.ts')) return 'route-sync-utils'
+    if (normalized.endsWith('/src/utils/recordFilters.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/groupedRecords.ts')) return 'record-groups'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'

@@ -13738,3 +13738,43 @@ Move 848 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 849 status:
+- Move 849 splits lightweight date/filter/selection helpers out of
+  `frontend/src/utils/groupedRecords.ts` into
+  `frontend/src/utils/recordFilters.ts`. Products and public catalog filtering
+  only need the small year/month and selection helpers, not the heavier
+  time/alphabet action-section builders, so they now avoid the
+  `record-groups` startup chunk.
+- `frontend/src/components/products/Products.tsx` and
+  `frontend/src/components/products/helpers/productFilterHelpers.ts` now import
+  from `recordFilters.ts`; `groupedRecords.ts` re-exports the helpers for
+  existing grouped-history pages while keeping its section builders intact.
+  `frontend/vite.config.ts` assigns `recordFilters.ts` to
+  `route-sync-utils`, and `frontend/tests/performanceLoadingUx.test.ts` guards
+  against Products or live product filtering importing the grouped-section
+  chunk again.
+- Build proof: `npm.cmd --prefix frontend run build` emitted
+  `record-groups-CvXR_GRo.js` at 3.03 kB / 1.27 kB gzip, down from 4.62 kB,
+  and `route-sync-utils-CWHPTGFF.js` at 4.32 kB / 1.81 kB gzip with the small
+  filter helpers folded into a chunk already loaded by these routes.
+- Live proof on Docker image `business-os:v6.0.0-202606090156`, frontend hash
+  `6ad017646771a8b2`, source hash `24d1c2a2a89e8dcc`: route-load trace passed
+  with zero failed responses and zero page errors. Products dropped from
+  36 requests / 26 scripts to 35 requests / 25 scripts; public catalog dropped
+  from 20 / 15 to 19 / 14. Dashboard stayed at 29 / 21, Inventory stayed at
+  37 / 28, POS stayed at 31 / 22, and Returns stayed at 32 / 25.
+- Verification proof: frontend utility suite, JSX/source check, production
+  build, `git diff --check`, Docker release, Docker update, live route-load
+  trace, full Phase 8.4 live suite, public Cloudflare portal check, rollback
+  checks, post-live hygiene, health check, and storage prune passed.
+- Cleanup proof: storage prune removed 727,812 bytes of stale reports,
+  5,303,141 bytes of old Docker-release backup data, one old
+  `business-os:v6.0.0-202606082320` rollback tag, and 2.923 GB of Docker
+  builder cache while preserving uploads, secrets, env files, Docker volumes,
+  the active image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 849: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

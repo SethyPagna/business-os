@@ -1,19 +1,16 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
+import { getTimeParts } from './recordFilters.ts'
+
+export {
+  getAvailableYears,
+  getTimeGroupingMode,
+  getTimeParts,
+  matchesYearMonthFilters,
+  toggleIdSet,
+} from './recordFilters.ts'
 
 type AnyRow = Record<string, any>
 type SortDirection = 'asc' | 'desc' | string
-
-interface TimeParts {
-  date: Date | null
-  year: number | ''
-  month: number | ''
-  day?: number
-  yearLabel: string
-  monthLabel: string
-  monthKey: string
-  dayKey: string
-  dayLabel: string
-}
 
 interface TimeActionSection<T extends AnyRow> {
   id: string
@@ -23,7 +20,6 @@ interface TimeActionSection<T extends AnyRow> {
   items: T[]
   groups: Map<string, TimeActionGroup<T>>
 }
-
 interface TimeActionGroup<T extends AnyRow> {
   id: string
   actionKey: string
@@ -32,25 +28,6 @@ interface TimeActionGroup<T extends AnyRow> {
   items: T[]
   sortTime: number
   synthetic?: boolean
-}
-
-function toDate(value: unknown): Date | null {
-  if (!value) return null
-  const raw = String(value).trim()
-  if (!raw) return null
-  const direct = new Date(raw)
-  if (!Number.isNaN(direct.getTime())) return direct
-  const isoLike = raw.replace(' ', 'T')
-  const normalizedIso = /[+-]\d{2}$/i.test(isoLike)
-    ? `${isoLike}:00`
-    : /[+-]\d{4}$/i.test(isoLike)
-      ? isoLike.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
-      : isoLike
-  const parsedIso = new Date(normalizedIso)
-  if (!Number.isNaN(parsedIso.getTime())) return parsedIso
-  const needsUtcSuffix = !/[zZ]$|[+-]\d{2}:\d{2}$|[+-]\d{4}$|[+-]\d{2}$/.test(normalizedIso)
-  const parsedUtc = new Date(needsUtcSuffix ? `${normalizedIso}Z` : normalizedIso)
-  return Number.isNaN(parsedUtc.getTime()) ? null : parsedUtc
 }
 
 function normalizeName(value: unknown): string {
@@ -63,63 +40,6 @@ export function getAlphabetInitialSection(value: unknown): string {
 
 function compareAlphabetLabels(left: unknown, right: unknown): number {
   return compareInitialKeys(left, right)
-}
-
-export function getTimeParts(value: unknown): TimeParts {
-  const parsed = toDate(value)
-  if (!parsed) {
-    return {
-      date: null,
-      year: '',
-      month: '',
-      yearLabel: 'Unknown year',
-      monthLabel: 'Unknown month',
-      monthKey: 'unknown-month',
-      dayKey: 'unknown-day',
-      dayLabel: 'Unknown day',
-    }
-  }
-
-  const year = parsed.getFullYear()
-  const month = parsed.getMonth() + 1
-  const day = parsed.getDate()
-
-  return {
-    date: parsed,
-    year,
-    month,
-    day,
-    yearLabel: String(year),
-    monthLabel: parsed.toLocaleString(undefined, { month: 'long', year: 'numeric' }),
-    monthKey: `${year}-${String(month).padStart(2, '0')}`,
-    dayKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-    dayLabel: parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }),
-  }
-}
-
-export function matchesYearMonthFilters(value: unknown, { year = 'all', month = 'all' } = {}): boolean {
-  const parts = getTimeParts(value)
-  if (year !== 'all' && parts.yearLabel !== String(year)) return false
-  if (month !== 'all' && String(parts.month || '') !== String(month)) return false
-  return true
-}
-
-export function getAvailableYears<T extends AnyRow = AnyRow>(
-  items: T[] = [],
-  getDate: (item: T) => unknown = (item) => item?.created_at,
-): string[] {
-  const years = new Set<string>()
-  for (const item of Array.isArray(items) ? items : []) {
-    const parts = getTimeParts(getDate(item))
-    if (parts.yearLabel && parts.yearLabel !== 'Unknown year') years.add(parts.yearLabel)
-  }
-  return [...years].sort((left, right) => Number(right) - Number(left))
-}
-
-export function getTimeGroupingMode(year: string | number = 'all', month: string | number = 'all'): 'year' | 'month' | 'day' {
-  if (month !== 'all') return 'day'
-  if (year !== 'all') return 'month'
-  return 'year'
 }
 
 export function buildTimeActionSections<T extends AnyRow = AnyRow>(items: T[] = [], {
@@ -258,7 +178,6 @@ export function buildTimeActionSections<T extends AnyRow = AnyRow>(items: T[] = 
       }
     })
 }
-
 export function buildAlphabetActionSections<T extends AnyRow = AnyRow>(items: T[] = [], {
   getName = (item: T) => item?.name,
   getItemId = (item: T) => item?.id,
@@ -316,14 +235,4 @@ export function buildAlphabetActionSections<T extends AnyRow = AnyRow>(items: T[
         }],
       }
     })
-}
-
-export function toggleIdSet(currentSet: Iterable<any> | null | undefined, ids: any[] = [], checked: boolean): Set<any> {
-  const next = new Set(currentSet || [])
-  for (const id of ids) {
-    if (id === null || id === undefined) continue
-    if (checked) next.add(id)
-    else next.delete(id)
-  }
-  return next
 }

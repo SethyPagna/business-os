@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 848, fold bulk action concurrency helper into the shared action-history chunk.
+- Latest completed move: Move 849, split record date/filter helpers out of grouped section builders.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `a17aafcbe9a0d3d4`
+  `6ad017646771a8b2`
 - latest verified source hash from the most recent Docker-served live check:
   `24d1c2a2a89e8dcc`
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-08T17-43-10-601Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-08T18-20-03-590Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,9 +45,9 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T17-44-06-867Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T18-21-00-706Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-08T17-42-53-495Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-08T18-19-45-452Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,40 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 849 splits lightweight date/filter/selection helpers out of
+  `frontend/src/utils/groupedRecords.ts` into `frontend/src/utils/recordFilters.ts`.
+  Products and public catalog filtering now use the small helper module instead
+  of loading grouped history section builders. Existing grouped-history pages
+  still import `groupedRecords.ts`, which re-exports the helpers and keeps the
+  section builders intact.
+- Source guardrails now require `recordFilters.ts` to stay in
+  `route-sync-utils` and reject Products or live product filtering importing
+  the grouped section-builder chunk for date filters or selection toggles.
+- Verification proof: frontend utility suite, JSX/source check, production
+  build, `git diff --check`, Docker release, Docker update, route-load trace,
+  full Phase 8.4 live suite, public Cloudflare portal check, receipt/loyalty/
+  settings rollback checks, post-live hygiene, health check, and storage prune
+  passed. Build proof emitted `record-groups-CvXR_GRo.js` at 3.03 kB /
+  1.27 kB gzip, down from 4.62 kB, and `route-sync-utils-CWHPTGFF.js` at
+  4.32 kB / 1.81 kB gzip.
+- Live proof on Docker image `business-os:v6.0.0-202606090156`, frontend hash
+  `6ad017646771a8b2`, source hash `24d1c2a2a89e8dcc`: route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T18-19-45-452Z.json` passed
+  with zero failures/errors. Products loaded in 240 ms with 35 requests /
+  25 scripts; public catalog loaded in 216 ms with 19 requests / 14 scripts;
+  Dashboard stayed 29 / 21, Inventory stayed 37 / 28, POS stayed 31 / 22, and
+  Returns stayed 32 / 25.
+- Cleanup proof: storage prune removed 727,812 bytes of stale reports,
+  5,303,141 bytes of old Docker-release backup data, one old
+  `business-os:v6.0.0-202606082320` rollback tag, and 2.923 GB of Docker
+  builder cache while preserving uploads, secrets, env files, Docker volumes,
+  the active image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 849: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 848 continues route-start request reduction by routing the tiny
   `frontend/src/utils/bulkOps.ts` concurrency helper into the already-loaded

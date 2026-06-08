@@ -2246,3 +2246,20 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   Storage prune removed 719,265 bytes of stale reports, 5,295,169 bytes of old
   Docker-release backup data, one old Docker rollback tag, and 3.579 GB of
   Docker builder cache.
+- Move 849 records the grouped-record helper split. Lightweight date/filter/
+  selection helpers moved from `frontend/src/utils/groupedRecords.ts` to
+  `frontend/src/utils/recordFilters.ts`, and Vite assigns `recordFilters.ts`
+  to `route-sync-utils`. Products and public catalog filtering no longer load
+  `record-groups`, while grouped-history pages still use the section builders.
+  Production build proof emitted `record-groups-CvXR_GRo.js` at 3.03 kB /
+  1.27 kB gzip, down from 4.62 kB, and `route-sync-utils-CWHPTGFF.js` at
+  4.32 kB / 1.81 kB gzip. Docker image
+  `business-os:v6.0.0-202606090156` served frontend hash
+  `6ad017646771a8b2` and source hash `24d1c2a2a89e8dcc`. Live route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T18-19-45-452Z.json` passed
+  with zero failures/errors: Products 35 requests / 25 scripts, public catalog
+  19 / 14, Dashboard 29 / 21, Inventory 37 / 28, POS 31 / 22, and Returns
+  32 / 25. Full Phase 8.4 live suite and public Cloudflare portal check passed.
+  Storage prune removed 727,812 bytes of stale reports, 5,303,141 bytes of old
+  Docker-release backup data, one old Docker rollback tag, and 2.923 GB of
+  Docker builder cache.

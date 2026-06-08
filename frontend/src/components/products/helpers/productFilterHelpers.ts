@@ -1,4 +1,4 @@
-import { matchesYearMonthFilters } from '../../../utils/groupedRecords.ts'
+import { matchesYearMonthFilters } from '../../../utils/recordFilters.ts'
 export { buildProductSearchTerms } from '../../../utils/searchTerms.ts'
 
 interface BranchStockRecord {
