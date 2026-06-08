@@ -395,6 +395,16 @@ await runTest('app bootstrap converts invalid sessions into an explicit unauthor
   assert.doesNotMatch(source, /localGetSettings\(\)/)
 })
 
+await runTest('stable auth bootstrap side reads use shared read cache', () => {
+  const source = fs.readFileSync(new URL('../src/api/authTransport.ts', import.meta.url), 'utf8')
+
+  assert.match(source, /import \{ apiFetch, route \} from '\.\/http\.ts'/)
+  assert.match(source, /route\(\s*'auth:verification-capabilities'/)
+  assert.match(source, /route\(\s*'organizations:bootstrap'/)
+  assert.doesNotMatch(source, /export function getVerificationCapabilities\(\): Promise<unknown> \{\s*return apiFetch\('GET', '\/api\/auth\/verification-capabilities'\)\s*\}/)
+  assert.doesNotMatch(source, /export function getOrganizationBootstrap\(\): Promise<unknown> \{\s*return apiFetch\('GET', '\/api\/organizations\/bootstrap'\)\s*\}/)
+})
+
 await runTest('paged audit and user-attributed activity APIs expose user filters', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const auditLogTransportSource = fs.readFileSync(new URL('../src/api/auditLogTransport.ts', import.meta.url), 'utf8')

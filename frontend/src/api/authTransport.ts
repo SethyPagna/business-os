@@ -1,5 +1,5 @@
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
-import { apiFetch } from './http.ts'
+import { apiFetch, route } from './http.ts'
 
 type AuthPayload = Record<string, unknown>
 
@@ -55,7 +55,11 @@ export function updateSessionDuration(payload: AuthPayload = {}): Promise<unknow
 }
 
 export function getVerificationCapabilities(): Promise<unknown> {
-  return apiFetch('GET', '/api/auth/verification-capabilities')
+  return route(
+    'auth:verification-capabilities',
+    () => apiFetch('GET', '/api/auth/verification-capabilities'),
+    null,
+  )
 }
 
 export function otpSetup(payload: AuthPayload = {}): Promise<unknown> {
@@ -91,7 +95,11 @@ export function unlinkGoogleOauth(payload: AuthPayload = {}): Promise<unknown> {
 }
 
 export function getOrganizationBootstrap(): Promise<unknown> {
-  return apiFetch('GET', '/api/organizations/bootstrap')
+  return route(
+    'organizations:bootstrap',
+    () => apiFetch('GET', '/api/organizations/bootstrap'),
+    null,
+  )
 }
 
 export function searchOrganizations(query: string): Promise<unknown> {
