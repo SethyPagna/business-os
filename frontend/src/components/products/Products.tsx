@@ -85,23 +85,6 @@ import {
   buildProductGroupSummaryParts,
 } from './helpers/productGroupViewHelpers.ts'
 import {
-  buildDeletedProductIdSet,
-  buildDefinedProductUpdates,
-  buildProductBranchMovePlan,
-  buildProductBranchStockAdjustments,
-  buildProductBulkInfoUpdates,
-  buildProductBulkPricingUpdates,
-  buildProductBulkUpdatePayload,
-  buildProductClearStockAdjustments,
-  buildProductStockAdjustmentPayload,
-  buildProductTransferStockPayload,
-  buildProductWritePayload as buildProductWritePayloadForSnapshot,
-  getDefaultProductRestoreBranchId,
-  getPreferredProductRestoreBranchId,
-  resolveRestoredProductParentId,
-  summarizeProductBulkRun,
-} from './helpers/productWriteHelpers.ts'
-import {
   buildBranchNameByIdMap,
   buildNameLookupMap,
   buildProductRowDisplayState,
@@ -133,6 +116,7 @@ const PRODUCTS_AUX_OPTIONS_READY_DELAY_MS = 1800
 
 type EntityId = string | number
 type Loader<T = unknown> = () => Promise<T>
+type ProductWriteHelpers = typeof import('./helpers/productWriteHelpers.ts')
 type NotificationTone = 'error' | 'info' | 'success' | 'warning' | string
 type SearchMode = 'AND' | 'OR'
 type ProductSortDirection = 'asc' | 'desc'
@@ -425,8 +409,26 @@ function scrollNodeWithOffset(node: HTMLElement | null, offset = 96): void {
   window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
 }
 
-function summarizeProductRun(run: unknown): ReturnType<typeof summarizeProductBulkRun> {
-  return summarizeProductBulkRun(run as Parameters<typeof summarizeProductBulkRun>[0])
+let productWriteHelpersPromise: Promise<ProductWriteHelpers> | null = null
+
+function loadProductWriteHelpers(): Promise<ProductWriteHelpers> {
+  productWriteHelpersPromise ||= import('./helpers/productWriteHelpers.ts')
+  return productWriteHelpersPromise
+}
+
+function summarizeProductRun(run: { failures?: { item?: unknown }[]; successes?: { item?: unknown }[] } = {}) {
+  const updatedIds = (run.successes || [])
+    .map((entry) => Number(entry?.item))
+    .filter((id) => Number.isFinite(id) && id > 0)
+  const failedIds = (run.failures || [])
+    .map((entry) => Number(entry?.item))
+    .filter((id) => Number.isFinite(id) && id > 0)
+  return {
+    done: updatedIds.length,
+    failed: failedIds.length,
+    failedIds,
+    updatedIds,
+  }
 }
 
 function aggregateProductInitials(rows: unknown): ProductFilterInitial[] {
@@ -1491,11 +1493,15 @@ export default function Products() {
       .map((product) => JSON.parse(JSON.stringify(product)) as ProductRecord)
   ), [products])
 
-  const buildProductWritePayload = useCallback((snapshot: ProductRecord = {}) => (
-    buildProductWritePayloadForSnapshot(snapshot, { id: user?.id, name: user?.name })
+  const buildProductWritePayload = useCallback(async (snapshot: ProductRecord = {}) => (
+    (await loadProductWriteHelpers()).buildProductWritePayload(snapshot, { id: user?.id, name: user?.name })
   ), [user?.id, user?.name])
 
   const restoreProductBranchStock = useCallback(async (productId: EntityId, snapshot: ProductRecord, currentProduct: ProductRecord, reason: string) => {
+    const {
+      buildProductBranchStockAdjustments,
+      buildProductStockAdjustmentPayload,
+    } = await loadProductWriteHelpers()
     const adjustments = buildProductBranchStockAdjustments(snapshot, currentProduct)
     const syncRun = await runConcurrentTasks(adjustments, async ({ branchId, type, quantity }: { branchId: EntityId; type: string; quantity: unknown }) => {
       await runProductStockMutation(
@@ -1522,7 +1528,8 @@ export default function Products() {
       const productId = Number(snapshot?.id || 0)
       const currentProduct = latestMap.get(productId)
       if (!currentProduct) return
-      await runProductWriteMutation(() => productApi.updateProduct(productId, buildProductWritePayload(snapshot)), 'Restore product')
+      const payload = await buildProductWritePayload(snapshot)
+      await runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product')
       await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
     })
     if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
@@ -1531,6 +1538,12 @@ export default function Products() {
 
   const restoreDeletedProducts = useCallback(async (snapshots: ProductRecord[] = [], reason = 'Restore deleted products'): Promise<RestoredProductEntry[]> => {
     if (!snapshots.length) return []
+    const {
+      buildDeletedProductIdSet,
+      getDefaultProductRestoreBranchId,
+      getPreferredProductRestoreBranchId,
+      resolveRestoredProductParentId,
+    } = await loadProductWriteHelpers()
     const defaultBranchId = getDefaultProductRestoreBranchId(branches)
     const restored: RestoredProductEntry[] = []
     const orderedSnapshots = orderProductRestoreSnapshots(snapshots)
@@ -1539,11 +1552,12 @@ export default function Products() {
     for (const snapshot of orderedSnapshots) {
       const preferredBranchId = getPreferredProductRestoreBranchId(snapshot, defaultBranchId)
       const resolvedParentId = resolveRestoredProductParentId(snapshot, deletedIdSet, restoredIdMap)
+      const restoredPayload = await buildProductWritePayload({
+        ...snapshot,
+        parent_id: resolvedParentId || null,
+      })
       const createPayload = {
-        ...buildProductWritePayload({
-          ...snapshot,
-          parent_id: resolvedParentId || null,
-        }),
+        ...restoredPayload,
         client_request_id: createProductHistoryRequestId('product_restore'),
         branch_id: preferredBranchId || defaultBranchId || '',
         stock_quantity: 0,
@@ -1610,6 +1624,10 @@ export default function Products() {
 
   const clearProductStockByIds = useCallback(async (productIds: EntityId[] = [], reason = 'Set products out of stock') => {
     if (!productIds.length) return
+    const {
+      buildProductClearStockAdjustments,
+      buildProductStockAdjustmentPayload,
+    } = await loadProductWriteHelpers()
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
     const clearRun = await runConcurrentTasks<EntityId, void>(productIds, async (productId: EntityId) => {
@@ -1643,6 +1661,7 @@ export default function Products() {
     if (!productIds.length || !Number.isFinite(amount) || amount <= 0) {
       return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
     }
+    const { buildProductStockAdjustmentPayload } = await loadProductWriteHelpers()
 
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
@@ -1676,6 +1695,11 @@ export default function Products() {
     if (!productIds.length || !Number.isFinite(numericBranchId) || numericBranchId <= 0) {
       return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
     }
+    const {
+      buildProductBranchMovePlan,
+      buildProductStockAdjustmentPayload,
+      buildProductTransferStockPayload,
+    } = await loadProductWriteHelpers()
 
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
@@ -1718,6 +1742,10 @@ export default function Products() {
 
   const runBulkProductUpdates = useCallback(async (updates: Record<string, unknown>) => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
+    const {
+      buildDefinedProductUpdates,
+      buildProductBulkUpdatePayload,
+    } = await loadProductWriteHelpers()
     const nextUpdates = buildDefinedProductUpdates(updates)
     if (!Object.keys(nextUpdates).length) {
       notify('No changes specified', 'warning')
@@ -2286,6 +2314,7 @@ export default function Products() {
               </div>
             </div>
             <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
+              const { buildProductBulkInfoUpdates } = await loadProductWriteHelpers()
               await runBulkProductUpdates(buildProductBulkInfoUpdates(bulkEditForm))
             }}>Apply to {selectedVisibleCount} products</button>
           </div>
@@ -2310,6 +2339,7 @@ export default function Products() {
                 </div>
                 <p className="text-xs text-gray-400 mt-1">KHR prices will auto-calculate at current exchange rate</p>
                 <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={async () => {
+                  const { buildProductBulkPricingUpdates } = await loadProductWriteHelpers()
                   await runBulkProductUpdates(buildProductBulkPricingUpdates(bulkEditForm))
                 }}>Apply to {selectedVisibleCount} products</button>
               </div>

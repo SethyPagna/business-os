@@ -659,7 +659,7 @@ await runTest('product page save and delete actions use shared guards and bounde
   assert.match(source, /if \(!beginSingleAction\(productSaveInFlightRef\)\) return[\s\S]*runProductWriteMutation\(\(\) => productApi\.createProduct\(payload\), 'Create product'\)/)
   assert.match(source, /runProductWriteMutation\(\(\) => productApi\.updateProduct\(selected\.id \|\| 0, payload\), 'Update product'\)/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.uploadProductImage\(\{ productId, filePath: entry, fileName \}\),[\s\S]*PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS/)
-  assert.match(source, /runProductWriteMutation\(\(\) => productApi\.updateProduct\(productId, buildProductWritePayload\(snapshot\)\), 'Restore product'\)/)
+  assert.match(source, /const payload = await buildProductWritePayload\(snapshot\)[\s\S]*runProductWriteMutation\(\(\) => productApi\.updateProduct\(productId, payload\), 'Restore product'\)/)
   assert.match(source, /runProductWriteMutation\(\(\) => productApi\.createProduct\(createPayload\), 'Restore deleted product'\)/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.updateProduct\([\s\S]*'Bulk update product'/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.updateProduct\([\s\S]*'Redo product bulk update'/)
