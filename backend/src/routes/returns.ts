@@ -85,6 +85,35 @@ function setCachedReturnsList(cacheKey, rows = [], now = Date.now()) {
   })
 }
 
+function getReturnItemsByReturnId(returnIds = []) {
+  const ids = []
+  const seen = new Set()
+  for (const rawId of returnIds) {
+    const id = parseInt(rawId, 10)
+    if (!Number.isFinite(id) || id <= 0 || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+  }
+
+  const buckets = new Map()
+  for (const id of ids) buckets.set(id, [])
+  if (!ids.length) return buckets
+
+  const placeholders = ids.map(() => '?').join(',')
+  const rows = db.prepare(`
+    SELECT *
+    FROM return_items
+    WHERE return_id IN (${placeholders})
+    ORDER BY return_id ASC, id ASC
+  `).all(...ids)
+  for (const row of rows) {
+    const returnId = parseInt(row.return_id, 10)
+    if (!buckets.has(returnId)) buckets.set(returnId, [])
+    buckets.get(returnId).push(row)
+  }
+  return buckets
+}
+
 function invalidateReturnsListCache() {
   returnsListCache.clear()
 }
@@ -269,11 +298,11 @@ router.get('/returns', authToken, requirePermission('sales'), (req, res) => {
     return
   }
 
-  const getItems = db.prepare('SELECT * FROM return_items WHERE return_id = ?')
-  const payload = []
-  for (const returnRow of returns) {
-    payload.push({ ...returnRow, items: getItems.all(returnRow.id) })
-  }
+  const itemBuckets = getReturnItemsByReturnId(returns.map((returnRow) => returnRow.id))
+  const payload = returns.map((returnRow) => ({
+    ...returnRow,
+    items: itemBuckets.get(parseInt(returnRow.id, 10)) || [],
+  }))
   setCachedReturnsList(cacheKey, payload)
   res.json(payload)
 })
@@ -1112,6 +1141,7 @@ module.exports._test = {
   RETURNS_LIST_CACHE_TTL_MS,
   buildReturnsListCacheKey,
   cloneReturnRows,
+  getReturnItemsByReturnId,
   invalidateReturnsListCache,
   readCachedReturnsList,
   returnsListCache,

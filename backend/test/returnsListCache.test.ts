@@ -1,8 +1,11 @@
 'use strict'
 
 const assert = require('assert')
+const fs = require('fs')
+const path = require('path')
 
 const returnsRoute = require('../src/routes/returns.ts')
+const returnsRouteSource = fs.readFileSync(path.join(__dirname, '../src/routes/returns.ts'), 'utf8')
 
 const {
   RETURNS_LIST_CACHE_TTL_MS,
@@ -68,6 +71,14 @@ runTest('returns list cache expires stale entries and can be invalidated', () =>
   assert.equal(returnsListCache.has(key), true)
   invalidateReturnsListCache()
   assert.equal(returnsListCache.size, 0)
+})
+
+runTest('returns includeItems hydration uses one batched item lookup', () => {
+  const helperSource = String(returnsRoute._test.getReturnItemsByReturnId || '')
+
+  assert.equal(typeof returnsRoute._test.getReturnItemsByReturnId, 'function')
+  assert.match(helperSource, /WHERE return_id IN/)
+  assert.doesNotMatch(returnsRouteSource, /const getItems = db\.prepare\('SELECT \* FROM return_items WHERE return_id = \?'\)/)
 })
 
 if (process.exitCode) process.exit(process.exitCode)
