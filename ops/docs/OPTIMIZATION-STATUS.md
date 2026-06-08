@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 852, keep public portal startup off the authenticated admin bootstrap preload.
+- Latest completed move: Move 853, skip the full admin language pack on public portal startup.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `d89391073231d012`
+  `43af754a04777e16`
 - latest verified source hash from the most recent Docker-served live check:
   `542f5c165aab068e`
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-08T21-29-53-373Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-08T22-03-01-098Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,39 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 853 prevents public portal sessions from scheduling the full admin
+  language pack after first paint. `AppContext` already ships a small core
+  English fallback and the customer portal has its own portal copy modules, so
+  public-mode providers now skip the deferred `lang-en` / `lang-km` admin pack
+  scheduler instead of fetching `lang-en` during a normal public visit.
+- Verification proof: focused performance/loading guard, frontend typecheck,
+  frontend utility suite, frontend production build, `git diff --check`,
+  Docker image build, Docker release update, local route-load trace, local
+  focused Playwright public asset probe, Cloudflare public asset probe, health
+  check, Docker container check, and storage prune passed.
+- Live proof on Docker image `business-os:v6.0.0-202606090540-move853`,
+  frontend hash `43af754a04777e16`, source hash `542f5c165aab068e`: local and
+  Cloudflare `/public` render the full 5,539-product catalog while making zero
+  `lang-en` requests and zero `app-bootstrap` requests in the measured startup
+  window.
+- Route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-08T22-03-01-098Z.json`
+  passed with zero failures/errors: Dashboard 173 ms at 26 requests / 20
+  scripts; Products 257 ms at 32 / 24; Inventory 235 ms at 34 / 27; POS
+  207 ms at 28 / 21; Returns 307 ms at 29 / 24; public catalog 185 ms at
+  18 / 13. The public route count is unchanged from Move 852 because `lang-en`
+  was a delayed follow-up request, but the public session no longer downloads
+  the 56.5 kB gzip admin English pack after the startup window.
+- Cleanup proof: storage prune removed 130,728 bytes of stale reports,
+  5,345,197 bytes of old Docker-release backup data, and 2.348 GB of Docker
+  builder cache while preserving uploads, secrets, env files, Docker volumes,
+  the active image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 853: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 852 keeps the public portal startup path off authenticated admin-only
   assets. `backend/server.ts` now treats `/public` and `/customer-portal` as

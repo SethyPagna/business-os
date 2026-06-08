@@ -13907,3 +13907,35 @@ Move 852 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 853 status:
+- Move 853 skips the full admin language-pack scheduler in public portal mode.
+  `frontend/src/AppContext.tsx` now returns early from the deferred
+  `lang-en` / `lang-km` loader effect when `publicMode` is true, relying on the
+  existing core English fallback plus portal-owned copy modules for public
+  rendering.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090540-move853` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `43af754a04777e16` and source hash `542f5c165aab068e`.
+- Live proof: local and Cloudflare focused Playwright probes rendered the
+  5,539-product public catalog with zero `lang-en` requests, zero
+  `app-bootstrap` requests, and zero failed requests in the measured startup
+  window.
+- Route proof: route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T22-03-01-098Z.json` passed
+  with zero failures/errors. Public catalog stayed at 18 requests / 13 scripts
+  during the route-ready window, while the delayed 56.5 kB gzip admin English
+  pack no longer downloads afterward.
+- Verification proof: focused performance/loading guard, frontend typecheck,
+  frontend utility suite, frontend production build, `git diff --check`,
+  Docker release update, Cloudflare public asset probe, health check, Docker
+  container check, and storage prune passed.
+- Cleanup proof: storage prune removed 130,728 bytes of stale reports,
+  5,345,197 bytes of old Docker-release backup data, and 2.348 GB of Docker
+  builder cache while preserving data, uploads, secrets, env files, Docker
+  volumes, active image, and latest local/R2 backup sets.
+- Current plan position after Move 853: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

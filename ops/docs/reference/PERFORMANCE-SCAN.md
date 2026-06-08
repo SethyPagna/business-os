@@ -2325,3 +2325,17 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   211 ms at 34 / 27, POS 234 ms at 28 / 21, and Returns 205 ms at 29 / 24.
   Storage prune removed 435,578 bytes of stale reports, 5,345,195 bytes of old
   Docker-release backup data, and 4.848 GB of Docker builder cache.
+- Move 853 records the public portal admin-language-pack defer. Public portal
+  `AppProvider` instances now skip the full admin language-pack scheduler, so
+  the public route keeps the core English fallback and portal-owned copy modules
+  without later downloading `lang-en-DND0-37b.js` at 173.57 kB / 56.51 kB gzip.
+  Docker image `business-os:v6.0.0-202606090540-move853` served frontend hash
+  `43af754a04777e16` and source hash `542f5c165aab068e`. Local and Cloudflare
+  focused Playwright probes rendered 5,539 public products with zero `lang-en`
+  requests, zero `app-bootstrap` requests, and zero failed requests. Route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T22-03-01-098Z.json` passed
+  with zero failures/errors: public catalog 185 ms at 18 requests / 13 scripts,
+  Dashboard 173 ms at 26 / 20, Products 257 ms at 32 / 24, Inventory 235 ms at
+  34 / 27, POS 207 ms at 28 / 21, and Returns 307 ms at 29 / 24. Storage prune
+  removed 130,728 bytes of stale reports, 5,345,197 bytes of old Docker-release
+  backup data, and 2.348 GB of Docker builder cache.

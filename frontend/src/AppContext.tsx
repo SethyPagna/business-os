@@ -1259,6 +1259,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [language, theme])
 
   useEffect(() => {
+    if (publicMode) return undefined
     let cancelled = false
     let timerId: number | null = null
     let idleId: number | null = null
@@ -1310,7 +1311,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
       if (loadListener) window.removeEventListener('load', loadListener)
     }
-  }, [language])
+  }, [language, publicMode])
 
   useEffect(() => {
     const root = document.documentElement
