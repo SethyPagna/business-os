@@ -10,7 +10,6 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import X from 'lucide-react/dist/esm/icons/x.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { fmtTime } from '../../utils/formatters'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
@@ -29,6 +28,7 @@ const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface')) as any
 const InventoryStockModals = lazy(() => import('./InventoryStockModals')) as any
 const InventoryBatchModal = lazy(() => import('./InventoryBatchModal')) as any
 const InventoryReasonManagerModal = lazy(() => import('./InventoryReasonManagerModal')) as any
+const InventoryStatDetailModal = lazy(() => import('./InventoryStatDetailModal')) as any
 
 const INVENTORY_HISTORY_READY_DELAY_MS = 1800
 
@@ -3332,44 +3332,15 @@ export default function Inventory() {
         </Suspense>
       ) : null}
 
-      {/* Section */}
-      {statDetail && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setStatDetail(null)}>
-          <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-              <div>
-                <h2 className="font-bold text-gray-900 dark:text-white">{statDetail.label}</h2>
-                <p className="text-xs text-gray-400 mt-1">{t('inventory') || 'Inventory'}</p>
-              </div>
-              <button onClick={() => setStatDetail(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <div className="modal-scroll p-4 space-y-2">
-              {Array.isArray(statDetail.detailSections) && statDetail.detailSections.length ? statDetail.detailSections.map((section, sectionIndex) => (
-                <div key={`${statDetail.id}-section-${sectionIndex}`} className="space-y-2 rounded-2xl border border-gray-100 bg-gray-50/80 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                  <div className="border-b border-gray-200 pb-2 dark:border-gray-700">
-                    <div className="text-sm font-semibold text-gray-900 dark:text-white">{section.title}</div>
-                    {section.subtitle ? <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{section.subtitle}</div> : null}
-                  </div>
-                  {Array.isArray(section.rows) ? section.rows.map((row, rowIndex) => (
-                    <div key={`${statDetail.id}-${sectionIndex}-${rowIndex}`} className="rounded-xl border border-gray-100 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-950/40">
-                      <div className="text-[11px] uppercase tracking-wide text-gray-400">{row.label}</div>
-                      <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{row.value}</div>
-                    </div>
-                  )) : null}
-                </div>
-              )) : null}
-              {Array.isArray(statDetail.details) && statDetail.details.length ? statDetail.details.map((row, index) => (
-                <div key={`${statDetail.id}-${index}`} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-900/40">
-                  <div className="text-[11px] uppercase tracking-wide text-gray-400">{row.label}</div>
-                  <div className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{row.value}</div>
-                </div>
-              )) : null}
-            </div>
-          </div>
-        </div>
-      )}
+      {statDetail ? (
+        <Suspense fallback={null}>
+          <InventoryStatDetailModal
+            onClose={() => setStatDetail(null)}
+            statDetail={statDetail}
+            t={t}
+          />
+        </Suspense>
+      ) : null}
 
       {adjustModal || transferModal || moveModal ? (
         <Suspense fallback={null}>

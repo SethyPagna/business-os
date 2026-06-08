@@ -75,6 +75,15 @@ async function main(): Promise<void> {
     const inventoryProductsStatus = await inventoryProductsRead
     const branchesStatus = await branchesRead
 
+    await page.getByRole('button', { name: /^Stats$/i }).click()
+    await page.locator('button.card').first().waitFor({ state: 'visible', timeout: 20_000 })
+    await page.locator('button.card').first().click()
+    const statModal = page.locator('.fixed.inset-0').last()
+    await statModal.locator('.modal-scroll').waitFor({ state: 'visible', timeout: 15_000 })
+    await closeTopModal(page)
+
+    await page.getByTitle('Show product stock, values, and item-level controls.').click()
+    await page.locator('tbody tr.table-row').first().waitFor({ state: 'visible', timeout: 20_000 })
     const rowCount = await page.locator('tbody tr.table-row').count()
     assert(rowCount > 0, 'No inventory product rows were rendered')
 
@@ -145,6 +154,7 @@ async function main(): Promise<void> {
         branchesStatus,
         inventoryReasonsStatus,
         productRows: rowCount,
+        statDetailModalOpened: true,
         adjustModalOpened: true,
         adjustSaveEnabled,
         reasonManagerOpened: true,
