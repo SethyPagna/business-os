@@ -15,6 +15,7 @@ assert(productsRoute.includes("buildProductReadCacheKey('search', query)"), 'pro
 assert(productsRoute.includes('PRODUCT_CATALOG_SNAPSHOT_VERSION_MEMO_MS'), 'product snapshot version reads should use a short in-process memo for startup bursts')
 assert(productsRoute.includes('function broadcastProductsUpdate'), 'product writes should invalidate the in-process snapshot memo before broadcasting')
 assert(!productsRoute.includes("broadcast('products')"), 'product route writes should use broadcastProductsUpdate instead of raw product broadcasts')
+assert(!productsRoute.includes("include.has('batches') || include.has('family')"), 'POS family expansion should not imply batch hydration unless batches are requested')
 assert(productsRoute.includes("metadata ?? query.includeMetadata ?? query.include_metadata"), 'product first-window reads should be able to skip full filter metadata')
 assert(!/ORDER BY p\.\$\{field\} COLLATE NOCASE ASC\s+LIMIT/.test(productsRoute), 'product filter metadata should not truncate brand/category/supplier options')
 assert(productsRoute.includes('const productsByImageBaseName = new Map()'), 'image-only bulk import should build a product lookup map')

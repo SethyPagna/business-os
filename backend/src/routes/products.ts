@@ -924,7 +924,7 @@ function buildProductSearchPayload(query = {}) {
   let items = include.has('family') ? expandProductFamilyRows(rows) : rows
   if (include.has('branch_stock')) items = attachBranchStock(items)
   if (include.has('images') || include.has('gallery')) items = attachImageGallery(items)
-  if (include.has('batches') || include.has('family')) {
+  if (include.has('batches')) {
     const itemIds = []
     for (const product of items) {
       itemIds.push(product.id)
