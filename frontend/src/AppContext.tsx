@@ -596,7 +596,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const canProbeServerSession = typeof window !== 'undefined' && typeof getAppApi().getAppBootstrap === 'function'
     if (hasStoredSession && canProbeServerSession) return false
     if (hasStoredSession) return true
-    if (canProbeServerSession) return true
+    // A user can still be authenticated by the httpOnly server cookie even
+    // when local/session storage is empty. Keep the secure shell up until the
+    // bootstrap probe confirms whether that cookie belongs to a valid session;
+    // otherwise the login route briefly mounts and downloads auth UI on normal
+    // admin startup.
+    if (canProbeServerSession) return false
     return true
   })
   // Initialize from actual WS state to avoid showing a disconnected badge
@@ -1184,7 +1189,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
 
           if (canProbeServerSession) {
             if (!hasStoredSession) {
-              setAuthReady(true)
               loadSettings().catch(() => {})
             }
             let settled = false

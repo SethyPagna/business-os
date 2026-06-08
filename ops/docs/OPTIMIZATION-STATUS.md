@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 850, split POS supplier normalization from Products menu helpers and remove noisy public API preload.
+- Latest completed move: Move 851, keep authenticated admin startup from mounting the login route or requesting the login chunk.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `fb52a37577b666c6`
+  `40d6419e815cddbb`
 - latest verified source hash from the most recent Docker-served live check:
   `9cb28cddba119d87`
 
@@ -31,7 +31,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-08T19-05-03-939Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-08T20-39-18-526Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -45,9 +45,9 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T19-06-01-541Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-08T19-04-46-912Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-08T20-39-01-221Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,45 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 851 fixes the cookie-only authenticated startup path. `AppContext`
+  now keeps `authReady` false whenever a server bootstrap probe is available
+  until `/api/auth/bootstrap` confirms or rejects the httpOnly cookie session,
+  preventing a transient unauthenticated render. `App.tsx` keeps the secure
+  loading shell active for stored sessions while bootstrap catches up, and
+  Vite now separates admin and direct-login HTML preloads so normal admin
+  routes do not preload `auth-login`.
+- Verification proof: frontend utility suite, JSX/source check, production
+  build, Docker image build, Docker update, focused Playwright auth-login
+  request proof, direct `/login` proof, route-load trace, full Phase 8.4 live
+  suite, public Cloudflare portal check, receipt/loyalty/settings rollback
+  checks, post-live hygiene, storage prune, health check, and in-app Browser
+  POS interaction checks passed.
+- Live proof on Docker image `business-os:v6.0.0-202606090431-move851`,
+  frontend hash `40d6419e815cddbb`, source hash `9cb28cddba119d87`: the
+  authenticated dashboard startup made zero `auth-login` requests and rendered
+  no login form, while direct `/login` still loaded `auth-login-BvphkK3w.js`
+  and showed the sign-in form. Route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T20-39-01-221Z.json`
+  passed with zero failures/errors: Dashboard 128 ms at 26 requests / 20
+  scripts; Products 273 ms at 32 / 24; Inventory 280 ms at 34 / 27; POS
+  218 ms at 28 / 21; Returns 224 ms at 29 / 24; public catalog 168 ms at
+  19 / 14.
+- Browser proof: in-app Browser opened POS at `http://127.0.0.1:4000/pos`,
+  searched `AHC`, verified the filtered count `1-4 / 4`, visible AHC product
+  cards and Khmer unit labels, no horizontal overflow, zero relevant console
+  messages, and cleared the old service-worker update banner.
+- Cleanup proof: storage prune removed 1,031,387 bytes of stale reports,
+  26,686,028 bytes of old Docker-release backup data, two old Docker rollback
+  tags (`business-os:v6.0.0-202606090119` and
+  `business-os:v6.0.0-202606090044`), and 4.571 GB of Docker builder cache
+  while preserving uploads, secrets, env files, Docker volumes, the active
+  image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 851: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 850 splits POS supplier normalization from the heavier Products menu
   helper. `frontend/src/components/products/helpers/productSupplierOptions.ts`

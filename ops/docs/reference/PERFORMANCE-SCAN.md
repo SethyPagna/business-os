@@ -2286,3 +2286,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   messages. Storage prune removed 1,075,543 bytes of stale reports,
   10,630,217 bytes of old Docker-release backup data, two old Docker rollback
   tags, and 3.65 GB of Docker builder cache.
+- Move 851 records the authenticated-startup login chunk fix. Cookie-only
+  admin sessions now wait for `/api/auth/bootstrap` before `authReady` becomes
+  true, so the app stays on the secure loading shell instead of briefly
+  mounting the login route. Vite route preloads are split into admin and
+  direct-login sets: normal admin pages preload `AdminRoot`, `app-auth`, and
+  `app-bootstrap`; `/login` still preloads `auth-login`. Production build
+  emitted `AdminRoot-B_5RxdFV.js`, `auth-login-BvphkK3w.js`, and
+  `app-bootstrap-C0gpciV3.js`. Docker image
+  `business-os:v6.0.0-202606090431-move851` served frontend hash
+  `40d6419e815cddbb` and source hash `9cb28cddba119d87`. Focused Playwright
+  proof showed authenticated Dashboard startup made zero `auth-login`
+  requests and rendered zero login fields, while fresh `/login` still loaded
+  `auth-login-BvphkK3w.js` and showed the sign-in form. Route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T20-39-01-221Z.json` passed
+  with zero failures/errors: Dashboard 128 ms at 26 requests / 20 scripts,
+  Products 273 ms at 32 / 24, Inventory 280 ms at 34 / 27, POS 218 ms at
+  28 / 21, Returns 224 ms at 29 / 24, and public catalog 168 ms at 19 / 14.
+  Full Phase 8.4 live suite passed, public Cloudflare rendered 20 products
+  with zero relevant console messages, and in-app Browser POS search for `AHC`
+  settled to `1-4 / 4` with visible AHC cards, no horizontal overflow, and zero
+  relevant app logs. Storage prune removed 1,031,387 bytes of stale reports,
+  26,686,028 bytes of old Docker-release backup data, two old Docker rollback
+  tags, and 4.571 GB of Docker builder cache.

@@ -8,6 +8,7 @@ import { useApp as useAppHook } from './AppContext.tsx'
 import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
+import { STORAGE_KEYS } from './constants.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
@@ -189,6 +190,32 @@ function asPageModule(importer: () => Promise<unknown>): ChunkImporter {
 
 function getAppShellApi(): AppShellApi {
   return (window as unknown as { api?: AppShellApi }).api || {}
+}
+
+function readStorageValue(storage: Storage | null | undefined, key: string): string {
+  try {
+    return storage?.getItem(key) || ''
+  } catch {
+    return ''
+  }
+}
+
+function hasUsableStoredAuthSession(): boolean {
+  if (typeof window === 'undefined') return false
+  const userJson = readStorageValue(window.sessionStorage, STORAGE_KEYS.USER)
+    || readStorageValue(window.localStorage, STORAGE_KEYS.USER)
+  if (!userJson) return false
+  try {
+    const parsed = JSON.parse(userJson) as Record<string, unknown> | null
+    if (!parsed || typeof parsed !== 'object') return false
+  } catch {
+    return false
+  }
+  const expiry = readStorageValue(window.sessionStorage, STORAGE_KEYS.USER_EXPIRY)
+    || readStorageValue(window.localStorage, STORAGE_KEYS.USER_EXPIRY)
+  if (!expiry) return true
+  const expiresAt = Number.parseInt(expiry, 10)
+  return Number.isFinite(expiresAt) && Date.now() <= expiresAt
 }
 
 function getConnection(): NetworkConnectionLike | null {
@@ -1798,7 +1825,9 @@ export default function App() {
     return <PublicCatalogView />
   }
 
-  if (!authReady && !user) {
+  const storedAuthSessionPending = !user && hasUsableStoredAuthSession()
+
+  if ((!authReady && !user) || storedAuthSessionPending) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 text-slate-600 dark:bg-slate-950 dark:text-slate-300" role="status" aria-live="polite">
         <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/95">

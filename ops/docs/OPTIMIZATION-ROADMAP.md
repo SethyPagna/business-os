@@ -13821,3 +13821,58 @@ Move 850 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 851 status:
+- Move 851 keeps authenticated admin startup from mounting the login route or
+  requesting the login chunk. `frontend/src/AppContext.tsx` now holds
+  `authReady` false while `/api/auth/bootstrap` checks a possible httpOnly
+  cookie session, even when local/session storage has no user payload. This
+  removes the transient login render that caused `auth-login` to download on
+  normal admin routes and contributed to visible startup flash.
+- `frontend/src/App.tsx` keeps the secure loading shell active for stored
+  sessions while bootstrap catches up, and `frontend/vite.config.ts` separates
+  admin and direct-login route preloads: admin routes preload `AdminRoot`,
+  `app-auth`, and `app-bootstrap`, while `/login` still preloads
+  `auth-login`. `frontend/tests/performanceLoadingUx.test.ts` now guards both
+  the route-aware preload split and the cookie-only auth readiness behavior.
+- Build proof: `npm.cmd --prefix frontend run build` emitted
+  `AdminRoot-B_5RxdFV.js`, `auth-login-BvphkK3w.js`, and
+  `app-bootstrap-C0gpciV3.js`. Docker image
+  `business-os:v6.0.0-202606090431-move851` serves frontend hash
+  `40d6419e815cddbb` and source hash `9cb28cddba119d87`.
+- Focused Playwright proof: authenticated Dashboard startup made zero
+  `auth-login` requests and rendered zero login fields. A fresh direct
+  `/login` page still loaded `auth-login-BvphkK3w.js` and showed one username
+  field, proving the optimization is route-specific rather than a broken login
+  path.
+- Live proof: route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T20-39-01-221Z.json`
+  passed with zero failed responses and zero app errors: Dashboard 128 ms at
+  26 requests / 20 scripts; Products 273 ms at 32 / 24; Inventory 280 ms at
+  34 / 27; POS 218 ms at 28 / 21; Returns 224 ms at 29 / 24; public catalog
+  168 ms at 19 / 14.
+- Full Phase 8.4 proof: `npm.cmd --prefix ops run phase84:live-suite` passed.
+  Broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-08T20-39-18-526Z/report.json`
+  checked 66 signals with zero relevant console messages and no framework
+  overlay. Public Cloudflare report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
+  rendered 20 products with zero failed responses, zero page errors, zero
+  relevant console messages, and enforced CSP. Receipt, loyalty, and settings
+  rollback checks restored their data.
+- In-app Browser proof: POS at `http://127.0.0.1:4000/pos` loaded, accepted
+  an `AHC` search, settled to `1-4 / 4`, showed AHC cards/prices/special
+  prices/Khmer unit labels, had no horizontal overflow, and logged zero
+  relevant app errors. The older service-worker update banner was applied and
+  cleared in the same tab.
+- Cleanup proof: storage prune removed 1,031,387 bytes of stale reports,
+  26,686,028 bytes of old Docker-release backup data, two old Docker rollback
+  tags (`business-os:v6.0.0-202606090119` and
+  `business-os:v6.0.0-202606090044`), and 4.571 GB of Docker builder cache
+  while preserving uploads, secrets, env files, Docker volumes, the active
+  image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 851: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

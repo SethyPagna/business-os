@@ -142,6 +142,11 @@ function emitBuildManifest(): Plugin {
 const routePreloadChunkNames = {
   admin: [
     'AdminRoot',
+    'app-auth',
+    'app-bootstrap',
+  ],
+  login: [
+    'AdminRoot',
     'auth-login',
     'app-auth',
     'app-bootstrap',
@@ -169,7 +174,7 @@ function toRoutePreloadFiles(bundle: OutputBundle, names: string[]): string[] {
   return Array.from(new Set(files))
 }
 
-function buildRoutePreloadScript(preloads: Record<'admin' | 'public', string[]>): string {
+function buildRoutePreloadScript(preloads: Record<'admin' | 'login' | 'public', string[]>): string {
   return `<script data-business-os-route-preloads>${escapeInlineScript(`(function installBusinessOsRoutePreloads() {
   var preloads = ${JSON.stringify(preloads)};
   function normalizePath(value) {
@@ -213,6 +218,9 @@ function buildRoutePreloadScript(preloads: Record<'admin' | 'public', string[]>)
       'server'
     ].indexOf(segment) !== -1;
   }
+  function isLoginPath(pathname) {
+    return pathname === '/login' || pathname.indexOf('/login/') === 0;
+  }
   function isPublicCatalogPath(pathname) {
     if (!pathname || pathname === '/' || pathname === '/health') return false;
     if (pathname.indexOf('/api/') === 0 || pathname.indexOf('/uploads/') === 0) return false;
@@ -220,7 +228,7 @@ function buildRoutePreloadScript(preloads: Record<'admin' | 'public', string[]>)
     return !isAdminAppPath(pathname);
   }
   var pathname = normalizePath(window.location && window.location.pathname);
-  var files = isPublicCatalogPath(pathname) ? preloads.public : preloads.admin;
+  var files = isPublicCatalogPath(pathname) ? preloads.public : (isLoginPath(pathname) ? preloads.login : preloads.admin);
   files.forEach(function preload(file) {
     var href = '/' + String(file || '').replace(/^\\/+/, '');
     if (!href || document.querySelector('link[rel="modulepreload"][href="' + href + '"]')) return;
@@ -242,6 +250,7 @@ function injectRouteAwareModulePreloads(): Plugin {
         if (!bundle || html.includes('data-business-os-route-preloads')) return html
         const preloads = {
           admin: toRoutePreloadFiles(bundle, routePreloadChunkNames.admin),
+          login: toRoutePreloadFiles(bundle, routePreloadChunkNames.login),
           public: toRoutePreloadFiles(bundle, routePreloadChunkNames.public),
         }
         const script = buildRoutePreloadScript(preloads)
