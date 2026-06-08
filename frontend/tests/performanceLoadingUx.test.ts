@@ -37,6 +37,7 @@ const portalMenu = fs.readFileSync(new URL('../src/components/shared/PortalMenu.
 const catalogPreviewSurface = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 const inventoryStockModals = fs.readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
+const inventoryBatchModal = fs.readFileSync(new URL('../src/components/inventory/InventoryBatchModal.tsx', import.meta.url), 'utf8')
 const inventoryExport = fs.readFileSync(new URL('../src/components/inventory/inventoryExport.ts', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
@@ -686,6 +687,9 @@ assert.doesNotMatch(inventory, /import InventoryProductsSurface from '\.\/Invent
 assert.match(inventory, /const InventoryStockModals = lazy\(\(\) => import\('\.\/InventoryStockModals'\)\) as any/, 'Inventory stock modals should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{t\('adjust_stock'\)\}<\/h2>/, 'Inventory should not keep stock adjust modal markup in the first route chunk')
 assert.match(inventoryStockModals, /export default function InventoryStockModals/, 'Inventory stock modal markup should live in the lazy stock modal component')
+assert.match(inventory, /const InventoryBatchModal = lazy\(\(\) => import\('\.\/InventoryBatchModal'\)\) as any/, 'Inventory batch modal should stay in a click-only lazy chunk')
+assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('inventory_batch_session', 'Batch session'\)\}<\/h2>/, 'Inventory should not keep batch session modal markup in the first route chunk')
+assert.match(inventoryBatchModal, /export default function InventoryBatchModal/, 'Inventory batch modal markup should live in the lazy batch modal component')
 assert.match(sales, /const SALES_HISTORY_READY_DELAY_MS = 1800/, 'Sales background history should wait until after first route-ready work')
 assert.match(sales, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Sales should have an explicit post-ready action-history gate')
 assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/, 'Sales should not fetch server action history during first route load')
@@ -1547,7 +1551,7 @@ assert.match(
   'inventory batch failure recovery should reuse shared id normalization',
 )
 assert.match(
-  inventory,
+  `${inventory}\n${inventoryBatchModal}`,
   /function buildDestinationProductOptions\(products(?:: [^=]+)? = \[\], excludedProductId(?:: [^,]+)?, placeholder(?:: [^)]+)?\)(?:: [^{]+)? \{[\s\S]*const options(?:: [^=]+)? = \[\{ value: '', label: placeholder \}\][\s\S]*for \(const product of products\)[\s\S]*if \(Number\.isFinite\(excludedId\) && id === excludedId\) continue[\s\S]*options\.push/,
   'inventory destination product options should skip excluded products without a filtered allocation',
 )
@@ -1557,7 +1561,7 @@ assert.match(
   'inventory single move destination selector should reuse the destination option renderer',
 )
 assert.match(
-  inventory,
+  inventoryBatchModal,
   /buildDestinationProductOptions\(summary, item\.productId/,
   'inventory batch move destination selector should reuse the destination option renderer',
 )
@@ -1567,7 +1571,7 @@ assert.doesNotMatch(
   'inventory selection scope should not repeat map/filter id normalization',
 )
 assert.doesNotMatch(
-  inventory,
+  `${inventory}\n${inventoryBatchModal}`,
   /summary\.filter\(\(product\) => Number\(product\.id\) !== Number\((?:moveModal\.id|item\.productId)\)\)\.map/,
   'inventory destination selectors should not allocate filtered summary arrays during render',
 )
