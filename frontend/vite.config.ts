@@ -153,7 +153,6 @@ const routePreloadChunkNames = {
     'initials-utils',
     'script-typography',
     'app-portal',
-    'portal-language-options',
     'portal-tools',
   ],
 }
@@ -304,7 +303,6 @@ const deferredModulePreloadPrefixes = [
   'assets/catalog-',
   'assets/catalog-secondary-tabs-',
   'assets/catalog-editor-',
-  'assets/portal-language-options-',
   'assets/portal-language-packs-',
   'assets/portal-content-i18n-',
   'assets/backup-reset-tools-',
@@ -552,9 +550,6 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
       return 'portal-translate-controller'
-    }
-    if (normalized.includes('/src/components/catalog/portalLanguageOptions.ts')) {
-      return 'portal-language-options'
     }
     if (normalized.includes('/src/components/catalog/portalLanguagePacks.ts')) {
       return 'portal-language-packs'
