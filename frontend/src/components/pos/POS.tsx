@@ -60,13 +60,7 @@ import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
-import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
-import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
-import {
-  buildProductLightboxState,
-  getProductGalleryImages,
-} from '../products/helpers/productGalleryHelpers.ts'
-import { buildProductSupplierOptions } from '../products/helpers/productMenuHelpers.ts'
+import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const FilterPanel = lazy(() => import('./FilterPanel'))
@@ -442,6 +436,69 @@ function asText(value: unknown): string {
 
 function asNumber(value: unknown): number {
   return Number(value || 0)
+}
+
+function buildPosSearchTerms(search: unknown): string[] {
+  const raw = String(search || '').trim()
+  if (!raw) return []
+  return raw.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean)
+}
+
+function buildSortedUniqueOptions(values: unknown[] = []): string[] {
+  return Array.from(new Set(
+    (Array.isArray(values) ? values : [])
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+  )).sort((left, right) => left.localeCompare(right))
+}
+
+function buildPosBrandOptions(metaBrands: unknown[] = [], settingsBrandOptions = '[]'): string[] {
+  let configuredBrands: unknown[] = []
+  try {
+    const parsed: unknown = JSON.parse(settingsBrandOptions || '[]')
+    configuredBrands = Array.isArray(parsed) ? parsed : []
+  } catch (_) {}
+  return buildSortedUniqueOptions([...(Array.isArray(metaBrands) ? metaBrands : []), ...configuredBrands])
+}
+
+function normalizePosProductGallery(value: unknown, fallback: unknown = null, limit = 5): string[] {
+  const maxItems = Math.max(0, Number(limit || 0))
+  if (!maxItems) return []
+  let input: unknown[] = []
+  if (Array.isArray(value)) {
+    input = value
+  } else if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(value)
+      input = Array.isArray(parsed) ? parsed : value.split('|')
+    } catch (_) {
+      input = value.split('|')
+    }
+  }
+  const seen = new Set<string>()
+  const list: string[] = []
+  for (const entry of input) {
+    const path = String(entry || '').trim()
+    if (!path || seen.has(path)) continue
+    seen.add(path)
+    list.push(path)
+    if (list.length >= maxItems) break
+  }
+  const fallbackValue = String(fallback || '').trim()
+  if (!list.length && fallbackValue) list.push(fallbackValue)
+  return list.slice(0, maxItems)
+}
+
+function getPosProductGalleryImages(product?: ProductRecord | null, limit = 5): string[] {
+  return normalizePosProductGallery(product?.image_gallery, product?.image_path || null, limit)
+}
+
+function buildPosProductLightboxState(product: ProductRecord, startIndex: unknown = 0, title = ''): ImageLightboxState | null {
+  const images = getPosProductGalleryImages(product).map((image) => resolvePublicAssetUrl(image)).filter(Boolean)
+  if (!images.length) return null
+  const numericIndex = Number(startIndex)
+  const index = Math.max(0, Math.min(Number.isFinite(numericIndex) ? numericIndex : 0, images.length - 1))
+  return { images, index, title }
 }
 
 function allTermsMatch(text: string, terms: string[]): boolean {
@@ -1208,7 +1265,7 @@ export default function POS() {
 
 // Product filter: comma-separated terms, AND/OR mode (same as Products page)
   const deferredSearch = useDeferredValue(search)
-  const searchTerms = useMemo(() => buildProductSearchTerms(deferredSearch), [deferredSearch])
+  const searchTerms = useMemo(() => buildPosSearchTerms(deferredSearch), [deferredSearch])
   const normalizedBrandFilter = useMemo(
     () => (brandFilter === 'all' ? 'all' : brandFilter.toLowerCase()),
     [brandFilter],
@@ -1224,11 +1281,11 @@ export default function POS() {
 
   // Derived filter lists from products
   const posSuppliers = useMemo(
-    () => buildProductSupplierOptions(productFilterMeta.suppliers),
+    () => buildSortedUniqueOptions(productFilterMeta.suppliers),
     [productFilterMeta.suppliers],
   )
   const posBrands = useMemo(
-    () => buildProductBrandOptions(productFilterMeta.brands, String(settings?.product_brand_options || '[]')),
+    () => buildPosBrandOptions(productFilterMeta.brands, String(settings?.product_brand_options || '[]')),
     [productFilterMeta.brands, settings?.product_brand_options],
   )
   const posPaymentMethods = useMemo((): string[] => {
@@ -1390,13 +1447,13 @@ export default function POS() {
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
-    const nextLightbox = buildProductLightboxState(getProductGalleryImages(product), startIndex, product?.name || t('products'))
+    const nextLightbox = buildPosProductLightboxState(product, startIndex, product?.name || t('products'))
     if (nextLightbox) setImageLightbox(nextLightbox)
   }, [t])
 
   /** Primary image used by cards/sheets, with gallery-first fallback. */
   const getPrimaryProductImage = useCallback((product: ProductRecord) => {
-    return getProductGalleryImages(product)[0] || product?.image_path || ''
+    return getPosProductGalleryImages(product)[0] || product?.image_path || ''
   }, [])
 
 // Cart mutations
