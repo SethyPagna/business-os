@@ -64,7 +64,7 @@ import {
   buildProductLightboxState,
   getProductGalleryImages,
 } from '../products/helpers/productGalleryHelpers.ts'
-import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
+import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
 import { buildProductSupplierOptions } from '../products/helpers/productMenuHelpers.ts'
 const Receipt = lazy(() => import('../receipt/Receipt'))
@@ -1385,7 +1385,11 @@ export default function POS() {
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
-    const nextLightbox = buildProductLightboxState(product, startIndex, product?.name || t('products')) as ImageLightboxState | null
+    const nextLightbox = buildProductLightboxState(
+      getProductGalleryImages(product),
+      startIndex,
+      product?.name || t('products'),
+    ) as ImageLightboxState | null
     if (nextLightbox) setImageLightbox(nextLightbox)
   }, [t])
 

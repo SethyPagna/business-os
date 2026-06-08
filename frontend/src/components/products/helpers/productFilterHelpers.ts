@@ -1,4 +1,5 @@
 import { matchesYearMonthFilters } from '../../../utils/groupedRecords.ts'
+export { buildProductSearchTerms } from '../../../utils/searchTerms.ts'
 
 interface BranchStockRecord {
   branch_id?: unknown
@@ -47,12 +48,6 @@ function toNumber(value: unknown, fallback = 0): number {
 
 function normalizeFilterValue(value: unknown): string {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
-}
-
-export function buildProductSearchTerms(search: unknown): string[] {
-  const raw = String(search || '').trim()
-  if (!raw) return []
-  return raw.split(',').map((term) => term.trim().toLowerCase()).filter(Boolean)
 }
 
 export function getProductBranchQuantity(product: ProductRecord, branchId: unknown): unknown {

@@ -348,6 +348,7 @@ assert.match(viteConfig, /'assets\/product-read-api-',[\s\S]*'assets\/returns-wr
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'action-history-api'/, 'action history reads/writes and admin user filter reads should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/offlineSnapshotTransport\.ts'\)\) return 'offline-snapshot-api'/, 'idle offline snapshot refresh should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/requestIds\.ts'\)\) return 'request-ids'/, 'small request-id helpers used by focused write transports should not drag app-api-methods into product writes')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/searchTerms\.ts'\)\) return 'search-terms'/, 'tiny search-term normalization should not drag product/catalog helper chunks into POS startup')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/browserDialogs\.ts'\)\) return 'browser-dialogs'/, 'browser file-picker dialogs should stay in an intent-only chunk instead of app-api-methods')
 assert.match(viteConfig, /productReadTransport\.ts'[\s\S]*lookupTransport\.ts'[\s\S]*expectedUpdatedAt\.ts'[\s\S]*localMirrors\.ts'[\s\S]*lazyLocalDb\.ts'[\s\S]*queryCache\.ts'[\s\S]*return 'product-read-api'/, 'POS product and lookup reads should have a narrow product-read API chunk instead of landing in app-api-methods')
 assert.doesNotMatch(viteConfig, /CatalogPreviewSurface\.tsx'\)\) \{[\s\S]*return 'catalog-preview'/, 'public catalog preview shell should stay in the route chunk to avoid a first-viewport lazy waterfall')
@@ -3171,8 +3172,8 @@ assert.match(
 )
 assert.match(
   pos,
-  /import \{ buildProductSearchTerms \} from '\.\.\/products\/helpers\/productFilterHelpers\.ts'/,
-  'POS should reuse shared product search-term normalization',
+  /import \{ buildProductSearchTerms \} from '\.\.\/\.\.\/utils\/searchTerms\.ts'/,
+  'POS should reuse lightweight search-term normalization without pulling product/catalog filter chunks',
 )
 assert.doesNotMatch(
   pos,
