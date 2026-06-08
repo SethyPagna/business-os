@@ -680,6 +680,8 @@ assert.match(inventory, /const INVENTORY_HISTORY_READY_DELAY_MS = 1800/, 'Invent
 assert.match(inventory, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Inventory should have an explicit post-ready action-history gate')
 assert.match(inventory, /useActionHistory\(\{ limit: 10, notify, scope: 'inventory', enabled: historyReady \}\)/, 'Inventory should not fetch server action history during first route load')
 assert.match(inventory, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*INVENTORY_HISTORY_READY_DELAY_MS/, 'Inventory should enable history only after the first inventory data load settles')
+assert.match(inventory, /const InventoryProductsSurface = lazy\(\(\) => import\('\.\/InventoryProductsSurface'\)\) as any/, 'Inventory products surface should stay in its own route subchunk')
+assert.doesNotMatch(inventory, /import InventoryProductsSurface from '\.\/InventoryProductsSurface'/, 'Inventory should not statically pull the product surface into the main inventory route chunk')
 assert.match(sales, /const SALES_HISTORY_READY_DELAY_MS = 1800/, 'Sales background history should wait until after first route-ready work')
 assert.match(sales, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Sales should have an explicit post-ready action-history gate')
 assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/, 'Sales should not fetch server action history during first route load')

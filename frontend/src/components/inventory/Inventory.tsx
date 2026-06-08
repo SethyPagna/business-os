@@ -21,12 +21,11 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
-import InventoryProductsSurface from './InventoryProductsSurface'
 const ProductDetailModal = lazy(() => import('./ProductDetailModal')) as any
 const InventoryImportModal = lazy(() => import('./InventoryImportModal')) as any
 const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface')) as any
+const InventoryProductsSurface = lazy(() => import('./InventoryProductsSurface')) as any
 const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface')) as any
-const InventoryProductsSurfaceLegacy = InventoryProductsSurface as any
 
 const INVENTORY_HISTORY_READY_DELAY_MS = 1800
 
@@ -3219,36 +3218,38 @@ export default function Inventory() {
               )}
             </div>
           ) : null}
-          <InventoryProductsSurfaceLegacy
-            InventoryBatchPreview={InventoryBatchPreview}
-            InventoryDiscountBadge={InventoryDiscountBadge}
-            branchFilter={branchFilter}
-            branches={branches}
-            collapsedInventoryGroups={collapsedInventoryGroups}
-            collapsedInventorySections={collapsedInventorySections}
-            fmtKHR={fmtKHR}
-            fmtUSD={fmtUSD}
-            getInventoryGroupSummaryParts={getInventoryGroupSummaryParts}
-            getStockQty={getStockQty}
-            initialDesktopRevealReady={initialInventoryDesktopRevealReady}
-            initialMobileFullListReady={initialInventoryMobileFullListReady}
-            initialMobileRevealReady={initialInventoryMobileRevealReady}
-            initialMobileInventorySections={initialMobileInventorySections}
-            inventoryProductSections={inventoryProductSections}
-            isInventorySelectionScopeFullySelected={isInventorySelectionScopeFullySelected}
-            isInventorySelectionScopePartiallySelected={isInventorySelectionScopePartiallySelected}
-            loading={loading && isProductsFirstLoad}
-            openAdjust={openAdjust}
-            selectedProductIds={selectedProductIds}
-            setDetailProduct={setDetailProduct}
-            showProductsSection={showProductsSection}
-            t={t}
-            toggleInventoryGroup={toggleInventoryGroup}
-            toggleInventorySection={toggleInventorySection}
-            toggleInventorySelectionScope={toggleInventorySelectionScope}
-            toggleSelectedProduct={toggleSelectedProduct}
-            visibleInventoryProducts={visibleInventoryProducts}
-          />
+          <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_inventory_products', 'Loading inventory products...', 'Loading inventory products...')}</div>}>
+            <InventoryProductsSurface
+              InventoryBatchPreview={InventoryBatchPreview}
+              InventoryDiscountBadge={InventoryDiscountBadge}
+              branchFilter={branchFilter}
+              branches={branches}
+              collapsedInventoryGroups={collapsedInventoryGroups}
+              collapsedInventorySections={collapsedInventorySections}
+              fmtKHR={fmtKHR}
+              fmtUSD={fmtUSD}
+              getInventoryGroupSummaryParts={getInventoryGroupSummaryParts}
+              getStockQty={getStockQty}
+              initialDesktopRevealReady={initialInventoryDesktopRevealReady}
+              initialMobileFullListReady={initialInventoryMobileFullListReady}
+              initialMobileRevealReady={initialInventoryMobileRevealReady}
+              initialMobileInventorySections={initialMobileInventorySections}
+              inventoryProductSections={inventoryProductSections}
+              isInventorySelectionScopeFullySelected={isInventorySelectionScopeFullySelected}
+              isInventorySelectionScopePartiallySelected={isInventorySelectionScopePartiallySelected}
+              loading={loading && isProductsFirstLoad}
+              openAdjust={openAdjust}
+              selectedProductIds={selectedProductIds}
+              setDetailProduct={setDetailProduct}
+              showProductsSection={showProductsSection}
+              t={t}
+              toggleInventoryGroup={toggleInventoryGroup}
+              toggleInventorySection={toggleInventorySection}
+              toggleInventorySelectionScope={toggleInventorySelectionScope}
+              toggleSelectedProduct={toggleSelectedProduct}
+              visibleInventoryProducts={visibleInventoryProducts}
+            />
+          </Suspense>
         </>
       )}
       {/* Movements */}
