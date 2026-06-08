@@ -2339,3 +2339,24 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   34 / 27, POS 207 ms at 28 / 21, and Returns 307 ms at 29 / 24. Storage prune
   removed 130,728 bytes of stale reports, 5,345,197 bytes of old Docker-release
   backup data, and 2.348 GB of Docker builder cache.
+- Move 854 records the public catalog product-grid chunk split and early
+  preload. `CatalogPage` now lazy-loads `CatalogProductsSection`, Vite emits a
+  `catalog-products` chunk and includes it in public route-aware preloads, and
+  backend SPA `Link` headers for `/public` and `/customer-portal` now include
+  `catalog-products` alongside `app-portal` and `catalog`. Production build
+  proof split the public catalog shell to `catalog-CUT5rYqA.js` at about
+  104.38 kB / 31.51 kB gzip plus `catalog-products-CQz2d15d.js` at about
+  20.49 kB / 5.90 kB gzip. Docker image
+  `business-os:v6.0.0-202606090650-move854` served frontend hash
+  `7ede2385a44420a8` and source hash `60d3b6f9db28ae02`. Route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T22-49-47-936Z.json` passed
+  with zero failures/errors: public catalog 174 ms at 19 requests / 14
+  scripts, Dashboard 211 ms at 26 / 20, Products 206 ms at 32 / 24, Inventory
+  216 ms at 34 / 27, POS 196 ms at 28 / 21, and Returns 216 ms at 29 / 24.
+  Local Playwright verified real 5,539-product public text in 270 ms, the
+  `catalog-products` asset, zero `lang-en`, zero `app-bootstrap`, and a real
+  `AHC, Mask` search result. Cloudflare public/admin headers included the new
+  preload, and Cloudflare public Playwright rendered products with zero
+  failures/errors. Storage prune removed 137,941 bytes of stale reports,
+  10,701,268 bytes of old Docker-release backup data, and 2.419 GB of Docker
+  builder cache.

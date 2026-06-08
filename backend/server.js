@@ -84,7 +84,7 @@ if (!startRequestedWorkerRole()) {
         { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
         { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
         { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users'] },
-        { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog'] },
+        { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog', 'catalog-products'] },
     ];
     const FRONTEND_CHUNK_BASE_COLLISIONS = {
         catalog: ['context', 'display', 'editor', 'preview', 'products', 'secondary-tabs', 'ui'],

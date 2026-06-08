@@ -35,7 +35,6 @@ import {
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
-import CatalogProductsSection from './CatalogProductsSection'
 import {
   createAboutBlock,
   createPromoItem,
@@ -66,6 +65,7 @@ import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { CatalogPageProvider } from './CatalogPageContext'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
+const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
 type PortalTranslateControllerModule = typeof import('./portalTranslateController.ts')
 type PortalLanguagePacksModule = typeof import('./portalLanguagePacks.ts')
@@ -93,6 +93,7 @@ function loadPortalContentI18nModule(): Promise<PortalContentI18nModule> {
 }
 
 const CatalogEditorSurface = lazy(loadCatalogEditorSurface)
+const CatalogProductsSection = lazy(loadCatalogProductsSection)
 const CatalogSecondaryTabs = lazy(loadCatalogSecondaryTabs)
 
 const CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS = 8000

@@ -13939,3 +13939,48 @@ Move 853 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 854 status:
+- Move 854 splits the public catalog product-grid surface into a preloaded
+  route-owned chunk. `frontend/src/components/catalog/CatalogPage.tsx` now
+  lazy-loads `CatalogProductsSection`, `frontend/vite.config.ts` emits and
+  route-aware preloads `catalog-products`, and `backend/server.ts` plus the
+  runtime entry `backend/server.js` include `catalog-products` in public portal
+  SPA `Link: rel=modulepreload` headers.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090650-move854` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `7ede2385a44420a8` and source hash `60d3b6f9db28ae02`.
+- Build proof: production assets now emit `catalog-CUT5rYqA.js` at about
+  104.38 kB / 31.51 kB gzip and `catalog-products-CQz2d15d.js` at about
+  20.49 kB / 5.90 kB gzip, instead of keeping the product grid inside the
+  larger public catalog route shell.
+- Header proof: local `/public`, Cloudflare `https://leangcosmetics.dpdns.org/public`,
+  and Cloudflare `https://admin.leangcosmetics.dpdns.org/public` all return
+  `Link` headers for `app-portal`, `catalog`, and `catalog-products`; admin
+  `/health` returned 200 with the Move 854 runtime metadata.
+- Live proof: route trace
+  `ops/runtime/reports/route-load-trace-2026-06-08T22-49-47-936Z.json` passed
+  with zero failures/errors. Public catalog measured 174 ms at 19 requests /
+  14 scripts, Dashboard 211 ms at 26 / 20, Products 206 ms at 32 / 24,
+  Inventory 216 ms at 34 / 27, POS 196 ms at 28 / 21, and Returns 216 ms at
+  29 / 24. Local Playwright loaded `/public`, saw real 5,539-product text in
+  270 ms, confirmed `catalog-products` loaded, confirmed zero `lang-en` and
+  zero `app-bootstrap` requests, and typed `AHC, Mask` into the real search
+  input with matching AHC Mask content. Cloudflare public Playwright rendered
+  the same product count with zero request failures or console errors.
+- Verification proof: `node backend\test\routeContracts.test.ts`,
+  `node frontend\tests\performanceLoadingUx.test.ts`, `npm.cmd --prefix
+  frontend run typecheck`, `npm.cmd --prefix frontend run build`,
+  `npm.cmd --prefix frontend run test:utils`, `npm.cmd --prefix backend run
+  test:utils`, Docker release update, focused local/Cloudflare Playwright
+  probes, route-load trace, `git diff --check`, and `npm.cmd --prefix ops run
+  prune-storage` all passed.
+- Cleanup proof: storage prune removed 137,941 bytes of stale reports,
+  10,701,268 bytes of old Docker-release backup data, and 2.419 GB of Docker
+  builder cache while preserving uploads, secrets, env files, Docker volumes,
+  the active image, `business-os:latest`, and latest local/R2 backup sets.
+- Current plan position after Move 854: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

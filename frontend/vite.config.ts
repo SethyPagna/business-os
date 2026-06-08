@@ -154,6 +154,7 @@ const routePreloadChunkNames = {
   public: [
     'PublicCatalogRoot',
     'catalog',
+    'catalog-products',
     'route-sync-utils',
     'app-portal',
     'portal-tools',
@@ -545,6 +546,12 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
     ) {
       return 'catalog-editor'
+    }
+    if (
+      normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
+      || normalized.includes('/src/components/catalog/catalogPagination.ts')
+    ) {
+      return 'catalog-products'
     }
     if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {
       return 'catalog-secondary-tabs'
