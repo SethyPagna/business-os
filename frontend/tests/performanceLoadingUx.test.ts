@@ -2999,6 +2999,16 @@ assert.match(
 )
 assert.match(
   pos,
+  /const ProductDetailSheet = lazy\(\(\) => import\('\.\/ProductDetailSheet'\)\)/,
+  'POS product detail sheet should stay in a click-only lazy chunk',
+)
+assert.doesNotMatch(
+  pos,
+  /import X from 'lucide-react\/dist\/esm\/icons\/x\.js'/,
+  'POS should not keep the product detail close icon in the first route chunk',
+)
+assert.match(
+  pos,
   /withLoaderTimeout\(\s*\(\) => shouldLoadMetadata[\s\S]*loadPosProductBootstrap\(productQuery\)[\s\S]*searchPosCatalogProducts\(productQuery\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
   'POS catalog reads should timeout the combined first-window product and branch request',
 )

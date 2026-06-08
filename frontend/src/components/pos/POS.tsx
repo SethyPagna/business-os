@@ -19,7 +19,6 @@ import { Suspense, lazy, useState, useEffect, useRef, useCallback, useDeferredVa
 import type { ChangeEvent, KeyboardEvent } from 'react'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
-import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, useSync } from '../../AppContext'
 import {
   PAYMENT_METHODS,
@@ -70,6 +69,7 @@ import { buildProductSupplierOptions } from '../products/helpers/productMenuHelp
 const Receipt = lazy(() => import('../receipt/Receipt'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const FilterPanel = lazy(() => import('./FilterPanel'))
+const ProductDetailSheet = lazy(() => import('./ProductDetailSheet'))
 
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
 const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
@@ -2301,113 +2301,26 @@ export default function POS() {
       )}
 
       {/* Product detail bottom-sheet */}
-      {detailProduct && (() => {
-        const p = detailProduct
-        const stock = getDisplayStock(p)
-        const variants = getVariantChoices(p)
-        const groupProduct = hasVariantChoices(p)
-        const groupMeta: ProductGroupMeta | null = p.__groupMeta || null
-        const promotion = calculateProductDiscount(p, exchangeRate)
-        const choiceLabel = groupMeta?.groupKind === 'variant'
-          ? posCopy('Variants', 'Variants')
-          : posCopy('Options', 'Options')
-        return (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDetailProduct(null)}>
-            <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <div className="flex items-center gap-3 min-w-0">
-                  <button
-                    type="button"
-                    className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center overflow-hidden flex-shrink-0"
-                    onClick={() => openImageLightbox(p, 0)}
-                      aria-label={posCopy('Preview product images')}
-                  >
-                    {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-4 w-4 text-gray-400" />}
-                  </button>
-                  <div className="min-w-0"><div className="font-bold text-gray-900 dark:text-white truncate">{p.__displayName || p.name}</div>{p.sku && <div className="text-xs text-gray-400 font-mono">{p.sku}</div>}</div>
-                </div>
-                <button onClick={() => setDetailProduct(null)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-auto p-4 space-y-2 text-sm">
-                {([
-                  [t('label_category')||'Category',    p.category],
-                  [t('label_supplier')||'Supplier',    p.supplier],
-                  [t('label_unit')||'Unit',            p.unit],
-                  [t('label_barcode')||'Barcode',      p.barcode],
-                  [t('label_description')||'Description', p.description],
-                ] as Array<[string, string | number | undefined]>).map(([label, val]) => val ? (
-                  <div key={label} className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{label}</span><span className="text-sm text-gray-800 dark:text-gray-200">{String(val)}</span></div>
-                ) : null)}
-                <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_selling_price')||'Price'}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(p.selling_price_usd))}</span>{asNumber(p.selling_price_khr) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(p.selling_price_khr))}</span>}</div></div>
-                {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
-                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price')||'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(asNumber(p.special_price_usd || p.selling_price_usd || 0))}</span>{asNumber(p.special_price_khr || p.selling_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(p.special_price_khr || p.selling_price_khr || 0))}</span>}</div></div>
-                ) : null}
-                {promotion.active ? (
-                  <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'Discounts')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 && <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span>}</div></div>
-                ) : null}
-                <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock')||'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{stock} {p.unit}</span></div>
-                {groupProduct ? (
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                    <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{choiceLabel}</div>
-                    <div className="space-y-2">
-                      {variants.map((variant) => {
-                        const variantStock = getDisplayStock(variant)
-                        const variantInStockNow = variantStock > asNumber(variant.out_of_stock_threshold)
-                        const variantPromotion = calculateProductDiscount(variant, exchangeRate)
-                        return (
-                          <div key={variant.id} className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
-                            <div className="flex items-center gap-2">
-                              {variant.__variantLabel ? <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{variant.__variantLabel}</span> : null}
-                              <div className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-900 dark:text-white">{variant.name}</div>
-                            </div>
-                            <div {...getKhmerTextProps(variant.unit, 'mt-0.5 text-xs text-gray-500 dark:text-gray-400')}>{variantStock} {variant.unit}</div>
-                            <div className="mt-2 flex flex-wrap gap-1.5">
-                              <button className="btn-primary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'selling'); setDetailProduct(null) }}>
-                                {fmtUSD(variant.selling_price_usd || 0)}
-                              </button>
-                              {asNumber(variant.special_price_usd) > 0 || asNumber(variant.special_price_khr) > 0 ? (
-                                <button className="btn-secondary flex-1 text-xs" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'special'); setDetailProduct(null) }}>
-                                  {posCopy('Special', 'Special')} {fmtUSD(variant.special_price_usd || variant.selling_price_usd || 0)}
-                                </button>
-                              ) : null}
-                              {variantPromotion.active ? (
-                                <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!variantInStockNow} onClick={() => { addToCart(variant, 'promotion'); setDetailProduct(null) }}>
-                                  {variant.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(variantPromotion.applied_price_usd)}
-                                </button>
-                              ) : null}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-              {!groupProduct ? (
-                <div className="border-t border-gray-200 p-4 dark:border-gray-700">
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <button className="btn-primary flex-1" disabled={stock <= asNumber(p.out_of_stock_threshold)} onClick={() => { addToCart(p, 'selling'); setDetailProduct(null) }}>
-                      {stock <= asNumber(p.out_of_stock_threshold) ? t('out_of_stock') : `${posCopy('Regular', 'Regular')} ${fmtUSD(asNumber(p.selling_price_usd || 0))}`}
-                    </button>
-                    {promotion.active ? (
-                      <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={stock <= asNumber(p.out_of_stock_threshold)} onClick={() => { addToCart(p, 'promotion'); setDetailProduct(null) }}>
-                        {p.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
-                      </button>
-                    ) : null}
-                    {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
-                      <button className="btn-secondary flex-1" disabled={stock <= asNumber(p.out_of_stock_threshold)} onClick={() => { addToCart(p, 'special'); setDetailProduct(null) }}>
-                        {posCopy('Special', 'Special')} {fmtUSD(asNumber(p.special_price_usd || p.selling_price_usd || 0))}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        )
-      })()}
+      {detailProduct ? (
+        <Suspense fallback={null}>
+          <ProductDetailSheet
+            product={detailProduct}
+            exchangeRate={exchangeRate}
+            t={t}
+            fmtUSD={fmtUSD}
+            fmtKHR={fmtKHR}
+            asNumber={asNumber}
+            posCopy={posCopy}
+            getDisplayStock={getDisplayStock}
+            getPrimaryProductImage={getPrimaryProductImage}
+            getVariantChoices={getVariantChoices}
+            hasVariantChoices={hasVariantChoices}
+            onAddToCart={addToCart}
+            onClose={() => setDetailProduct(null)}
+            onOpenImageLightbox={openImageLightbox}
+          />
+        </Suspense>
+      ) : null}
 
       {/* Receipt overlay shown after each completed sale */}
       {/*   Displayed on top of the POS so other orders remain intact.   */}

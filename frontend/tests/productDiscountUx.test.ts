@@ -32,11 +32,12 @@ await runTest('products table separates product identity from operational detail
 
 await runTest('POS product cards expose discount badges before opening details', () => {
   const source = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  const detailSheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
   assert.match(source, /ProductDiscountBadge/)
   assert.match(source, /calculateProductDiscount\(product,\s*exchangeRate\)/)
   assert.match(source, /pagedProductCards\.map[\s\S]*<ProductDiscountBadge/)
-  assert.match(source, /variantPromotion\.active/)
-  assert.match(source, /addToCart\(variant,\s*'promotion'\)/)
+  assert.match(detailSheet, /variantPromotion\.active/)
+  assert.match(detailSheet, /closeAfterAdd\(variant,\s*'promotion'\)/)
 })
 
 await runTest('inventory keeps previous stats during partial refresh failures', () => {
