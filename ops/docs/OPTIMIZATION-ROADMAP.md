@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 858.
+- Latest completed implementation move in this roadmap: Move 860.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -14194,3 +14194,51 @@ Move 859 status:
   guardrail. The next measured startup target is shrinking real `catalog`,
   language, CSS, vendor, and remote tunnel costs now that secondary/social icon
   startup work is intent-loaded.
+
+Move 860 status:
+- Move 860 splits public portal API calls into a dedicated public-only
+  transport. `frontend/src/public-web-api.ts` now lazy-loads
+  `frontend/src/api/portalPublicTransport.ts`, which owns only customer-facing
+  catalog, portal config, membership, submission, and portal AI calls. The
+  public startup no longer pulls the shared admin `apiFetch`/route helper,
+  query helper, admin review transport, or HTTP state machinery.
+- Runtime proof: Docker image `business-os:v6.0.0-202606091250-move860` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `4c216e402a43c48c`, source hash `e907e23af14377c3`, and runtime revision
+  `move860-public-api-transport`.
+- Build proof: production output emits `app-portal-i7Pp78I2.js` at 2.57 kB /
+  1.00 kB gzip and `portal-admin-api-DNJ6zyZz.js` at 2.80 kB / 1.09 kB gzip.
+  The public `app-portal` chunk contains no `api-http-core`, no
+  `api-http-state`, and no `portal-admin-api`; admin catalog/editor routes keep
+  the full admin transport in their own dependency path.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T04-04-32-989Z.json` passed
+  with zero failures/errors. Public catalog measured 173 ms at 18 requests /
+  13 scripts; Dashboard 174 ms at 31 / 25; Products 272 ms at 38 / 30;
+  Inventory 296 ms at 40 / 33; POS 212 ms at 35 / 28; Returns 237 ms at
+  35 / 30.
+- Focused Playwright proof: local `/public` loaded in 962 ms, returned 200,
+  and rendered real catalog data with `5,539 result(s)`. Admin/public
+  Cloudflare `/public` URLs both returned 200 and rendered the same real
+  product catalog. All three startup traces excluded `api-http-core`,
+  `api-http-state`, `portal-admin-api`, `shared-icons`, and
+  `catalog-secondary-tabs`; pressing About loaded secondary tab and shared icon
+  chunks only on intent. The public Cloudflare tunnel remains slower than local
+  in this run (about 6.5 s admin domain and 11.6 s public domain), so the next
+  honest startup targets are CSS size, catalog chunk size, bootstrap payload
+  size, and map iframe lazy loading.
+- Verification proof: frontend performance guard, frontend typecheck,
+  frontend production build, full frontend utility suite, full backend utility
+  suite, generated reference refresh, performance scan, schema audit, Phase 29
+  audit, storage prune, Docker image build, Docker release update, health
+  check, route trace, focused local/cloudflare Playwright probes, and
+  `git diff --check` passed. Storage prune removed 3,158 bytes of stale
+  reports, one old Docker-release backup (5,359,087 bytes), and 2.348 GB of
+  Docker builder cache while preserving uploads, secrets, env files, Docker
+  volumes, newest backups, the latest R2 backup, active containers/images, and
+  protected rollback tags.
+- Current plan position after Move 860: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

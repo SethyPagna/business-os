@@ -528,10 +528,11 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
     if (normalized.endsWith('/src/api/systemRuntime.ts')) return 'app-system'
     if (normalized.endsWith('/src/api/browserDialogs.ts')) return 'browser-dialogs'
+    if (normalized.endsWith('/src/api/portalPublicTransport.ts')) return 'app-portal'
     if (
       normalized.endsWith('/src/api/portalTransport.ts')
       || normalized.endsWith('/src/api/portalHttp.ts')
-    ) return 'app-portal'
+    ) return 'portal-admin-api'
     if (normalized.endsWith('/src/app/pathRouting.ts')) return 'app-routing'
     if (normalized.endsWith('/src/api/localDb.ts')) return 'app-local-db'
     if (

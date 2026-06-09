@@ -1,4 +1,4 @@
-import type * as PortalTransport from './api/portalTransport.ts'
+import type * as PortalPublicTransport from './api/portalPublicTransport.ts'
 
 type PortalMethodName =
   | 'askPortalAi'
@@ -13,10 +13,10 @@ type PortalMethodName =
 type PublicPortalMethod = (...args: unknown[]) => Promise<unknown>
 type PublicPortalApi = Record<PortalMethodName, PublicPortalMethod>
 
-let portalTransportPromise: Promise<typeof PortalTransport> | null = null
+let portalTransportPromise: Promise<typeof PortalPublicTransport> | null = null
 
-function loadPortalTransport(): Promise<typeof PortalTransport> {
-  if (!portalTransportPromise) portalTransportPromise = import('./api/portalTransport.ts')
+function loadPortalTransport(): Promise<typeof PortalPublicTransport> {
+  if (!portalTransportPromise) portalTransportPromise = import('./api/portalPublicTransport.ts')
   return portalTransportPromise
 }
 

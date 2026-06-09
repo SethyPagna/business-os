@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 859, defer public catalog secondary/contact/social icon code until the secondary tabs are opened.
+- Latest completed move: Move 860, split the public portal API transport so shared admin HTTP/bootstrap code stays out of public startup.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `b2cb83f3fcf497c7`
+  `4c216e402a43c48c`
 - latest verified source hash from the most recent Docker-served live check:
   `e907e23af14377c3`
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T03-12-29-886Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T04-04-32-989Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,50 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 860 splits the public portal API transport away from the shared admin
+  HTTP client. `public-web-api.ts` now lazy-loads
+  `portalPublicTransport.ts`, a small public-only endpoint wrapper, so
+  `api-http-core`, `api-http-state`, `portal-admin-api`, `shared-icons`, and
+  `catalog-secondary-tabs` are all absent from first public startup.
+- Runtime proof: Docker image `business-os:v6.0.0-202606091250-move860` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `4c216e402a43c48c`, source hash `e907e23af14377c3`, and runtime revision
+  `move860-public-api-transport`.
+- Build proof: production output emits `app-portal-i7Pp78I2.js` at 2.57 kB /
+  1.00 kB gzip and `portal-admin-api-DNJ6zyZz.js` at 2.80 kB / 1.09 kB gzip.
+  The public `app-portal` chunk contains no `api-http-core`, `api-http-state`,
+  or `portal-admin-api` reference; admin/editor routes still own the full
+  transport as expected.
+- Live proof: local Playwright loaded `http://127.0.0.1:4000/public` in
+  962 ms and rendered real product data (`5,539 result(s)`). Cloudflare checks
+  for `https://admin.leangcosmetics.dpdns.org/public` and
+  `https://leangcosmetics.dpdns.org/public` both returned 200, rendered the
+  same real catalog data, and started without `api-http-core`,
+  `api-http-state`, `portal-admin-api`, `shared-icons`, or
+  `catalog-secondary-tabs`. Pressing About loaded the secondary tab and shared
+  icon chunks on intent.
+- Route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T04-04-32-989Z.json` passed
+  with zero failures/errors. Public catalog measured 173 ms at 18 requests /
+  13 scripts; Dashboard 174 ms; Products 272 ms; Inventory 296 ms; POS
+  212 ms; Returns 237 ms.
+- Verification proof: public loading guard, frontend typecheck, frontend
+  production build, full frontend utility suite, full backend utility suite,
+  generated reference refresh, performance scan, schema audit, Phase 29 audit,
+  Docker image build, Docker release update, health check, route trace, focused
+  local/cloudflare Playwright probes, storage prune, and `git diff --check`
+  passed. Storage prune removed one stale runtime report (3,158 bytes), one old
+  Docker-release backup (`20260609-105426`, 5,359,087 bytes), and 2.348 GB of
+  Docker builder cache while preserving uploads, secrets, volumes, newest
+  backups, latest R2 backup, active containers/images, and protected rollback
+  tags.
+- Current plan position after Move 860: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail. The next measured startup targets are the large public CSS,
+  catalog chunk, bootstrap payload, and Google Maps iframe path.
 
 - Move 859 defers the public catalog's secondary/contact/social icon payload.
   `CatalogPage` now passes contact/social metadata without Lucide component

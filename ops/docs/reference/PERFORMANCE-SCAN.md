@@ -79,26 +79,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
 | `frontend/dist/assets/index-CW_jNXiu.css` | 155.4 |
-| `frontend/dist/assets/catalog-CwBJaxV9.js` | 104.5 |
-| `frontend/dist/assets/Products-CCDrLG9E.js` | 85.9 |
-| `frontend/dist/assets/Inventory-D0XIKupC.js` | 83.3 |
-| `frontend/dist/assets/catalog-editor-BWHFyHr-.js` | 74.2 |
+| `frontend/dist/assets/catalog-DKjC55wY.js` | 104.5 |
+| `frontend/dist/assets/Products-CHDEouM3.js` | 85.9 |
+| `frontend/dist/assets/Inventory-oWPRqeNr.js` | 83.3 |
+| `frontend/dist/assets/catalog-editor-DDJPrFqI.js` | 74.2 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-BSAW_MCa.js` | 68.0 |
-| `frontend/dist/assets/POS-CeLI1pyc.js` | 65.0 |
-| `frontend/dist/assets/AdminRoot-CjCa4rmr.js` | 64.5 |
-| `frontend/dist/assets/Dashboard-B-zn-3TS.js` | 62.6 |
-| `frontend/dist/assets/Settings-CMJVKxhu.js` | 54.9 |
+| `frontend/dist/assets/BulkImportModal-DQkLLoRs.js` | 68.0 |
+| `frontend/dist/assets/POS-DZOo20Hx.js` | 65.0 |
+| `frontend/dist/assets/AdminRoot-D_gi37c2.js` | 64.6 |
+| `frontend/dist/assets/Dashboard-CSPQZs02.js` | 62.6 |
+| `frontend/dist/assets/Settings-CzTG-39S.js` | 54.9 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-BXzZrwqF.js` | 51.3 |
-| `frontend/dist/assets/dashboard-charts-BfPh1_IH.js` | 47.9 |
-| `frontend/dist/assets/user-profile-modal-8KrlpT6T.js` | 43.9 |
-| `frontend/dist/assets/ReceiptSettings-c1tCdZfP.js` | 40.3 |
+| `frontend/dist/assets/Backup-BMcp6wNy.js` | 51.3 |
+| `frontend/dist/assets/dashboard-charts-CWoibG2a.js` | 47.9 |
+| `frontend/dist/assets/user-profile-modal-D5yOnTAi.js` | 43.9 |
+| `frontend/dist/assets/ReceiptSettings-CCeWMtq6.js` | 40.3 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-D4IP1fft.js` | 37.2 |
-| `frontend/dist/assets/Sales-ZovAXkMd.js` | 36.7 |
-| `frontend/dist/assets/ProductForm-D_TsqA-W.js` | 35.8 |
-| `frontend/dist/assets/AuditLog-DMlZYQce.js` | 35.5 |
+| `frontend/dist/assets/catalog-secondary-tabs-DpH-WSB0.js` | 37.2 |
+| `frontend/dist/assets/Sales-DSvmWuSQ.js` | 36.7 |
+| `frontend/dist/assets/ProductForm-C-Mxal0-.js` | 35.8 |
+| `frontend/dist/assets/AuditLog-BxmebYQO.js` | 35.5 |
 
 ## 5. Notes
 
@@ -2240,4 +2240,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `release/business-os` kit after reference checks, removing 380,917,753 bytes
   and letting the Phase 29 generated-bulk audit pass below its 512 MB
   threshold.
+- Move 860 records public portal API transport splitting. `public-web-api.ts`
+  now lazy-loads `portalPublicTransport.ts`, a customer-facing transport that
+  does not import shared `apiFetch`, route helpers, the shared query helper, or
+  admin review transport. Production output emits `app-portal-i7Pp78I2.js` at
+  2.57 kB / 1.00 kB gzip and `portal-admin-api-DNJ6zyZz.js` at 2.80 kB /
+  1.09 kB gzip; `app-portal` contains no `api-http-core`, `api-http-state`, or
+  `portal-admin-api`. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T04-04-32-989Z.json` passed
+  with zero failures/errors; public catalog measured 173 ms at 18 requests /
+  13 scripts. Focused Playwright loaded local `/public` in 962 ms with real
+  `5,539 result(s)`, confirmed admin/public Cloudflare `/public` both returned
+  200 with real catalog data, and verified About-tab chunks still load only on
+  intent. Remaining honest public startup targets are `index-CW_jNXiu.css`
+  size, the roughly 106 kB catalog chunk, the roughly 49 kB decoded bootstrap
+  payload, and the Google Maps iframe path.
 <!-- phase29-manual-notes:end -->
