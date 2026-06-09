@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 874.
+- Latest completed implementation move in this roadmap: Move 875.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,37 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 875 current state:
+- Docker release `business-os:v6.0.0-202606101915-move875` is running healthy
+  with frontend hash `c3007a11e6a306b3` and source hash
+  `7ab08150d35639ab`.
+- Product catalog startup reads now have Postgres indexes matching the traced
+  hot route order/metadata paths: `idx_products_active_created_pg`,
+  `idx_products_active_name_id_pg`, `idx_products_active_brand_pg`,
+  `idx_products_active_category_pg`, and
+  `idx_products_active_supplier_pg`. Existing live databases create these
+  through runtime schema bootstrap; new installs get them from the canonical
+  Postgres schema.
+- The product catalog snapshot-version memo window increased from 1 second to
+  5 seconds. Product writes still invalidate the memo through the existing
+  product update broadcast path, while startup route bursts avoid repeated
+  MAX/version scans for the same catalog state.
+- Local Playwright proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-51-12-489Z.json`
+  measured Products 363 ms, Inventory 391 ms, POS 387 ms, and Branches 382 ms
+  with zero failed requests and zero console/page errors.
+- Public Cloudflare proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-54-13-632Z.json`
+  measured Products 2.099 s, Inventory 2.990 s, POS 2.750 s, and Branches
+  2.150 s with zero failed requests and zero console/page errors. Products is
+  below the 2.5 s target on the final clean public pass. POS and Inventory are
+  the next route-ready targets because their remaining delay is the
+  shared lazy/cache chunk plus bootstrap API path through Cloudflare.
+- Verification passed: `git diff --check`, backend route-contract and server
+  utility tests, schema audit, frontend typecheck, frontend JSX/source syntax
+  check, Docker release guardrail, Docker release/start health, local focused
+  route-load trace, and repeated public Cloudflare route-load traces.
 
 Move 867 current state:
 - Docker release `business-os:v6.0.0-202606101245-move867` is running healthy

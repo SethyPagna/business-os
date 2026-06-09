@@ -42,7 +42,7 @@ const {
 } = require('../productBatches.ts')
 
 const router = express.Router()
-const PRODUCT_CATALOG_SNAPSHOT_VERSION_MEMO_MS = 1000
+const PRODUCT_CATALOG_SNAPSHOT_VERSION_MEMO_MS = 5000
 let productCatalogSnapshotVersionMemo = { value: '', builtAt: 0 }
 
 function asyncRoute(handler) {

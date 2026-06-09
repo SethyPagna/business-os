@@ -4,22 +4,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 874 release `business-os:v6.0.0-202606101840-move874` is live with
+- Move 875 release `business-os:v6.0.0-202606101915-move875` is live with
   frontend hash `c3007a11e6a306b3`.
-- Startup optimization removed a duplicate Product filter metadata request and
-  changed selected online reads to try the live/same-origin server before
-  local fallback. The affected routes keep local fallback for failed reads and
-  deferred mirror/cache writes.
+- Backend startup optimization added Postgres indexes for Product/POS catalog
+  route hot paths: Product `created_desc`, POS `name_asc`, and cold
+  brand/category/supplier filter metadata scans. The product catalog
+  snapshot-version memo window also increased from 1 second to 5 seconds with
+  write invalidation preserved.
 - Final local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-075Z.json`:
-  Products 365 ms, Inventory 357 ms, POS 382 ms, Branches 292 ms, zero failed
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-51-12-489Z.json`:
+  Products 363 ms, Inventory 391 ms, POS 387 ms, Branches 382 ms, zero failed
   requests/errors.
 - Final public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-775Z.json`:
-  Products 5.481 s, Inventory 2.510 s, POS 3.197 s, Branches 2.726 s, zero
-  failed requests/errors. Remaining primary bottleneck is public
-  `/api/products/search` and `/api/products/bootstrap` variance, not a fake
-  loading delay.
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-54-13-632Z.json`:
+  Products 2.099 s, Inventory 2.990 s, POS 2.750 s, Branches 2.150 s, zero
+  failed requests/errors. Products is now under the 2.5 s target on the clean
+  public pass; POS and Inventory remain the next startup optimization targets.
 
 ## 1. Scope
 

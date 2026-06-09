@@ -8,9 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 874, remove duplicate Product filter startup
-  reads and keep online read routes on the live/same-origin path before local
-  fallback.
+- Latest completed move: Move 875, add product catalog read indexes and reduce
+  repeated product snapshot-version scans during startup route bursts.
 
 ## Current Baseline
 
@@ -100,6 +99,10 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-075Z.json`
 - latest Move 874 Cloudflare affected-route trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-775Z.json`
+- latest Move 875 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-51-12-489Z.json`
+- latest Move 875 final Cloudflare affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-54-13-632Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -122,6 +125,35 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 875 adds Postgres indexes for the traced Product/POS read hot paths:
+  `(is_active, created_at DESC, id DESC)` for Product `created_desc` startup
+  search, `(is_active, name, id)` for POS `name_asc` bootstrap, and
+  `(is_active, brand/category/supplier)` for cold filter metadata distinct
+  scans. The product catalog snapshot-version memo window moved from 1 second
+  to 5 seconds; writes still invalidate the memo through the existing product
+  broadcast path, while startup route bursts avoid repeating the same MAX scan.
+- Docker image `business-os:v6.0.0-202606101915-move875` is live with frontend
+  hash `c3007a11e6a306b3` and source hash `7ab08150d35639ab`. Schema audit
+  now reports 64 runtime indexes, including the new product indexes. Local
+  Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-51-12-489Z.json`
+  measured Products 363 ms, Inventory 391 ms, POS 387 ms, and Branches 382 ms
+  with zero failed requests and zero page/console errors.
+- Public Cloudflare was measured repeatedly after the release because the
+  first post-restart pass was tunnel-cold. The final clean public trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T23-54-13-632Z.json`
+  measured Products 2.099 s, Inventory 2.990 s, POS 2.750 s, and Branches
+  2.150 s with zero failed requests and zero page/console errors. Products is
+  now below the 2.5 s target in the clean public pass; POS and Inventory remain
+  the next honest targets because their route-ready timing is still gated by
+  shared lazy/cache chunks and bootstrap API timing through Cloudflare.
+- Current plan position after Move 875: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: reduce
+  POS and Inventory startup chunk/API timing without adding fake loading
+  delays or weakening failed-read recovery.
 
 - Move 874 removes a duplicate Products filter startup request by treating the
   filter metadata returned by `/api/products/search` as authoritative for the

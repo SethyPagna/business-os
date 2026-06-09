@@ -1864,6 +1864,41 @@ CREATE INDEX idx_products_active_stock_name_pg ON public.products USING btree (i
 
 
 --
+-- Name: idx_products_active_created_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_active_created_pg ON public.products USING btree (is_active, created_at DESC, id DESC);
+
+
+--
+-- Name: idx_products_active_name_id_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_active_name_id_pg ON public.products USING btree (is_active, name, id);
+
+
+--
+-- Name: idx_products_active_brand_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_active_brand_pg ON public.products USING btree (is_active, brand);
+
+
+--
+-- Name: idx_products_active_category_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_active_category_pg ON public.products USING btree (is_active, category);
+
+
+--
+-- Name: idx_products_active_supplier_pg; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_products_active_supplier_pg ON public.products USING btree (is_active, supplier);
+
+
+--
 -- Name: idx_products_barcode_pg; Type: INDEX; Schema: public; Owner: -
 --
 
