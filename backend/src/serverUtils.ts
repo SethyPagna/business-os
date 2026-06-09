@@ -274,7 +274,10 @@ function isCustomerPortalRoutePath(reqPath) {
 
 function setAdminSpaHtmlHeaders(req, res) {
   setHtmlNoCacheHeaders(res)
-  if (isCustomerPortalRoutePath(req?.path)) {
+  const path = String(req?.path || '').split('?')[0].toLowerCase()
+  const isLoginRoute = path === '/login' || path.startsWith('/login/')
+  const hasSessionCookie = /(?:^|;\s*)bos_session=/.test(String(req?.headers?.cookie || ''))
+  if (isCustomerPortalRoutePath(path) || isLoginRoute || !hasSessionCookie) {
     return
   }
   const bootstrapPreload = '</api/auth/bootstrap>; rel=preload; as=fetch; crossorigin=use-credentials'

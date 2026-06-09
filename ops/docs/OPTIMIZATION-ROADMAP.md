@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 870.
+- Latest completed implementation move in this roadmap: Move 871.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -143,6 +143,27 @@ Move 870 current state:
   2.938 s, Audit Log 1.826 s, Receipt Settings 2.264 s, and Loyalty Points
   2.069 s; Branches is the next variance candidate in longer multi-route
   runs.
+
+Move 871 current state:
+- Auth bootstrap preload is now owned by `setAdminSpaHtmlHeaders` and only
+  emitted for authenticated admin shells with a `bos_session` cookie. Public
+  portal shells and `/login` no longer trigger wasted/noisy
+  `/api/auth/bootstrap` preload requests.
+- Final release proof: Docker image
+  `business-os:v6.0.0-202606101430-move871`, frontend hash
+  `69e2e819e937bff6`, source hash `c923862d80ad7213`.
+- Header proof: authenticated `/branches` and `/audit-log` emit exactly one
+  credentialed auth-bootstrap preload; `/login` and `/public` emit zero.
+- Live Cloudflare Playwright trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-03-59-485Z.json`
+  reported zero failed requests and zero console/page errors. Timings:
+  Products 2.423 s, Inventory 2.944 s, POS 2.814 s, Files 3.224 s, Branches
+  2.552 s, Audit Log 3.322 s.
+- A Branches/Audit Log data API preload experiment was measured and rejected
+  because it increased ready time by competing with critical JS/auth requests.
+- Next executable slice: inspect and reduce the client dependency path that
+  pulls `product-read-api` and language chunks into Audit Log/Files first
+  paint, then re-run route-load traces before any broader rewiring.
 
 ## Phase 1: Safe Wins
 

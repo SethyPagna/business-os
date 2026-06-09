@@ -8,8 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 870, remove the Branches/Audit Log
-  late-chunk startup waterfalls from the Cloudflare admin path.
+- Latest completed move: Move 871, gate the admin auth bootstrap preload to
+  authenticated admin shells only, removing anonymous/login auth-bootstrap
+  noise while preserving the direct-visit speed hint.
 
 ## Current Baseline
 
@@ -19,7 +20,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `69e2e819e937bff6`
 - latest verified source hash from the most recent Docker-served live check:
-  `c30255d0546aaee2`
+  `c923862d80ad7213`
 
 Latest verified reports:
 
@@ -87,6 +88,8 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T19-35-23-028Z.json`
 - latest Move 870 comparison route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T19-35-23-925Z.json`
+- latest Move 871 Cloudflare route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-03-59-485Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -109,6 +112,28 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 871 makes the admin SPA auth bootstrap preload conditional on a real
+  `bos_session` cookie and skips the preload on `/login` and public portal
+  shells. Live header proof on the final Docker release showed `/branches`
+  and `/audit-log` each emit exactly one credentialed
+  `</api/auth/bootstrap>; rel=preload; as=fetch; crossorigin=use-credentials`
+  link, while `/login` and `/public` emit none. A route-specific data API
+  preload experiment for Branches/Audit Log was tested, measured slower, and
+  removed before commit. Docker image
+  `business-os:v6.0.0-202606101430-move871` is live with frontend hash
+  `69e2e819e937bff6` and source hash `c923862d80ad7213`. Cloudflare startup
+  warmup completed with zero failures and 299 HIT targets. Browser trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-03-59-485Z.json`
+  measured Products 2.423 s, Inventory 2.944 s, POS 2.814 s, Files 3.224 s,
+  Branches 2.552 s, and Audit Log 3.322 s with zero failed requests and zero
+  page/console errors. Next target: remove the remaining client-side late
+  dependency path that pulls `product-read-api`/language chunks into
+  non-product first paint and continue route-by-route sub-2.5 s work.
+- Current plan position after Move 871: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps.
 
 - Move 865 aligns the public portal server-side HTTP preload headers with the
   actual Vite startup graph and keeps the scanner bundle out of first load.

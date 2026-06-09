@@ -287,8 +287,8 @@ runTest('setHtmlNoCacheHeaders serves SPA shell in standards UTF-8 HTML mode', (
   assert.equal(headers.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
 })
 
-runTest('setAdminSpaHtmlHeaders preloads admin bootstrap and avoids noisy public API preloads', () => {
-  const collectHeaders = (path) => {
+runTest('setAdminSpaHtmlHeaders preloads admin bootstrap only for authenticated admin shells', () => {
+  const collectHeaders = (path, cookie = '') => {
     const headers = new Map()
     const res = {
       setHeader(name, value) {
@@ -303,14 +303,33 @@ runTest('setAdminSpaHtmlHeaders preloads admin bootstrap and avoids noisy public
         headers.set(key, existing ? `${existing}, ${value}` : String(value))
       },
     }
-    setAdminSpaHtmlHeaders({ path }, res)
+    setAdminSpaHtmlHeaders({ path, headers: { cookie } }, res)
     return headers
   }
 
-  const dashboardHeaders = collectHeaders('/dashboard')
+  const dashboardHeaders = collectHeaders('/dashboard', 'bos_session=test-session')
   assert.equal(dashboardHeaders.get('Content-Type'), 'text/html; charset=utf-8')
   assert.match(dashboardHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
   assert.match(dashboardHeaders.get('Link') || '', /crossorigin=use-credentials/)
+
+  const branchesHeaders = collectHeaders('/branches', 'bos_session=test-session')
+  assert.match(branchesHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
+  assert.doesNotMatch(branchesHeaders.get('Link') || '', /\/api\/branches/)
+  assert.doesNotMatch(branchesHeaders.get('Link') || '', /\/api\/branches\/summary/)
+  assert.equal([...(branchesHeaders.get('Link') || '').matchAll(/\/api\/auth\/bootstrap/g)].length, 1)
+
+  const auditHeaders = collectHeaders('/audit-log', 'bos_session=test-session')
+  assert.doesNotMatch(auditHeaders.get('Link') || '', /\/api\/system\/audit-logs/)
+
+  const anonymousHeaders = collectHeaders('/dashboard')
+  assert.equal(anonymousHeaders.get('Content-Type'), 'text/html; charset=utf-8')
+  assert.equal(anonymousHeaders.get('Link') || '', '')
+  assert.doesNotMatch(anonymousHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
+
+  const loginHeaders = collectHeaders('/login')
+  assert.equal(loginHeaders.get('Content-Type'), 'text/html; charset=utf-8')
+  assert.equal(loginHeaders.get('Link') || '', '')
+  assert.doesNotMatch(loginHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
 
   const publicHeaders = collectHeaders('/public')
   assert.equal(publicHeaders.get('Content-Type'), 'text/html; charset=utf-8')

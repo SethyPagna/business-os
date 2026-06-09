@@ -106,6 +106,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 871 gates the admin auth bootstrap preload to authenticated admin
+  shells only. This removes anonymous `/login` and public-shell
+  `/api/auth/bootstrap` preload noise while preserving one credentialed
+  preload for direct authenticated admin visits. Final Docker image
+  `business-os:v6.0.0-202606101430-move871` is live with frontend hash
+  `69e2e819e937bff6` and source hash `c923862d80ad7213`; startup warmup
+  completed with zero failures and 299 HIT targets. Header proof confirmed
+  `/branches` and `/audit-log` emit exactly one auth-bootstrap preload, while
+  `/login` and `/public` emit none. Cloudflare Playwright trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-03-59-485Z.json`
+  measured Products 2.423 s, Inventory 2.944 s, POS 2.814 s, Files 3.224 s,
+  Branches 2.552 s, and Audit Log 3.322 s with zero failures/errors. A
+  route-specific data API preload experiment was tested and removed because
+  it regressed route-ready timing; the next real bottleneck is the client
+  dependency path that still pulls `product-read-api`/language chunks into
+  some non-product first paints.
 - Move 870 removes the Branches and Audit Log late-chunk waterfalls found by
   the broad admin route sweep. The sweep measured Branches 6.197 s and Audit
   Log 6.012 s; warm focused repeats still measured Branches 3.047 s and Audit
