@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 855, split public catalog icons and fix exact catalog preload resolution.
+- Latest completed move: Move 856, keep catalog editor context and editor-only allocations out of public startup.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `95b3c1b169231b34`
+  `b2c34722d82f7abf`
 - latest verified source hash from the most recent Docker-served live check:
   `e907e23af14377c3`
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T00-09-50-358Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T00-50-18-388Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,43 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 856 moves the public catalog editor context provider into the lazy
+  `CatalogEditorSurface`, routes `CatalogPageContext` into the `catalog-editor`
+  chunk, and gates the large `editorSections`/`editorContextValue` allocation
+  behind `canEdit`. Public visitors now skip the editor-only provider module
+  and the per-render editor context object while staff editing keeps the same
+  lazy editor behavior.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  build`, Docker image build, Docker release update, route-load trace, local
+  and Cloudflare header checks, and focused local/public/admin Playwright
+  LCP/resource probes passed. Final frontend utility suite, `git diff --check`,
+  and storage prune also passed.
+- Live proof on Docker image `business-os:v6.0.0-202606090950-move856`,
+  frontend hash `b2c34722d82f7abf`, source hash `e907e23af14377c3`: route
+  trace `ops/runtime/reports/route-load-trace-2026-06-09T00-50-18-388Z.json`
+  passed with zero failures/errors. Public catalog measured 201 ms at 20
+  requests / 15 scripts; Dashboard 341 ms at 27 / 21; Products 299 ms at
+  33 / 25; Inventory 327 ms at 35 / 28; POS 261 ms at 29 / 22; Returns
+  273 ms at 30 / 25.
+- Focused Playwright proof: local `/public` rendered 20 real products with no
+  console/request failures and LCP 492 ms. Warm Cloudflare probes rendered the
+  same 20 products with no failures: `https://leangcosmetics.dpdns.org/public`
+  LCP 3.044 s and `https://admin.leangcosmetics.dpdns.org/public` LCP 2.816 s.
+  A cold public tunnel sample reached 34.928 s LCP before warming, so the next
+  bottleneck remains Cloudflare/tunnel variability plus the still-large
+  `catalog` and `app-shared` first-route scripts, not fake or missing data.
+- Cleanup proof: storage prune removed one stale runtime report
+  (`phase84-settings-save-rollback-check-latest.json`, 544 bytes), one old
+  Docker-release backup (`20260609-064844`, 5,356,502 bytes), and 2.387 GB of
+  Docker builder cache while keeping the newest local/R2 backups and protected
+  rollback images.
+- Current plan position after Move 856: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 855 splits public catalog Lucide icons out of the broader shared icon
   bundle and fixes exact SPA preload resolution for the new `catalog-icons`

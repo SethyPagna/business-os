@@ -11,7 +11,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { ProductImg } from '../products/shared/primitives'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
-import { useCatalogPageContext } from './CatalogPageContext'
+import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
@@ -212,7 +212,19 @@ type CatalogEditorSurfaceContext = {
   uploadPromoItemMedia: (id: string) => void
 }
 
-export default function CatalogEditorSurface() {
+type CatalogEditorSurfaceProps = {
+  contextValue: unknown
+}
+
+export default function CatalogEditorSurface({ contextValue }: CatalogEditorSurfaceProps) {
+  return (
+    <CatalogPageProvider value={contextValue}>
+      <CatalogEditorSurfaceContent />
+    </CatalogPageProvider>
+  )
+}
+
+function CatalogEditorSurfaceContent() {
   const {
     aboutBlocks,
     activeEditorSection,

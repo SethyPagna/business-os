@@ -51,7 +51,6 @@ import {
 } from './portalTranslationData.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
-import { CatalogPageProvider } from './CatalogPageContext'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
@@ -3308,91 +3307,91 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     )
   }
 
-  const editorSections: EditorSection[] = [
-    ['portal-section-branding', 'branding', copy('businessInfo', 'Business details')],
-    ['portal-section-media', 'media', copy('mediaSection', 'Media')],
-    ['portal-section-display', 'display', copy('display', 'Display settings')],
-    ['portal-section-theme', 'about', copy('about', 'About')],
-    ['portal-section-faq', 'faq', copy('faqSection', 'FAQ editor')],
-    ['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')],
-    ['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')],
-    ['portal-section-submissions', 'submissions', copy('portalSubmissionSettings', 'Submission settings')],
-  ]
-  const editorContextValue = {
-    aboutBlocks,
-    activeEditorSection,
-    addAboutBlock,
-    addAiFaqStarterSet,
-    addFaqItem,
-    addFaqStarterSet,
-    addPromoItem,
-    aiProviders,
-    cancelPortalMediaUpload,
-    clearPortalMediaTarget,
-    copy,
-    draftMapEmbedUrl,
-    dragAboutBlockId,
-    dragPromoItemId,
-    editorDirty,
-    editorDraft,
-    editorSaving,
-    editorSections,
-    faqItems,
-    formatDateTime,
-    generatedPublicUrl,
-    getAboutBlockLabel,
-    getMediaUploadState,
-    handleReviewSubmission,
-    moveAboutBlockBefore,
-    movePromoItemBefore,
-    navigateTo,
-    normalizeHexColor,
-    openFilePicker,
-    openPortalImage,
-    previewConfig,
-    previewSectionRef,
-    products,
-    promoItems,
-    publicPortalUrl,
-    recommendedProductIds,
-    recommendedProductOptions,
-    recommendedProductSearchInput,
-    recommendedProductSearchTerm,
-    removeAboutBlock,
-    removeFaqItem,
-    removePromoItem,
-    reviewItems,
-    reviewSavingId,
-    savePortalDraft,
-    selectedRecommendedProductOptions,
-    setActiveEditorSection,
-    setDraft,
-    setDragAboutBlockId,
-    setDragPromoItemId,
-    setRecommendedProductSearchInput,
-    setRecommendedProductSearchTerm,
-    setReviewItems,
-    toNumber,
-    toggleRecommendedProduct,
-    updateAboutBlock,
-    updateFaqItem,
-    updatePromoItem,
-    uploadAboutBlockMedia,
-    uploadDraftImage,
-    uploadPromoItemMedia,
-  }
+  const editorPanel = canEdit ? (() => {
+    const editorSections: EditorSection[] = [
+      ['portal-section-branding', 'branding', copy('businessInfo', 'Business details')],
+      ['portal-section-media', 'media', copy('mediaSection', 'Media')],
+      ['portal-section-display', 'display', copy('display', 'Display settings')],
+      ['portal-section-theme', 'about', copy('about', 'About')],
+      ['portal-section-faq', 'faq', copy('faqSection', 'FAQ editor')],
+      ['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')],
+      ['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')],
+      ['portal-section-submissions', 'submissions', copy('portalSubmissionSettings', 'Submission settings')],
+    ]
+    const editorContextValue = {
+      aboutBlocks,
+      activeEditorSection,
+      addAboutBlock,
+      addAiFaqStarterSet,
+      addFaqItem,
+      addFaqStarterSet,
+      addPromoItem,
+      aiProviders,
+      cancelPortalMediaUpload,
+      clearPortalMediaTarget,
+      copy,
+      draftMapEmbedUrl,
+      dragAboutBlockId,
+      dragPromoItemId,
+      editorDirty,
+      editorDraft,
+      editorSaving,
+      editorSections,
+      faqItems,
+      formatDateTime,
+      generatedPublicUrl,
+      getAboutBlockLabel,
+      getMediaUploadState,
+      handleReviewSubmission,
+      moveAboutBlockBefore,
+      movePromoItemBefore,
+      navigateTo,
+      normalizeHexColor,
+      openFilePicker,
+      openPortalImage,
+      previewConfig,
+      previewSectionRef,
+      products,
+      promoItems,
+      publicPortalUrl,
+      recommendedProductIds,
+      recommendedProductOptions,
+      recommendedProductSearchInput,
+      recommendedProductSearchTerm,
+      removeAboutBlock,
+      removeFaqItem,
+      removePromoItem,
+      reviewItems,
+      reviewSavingId,
+      savePortalDraft,
+      selectedRecommendedProductOptions,
+      setActiveEditorSection,
+      setDraft,
+      setDragAboutBlockId,
+      setDragPromoItemId,
+      setRecommendedProductSearchInput,
+      setRecommendedProductSearchTerm,
+      setReviewItems,
+      toNumber,
+      toggleRecommendedProduct,
+      updateAboutBlock,
+      updateFaqItem,
+      updatePromoItem,
+      uploadAboutBlockMedia,
+      uploadDraftImage,
+      uploadPromoItemMedia,
+    }
 
-  const editorPanel = canEdit ? (
-    <CatalogPageProvider value={editorContextValue}>
+    return (
       <Suspense fallback={(
         <SectionShell title={copy('studioTitle', 'Portal Editor')}>
           <div className="text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>
         </SectionShell>
       )}>
-        <CatalogEditorSurface />
+        <CatalogEditorSurface contextValue={editorContextValue} />
       </Suspense>
-    </CatalogPageProvider>
-  ) : null
+    )
+  })() : null
 
   if (loading && !publicView) {
     return (

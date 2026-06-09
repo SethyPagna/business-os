@@ -573,6 +573,7 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
       || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
+      || normalized.includes('/src/components/catalog/CatalogPageContext.tsx')
     ) {
       return 'catalog-editor'
     }

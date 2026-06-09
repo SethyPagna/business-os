@@ -14018,3 +14018,43 @@ Move 855 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 856 status:
+- Move 856 keeps the public catalog editor context out of customer startup.
+  `CatalogPage` no longer imports `CatalogPageProvider`; the lazy
+  `CatalogEditorSurface` owns the provider and receives the existing context
+  value as a prop. Vite now routes `CatalogPageContext.tsx` into the
+  `catalog-editor` chunk, and the public render path skips building
+  `editorSections` plus the large `editorContextValue` object unless `canEdit`
+  is true.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090950-move856` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `b2c34722d82f7abf` and source hash `e907e23af14377c3`.
+- Build/live proof: production build emits the public catalog shell at about
+  104.15 kB / 31.42 kB gzip, `catalog-editor-CjFxpcku.js` at 75.36 kB /
+  13.92 kB gzip, `catalog-products-CPHcrfir.js` at 20.53 kB / 5.91 kB gzip,
+  and `catalog-icons-CFqKE5MX.js` at 10.99 kB / 2.67 kB gzip. Local, public
+  Cloudflare, and admin Cloudflare `/public` headers still include
+  `app-portal`, `catalog`, `catalog-icons`, and `catalog-products`.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T00-50-18-388Z.json` passed
+  with zero failures/errors. Public catalog measured 201 ms at 20 requests /
+  15 scripts; Dashboard 341 ms at 27 / 21; Products 299 ms at 33 / 25;
+  Inventory 327 ms at 35 / 28; POS 261 ms at 29 / 22; Returns 273 ms at
+  30 / 25. Focused Playwright probes rendered 20 real products with no request
+  failures: local LCP 492 ms, warm public Cloudflare LCP 3.044 s, warm admin
+  public LCP 2.816 s. A cold public-domain tunnel sample reached 34.928 s
+  before warming, so the next target is separating app/tunnel variability from
+  remaining catalog/app-shared script weight.
+- Verification proof: frontend performance guard, frontend typecheck,
+  frontend production build, Docker image build, Docker release update, route
+  trace, local/Cloudflare header checks, focused Playwright probes, final
+  frontend utility suite, `git diff --check`, and storage prune passed. Storage
+  prune removed one stale runtime report, one old Docker-release backup
+  (`20260609-064844`, 5,356,502 bytes), and 2.387 GB of Docker builder cache
+  while preserving newest backups and protected rollback images.
+- Current plan position after Move 856: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

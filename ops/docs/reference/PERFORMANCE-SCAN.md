@@ -2376,3 +2376,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   Focused Playwright LCP/resource probes saw local public LCP at 232 ms and
   Cloudflare public LCP at 3.232 s, down from the prior 5.820 s probe that
   revealed the missing catalog shell preload.
+- Move 856 records the catalog editor-context split and edit-only allocation
+  gate. `CatalogPageContext.tsx` now follows the lazy `catalog-editor` chunk,
+  `CatalogPage.tsx` no longer imports the editor provider, and public renders
+  skip constructing `editorSections` plus the large `editorContextValue`
+  object unless `canEdit` is true. Docker image
+  `business-os:v6.0.0-202606090950-move856` served frontend hash
+  `b2c34722d82f7abf` and source hash `e907e23af14377c3`. Production build
+  proof kept the public catalog shell at about 104.15 kB / 31.42 kB gzip,
+  with the editor chunk at 75.36 kB / 13.92 kB gzip. Route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T00-50-18-388Z.json` passed
+  with zero failures/errors: public catalog 201 ms at 20 requests / 15
+  scripts, Dashboard 341 ms at 27 / 21, Products 299 ms at 33 / 25, Inventory
+  327 ms at 35 / 28, POS 261 ms at 29 / 22, and Returns 273 ms at 30 / 25.
+  Focused Playwright probes rendered 20 real products with no failures:
+  local LCP 492 ms, warm public Cloudflare LCP 3.044 s, and warm admin public
+  LCP 2.816 s. One cold public-domain tunnel sample hit 34.928 s LCP before
+  warming, so further work should separate Cloudflare/tunnel cold variability
+  from the remaining `catalog` and `app-shared` first-route JavaScript.
+  Storage prune removed one stale runtime report, one old Docker-release backup
+  (`20260609-064844`, 5,356,502 bytes), and 2.387 GB of Docker builder cache.
