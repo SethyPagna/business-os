@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 857.
+- Latest completed implementation move in this roadmap: Move 858.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -14098,3 +14098,44 @@ Move 857 status:
   guardrail. The next measured startup target is shrinking the still-large
   catalog, language, CSS, and vendor chunks while separating app work from
   Cloudflare Tunnel variability.
+
+Move 858 status:
+- Move 858 splits the public catalog onto a minimal
+  `PublicCatalogAppProvider` backed by the tiny `AppContextCore` hook context.
+  The public route no longer imports the full admin `AppContext` provider, so
+  auth/bootstrap side effects, websocket health wiring, full settings/theme
+  startup, and admin page state stay out of public catalog startup. Existing
+  admin imports remain compatible through `AppContext` re-exports.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090940-move858` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `5096e7c52a17b058`, source hash `e907e23af14377c3`, and runtime revision
+  `move858-public-provider-split`.
+- Build/live proof: production build now emits
+  `route-sync-utils-D2WGtH-x.js` at 4.49 kB / 1.91 kB gzip, down from the
+  previous roughly 48.7 kB helper chunk that pulled the full admin context into
+  public startup. The refreshed performance scan no longer lists
+  `route-sync-utils` in the top 25 built chunks.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T02-17-53-549Z.json` passed
+  with zero failures/errors. Public catalog measured 202 ms at 21 requests /
+  16 scripts; Dashboard 178 ms at 31 / 25; Products 289 ms at 38 / 30;
+  Inventory 278 ms at 40 / 33; POS 287 ms at 35 / 28; Returns 228 ms at
+  35 / 30. Focused Playwright rendered the real public catalog with search and
+  product content, no request/console failures, local LCP 196 ms, and warm
+  Cloudflare LCP around 2.13-2.14 s.
+- Verification proof: frontend performance guard, frontend typecheck,
+  frontend production build, full frontend utility suite, generated reference
+  refresh, performance scan, Docker image build, Docker release update, health
+  check, route trace, focused local/public/admin Playwright probes,
+  `git diff --check`, and storage prune passed. Storage prune removed two stale
+  runtime reports (1,563 bytes), one old Docker-release backup
+  (`20260609-080847`, 5,357,364 bytes), and 2.348 GB of Docker builder cache
+  while preserving uploads, secrets, volumes, newest backups, R2 latest backup,
+  and protected rollback images.
+- Current plan position after Move 858: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail. The next measured startup targets are shrinking `catalog`,
+  language, CSS, vendor, and remote tunnel costs without sacrificing real data
+  completeness.

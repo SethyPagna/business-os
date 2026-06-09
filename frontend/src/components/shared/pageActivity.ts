@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useApp } from '../../AppContext'
+import { useApp } from '../../app/AppContextCore.tsx'
 
 type PageActivityContext = {
   page?: string

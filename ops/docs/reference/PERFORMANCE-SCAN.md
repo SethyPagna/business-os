@@ -28,7 +28,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/utils-settings/Settings.tsx` | 88.1 | 1911 |
 | `backend/src/routes/inventory.ts` | 86.1 | 1952 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 80.1 | 1775 |
-| `frontend/src/AppContext.tsx` | 78.8 | 1984 |
+| `frontend/src/AppContext.tsx` | 76.0 | 1915 |
 | `frontend/src/App.tsx` | 74.4 | 1966 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 68.2 | 1326 |
@@ -53,10 +53,10 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/pos/POS.tsx` | 2362 | 114.8 |
 | `backend/src/routes/products.ts` | 2297 | 101.8 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2170 | 101.2 |
-| `frontend/src/AppContext.tsx` | 1984 | 78.8 |
 | `frontend/src/App.tsx` | 1966 | 74.4 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 1958 | 100.4 |
 | `backend/src/routes/inventory.ts` | 1952 | 86.1 |
+| `frontend/src/AppContext.tsx` | 1915 | 76.0 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1911 | 88.1 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1775 | 80.1 |
 | `backend/src/routes/system/index.ts` | 1674 | 65.6 |
@@ -79,26 +79,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
 | `frontend/dist/assets/index-CW_jNXiu.css` | 155.4 |
-| `frontend/dist/assets/catalog-28w5tPuI.js` | 101.8 |
-| `frontend/dist/assets/Products-JmNKoQRF.js` | 86.1 |
-| `frontend/dist/assets/Inventory-opzpIBZA.js` | 83.5 |
-| `frontend/dist/assets/catalog-editor-B7ygFH2j.js` | 74.2 |
+| `frontend/dist/assets/catalog-GJOSQ9P7.js` | 104.6 |
+| `frontend/dist/assets/Products-DSxPKrf4.js` | 86.0 |
+| `frontend/dist/assets/Inventory-NFh0vlJ0.js` | 83.4 |
+| `frontend/dist/assets/catalog-editor-ecvL01Dl.js` | 74.2 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-B-Dl_cSR.js` | 68.0 |
-| `frontend/dist/assets/POS-VkZZ8edD.js` | 65.0 |
-| `frontend/dist/assets/AdminRoot-D8-jhkQg.js` | 64.6 |
-| `frontend/dist/assets/Dashboard-CoCN9yHz.js` | 62.4 |
-| `frontend/dist/assets/Settings-D4zoBugz.js` | 54.9 |
+| `frontend/dist/assets/BulkImportModal-8UCoMSDB.js` | 68.0 |
+| `frontend/dist/assets/POS-DODskSH1.js` | 65.0 |
+| `frontend/dist/assets/AdminRoot-C003zuyi.js` | 64.6 |
+| `frontend/dist/assets/Dashboard-B4EOVSb-.js` | 62.6 |
+| `frontend/dist/assets/Settings-DwCFn2Ps.js` | 54.9 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-CjXJjRzY.js` | 51.3 |
-| `frontend/dist/assets/route-sync-utils-DrvXnkfG.js` | 47.6 |
-| `frontend/dist/assets/user-profile-modal-CwI9O46e.js` | 43.8 |
-| `frontend/dist/assets/ReceiptSettings-DJ1xSHtF.js` | 40.3 |
+| `frontend/dist/assets/Backup-Bd2RBkSj.js` | 51.3 |
+| `frontend/dist/assets/dashboard-charts-D7dz0iMB.js` | 47.9 |
+| `frontend/dist/assets/user-profile-modal-YH5rq8Ha.js` | 43.8 |
+| `frontend/dist/assets/ReceiptSettings-D1UjvyQo.js` | 40.3 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-C_PcDQx-.js` | 37.3 |
-| `frontend/dist/assets/Sales-D0DKlt2k.js` | 36.8 |
-| `frontend/dist/assets/ProductForm-DTy82HV7.js` | 35.8 |
-| `frontend/dist/assets/AuditLog-Dg_i3kVc.js` | 35.6 |
+| `frontend/dist/assets/catalog-secondary-tabs-BZuMjpwG.js` | 37.2 |
+| `frontend/dist/assets/Sales-Dn-ta0U8.js` | 36.8 |
+| `frontend/dist/assets/ProductForm-DH3DARG5.js` | 35.8 |
+| `frontend/dist/assets/AuditLog-rEQu7HOs.js` | 35.5 |
 
 ## 5. Notes
 
@@ -2209,4 +2209,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `app-shared` script fetches, 20 real products rendered, working search, and
   no relevant console/request failures. Local LCP was 248 ms; warm public and
   admin Cloudflare LCPs were 2.776 s and 2.784 s.
+- Move 858 records public catalog provider slimming. `PublicCatalogRoot` now
+  uses `PublicCatalogAppProvider`, while shared hooks and fallback context live
+  in `AppContextCore`; `CatalogPage` and `pageActivity` import that tiny core
+  instead of the full admin `AppContext`. Production output emits
+  `route-sync-utils-D2WGtH-x.js` at 4.49 KB / 1.91 KB gzip, down from the
+  previous roughly 48.7 KB helper chunk that pulled admin provider code into
+  public startup. Docker image `business-os:v6.0.0-202606090940-move858`
+  served frontend hash `5096e7c52a17b058`. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T02-17-53-549Z.json` passed
+  with zero failures/errors; public catalog measured 202 ms at 21 requests /
+  16 scripts, Dashboard 178 ms, Products 289 ms, Inventory 278 ms, POS
+  287 ms, and Returns 228 ms. Focused Playwright rendered the real public
+  catalog with search and product content, no request/console failures, local
+  LCP 196 ms, and warm public/admin Cloudflare LCPs around 2.13-2.14 s.
 <!-- phase29-manual-notes:end -->

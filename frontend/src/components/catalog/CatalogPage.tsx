@@ -14,7 +14,7 @@ import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import type { LucideIcon } from 'lucide-react'
 import { useIsPageActive } from '../shared/pageActivity'
-import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { isBrokenLocalizedString, useApp, useSync } from '../../app/AppContextCore.tsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,

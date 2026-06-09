@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 857, split public catalog shared utility controls out of the broad app-shared startup chunk.
+- Latest completed move: Move 858, split the public catalog onto a minimal app provider so it no longer imports the full admin AppContext during public startup.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `0067e4e403e00d73`
+  `5096e7c52a17b058`
 - latest verified source hash from the most recent Docker-served live check:
   `e907e23af14377c3`
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T01-30-15-433Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T02-17-53-549Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,46 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 858 gives the public catalog a minimal `PublicCatalogAppProvider` and
+  moves shared context hooks into `AppContextCore`. Public startup now keeps the
+  admin provider, auth/bootstrap side effects, websocket health wiring, and
+  full settings/theme provider code out of the public route while existing
+  admin imports continue through `AppContext` re-exports.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  build`, `npm.cmd --prefix frontend run test:utils`,
+  `node ops\scripts\docs\generate-doc-reference.ts`,
+  `node ops\scripts\docs\performance-scan.ts`, Docker image build, Docker
+  release update, health check, route-load trace, focused local/public/admin
+  Playwright browser probes, `git diff --check`, and storage prune passed.
+- Live proof on Docker image `business-os:v6.0.0-202606090940-move858`,
+  frontend hash `5096e7c52a17b058`, source hash `e907e23af14377c3`: route
+  trace `ops/runtime/reports/route-load-trace-2026-06-09T02-17-53-549Z.json`
+  passed with zero failures/errors. Public catalog measured 202 ms at 21
+  requests / 16 scripts; Dashboard 178 ms at 31 / 25; Products 289 ms at
+  38 / 30; Inventory 278 ms at 40 / 33; POS 287 ms at 35 / 28; Returns
+  228 ms at 35 / 30.
+- Build proof: `route-sync-utils-D2WGtH-x.js` is 4.49 kB / 1.91 kB gzip after
+  the provider split, down from the previous roughly 48.7 kB helper chunk that
+  pulled the full admin context into public startup. The generated performance
+  scan no longer lists `route-sync-utils` in the top 25 built chunks.
+- Focused Playwright proof: local `/public` rendered the real public catalog
+  with search and product content, no console/request failures, and LCP 196 ms.
+  Cold tunnel samples were clean but slower; warm public checks measured
+  `https://admin.leangcosmetics.dpdns.org/public` at 2.128 s LCP and
+  `https://leangcosmetics.dpdns.org/public` at 2.144 s LCP. Remaining remote
+  startup work is now the real `catalog`, language, CSS, vendor, and Cloudflare
+  path cost rather than the removed admin-provider import.
+- Cleanup proof: storage prune removed two stale runtime reports (1,563 bytes),
+  one old Docker-release backup (`20260609-080847`, 5,357,364 bytes), and
+  2.348 GB of Docker builder cache while keeping newest local/R2 backups,
+  uploads, secrets, volumes, and protected rollback images.
+- Current plan position after Move 858: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 857 gives the public catalog its own focused shared utility ownership:
   `AppSelect` now builds as `shared-select`, `LazyPortalMenu` as

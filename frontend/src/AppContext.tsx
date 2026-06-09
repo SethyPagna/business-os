@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, useMemo, useContext as _useContext, startTransition } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
 import { STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
@@ -19,6 +19,17 @@ import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
+import {
+  AppContext,
+  SyncContext,
+  isBrokenLocalizedString,
+  useApp,
+  useSync,
+  useT,
+  type AppContextCoreValue,
+} from './app/AppContextCore.tsx'
+
+export { isBrokenLocalizedString, useApp, useSync, useT }
 
 /**
  * Global application context.
@@ -304,8 +315,6 @@ const LANG_LOADERS: Record<string, () => Promise<TranslationPack>> = {
 }
 const loadedLangs: Record<string, TranslationPack> = { en: CORE_ENGLISH_PACK }
 const fullyLoadedLangs = new Set<string>()
-const AppContext = createContext<AppContextValue | null>(null)
-const SyncContext = createContext<SyncContextValue | null>(null)
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 const DEVICE_LOCAL_SETTING_KEYS = new Set([
   'theme',
@@ -483,18 +492,6 @@ function normalizeDateInput(value: unknown): Date | null {
   if (!value) return null
   const date = value instanceof Date ? value : new Date(String(value))
   return Number.isNaN(date?.getTime?.()) ? null : date
-}
-
-export function isBrokenLocalizedString(value: unknown): boolean {
-  if (typeof value !== 'string') return false
-  const trimmed = value.trim()
-  if (!trimmed) return false
-  if (trimmed.includes('\ufffd')) return true
-  if (/[\uE000-\uF8FF]/.test(trimmed)) return true
-  const mojibakeMarkers = ['\u00C3', '\u00C2', '\u00E2\u20AC', '\u00E1\u0178', '\u00E1\u017E', '\u00E0\u00B8', '\u00E1\u00BA', '\u00D0', '\u00D1', '\u00D8', '\u00D9']
-  if (mojibakeMarkers.some((marker) => trimmed.includes(marker))) return true
-  const questionMarks = (trimmed.match(/\?/g) || []).length
-  return questionMarks >= Math.max(3, Math.floor(trimmed.length * 0.18))
 }
 
 function buildRuntimeDescriptorFromBootstrap(payload: BootstrapPayload = {}) {
@@ -1908,76 +1905,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }
 
   return (
-    <AppContext.Provider value={appValue}>
+    <AppContext.Provider value={appValue as AppContextCoreValue}>
       <SyncContext.Provider value={syncValue}>
         {children}
       </SyncContext.Provider>
     </AppContext.Provider>
   )
-}
-
-const FALLBACK_SYNC_CONTEXT: SyncContextValue = {
-  syncConnected: false,
-  syncChannel: null,
-  syncServerUnreachable: false,
-}
-
-const FALLBACK_APP_CONTEXT: AppContextValue = {
-  user: null,
-  login: async () => ({ success: false, error: 'App context not ready' }),
-  logout: async () => {},
-  persistAuthenticatedUser: async () => {},
-  authReady: true,
-  page: 'dashboard',
-  setPage: () => {},
-  navigateTo: () => {},
-  settings: {},
-  loadSettings: async () => ({}),
-  saveSettings: async () => ({ success: false, error: 'Settings are not ready yet' }),
-  language: 'en',
-  theme: 'light',
-  t: (key: string) => key,
-  toggleTheme: () => {},
-  toggleLanguage: () => {},
-  notify: () => {},
-  notification: null,
-  writeConflict: null,
-  dismissWriteConflict: () => {},
-  reloadWriteConflict: async () => {},
-  hasPermission: () => false,
-  canAccessPage: () => true,
-  getPermissions: () => ({}),
-  formatPrice: (value: unknown) => String(value ?? ''),
-  fmtUSD: (value: unknown) => `$${normalizePriceValue(value || 0).toFixed(2)}`,
-  fmtKHR: (value: unknown) => `${normalizePriceValue(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KHR`,
-  usdSymbol: '$',
-  khrSymbol: 'KHR',
-  displayCurrency: 'usd',
-  exchangeRate: 4000,
-  usdToKhr: (value: unknown) => Number(value || 0) * 4000,
-  khrToUsd: (value: unknown) => Number(value || 0) / 4000,
-  displayTimezone: 'UTC',
-  deviceTimezone: 'UTC',
-  formatDateTime: (value: unknown) => String(value || ''),
-  syncUrl: '',
-  updateSyncUrl: () => {},
-  syncConnected: false,
-  syncChannel: null,
-  syncServerUnreachable: false,
-  canWriteToServer: false,
-  AccessDenied: () => null,
-}
-
-export const useApp = (): unknown => useContext(AppContext) || FALLBACK_APP_CONTEXT
-export const useSync = (): unknown => useContext(SyncContext) || FALLBACK_SYNC_CONTEXT
-
-// Helper hook: gather translations for a list of keys once per render
-export const useT = (keys: string[] = []): Record<string, string> => {
-  const ctx = _useContext(AppContext)
-  const tfn = ctx?.t || ((k: string) => k)
-  return useMemo(() => {
-    const map: Record<string, string> = {}
-    for (const k of keys) map[k] = tfn(k)
-    return map
-  }, [tfn, keys.join('|')])
 }

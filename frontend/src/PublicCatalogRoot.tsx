@@ -1,6 +1,6 @@
 import { Suspense, type ReactElement } from 'react'
 import CatalogPage from './components/catalog/CatalogPage.tsx'
-import { AppProvider } from './AppContext.tsx'
+import { PublicCatalogAppProvider } from './app/PublicCatalogAppProvider.tsx'
 import './public-web-api.ts'
 
 function PublicCatalogFallback(): ReactElement {
@@ -15,10 +15,10 @@ function PublicCatalogFallback(): ReactElement {
 
 export default function PublicCatalogRoot(): ReactElement {
   return (
-    <AppProvider publicMode>
+    <PublicCatalogAppProvider>
       <Suspense fallback={<PublicCatalogFallback />}>
         <CatalogPage publicView />
       </Suspense>
-    </AppProvider>
+    </PublicCatalogAppProvider>
   )
 }
