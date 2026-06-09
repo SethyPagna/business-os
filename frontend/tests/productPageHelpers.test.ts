@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import {
   normalizeBrandLookup,
   parseBrandColorMap,
-  waitForNextFrame,
 } from '../src/components/products/helpers/productPageHelpers.ts'
 
 assert.deepEqual(parseBrandColorMap(''), {}, 'empty brand color map should be safe')
@@ -16,7 +15,5 @@ assert.deepEqual(
 
 assert.equal(normalizeBrandLookup('  Leang   Cosmetics  '), 'leang cosmetics')
 assert.equal(normalizeBrandLookup(null), '')
-
-await waitForNextFrame()
 
 console.log('productPageHelpers tests passed')

@@ -106,6 +106,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 862 removes real double-load overhead from Products, Inventory, and
+  Audit Log. Products no longer waits an extra animation frame after fetched
+  rows arrive, and Inventory/Audit Log no longer hold fetched rows behind
+  requestAnimationFrame reveal overlays. The public catalog route now uses a
+  dedicated `PublicCatalogPage.tsx` controller and `catalog-public` chunk, with
+  `CatalogProductsSection` lazy-loaded behind the first shell. Local
+  route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T09-09-18-084Z.json` passed
+  with zero failures/errors and measured public catalog 155 ms, Dashboard
+  177 ms, Products 197 ms, Inventory 271 ms, POS 254 ms, Returns 202 ms,
+  Files 195 ms, and Audit Log 881 ms. Remote public Playwright rendered real
+  `5539 result(s)` data on both public hosts with zero horizontal overflow.
+  Remaining LCP/route latency risk is Cloudflare Tunnel/static script delivery:
+  hashed assets are correctly immutable and turn into Cloudflare HITs after
+  warmup, but tunnel logs still show intermittent edge connectivity failures.
 - Move 861 adds bounded public cache headers to customer-safe portal read
   endpoints instead of faking faster loading in the UI. `/api/portal/config`,
   `/api/portal/bootstrap`, `/api/portal/catalog/meta`,

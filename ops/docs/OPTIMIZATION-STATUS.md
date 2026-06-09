@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 861, add bounded public cache headers to read-only customer portal JSON so the edge can reuse real catalog data without caching writes or private flows.
+- Latest completed move: Move 862, remove post-fetch reveal delays on Products, Inventory, and Audit Log while splitting the public catalog shell away from the admin catalog route.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `e2852f3723ccda52`
+  `743d0df6bce2dd1a`
 - latest verified source hash from the most recent Docker-served live check:
   `d6cbc00cf6b3588c`
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T05-08-34-700Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T09-09-18-084Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -55,7 +55,7 @@ Latest verified reports:
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/docker-release/cloudflare-startup-warmup.json`
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T09-06-47-453Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -78,6 +78,57 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 862 removes the visible double-load penalty from route tables and keeps
+  public catalog startup lighter. `Products.tsx` no longer waits an extra
+  animation frame after product rows are fetched, and Inventory/Audit Log no
+  longer hold fetched rows behind two-frame reveal overlays. The public route
+  now uses `PublicCatalogPage.tsx`, so `/public` receives the small
+  `catalog-public` shell plus lazy `catalog-products` rather than the larger
+  admin catalog route.
+- Runtime proof: the running Docker app is healthy at
+  `http://127.0.0.1:4000/health` with frontend revision
+  `move862-double-load-reveal`, frontend hash `743d0df6bce2dd1a`, backend
+  runtime revision `move861-public-portal-cache`, and source hash
+  `d6cbc00cf6b3588c`. A full release image was not rebuilt in this slice; the
+  fresh frontend bundle was copied into `/app/frontend-dist` and the app
+  container was restarted to clear stale service-worker/chunk references.
+- Local live proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T09-09-18-084Z.json` passed
+  with zero failed requests and zero console/page errors across public catalog,
+  Dashboard, Products, Inventory, POS, Returns, Files, and Audit Log. Route
+  ready timings were: public catalog 155 ms, Dashboard 177 ms, Products
+  197 ms, Inventory 271 ms, POS 254 ms, Returns 202 ms, Files 195 ms, and
+  Audit Log 881 ms.
+- Remote proof: after restarting `business-os-cloudflared-1`,
+  `https://admin.leangcosmetics.dpdns.org/health` and
+  `https://leangcosmetics.dpdns.org/public` returned 200. Playwright verified
+  both public domains rendered real catalog data (`5539 result(s)`) on a
+  390 px mobile viewport with zero request/console failures and zero horizontal
+  overflow. The Cloudflare startup warmup report
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T09-06-47-453Z.json`
+  warmed 13 startup targets with zero failures; repeated hashed chunk requests
+  returned `Cache-Control: public, max-age=31536000, immutable` and
+  `cf-cache-status: HIT`.
+- Remaining performance finding: remote admin/public route timing is still
+  dominated by Cloudflare Tunnel and script delivery latency rather than API
+  waits or artificial UI delays. Local routes are sub-second, but remote warm
+  traces still measured roughly 3-6 seconds on several admin routes. Tunnel
+  logs showed repeated `network is unreachable` errors to Cloudflare edge
+  port 7844 plus Docker DNS hiccups, which explains the recurring 530/1033
+  failures seen outside the app.
+- Verification proof: frontend typecheck, frontend production build,
+  `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node frontend\tests\productPageHelpers.test.ts`, backend route contracts,
+  frontend utility suite, JSX/source check, `git diff --check`, local
+  route-load trace, Cloudflare warmup, and remote public Playwright probes
+  passed.
+- Current plan position after Move 862: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active for repeated schema,
+  cleanup, TypeScript, runtime, and performance sweeps. Next executable target:
+  reduce remote script request pressure and harden Cloudflare tunnel recovery
+  rather than adding more loading UI.
 
 - Move 861 adds bounded shared-cache headers to read-only public portal JSON.
   `backend/src/routes/portal.ts` now emits

@@ -54,7 +54,6 @@ import {
   normalizeBrandLookup,
   parseBrandColorMap,
   useDebouncedValue,
-  waitForNextFrame,
 } from './helpers/productPageHelpers.ts'
 import {
   buildProductLightboxGalleryInput,
@@ -636,10 +635,6 @@ export default function Products() {
 
         if (!result.hasAnySuccess) {
           throw new Error(getFirstLoaderError(result.errors, tr('products_load_failed', 'Failed to load products')))
-        }
-        if (firstLoad) {
-          await waitForNextFrame()
-          if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         }
         loadedOnceRef.current = true
         setLoadError(null)

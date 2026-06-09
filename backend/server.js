@@ -53,15 +53,20 @@ if (!startRequestedWorkerRole()) {
     const app = express();
     let databaseMaintenanceTimer = null;
     const uploadFallbackCache = new Map();
-    const LEGACY_FRONTEND_ASSET_PREFIXES = [
-        'index-',
-        'app-shared-',
-        'app-api-',
-        'POS-',
-        'Inventory-',
-        'catalog-',
-        'groupedRecords-',
-        'productGrouping-',
+const LEGACY_FRONTEND_ASSET_PREFIXES = [
+    'index-',
+    'app-shared-',
+    'app-api-',
+    'POS-',
+    'Inventory-',
+    'catalog-editor-',
+    'catalog-icons-',
+    'catalog-products-',
+    'catalog-public-',
+    'catalog-secondary-tabs-',
+    'catalog-',
+    'groupedRecords-',
+    'productGrouping-',
         'product-detail-',
         'Receipt-',
         'CustomersTab-',
@@ -84,11 +89,11 @@ if (!startRequestedWorkerRole()) {
         { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
         { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
         { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users'] },
-        { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog', 'catalog-icons', 'catalog-products'] },
-    ];
-    const FRONTEND_CHUNK_BASE_COLLISIONS = {
-        catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'secondary-tabs', 'ui'],
-    };
+    { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog-public', 'catalog-icons', 'catalog-products'] },
+];
+const FRONTEND_CHUNK_BASE_COLLISIONS = {
+    catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'],
+};
     const frontendModulePreloadCache = new Map();
     function listFrontendAssetFiles() {
         if (!FRONTEND_DIST_EXISTS)
@@ -113,15 +118,13 @@ if (!startRequestedWorkerRole()) {
             return directPath;
         if (!normalized.endsWith('.js'))
             return '';
-        for (const prefix of LEGACY_FRONTEND_ASSET_PREFIXES) {
-            if (!normalized.startsWith(prefix))
-                continue;
-            const fallbackName = listFrontendAssetFiles()
-                .filter((name) => name.startsWith(prefix) && name.endsWith('.js'))
-                .sort()
-                .at(-1);
-            if (!fallbackName)
-                return '';
+    const legacyPrefixes = [...LEGACY_FRONTEND_ASSET_PREFIXES].sort((a, b) => b.length - a.length);
+    for (const prefix of legacyPrefixes) {
+        if (!normalized.startsWith(prefix))
+            continue;
+        const fallbackName = resolveFrontendChunkAssetName(prefix.replace(/-$/, ''));
+        if (!fallbackName)
+            return '';
             const fallbackPath = path.join(assetsDir, fallbackName);
             return fs.existsSync(fallbackPath) ? fallbackPath : '';
         }

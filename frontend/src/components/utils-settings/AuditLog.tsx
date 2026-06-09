@@ -581,22 +581,8 @@ export default function AuditLog() {
 
   useEffect(() => {
     if (initialDesktopRevealReady || loading) return
-    if (!visibleLogs.length || error) {
-      setInitialDesktopRevealReady(true)
-      return
-    }
-    let cancelled = false
-    let nestedFrame: number | null = null
-    const frame = window.requestAnimationFrame(() => {
-      nestedFrame = window.requestAnimationFrame(() => {
-        if (!cancelled) setInitialDesktopRevealReady(true)
-      })
-    })
-    return () => {
-      cancelled = true
-      window.cancelAnimationFrame(frame)
-      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
-    }
+    setInitialDesktopRevealReady(true)
+    return undefined
   }, [error, initialDesktopRevealReady, loading, visibleLogs.length])
 
   useEffect(() => {
@@ -605,22 +591,8 @@ export default function AuditLog() {
       return
     }
     if (initialMobileRevealReady) return
-    if (!visibleLogs.length || error) {
-      setInitialMobileRevealReady(true)
-      return
-    }
-    let cancelled = false
-    let nestedFrame: number | null = null
-    const frame = window.requestAnimationFrame(() => {
-      nestedFrame = window.requestAnimationFrame(() => {
-        if (!cancelled) setInitialMobileRevealReady(true)
-      })
-    })
-    return () => {
-      cancelled = true
-      window.cancelAnimationFrame(frame)
-      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
-    }
+    setInitialMobileRevealReady(true)
+    return undefined
   }, [error, initialMobileRevealReady, loading, visibleLogs.length])
 
   useEffect(() => {

@@ -22,10 +22,3 @@ export function parseBrandColorMap(raw: unknown): Record<string, unknown> {
 export function normalizeBrandLookup(value: unknown): string {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 }
-
-export function waitForNextFrame(): Promise<void> {
-  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
-    return Promise.resolve()
-  }
-  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()))
-}

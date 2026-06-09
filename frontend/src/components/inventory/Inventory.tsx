@@ -1576,22 +1576,8 @@ export default function Inventory() {
 
   useEffect(() => {
     if (initialInventoryDesktopRevealReady || loading) return
-    if (!visibleInventoryProducts.length || loadError) {
-      setInitialInventoryDesktopRevealReady(true)
-      return
-    }
-    let cancelled = false
-    let nestedFrame: number | null = null
-    const frame = window.requestAnimationFrame(() => {
-      nestedFrame = window.requestAnimationFrame(() => {
-        if (!cancelled) setInitialInventoryDesktopRevealReady(true)
-      })
-    })
-    return () => {
-      cancelled = true
-      window.cancelAnimationFrame(frame)
-      if (nestedFrame !== null) window.cancelAnimationFrame(nestedFrame)
-    }
+    setInitialInventoryDesktopRevealReady(true)
+    return undefined
   }, [initialInventoryDesktopRevealReady, loadError, loading, visibleInventoryProducts.length, visibleInventoryProductsSignature])
 
   useEffect(() => {

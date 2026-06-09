@@ -89,6 +89,11 @@ const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'app-api-',
   'POS-',
   'Inventory-',
+  'catalog-editor-',
+  'catalog-icons-',
+  'catalog-products-',
+  'catalog-public-',
+  'catalog-secondary-tabs-',
   'catalog-',
   'groupedRecords-',
   'productGrouping-',
@@ -114,10 +119,10 @@ const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
   { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
   { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
   { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users'] },
-  { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog', 'catalog-icons', 'catalog-products'] },
+  { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog-public', 'catalog-icons', 'catalog-products'] },
 ]
 const FRONTEND_CHUNK_BASE_COLLISIONS = {
-  catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'secondary-tabs', 'ui'],
+  catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'],
 }
 const frontendModulePreloadCache = new Map()
 
@@ -140,12 +145,10 @@ function resolveFrontendAssetPath(assetName = '') {
   if (fs.existsSync(directPath)) return directPath
   if (!normalized.endsWith('.js')) return ''
 
-  for (const prefix of LEGACY_FRONTEND_ASSET_PREFIXES) {
+  const legacyPrefixes = [...LEGACY_FRONTEND_ASSET_PREFIXES].sort((a, b) => b.length - a.length)
+  for (const prefix of legacyPrefixes) {
     if (!normalized.startsWith(prefix)) continue
-    const fallbackName = listFrontendAssetFiles()
-      .filter((name) => name.startsWith(prefix) && name.endsWith('.js'))
-      .sort()
-      .at(-1)
+    const fallbackName = resolveFrontendChunkAssetName(prefix.replace(/-$/, ''))
     if (!fallbackName) return ''
     const fallbackPath = path.join(assetsDir, fallbackName)
     return fs.existsSync(fallbackPath) ? fallbackPath : ''
