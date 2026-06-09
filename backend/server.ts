@@ -82,6 +82,7 @@ const FRONTEND_DIST_EXISTS = fs.existsSync(FRONTEND_DIST)
 const app = express()
 let databaseMaintenanceTimer = null
 const uploadFallbackCache = new Map()
+const PUBLIC_PORTAL_BOOTSTRAP_SCRIPT_ID = 'business-os-portal-bootstrap'
 
 const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'index-',
@@ -119,10 +120,23 @@ const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
   { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
   { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
   { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users'] },
-  { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog-public', 'catalog-icons', 'catalog-products'] },
+  {
+    match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'),
+    chunks: [
+      'app-portal',
+      'app-shell',
+      'loader-utils',
+      'catalog-public-core',
+      'catalog-public-utils',
+      'catalog-public',
+      'catalog-icons',
+      'catalog-products',
+    ],
+  },
 ]
 const FRONTEND_CHUNK_BASE_COLLISIONS = {
   catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'],
+  'catalog-public': ['core', 'utils'],
 }
 const frontendModulePreloadCache = new Map()
 
@@ -215,9 +229,50 @@ function appendSpaModulePreloadHeaders(req, res) {
   }
 }
 
-function sendSpaIndex(req, res) {
+function isPublicSpaRoutePath(routePath = '/') {
+  const normalizedPath = String(routePath || '/').split('?')[0].toLowerCase() || '/'
+  return normalizedPath.startsWith('/public') || normalizedPath.startsWith('/customer-portal')
+}
+
+function escapeInlineJson(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+}
+
+function injectPublicPortalBootstrap(html, payload) {
+  if (!html || html.includes(`id="${PUBLIC_PORTAL_BOOTSTRAP_SCRIPT_ID}"`)) return html
+  const script = `<script type="application/json" id="${PUBLIC_PORTAL_BOOTSTRAP_SCRIPT_ID}">${escapeInlineJson(payload)}</script>`
+  return html.includes('</head>')
+    ? html.replace('</head>', `${script}\n </head>`)
+    : `${html}\n${script}`
+}
+
+async function sendPublicSpaIndex(_req, res) {
+  const htmlPath = path.join(FRONTEND_DIST, 'index.html')
+  const portalRouter = require('./src/routes/portal.ts')
+  const buildPayload = portalRouter?.buildPublicPortalBootstrapPayload
+  if (typeof buildPayload !== 'function') {
+    return res.sendFile(htmlPath)
+  }
+  const html = await fs.promises.readFile(htmlPath, 'utf8')
+  const payload = await buildPayload()
+  res.type('html')
+  return res.send(injectPublicPortalBootstrap(html, payload))
+}
+
+function sendSpaIndex(req, res, _next) {
   setAdminSpaHtmlHeaders(req, res)
   appendSpaModulePreloadHeaders(req, res)
+  if (isPublicSpaRoutePath(req?.path)) {
+    return sendPublicSpaIndex(req, res).catch((error) => {
+      console.warn(`[server] public portal inline bootstrap unavailable: ${error?.message || error}`)
+      return res.sendFile(path.join(FRONTEND_DIST, 'index.html'))
+    })
+  }
   return res.sendFile(path.join(FRONTEND_DIST, 'index.html'))
 }
 
@@ -415,7 +470,7 @@ function mountStaticAssets(target) {
       setNoStoreHeaders(res)
       return res.redirect(302, '/public')
     }
-    return sendSpaIndex(req, res)
+    return sendSpaIndex(req, res, next)
   })
 
   target.get('/assets/:assetName', (req, res, next) => {
@@ -528,7 +583,7 @@ function mountSpaFallback(target) {
 
   target.get('*', (req, res, next) => {
     if (!isSpaFallbackEligible(req.path)) return next()
-    return sendSpaIndex(req, res)
+    return sendSpaIndex(req, res, next)
   })
 }
 

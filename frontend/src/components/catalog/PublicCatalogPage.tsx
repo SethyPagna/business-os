@@ -27,12 +27,14 @@ const PUBLIC_PORTAL_MEMBERSHIP_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
+const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 const PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT = 80
 const SUBMISSION_MAX_SCREENSHOTS = 8
 const IMAGE_READ_CONCURRENCY = 2
 
 type LooseRecord = Record<string, any>
+type PortalBootstrapWindow = Window & { __businessOsPortalBootstrap?: LooseRecord | null }
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 type PortalInitialOption = ReturnType<typeof aggregateInitialOptions>[number]
 type CatalogOption = { id: string | number; name: string }
@@ -316,6 +318,27 @@ function writePortalCache(payload: LooseRecord): void {
   } catch (_) {}
 }
 
+function readEmbeddedPortalBootstrap(): LooseRecord | null {
+  if (typeof document === 'undefined') return null
+  const portalWindow = window as PortalBootstrapWindow
+  if (portalWindow.__businessOsPortalBootstrap) return portalWindow.__businessOsPortalBootstrap
+  const node = document.getElementById(PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID)
+  if (!node) return null
+  const raw = String(node.textContent || '').trim()
+  if (!raw || raw.length > 2_000_000) return null
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return null
+    portalWindow.__businessOsPortalBootstrap = {
+      cachedAt: Date.now(),
+      ...(parsed as LooseRecord),
+    }
+    return portalWindow.__businessOsPortalBootstrap
+  } catch (_) {
+    return null
+  }
+}
+
 function withAssetVersion(url: unknown, versionSeed: unknown): string {
   const raw = String(url || '').trim()
   if (!raw || raw.startsWith('blob:') || raw.startsWith('data:')) return raw
@@ -458,7 +481,8 @@ function normalizeBootstrapPayload(payload: unknown) {
 
 export default function PublicCatalogPage() {
   const { theme, toggleTheme, t } = useApp() as { theme?: string; toggleTheme: () => void; t?: (key: string) => string }
-  const cachedPortalRef = useRef(readPortalCache())
+  const embeddedPortalRef = useRef(readEmbeddedPortalBootstrap())
+  const cachedPortalRef = useRef(embeddedPortalRef.current || readPortalCache())
   const cachedPortal = cachedPortalRef.current
   const requestRef = useRef(0)
   const productRequestRef = useRef(0)
@@ -516,6 +540,12 @@ export default function PublicCatalogPage() {
   }
 
   useEffect(() => {
+    if (embeddedPortalRef.current) {
+      skipNextProductSearchRef.current = true
+      writePortalCache(embeddedPortalRef.current)
+      setLoading(false)
+      return undefined
+    }
     const requestId = beginTrackedRequest(requestRef)
     setLoading(products.length === 0)
     withLoaderTimeout(() => getCatalogApi().getPortalBootstrap?.() || Promise.reject(new Error('Portal bootstrap API unavailable')), 'Portal bootstrap', PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS)
@@ -555,6 +585,7 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     if (!config.showCatalog) return undefined
+    if (loading && products.length === 0) return undefined
     if (skipNextProductSearchRef.current) {
       skipNextProductSearchRef.current = false
       return undefined
@@ -607,7 +638,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, deferredSearch, productInitial, productPage, productPageSize, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, stockFilter])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -732,6 +763,7 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     if (!displayConfig.aiEnabled) return
+    if (activeTab !== 'ai') return
     getCatalogApi().getPortalAiStatus?.()
       ?.then((result) => {
         const data = (result || {}) as LooseRecord
@@ -739,7 +771,7 @@ export default function PublicCatalogPage() {
         setAssistantRequestPolicy((data.policy || data.requestPolicy || null) as LooseRecord | null)
       })
       .catch(() => {})
-  }, [displayConfig.aiEnabled])
+  }, [activeTab, displayConfig.aiEnabled])
 
   const catalogSection = displayConfig.showCatalog ? (
     <Suspense fallback={<div className="portal-empty-card">{copy('catalogLoading', 'Loading products...')}</div>}>

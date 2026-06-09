@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 863, add a guarded Cloudflare Tunnel watchdog that restarts stale cloudflared only when local health is good and remote tunnel probes fail.
+- Latest completed move: Move 864, remove the public catalog first-load bootstrap API round trip and fix public route preload ownership.
 
 ## Current Baseline
 
@@ -16,9 +16,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `743d0df6bce2dd1a`
+  `83b81a7b4acf802f`
 - latest verified source hash from the most recent Docker-served live check:
-  `d6cbc00cf6b3588c`
+  `a1f5cda48de87877`
 
 Latest verified reports:
 
@@ -53,9 +53,9 @@ Latest verified reports:
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T09-37-18-029Z.json`
 - latest focused public-host route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T15-59-39-413Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T09-37-19-741Z.json`
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T15-59-13-197Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -78,6 +78,36 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 864 removes the public catalog first-load bootstrap API round trip.
+  The backend now injects the public portal bootstrap payload directly into
+  `/public` and `/customer-portal` HTML, while the frontend reads and caches
+  that embedded payload across startup mounts. Product search also skips the
+  duplicate first fetch when bootstrap data already contains the first page.
+  The public catalog pagination control no longer imports the shared admin
+  `AppSelect`, and public price presentation now owns the small discount
+  calculation it needs instead of pulling the larger product shared chunk into
+  startup. `vite.config.ts` and the server preload map were updated so
+  `app-portal`, `app-shell`, `loader-utils`, `catalog-public-core`,
+  `catalog-public-utils`, `catalog-public`, `catalog-icons`, and
+  `catalog-products` are route-owned preloads. The preload resolver now guards
+  `catalog-public` against matching `catalog-public-core` or
+  `catalog-public-utils`, eliminating the duplicate utility preload and adding
+  the real public component chunk.
+- Runtime proof: Docker image `business-os:v6.0.0-202606091602-perf870`
+  is running with frontend hash `83b81a7b4acf802f` and source hash
+  `a1f5cda48de87877`. Local `/public` route-load trace passed at 259 ms
+  ready, 19 requests, 15 scripts, `api=0`, and zero failures/errors; local LCP
+  trace passed at 280 ms LCP, 144 ms FCP, 248 ms ready, and zero failures.
+  Public Cloudflare warmup passed 13 targets with 0 failures. Real public
+  `https://leangcosmetics.dpdns.org/public` route-load passed at 2.215 s ready,
+  19 requests, 15 scripts, `api=0`, and zero failures/errors; public LCP passed
+  at 2.324 s LCP, 1.300 s FCP, 2.300 s ready, 20 requests, and zero failures.
+  Current plan position after Move 864: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next honest target is
+  reducing Cloudflare first-document/static-asset latency and the remaining
+  first-viewport font cost without reintroducing fake loading delays.
 
 - Move 863 adds `ops/scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts`
   and the `npm --prefix ops run cloudflare:tunnel-watchdog` command. The

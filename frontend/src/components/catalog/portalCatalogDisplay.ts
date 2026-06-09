@@ -1,5 +1,3 @@
-import { calculateProductDiscount } from '../../utils/pricing.ts'
-
 type PortalProduct = Record<string, unknown>
 
 interface PortalDisplayConfig {
@@ -23,6 +21,72 @@ interface PortalPromotionDetails {
 
 type PortalCopy = (key: string, fallback: string) => string
 type PortalPriceFormatter = (usd: unknown, khr: unknown, config: PortalDisplayConfig) => string
+
+function toFiniteNumber(value: unknown, fallback = 0): number {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : fallback
+}
+
+function normalizePriceValue(value: unknown, fallback = 0): number {
+  const numberValue = toFiniteNumber(value, fallback)
+  const rounded = Math.round((numberValue + Number.EPSILON) * 100) / 100
+  return Object.is(rounded, -0) ? 0 : rounded
+}
+
+function normalizeDiscountPercent(value: unknown): number {
+  return Math.min(100, Math.max(0, normalizePriceValue(value, 0)))
+}
+
+function isPortalDiscountActive(product: PortalProduct = {}): boolean {
+  if (!product.discount_enabled) return false
+  const type = String(product.discount_type || '').toLowerCase() === 'fixed' ? 'fixed' : 'percent'
+  if (type === 'percent' && normalizeDiscountPercent(product.discount_percent) <= 0) return false
+  if (type === 'fixed' && normalizePriceValue(product.discount_amount_usd || 0) <= 0 && normalizePriceValue(product.discount_amount_khr || 0) <= 0) return false
+  const nowMs = Date.now()
+  const starts = String(product.discount_starts_at || '').trim()
+  const ends = String(product.discount_ends_at || '').trim()
+  if (starts && !Number.isNaN(new Date(starts).getTime()) && new Date(starts).getTime() > nowMs) return false
+  if (ends && !Number.isNaN(new Date(ends).getTime()) && new Date(ends).getTime() < nowMs) return false
+  return true
+}
+
+function calculatePortalDiscount(product: PortalProduct = {}, exchangeRate = 4100) {
+  const sellingUsd = normalizePriceValue(product.selling_price_usd || 0)
+  const sellingKhr = normalizePriceValue(product.selling_price_khr || (sellingUsd * exchangeRate))
+  if (!isPortalDiscountActive(product)) {
+    return {
+      active: false,
+      applied_price_usd: sellingUsd,
+      applied_price_khr: sellingKhr,
+      discount_amount_usd: 0,
+      discount_amount_khr: 0,
+      percent_off: 0,
+    }
+  }
+  const type = String(product.discount_type || '').toLowerCase() === 'fixed' ? 'fixed' : 'percent'
+  let discountUsd = 0
+  let discountKhr = 0
+  let percentOff = 0
+  if (type === 'percent') {
+    percentOff = normalizeDiscountPercent(product.discount_percent)
+    discountUsd = normalizePriceValue(sellingUsd * (percentOff / 100))
+    discountKhr = normalizePriceValue(sellingKhr * (percentOff / 100))
+  } else {
+    discountUsd = normalizePriceValue(product.discount_amount_usd || 0)
+    discountKhr = normalizePriceValue(product.discount_amount_khr || (discountUsd * exchangeRate))
+    percentOff = sellingUsd > 0 ? Math.round((Math.min(discountUsd, sellingUsd) / sellingUsd) * 100) : 0
+  }
+  discountUsd = Math.min(discountUsd, sellingUsd)
+  discountKhr = Math.min(discountKhr, sellingKhr)
+  return {
+    active: true,
+    applied_price_usd: normalizePriceValue(Math.max(0, sellingUsd - discountUsd)),
+    applied_price_khr: normalizePriceValue(Math.max(0, sellingKhr - discountKhr)),
+    discount_amount_usd: discountUsd,
+    discount_amount_khr: discountKhr,
+    percent_off: Math.max(0, percentOff),
+  }
+}
 
 export function normalizeRecommendedProductIds(value: unknown): number[] {
   const source = Array.isArray(value)
@@ -76,7 +140,7 @@ export function productMatchesPortalBranches(product: PortalProduct = {}, branch
 }
 
 export function getPortalPromotionDetails(product: PortalProduct = {}): PortalPromotionDetails {
-  const promotion = calculateProductDiscount(product)
+  const promotion = calculatePortalDiscount(product)
   const active = promotion.active
   return {
     active,
@@ -94,7 +158,7 @@ export function buildPortalPricePresentation(
   formatPortalPrice: PortalPriceFormatter,
 ) {
   const promotion = getPortalPromotionDetails(product)
-  const discounted = calculateProductDiscount(product)
+  const discounted = calculatePortalDiscount(product)
   const activeUsd = promotion.active ? discounted.applied_price_usd : Number(product?.selling_price_usd || 0)
   const activeKhr = promotion.active ? discounted.applied_price_khr : Number(product?.selling_price_khr || 0)
   return {

@@ -2294,4 +2294,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   intent. Remaining honest public startup targets are `index-CW_jNXiu.css`
   size, the roughly 106 kB catalog chunk, the roughly 49 kB decoded bootstrap
   payload, and the Google Maps iframe path.
+- Move 864 records public catalog first-load bootstrap embedding and preload
+  correction. The backend injects the public portal bootstrap payload into
+  `/public` and `/customer-portal` HTML; `PublicCatalogPage` reads that payload
+  into a reusable window cache instead of spending the first render on
+  `/api/portal/bootstrap`. The first product-search effect now skips when the
+  embedded bootstrap already has the first page. The public catalog pagination
+  control uses a local compact select, and public price display owns its small
+  discount calculation so startup no longer needs the shared admin select or
+  product shared chunk. The server preload resolver now treats
+  `catalog-public` separately from `catalog-public-core` and
+  `catalog-public-utils`, so the route preloads the real public component chunk
+  instead of the utility chunk twice. Docker image
+  `business-os:v6.0.0-202606091602-perf870` served frontend hash
+  `83b81a7b4acf802f`. Local Playwright route-load passed at 259 ms ready,
+  19 requests, 15 scripts, `api=0`, and zero failures/errors; local LCP passed
+  at 280 ms. Public Cloudflare warmup passed 13 targets with 0 failures. Real
+  public Cloudflare route-load passed at 2.215 s ready with `api=0`; public LCP
+  passed at 2.324 s, below the 2.5 s target.
 <!-- phase29-manual-notes:end -->

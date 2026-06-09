@@ -153,6 +153,10 @@ const routePreloadChunkNames = {
   ],
   public: [
     'PublicCatalogRoot',
+    'app-shell',
+    'loader-utils',
+    'catalog-public-core',
+    'catalog-public-utils',
     'catalog-public',
     'catalog-icons',
     'catalog-products',
@@ -420,8 +424,11 @@ const publicCatalogIconNames = new Set([
   'flame',
   'globe',
   'help-circle',
+  'mail',
+  'map-pin',
   'medal',
   'moon',
+  'phone',
   'search',
   'shopping-bag',
   'sparkles',
@@ -513,7 +520,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
     if (normalized.endsWith('/src/utils/searchTerms.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/recordFilters.ts')) return 'route-sync-utils'
-    if (normalized.endsWith('/src/utils/loaders.ts')) return 'route-sync-utils'
+    if (normalized.endsWith('/src/utils/loaders.ts')) return 'loader-utils'
     if (normalized.endsWith('/src/utils/groupedRecords.ts')) return 'shared-ui'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
@@ -621,13 +628,17 @@ function manualChunks(id: string): string | undefined {
       return 'catalog-editor'
     }
     if (
-      normalized.includes('/src/components/catalog/PublicCatalogPage.tsx')
-      || normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')
-      || normalized.includes('/src/components/catalog/catalogImages.tsx')
+      normalized.includes('/src/components/catalog/catalogImages.tsx')
       || normalized.includes('/src/components/catalog/catalogUi.tsx')
       || normalized.includes('/src/components/catalog/catalogAssetUrls.ts')
       || normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+    ) {
+      return 'catalog-public-core'
+    }
+    if (
+      normalized.includes('/src/components/catalog/PublicCatalogPage.tsx')
+      || normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')
     ) {
       return 'catalog-public'
     }
@@ -640,8 +651,8 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {
       return 'catalog-secondary-tabs'
     }
-    if (normalized.includes('/src/utils/initials.ts')) return 'route-sync-utils'
-    if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'route-sync-utils'
+    if (normalized.includes('/src/utils/initials.ts')) return 'catalog-public-utils'
+    if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'catalog-public-utils'
     if (normalized.endsWith('/src/utils/publicAssetUrls.ts')) {
       return 'app-shared'
     }
@@ -679,7 +690,7 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-lazy-portal-menu'
-    if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'
+    if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'app-shell'
     if (normalized.includes('/src/components/shared/PortalMenu.tsx')) return 'shared-portal-menu'
     if (normalized.includes('/src/components/files/FilePickerModal')) {
       return 'file-picker-modal'

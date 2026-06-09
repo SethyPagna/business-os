@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import AppSelect from '../shared/AppSelect'
 
 const CATALOG_PAGE_SIZE_OPTIONS = [20, 50, 100]
 
@@ -18,6 +17,12 @@ type CatalogPaginationControlsProps = {
   className?: string
 }
 
+type CatalogPageSizeSelectProps = {
+  ariaLabel: string
+  onChange?: (value: number) => void
+  value: number
+}
+
 function clampCatalogPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
   const safePageSize = Math.max(1, Number(pageSize || CATALOG_PAGE_SIZE_OPTIONS[0]))
   const totalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalItems || 0)) / safePageSize))
@@ -30,6 +35,46 @@ export function paginateCatalogItems<T>(items: readonly T[] = [], page: NumericI
   const safePage = clampCatalogPage(page, list.length, safePageSize)
   const start = (safePage - 1) * safePageSize
   return list.slice(start, start + safePageSize)
+}
+
+function CatalogPageSizeSelect({ ariaLabel, onChange, value }: CatalogPageSizeSelectProps) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="relative h-8 min-w-0">
+      <button
+        type="button"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        className="inline-flex h-8 w-full min-w-0 items-center justify-between rounded-full border border-slate-200 bg-white px-3 pr-2 text-xs font-semibold text-slate-700 shadow-none outline-none transition hover:bg-slate-50 focus:border-blue-300 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:hover:bg-slate-800"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{value}</span>
+        <span aria-hidden="true" className="text-[10px] text-slate-400">v</span>
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-[calc(100%+0.25rem)] z-40 min-w-[4rem] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 text-xs font-semibold text-slate-700 shadow-lg dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100">
+          {CATALOG_PAGE_SIZE_OPTIONS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={`block w-full rounded-xl px-3 py-2 text-left transition ${
+                option === value
+                  ? 'bg-blue-600 text-white'
+                  : 'hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+              onClick={() => {
+                onChange?.(option)
+                setOpen(false)
+              }}
+            >
+              {option}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
 }
 
 export default function CatalogPaginationControls({
@@ -53,7 +98,6 @@ export default function CatalogPaginationControls({
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
   const [pageDraft, setPageDraft] = useState(String(safePage))
-  const pageSizeSelectOptions = CATALOG_PAGE_SIZE_OPTIONS.map((option) => ({ value: option, label: option }))
 
   useEffect(() => {
     setPageDraft(String(safePage))
@@ -90,15 +134,10 @@ export default function CatalogPaginationControls({
           <span className="sm:hidden">{start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}</span>
           <span className="hidden sm:inline">{showingLabel} {start.toLocaleString()}-{end.toLocaleString()} {ofLabel} {total.toLocaleString()} {label}</span>
         </span>
-        <AppSelect
+        <CatalogPageSizeSelect
           value={safePageSize}
-          options={pageSizeSelectOptions}
-          onChange={(nextValue) => onPageSizeChange?.(Number(nextValue))}
+          onChange={(nextValue) => onPageSizeChange?.(nextValue)}
           ariaLabel={perPageLabel}
-          className="h-8 w-full min-w-0"
-          buttonClassName="h-8 w-full rounded-full px-3 py-0 pr-2 text-xs font-semibold shadow-none"
-          menuClassName="min-w-[4rem]"
-          optionClassName="text-xs"
         />
         <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
           <button

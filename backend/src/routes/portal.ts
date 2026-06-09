@@ -908,6 +908,17 @@ function getCachedPortalProducts(config) {
   return getOrSetJson('portal:products', ttl, () => getPortalProducts(config))
 }
 
+async function buildPublicPortalBootstrapPayload() {
+  const config = await getCachedPortalConfig()
+  const catalog = getPortalCatalogProductPage(config, { page: 1, pageSize: 20 })
+  return {
+    config,
+    meta: await getCachedPortalMeta(),
+    catalog,
+    products: catalog.items,
+  }
+}
+
 function getPortalCatalogMeta() {
   const categories = db.prepare(`
     SELECT id, name
@@ -1042,15 +1053,10 @@ router.get('/config', asyncRoute(async (_req, res) => {
 }))
 
 router.get('/bootstrap', asyncRoute(async (_req, res) => {
-  const config = await getCachedPortalConfig()
-  const catalog = getPortalCatalogProductPage(config, { page: 1, pageSize: 20 })
+  const payload = await buildPublicPortalBootstrapPayload()
+  const config = payload.config || {}
   setPublicPortalCacheHeaders(res, config?.refreshSeconds || 20)
-  res.json({
-    config,
-    meta: await getCachedPortalMeta(),
-    catalog,
-    products: catalog.items,
-  })
+  res.json(payload)
 }))
 
 router.get('/catalog/meta', asyncRoute(async (_req, res) => {
@@ -1425,3 +1431,4 @@ router.patch('/submissions/:id/review', authToken, requirePermission('settings')
 })
 
 module.exports = router
+module.exports.buildPublicPortalBootstrapPayload = buildPublicPortalBootstrapPayload
