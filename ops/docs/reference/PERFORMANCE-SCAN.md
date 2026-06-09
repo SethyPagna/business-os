@@ -106,6 +106,27 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 870 removes the Branches and Audit Log late-chunk waterfalls found by
+  the broad admin route sweep. The sweep measured Branches 6.197 s and Audit
+  Log 6.012 s; warm focused repeats still measured Branches 3.047 s and Audit
+  Log 3.925 s. Branches now preloads `route-sync-utils`,
+  `settings-refresh`, `shared-ui`, `shared-lazy-portal-menu`, `app-shared`,
+  and `product-shared` alongside its branch/product/action-history chunks.
+  Audit Log now preloads `audit-log-api`, `refresh-cw`, `monitor-smartphone`,
+  `route-sync-utils`, `settings-refresh`, `shared-ui`,
+  `shared-lazy-portal-menu`, `app-shared`, `product-shared`, and `lang-en`.
+  Cloudflare startup warmup now includes `/audit-log` and those dependency
+  names in the bounded graph filter. Docker image
+  `business-os:v6.0.0-202606101345-move870` is live with frontend hash
+  `69e2e819e937bff6` and source hash `c30255d0546aaee2`. Startup warmup
+  completed with zero failures, 298 HIT, and 1 MISS target. Cloudflare
+  Playwright route-load proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-35-23-028Z.json`
+  measured Branches 1.971 s and Audit Log 2.315 s with zero failures/errors.
+  Comparison trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-35-23-925Z.json`
+  measured Dashboard 2.358 s, Branches 2.938 s, Audit Log 1.826 s,
+  Receipt Settings 2.264 s, and Loyalty Points 2.069 s.
 - Move 869 removes the Users late-chunk waterfall found after the Library
   fix. The previous comparison trace measured Users at 3.739 s ready because
   `user-admin-api`, `user-read-api`, `user-permission-definitions`,

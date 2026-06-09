@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 869, remove the Users late-chunk startup
-  waterfall from the Cloudflare admin path.
+- Latest completed move: Move 870, remove the Branches/Audit Log
+  late-chunk startup waterfalls from the Cloudflare admin path.
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `69e2e819e937bff6`
 - latest verified source hash from the most recent Docker-served live check:
-  `0eeb7ba4c6f551d5`
+  `c30255d0546aaee2`
 
 Latest verified reports:
 
@@ -83,6 +83,10 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T19-23-22-588Z.json`
 - latest Move 869 Users/Audit Log comparison route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T19-24-07-717Z.json`
+- latest Move 870 focused Branches/Audit Log route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-35-23-028Z.json`
+- latest Move 870 comparison route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-35-23-925Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -247,6 +251,34 @@ Latest cleanup run:
   R2/access follow-up open; Phase 29 remains active. Next target is a broader
   admin-shell/tunnel variance pass, then any remaining route outliers above
   the 2.5 s target.
+- Move 870 fixes the next measured route-owned startup waterfalls. Before the
+  change, the broad live sweep measured Branches at 6.197 s and Audit Log at
+  6.012 s. Warm repeat samples still showed Branches at 3.047 s and Audit Log
+  at 3.925 s because route-needed helper chunks were discovered after the
+  route chunks. Branches now preloads `route-sync-utils`, `settings-refresh`,
+  `shared-ui`, `shared-lazy-portal-menu`, `app-shared`, and `product-shared`
+  with its existing branch/product/action-history dependencies. Audit Log now
+  preloads `audit-log-api`, `refresh-cw`, `monitor-smartphone`,
+  `route-sync-utils`, `settings-refresh`, `shared-ui`,
+  `shared-lazy-portal-menu`, `app-shared`, `product-shared`, and `lang-en`.
+  The startup warmer now includes `/audit-log` and the matching dependency
+  names in its bounded graph filter.
+- Runtime proof: Docker image `business-os:v6.0.0-202606101345-move870` is
+  running with frontend hash `69e2e819e937bff6`, source hash
+  `c30255d0546aaee2`, and healthy local `/health`. Startup warmup completed
+  with zero failures, 298 HIT, and 1 MISS target across `/`, `/products`,
+  `/inventory`, `/pos`, `/branches`, `/files`, `/users`, and `/audit-log`.
+  Cloudflare Playwright focused proof measured Branches 1.971 s and Audit Log
+  2.315 s with zero failed requests and zero console errors. A follow-up
+  comparison measured Dashboard 2.358 s, Branches 2.938 s, Audit Log 1.826 s,
+  Receipt Settings 2.264 s, and Loyalty Points 2.069 s, all with zero
+  failures/errors. Branches remains the main variance candidate when run in a
+  longer multi-route sequence.
+- Current plan position after Move 870: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target is Branches
+  multi-route variance and any remaining routes above the 2.5 s target, while
+  avoiding fake loader delays or broad data prefetch.
 
 - Move 864 removes the public catalog first-load bootstrap API round trip.
   The backend now injects the public portal bootstrap payload directly into

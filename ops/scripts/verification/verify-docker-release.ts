@@ -632,7 +632,7 @@ function main() {
     retriesTransientAssetErrors: cloudflareStartupWarmup.includes('async function fetchAssetWithRetry') &&
       cloudflareStartupWarmup.includes('function shouldRetryAssetFetch') &&
       cloudflareStartupWarmup.includes('args.assetRetryDelayMs'),
-    routeSpecificAdminWarmup: cloudflareStartupWarmup.includes("DEFAULT_ADMIN_ROUTE_PATHS = ['/', '/products', '/inventory', '/pos', '/branches', '/files', '/users']") &&
+    routeSpecificAdminWarmup: cloudflareStartupWarmup.includes("DEFAULT_ADMIN_ROUTE_PATHS = ['/', '/products', '/inventory', '/pos', '/branches', '/files', '/users', '/audit-log']") &&
       cloudflareStartupWarmup.includes('BOS_WARMUP_ADMIN_ROUTES') &&
       cloudflareStartupWarmup.includes('--admin-route') &&
       cloudflareStartupWarmup.includes('args.adminRoutes.map'),

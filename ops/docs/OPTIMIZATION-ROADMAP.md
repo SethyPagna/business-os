@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 869.
+- Latest completed implementation move in this roadmap: Move 870.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -123,6 +123,26 @@ Move 869 current state:
   repeat, with zero failures/errors. Audit Log comparison measured 2.106 s,
   so the next pass should look for broader tunnel variance and any remaining
   routes above the 2.5 s target.
+
+Move 870 current state:
+- Docker release `business-os:v6.0.0-202606101345-move870` is running healthy
+  with frontend hash `69e2e819e937bff6` and source hash
+  `c30255d0546aaee2`.
+- Branches now owns the visible-route helper preloads that were previously
+  discovered after `Branches`: `route-sync-utils`, `settings-refresh`,
+  `shared-ui`, `shared-lazy-portal-menu`, `app-shared`, and `product-shared`,
+  alongside the existing branch/product/action-history chunks.
+- Audit Log now owns `audit-log-api`, `refresh-cw`, `monitor-smartphone`,
+  `route-sync-utils`, `settings-refresh`, `shared-ui`,
+  `shared-lazy-portal-menu`, `app-shared`, `product-shared`, and `lang-en`.
+  Startup warmup now covers `/audit-log` and completed with zero failures,
+  298 HIT, and 1 MISS target.
+- Live Cloudflare Playwright proof improved focused Branches from 3.047 s to
+  1.971 s and focused Audit Log from 3.925 s to 2.315 s, with zero
+  failures/errors. The comparison sweep measured Dashboard 2.358 s, Branches
+  2.938 s, Audit Log 1.826 s, Receipt Settings 2.264 s, and Loyalty Points
+  2.069 s; Branches is the next variance candidate in longer multi-route
+  runs.
 
 ## Phase 1: Safe Wins
 
