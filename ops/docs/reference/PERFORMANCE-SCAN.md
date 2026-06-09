@@ -106,6 +106,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 867 makes remote startup warmup match real route entrypoints instead of
+  warming only `/public` and `/`. The backend SPA shell now emits route-specific
+  first-window modulepreloads for Products, Inventory, POS, Branches, and public
+  catalog child chunks, including `vendor-dexie`, `csv-utils`, `shared-ui`, and
+  `shared-lazy-portal-menu`. `warm-cloudflare-startup-assets.ts` now warms
+  admin route surfaces (`/`, `/products`, `/inventory`, `/pos`, `/branches`),
+  reads HTTP `Link` headers, follows a bounded first-window JS dependency
+  graph from fetched chunks, retries transient asset fetches, and warms surfaces
+  in parallel. `docker-release.ps1` now waits briefly for the Cloudflare tunnel
+  before invoking warmup. Docker image
+  `business-os:v6.0.0-202606101245-move867` is live with frontend hash
+  `69e2e819e937bff6` and source hash `a6cad3993925bc87`. Startup warmup
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json` completed with
+  zero failures. Live Cloudflare Playwright route-load proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-47-53-060Z.json`
+  measured Products 2.310 s, Inventory 2.424 s, POS 2.610 s, Branches
+  2.187 s, with zero failures/errors. Repeat focused traces measured POS
+  2.274 s and public catalog 2.163 s:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-607Z.json` and
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-940Z.json`.
 - Move 865 aligns public portal HTTP startup preloads with the real Vite
   public graph and adds origin-side public HTML/cache proof. The backend now
   emits short bounded cache headers for public SPA HTML, CSS preload headers,

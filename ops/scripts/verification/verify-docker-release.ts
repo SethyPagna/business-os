@@ -571,14 +571,39 @@ function main() {
   ;[
     'DEFAULT_DOCUMENT_ATTEMPTS',
     'DEFAULT_DOCUMENT_RETRY_DELAY_MS',
+    'DEFAULT_ASSET_ATTEMPTS',
+    'DEFAULT_ASSET_RETRY_DELAY_MS',
+    'DEFAULT_ADMIN_ROUTE_PATHS',
+    'DEFAULT_ASSET_GRAPH_DEPTH',
+    'ADMIN_FIRST_WINDOW_DEPENDENCY_RE',
     'BOS_WARMUP_DOCUMENT_ATTEMPTS',
     'BOS_WARMUP_DOCUMENT_RETRY_DELAY_MS',
+    'BOS_WARMUP_ASSET_ATTEMPTS',
+    'BOS_WARMUP_ASSET_RETRY_DELAY_MS',
+    'BOS_WARMUP_ADMIN_ROUTES',
+    'BOS_WARMUP_ASSET_GRAPH_DEPTH',
     '--document-attempts',
     '--document-retry-delay-ms',
+    '--asset-attempts',
+    '--asset-retry-delay-ms',
+    '--admin-route',
+    '--admin-routes',
+    '--asset-graph-depth',
     'function shouldRetryDocumentFetch',
     'async function fetchDocumentWithRetry',
+    'function shouldRetryAssetFetch',
+    'async function fetchAssetWithRetry',
+    'function extractLinkHeaderAssets',
+    'function extractFetchedChunkDependencies',
+    'async function warmAssetsWithGraph',
+    'linkHeader',
     'documentAttempts',
     'documentRetryDelayMs',
+    'assetAttempts',
+    'assetRetryDelayMs',
+    'assetGraphDepth',
+    'adminRoutes',
+    'dependencyAssetCount',
     'attemptCount',
   ].forEach((token) => requireToken(cloudflareStartupWarmup, token, 'Cloudflare startup warmup retry'))
 
@@ -587,16 +612,43 @@ function main() {
     releaseStartCallsWarmup: automation.includes('warm-cloudflare-startup-assets.ts') &&
       automation.includes('CloudflareStartupWarmupReport') &&
       automation.includes('CloudflareStartupWarmupLog'),
+    waitsForTunnelBeforeWarmup: automation.includes('function Wait-CloudflareStartupTunnel') &&
+      automation.includes('Cloudflare tunnel answered before startup warmup') &&
+      automation.includes('warmup will still try its own retries'),
     documentRetryConfigurable: cloudflareStartupWarmup.includes('BOS_WARMUP_DOCUMENT_ATTEMPTS') &&
       cloudflareStartupWarmup.includes('BOS_WARMUP_DOCUMENT_RETRY_DELAY_MS') &&
       cloudflareStartupWarmup.includes('--document-attempts') &&
       cloudflareStartupWarmup.includes('--document-retry-delay-ms'),
+    assetRetryConfigurable: cloudflareStartupWarmup.includes('BOS_WARMUP_ASSET_ATTEMPTS') &&
+      cloudflareStartupWarmup.includes('BOS_WARMUP_ASSET_RETRY_DELAY_MS') &&
+      cloudflareStartupWarmup.includes('--asset-attempts') &&
+      cloudflareStartupWarmup.includes('--asset-retry-delay-ms'),
     retriesTransientTunnelErrors: cloudflareStartupWarmup.includes('result.status === 0') &&
       cloudflareStartupWarmup.includes('result.status === 429') &&
       cloudflareStartupWarmup.includes('result.status >= 500'),
     retryLoopReportsAttempts: cloudflareStartupWarmup.includes('async function fetchDocumentWithRetry') &&
       cloudflareStartupWarmup.includes('attempts.push(result)') &&
       cloudflareStartupWarmup.includes('attemptCount: attempts.length'),
+    retriesTransientAssetErrors: cloudflareStartupWarmup.includes('async function fetchAssetWithRetry') &&
+      cloudflareStartupWarmup.includes('function shouldRetryAssetFetch') &&
+      cloudflareStartupWarmup.includes('args.assetRetryDelayMs'),
+    routeSpecificAdminWarmup: cloudflareStartupWarmup.includes("DEFAULT_ADMIN_ROUTE_PATHS = ['/', '/products', '/inventory', '/pos', '/branches']") &&
+      cloudflareStartupWarmup.includes('BOS_WARMUP_ADMIN_ROUTES') &&
+      cloudflareStartupWarmup.includes('--admin-route') &&
+      cloudflareStartupWarmup.includes('args.adminRoutes.map'),
+    warmsHttpLinkHeaders: cloudflareStartupWarmup.includes('function extractLinkHeaderAssets') &&
+      cloudflareStartupWarmup.includes("response.headers.get('link')") &&
+      cloudflareStartupWarmup.includes('...extractLinkHeaderAssets(baseUrl, documentResult.linkHeader)'),
+    warmsAdminChunkDependencies: cloudflareStartupWarmup.includes('function extractFetchedChunkDependencies') &&
+      cloudflareStartupWarmup.includes('async function warmAssetsWithGraph') &&
+      cloudflareStartupWarmup.includes("await warmAssetsWithGraph(baseUrl, documentAssets, args, name !== 'public')") &&
+      cloudflareStartupWarmup.includes("new URL(match[1], assetUrl)") &&
+      cloudflareStartupWarmup.includes('ADMIN_FIRST_WINDOW_DEPENDENCY_RE.test(asset)') &&
+      cloudflareStartupWarmup.includes('BOS_WARMUP_ASSET_GRAPH_DEPTH') &&
+      cloudflareStartupWarmup.includes('dependencyAssetCount'),
+    parallelSurfaceWarmup: cloudflareStartupWarmup.includes('const results = await runLimited(') &&
+      cloudflareStartupWarmup.includes('surfaces,') &&
+      cloudflareStartupWarmup.includes('(surface) => warmSurface(surface.name, surface.baseUrl, surface.path, args)'),
   }
   const packageStageScript = read(buildPackageStagePath)
   const serverEntryScript = read(buildServerEntryPath)

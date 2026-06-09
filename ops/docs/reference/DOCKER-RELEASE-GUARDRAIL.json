@@ -32,9 +32,16 @@
   "cloudflareStartupWarmupCoverage": {
     "scriptPresent": true,
     "releaseStartCallsWarmup": true,
+    "waitsForTunnelBeforeWarmup": true,
     "documentRetryConfigurable": true,
+    "assetRetryConfigurable": true,
     "retriesTransientTunnelErrors": true,
-    "retryLoopReportsAttempts": true
+    "retryLoopReportsAttempts": true,
+    "retriesTransientAssetErrors": true,
+    "routeSpecificAdminWarmup": true,
+    "warmsHttpLinkHeaders": true,
+    "warmsAdminChunkDependencies": true,
+    "parallelSurfaceWarmup": true
   },
   "packageStageCoverage": {
     "serverEntryScriptPresent": true,

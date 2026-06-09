@@ -73,15 +73,26 @@ if (!startRequestedWorkerRole()) {
         'CustomersTab-',
     ];
     const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = ['app-bootstrap'];
+    const SPA_ADMIN_FIRST_WINDOW_CHUNKS = [
+        'AdminRoot',
+        'auth-login',
+        'app-api',
+        'api-http-core',
+        'api-http-state',
+        'app-shell',
+        'Sidebar',
+        'shared-ui',
+        'catalog-icons',
+    ];
     const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
-        { match: (routePath) => routePath === '/' || routePath === '/index.html' || routePath.startsWith('/dashboard'), chunks: ['Dashboard'] },
-        { match: (routePath) => routePath.startsWith('/pos'), chunks: ['POS'] },
-        { match: (routePath) => routePath.startsWith('/products'), chunks: ['Products'] },
-        { match: (routePath) => routePath.startsWith('/inventory'), chunks: ['Inventory'] },
+        { match: (routePath) => routePath === '/' || routePath === '/index.html' || routePath.startsWith('/dashboard'), chunks: ['Dashboard', 'dashboard-api', 'dashboard-charts', 'app-shared', 'shared-formatters'] },
+        { match: (routePath) => routePath.startsWith('/pos'), chunks: ['POS', 'app-local-db', 'vendor-dexie', 'csv-utils', 'product-read-api', 'productDisplayHelpers', 'product-shared', 'app-shared', 'lang-en'] },
+        { match: (routePath) => routePath.startsWith('/products'), chunks: ['Products', 'product-read-api', 'productDisplayHelpers', 'product-shared', 'app-shared', 'shared-action-history', 'catalog', 'catalog-public-core', 'catalog-public'] },
+        { match: (routePath) => routePath.startsWith('/inventory'), chunks: ['Inventory', 'vendor-dexie', 'csv-utils', 'product-read-api', 'inventory-api', 'InventoryProductsSurface', 'product-shared', 'app-shared', 'shared-action-history', 'shared-formatters'] },
         { match: (routePath) => routePath.startsWith('/sales'), chunks: ['Sales'] },
         { match: (routePath) => routePath.startsWith('/returns'), chunks: ['Returns'] },
         { match: (routePath) => routePath.startsWith('/contacts'), chunks: ['Contacts'] },
-        { match: (routePath) => routePath.startsWith('/branches'), chunks: ['Branches'] },
+        { match: (routePath) => routePath.startsWith('/branches'), chunks: ['Branches', 'app-local-db', 'vendor-dexie', 'csv-utils', 'branch-api', 'product-read-api', 'shared-action-history', 'shared-page-header', 'shared-modal'] },
         { match: (routePath) => routePath.startsWith('/audit-log'), chunks: ['AuditLog'] },
         { match: (routePath) => routePath.startsWith('/receipt-settings'), chunks: ['ReceiptSettings'] },
         { match: (routePath) => routePath.startsWith('/backup'), chunks: ['Backup'] },
@@ -100,6 +111,8 @@ if (!startRequestedWorkerRole()) {
                 'PublicCatalogRoot',
                 'app-portal',
                 'app-shell',
+                'shared-ui',
+                'shared-lazy-portal-menu',
                 'catalog-public-core',
                 'catalog-public-utils',
                 'catalog-public',
@@ -188,7 +201,7 @@ if (!startRequestedWorkerRole()) {
         const routeChunks = SPA_ROUTE_MODULE_PRELOAD_CHUNKS
             .filter((entry) => entry.match(normalizedPath))
             .flatMap((entry) => entry.chunks);
-        const baseChunks = isPublicPortalRoute ? [] : SPA_ADMIN_MODULE_PRELOAD_CHUNKS;
+        const baseChunks = isPublicPortalRoute ? [] : [...SPA_ADMIN_MODULE_PRELOAD_CHUNKS, ...SPA_ADMIN_FIRST_WINDOW_CHUNKS];
         return [...new Set([...baseChunks, ...routeChunks])];
     }
     function appendLinkHeader(res, value) {

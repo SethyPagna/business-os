@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 866.
+- Latest completed implementation move in this roadmap: Move 867.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,25 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 867 current state:
+- Docker release `business-os:v6.0.0-202606101245-move867` is running healthy
+  with frontend hash `69e2e819e937bff6` and source hash
+  `a6cad3993925bc87`.
+- Cloudflare startup warmup is now route-aware for `/`, `/products`,
+  `/inventory`, `/pos`, and `/branches`; it parses HTML and HTTP `Link`
+  headers, follows a bounded first-window JS dependency graph, retries
+  transient document and asset fetches, and warms route surfaces in parallel.
+- Backend SPA HTML now preloads the first-window admin/public route chunks
+  that were previously discovered late, including `vendor-dexie`, `csv-utils`,
+  `shared-ui`, and `shared-lazy-portal-menu`.
+- Final live Cloudflare Playwright route-load proof after startup warmup had
+  zero failed requests/errors. Admin trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-47-53-060Z.json`.
+  Repeat POS trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-607Z.json`.
+  Repeat public trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-940Z.json`.
 
 ## Phase 1: Safe Wins
 

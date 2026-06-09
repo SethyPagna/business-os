@@ -727,6 +727,35 @@ function Invoke-Start {
   Write-Ok 'Docker release runtime is healthy.'
 }
 
+function Wait-CloudflareStartupTunnel($publicUrl, $adminUrl) {
+  $urls = @($publicUrl, $adminUrl) | Where-Object { $_ -and ([string]$_).Trim() } | Select-Object -Unique
+  if (-not $urls -or $urls.Count -eq 0) { return $false }
+  $deadline = (Get-Date).AddSeconds(75)
+  do {
+    $readyCount = 0
+    foreach ($url in $urls) {
+      try {
+        $response = Invoke-WebRequest -Uri $url -UseBasicParsing -TimeoutSec 8 -Headers @{ 'bypass-tunnel-reminder' = 'true' }
+        $statusCode = [int]$response.StatusCode
+        if ($statusCode -ge 200 -and $statusCode -lt 500) {
+          $readyCount += 1
+        }
+      } catch {
+        $statusCode = 0
+        try {
+          $statusCode = [int]$_.Exception.Response.StatusCode
+        } catch {}
+        if ($statusCode -ge 200 -and $statusCode -lt 500) {
+          $readyCount += 1
+        }
+      }
+    }
+    if ($readyCount -gt 0) { return $true }
+    Start-Sleep -Seconds 3
+  } while ((Get-Date) -lt $deadline)
+  return $false
+}
+
 function Get-ComposeVolumeName($volumeKey) {
   $docker = Resolve-Docker
   $env:DOCKER_CONFIG = $DockerConfig
@@ -882,6 +911,11 @@ function Test-ReleaseHealth {
         Write-Step 'Warming Cloudflare startup assets for public and admin links...'
         $publicUrl = if ($envMap.BUSINESS_OS_PUBLIC_URL) { [string]$envMap.BUSINESS_OS_PUBLIC_URL } else { 'https://leangcosmetics.dpdns.org' }
         $adminUrl = if ($envMap.BUSINESS_OS_ADMIN_URL) { [string]$envMap.BUSINESS_OS_ADMIN_URL } else { 'https://admin.leangcosmetics.dpdns.org' }
+        if (Wait-CloudflareStartupTunnel $publicUrl $adminUrl) {
+          Write-Ok 'Cloudflare tunnel answered before startup warmup.'
+        } else {
+          Write-Warn 'Cloudflare tunnel did not answer before startup warmup; warmup will still try its own retries.'
+        }
         $warmup = Invoke-ProcessWithTimeout $node @(
           $CloudflareStartupWarmupScript,
           '--public-url', $publicUrl,

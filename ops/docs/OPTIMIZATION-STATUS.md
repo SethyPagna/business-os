@@ -8,7 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 866, remove 1.8s artificial post-load ready gates from high-traffic admin pages.
+- Latest completed move: Move 867, make Cloudflare admin/public startup
+  warmup route-aware and preload first-window route dependencies.
 
 ## Current Baseline
 
@@ -16,9 +17,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `e356e456847a8801`
+  `69e2e819e937bff6`
 - latest verified source hash from the most recent Docker-served live check:
-  `7a298b93f135e813`
+  `a6cad3993925bc87`
 
 Latest verified reports:
 
@@ -65,7 +66,13 @@ Latest verified reports:
 - latest Move 866 warmed admin-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-33-32-034Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/reports/cloudflare-startup-warmup-move866-final-repeat.json`
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json`
+- latest Move 867 warmed admin-host route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-47-53-060Z.json`
+- latest Move 867 warmed POS repeat trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-607Z.json`
+- latest Move 867 warmed public-host repeat trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-940Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -159,6 +166,31 @@ Latest cleanup run:
   R2/access follow-up open; Phase 29 remains active. Next target is shrinking
   the remaining admin remote startup waterfall and making Cloudflare startup
   warmup/cache behavior less dependent on manual settle time.
+- Move 867 closes the largest remote admin startup waterfall found after
+  Move 866. The server now emits route-specific first-window modulepreloads for
+  Products, Inventory, POS, Branches, and the public portal, including child
+  chunks that were previously discovered late (`vendor-dexie`, `csv-utils`,
+  `shared-ui`, and `shared-lazy-portal-menu`). The Cloudflare startup warmer is
+  now route-aware, parses HTTP `Link` headers, follows a bounded first-window
+  JS dependency graph, warms public/admin route surfaces in parallel, and
+  retries transient asset fetches as well as transient document 530/5xx/429
+  responses. Docker startup now waits briefly for a Cloudflare tunnel response
+  before warming, then still uses the warmer's own retry budget if the tunnel
+  is slower than the settle probe.
+- Runtime proof: Docker image `business-os:v6.0.0-202606101245-move867` is
+  running with frontend hash `69e2e819e937bff6`, source hash
+  `a6cad3993925bc87`, Postgres/R2/BullMQ/Redis/DuckDB healthy, and startup
+  warmup completed with zero failures: 171 HIT / 2 MISS targets. Final live
+  Cloudflare Playwright route-load proof had zero failed requests/errors:
+  Products 2.310 s, Inventory 2.424 s, POS 2.610 s, Branches 2.187 s. Repeat
+  focused samples after warm cache brought POS to 2.274 s and the public
+  portal to 2.163 s. The remaining remote variance is Cloudflare tunnel edge
+  timing, not artificial loader delay or missing app data.
+- Current plan position after Move 867: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target is smoothing
+  the remaining Cloudflare tunnel variance and continuing page-by-page live
+  checks without reintroducing fake loading waits.
 
 - Move 864 removes the public catalog first-load bootstrap API round trip.
   The backend now injects the public portal bootstrap payload directly into
