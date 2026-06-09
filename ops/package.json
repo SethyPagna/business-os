@@ -27,6 +27,7 @@
     "phase84:route-load-trace": "node scripts/runtime/live-checks/route-load-trace.ts",
     "phase84:inventory-section-restore": "node scripts/runtime/live-checks/phase84-inventory-section-restore-live-check.ts",
     "warm-cloudflare-startup": "node scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts",
+    "cloudflare:tunnel-watchdog": "node scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts",
     "phase84:receipt-settings-rollback": "node scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts",
     "phase84:loyalty-points-rollback": "node scripts/runtime/live-checks/phase84-loyalty-points-rollback-check.ts",
     "phase84:settings-save-rollback": "node scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts",

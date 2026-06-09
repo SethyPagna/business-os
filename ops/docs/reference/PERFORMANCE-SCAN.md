@@ -106,6 +106,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 863 adds a guarded Cloudflare Tunnel watchdog at
+  `ops/scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts` plus
+  `npm --prefix ops run cloudflare:tunnel-watchdog`. It probes local health
+  and public/admin remote health, restarts only `business-os-cloudflared-1`
+  when local is healthy and remote probes show transient tunnel statuses, then
+  optionally warms startup assets. Dry-run and apply proofs both passed; the
+  apply run skipped restart because all probes were 200 and warmed startup
+  assets successfully. Remote route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T09-37-18-029Z.json`
+  passed with zero failures/errors; Cloudflare warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T09-37-19-741Z.json`
+  saw 12 HIT / 1 DYNAMIC and zero failures.
 - Move 862 removes real double-load overhead from Products, Inventory, and
   Audit Log. Products no longer waits an extra animation frame after fetched
   rows arrive, and Inventory/Audit Log no longer hold fetched rows behind

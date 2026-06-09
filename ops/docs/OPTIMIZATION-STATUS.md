@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 862, remove post-fetch reveal delays on Products, Inventory, and Audit Log while splitting the public catalog shell away from the admin catalog route.
+- Latest completed move: Move 863, add a guarded Cloudflare Tunnel watchdog that restarts stale cloudflared only when local health is good and remote tunnel probes fail.
 
 ## Current Baseline
 
@@ -51,11 +51,11 @@ Latest verified reports:
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-04T03-20-19-101Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T09-37-18-029Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-04T01-12-37-146Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T09-06-47-453Z.json`
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T09-37-19-741Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -78,6 +78,36 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 863 adds `ops/scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts`
+  and the `npm --prefix ops run cloudflare:tunnel-watchdog` command. The
+  watchdog probes local health plus public/admin remote health. If the local
+  app is healthy but public/admin probes return transient tunnel statuses
+  (`0`, `502`, `520`, `522`, `523`, `524`, or `530`), `--apply` restarts only
+  `business-os-cloudflared-1`, waits for reconnect, reprobes, and can run the
+  startup asset warmer. Dry-run mode writes the same report without mutating
+  the running containers.
+- Runtime proof: dry-run reported local/public/admin health all 200, and
+  apply mode with `--warm-startup-assets` correctly skipped restart while
+  warming startup assets. Report:
+  `ops/runtime/reports/cloudflare-tunnel-watchdog-2026-06-09T09-35-47-841Z.json`.
+  The follow-up Cloudflare warmup report
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T09-37-19-741Z.json`
+  warmed 13 targets with zero failures, 12 Cloudflare HIT responses, and one
+  DYNAMIC document/API response.
+- Remote proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T09-37-18-029Z.json`
+  passed against `https://admin.leangcosmetics.dpdns.org` with zero failed
+  requests and zero console/page errors across public catalog, Dashboard,
+  Products, Inventory, Files, and Audit Log. Timings remain tunnel/network
+  bound: Dashboard 1443 ms, Products 4399 ms, Inventory 4489 ms, Files
+  3990 ms, Audit Log 5429 ms, public catalog 2209 ms.
+- Current plan position after Move 863: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target remains
+  reducing remote first-load script pressure and, if possible, automating the
+  watchdog from the Windows launcher or scheduled task so stale tunnels heal
+  without manual Codex intervention.
 
 - Move 862 removes the visible double-load penalty from route tables and keeps
   public catalog startup lighter. `Products.tsx` no longer waits an extra
