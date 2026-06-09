@@ -633,6 +633,22 @@ function cacheTtl(seconds = 20) {
   return Math.min(60, Math.max(5, Number(seconds || 20) || 20))
 }
 
+function setPublicPortalCacheHeaders(res, seconds = 20) {
+  const ttl = cacheTtl(seconds)
+  res.setHeader('Cache-Control', `public, max-age=${ttl}, stale-while-revalidate=${Math.max(60, ttl * 6)}`)
+  res.removeHeader?.('Pragma')
+  res.removeHeader?.('Expires')
+  if (typeof res.append === 'function') {
+    res.append('Vary', 'Accept-Encoding')
+  } else {
+    const current = String(res.getHeader?.('Vary') || '').trim()
+    if (!current) res.setHeader('Vary', 'Accept-Encoding')
+    else if (!current.toLowerCase().split(',').map((part) => part.trim()).includes('accept-encoding')) {
+      res.setHeader('Vary', `${current}, Accept-Encoding`)
+    }
+  }
+}
+
 function normalizePositiveInt(value, fallback, { min = 1, max = 100 } = {}) {
   const parsed = Number.parseInt(value, 10)
   if (!Number.isFinite(parsed)) return fallback
@@ -1021,12 +1037,14 @@ function collectRecommendationCitations(recommendations) {
 }
 
 router.get('/config', asyncRoute(async (_req, res) => {
+  setPublicPortalCacheHeaders(res, 20)
   res.json(await getCachedPortalConfig())
 }))
 
 router.get('/bootstrap', asyncRoute(async (_req, res) => {
   const config = await getCachedPortalConfig()
   const catalog = getPortalCatalogProductPage(config, { page: 1, pageSize: 20 })
+  setPublicPortalCacheHeaders(res, config?.refreshSeconds || 20)
   res.json({
     config,
     meta: await getCachedPortalMeta(),
@@ -1036,16 +1054,19 @@ router.get('/bootstrap', asyncRoute(async (_req, res) => {
 }))
 
 router.get('/catalog/meta', asyncRoute(async (_req, res) => {
+  setPublicPortalCacheHeaders(res, 20)
   res.json(await getCachedPortalMeta())
 }))
 
 router.get('/catalog/products', asyncRoute(async (_req, res) => {
   const config = await getCachedPortalConfig()
+  setPublicPortalCacheHeaders(res, config?.refreshSeconds || 20)
   res.json(await getCachedPortalProducts(config))
 }))
 
 router.get('/catalog/products/search', asyncRoute(async (req, res) => {
   const config = await getCachedPortalConfig()
+  setPublicPortalCacheHeaders(res, config?.refreshSeconds || 20)
   res.json(getPortalCatalogProductPage(config, req.query))
 }))
 

@@ -65,7 +65,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1555 | 104.9 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
-| `backend/src/routes/portal.ts` | 1407 | 51.5 |
+| `backend/src/routes/portal.ts` | 1428 | 52.3 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `backend/src/fileAssets.ts` | 1336 | 46.3 |
 | `frontend/src/web-api.ts` | 1328 | 52.2 |
@@ -79,26 +79,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
 | `frontend/dist/assets/index-CW_jNXiu.css` | 155.4 |
-| `frontend/dist/assets/catalog-DKjC55wY.js` | 104.5 |
-| `frontend/dist/assets/Products-CHDEouM3.js` | 85.9 |
-| `frontend/dist/assets/Inventory-oWPRqeNr.js` | 83.3 |
-| `frontend/dist/assets/catalog-editor-DDJPrFqI.js` | 74.2 |
+| `frontend/dist/assets/catalog-BslwWpOK.js` | 104.5 |
+| `frontend/dist/assets/Products-CVOvHkZb.js` | 85.9 |
+| `frontend/dist/assets/Inventory-DMHR7CKq.js` | 83.3 |
+| `frontend/dist/assets/catalog-editor-CxwUJJtX.js` | 74.2 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-DQkLLoRs.js` | 68.0 |
-| `frontend/dist/assets/POS-DZOo20Hx.js` | 65.0 |
-| `frontend/dist/assets/AdminRoot-D_gi37c2.js` | 64.6 |
-| `frontend/dist/assets/Dashboard-CSPQZs02.js` | 62.6 |
-| `frontend/dist/assets/Settings-CzTG-39S.js` | 54.9 |
+| `frontend/dist/assets/BulkImportModal-DJl__C-q.js` | 68.0 |
+| `frontend/dist/assets/POS-CP00i9F1.js` | 65.0 |
+| `frontend/dist/assets/AdminRoot-BmAghdYF.js` | 64.6 |
+| `frontend/dist/assets/Dashboard-DctFleqO.js` | 62.6 |
+| `frontend/dist/assets/Settings-DFpYlHqj.js` | 54.9 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-BMcp6wNy.js` | 51.3 |
-| `frontend/dist/assets/dashboard-charts-CWoibG2a.js` | 47.9 |
-| `frontend/dist/assets/user-profile-modal-D5yOnTAi.js` | 43.9 |
-| `frontend/dist/assets/ReceiptSettings-CCeWMtq6.js` | 40.3 |
+| `frontend/dist/assets/Backup-BrIU9QiG.js` | 51.3 |
+| `frontend/dist/assets/dashboard-charts-CCbMJTEp.js` | 47.9 |
+| `frontend/dist/assets/user-profile-modal-B6eB_Lvd.js` | 43.9 |
+| `frontend/dist/assets/ReceiptSettings-IQLkdtyL.js` | 40.3 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-DpH-WSB0.js` | 37.2 |
-| `frontend/dist/assets/Sales-DSvmWuSQ.js` | 36.7 |
-| `frontend/dist/assets/ProductForm-C-Mxal0-.js` | 35.8 |
-| `frontend/dist/assets/AuditLog-BxmebYQO.js` | 35.5 |
+| `frontend/dist/assets/catalog-secondary-tabs-D1T5rqcX.js` | 37.2 |
+| `frontend/dist/assets/Sales-CfcDQDBu.js` | 36.7 |
+| `frontend/dist/assets/ProductForm-CCA35wiX.js` | 35.8 |
+| `frontend/dist/assets/AuditLog-DRLVtWb8.js` | 35.5 |
 
 ## 5. Notes
 
@@ -106,6 +106,18 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 861 adds bounded public cache headers to customer-safe portal read
+  endpoints instead of faking faster loading in the UI. `/api/portal/config`,
+  `/api/portal/bootstrap`, `/api/portal/catalog/meta`,
+  `/api/portal/catalog/products`, and
+  `/api/portal/catalog/products/search` now emit
+  `public, max-age=20, stale-while-revalidate=120` with
+  `Vary: Accept-Encoding`; AI chat, submissions, membership, reviews, and
+  write/private paths remain uncached. Live Playwright proved local/admin
+  Cloudflare/public Cloudflare all rendered real `5539 result(s)` data, and
+  the route trace measured public catalog at 153 ms with zero failed requests.
+  Next real performance targets are splitting public-only `CatalogPage` code,
+  trimming shared CSS, and reducing Docker release build base-layer fetch time.
 - Move 178 reduces `writeSystemSettings()` transaction-loop overhead by
   preparing the settings delete statement once beside the upsert statement.
 - Move 179 leaves `language-runtime-audit.mjs` in Node.js and rejects it from

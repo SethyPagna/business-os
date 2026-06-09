@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-09T04:05:58.925Z
+Generated: 2026-06-09T05:08:36.866Z
 
 ## Summary
 
@@ -63,13 +63,13 @@ Generated: 2026-06-09T04:05:58.925Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 14197 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 14245 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12071 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10341 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9757 | ops/docs |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 4180 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 3920 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| ops/docs/OPTIMIZATION-STATUS.md | 3876 | ops/docs |
 | frontend/tests/performanceLoadingUx.test.ts | 3575 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3572 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3498 | frontend/components/catalog |
@@ -80,7 +80,7 @@ Generated: 2026-06-09T04:05:58.925Z
 | frontend/src/components/products/Products.tsx | 2589 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2362 | frontend/components/pos |
 | backend/src/routes/products.ts | 2297 | backend/routes |
-| ops/docs/reference/PERFORMANCE-SCAN.md | 2244 | ops/docs/reference |
+| ops/docs/reference/PERFORMANCE-SCAN.md | 2259 | ops/docs/reference |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
 | ops/docs/reference/FOLDER-COVERAGE.md | 2164 | ops/docs/reference |
 | backend/src/db/postgresSchema.sql | 2155 | backend/db |

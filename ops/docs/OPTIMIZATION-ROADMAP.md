@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 860.
+- Latest completed implementation move in this roadmap: Move 861.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -14194,6 +14194,43 @@ Move 859 status:
   guardrail. The next measured startup target is shrinking real `catalog`,
   language, CSS, vendor, and remote tunnel costs now that secondary/social icon
   startup work is intent-loaded.
+
+Move 861 status:
+- Move 861 gives the public customer portal real, bounded shared-cache
+  behavior for anonymous read endpoints. `backend/src/routes/portal.ts` now
+  sends `Cache-Control: public, max-age=20, stale-while-revalidate=120` and
+  `Vary: Accept-Encoding` on `/api/portal/config`,
+  `/api/portal/bootstrap`, `/api/portal/catalog/meta`,
+  `/api/portal/catalog/products`, and
+  `/api/portal/catalog/products/search`; AI chat, customer submissions,
+  membership, reviews, and private/write paths stay uncached.
+- Runtime proof: Docker image `business-os:v6.0.0-202606091330-move861` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `e2852f3723ccda52`, source hash `d6cbc00cf6b3588c`, and runtime revision
+  `move861-public-portal-cache`.
+- Live proof: Playwright verified local, admin Cloudflare, and public
+  Cloudflare portal URLs. All rendered real catalog data (`5539 result(s)`)
+  and both `/api/portal/bootstrap` and
+  `/api/portal/catalog/products/search?page=1&pageSize=20` returned bounded
+  public cache headers. Local render measured 357 ms; Cloudflare admin
+  measured 4646 ms; Cloudflare public measured 5232 ms on the cold live pass.
+- Route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T05-08-34-700Z.json` passed
+  with zero failures/errors. Public catalog measured 153 ms at 18 requests /
+  13 scripts; Dashboard 162 ms; Products 360 ms; Inventory 255 ms; POS
+  240 ms; Returns 257 ms.
+- Verification proof: backend portal regression, frontend public loading
+  guard, full backend utility suite, frontend typecheck, frontend production
+  build, generated reference refresh, performance scan, schema audit, Phase 29
+  audit, Docker image build, Docker release update, health check, release
+  route contract, local/cloudflare Playwright probes, route trace, and storage
+  prune passed. Storage prune removed one old Docker-release backup
+  (`20260609-110433`, 5,359,517 bytes) and 2.387 GB of Docker builder cache.
+- Current plan position after Move 861: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
 
 Move 860 status:
 - Move 860 splits public portal API calls into a dedicated public-only

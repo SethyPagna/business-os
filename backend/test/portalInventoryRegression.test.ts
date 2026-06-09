@@ -46,6 +46,18 @@ runTest('portal catalog product payloads share image and branch-stock materializ
   assert.equal((source.match(/function getPortalProductAssets\(productIds\) \{/g) || []).length, 1, 'portal asset materialization should have one implementation')
 })
 
+runTest('public portal read endpoints advertise bounded shared-cache headers', () => {
+  const source = readSource('src/routes/portal.ts')
+  assert.match(source, /function setPublicPortalCacheHeaders\(res, seconds = 20\) \{[\s\S]*Cache-Control'[\s\S]*public, max-age=\$\{ttl\}, stale-while-revalidate=\$\{Math\.max\(60, ttl \* 6\)\}/, 'portal read cache helper should emit bounded public cache headers')
+  assert.match(source, /router\.get\('\/config'[\s\S]*setPublicPortalCacheHeaders\(res, 20\)[\s\S]*res\.json\(await getCachedPortalConfig\(\)\)/, 'portal config should be briefly cacheable')
+  assert.match(source, /router\.get\('\/bootstrap'[\s\S]*setPublicPortalCacheHeaders\(res, config\?\.refreshSeconds \|\| 20\)[\s\S]*products: catalog\.items/, 'portal bootstrap should be briefly cacheable')
+  assert.match(source, /router\.get\('\/catalog\/meta'[\s\S]*setPublicPortalCacheHeaders\(res, 20\)[\s\S]*res\.json\(await getCachedPortalMeta\(\)\)/, 'portal metadata should be briefly cacheable')
+  assert.match(source, /router\.get\('\/catalog\/products'[\s\S]*setPublicPortalCacheHeaders\(res, config\?\.refreshSeconds \|\| 20\)[\s\S]*res\.json\(await getCachedPortalProducts\(config\)\)/, 'full portal products should be briefly cacheable')
+  assert.match(source, /router\.get\('\/catalog\/products\/search'[\s\S]*setPublicPortalCacheHeaders\(res, config\?\.refreshSeconds \|\| 20\)[\s\S]*res\.json\(getPortalCatalogProductPage\(config, req\.query\)\)/, 'paged portal product search should be briefly cacheable')
+  assert.doesNotMatch(source, /router\.post\('\/ai\/chat'[\s\S]*setPublicPortalCacheHeaders/, 'AI chat must not use public cache headers')
+  assert.doesNotMatch(source, /router\.post\('\/submissions'[\s\S]*setPublicPortalCacheHeaders/, 'share submissions must not use public cache headers')
+})
+
 runTest('inventory movements accept large page sizes and use text-safe created_at ordering', () => {
   const source = readSource('src/routes/inventory.ts')
   assert.match(source, /normalizePositiveInt\(requestedPageSize,\s*50000,\s*\{\s*min:\s*1,\s*max:\s*50000\s*\}\)/, 'movements route should allow explicit pageSize values up to 50000')
