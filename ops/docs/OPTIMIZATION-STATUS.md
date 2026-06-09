@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 858, split the public catalog onto a minimal app provider so it no longer imports the full admin AppContext during public startup.
+- Latest completed move: Move 859, defer public catalog secondary/contact/social icon code until the secondary tabs are opened.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `5096e7c52a17b058`
+  `b2cb83f3fcf497c7`
 - latest verified source hash from the most recent Docker-served live check:
   `e907e23af14377c3`
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T02-17-53-549Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T03-12-29-886Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,58 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 859 defers the public catalog's secondary/contact/social icon payload.
+  `CatalogPage` now passes contact/social metadata without Lucide component
+  references, so `Facebook`, `Instagram`, `Mail`, `MapPin`, `Phone`, and
+  `Send` stay owned by the lazy `CatalogSecondaryTabs` boundary. The public
+  first-viewport icon bucket still owns `chevron-down` for `AppSelect`, and
+  `assets/shared-icons-` remains excluded from direct route modulepreload.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  build`, `npm.cmd --prefix frontend run test:utils`, `npm.cmd --prefix
+  backend run test:utils`, `node ops\scripts\docs\generate-doc-reference.ts`,
+  `node ops\scripts\docs\performance-scan.ts`, Docker image build, Docker
+  release update, health check, route-load trace, focused local Playwright
+  script-waterfall check, warm Cloudflare public checks, and storage prune
+  passed.
+- Live proof on Docker image `business-os:v6.0.0-202606091115-move859`,
+  frontend hash `b2cb83f3fcf497c7`, source hash `e907e23af14377c3`: route
+  trace `ops/runtime/reports/route-load-trace-2026-06-09T03-12-29-886Z.json`
+  passed with zero failures/errors. Public catalog measured 161 ms at 20
+  requests / 15 scripts; Dashboard 321 ms at 31 / 25; Products 293 ms at
+  38 / 30; Inventory 305 ms at 40 / 33; POS 295 ms at 35 / 28; Returns
+  302 ms at 35 / 30.
+- Browser proof: local mobile Playwright rendered the real `/public` catalog
+  with no relevant console/request failures, 1.041 s network-idle load, LCP
+  336 ms, 12 initial scripts, `catalog-icons-B89f4Ick.js` loaded, and no
+  initial `shared-icons-*` or `catalog-secondary-tabs-*`. After pressing the
+  About tab, `catalog-secondary-tabs-D9bzcZjJ.js` and
+  `shared-icons-Z1cfLhvY.js` loaded on intent. Warm Cloudflare checks for
+  `https://admin.leangcosmetics.dpdns.org/public` and
+  `https://leangcosmetics.dpdns.org/public` both returned 200, rendered real
+  catalog text, loaded 12 scripts, and did not fetch `shared-icons-*`
+  initially.
+- Build proof: local production output keeps `catalog-icons-B89f4Ick.js` at
+  9.06 kB / 2.23 kB gzip, `shared-icons-Z1cfLhvY.js` at 11.14 kB / 2.49 kB
+  gzip, and `catalog-CwBJaxV9.js` at 106.87 kB / 32.38 kB gzip. The public
+  route preload table contains only `PublicCatalogRoot`, `app-portal`,
+  `catalog`, `catalog-icons`, `catalog-products`, and `route-sync-utils`.
+- Cleanup proof: storage prune removed four stale runtime report files
+  (12,113 bytes), three old Docker-release backups (`20260609-101645`,
+  `20260609-092903`, `20260609-084904`; 16,074,675 bytes), and 2.615 GB of
+  Docker builder cache. The generated `release\business-os` kit was also
+  deleted after reference checks because it is reproducible from
+  `run\build-release.bat` / `run\docker\release.bat`, removing 380,917,753
+  bytes and bringing Phase 29 generated-bulk candidates under the 512 MB
+  guardrail. Cleanup preserved uploads, secrets, volumes, newest local backups,
+  the latest R2 backup, active containers, active images, and protected
+  rollback tags.
+- Current plan position after Move 859: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 858 gives the public catalog a minimal `PublicCatalogAppProvider` and
   moves shared context hooks into `AppContextCore`. Public startup now keeps the

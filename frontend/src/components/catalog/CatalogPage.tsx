@@ -1,14 +1,7 @@
 import { Suspense, lazy, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
-import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
-import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
-import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
-import Mail from 'lucide-react/dist/esm/icons/mail.js'
-import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
-import Phone from 'lucide-react/dist/esm/icons/phone.js'
-import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
@@ -3047,35 +3040,31 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       enabled: displayConfig.showWebsite,
       label: String(displayConfig.linkLabels?.website || copy('website', 'Website')).trim() || copy('website', 'Website'),
       value: displayConfig.links?.website,
-      icon: Globe,
     },
     {
       key: 'facebook',
       enabled: displayConfig.showFacebook,
       label: String(displayConfig.linkLabels?.facebook || copy('facebook', 'Facebook')).trim() || copy('facebook', 'Facebook'),
       value: displayConfig.links?.facebook,
-      icon: Facebook,
     },
     {
       key: 'instagram',
       enabled: displayConfig.showInstagram,
       label: String(displayConfig.linkLabels?.instagram || copy('instagram', 'Instagram')).trim() || copy('instagram', 'Instagram'),
       value: displayConfig.links?.instagram,
-      icon: Instagram,
     },
     {
       key: 'telegram',
       enabled: displayConfig.showTelegram,
       label: String(displayConfig.linkLabels?.telegram || copy('telegram', 'Telegram')).trim() || copy('telegram', 'Telegram'),
       value: displayConfig.links?.telegram,
-      icon: Send,
     },
   ].filter((item) => item.enabled && item.value)
 
   const businessFacts = [
-    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '', icon: Phone },
-    { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: displayConfig.businessEmail ? `mailto:${displayConfig.businessEmail}` : '', icon: Mail },
-    { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink), icon: MapPin },
+    { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '' },
+    { key: 'email', enabled: displayConfig.showEmail, label: copy('email', 'Email'), value: displayConfig.businessEmail, href: displayConfig.businessEmail ? `mailto:${displayConfig.businessEmail}` : '' },
+    { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')

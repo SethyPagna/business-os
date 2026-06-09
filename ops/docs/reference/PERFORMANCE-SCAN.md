@@ -17,7 +17,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
 | `frontend/src/components/inventory/Inventory.tsx` | 159.8 | 3454 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 153.0 | 3509 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 152.5 | 3498 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
 | `frontend/src/components/products/Products.tsx` | 119.6 | 2589 |
 | `frontend/src/components/pos/POS.tsx` | 114.8 | 2362 |
@@ -45,7 +45,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Lines | Size (KB) |
 |---|---:|---:|
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 3509 | 153.0 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 3498 | 152.5 |
 | `frontend/src/components/inventory/Inventory.tsx` | 3454 | 159.8 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
@@ -79,26 +79,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
 | `frontend/dist/assets/index-CW_jNXiu.css` | 155.4 |
-| `frontend/dist/assets/catalog-GJOSQ9P7.js` | 104.6 |
-| `frontend/dist/assets/Products-DSxPKrf4.js` | 86.0 |
-| `frontend/dist/assets/Inventory-NFh0vlJ0.js` | 83.4 |
-| `frontend/dist/assets/catalog-editor-ecvL01Dl.js` | 74.2 |
+| `frontend/dist/assets/catalog-CwBJaxV9.js` | 104.5 |
+| `frontend/dist/assets/Products-CCDrLG9E.js` | 85.9 |
+| `frontend/dist/assets/Inventory-D0XIKupC.js` | 83.3 |
+| `frontend/dist/assets/catalog-editor-BWHFyHr-.js` | 74.2 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-8UCoMSDB.js` | 68.0 |
-| `frontend/dist/assets/POS-DODskSH1.js` | 65.0 |
-| `frontend/dist/assets/AdminRoot-C003zuyi.js` | 64.6 |
-| `frontend/dist/assets/Dashboard-B4EOVSb-.js` | 62.6 |
-| `frontend/dist/assets/Settings-DwCFn2Ps.js` | 54.9 |
+| `frontend/dist/assets/BulkImportModal-BSAW_MCa.js` | 68.0 |
+| `frontend/dist/assets/POS-CeLI1pyc.js` | 65.0 |
+| `frontend/dist/assets/AdminRoot-CjCa4rmr.js` | 64.5 |
+| `frontend/dist/assets/Dashboard-B-zn-3TS.js` | 62.6 |
+| `frontend/dist/assets/Settings-CMJVKxhu.js` | 54.9 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-Bd2RBkSj.js` | 51.3 |
-| `frontend/dist/assets/dashboard-charts-D7dz0iMB.js` | 47.9 |
-| `frontend/dist/assets/user-profile-modal-YH5rq8Ha.js` | 43.8 |
-| `frontend/dist/assets/ReceiptSettings-D1UjvyQo.js` | 40.3 |
+| `frontend/dist/assets/Backup-BXzZrwqF.js` | 51.3 |
+| `frontend/dist/assets/dashboard-charts-BfPh1_IH.js` | 47.9 |
+| `frontend/dist/assets/user-profile-modal-8KrlpT6T.js` | 43.9 |
+| `frontend/dist/assets/ReceiptSettings-c1tCdZfP.js` | 40.3 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-BZuMjpwG.js` | 37.2 |
-| `frontend/dist/assets/Sales-Dn-ta0U8.js` | 36.8 |
-| `frontend/dist/assets/ProductForm-DH3DARG5.js` | 35.8 |
-| `frontend/dist/assets/AuditLog-rEQu7HOs.js` | 35.5 |
+| `frontend/dist/assets/catalog-secondary-tabs-D4IP1fft.js` | 37.2 |
+| `frontend/dist/assets/Sales-ZovAXkMd.js` | 36.7 |
+| `frontend/dist/assets/ProductForm-D_TsqA-W.js` | 35.8 |
+| `frontend/dist/assets/AuditLog-DMlZYQce.js` | 35.5 |
 
 ## 5. Notes
 
@@ -2223,4 +2223,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   287 ms, and Returns 228 ms. Focused Playwright rendered the real public
   catalog with search and product content, no request/console failures, local
   LCP 196 ms, and warm public/admin Cloudflare LCPs around 2.13-2.14 s.
+- Move 859 records public catalog secondary/social icon deferral. `CatalogPage`
+  now passes contact/social metadata without direct Lucide component
+  references, `chevron-down` stays in the first-viewport `catalog-icons`
+  bucket for `AppSelect`, and `shared-icons` remains excluded from route
+  modulepreload. Docker image `business-os:v6.0.0-202606091115-move859`
+  served frontend hash `b2cb83f3fcf497c7`. Local route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T03-12-29-886Z.json` passed
+  with zero failures/errors; public catalog measured 161 ms at 20 requests /
+  15 scripts. Focused mobile Playwright confirmed 12 initial scripts, local LCP
+  336 ms, `catalog-icons-B89f4Ick.js` loaded, no initial `shared-icons-*` or
+  `catalog-secondary-tabs-*`, and About-tab intent loading of
+  `catalog-secondary-tabs-D9bzcZjJ.js` plus `shared-icons-Z1cfLhvY.js`. Warm
+  admin/public Cloudflare checks both returned 200 with 12 scripts and no
+  initial `shared-icons`. Cleanup also deleted the generated
+  `release/business-os` kit after reference checks, removing 380,917,753 bytes
+  and letting the Phase 29 generated-bulk audit pass below its 512 MB
+  threshold.
 <!-- phase29-manual-notes:end -->

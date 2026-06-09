@@ -14139,3 +14139,58 @@ Move 858 status:
   guardrail. The next measured startup targets are shrinking `catalog`,
   language, CSS, vendor, and remote tunnel costs without sacrificing real data
   completeness.
+
+Move 859 status:
+- Move 859 defers public catalog secondary/contact/social icon work until the
+  secondary tabs are opened. `CatalogPage` no longer imports `Facebook`,
+  `Instagram`, `Mail`, `MapPin`, `Phone`, or `Send`; it passes plain metadata
+  and lets the lazy `CatalogSecondaryTabs` boundary resolve those icons on
+  intent. `chevron-down` stays in `catalog-icons` so first-viewport
+  `AppSelect` does not pull `shared-icons`, and `assets/shared-icons-` stays
+  blocked from route modulepreload.
+- Runtime proof: Docker image `business-os:v6.0.0-202606091115-move859` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `b2cb83f3fcf497c7`, source hash `e907e23af14377c3`, and runtime revision
+  `move859-public-icon-key-split`.
+- Build/live proof: production output keeps `catalog-icons-B89f4Ick.js` at
+  9.06 kB / 2.23 kB gzip, `shared-icons-Z1cfLhvY.js` at 11.14 kB / 2.49 kB
+  gzip, and `catalog-CwBJaxV9.js` at 106.87 kB / 32.38 kB gzip. The public
+  route preload table excludes `shared-icons` and includes only
+  `PublicCatalogRoot`, `app-portal`, `catalog`, `catalog-icons`,
+  `catalog-products`, and `route-sync-utils`.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T03-12-29-886Z.json` passed
+  with zero failures/errors. Public catalog measured 161 ms at 20 requests /
+  15 scripts; Dashboard 321 ms at 31 / 25; Products 293 ms at 38 / 30;
+  Inventory 305 ms at 40 / 33; POS 295 ms at 35 / 28; Returns 302 ms at
+  35 / 30.
+- Focused Playwright proof: local mobile `/public` rendered the real catalog,
+  recorded no relevant console/request failures, loaded in 1.041 s to
+  network-idle with LCP 336 ms, and started with 12 scripts including
+  `catalog-icons-B89f4Ick.js` but no `shared-icons-*` or
+  `catalog-secondary-tabs-*`. Pressing About then loaded
+  `catalog-secondary-tabs-D9bzcZjJ.js` and `shared-icons-Z1cfLhvY.js`.
+  Warm Cloudflare checks for `https://admin.leangcosmetics.dpdns.org/public`
+  and `https://leangcosmetics.dpdns.org/public` both returned 200, rendered
+  real catalog text, loaded 12 scripts, and did not fetch `shared-icons`
+  initially.
+- Verification proof: frontend performance guard, frontend typecheck,
+  frontend production build, full frontend utility suite, full backend utility
+  suite, generated reference refresh, performance scan, Docker image build,
+  Docker release update, health check, route trace, focused local/cloudflare
+  Playwright probes, and storage prune passed. Storage prune removed four
+  stale runtime report files (12,113 bytes), three old Docker-release backups
+  (16,074,675 bytes), and 2.615 GB of Docker builder cache. The generated
+  `release\business-os` kit was deleted after reference checks because it is
+  reproducible from `run\build-release.bat` / `run\docker\release.bat`,
+  removing 380,917,753 bytes and bringing Phase 29 generated-bulk candidates
+  under the 512 MB guardrail. Cleanup preserved uploads, secrets, volumes,
+  newest backups, the latest R2 backup, active containers/images, and protected
+  rollback tags.
+- Current plan position after Move 859: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail. The next measured startup target is shrinking real `catalog`,
+  language, CSS, vendor, and remote tunnel costs now that secondary/social icon
+  startup work is intent-loaded.
