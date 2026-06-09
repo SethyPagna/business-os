@@ -106,6 +106,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 873 makes Product and Inventory read transports live-server-first.
+  Product search/bootstrap/filter/lookup usage and Inventory search/bootstrap
+  now defer cache writes for 10 seconds and lazy-load `api-local-cache` only
+  for cache writes or failed live fallbacks. Local production chunk proof
+  showed `Products-*` and `Inventory-*` contain no `api-local-cache`,
+  `lazyLocalDb`, `queryCache`, or `localMirrors`; `product-read-api` is about
+  2.62 kB and `inventory-api` is about 2.14 kB. Docker image
+  `business-os:v6.0.0-202606101610-move873` is live with frontend hash
+  `291cb07b12cdf13b` and source hash `6d8391289817d4a2`. Public Cloudflare
+  Playwright trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-57-37-630Z.json`
+  measured Products 4.762 s, Inventory 3.111 s, POS 4.712 s, Files 3.632 s,
+  Branches 3.555 s, and Audit Log 2.781 s with zero failed requests and zero
+  page/console errors. Product and Inventory no longer load `api-local-cache`
+  in first paint; the next performance target is the live
+  `/api/products/search` and `/api/products/bootstrap` path, which dominates
+  Product/POS timing.
 - Move 872 removes product-only first-paint leakage from Audit Log and
   Library/Files. Generic local fallback/cache helpers (`lazyLocalDb`,
   `localMirrors`, `queryCache`, and `expectedUpdatedAt`) now build into

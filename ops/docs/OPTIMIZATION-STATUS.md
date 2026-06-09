@@ -8,9 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 872, split generic local cache/fallback helpers
-  out of product chunks and stop Audit Log/Files from preloading product-only
-  code during first paint.
+- Latest completed move: Move 873, make Product and Inventory read transports
+  live-server-first by lazy-loading local cache fallback/write helpers.
 
 ## Current Baseline
 
@@ -18,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `1df23f1eac671f2f`
+  `291cb07b12cdf13b`
 - latest verified source hash from the most recent Docker-served live check:
   `6d8391289817d4a2`
 
@@ -94,6 +93,8 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T20-41-04-387Z.json`
 - latest Move 872 focused Audit Log route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T20-40-13-816Z.json`
+- latest Move 873 Cloudflare route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-57-37-630Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -116,6 +117,31 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 873 makes Product and Inventory read transports prefer the live server
+  path without first downloading local fallback/cache helpers. Product search,
+  product bootstrap/filter/lookup usage, and Inventory search/bootstrap now
+  write cache results through deferred dynamic imports and only import
+  fallback helpers when the live request fails. The production chunk proof
+  showed `Products-*` and `Inventory-*` contain no `api-local-cache`,
+  `lazyLocalDb`, `queryCache`, or `localMirrors`; `product-read-api` is about
+  2.62 kB and `inventory-api` is about 2.14 kB, with `api-local-cache` only
+  referenced behind dynamic fallback/write imports.
+- Docker image `business-os:v6.0.0-202606101610-move873` is live with frontend
+  hash `291cb07b12cdf13b` and source hash `6d8391289817d4a2`. Cloudflare
+  startup warmup completed and local health is good. Public Playwright trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-57-37-630Z.json`
+  measured Products 4.762 s, Inventory 3.111 s, POS 4.712 s, Files 3.632 s,
+  Branches 3.555 s, and Audit Log 2.781 s with zero failed requests and zero
+  page/console errors. The Product and Inventory first-paint request lists no
+  longer include `api-local-cache`; remaining Product/POS delay is now the
+  live product search/bootstrap API path, not the local-cache helper chunk.
+- Current plan position after Move 873: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: optimize
+  `/api/products/search` and `/api/products/bootstrap` timing and keep testing
+  through public Cloudflare traces.
 
 - Move 872 removes product-only first-paint leakage from Audit Log and
   Library/Files. `frontend/src/utils/pricing.ts` now belongs to `app-shared`

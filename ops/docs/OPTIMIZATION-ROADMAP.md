@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 872.
+- Latest completed implementation move in this roadmap: Move 873.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -192,6 +192,28 @@ Move 872 current state:
   and Branches 3.849 s, all with zero failures/errors. The next executable
   slice is to reduce Inventory/Product API and static-asset variance without
   reintroducing broad preload contention.
+
+Move 873 current state:
+- Docker release `business-os:v6.0.0-202606101610-move873` is running healthy
+  with frontend hash `291cb07b12cdf13b` and source hash
+  `6d8391289817d4a2`.
+- Product and Inventory read transports are now live-server-first. Product
+  search, product bootstrap/filter/lookup usage, Inventory product search, and
+  Inventory bootstrap defer local cache writes for 10 seconds and lazy-load
+  cache/fallback helpers only for cache writes or failed live requests.
+- Local production chunk proof showed `Products-*` and `Inventory-*` contain
+  no `api-local-cache`, `lazyLocalDb`, `queryCache`, or `localMirrors`.
+  `product-read-api` is about 2.62 kB and `inventory-api` is about 2.14 kB;
+  the remaining `api-local-cache` references are dynamic fallback/write
+  imports rather than eager first-paint dependencies.
+- Public Cloudflare Playwright proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-57-37-630Z.json`
+  measured Products 4.762 s, Inventory 3.111 s, POS 4.712 s, Files 3.632 s,
+  Branches 3.555 s, and Audit Log 2.781 s with zero failed requests and zero
+  page/console errors. Product and Inventory no longer load `api-local-cache`
+  during first paint. The next executable slice is backend/query-path work on
+  `/api/products/search` and `/api/products/bootstrap`, which were the slowest
+  remaining Product/POS requests in the trace.
 
 ## Phase 1: Safe Wins
 

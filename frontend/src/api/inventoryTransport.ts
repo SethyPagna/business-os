@@ -1,7 +1,5 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
-import { readCachedQueryResult, writeCachedQueryResult } from './queryCache.ts'
-import { routeMirrored } from './localMirrors.ts'
 
 type InventoryMovementParams = {
   branchId?: string | number | null
@@ -12,6 +10,37 @@ type InventoryMovementParams = {
   endDate?: string | null
   page?: string | number | null
   pageSize?: string | number | null
+}
+
+const INVENTORY_READ_CACHE_WRITE_DELAY_MS = 10_000
+
+function scheduleInventoryCacheWrite(cacheKey: string, result: unknown): void {
+  const run = (): void => {
+    import('./queryCache.ts')
+      .then(({ writeCachedQueryResult }) => writeCachedQueryResult(cacheKey, result))
+      .catch(() => {})
+  }
+  if (typeof window === 'undefined') {
+    Promise.resolve().then(run).catch(() => {})
+    return
+  }
+  window.setTimeout(run, INVENTORY_READ_CACHE_WRITE_DELAY_MS)
+}
+
+function readInventoryCache(cacheKey: string): Promise<unknown> {
+  return import('./queryCache.ts').then(({ readCachedQueryResult }) => readCachedQueryResult(cacheKey))
+}
+
+function routeCachedInventoryQuery(cacheKey: string, path: string): Promise<unknown> {
+  return route(
+    cacheKey,
+    async () => {
+      const result = await apiFetch('GET', path)
+      scheduleInventoryCacheWrite(cacheKey, result)
+      return result
+    },
+    () => readInventoryCache(cacheKey),
+  )
 }
 
 export function getInventorySummary({ branchId }: { branchId?: string | number | null } = {}): Promise<unknown> {
@@ -35,23 +64,13 @@ export function getInventoryStats(params: QueryParams = {}): Promise<unknown> {
 export function searchInventoryProducts(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `inventory:products:search:v2:${query}`
-  return routeMirrored(
-    cacheKey,
-    () => apiFetch('GET', appendQuery('/api/inventory/products/search', query)),
-    () => readCachedQueryResult(cacheKey),
-    (result: unknown) => writeCachedQueryResult(cacheKey, result),
-  )
+  return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/products/search', query))
 }
 
 export function getInventoryBootstrap(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `inventory:bootstrap:v1:${query}`
-  return routeMirrored(
-    cacheKey,
-    () => apiFetch('GET', appendQuery('/api/inventory/bootstrap', query)),
-    () => readCachedQueryResult(cacheKey),
-    (result: unknown) => writeCachedQueryResult(cacheKey, result),
-  )
+  return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/bootstrap', query))
 }
 
 export function getInventoryMovements({
