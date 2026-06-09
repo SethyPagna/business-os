@@ -14279,3 +14279,30 @@ Move 860 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 865 status:
+- Move 865 aligns public `/public` and `/customer-portal` HTTP startup hints
+  with the real Vite public graph. The backend now emits short bounded public
+  cache headers, CSS preload headers, exact public modulepreloads, and one
+  targeted Khmer 600 font preload. The preload resolver now guards `vendor`
+  against matching `vendor-react`, `vendor-dexie`, and `vendor-zxing`, so the
+  scanner bundle is not preloaded into the customer portal.
+- Cloudflare automation now includes a public-only
+  `http_request_cache_settings` cache rule for `/public` and
+  `/customer-portal`. Applying that rule remains pending because the current
+  Cloudflare API token returns HTTP 403 for `Zone.Cache Rules: Edit`; the
+  verifier reports this non-fatally, and the automation policy documents the
+  required Cache Rules, Account Rulesets, and Account Filter Lists
+  permissions.
+- Runtime proof: Docker image `business-os:v6.0.0-202606100105-perf874` is
+  healthy with frontend hash `e356e456847a8801` and source hash
+  `7a298b93f135e813`. Local public LCP passed at 404 ms. Public Cloudflare
+  warmup passed 13 targets with zero failures. Final public route-load passed
+  at 2.068 s ready with `api=0`, and final public LCP passed at 1.812 s with
+  zero failures/errors.
+- Current plan position after Move 865: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target is applying
+  the public Cloudflare cache rule after token permission update, then
+  continuing CSS/catalog chunk reductions with measured local and public LCP
+  checks.

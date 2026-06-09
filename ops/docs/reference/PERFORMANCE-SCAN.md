@@ -106,6 +106,30 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 865 aligns public portal HTTP startup preloads with the real Vite
+  public graph and adds origin-side public HTML/cache proof. The backend now
+  emits short bounded cache headers for public SPA HTML, CSS preload headers,
+  exact public modulepreloads (`index`, `vendor-react`, the tiny `vendor`,
+  `app-routing`, `PublicCatalogRoot`, `app-portal`, `app-shell`, catalog
+  public chunks, and `route-sync-utils`), and one targeted
+  `noto-sans-khmer-khmer-600` font preload. The chunk resolver now guards
+  `vendor` against `vendor-react`, `vendor-dexie`, and `vendor-zxing`, so the
+  scanner bundle is not accidentally preloaded into the customer portal.
+  Docker image `business-os:v6.0.0-202606100105-perf874` is live with frontend
+  hash `e356e456847a8801` and source hash `7a298b93f135e813`. Local LCP proof:
+  `ops/runtime/reports/lcp-route-trace-2026-06-09T16-46-24-461Z.json` passed
+  at 404 ms LCP, 200 ms FCP, 373 ms ready, 19 requests, zero failures/errors.
+  Public proof after Cloudflare warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T16-52-13-223Z.json`
+  passed 13 targets with zero failures; public route-load
+  `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json` passed
+  at 2.068 s ready, `api=0`, zero failures/errors; public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-09T16-52-41-462Z.json` passed
+  at 1.812 s LCP, 1.412 s FCP, 1.763 s ready, zero failures/errors. Cloudflare
+  HTML remains `CF-Cache-Status: DYNAMIC` because the existing API token lacks
+  `Zone.Cache Rules: Edit`; `verify-cloudflare-automation.ts` now reports that
+  permission gap non-fatally and contains a public-only cache eligibility rule
+  for `/public` and `/customer-portal`.
 - Move 863 adds a guarded Cloudflare Tunnel watchdog at
   `ops/scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts` plus
   `npm --prefix ops run cloudflare:tunnel-watchdog`. It probes local health

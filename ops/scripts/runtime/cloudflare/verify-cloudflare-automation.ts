@@ -218,6 +218,26 @@ async function applyCloudflareAutomation({ token, zone, accountId, adminHost, pu
       },
     ],
   }))
+
+  await tryApplyRuleset('Public portal cache rules', () => upsertEntrypointRuleset({
+    token,
+    zoneId: zone.id,
+    phase: 'http_request_cache_settings',
+    name: 'Business OS cache rules',
+    rules: [
+      {
+        action: 'set_cache_settings',
+        expression: `(http.host eq "${publicHost}" and (http.request.uri.path in {"/public" "/customer-portal"} or starts_with(http.request.uri.path, "/public/") or starts_with(http.request.uri.path, "/customer-portal/")))`,
+        description: 'Business OS public portal cache eligibility',
+        enabled: true,
+        action_parameters: {
+          cache: true,
+          edge_ttl: { mode: 'respect_origin' },
+          browser_ttl: { mode: 'respect_origin' },
+        },
+      },
+    ],
+  }))
 }
 
 async function main() {
@@ -245,9 +265,14 @@ async function main() {
 
   const access = await requestJson('GET', `https://api.cloudflare.com/client/v4/accounts/${accountId}/access/apps?per_page=50`, token)
   const rulesets = await requestJson('GET', `https://api.cloudflare.com/client/v4/zones/${zone.id}/rulesets?per_page=50`, token)
+  const cacheRulesEntrypoint = await requestJson('GET', `https://api.cloudflare.com/client/v4/zones/${zone.id}/rulesets/phases/http_request_cache_settings/entrypoint`, token)
   const needs = []
+  const optionalNeeds = []
   if (!access.ok || access.body?.success === false) needs.push(summarizeFailure(access, 'Account.Cloudflare Access: Edit'))
   if (!rulesets.ok || rulesets.body?.success === false) needs.push(summarizeFailure(rulesets, 'Zone.Rulesets: Edit'))
+  if (cacheRulesEntrypoint.status !== 404 && (!cacheRulesEntrypoint.ok || cacheRulesEntrypoint.body?.success === false)) {
+    optionalNeeds.push(summarizeFailure(cacheRulesEntrypoint, 'Zone.Cache Rules: Edit'))
+  }
 
   const emails = readAllowedEmails(policy)
   const adminAccessMode = normalizeAdminAccessMode(policy)
@@ -262,6 +287,7 @@ async function main() {
   console.log(`DNS records: ${missingDns.length ? `missing ${missingDns.join(', ')}` : 'ready'}`)
   console.log(`Access API: ${access.ok && access.body?.success !== false ? 'ready' : 'needs stronger token'}`)
   console.log(`Rulesets/WAF API: ${rulesets.ok && rulesets.body?.success !== false ? 'ready' : 'needs stronger token'}`)
+  console.log(`Cache Rules API: ${cacheRulesEntrypoint.status === 404 || (cacheRulesEntrypoint.ok && cacheRulesEntrypoint.body?.success !== false) ? 'ready' : 'needs stronger token'}`)
   console.log(`Allowed countries: ${(policy.cloudflare?.allowedCountries || []).join(', ')}`)
   console.log(`Rate limit profile: ${policy.cloudflare?.rateLimitProfile || 'normal'}`)
   console.log(`Admin access mode: ${adminAccessMode}`)
@@ -271,6 +297,10 @@ async function main() {
     console.log('\nCloudflare automation needs:')
     needs.forEach((need) => console.log(`- ${need}`))
     if (args.apply) process.exit(2)
+  }
+  if (optionalNeeds.length) {
+    console.log('\nOptional Cloudflare automation improvements:')
+    optionalNeeds.forEach((need) => console.log(`- ${need}`))
   }
 
   if (args.apply && !needs.length) {

@@ -93,6 +93,11 @@ if (!startRequestedWorkerRole()) {
         {
             match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'),
             chunks: [
+                'index',
+                'vendor-react',
+                'vendor',
+                'app-routing',
+                'PublicCatalogRoot',
                 'app-portal',
                 'app-shell',
                 'loader-utils',
@@ -101,14 +106,18 @@ if (!startRequestedWorkerRole()) {
                 'catalog-public',
                 'catalog-icons',
                 'catalog-products',
+                'route-sync-utils',
             ],
         },
     ];
     const FRONTEND_CHUNK_BASE_COLLISIONS = {
+        vendor: ['dexie', 'react', 'zxing'],
         catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'],
         'catalog-public': ['core', 'utils'],
     };
     const frontendModulePreloadCache = new Map();
+    const frontendStylePreloadCache = { value: null };
+    const frontendPublicFontPreloadCache = { value: null };
     function listFrontendAssetFiles() {
         if (!FRONTEND_DIST_EXISTS)
             return [];
@@ -201,6 +210,55 @@ if (!startRequestedWorkerRole()) {
             appendLinkHeader(res, `</assets/${assetName}>; rel=modulepreload`);
         }
     }
+    function resolveFrontendStyleAssetNames() {
+        if (!FRONTEND_DIST_EXISTS)
+            return [];
+        if (frontendStylePreloadCache.value)
+            return frontendStylePreloadCache.value;
+        const assetsDir = path.join(FRONTEND_DIST, 'assets');
+        frontendStylePreloadCache.value = listFrontendAssetFiles()
+            .filter((name) => name.endsWith('.css'))
+            .map((name) => {
+            let size = 0;
+            try {
+                size = fs.statSync(path.join(assetsDir, name)).size || 0;
+            }
+            catch (_) { }
+            return { name, size };
+        })
+            .sort((left, right) => left.size - right.size || left.name.localeCompare(right.name))
+            .map((entry) => entry.name);
+        return frontendStylePreloadCache.value;
+    }
+    function appendSpaStylePreloadHeaders(res) {
+        for (const assetName of resolveFrontendStyleAssetNames()) {
+            appendLinkHeader(res, `</assets/${assetName}>; rel=preload; as=style`);
+        }
+    }
+    function resolveFrontendPublicFontPreloadAssetNames() {
+        if (!FRONTEND_DIST_EXISTS)
+            return [];
+        if (frontendPublicFontPreloadCache.value)
+            return frontendPublicFontPreloadCache.value;
+        frontendPublicFontPreloadCache.value = listFrontendAssetFiles()
+            .filter((name) => /^noto-sans-khmer-khmer-600-normal-[A-Za-z0-9_-]+\.woff2$/.test(name))
+            .sort()
+            .slice(0, 1);
+        return frontendPublicFontPreloadCache.value;
+    }
+    function appendPublicFontPreloadHeaders(res) {
+        for (const assetName of resolveFrontendPublicFontPreloadAssetNames()) {
+            appendLinkHeader(res, `</assets/${assetName}>; rel=preload; as=font; type=font/woff2; crossorigin`);
+        }
+    }
+    function setPublicSpaHtmlCacheHeaders(res, refreshSeconds = 20) {
+        const ttlSeconds = Math.max(5, Math.min(60, Number(refreshSeconds) || 20));
+        res.setHeader('Cache-Control', `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}, stale-while-revalidate=120`);
+        if (typeof res.removeHeader === 'function') {
+            res.removeHeader('Pragma');
+            res.removeHeader('Expires');
+        }
+    }
     function isPublicSpaRoutePath(routePath = '/') {
         const normalizedPath = String(routePath || '/').split('?')[0].toLowerCase() || '/';
         return normalizedPath.startsWith('/public') || normalizedPath.startsWith('/customer-portal');
@@ -230,11 +288,16 @@ if (!startRequestedWorkerRole()) {
         }
         const html = await fs.promises.readFile(htmlPath, 'utf8');
         const payload = await buildPayload();
+        setPublicSpaHtmlCacheHeaders(res, payload?.config?.refreshSeconds);
         res.type('html');
         return res.send(injectPublicPortalBootstrap(html, payload));
     }
     function sendSpaIndex(req, res, _next) {
         setAdminSpaHtmlHeaders(req, res);
+        if (isPublicSpaRoutePath(req?.path)) {
+            appendSpaStylePreloadHeaders(res);
+            appendPublicFontPreloadHeaders(res);
+        }
         appendSpaModulePreloadHeaders(req, res);
         if (isPublicSpaRoutePath(req?.path)) {
             return sendPublicSpaIndex(req, res).catch((error) => {

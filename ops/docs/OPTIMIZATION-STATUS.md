@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-09
+Last updated: 2026-06-10
 
 ## Phase Board
 
@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 864, remove the public catalog first-load bootstrap API round trip and fix public route preload ownership.
+- Latest completed move: Move 865, align public portal HTTP preloads, short HTML cache headers, and cache-rule automation reporting.
 
 ## Current Baseline
 
@@ -16,9 +16,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `83b81a7b4acf802f`
+  `e356e456847a8801`
 - latest verified source hash from the most recent Docker-served live check:
-  `a1f5cda48de87877`
+  `7a298b93f135e813`
 
 Latest verified reports:
 
@@ -53,9 +53,11 @@ Latest verified reports:
 - latest focused remote admin route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T09-37-18-029Z.json`
 - latest focused public-host route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T15-59-39-413Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
+- latest focused public-host LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-09T16-52-41-462Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T15-59-13-197Z.json`
+  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T16-52-13-223Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -78,6 +80,44 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 865 aligns the public portal server-side HTTP preload headers with the
+  actual Vite startup graph and keeps the scanner bundle out of first load.
+  Public `/public` and `/customer-portal` HTML now emit short bounded cache
+  headers, CSS preload headers, the exact public startup modulepreloads
+  (`index`, `vendor-react`, the tiny `vendor`, `app-routing`,
+  `PublicCatalogRoot`, `app-portal`, `app-shell`, public catalog chunks, and
+  `route-sync-utils`), plus one targeted `Noto Sans Khmer` 600 woff2 font
+  preload. The preload resolver now guards `vendor` against matching
+  `vendor-react`, `vendor-dexie`, or `vendor-zxing`, so the 446 kB scanner
+  bundle is not pulled into public catalog startup.
+- Cloudflare automation now contains a public-only cache eligibility rule for
+  `/public` and `/customer-portal` and the automation policy documents the
+  additional Cache Rules permissions needed to apply it. The current token can
+  verify DNS, Access, and Rulesets/WAF, but `http_request_cache_settings`
+  returns HTTP 403, so the dry run reports: `Zone.Cache Rules: Edit is
+  required. Cloudflare returned HTTP 403: request is not authorized`.
+- Runtime proof: Docker image `business-os:v6.0.0-202606100105-perf874`
+  is running with frontend hash `e356e456847a8801`, source hash
+  `7a298b93f135e813`, and healthy local `/health`. Local `/public` LCP passed
+  at 404 ms LCP, 200 ms FCP, 373 ms ready, 19 requests, and zero failures or
+  console errors. Public `https://leangcosmetics.dpdns.org/public` warmed with
+  13 targets, zero failures, 11 HIT / 1 MISS / 1 DYNAMIC. The final public
+  route-load trace passed at 2.068 s ready, 20 requests, `api=0`, 15 scripts,
+  zero failures/errors; the final public LCP trace passed at 1.812 s LCP,
+  1.412 s FCP, 1.763 s ready, 20 requests, and zero failures/errors.
+- Tunnel note: immediately after Docker restarts, Cloudflare briefly returned
+  530 while local health stayed 200 and `cloudflared` logged timeouts to
+  Cloudflare edge port 7844. The watchdog restart/settle path and subsequent
+  warmup restored public/admin 200s. `CF-Cache-Status` for the public HTML is
+  still `DYNAMIC` until the Cloudflare token receives Cache Rules edit
+  permissions and the public-only cache rule can be applied.
+- Current plan position after Move 865: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target is applying
+  the Cloudflare public HTML cache rule after token permission update, then
+  trimming the remaining public CSS/catalog chunk costs without reintroducing
+  artificial loading delays.
 
 - Move 864 removes the public catalog first-load bootstrap API round trip.
   The backend now injects the public portal bootstrap payload directly into

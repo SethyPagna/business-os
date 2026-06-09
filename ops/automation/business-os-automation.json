@@ -15,6 +15,9 @@
     "requiredPermissions": [
       "Zone DNS Edit",
       "Zone Rulesets Edit",
+      "Zone Cache Rules Edit",
+      "Account Rulesets Edit",
+      "Account Filter Lists Edit",
       "Account Cloudflare Tunnel Edit",
       "Account Access: Apps and Policies Edit"
     ]
