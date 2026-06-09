@@ -262,6 +262,47 @@ function injectRouteAwareModulePreloads(): Plugin {
   }
 }
 
+function deferRenderBlockingStylesheets(): Plugin {
+  return {
+    name: 'business-os-defer-render-blocking-stylesheets',
+    transformIndexHtml: {
+      order: 'post',
+      handler(html: string): string {
+        if (html.includes('data-business-os-async-style')) return html
+        const asyncStyleHrefs: string[] = []
+        const nextHtml = html.replace(
+          /<link\s+rel="stylesheet"\s+href="([^"]*\/assets\/[^"]+\.css)"\s*>/g,
+          (_match, href: string) => {
+            asyncStyleHrefs.push(href)
+            return [
+              `<link rel="preload" as="style" href="${href}" data-business-os-style-preload>`,
+              `<link rel="stylesheet" href="${href}" media="print" data-business-os-async-style>`,
+            ].join('\n ')
+          },
+        )
+        if (!asyncStyleHrefs.length) return nextHtml
+        const noscriptLinks = asyncStyleHrefs
+          .map((href) => `<link rel="stylesheet" href="${href}">`)
+          .join('')
+        const activationScript = `<script data-business-os-async-styles>${escapeInlineScript(`(function activateBusinessOsAsyncStyles() {
+  function activate() {
+    var links = document.querySelectorAll('link[data-business-os-async-style]');
+    links.forEach(function activateStyle(link) {
+      link.media = 'all';
+    });
+  }
+  if (typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(activate);
+    return;
+  }
+  window.setTimeout(activate, 0);
+}());`)}</script>`
+        return nextHtml.replace('</head>', `\n ${activationScript}\n <noscript>${noscriptLinks}</noscript>\n </head>`)
+      },
+    },
+  }
+}
+
 const deferredModulePreloadPrefixes = [
   'assets/file-picker-modal-',
   'assets/image-lightbox-',
@@ -680,7 +721,7 @@ function manualChunks(id: string): string | undefined {
 }
 
 export default defineConfig({
-  plugins: [react(), inlinePublicRuntimeScripts(), fixCrossorigin(), emitBuildManifest(), injectRouteAwareModulePreloads()],
+  plugins: [react(), inlinePublicRuntimeScripts(), fixCrossorigin(), emitBuildManifest(), injectRouteAwareModulePreloads(), deferRenderBlockingStylesheets()],
 
   build: {
     outDir: 'dist',

@@ -100,10 +100,11 @@ assert(viteConfig.includes("'truck'") && viteConfig.includes("'warehouse'"), 'Co
 assert(viteConfig.includes("'undo-2'"), 'Returns undo icon should stay in shared-icons instead of a separate startup chunk.')
 
 const apiMethods = read(path.join(SRC_ROOT, 'api', 'methods.ts'))
+const settingsTransport = read(path.join(SRC_ROOT, 'api', 'settingsTransport.ts'))
 assert(apiMethods.includes('uploadImportJobImages'), 'Import job image batch uploader is missing.')
 assert(!/imageFiles:\s*imagePayload/.test(apiMethods + bulkImport), 'Bulk image imports must not send imageFiles JSON payloads.')
-assert(apiMethods.includes("const settingsResponse = await apiFetch('GET', '/api/settings')"), 'Settings reads must use /api/settings inline updatedAt.')
-assert(!apiMethods.includes("apiFetch('GET', '/api/settings/meta')"), 'Settings reads must not add a redundant /api/settings/meta waterfall.')
+assert(settingsTransport.includes("const settingsResponse = asSettingsPayload(await apiFetch('GET', '/api/settings'))"), 'Settings reads must use /api/settings inline updatedAt.')
+assert(!settingsTransport.includes("apiFetch('GET', '/api/settings/meta')"), 'Settings reads must not add a redundant /api/settings/meta waterfall.')
 assert(read(path.join(SRC_ROOT, 'utils', 'csv.ts')).includes('UTF8_BOM'), 'CSV downloads/templates must include UTF-8 BOM for Khmer Excel compatibility.')
 
 const backendImportCsv = read(path.join(PROJECT_ROOT, 'backend', 'src', 'importCsv.ts'))

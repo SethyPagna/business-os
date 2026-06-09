@@ -25,6 +25,7 @@
     "phase84:live-suite": "node scripts/runtime/live-checks/phase84-live-suite.ts",
     "phase84:all-pages-control-audit": "node scripts/runtime/live-checks/all-pages-control-audit.ts",
     "phase84:route-load-trace": "node scripts/runtime/live-checks/route-load-trace.ts",
+    "phase84:lcp-route-trace": "node scripts/runtime/live-checks/lcp-route-trace.ts",
     "phase84:inventory-section-restore": "node scripts/runtime/live-checks/phase84-inventory-section-restore-live-check.ts",
     "warm-cloudflare-startup": "node scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts",
     "cloudflare:tunnel-watchdog": "node scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts",
