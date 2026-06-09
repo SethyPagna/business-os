@@ -114,10 +114,10 @@ const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
   { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
   { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
   { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users'] },
-  { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog', 'catalog-products'] },
+  { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog', 'catalog-icons', 'catalog-products'] },
 ]
 const FRONTEND_CHUNK_BASE_COLLISIONS = {
-  catalog: ['context', 'display', 'editor', 'preview', 'products', 'secondary-tabs', 'ui'],
+  catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'secondary-tabs', 'ui'],
 }
 const frontendModulePreloadCache = new Map()
 

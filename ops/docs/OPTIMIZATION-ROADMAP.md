@@ -13984,3 +13984,37 @@ Move 854 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 855 status:
+- Move 855 splits public catalog icon modules away from the broader
+  `shared-icons` chunk and fixes exact backend SPA preload resolution for the
+  new `catalog-icons` chunk. `CatalogPage` and `CatalogProductsSection`
+  removed dead icon imports; `frontend/vite.config.ts` emits and route-preloads
+  `catalog-icons`; `backend/server.ts` and `backend/server.js` exclude
+  `catalog-icons` from the generic `catalog` collision set so the real
+  `catalog-*.js` shell is advertised instead of duplicating the icon chunk.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090810-move855` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `95b3c1b169231b34` and source hash `e907e23af14377c3`.
+- Build/header proof: production output emits `catalog-icons-CFqKE5MX.js` at
+  10.99 kB / 2.67 kB gzip and `shared-icons-BJJYPCes.js` at 9.22 kB /
+  2.08 kB gzip. Local, public Cloudflare, and admin Cloudflare `/public`
+  headers now include `app-portal`, `catalog`, `catalog-icons`, and
+  `catalog-products`, each resolving to the intended asset.
+- Live proof: route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T00-09-50-358Z.json` passed
+  with zero failures/errors. Public catalog measured 207 ms at 20 requests /
+  15 scripts; Dashboard 180 ms at 27 / 21; Products 268 ms at 33 / 25;
+  Inventory 221 ms at 35 / 28; POS 201 ms at 29 / 22; Returns 235 ms at
+  30 / 25. Focused Playwright LCP/resource probes saw local public LCP at
+  232 ms and Cloudflare public LCP at 3.232 s, down from the previous 5.820 s
+  probe that exposed the missing `catalog` preload.
+- Verification proof: frontend performance guard, backend route contracts,
+  frontend typecheck, frontend production build, Docker image build, Docker
+  release update, route-load trace, local/Cloudflare header checks, and focused
+  Playwright probes passed.
+- Current plan position after Move 855: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.

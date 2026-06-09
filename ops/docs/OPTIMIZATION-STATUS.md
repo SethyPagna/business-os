@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 854, split and prefetch the public catalog product grid chunk.
+- Latest completed move: Move 855, split public catalog icons and fix exact catalog preload resolution.
 
 ## Current Baseline
 
@@ -16,9 +16,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `7ede2385a44420a8`
+  `95b3c1b169231b34`
 - latest verified source hash from the most recent Docker-served live check:
-  `60d3b6f9db28ae02`
+  `e907e23af14377c3`
 
 Latest verified reports:
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-08T22-49-47-936Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T00-09-50-358Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,39 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 855 splits public catalog Lucide icons out of the broader shared icon
+  bundle and fixes exact SPA preload resolution for the new `catalog-icons`
+  chunk. `CatalogPage` and `CatalogProductsSection` dropped dead icon imports,
+  Vite now emits a named `catalog-icons` chunk, and the backend `catalog`
+  preload collision guard excludes `catalog-icons` so `/public` receives one
+  correct `catalog`, `catalog-icons`, and `catalog-products` header each.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `node backend\test\routeContracts.test.ts`, `npm.cmd --prefix frontend run
+  typecheck`, `npm.cmd --prefix frontend run build`, Docker image build,
+  Docker release update, local/Cloudflare header checks, route-load trace, and
+  focused local/Cloudflare Playwright LCP/resource probes passed.
+- Live proof on Docker image `business-os:v6.0.0-202606090810-move855`,
+  frontend hash `95b3c1b169231b34`, source hash `e907e23af14377c3`: local
+  `/public` LCP was 232 ms with real products present and zero failures/errors.
+  Cloudflare public `/public` rendered products with zero failures/errors and
+  measured 3.232 s LCP in the focused mobile probe, down from the prior
+  5.820 s probe where the catalog shell was not in the Link header. The
+  server Link header now includes `app-portal`, `catalog`, `catalog-icons`,
+  and `catalog-products`.
+- Route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T00-09-50-358Z.json`
+  passed with zero failures/errors: Dashboard 180 ms at 27 requests / 21
+  scripts; Products 268 ms at 33 / 25; Inventory 221 ms at 35 / 28; POS
+  201 ms at 29 / 22; Returns 235 ms at 30 / 25; public catalog 207 ms at
+  20 / 15. Production build proof emits `catalog-icons-CFqKE5MX.js` at
+  10.99 kB / 2.67 kB gzip while shrinking `shared-icons-BJJYPCes.js` to
+  9.22 kB / 2.08 kB gzip.
+- Current plan position after Move 855: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 854 splits the public catalog product grid out of the route shell.
   `CatalogPage` now lazy-loads `CatalogProductsSection`, Vite emits a named

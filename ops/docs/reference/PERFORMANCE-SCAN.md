@@ -2360,3 +2360,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   failures/errors. Storage prune removed 137,941 bytes of stale reports,
   10,701,268 bytes of old Docker-release backup data, and 2.419 GB of Docker
   builder cache.
+- Move 855 records the public catalog icon split and exact preload resolver
+  fix. Vite now emits `catalog-icons-CFqKE5MX.js` at 10.99 kB / 2.67 kB gzip,
+  while `shared-icons-BJJYPCes.js` is reduced to 9.22 kB / 2.08 kB gzip.
+  Backend SPA preload collision handling now excludes `catalog-icons` from the
+  broad `catalog` base, so local/public/admin `/public` Link headers include
+  the intended `app-portal`, `catalog`, `catalog-icons`, and
+  `catalog-products` assets once. Docker image
+  `business-os:v6.0.0-202606090810-move855` served frontend hash
+  `95b3c1b169231b34` and source hash `e907e23af14377c3`. Route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T00-09-50-358Z.json` passed
+  with zero failures/errors: public catalog 207 ms at 20 requests / 15
+  scripts, Dashboard 180 ms at 27 / 21, Products 268 ms at 33 / 25, Inventory
+  221 ms at 35 / 28, POS 201 ms at 29 / 22, and Returns 235 ms at 30 / 25.
+  Focused Playwright LCP/resource probes saw local public LCP at 232 ms and
+  Cloudflare public LCP at 3.232 s, down from the prior 5.820 s probe that
+  revealed the missing catalog shell preload.

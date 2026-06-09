@@ -154,6 +154,7 @@ const routePreloadChunkNames = {
   public: [
     'PublicCatalogRoot',
     'catalog',
+    'catalog-icons',
     'catalog-products',
     'route-sync-utils',
     'app-portal',
@@ -363,6 +364,33 @@ const authLoginIconNames = new Set([
   'shield-check',
 ])
 
+const publicCatalogIconNames = new Set([
+  'arrow-down',
+  'arrow-right',
+  'arrow-up',
+  'badge-check',
+  'badge-percent',
+  'bot',
+  'facebook',
+  'flame',
+  'globe',
+  'help-circle',
+  'instagram',
+  'mail',
+  'map-pin',
+  'medal',
+  'moon',
+  'phone',
+  'search',
+  'send',
+  'shopping-bag',
+  'sparkles',
+  'store',
+  'sun',
+  'ticket',
+  'trophy',
+])
+
 const routeSharedIconNames = new Set([
   'alert-circle',
   'alert-triangle',
@@ -427,6 +455,7 @@ function manualChunks(id: string): string | undefined {
   if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
     const iconName = path.basename(normalized, '.js')
     if (authLoginIconNames.has(iconName)) return 'auth-login'
+    if (publicCatalogIconNames.has(iconName)) return 'catalog-icons'
     if (routeSharedIconNames.has(iconName)) return 'shared-icons'
     return appShellIconNames.has(iconName) ? 'app-shell-icons' : undefined
   }
