@@ -326,7 +326,7 @@ export default function Users() {
   const [rolesLoading, setRolesLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [historyReady, setHistoryReady] = useState(false)
-  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user: currentUser })
   const runUserMutation = useCallback((loader: () => Promise<MutationResult>, label: string) => (
     withLoaderTimeout(loader, label, USER_MUTATION_TIMEOUT_MS)
   ), [])

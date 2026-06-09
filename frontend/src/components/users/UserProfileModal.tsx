@@ -414,7 +414,7 @@ function AvatarEditorModal({
 
 export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const { user, notify, hasPermission, saveSettings, settings, t, logout } = useApp()
-  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'profile' })
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'profile', user })
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr = (key: string, fallbackEn: string, fallbackKm = fallbackEn): string => {
     const value = typeof t === 'function' ? t(key) : null

@@ -417,7 +417,7 @@ export default function FilesPage() {
   const testProviderInFlightRef = useRef(false)
   const deleteProviderInFlightRef = useRef(false)
   const [historyReady, setHistoryReady] = useState(false)
-  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
 
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const tr: TranslateWithFallback = (key, fallback = key, fallbackKm = fallback) => {

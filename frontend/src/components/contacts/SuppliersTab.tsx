@@ -321,7 +321,7 @@ function SuppliersTab({ t, notify, active = true }: SuppliersTabProps) {
   const deferredSearch = useDeferredValue(search)
   const syncChannelName = String(syncChannel?.channel || '')
   const syncChannelTs = Number(syncChannel?.ts || 0)
-  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
   const supplierQuery = useMemo(() => ({
     search: deferredSearch.trim() || undefined,
     year: yearFilter !== 'all' ? yearFilter : undefined,

@@ -44,6 +44,11 @@ type Notify = (message: string, type?: string) => void
 type AppContextValue = {
   t?: Translate
   notify?: Notify
+  user?: {
+    username?: unknown
+    role_code?: unknown
+    permissions?: unknown
+  } | null
 }
 type SyncContextValue = {
   syncChannel?: {
@@ -186,6 +191,7 @@ export default function CustomTables() {
   const { syncChannel } = useCustomTablesSync()
   const t: Translate = typeof app?.t === 'function' ? app.t : ((key) => key)
   const notify: Notify = typeof app?.notify === 'function' ? app.notify : (() => {})
+  const user = app?.user || null
   const [tables, setTables] = useState<CustomTable[]>([])
   const [activeTable, setActiveTable] = useState<CustomTable | null>(null)
   const [tableData, setTableData] = useState<CustomRow[]>([])
@@ -205,7 +211,7 @@ export default function CustomTables() {
   const createTableInFlightRef = useRef(false)
   const saveRowInFlightRef = useRef(false)
   const deleteRowInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 3, notify })
+  const actionHistory = useActionHistory({ limit: 3, notify, user })
   const typedActionHistory = actionHistory as unknown as ActionHistoryBarHistory
 
   const activeSchema = useMemo(() => {

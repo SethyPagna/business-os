@@ -569,7 +569,7 @@ export default function Inventory() {
   const moveStockInFlightRef = useRef(false)
   const transferStockInFlightRef = useRef(false)
   const batchInventoryInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady, user })
   const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
     withLoaderTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS)
   ), [])

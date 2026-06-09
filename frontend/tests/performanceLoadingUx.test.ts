@@ -110,6 +110,7 @@ const userAdminTransport = fs.readFileSync(new URL('../src/api/userAdminTranspor
 const backgroundImportTracker = fs.readFileSync(new URL('../src/components/shared/BackgroundImportTracker.tsx', import.meta.url), 'utf8')
 const notificationCenter = fs.readFileSync(new URL('../src/components/shared/NotificationCenter.tsx', import.meta.url), 'utf8')
 const actionHistory = fs.readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
+const actionHistoryBar = fs.readFileSync(new URL('../src/components/shared/ActionHistoryBar.tsx', import.meta.url), 'utf8')
 const actionHistoryTransport = fs.readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 
@@ -344,7 +345,7 @@ assert.doesNotMatch(viteConfig, /PortalMenu\.tsx'\)\) return 'portal-tools'/, 's
 assert.match(viteConfig, /'assets\/shared-portal-menu-',/, 'PortalMenu should not be eagerly modulepreloaded into the initial shell')
 assert.match(viteConfig, /'assets\/shared-lazy-portal-menu-',/, 'LazyPortalMenu wrapper should not be eagerly modulepreloaded into unrelated route shells')
 assert.match(viteConfig, /'assets\/product-detail-',/, 'Product detail modals should not be eagerly modulepreloaded before row detail intent')
-assert.match(viteConfig, /AppSelect\.tsx'\)\) return 'shared-select'[\s\S]*LazyPortalMenu\.tsx'\)\) return 'shared-lazy-portal-menu'[\s\S]*pageActivity\.ts'\)\) return 'route-sync-utils'[\s\S]*PortalMenu\.tsx'\)\) return 'shared-portal-menu'[\s\S]*if \(normalized\.includes\('\/src\/components\/files\/FilePickerModal'\)/, 'public catalog shared controls should have focused chunk ownership before generic shared handling')
+assert.match(viteConfig, /AppSelect\.tsx'\)\) return 'shared-ui'[\s\S]*LazyPortalMenu\.tsx'\)\) return 'shared-lazy-portal-menu'[\s\S]*pageActivity\.ts'\)\) return 'route-sync-utils'[\s\S]*PortalMenu\.tsx'\)\) return 'shared-portal-menu'[\s\S]*if \(normalized\.includes\('\/src\/components\/files\/FilePickerModal'\)/, 'public catalog shared controls should have focused chunk ownership before generic shared handling')
 assert.doesNotMatch(viteConfig, /lucide-react[\\\/]\)\.test\(id\)\) return 'vendor-lucide'/, 'Lucide icons should not be forced into one app-wide startup vendor chunk')
 assert.match(viteConfig, /const appShellIconNames = new Set\([\s\S]*'layout-dashboard'[\s\S]*'shopping-cart'[\s\S]*'users'/, 'startup shell Lucide icons should be listed explicitly instead of falling into route chunks')
 assert.match(viteConfig, /const authLoginIconNames = new Set\([\s\S]*'chrome'[\s\S]*'key-round'[\s\S]*'lock-keyhole'/, 'auth-only Login icons should be listed explicitly for the signed-out auth chunk')
@@ -352,14 +353,15 @@ assert.match(viteConfig, /const publicCatalogIconNames = new Set\(\[[\s\S]*'arro
 assert.doesNotMatch(viteConfig.match(/const publicCatalogIconNames = new Set\(\[[\s\S]*?\]\)/)?.[0] || '', /'facebook'|'instagram'|'mail'|'map-pin'|'phone'|'send'/, 'secondary contact and social icons should not ride the public catalog first-viewport icon chunk')
 assert.match(viteConfig, /const routeSharedIconNames = new Set\(\[[\s\S]*'check-circle-2'[\s\S]*'info'[\s\S]*'mail'[\s\S]*'phone'[\s\S]*'settings-2'[\s\S]*'shield-alert'[\s\S]*'trash-2'[\s\S]*'upload'[\s\S]*\]\)/, 'cross-route notification, reset, and catalog-adjacent icons should stay in a shared icon chunk')
 assert.doesNotMatch(viteConfig, /const authLoginIconNames = new Set\(\[[^\]]*'(chevron-down|chevron-up|mail)'/, 'shared catalog icons should not be pinned to the auth-login chunk')
-assert.match(viteConfig, /if \(authLoginIconNames\.has\(iconName\)\) return 'auth-login'[\s\S]*if \(publicCatalogIconNames\.has\(iconName\)\) return 'catalog-icons'[\s\S]*if \(routeSharedIconNames\.has\(iconName\)\) return 'shared-icons'[\s\S]*return appShellIconNames\.has\(iconName\) \? 'app-shell-icons' : undefined/, 'direct Lucide icon modules should keep auth, public catalog, shared route, and shell icons out of feature chunks')
+assert.match(viteConfig, /if \(authLoginIconNames\.has\(iconName\)\) return 'auth-login'[\s\S]*if \(publicCatalogIconNames\.has\(iconName\)\) return 'catalog-icons'[\s\S]*if \(routeSharedIconNames\.has\(iconName\) \|\| appShellIconNames\.has\(iconName\)\) return 'shared-ui'/, 'direct Lucide icon modules should keep auth, public catalog, shared route, and shell icons out of feature chunks')
 assert.match(viteConfig, /'assets\/dashboard-charts-',[\s\S]*'assets\/dashboard-export-',/, 'Dashboard chart/report chunks should be excluded from eager modulepreload on non-dashboard routes')
 assert.match(viteConfig, /'assets\/catalog-',[\s\S]*'assets\/portal-language-packs-',[\s\S]*'assets\/portal-content-i18n-'/, 'catalog and public portal intent chunks should be excluded from eager modulepreload')
-assert.match(viteConfig, /'assets\/shared-icons-',[\s\S]*'assets\/system-jobs-api-'/, 'secondary shared icon chunks should not be modulepreloaded during the public product first viewport')
+assert.match(viteConfig, /'assets\/shared-action-history-',[\s\S]*'assets\/system-jobs-api-'/, 'secondary admin chunks should not be modulepreloaded during the public product first viewport')
 assert.match(viteConfig, /'assets\/backup-reset-tools-',/, 'Backup reset tools should not be eagerly modulepreloaded into the normal Backup route')
 assert.match(viteConfig, /'assets\/settings-otp-modal-',/, 'Settings OTP modal should not be eagerly modulepreloaded into the normal Settings route')
 assert.doesNotMatch(viteConfig, /'assets\/access-control-api-'|accessControlTransport/, 'Retired access-control transport should not produce or preload a stale chunk')
 assert.match(viteConfig, /'assets\/custom-tables-api-',/, 'Custom-table route transport should not be eagerly modulepreloaded into normal startup')
+assert.match(viteConfig, /'assets\/csv-utils-',/, 'CSV import and export helpers should stay out of eager modulepreload on read-only route startup')
 assert.match(viteConfig, /'assets\/user-profile-modal-',/, 'Users profile modal should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /'assets\/user-detail-sheet-',/, 'Users detail sheet should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /'assets\/user-permission-editor-',/, 'Users role permission editor should not be eagerly modulepreloaded into the normal Users route')
@@ -377,13 +379,16 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/saleWriteTransport\
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productWriteTransport\.ts'\)\) return 'product-write-api'/, 'Products page create\/update\/delete writes should have their own lazy product-write API chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productImageUploadTransport\.ts'\)\) return 'product-image-upload-api'/, 'Products page image upload intent should use a narrow product-image upload chunk instead of the full file transport')
 assert.match(viteConfig, /'assets\/product-image-upload-api-',/, 'Product image upload intent chunk should be excluded from eager modulepreload')
+assert.match(viteConfig, /'assets\/quick-preference-toggles-',/, 'Context-backed preference toggles should not pollute the generic shared startup chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/branchTransport\.ts'\)\) return 'branch-api'[\s\S]*normalized\.endsWith\('\/src\/api\/inventoryTransport\.ts'\)\) return 'inventory-api'/, 'Products page branch and stock intents should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userAdminTransport\.ts'\)\) return 'user-admin-api'[\s\S]*normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'/, 'Users admin reads and mutations should use a focused route chunk instead of app-api-methods')
 assert.doesNotMatch(viteConfig, /normalized\.endsWith\('\/src\/api\/accessControlTransport\.ts'\)\) return 'access-control-api'/, 'retired access-control wrapper should not keep a manual chunk rule')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/customTablesTransport\.ts'\)\) return 'custom-tables-api'/, 'custom-table route operations should have a focused lazy custom-tables chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsReadTransport\.ts'\)\) return 'returns-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsTransport\.ts'\)\) return 'returns-write-api'[\s\S]*normalized\.endsWith\('\/src\/api\/rfidTransport\.ts'\)\) return 'rfid-api'/, 'Inventory user, dashboard, returns reads, returns writes, and RFID should use focused chunks instead of app-api-methods')
 assert.match(viteConfig, /'assets\/product-read-api-',[\s\S]*'assets\/returns-write-api-',/, 'dynamic product reads and return writes should stay out of eager modulepreload on read-only route startup')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'action-history-api'/, 'action history reads/writes and admin user filter reads should not collapse into app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'shared-action-history'/, 'action history reads/writes and admin user filter reads should stay with the history UI instead of adding another startup request')
+assert.doesNotMatch(actionHistory, /AppContext|useAppHook|useApp\(/, 'shared action history should receive the current user from pages instead of importing the full app context graph')
+assert.doesNotMatch(actionHistoryBar, /AppContext|useAppHook|useAppFromContext|useApp\(/, 'shared action history chrome should not import the full app context graph just for translations')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/offlineSnapshotTransport\.ts'\)\) return 'offline-snapshot-api'/, 'idle offline snapshot refresh should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/requestIds\.ts'\)\) return 'request-ids'/, 'small request-id helpers used by focused write transports should not drag app-api-methods into product writes')
   assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/searchTerms\.ts'\)\) return 'route-sync-utils'/, 'tiny search-term normalization should share the small synchronous route helper chunk instead of costing its own startup request')
@@ -479,7 +484,7 @@ assert.doesNotMatch(catalogPage, /import \{ createCircularFaviconDataUrl \} from
 assert.match(catalogPage, /window\.requestIdleCallback\(renderRoundedFavicon, \{ timeout: 1800 \}\)/, 'public catalog should round the favicon from an idle callback after the first viewport can render')
 assert.match(catalogPage, /import\('\.\.\/\.\.\/utils\/favicon\.ts'\)\.then\(\(\{ createCircularFaviconDataUrl \}\)/, 'public catalog should load favicon canvas helpers only from the delayed favicon task')
 assert.match(viteConfig, /CatalogEditorSurface\.tsx'\)[\s\S]*CatalogImageField\.tsx'\)[\s\S]*return 'catalog-editor'/, 'editor-only catalog image fields should not be grouped into the public catalog chunk')
-assert.match(viteConfig, /PaginationControls\.tsx'\)\) return 'shared-pagination'[\s\S]*ActionHistoryBar\.tsx'\)\) return 'shared-action-history'[\s\S]*FilterMenu\.tsx'\)\) return 'shared-filter-menu'[\s\S]*SectionSwitcher\.tsx'\)\) return 'shared-section-switcher'[\s\S]*PageHeader\.tsx'\)\) return 'shared-page-header'[\s\S]*Modal\.tsx'\)\) return 'shared-modal'[\s\S]*if \(normalized\.includes\('\/src\/components\/shared\/'\)\) return 'app-shared'/, 'later-route shared controls should be split before the generic app-shared startup chunk')
+assert.match(viteConfig, /QuickPreferenceToggles\.tsx'\)\) return 'quick-preference-toggles'[\s\S]*PaginationControls\.tsx'\)\) return 'shared-ui'[\s\S]*ActionHistoryBar\.tsx'\)\) return 'shared-action-history'[\s\S]*FilterMenu\.tsx'\)\) return 'shared-ui'[\s\S]*SectionSwitcher\.tsx'\)\) return 'shared-ui'[\s\S]*PageHeader\.tsx'\)\) return 'shared-page-header'[\s\S]*Modal\.tsx'\)\) return 'shared-modal'[\s\S]*if \(normalized\.includes\('\/src\/components\/shared\/'\)\) return 'app-shared'/, 'later-route shared controls should be split before the generic app-shared startup chunk')
 assert.doesNotMatch(exportMenu, /import PortalMenu from '\.\/PortalMenu'/, 'ExportMenu should not statically import the portal menu positioning code during startup')
 assert.match(exportMenu, /import\('\.\/PortalMenu'\)\.then\(\(module\) => module\.default\)/, 'ExportMenu should load PortalMenu only on pointer/focus/click intent')
 assert.match(exportMenu, /defaultOpen=\{openOnLoad\}/, 'ExportMenu first click should open the menu after the PortalMenu chunk loads')
@@ -736,7 +741,7 @@ assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} clas
 assert.match(inventory, /inventory-history-row[\s\S]{0,160}<ActionHistoryBar/, 'inventory history controls should render inside the dedicated history row')
 assert.match(inventory, /const INVENTORY_HISTORY_READY_DELAY_MS = 1800/, 'Inventory background history should wait until after first route-ready work')
 assert.match(inventory, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Inventory should have an explicit post-ready action-history gate')
-assert.match(inventory, /useActionHistory\(\{ limit: 10, notify, scope: 'inventory', enabled: historyReady \}\)/, 'Inventory should not fetch server action history during first route load')
+assert.match(inventory, /useActionHistory\(\{ limit: 10, notify, scope: 'inventory', enabled: historyReady, user \}\)/, 'Inventory should not fetch server action history during first route load and should pass user without importing AppContext inside the hook')
 assert.match(inventory, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*INVENTORY_HISTORY_READY_DELAY_MS/, 'Inventory should enable history only after the first inventory data load settles')
 assert.match(inventory, /const InventoryProductsSurface = lazy\(\(\) => import\('\.\/InventoryProductsSurface'\)\) as any/, 'Inventory products surface should stay in its own route subchunk')
 assert.doesNotMatch(inventory, /import InventoryProductsSurface from '\.\/InventoryProductsSurface'/, 'Inventory should not statically pull the product surface into the main inventory route chunk')
@@ -755,15 +760,15 @@ assert.doesNotMatch(inventory, /lucide-react\/dist\/esm\/icons\/x\.js/, 'Invento
 assert.match(inventoryStatDetailModal, /export default function InventoryStatDetailModal/, 'Inventory stat detail modal markup should live in the lazy stat detail component')
 assert.match(sales, /const SALES_HISTORY_READY_DELAY_MS = 1800/, 'Sales background history should wait until after first route-ready work')
 assert.match(sales, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Sales should have an explicit post-ready action-history gate')
-assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/, 'Sales should not fetch server action history during first route load')
+assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/, 'Sales should not fetch server action history during first route load')
 assert.match(sales, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*SALES_HISTORY_READY_DELAY_MS/, 'Sales should enable history only after the first sales data load settles')
 assert.match(returns, /const RETURNS_HISTORY_READY_DELAY_MS = 1800/, 'Returns background history should wait until after first route-ready work')
 assert.match(returns, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Returns should have an explicit post-ready action-history gate')
-assert.match(returns, /useActionHistory\(\{ limit: 8, notify, scope: 'returns', enabled: historyReady \}\)/, 'Returns should not fetch server action history during first route load')
+assert.match(returns, /useActionHistory\(\{ limit: 8, notify, scope: 'returns', enabled: historyReady, user \}\)/, 'Returns should not fetch server action history during first route load')
 assert.match(returns, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*RETURNS_HISTORY_READY_DELAY_MS/, 'Returns should enable history only after the first returns data load settles')
 assert.match(products, /const PRODUCTS_HISTORY_READY_DELAY_MS = 1800/, 'Products background history should wait until after first route-ready work')
 assert.match(products, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Products should have an explicit post-ready action-history gate')
-assert.match(products, /useActionHistory\(\{ limit: 10, notify, scope: 'products', enabled: historyReady \}\)/, 'Products should not fetch server action history during first route load')
+assert.match(products, /useActionHistory\(\{ limit: 10, notify, scope: 'products', enabled: historyReady, user \}\)/, 'Products should not fetch server action history during first route load')
 assert.match(products, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*PRODUCTS_HISTORY_READY_DELAY_MS/, 'Products should enable history only after the first product data load settles')
 assert.match(products, /const ActionHistoryBar = lazy\(\(\) => import\('\.\.\/shared\/ActionHistoryBar'\)\)/, 'Products should lazy-load action history chrome after first route-ready work')
 assert.doesNotMatch(products, /import ActionHistoryBar from '\.\.\/shared\/ActionHistoryBar'/, 'Products should not statically import action history chrome during first route render')
@@ -774,7 +779,7 @@ assert.match(backup, /useState<BackupSectionId>\('all'\)/, 'Backup should defaul
 assert.match(backup, /BackupOverview/, 'Backup overview should provide lightweight section entry points')
 assert.match(backup, /const BACKUP_HISTORY_READY_DELAY_MS = 1800/, 'Backup background history should wait until after first route-ready work')
 assert.match(backup, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Backup should have an explicit post-ready action-history gate')
-assert.match(backup, /useActionHistory\(\{ limit: 3, notify, scope: 'backup', enabled: historyReady \}\)/, 'Backup should not fetch server action history during first route load')
+assert.match(backup, /useActionHistory\(\{ limit: 3, notify, scope: 'backup', enabled: historyReady, user \}\)/, 'Backup should not fetch server action history during first route load')
 assert.match(backup, /window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*BACKUP_HISTORY_READY_DELAY_MS/, 'Backup should enable history only after the overview has rendered')
 assert.doesNotMatch(backup, /import \{ ResetData, FactoryReset \} from '\.\/ResetData'/, 'Backup should not statically import destructive reset tools during normal backup route load')
 assert.match(backup, /const LazyResetData = lazy\(async \(\) => \{[\s\S]*await import\('\.\/ResetData'\)[\s\S]*module\.ResetData/, 'Backup should load reset tools only when advanced maintenance is opened')
@@ -891,7 +896,7 @@ for (const [name, source] of [
   assert.match(source, /const failedIdSet = new Set\(failedIds\)/, `${name} contacts should reuse a failed-id Set when filtering deleted snapshots`)
   assert.match(source, /const \w+_HISTORY_READY_DELAY_MS = 1800/, `${name} contacts should delay background history until after first route-ready work`)
   assert.match(source, /const \[historyReady, setHistoryReady\] = useState\(false\)/, `${name} contacts should have an explicit post-ready action-history gate`)
-  assert.match(source, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/, `${name} contacts should not fetch server action history during first contact data load`)
+  assert.match(source, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/, `${name} contacts should not fetch server action history during first contact data load`)
   assert.match(source, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*_HISTORY_READY_DELAY_MS/, `${name} contacts should enable history only after the first contact data load settles`)
   assert.doesNotMatch(source, /if \(!loadedOnceRef\.current\) \{[\s\S]{0,240}loadedOnceRef\.current = true/, `${name} contacts should not lock in a failed first load as a completed render`)
   assert.doesNotMatch(source, /\.filter\(\([^)]*\) => ids\.includes\(Number\([^)]*\.id \|\| 0\)\)\)\.map/, `${name} contacts should not scan selected ids with Array.includes while snapshotting`)
@@ -1204,7 +1209,7 @@ assert.match(
 )
 assert.match(
   branches,
-  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/,
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/,
   'Branches should not fetch server action history during first route load',
 )
 assert.match(
@@ -2174,7 +2179,7 @@ assert.match(
 )
 assert.match(
   usersPage,
-  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/,
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user: currentUser \}\)/,
   'Users should not fetch server action history during first route load',
 )
 assert.match(
@@ -2973,7 +2978,7 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady \}\)/,
+  /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/,
   'Files should not fetch server action history during first route load',
 )
 assert.match(

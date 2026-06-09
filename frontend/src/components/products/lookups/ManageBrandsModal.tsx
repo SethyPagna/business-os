@@ -203,7 +203,7 @@ export default function ManageBrandsModal({
   t,
 }: ManageBrandsModalProps) {
   const { settings, notify } = useApp()
-  const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-brands' })
+  const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-brands', user })
   const actionHistoryForBar = actionHistory as unknown as ComponentProps<typeof ActionHistoryBar>['history']
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')

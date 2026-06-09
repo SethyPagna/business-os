@@ -39,6 +39,13 @@ interface AppContextValue {
   t: TranslateFn
   notify: NotifyFn
   hasPermission(permission: string): boolean
+  user?: {
+    id?: unknown
+    name?: unknown
+    username?: unknown
+    role_code?: unknown
+    permissions?: unknown
+  } | null
 }
 
 interface ActionHistoryItem {
@@ -1394,11 +1401,11 @@ const MemoBackupOverview = memo(BackupOverview)
 
 
 export default function Backup() {
-  const { t, notify, hasPermission } = useApp()
+  const { t, notify, hasPermission, user } = useApp()
   const copy = useCopy(t)
   const isActive = useIsPageActive('backup')
   const [historyReady, setHistoryReady] = useState(false)
-  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup', enabled: historyReady }) as ActionHistoryValue
+  const actionHistory = useActionHistory({ limit: 3, notify, scope: 'backup', enabled: historyReady, user }) as ActionHistoryValue
   const [loading, setLoading] = useState<BackupAction>('')
   const [folderExportPath, setFolderExportPath] = useState('')
   const [folderImportPath, setFolderImportPath] = useState('')

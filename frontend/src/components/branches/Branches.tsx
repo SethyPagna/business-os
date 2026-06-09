@@ -298,7 +298,7 @@ export default function Branches() {
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
 
   /**
    * 3. Data Loading

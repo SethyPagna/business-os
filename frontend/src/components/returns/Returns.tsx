@@ -146,6 +146,13 @@ interface AppContextValue {
   fmtUSD: (value: number | string | null | undefined) => string
   fmtKHR: (value: number | string | null | undefined) => string
   notify: (message: string, type?: string) => void
+  user?: {
+    id?: unknown
+    name?: unknown
+    username?: unknown
+    role_code?: unknown
+    permissions?: unknown
+  } | null
 }
 
 interface SyncContextValue {
@@ -234,7 +241,7 @@ function getInitialReturnPageSize(): number {
 }
 
 export default function Returns() {
-  const { t, fmtUSD, fmtKHR, notify } = useApp()
+  const { t, fmtUSD, fmtKHR, notify, user } = useApp()
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string): string => {
     const candidate = fallbackKm || fallbackEn
@@ -275,7 +282,7 @@ export default function Returns() {
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const loadWatchdogRef = useRef<number | null>(null)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
-  const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 8, notify, scope: 'returns', enabled: historyReady, user })
   const deferredSearch = useDeferredValue(search)
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const returnsDateRange = useMemo(() => {

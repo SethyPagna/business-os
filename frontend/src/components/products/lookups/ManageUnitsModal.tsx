@@ -94,6 +94,13 @@ interface ManageUnitsModalProps {
 
 interface AppContextValue {
   notify: (message: string, type?: string) => void
+  user?: {
+    id?: unknown
+    name?: unknown
+    username?: unknown
+    role_code?: unknown
+    permissions?: unknown
+  } | null
 }
 
 interface SyncContextValue {
@@ -165,7 +172,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<EntityId | 'selected' | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
-  const { notify } = useApp()
+  const { notify, user } = useApp()
   const reviewProductsLabel = t('review_products') && t('review_products') !== 'review_products'
     ? t('review_products')
     : 'Review products'
@@ -174,7 +181,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
   const saveInFlightRef = useRef(false)
   const deleteInFlightRef = useRef(false)
   const bulkDeleteInFlightRef = useRef(false)
-  const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-units' })
+  const actionHistory = useActionHistory({ limit: 5, notify, scope: 'product-units', user })
   const actionHistoryForBar = actionHistory as unknown as ComponentProps<typeof ActionHistoryBar>['history']
   const unitsById = useMemo(() => {
     const index = new Map<number, UnitRow>()

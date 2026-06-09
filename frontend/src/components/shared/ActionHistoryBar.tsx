@@ -2,7 +2,6 @@ import { useState } from 'react'
 import CornerDownLeft from 'lucide-react/dist/esm/icons/corner-down-left.js'
 import CornerDownRight from 'lucide-react/dist/esm/icons/corner-down-right.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
-import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import AppSelect from './AppSelect'
 
 type Translate = (key: string, fallback: string) => string
@@ -36,10 +35,6 @@ type ActionHistory = {
   redo: (id?: string | number) => void
 }
 
-type AppTranslationContext = {
-  t?: (key: string) => string
-}
-
 type ActionHistoryBarProps = {
   history?: ActionHistory | null
   align?: 'left' | 'right'
@@ -66,14 +61,11 @@ export default function ActionHistoryBar({
   t,
   summaryMode = 'full',
 }: ActionHistoryBarProps) {
-  const useApp = useAppFromContext as () => AppTranslationContext
-  const app = useApp()
   const [open, setOpen] = useState(false)
   if (!history) return null
 
   const T: Translate = (key, fallback) => {
     if (typeof t === 'function') return t(key) || fallback
-    if (typeof app?.t === 'function') return app.t(key) || fallback
     return fallback
   }
   const undoItems = formatHistoryList(history.undoItems)

@@ -289,6 +289,7 @@ const deferredModulePreloadPrefixes = [
   'assets/branch-api-',
   'assets/contacts-api-',
   'assets/custom-tables-api-',
+  'assets/csv-utils-',
   'assets/dashboard-api-',
   'assets/dashboard-charts-',
   'assets/dashboard-export-',
@@ -305,6 +306,7 @@ const deferredModulePreloadPrefixes = [
   'assets/product-image-upload-api-',
   'assets/product-read-api-',
   'assets/product-write-api-',
+  'assets/quick-preference-toggles-',
   'assets/rfid-api-',
   'assets/returns-write-api-',
   'assets/sale-write-api-',
@@ -454,8 +456,8 @@ function manualChunks(id: string): string | undefined {
     const iconName = path.basename(normalized, '.js')
     if (authLoginIconNames.has(iconName)) return 'auth-login'
     if (publicCatalogIconNames.has(iconName)) return 'catalog-icons'
-    if (routeSharedIconNames.has(iconName)) return 'shared-icons'
-    return appShellIconNames.has(iconName) ? 'app-shell-icons' : undefined
+    if (routeSharedIconNames.has(iconName) || appShellIconNames.has(iconName)) return 'shared-ui'
+    return undefined
   }
   if (!id.includes('node_modules')) {
     if (normalized.endsWith('/src/lang/en.json')) return 'lang-en'
@@ -472,7 +474,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/searchTerms.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/recordFilters.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/loaders.ts')) return 'route-sync-utils'
-    if (normalized.endsWith('/src/utils/groupedRecords.ts')) return 'record-groups'
+    if (normalized.endsWith('/src/utils/groupedRecords.ts')) return 'shared-ui'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
     if (normalized.endsWith('/src/api/contactWriteTransport.ts')) return 'contact-write-api'
@@ -510,7 +512,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/returnsReadTransport.ts')) return 'returns-read-api'
     if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-write-api'
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
-    if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
+    if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'shared-action-history'
     if (normalized.endsWith('/src/api/offlineSnapshotTransport.ts')) return 'offline-snapshot-api'
     if (normalized.endsWith('/src/api/pendingSyncTransport.ts')) return 'pending-sync-api'
     if (normalized.endsWith('/src/api/settingsTransport.ts')) return 'settings-api'
@@ -635,7 +637,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
       return 'image-lightbox'
     }
-    if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-select'
+    if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-lazy-portal-menu'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'
     if (normalized.includes('/src/components/shared/PortalMenu.tsx')) return 'shared-portal-menu'
@@ -651,10 +653,11 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/NotificationCenter.tsx')) return 'notification-center'
     if (normalized.includes('/src/components/shared/BackgroundImportTracker.tsx')) return 'background-import-tracker'
     if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
-    if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-pagination'
+    if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'quick-preference-toggles'
+    if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/ActionHistoryBar.tsx')) return 'shared-action-history'
-    if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-filter-menu'
-    if (normalized.includes('/src/components/shared/SectionSwitcher.tsx')) return 'shared-section-switcher'
+    if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-ui'
+    if (normalized.includes('/src/components/shared/SectionSwitcher.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PageHeader.tsx')) return 'shared-page-header'
     if (normalized.includes('/src/components/shared/Modal.tsx')) return 'shared-modal'
     if (

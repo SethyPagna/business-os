@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useApp as useAppHook } from '../AppContext.tsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -13,12 +12,12 @@ type HistoryAction = () => unknown | Promise<unknown>
 type NotifyFn = (message: string, type?: string) => void
 
 type ActionHistoryUser = {
+  id?: unknown
+  name?: unknown
   username?: unknown
   role_code?: unknown
   permissions?: unknown
 }
-
-const useApp = useAppHook as () => { user?: ActionHistoryUser }
 
 type ActionHistoryInput = {
   id?: unknown
@@ -68,6 +67,7 @@ type ActionHistoryOptions = {
   notify?: NotifyFn
   scope?: string
   enabled?: boolean
+  user?: ActionHistoryUser | null
 }
 
 declare global {
@@ -120,8 +120,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : String(error || fallback)
 }
 
-export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true }: ActionHistoryOptions = {}) {
-  const { user } = useApp()
+export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true, user = null }: ActionHistoryOptions = {}) {
   const [undoStack, setUndoStack] = useState<ActionHistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<ActionHistoryEntry[]>([])
   const [serverItems, setServerItems] = useState<ServerHistoryItem[]>([])

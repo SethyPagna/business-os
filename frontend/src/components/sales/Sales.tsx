@@ -247,7 +247,7 @@ export default function Sales() {
   const membershipActionRef = useRef<Set<string>>(new Set())
   const bulkStatusInFlightRef = useRef(false)
   const aliveRef = useRef(true)
-  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
   const deferredSearch = useDeferredValue(search)
   const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const isAdmin = useMemo(() => {

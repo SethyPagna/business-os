@@ -546,7 +546,7 @@ export default function Products() {
   const desktopSelectAllRef = useRef<HTMLInputElement | null>(null)
   const mobileSelectAllRef = useRef<HTMLInputElement | null>(null)
   const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
-  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products', enabled: historyReady })
+  const actionHistory = useActionHistory({ limit: 10, notify, scope: 'products', enabled: historyReady, user })
   const debouncedSearch = useDebouncedValue(search, 180)
   const runProductWriteMutation = useCallback(<T,>(loader: Loader<T>, label: string, timeoutMs = PRODUCT_WRITE_MUTATION_TIMEOUT_MS): Promise<T> => (
     withLoaderTimeout(loader, label, timeoutMs)
