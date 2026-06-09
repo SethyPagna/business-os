@@ -106,6 +106,25 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 868 removes the Library/Files late-chunk stall found by the next broad
+  live Cloudflare sweep. The failing sample was not an API failure: `/files`
+  reached 21.527 s ready while waiting for late-discovered first-screen helper
+  chunks. Backend SPA preload hints now include the Library route's direct
+  first-window chunk set (`FilesPage`, `file-api`, `ai-api`,
+  `multipart-headers-api`, `route-sync-utils`, `settings-refresh`, `shared-ui`,
+  `shared-action-history`, `shared-page-header`, `product-shared`, and
+  `app-shared`), and Cloudflare startup warmup now includes `/files` plus those
+  dependency names in the bounded graph filter. Docker image
+  `business-os:v6.0.0-202606101315-move868` is live with frontend hash
+  `69e2e819e937bff6` and source hash `a560821a401e12c5`. Startup warmup
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json` completed with
+  zero failures and 210 HIT targets. Library/Files Playwright route-load proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-12-04-740Z.json`
+  measured 2.731 s ready with zero failures/errors; repeat
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-12-33-074Z.json`
+  measured 3.336 s. Direct authenticated `/api/files` was 17 ms local and
+  448 ms remote, confirming the remaining variance is Cloudflare/static-asset
+  delivery rather than backend query work.
 - Move 867 makes remote startup warmup match real route entrypoints instead of
   warming only `/public` and `/`. The backend SPA shell now emits route-specific
   first-window modulepreloads for Products, Inventory, POS, Branches, and public

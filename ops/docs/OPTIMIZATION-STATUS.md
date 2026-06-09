@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 867, make Cloudflare admin/public startup
-  warmup route-aware and preload first-window route dependencies.
+- Latest completed move: Move 868, remove the Library/Files late-chunk startup
+  stall from the Cloudflare admin path.
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `69e2e819e937bff6`
 - latest verified source hash from the most recent Docker-served live check:
-  `a6cad3993925bc87`
+  `a560821a401e12c5`
 
 Latest verified reports:
 
@@ -73,6 +73,12 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-607Z.json`
 - latest Move 867 warmed public-host repeat trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-940Z.json`
+- latest Move 868 Library/Files route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-12-04-740Z.json`
+- latest Move 868 Library/Files repeat trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-12-33-074Z.json`
+- latest Move 868 comparison route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-12-05-433Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -191,6 +197,29 @@ Latest cleanup run:
   R2/access follow-up open; Phase 29 remains active. Next target is smoothing
   the remaining Cloudflare tunnel variance and continuing page-by-page live
   checks without reintroducing fake loading waits.
+- Move 868 fixes the worst outlier found by the next broad Cloudflare route
+  sweep. Before the change, Library/Files was 21.527 s ready with zero failed
+  requests, because the first screen waited for late-discovered chunks:
+  `shared-ui`, `shared-page-header`, `shared-action-history`, `file-api`,
+  `ai-api`, and `multipart-headers-api`. The backend now emits direct
+  `/files` modulepreloads for those route-owned first-window chunks plus
+  `route-sync-utils` and `settings-refresh`, and the startup warmer now includes
+  `/files` plus the matching dependency names in its bounded graph filter.
+- Runtime proof: Docker image `business-os:v6.0.0-202606101315-move868` is
+  running with frontend hash `69e2e819e937bff6`, source hash
+  `a560821a401e12c5`, and healthy local `/health`. Startup warmup completed
+  with zero failures and 210 HIT targets across `/`, `/products`, `/inventory`,
+  `/pos`, `/branches`, and `/files`. Cloudflare Playwright proof for
+  Library/Files improved from 21.527 s to 2.731 s on the first post-change
+  sample and 3.336 s on repeat, with zero failed requests and zero console
+  errors. Direct authenticated `/api/files` timing was 17 ms local and 448 ms
+  remote, so the remaining variation is Cloudflare/static-asset tunnel timing,
+  not backend query work or fake loader delay.
+- Current plan position after Move 868: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target from the same
+  live sweep is Users at 3.739 s and Audit Log at 2.565 s, then a broader
+  admin-shell/tunnel variance pass.
 
 - Move 864 removes the public catalog first-load bootstrap API round trip.
   The backend now injects the public portal bootstrap payload directly into

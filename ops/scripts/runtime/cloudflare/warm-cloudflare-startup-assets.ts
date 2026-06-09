@@ -12,12 +12,12 @@ const DEFAULT_DOCUMENT_ATTEMPTS = 5
 const DEFAULT_DOCUMENT_RETRY_DELAY_MS = 2_000
 const DEFAULT_ASSET_ATTEMPTS = 3
 const DEFAULT_ASSET_RETRY_DELAY_MS = 750
-const DEFAULT_ADMIN_ROUTE_PATHS = ['/', '/products', '/inventory', '/pos', '/branches']
+const DEFAULT_ADMIN_ROUTE_PATHS = ['/', '/products', '/inventory', '/pos', '/branches', '/files']
 const DEFAULT_ASSET_GRAPH_DEPTH = 1
 const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-')
 const DEFAULT_OUTPUT = `ops/runtime/reports/cloudflare-startup-warmup-${TIMESTAMP}.json`
 const LATEST_OUTPUT = 'ops/runtime/reports/cloudflare-startup-warmup-latest.json'
-const ADMIN_FIRST_WINDOW_DEPENDENCY_RE = /\/assets\/(?:AdminRoot|Sidebar|app-(?:api|auth|bootstrap|local-db|routing|shared|shell)|api-http-(?:core|state)|catalog-(?:icons|public|public-core)|dashboard-(?:api|charts)|product-(?:read-api|shared)|productDisplayHelpers|inventory-api|branch-api|vendor-dexie|csv-utils|settings-refresh|shared-(?:action-history|formatters|modal|page-header|ui)|lang-en)-/i
+const ADMIN_FIRST_WINDOW_DEPENDENCY_RE = /\/assets\/(?:AdminRoot|Sidebar|app-(?:api|auth|bootstrap|local-db|routing|shared|shell)|api-http-(?:core|state)|catalog-(?:icons|public|public-core)|dashboard-(?:api|charts)|product-(?:read-api|shared)|productDisplayHelpers|inventory-api|branch-api|file-api|ai-api|multipart-headers-api|vendor-dexie|csv-utils|route-sync-utils|settings-refresh|shared-(?:action-history|formatters|modal|page-header|ui)|lang-en)-/i
 
 function assertInsideWorkspace(target) {
   const relative = path.relative(ROOT_DIR, target)

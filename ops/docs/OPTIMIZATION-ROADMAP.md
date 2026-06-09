@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 867.
+- Latest completed implementation move in this roadmap: Move 868.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -91,6 +91,21 @@ Move 867 current state:
   `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-607Z.json`.
   Repeat public trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T18-48-19-940Z.json`.
+
+Move 868 current state:
+- Docker release `business-os:v6.0.0-202606101315-move868` is running healthy
+  with frontend hash `69e2e819e937bff6` and source hash
+  `a560821a401e12c5`.
+- Library/Files is now a route-specific warmup surface. Its first-window
+  modulepreloads include `FilesPage`, `file-api`, `ai-api`,
+  `multipart-headers-api`, `route-sync-utils`, `settings-refresh`,
+  `shared-ui`, `shared-action-history`, `shared-page-header`,
+  `product-shared`, and `app-shared`.
+- Startup warmup now covers `/files` and completed with zero failures across
+  210 HIT targets. Live Cloudflare Playwright proof improved Library/Files from
+  the broad-sweep 21.527 s outlier to 2.731 s first sample and 3.336 s repeat,
+  with zero failures/errors. Direct `/api/files` timing was 17 ms local and
+  448 ms remote, so remaining variation is the Cloudflare/static asset path.
 
 ## Phase 1: Safe Wins
 
