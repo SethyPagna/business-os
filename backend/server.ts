@@ -130,7 +130,6 @@ const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
       'PublicCatalogRoot',
       'app-portal',
       'app-shell',
-      'loader-utils',
       'catalog-public-core',
       'catalog-public-utils',
       'catalog-public',

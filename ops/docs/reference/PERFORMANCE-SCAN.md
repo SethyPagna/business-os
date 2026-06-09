@@ -2336,4 +2336,22 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   at 280 ms. Public Cloudflare warmup passed 13 targets with 0 failures. Real
   public Cloudflare route-load passed at 2.215 s ready with `api=0`; public LCP
   passed at 2.324 s, below the 2.5 s target.
+- Move 866 records artificial admin loading-delay removal. Products, POS,
+  Inventory, Files, Branch, Contacts, Sales, Returns, Backup, Users, and Sync
+  Server no longer wait 1.8 s before enabling secondary history/filter/metadata
+  and online-check work; those gates now resolve at 250 ms after primary load.
+  Frontend typecheck, full frontend utility suite, production build, Docker
+  build, and Docker release health passed. Local Docker image
+  `business-os:v6.0.0-202606101030-move866` served frontend hash
+  `69e2e819e937bff6`; affected local route-load passed with zero failures and
+  ready times of Products 317 ms, POS 291 ms, Returns 270 ms, Files 360 ms,
+  Branches 307 ms, Users 263 ms, and Sync Server 238 ms. Local multi-route LCP
+  stayed below 1 s with zero failures/errors. Move 866 also restores the
+  performance chunk contract by moving `pageActivity.ts`, `loaders.ts`,
+  initials, and Khmer typography into `route-sync-utils` and keeping secondary
+  contact icons out of the public first-viewport icon chunk. Warmed public
+  Cloudflare LCP passed at 2.328 s after a 12/12 HIT startup warmup. Warmed
+  admin Cloudflare route-load passed with zero failures/errors but remains the
+  next hotspot: Products 3.402 s, Inventory 3.306 s, POS 3.912 s, Branches
+  4.333 s.
 <!-- phase29-manual-notes:end -->

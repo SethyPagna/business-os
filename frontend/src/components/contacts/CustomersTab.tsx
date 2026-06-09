@@ -29,7 +29,7 @@ import {
 import type { ContactOption } from './contactOptionUtils'
 import { generateCustomerMembershipNumber } from './customerMembershipNumber'
 
-const CUSTOMERS_HISTORY_READY_DELAY_MS = 1800
+const CUSTOMERS_HISTORY_READY_DELAY_MS = 250
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void

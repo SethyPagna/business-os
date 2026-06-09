@@ -100,7 +100,6 @@ if (!startRequestedWorkerRole()) {
                 'PublicCatalogRoot',
                 'app-portal',
                 'app-shell',
-                'loader-utils',
                 'catalog-public-core',
                 'catalog-public-utils',
                 'catalog-public',

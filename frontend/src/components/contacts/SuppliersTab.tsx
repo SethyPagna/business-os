@@ -31,7 +31,7 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
-const SUPPLIERS_HISTORY_READY_DELAY_MS = 1800
+const SUPPLIERS_HISTORY_READY_DELAY_MS = 250
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void

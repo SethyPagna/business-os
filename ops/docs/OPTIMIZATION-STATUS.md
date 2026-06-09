@@ -8,7 +8,7 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 865, align public portal HTTP preloads, short HTML cache headers, and cache-rule automation reporting.
+- Latest completed move: Move 866, remove 1.8s artificial post-load ready gates from high-traffic admin pages.
 
 ## Current Baseline
 
@@ -56,8 +56,16 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
 - latest focused public-host LCP trace:
   `ops/runtime/reports/lcp-route-trace-2026-06-09T16-52-41-462Z.json`
+- latest Move 866 local affected-page route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
+- latest Move 866 local multi-route LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-09T17-30-20-163Z.json`
+- latest Move 866 warmed public-host LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-09T17-33-26-477Z.json`
+- latest Move 866 warmed admin-host route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T17-33-32-034Z.json`
 - latest Cloudflare startup asset warmup:
-  `ops/runtime/reports/cloudflare-startup-warmup-2026-06-09T16-52-13-223Z.json`
+  `ops/runtime/reports/cloudflare-startup-warmup-move866-final-repeat.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -118,6 +126,39 @@ Latest cleanup run:
   the Cloudflare public HTML cache rule after token permission update, then
   trimming the remaining public CSS/catalog chunk costs without reintroducing
   artificial loading delays.
+- Move 866 removes another class of artificial loading overhead: the fixed
+  1.8 second post-load gates for history, filter metadata, auxiliary options,
+  and online checks now resolve after 250 ms on Products, POS, Inventory,
+  Files, Branch, Contacts, Sales, Returns, Backup, Users, and Sync Server.
+  This keeps primary data rendering first, but stops secondary controls from
+  waiting on a fake delay after real data is already available.
+- Runtime proof: frontend typecheck, full frontend utility suite, production
+  build, Docker build, and Docker release health passed. Docker image
+  `business-os:v6.0.0-202606101030-move866` is healthy locally with frontend
+  hash `69e2e819e937bff6` and source hash `9bff0f4aef6ae3b6`. Local
+  route-load proof passed with zero failures/errors: Products 317 ms, POS
+  291 ms, Returns 270 ms, Files 360 ms, Branches 307 ms, Users 263 ms, and
+  Sync Server 238 ms. Local LCP proof passed with zero failures/errors across
+  Dashboard, Products, Inventory, POS, Files, Branches, Audit Log, Settings,
+  and Public Catalog; every route stayed below 1 s LCP.
+- Move 866 also restores the performance chunk contract found by the frontend
+  guard suite: `pageActivity.ts`, `loaders.ts`, initials, and Khmer typography
+  now share `route-sync-utils`; secondary phone/mail/map icons stay out of the
+  first public catalog icon chunk; the stale `loader-utils` preload was removed
+  from the Vite route preload map and backend public preload hints.
+- Cloudflare proof: the tunnel watchdog saw local/public/admin health all 200.
+  After the restart settle, explicit startup warmup completed 12/12 HIT
+  targets and the repeated public LCP passed at 2.328 s with zero
+  failures/errors. Warmed admin route-load passed with zero failures/errors but
+  remains slower than local: Products 3.402 s, Inventory 3.306 s, POS 3.912 s,
+  and Branches 4.333 s. The remaining honest hotspot is remote admin
+  tunnel/cache latency plus admin chunk transfer, not local app rendering or
+  artificial page-delay gates.
+- Current plan position after Move 866: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target is shrinking
+  the remaining admin remote startup waterfall and making Cloudflare startup
+  warmup/cache behavior less dependent on manual settle time.
 
 - Move 864 removes the public catalog first-load bootstrap API round trip.
   The backend now injects the public portal bootstrap payload directly into
@@ -128,7 +169,7 @@ Latest cleanup run:
   `AppSelect`, and public price presentation now owns the small discount
   calculation it needs instead of pulling the larger product shared chunk into
   startup. `vite.config.ts` and the server preload map were updated so
-  `app-portal`, `app-shell`, `loader-utils`, `catalog-public-core`,
+  `app-portal`, `app-shell`, `catalog-public-core`,
   `catalog-public-utils`, `catalog-public`, `catalog-icons`, and
   `catalog-products` are route-owned preloads. The preload resolver now guards
   `catalog-public` against matching `catalog-public-core` or

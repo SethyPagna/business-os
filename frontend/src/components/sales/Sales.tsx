@@ -34,7 +34,7 @@ import SalesListSurface from './SalesListSurface'
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
 const SALES_MEMBERSHIP_MUTATION_TIMEOUT_MS = 12000
-const SALES_HISTORY_READY_DELAY_MS = 1800
+const SALES_HISTORY_READY_DELAY_MS = 250
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void

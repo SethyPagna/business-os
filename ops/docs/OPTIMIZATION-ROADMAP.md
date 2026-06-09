@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 863.
+- Latest completed implementation move in this roadmap: Move 866.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -14306,3 +14306,31 @@ Move 865 status:
   the public Cloudflare cache rule after token permission update, then
   continuing CSS/catalog chunk reductions with measured local and public LCP
   checks.
+
+Move 866 status:
+- Move 866 reduces the remaining artificial page-load overhead by cutting the
+  fixed post-load ready gates from 1.8 s to 250 ms for Products, POS,
+  Inventory, Files, Branch, Contacts, Sales, Returns, Backup, Users, and Sync
+  Server. These gates control secondary history/filter/metadata/online-check
+  work, so primary content still renders first while controls no longer wait
+  on a fake delay after data is ready.
+- Verification proof: frontend typecheck, full frontend utility suite,
+  production build, Docker build, and Docker release health passed. Docker
+  image `business-os:v6.0.0-202606101030-move866` is healthy locally with
+  frontend hash `69e2e819e937bff6` and source hash `9bff0f4aef6ae3b6`. Local
+  route-load passed with zero failures/errors for Products 317 ms, POS 291 ms,
+  Returns 270 ms, Files 360 ms, Branches 307 ms, Users 263 ms, and Sync Server
+  238 ms. Local LCP passed below 1 s on Dashboard, Products, Inventory, POS,
+  Files, Branches, Audit Log, Settings, and Public Catalog.
+- Move 866 also restores the frontend performance chunk contract:
+  `pageActivity.ts`, `loaders.ts`, initials, and Khmer typography now share
+  `route-sync-utils`; secondary phone/mail/map icons stay out of the first
+  public icon chunk; stale `loader-utils` public preload hints were removed.
+- Remote proof: Cloudflare watchdog reported local/public/admin health all 200
+  after settle. Explicit startup warmup completed 12/12 HIT targets; warmed
+  public LCP passed at 2.328 s. Warmed admin route-load passed with zero
+  failures/errors but remains the next target: Products 3.402 s, Inventory
+  3.306 s, POS 3.912 s, Branches 4.333 s.
+- Current plan position after Move 866: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active.

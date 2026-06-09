@@ -46,7 +46,7 @@ const BRANCHES_LIST_TIMEOUT_MS = 10000
 const BRANCHES_SUMMARY_TIMEOUT_MS = 10000
 const BRANCH_TRANSFERS_TIMEOUT_MS = 12000
 const BRANCH_MUTATION_TIMEOUT_MS = 12000
-const BRANCHES_HISTORY_READY_DELAY_MS = 1800
+const BRANCHES_HISTORY_READY_DELAY_MS = 250
 
 type TranslateFunction = (key: string) => string | undefined
 type NotifyFunction = (message: string, type?: string) => void

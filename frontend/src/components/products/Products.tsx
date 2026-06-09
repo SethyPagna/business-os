@@ -109,9 +109,9 @@ const ProductDetailModal = lazy(() => import('./surfaces/ProductDetailModal'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const ActionHistoryBar = lazy(() => import('../shared/ActionHistoryBar'))
 
-const PRODUCTS_HISTORY_READY_DELAY_MS = 1800
-const PRODUCTS_FILTER_META_READY_DELAY_MS = 1800
-const PRODUCTS_AUX_OPTIONS_READY_DELAY_MS = 1800
+const PRODUCTS_HISTORY_READY_DELAY_MS = 250
+const PRODUCTS_FILTER_META_READY_DELAY_MS = 250
+const PRODUCTS_AUX_OPTIONS_READY_DELAY_MS = 250
 
 type EntityId = string | number
 type Loader<T = unknown> = () => Promise<T>

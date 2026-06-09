@@ -30,7 +30,7 @@ const InventoryBatchModal = lazy(() => import('./InventoryBatchModal')) as any
 const InventoryReasonManagerModal = lazy(() => import('./InventoryReasonManagerModal')) as any
 const InventoryStatDetailModal = lazy(() => import('./InventoryStatDetailModal')) as any
 
-const INVENTORY_HISTORY_READY_DELAY_MS = 1800
+const INVENTORY_HISTORY_READY_DELAY_MS = 250
 
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
