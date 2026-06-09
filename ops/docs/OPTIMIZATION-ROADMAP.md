@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 868.
+- Latest completed implementation move in this roadmap: Move 869.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -106,6 +106,23 @@ Move 868 current state:
   the broad-sweep 21.527 s outlier to 2.731 s first sample and 3.336 s repeat,
   with zero failures/errors. Direct `/api/files` timing was 17 ms local and
   448 ms remote, so remaining variation is the Cloudflare/static asset path.
+
+Move 869 current state:
+- Docker release `business-os:v6.0.0-202606101330-move869` is running healthy
+  with frontend hash `69e2e819e937bff6` and source hash
+  `0eeb7ba4c6f551d5`.
+- Users is now a route-specific warmup surface. Its first-window modulepreloads
+  include `Users`, `user-admin-api`, `user-read-api`,
+  `user-permission-definitions`, `route-sync-utils`,
+  `shared-action-history`, `shared-formatters`, `shared-ui`, `shared-modal`,
+  `shared-portal-menu`, `shared-lazy-portal-menu`, `app-shared`, and
+  `product-shared`.
+- Startup warmup now covers `/users` and completed with zero failures across
+  258 HIT and 4 MISS targets. Live Cloudflare Playwright proof improved Users
+  from the broad-sweep 3.739 s sample to 2.311 s first sample and 2.257 s
+  repeat, with zero failures/errors. Audit Log comparison measured 2.106 s,
+  so the next pass should look for broader tunnel variance and any remaining
+  routes above the 2.5 s target.
 
 ## Phase 1: Safe Wins
 

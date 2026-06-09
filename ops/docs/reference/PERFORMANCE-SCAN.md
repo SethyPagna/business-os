@@ -106,6 +106,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 869 removes the Users late-chunk waterfall found after the Library
+  fix. The previous comparison trace measured Users at 3.739 s ready because
+  `user-admin-api`, `user-read-api`, `user-permission-definitions`,
+  `shared-action-history`, `shared-formatters`, `shared-modal`,
+  `shared-portal-menu`, `shared-lazy-portal-menu`, `route-sync-utils`,
+  `app-shared`, and `product-shared` arrived after the `Users` route chunk.
+  The backend SPA preload hints now include those first-window dependencies
+  for `/users`, and Cloudflare startup warmup includes `/users` plus the
+  matching dependency names in its bounded graph filter. Docker image
+  `business-os:v6.0.0-202606101330-move869` is live with frontend hash
+  `69e2e819e937bff6` and source hash `0eeb7ba4c6f551d5`. Startup warmup
+  `ops/runtime/docker-release/cloudflare-startup-warmup.json` completed with
+  zero failures, 258 HIT, and 4 MISS targets. Cloudflare Playwright route-load
+  proof: `ops/runtime/reports/route-load-trace-2026-06-09T19-23-22-588Z.json`
+  measured Users at 2.311 s with zero failures/errors; repeat comparison
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-24-07-717Z.json`
+  measured Users 2.257 s and Audit Log 2.106 s.
 - Move 868 removes the Library/Files late-chunk stall found by the next broad
   live Cloudflare sweep. The failing sample was not an API failure: `/files`
   reached 21.527 s ready while waiting for late-discovered first-screen helper

@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 868, remove the Library/Files late-chunk startup
-  stall from the Cloudflare admin path.
+- Latest completed move: Move 869, remove the Users late-chunk startup
+  waterfall from the Cloudflare admin path.
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `69e2e819e937bff6`
 - latest verified source hash from the most recent Docker-served live check:
-  `a560821a401e12c5`
+  `0eeb7ba4c6f551d5`
 
 Latest verified reports:
 
@@ -79,6 +79,10 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T19-12-33-074Z.json`
 - latest Move 868 comparison route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T19-12-05-433Z.json`
+- latest Move 869 focused Users route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-23-22-588Z.json`
+- latest Move 869 Users/Audit Log comparison route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T19-24-07-717Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -220,6 +224,29 @@ Latest cleanup run:
   R2/access follow-up open; Phase 29 remains active. Next target from the same
   live sweep is Users at 3.739 s and Audit Log at 2.565 s, then a broader
   admin-shell/tunnel variance pass.
+- Move 869 fixes the next measured admin route waterfall from the same live
+  sweep. Before the change, Users reached 3.739 s ready because
+  `user-admin-api`, `user-read-api`, `user-permission-definitions`,
+  `shared-action-history`, `shared-formatters`, `shared-modal`,
+  `shared-portal-menu`, `shared-lazy-portal-menu`, `route-sync-utils`,
+  `app-shared`, and `product-shared` were discovered after the route chunk.
+  The backend now emits direct `/users` modulepreload hints for those
+  first-screen dependencies, and the startup warmer now includes `/users` plus
+  the matching user/shared dependency names in its bounded graph filter.
+- Runtime proof: Docker image `business-os:v6.0.0-202606101330-move869` is
+  running with frontend hash `69e2e819e937bff6`, source hash
+  `0eeb7ba4c6f551d5`, and healthy local `/health`. Startup warmup completed
+  with zero failures, 258 HIT, and 4 MISS targets across `/`, `/products`,
+  `/inventory`, `/pos`, `/branches`, `/files`, and `/users`. Cloudflare
+  Playwright proof for Users improved from 3.739 s to 2.311 s on the first
+  post-change sample and 2.257 s on repeat, with zero failed requests and zero
+  console errors. The follow-up Audit Log comparison measured 2.106 s with
+  zero failures/errors.
+- Current plan position after Move 869: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next target is a broader
+  admin-shell/tunnel variance pass, then any remaining route outliers above
+  the 2.5 s target.
 
 - Move 864 removes the public catalog first-load bootstrap API round trip.
   The backend now injects the public portal bootstrap payload directly into
