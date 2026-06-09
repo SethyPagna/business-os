@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 850.
+- Latest completed implementation move in this roadmap: Move 857.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -14058,3 +14058,43 @@ Move 856 status:
   R2/access follow-up open; Phase 29 remains active as the repeated
   whole-codebase, schema, cleanup, TypeScript, runtime, and performance
   guardrail.
+
+Move 857 status:
+- Move 857 splits public catalog shared utility controls away from the broad
+  `app-shared` startup bucket. Vite now routes `AppSelect.tsx` to
+  `shared-select`, `LazyPortalMenu.tsx` to `shared-lazy-portal-menu`, and
+  `pageActivity.ts` to `route-sync-utils` before the generic
+  `components/shared` fallback. The public catalog still gets the controls it
+  needs, but no longer fetches the large catch-all shared chunk for them.
+- Runtime proof: Docker image `business-os:v6.0.0-202606090110-move857` is
+  healthy at `http://127.0.0.1:4000/health` with frontend hash
+  `0067e4e403e00d73` and source hash `e907e23af14377c3`.
+- Build/live proof: production build now emits `app-shared-u7Xi8a2R.js` at
+  9.03 kB / 3.66 kB gzip instead of the previous roughly 58 kB shared bucket.
+  The public route fetches focused `shared-select` and
+  `shared-lazy-portal-menu` chunks and no `app-shared` script in the focused
+  Playwright resource trace.
+- Live route proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T01-30-15-433Z.json` passed
+  with zero failures/errors. Public catalog measured 174 ms at 21 requests /
+  16 scripts; Dashboard 167 ms at 28 / 22; Products 272 ms at 35 / 27;
+  Inventory 300 ms at 37 / 30; POS 266 ms at 30 / 23; Returns 223 ms at
+  32 / 27. Focused Playwright probes rendered 20 real products with no request
+  failures: local LCP 248 ms, warm public Cloudflare LCP 2.776 s, and warm
+  admin public LCP 2.784 s.
+- Verification proof: frontend performance guard, frontend typecheck,
+  frontend production build, generated reference refresh, performance scan,
+  Docker image build, Docker release update, health check, route trace, and
+  focused local/public/admin Playwright browser probes passed. Final frontend
+  utility suite, `git diff --check`, and storage prune also passed; prune
+  removed one stale report, one old Docker-release backup
+  (`20260609-080325`, 5,356,932 bytes), and 2.348 GB of Docker builder cache
+  without touching uploads, secrets, volumes, newest backups, or protected
+  rollback images.
+- Current plan position after Move 857: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail. The next measured startup target is shrinking the still-large
+  catalog, language, CSS, and vendor chunks while separating app work from
+  Cloudflare Tunnel variability.

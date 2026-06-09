@@ -15,21 +15,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Size (KB) | Lines |
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
-| `frontend/src/components/inventory/Inventory.tsx` | 198.4 | 4006 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 158.0 | 3623 |
+| `frontend/src/components/inventory/Inventory.tsx` | 159.8 | 3454 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 153.0 | 3509 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
-| `frontend/src/components/pos/POS.tsx` | 126.4 | 2453 |
-| `frontend/src/components/products/Products.tsx` | 118.2 | 2553 |
-| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 104.6 | 1543 |
-| `frontend/src/components/dashboard/Dashboard.tsx` | 101.5 | 1984 |
+| `frontend/src/components/products/Products.tsx` | 119.6 | 2589 |
+| `frontend/src/components/pos/POS.tsx` | 114.8 | 2362 |
+| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 104.9 | 1555 |
+| `backend/src/routes/products.ts` | 101.8 | 2297 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 101.2 | 2170 |
-| `backend/src/routes/products.ts` | 101.0 | 2277 |
+| `frontend/src/components/dashboard/Dashboard.tsx` | 100.4 | 1958 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 88.1 | 1911 |
-| `backend/src/routes/inventory.ts` | 84.2 | 1902 |
+| `backend/src/routes/inventory.ts` | 86.1 | 1952 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 80.1 | 1775 |
-| `frontend/src/AppContext.tsx` | 78.4 | 1978 |
-| `frontend/src/App.tsx` | 71.7 | 1905 |
+| `frontend/src/AppContext.tsx` | 78.8 | 1984 |
+| `frontend/src/App.tsx` | 74.4 | 1966 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 68.2 | 1326 |
 | `backend/src/routes/system/index.ts` | 65.6 | 1674 |
@@ -44,31 +44,31 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 | File | Lines | Size (KB) |
 |---|---:|---:|
-| `frontend/src/components/inventory/Inventory.tsx` | 4006 | 198.4 |
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
-| `frontend/src/components/catalog/CatalogPage.tsx` | 3623 | 158.0 |
+| `frontend/src/components/catalog/CatalogPage.tsx` | 3509 | 153.0 |
+| `frontend/src/components/inventory/Inventory.tsx` | 3454 | 159.8 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
-| `frontend/src/components/products/Products.tsx` | 2553 | 118.2 |
-| `frontend/src/components/pos/POS.tsx` | 2453 | 126.4 |
-| `backend/src/routes/products.ts` | 2277 | 101.0 |
+| `frontend/src/components/products/Products.tsx` | 2589 | 119.6 |
+| `frontend/src/components/pos/POS.tsx` | 2362 | 114.8 |
+| `backend/src/routes/products.ts` | 2297 | 101.8 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2170 | 101.2 |
-| `frontend/src/components/dashboard/Dashboard.tsx` | 1984 | 101.5 |
-| `frontend/src/AppContext.tsx` | 1978 | 78.4 |
+| `frontend/src/AppContext.tsx` | 1984 | 78.8 |
+| `frontend/src/App.tsx` | 1966 | 74.4 |
+| `frontend/src/components/dashboard/Dashboard.tsx` | 1958 | 100.4 |
+| `backend/src/routes/inventory.ts` | 1952 | 86.1 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1911 | 88.1 |
-| `frontend/src/App.tsx` | 1905 | 71.7 |
-| `backend/src/routes/inventory.ts` | 1902 | 84.2 |
 | `frontend/src/components/utils-settings/Backup.tsx` | 1775 | 80.1 |
 | `backend/src/routes/system/index.ts` | 1674 | 65.6 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
 | `backend/src/routes/sales.ts` | 1591 | 65.2 |
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
-| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1543 | 104.6 |
+| `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1555 | 104.9 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
 | `backend/src/routes/portal.ts` | 1407 | 51.5 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
+| `backend/src/fileAssets.ts` | 1336 | 46.3 |
 | `frontend/src/web-api.ts` | 1328 | 52.2 |
-| `frontend/src/components/users/UserProfileModal.tsx` | 1326 | 68.2 |
 
 ## 4. Largest Built Chunks
 
@@ -78,27 +78,27 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
-| `frontend/dist/assets/index-DbL1XvZE.css` | 154.8 |
-| `frontend/dist/assets/Inventory-utbtGQYV.js` | 129.9 |
-| `frontend/dist/assets/catalog-CQDB6Xdz.js` | 124.6 |
-| `frontend/dist/assets/Products-C7tzHHGQ.js` | 85.0 |
-| `frontend/dist/assets/POS-BzAJ_ani.js` | 74.8 |
-| `frontend/dist/assets/catalog-editor-QcDLJvBJ.js` | 73.9 |
+| `frontend/dist/assets/index-CW_jNXiu.css` | 155.4 |
+| `frontend/dist/assets/catalog-28w5tPuI.js` | 101.8 |
+| `frontend/dist/assets/Products-JmNKoQRF.js` | 86.1 |
+| `frontend/dist/assets/Inventory-opzpIBZA.js` | 83.5 |
+| `frontend/dist/assets/catalog-editor-B7ygFH2j.js` | 74.2 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-TgmyNMcY.js` | 67.9 |
-| `frontend/dist/assets/Dashboard-igDVDVQP.js` | 62.8 |
-| `frontend/dist/assets/AdminRoot-S4E781JA.js` | 62.6 |
-| `frontend/dist/assets/app-shared-CGDfwlQp.js` | 56.9 |
-| `frontend/dist/assets/Settings-Bhi0QmOW.js` | 54.8 |
+| `frontend/dist/assets/BulkImportModal-B-Dl_cSR.js` | 68.0 |
+| `frontend/dist/assets/POS-VkZZ8edD.js` | 65.0 |
+| `frontend/dist/assets/AdminRoot-D8-jhkQg.js` | 64.6 |
+| `frontend/dist/assets/Dashboard-CoCN9yHz.js` | 62.4 |
+| `frontend/dist/assets/Settings-D4zoBugz.js` | 54.9 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-DB7kjbWQ.js` | 51.3 |
-| `frontend/dist/assets/user-profile-modal-XXsFskQ4.js` | 43.7 |
-| `frontend/dist/assets/ReceiptSettings-BM9YrE6R.js` | 40.2 |
+| `frontend/dist/assets/Backup-CjXJjRzY.js` | 51.3 |
+| `frontend/dist/assets/route-sync-utils-DrvXnkfG.js` | 47.6 |
+| `frontend/dist/assets/user-profile-modal-CwI9O46e.js` | 43.8 |
+| `frontend/dist/assets/ReceiptSettings-DJ1xSHtF.js` | 40.3 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-BSV3zrmN.js` | 37.4 |
-| `frontend/dist/assets/Sales-CKqKjpEp.js` | 36.8 |
-| `frontend/dist/assets/ProductForm-BOzgJo3u.js` | 35.8 |
-| `frontend/dist/assets/AuditLog-89TaZZG2.js` | 35.6 |
+| `frontend/dist/assets/catalog-secondary-tabs-C_PcDQx-.js` | 37.3 |
+| `frontend/dist/assets/Sales-D0DKlt2k.js` | 36.8 |
+| `frontend/dist/assets/ProductForm-DTy82HV7.js` | 35.8 |
+| `frontend/dist/assets/AuditLog-Dg_i3kVc.js` | 35.6 |
 
 ## 5. Notes
 
@@ -2199,200 +2199,14 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   38.19 MB of Docker builder cache. Generated-artifact cleanup then removed
   415,957,346 bytes from regenerable `release`, `frontend/dist`, and `output`
   folders, and the follow-up Phase 29 audit passed with zero failures.
+- Move 857 records public catalog shared-utility chunk slimming. `AppSelect`
+  now builds as `shared-select`, `LazyPortalMenu` as
+  `shared-lazy-portal-menu`, and `pageActivity` folds into `route-sync-utils`
+  before the generic shared fallback. Production output now emits
+  `app-shared-u7Xi8a2R.js` at 9.03 KB / 3.66 KB gzip instead of the previous
+  roughly 58 KB `app-shared` bucket. Focused Playwright resource traces on
+  local, public Cloudflare, and admin Cloudflare `/public` confirmed zero
+  `app-shared` script fetches, 20 real products rendered, working search, and
+  no relevant console/request failures. Local LCP was 248 ms; warm public and
+  admin Cloudflare LCPs were 2.776 s and 2.784 s.
 <!-- phase29-manual-notes:end -->
-
-- Move 846 records the product route startup chunk consolidation. Vite now
-  assigns `frontend/src/utils/productGrouping.ts` to `product-shared`, removing
-  the separate `productGrouping-*.js` request from Products, Inventory, and POS
-  without affecting Dashboard, Returns, or the public catalog. Production build
-  proof emitted `product-shared-BTlFGq5T.js` at 11.93 kB / 4.21 kB gzip and no
-  standalone productGrouping asset. Docker image
-  `business-os:v6.0.0-202606090010` served frontend hash
-  `55303e93b37a9590`. Live route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T16-34-44-268Z.json`
-  passed with zero failures/errors: Products 38 requests / 28 scripts,
-  Inventory 39 / 30, POS 31 / 22, Dashboard 29 / 21, Returns 33 / 26, and
-  public catalog 20 / 15. Full Phase 8.4 live suite and public Cloudflare
-  portal check passed. Storage prune removed 719,979 bytes of stale reports,
-  5,286,447 bytes of old Docker-release backup data, one old Docker rollback
-  tag, and 3.579 GB of Docker builder cache.
-- Move 847 records the action-history helper chunk consolidation. Vite now
-  assigns `frontend/src/utils/historyHelpers.ts` to `shared-action-history`,
-  removing the separate `historyHelpers-*.js` request from Products, Inventory,
-  and Returns without changing Dashboard, POS, or public catalog startup.
-  Production build proof emitted `shared-action-history-opXl0TYw.js` at
-  12.00 kB / 4.12 kB gzip and no standalone historyHelpers asset. Docker image
-  `business-os:v6.0.0-202606090044` served frontend hash
-  `c542cd5c37ee937b`. Live route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T17-07-07-532Z.json`
-  passed with zero failures/errors: Products 37 requests / 27 scripts,
-  Inventory 38 / 29, Returns 32 / 25, Dashboard 29 / 21, POS 31 / 22, and
-  public catalog 20 / 15. Full Phase 8.4 live suite and public Cloudflare
-  portal check passed. Storage prune removed 719,667 bytes of stale reports,
-  5,272,836 bytes of old Docker-release backup data, one old Docker rollback
-  tag, and 3.579 GB of Docker builder cache.
-- Move 848 records the bulk action helper chunk consolidation. Vite now assigns
-  `frontend/src/utils/bulkOps.ts` to `shared-action-history`, removing the
-  separate `bulkOps-*.js` request from Products and Inventory startup without
-  changing Dashboard, POS, Returns, or public catalog startup. Production build
-  proof emitted `shared-action-history-DXTzoB3i.js` at 12.53 kB / 4.34 kB gzip
-  and no standalone bulkOps asset. Docker image
-  `business-os:v6.0.0-202606090119` served frontend hash
-  `a17aafcbe9a0d3d4` and source hash `24d1c2a2a89e8dcc`. Live route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T17-42-53-495Z.json` passed
-  with zero failures/errors: Products 36 requests / 26 scripts, Inventory
-  37 / 28, Dashboard 29 / 21, POS 31 / 22, Returns 32 / 25, and public catalog
-  20 / 15. Full Phase 8.4 live suite and public Cloudflare portal check passed.
-  Storage prune removed 719,265 bytes of stale reports, 5,295,169 bytes of old
-  Docker-release backup data, one old Docker rollback tag, and 3.579 GB of
-  Docker builder cache.
-- Move 849 records the grouped-record helper split. Lightweight date/filter/
-  selection helpers moved from `frontend/src/utils/groupedRecords.ts` to
-  `frontend/src/utils/recordFilters.ts`, and Vite assigns `recordFilters.ts`
-  to `route-sync-utils`. Products and public catalog filtering no longer load
-  `record-groups`, while grouped-history pages still use the section builders.
-  Production build proof emitted `record-groups-CvXR_GRo.js` at 3.03 kB /
-  1.27 kB gzip, down from 4.62 kB, and `route-sync-utils-CWHPTGFF.js` at
-  4.32 kB / 1.81 kB gzip. Docker image
-  `business-os:v6.0.0-202606090156` served frontend hash
-  `6ad017646771a8b2` and source hash `24d1c2a2a89e8dcc`. Live route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T18-19-45-452Z.json` passed
-  with zero failures/errors: Products 35 requests / 25 scripts, public catalog
-  19 / 14, Dashboard 29 / 21, Inventory 37 / 28, POS 31 / 22, and Returns
-  32 / 25. Full Phase 8.4 live suite and public Cloudflare portal check passed.
-  Storage prune removed 727,812 bytes of stale reports, 5,303,141 bytes of old
-  Docker-release backup data, one old Docker rollback tag, and 2.923 GB of
-  Docker builder cache.
-- Move 850 records the POS supplier-option helper split and public preload
-  cleanup. `buildProductSupplierOptions` moved into
-  `frontend/src/components/products/helpers/productSupplierOptions.ts`, POS now
-  imports that small helper directly, and Vite assigns it to `product-shared`
-  so POS no longer requests the heavier Products menu helper. The public
-  `/api/portal/bootstrap` `Link: rel=preload` header was removed because
-  Cloudflare Early Hints reported it as unused while the portal already loads
-  bootstrap through its own data loader. Production build proof emitted
-  `product-shared-DEk7U8Qi.js` at 12.05 kB / 4.25 kB gzip and no standalone
-  `productMenuHelpers-*.js` asset. Docker image
-  `business-os:v6.0.0-202606090302` served frontend hash
-  `fb52a37577b666c6` and source hash `9cb28cddba119d87`. Live route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T19-04-46-912Z.json` passed
-  with zero failures/errors: Dashboard 168 ms at 29 requests / 21 scripts,
-  Products 310 ms at 35 / 25, Inventory 261 ms at 37 / 28, POS 230 ms at
-  31 / 22 with no `productMenuHelpers` request, Returns 198 ms at 32 / 25, and
-  public catalog 173 ms at 19 / 14. Full Phase 8.4 live suite passed; public
-  Cloudflare rendered 20 products with zero relevant console messages. In-app
-  Browser proof verified POS search filtering for `AHC` and public portal
-  product loading with no horizontal overflow and zero relevant console
-  messages. Storage prune removed 1,075,543 bytes of stale reports,
-  10,630,217 bytes of old Docker-release backup data, two old Docker rollback
-  tags, and 3.65 GB of Docker builder cache.
-- Move 851 records the authenticated-startup login chunk fix. Cookie-only
-  admin sessions now wait for `/api/auth/bootstrap` before `authReady` becomes
-  true, so the app stays on the secure loading shell instead of briefly
-  mounting the login route. Vite route preloads are split into admin and
-  direct-login sets: normal admin pages preload `AdminRoot`, `app-auth`, and
-  `app-bootstrap`; `/login` still preloads `auth-login`. Production build
-  emitted `AdminRoot-B_5RxdFV.js`, `auth-login-BvphkK3w.js`, and
-  `app-bootstrap-C0gpciV3.js`. Docker image
-  `business-os:v6.0.0-202606090431-move851` served frontend hash
-  `40d6419e815cddbb` and source hash `9cb28cddba119d87`. Focused Playwright
-  proof showed authenticated Dashboard startup made zero `auth-login`
-  requests and rendered zero login fields, while fresh `/login` still loaded
-  `auth-login-BvphkK3w.js` and showed the sign-in form. Route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T20-39-01-221Z.json` passed
-  with zero failures/errors: Dashboard 128 ms at 26 requests / 20 scripts,
-  Products 273 ms at 32 / 24, Inventory 280 ms at 34 / 27, POS 218 ms at
-  28 / 21, Returns 224 ms at 29 / 24, and public catalog 168 ms at 19 / 14.
-  Full Phase 8.4 live suite passed, public Cloudflare rendered 20 products
-  with zero relevant console messages, and in-app Browser POS search for `AHC`
-  settled to `1-4 / 4` with visible AHC cards, no horizontal overflow, and zero
-  relevant app logs. Storage prune removed 1,031,387 bytes of stale reports,
-  26,686,028 bytes of old Docker-release backup data, two old Docker rollback
-  tags, and 4.571 GB of Docker builder cache.
-- Move 852 records the public portal admin-bootstrap preload split. SPA shell
-  modulepreload headers now keep `app-bootstrap` on authenticated admin routes
-  but omit it from `/public` and `/customer-portal`, where only `app-portal`
-  and `catalog` are hinted. Docker image
-  `business-os:v6.0.0-202606090500-move852` served frontend hash
-  `d89391073231d012` and source hash `542f5c165aab068e`. Local and Cloudflare
-  `/public` headers no longer include `app-bootstrap`; local and Cloudflare
-  `/dashboard` headers still include `/api/auth/bootstrap`, `app-bootstrap`,
-  and the dashboard chunk. Focused Playwright found zero `app-bootstrap`
-  downloads and zero request failures on `/public`. Route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T21-29-53-373Z.json` passed
-  with zero failures/errors: public catalog 154 ms at 18 requests / 13
-  scripts, Dashboard 135 ms at 26 / 20, Products 221 ms at 32 / 24, Inventory
-  211 ms at 34 / 27, POS 234 ms at 28 / 21, and Returns 205 ms at 29 / 24.
-  Storage prune removed 435,578 bytes of stale reports, 5,345,195 bytes of old
-  Docker-release backup data, and 4.848 GB of Docker builder cache.
-- Move 853 records the public portal admin-language-pack defer. Public portal
-  `AppProvider` instances now skip the full admin language-pack scheduler, so
-  the public route keeps the core English fallback and portal-owned copy modules
-  without later downloading `lang-en-DND0-37b.js` at 173.57 kB / 56.51 kB gzip.
-  Docker image `business-os:v6.0.0-202606090540-move853` served frontend hash
-  `43af754a04777e16` and source hash `542f5c165aab068e`. Local and Cloudflare
-  focused Playwright probes rendered 5,539 public products with zero `lang-en`
-  requests, zero `app-bootstrap` requests, and zero failed requests. Route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T22-03-01-098Z.json` passed
-  with zero failures/errors: public catalog 185 ms at 18 requests / 13 scripts,
-  Dashboard 173 ms at 26 / 20, Products 257 ms at 32 / 24, Inventory 235 ms at
-  34 / 27, POS 207 ms at 28 / 21, and Returns 307 ms at 29 / 24. Storage prune
-  removed 130,728 bytes of stale reports, 5,345,197 bytes of old Docker-release
-  backup data, and 2.348 GB of Docker builder cache.
-- Move 854 records the public catalog product-grid chunk split and early
-  preload. `CatalogPage` now lazy-loads `CatalogProductsSection`, Vite emits a
-  `catalog-products` chunk and includes it in public route-aware preloads, and
-  backend SPA `Link` headers for `/public` and `/customer-portal` now include
-  `catalog-products` alongside `app-portal` and `catalog`. Production build
-  proof split the public catalog shell to `catalog-CUT5rYqA.js` at about
-  104.38 kB / 31.51 kB gzip plus `catalog-products-CQz2d15d.js` at about
-  20.49 kB / 5.90 kB gzip. Docker image
-  `business-os:v6.0.0-202606090650-move854` served frontend hash
-  `7ede2385a44420a8` and source hash `60d3b6f9db28ae02`. Route trace
-  `ops/runtime/reports/route-load-trace-2026-06-08T22-49-47-936Z.json` passed
-  with zero failures/errors: public catalog 174 ms at 19 requests / 14
-  scripts, Dashboard 211 ms at 26 / 20, Products 206 ms at 32 / 24, Inventory
-  216 ms at 34 / 27, POS 196 ms at 28 / 21, and Returns 216 ms at 29 / 24.
-  Local Playwright verified real 5,539-product public text in 270 ms, the
-  `catalog-products` asset, zero `lang-en`, zero `app-bootstrap`, and a real
-  `AHC, Mask` search result. Cloudflare public/admin headers included the new
-  preload, and Cloudflare public Playwright rendered products with zero
-  failures/errors. Storage prune removed 137,941 bytes of stale reports,
-  10,701,268 bytes of old Docker-release backup data, and 2.419 GB of Docker
-  builder cache.
-- Move 855 records the public catalog icon split and exact preload resolver
-  fix. Vite now emits `catalog-icons-CFqKE5MX.js` at 10.99 kB / 2.67 kB gzip,
-  while `shared-icons-BJJYPCes.js` is reduced to 9.22 kB / 2.08 kB gzip.
-  Backend SPA preload collision handling now excludes `catalog-icons` from the
-  broad `catalog` base, so local/public/admin `/public` Link headers include
-  the intended `app-portal`, `catalog`, `catalog-icons`, and
-  `catalog-products` assets once. Docker image
-  `business-os:v6.0.0-202606090810-move855` served frontend hash
-  `95b3c1b169231b34` and source hash `e907e23af14377c3`. Route trace
-  `ops/runtime/reports/route-load-trace-2026-06-09T00-09-50-358Z.json` passed
-  with zero failures/errors: public catalog 207 ms at 20 requests / 15
-  scripts, Dashboard 180 ms at 27 / 21, Products 268 ms at 33 / 25, Inventory
-  221 ms at 35 / 28, POS 201 ms at 29 / 22, and Returns 235 ms at 30 / 25.
-  Focused Playwright LCP/resource probes saw local public LCP at 232 ms and
-  Cloudflare public LCP at 3.232 s, down from the prior 5.820 s probe that
-  revealed the missing catalog shell preload.
-- Move 856 records the catalog editor-context split and edit-only allocation
-  gate. `CatalogPageContext.tsx` now follows the lazy `catalog-editor` chunk,
-  `CatalogPage.tsx` no longer imports the editor provider, and public renders
-  skip constructing `editorSections` plus the large `editorContextValue`
-  object unless `canEdit` is true. Docker image
-  `business-os:v6.0.0-202606090950-move856` served frontend hash
-  `b2c34722d82f7abf` and source hash `e907e23af14377c3`. Production build
-  proof kept the public catalog shell at about 104.15 kB / 31.42 kB gzip,
-  with the editor chunk at 75.36 kB / 13.92 kB gzip. Route trace
-  `ops/runtime/reports/route-load-trace-2026-06-09T00-50-18-388Z.json` passed
-  with zero failures/errors: public catalog 201 ms at 20 requests / 15
-  scripts, Dashboard 341 ms at 27 / 21, Products 299 ms at 33 / 25, Inventory
-  327 ms at 35 / 28, POS 261 ms at 29 / 22, and Returns 273 ms at 30 / 25.
-  Focused Playwright probes rendered 20 real products with no failures:
-  local LCP 492 ms, warm public Cloudflare LCP 3.044 s, and warm admin public
-  LCP 2.816 s. One cold public-domain tunnel sample hit 34.928 s LCP before
-  warming, so further work should separate Cloudflare/tunnel cold variability
-  from the remaining `catalog` and `app-shared` first-route JavaScript.
-  Storage prune removed one stale runtime report, one old Docker-release backup
-  (`20260609-064844`, 5,356,502 bytes), and 2.387 GB of Docker builder cache.

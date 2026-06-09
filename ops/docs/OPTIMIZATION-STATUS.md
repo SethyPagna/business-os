@@ -8,7 +8,7 @@ Last updated: 2026-06-09
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 856, keep catalog editor context and editor-only allocations out of public startup.
+- Latest completed move: Move 857, split public catalog shared utility controls out of the broad app-shared startup chunk.
 
 ## Current Baseline
 
@@ -16,7 +16,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `b2c34722d82f7abf`
+  `0067e4e403e00d73`
 - latest verified source hash from the most recent Docker-served live check:
   `e907e23af14377c3`
 
@@ -47,7 +47,7 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T00-50-18-388Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-09T01-30-15-433Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -78,6 +78,43 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 857 gives the public catalog its own focused shared utility ownership:
+  `AppSelect` now builds as `shared-select`, `LazyPortalMenu` as
+  `shared-lazy-portal-menu`, and `pageActivity` folds into
+  `route-sync-utils` before the generic `components/shared` fallback. This
+  keeps the public product page from fetching the broad `app-shared` bundle
+  just to render first-viewport select/menu plumbing.
+- Verification proof: `node frontend\tests\performanceLoadingUx.test.ts`,
+  `npm.cmd --prefix frontend run typecheck`, `npm.cmd --prefix frontend run
+  build`, `node ops\scripts\docs\generate-doc-reference.ts`,
+  `node ops\scripts\docs\performance-scan.ts`, Docker image build, Docker
+  release update, health check, route-load trace, and focused Playwright local
+  plus Cloudflare browser probes passed.
+- Live proof on Docker image `business-os:v6.0.0-202606090110-move857`,
+  frontend hash `0067e4e403e00d73`, source hash `e907e23af14377c3`: route
+  trace `ops/runtime/reports/route-load-trace-2026-06-09T01-30-15-433Z.json`
+  passed with zero failures/errors. Public catalog measured 174 ms at 21
+  requests / 16 scripts; Dashboard 167 ms at 28 / 22; Products 272 ms at
+  35 / 27; Inventory 300 ms at 37 / 30; POS 266 ms at 30 / 23; Returns
+  223 ms at 32 / 27.
+- Focused Playwright proof: local `/public` rendered 20 real products with no
+  console/request failures, working search input, no `app-shared` script, and
+  LCP 248 ms. Warm Cloudflare probes rendered 20 products with no failures:
+  `https://leangcosmetics.dpdns.org/public` LCP 2.776 s and
+  `https://admin.leangcosmetics.dpdns.org/public` LCP 2.784 s. Cold tunnel
+  samples still vary, so the remaining remote bottleneck is the Cloudflare
+  path plus the still-large `catalog`, language, CSS, and vendor chunks.
+- Cleanup proof: storage prune removed one stale runtime report
+  (`test-data-cleanup-postcheck-latest.json`, 770 bytes), one old
+  Docker-release backup (`20260609-080325`, 5,356,932 bytes), and 2.348 GB of
+  Docker builder cache while keeping newest local/R2 backups, uploads, secrets,
+  volumes, and protected rollback images.
+- Current plan position after Move 857: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
 
 - Move 856 moves the public catalog editor context provider into the lazy
   `CatalogEditorSurface`, routes `CatalogPageContext` into the `catalog-editor`
