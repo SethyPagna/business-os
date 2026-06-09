@@ -53,20 +53,20 @@ if (!startRequestedWorkerRole()) {
     const app = express();
     let databaseMaintenanceTimer = null;
     const uploadFallbackCache = new Map();
-const LEGACY_FRONTEND_ASSET_PREFIXES = [
-    'index-',
-    'app-shared-',
-    'app-api-',
-    'POS-',
-    'Inventory-',
-    'catalog-editor-',
-    'catalog-icons-',
-    'catalog-products-',
-    'catalog-public-',
-    'catalog-secondary-tabs-',
-    'catalog-',
-    'groupedRecords-',
-    'productGrouping-',
+    const LEGACY_FRONTEND_ASSET_PREFIXES = [
+        'index-',
+        'app-shared-',
+        'app-api-',
+        'POS-',
+        'Inventory-',
+        'catalog-editor-',
+        'catalog-icons-',
+        'catalog-products-',
+        'catalog-public-',
+        'catalog-secondary-tabs-',
+        'catalog-',
+        'groupedRecords-',
+        'productGrouping-',
         'product-detail-',
         'Receipt-',
         'CustomersTab-',
@@ -89,11 +89,11 @@ const LEGACY_FRONTEND_ASSET_PREFIXES = [
         { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
         { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
         { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users'] },
-    { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog-public', 'catalog-icons', 'catalog-products'] },
-];
-const FRONTEND_CHUNK_BASE_COLLISIONS = {
-    catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'],
-};
+        { match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'), chunks: ['app-portal', 'catalog-public', 'catalog-icons', 'catalog-products'] },
+    ];
+    const FRONTEND_CHUNK_BASE_COLLISIONS = {
+        catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'],
+    };
     const frontendModulePreloadCache = new Map();
     function listFrontendAssetFiles() {
         if (!FRONTEND_DIST_EXISTS)
@@ -118,13 +118,13 @@ const FRONTEND_CHUNK_BASE_COLLISIONS = {
             return directPath;
         if (!normalized.endsWith('.js'))
             return '';
-    const legacyPrefixes = [...LEGACY_FRONTEND_ASSET_PREFIXES].sort((a, b) => b.length - a.length);
-    for (const prefix of legacyPrefixes) {
-        if (!normalized.startsWith(prefix))
-            continue;
-        const fallbackName = resolveFrontendChunkAssetName(prefix.replace(/-$/, ''));
-        if (!fallbackName)
-            return '';
+        const legacyPrefixes = [...LEGACY_FRONTEND_ASSET_PREFIXES].sort((a, b) => b.length - a.length);
+        for (const prefix of legacyPrefixes) {
+            if (!normalized.startsWith(prefix))
+                continue;
+            const fallbackName = resolveFrontendChunkAssetName(prefix.replace(/-$/, ''));
+            if (!fallbackName)
+                return '';
             const fallbackPath = path.join(assetsDir, fallbackName);
             return fs.existsSync(fallbackPath) ? fallbackPath : '';
         }
@@ -144,10 +144,19 @@ const FRONTEND_CHUNK_BASE_COLLISIONS = {
         const collisionPattern = FRONTEND_CHUNK_BASE_COLLISIONS[normalized]
             ? new RegExp(`^${escaped}-(${FRONTEND_CHUNK_BASE_COLLISIONS[normalized].map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})-`)
             : null;
+        const assetsDir = path.join(FRONTEND_DIST, 'assets');
         const assetName = listFrontendAssetFiles()
             .filter((name) => exactChunkPattern.test(name) && !(collisionPattern && collisionPattern.test(name)))
-            .sort()
-            .at(-1) || '';
+            .map((name) => {
+            let mtimeMs = 0;
+            try {
+                mtimeMs = fs.statSync(path.join(assetsDir, name)).mtimeMs || 0;
+            }
+            catch (_) { }
+            return { name, mtimeMs };
+        })
+            .sort((left, right) => (left.mtimeMs - right.mtimeMs) || left.name.localeCompare(right.name))
+            .at(-1)?.name || '';
         frontendModulePreloadCache.set(normalized, assetName);
         return assetName;
     }

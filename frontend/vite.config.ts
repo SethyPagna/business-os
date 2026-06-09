@@ -290,6 +290,7 @@ const deferredModulePreloadPrefixes = [
   'assets/contacts-api-',
   'assets/custom-tables-api-',
   'assets/dashboard-api-',
+  'assets/dashboard-charts-',
   'assets/dashboard-export-',
   'assets/drive-sync-api-',
   'assets/file-api-',
@@ -470,6 +471,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/settingsRefresh.ts')) return 'settings-refresh'
     if (normalized.endsWith('/src/utils/searchTerms.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/recordFilters.ts')) return 'route-sync-utils'
+    if (normalized.endsWith('/src/utils/loaders.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/groupedRecords.ts')) return 'record-groups'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
@@ -557,6 +559,7 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/products/helpers/productGalleryHelpers.ts')
       || normalized.includes('/src/components/products/helpers/productSupplierOptions.ts')
       || normalized.includes('/src/utils/productBatches.ts')
+      || normalized.includes('/src/utils/pricing.ts')
       || normalized.endsWith('/src/utils/productGrouping.ts')
       || normalized.includes('/src/utils/color.ts')
     ) {

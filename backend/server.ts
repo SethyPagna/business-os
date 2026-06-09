@@ -170,10 +170,18 @@ function resolveFrontendChunkAssetName(chunkBase = '') {
   const collisionPattern = FRONTEND_CHUNK_BASE_COLLISIONS[normalized]
     ? new RegExp(`^${escaped}-(${FRONTEND_CHUNK_BASE_COLLISIONS[normalized].map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})-`)
     : null
+  const assetsDir = path.join(FRONTEND_DIST, 'assets')
   const assetName = listFrontendAssetFiles()
     .filter((name) => exactChunkPattern.test(name) && !(collisionPattern && collisionPattern.test(name)))
-    .sort()
-    .at(-1) || ''
+    .map((name) => {
+      let mtimeMs = 0
+      try {
+        mtimeMs = fs.statSync(path.join(assetsDir, name)).mtimeMs || 0
+      } catch (_) {}
+      return { name, mtimeMs }
+    })
+    .sort((left, right) => (left.mtimeMs - right.mtimeMs) || left.name.localeCompare(right.name))
+    .at(-1)?.name || ''
   frontendModulePreloadCache.set(normalized, assetName)
   return assetName
 }
