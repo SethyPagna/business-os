@@ -321,6 +321,8 @@ const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000
 const PENDING_SYNC_POLL_INTERVAL_MS = 20_000
 const NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS = 30000
 const NOTIFICATION_CENTER_IDLE_TIMEOUT_MS = 45000
+const QUICK_PREFERENCES_INITIAL_MOUNT_DELAY_MS = 7000
+const QUICK_PREFERENCES_IDLE_TIMEOUT_MS = 20000
 const IMPORT_TRACKER_INITIAL_MOUNT_DELAY_MS = 180000
 const IMPORT_TRACKER_IDLE_TIMEOUT_MS = 60000
 const STALE_SHELL_CACHE_DELETE_CONCURRENCY = 2
@@ -899,6 +901,43 @@ function useDeferredImportTrackerMount(user: AppUser | null): boolean {
     return () => {
       cancelled = true
       window.removeEventListener('import-job:activity', onImportJobActivity)
+      if (timerId != null) window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+        window.cancelIdleCallback(idleId)
+      }
+    }
+  }, [enabled, user])
+
+  return !!user && enabled
+}
+
+function useDeferredQuickPreferencesMount(user: AppUser | null): boolean {
+  const [enabled, setEnabled] = useState(false)
+
+  useEffect(() => {
+    if (!user || typeof window === 'undefined') {
+      setEnabled(false)
+      return undefined
+    }
+    if (enabled) return undefined
+
+    let cancelled = false
+    let idleId: number | null = null
+    let timerId: number | null = null
+    const enable = () => {
+      if (cancelled || document.visibilityState === 'hidden') return
+      setEnabled(true)
+    }
+    timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(enable, { timeout: QUICK_PREFERENCES_IDLE_TIMEOUT_MS })
+      } else {
+        enable()
+      }
+    }, QUICK_PREFERENCES_INITIAL_MOUNT_DELAY_MS)
+
+    return () => {
+      cancelled = true
       if (timerId != null) window.clearTimeout(timerId)
       if (idleId != null && typeof window.cancelIdleCallback === 'function') {
         window.cancelIdleCallback(idleId)
@@ -1619,6 +1658,7 @@ export default function App() {
   } = useSyncErrorBanner(authReady ? user : null)
   const mountedPages = useMountedPages(page)
   const shouldMountImportTracker = useDeferredImportTrackerMount(authReady ? user : null)
+  const shouldMountQuickPreferences = useDeferredQuickPreferencesMount(authReady ? user : null)
   const {
     notificationCenterOpenRequestId,
     shouldMountNotificationCenter,
@@ -1896,15 +1936,17 @@ export default function App() {
         </div>
         <div className="flex items-center gap-2">
           {desktopNotificationSlot}
-          <Suspense fallback={null}>
-            <QuickPreferenceToggles />
-          </Suspense>
+          {shouldMountQuickPreferences ? (
+            <Suspense fallback={null}>
+              <QuickPreferenceToggles />
+            </Suspense>
+          ) : null}
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Suspense fallback={null}>
-          <Sidebar notificationSlot={mobileNotificationSlot} />
+          <Sidebar notificationSlot={mobileNotificationSlot} showQuickPreferences={shouldMountQuickPreferences} />
         </Suspense>
 
         <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 pb-16 md:pt-0 md:pb-0">

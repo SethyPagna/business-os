@@ -21,7 +21,6 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
-import QuickPreferenceToggles from '../shared/QuickPreferenceToggles'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
 
 type TranslateFn = (key: string) => string
@@ -65,11 +64,15 @@ type UserProfileModalProps = {
 
 type SidebarProps = {
   notificationSlot?: ReactNode
+  showQuickPreferences?: boolean
 }
 
 const useApp = useAppHook as () => SidebarAppContext
 const UserProfileModal = lazy(async () => ({
   default: (await import('../users/UserProfileModal')).default as ComponentType<UserProfileModalProps>,
+}))
+const QuickPreferenceToggles = lazy(async () => ({
+  default: (await import('../shared/QuickPreferenceToggles')).default,
 }))
 
 const ICONS_BY_ID: Record<string, LucideIcon> = {
@@ -151,7 +154,7 @@ function isNavigationItemWithIcon(item: NavigationItemWithIcon | undefined): ite
   return !!item
 }
 
-export default function Sidebar({ notificationSlot = null }: SidebarProps = {}) {
+export default function Sidebar({ notificationSlot = null, showQuickPreferences = false }: SidebarProps = {}) {
   const {
     page,
     navigateTo,
@@ -301,7 +304,11 @@ export default function Sidebar({ notificationSlot = null }: SidebarProps = {}) 
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           {notificationSlot}
-          <QuickPreferenceToggles />
+          {showQuickPreferences ? (
+            <Suspense fallback={null}>
+              <QuickPreferenceToggles />
+            </Suspense>
+          ) : null}
           <button type="button" onClick={() => setProfileOpen(true)} className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-50/90 p-0.5 dark:bg-blue-900/30">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/40">
               {user?.avatar_path ? (

@@ -84,10 +84,11 @@ export default function CatalogPaginationControls({
   if (total <= 0) return null
 
   return (
-    <div className={`rounded-2xl border border-slate-200 bg-white/88 px-3 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/76 dark:text-slate-300 ${className}`}>
-      <div className="grid grid-cols-[minmax(7rem,1fr)_4rem_minmax(7.5rem,10rem)] items-center gap-2">
-        <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1.5 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-          {showingLabel} {start.toLocaleString()}-{end.toLocaleString()} {ofLabel} {total.toLocaleString()} {label}
+    <div className={`rounded-2xl border border-slate-200 bg-white/88 px-2 py-2 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/76 dark:text-slate-300 sm:px-3 ${className}`}>
+      <div className="grid grid-cols-[minmax(0,1fr)_4rem_minmax(6.5rem,8rem)] items-center gap-1.5 sm:grid-cols-[minmax(7rem,1fr)_4rem_minmax(7.5rem,10rem)] sm:gap-2">
+        <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100 sm:text-xs">
+          <span className="sm:hidden">{start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}</span>
+          <span className="hidden sm:inline">{showingLabel} {start.toLocaleString()}-{end.toLocaleString()} {ofLabel} {total.toLocaleString()} {label}</span>
         </span>
         <AppSelect
           value={safePageSize}

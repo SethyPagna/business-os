@@ -306,7 +306,6 @@ const deferredModulePreloadPrefixes = [
   'assets/product-image-upload-api-',
   'assets/product-read-api-',
   'assets/product-write-api-',
-  'assets/quick-preference-toggles-',
   'assets/rfid-api-',
   'assets/returns-write-api-',
   'assets/sale-write-api-',
@@ -653,7 +652,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/NotificationCenter.tsx')) return 'notification-center'
     if (normalized.includes('/src/components/shared/BackgroundImportTracker.tsx')) return 'background-import-tracker'
     if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
-    if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'quick-preference-toggles'
+    if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/ActionHistoryBar.tsx')) return 'shared-action-history'
     if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-ui'
