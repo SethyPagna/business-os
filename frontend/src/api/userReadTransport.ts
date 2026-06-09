@@ -10,5 +10,6 @@ export function getUsers(): Promise<unknown> {
       const db = await getLocalDb()
       return db.table('users').toArray()
     },
+    { raceLocalFallback: false },
   )
 }

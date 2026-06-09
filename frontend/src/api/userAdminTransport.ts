@@ -22,6 +22,7 @@ export function getRoles(): Promise<unknown> {
       const db = await getLocalDb()
       return db.table('roles').toArray()
     },
+    { raceLocalFallback: false },
   )
 }
 

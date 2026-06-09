@@ -40,6 +40,7 @@ function routeCachedInventoryQuery(cacheKey: string, path: string): Promise<unkn
       return result
     },
     () => readInventoryCache(cacheKey),
+    { raceLocalFallback: false },
   )
 }
 

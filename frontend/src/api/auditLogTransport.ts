@@ -64,6 +64,7 @@ export function getAuditLogs(params: AuditLogParams = {}): Promise<unknown> {
         partial: true,
       }
     },
+    { raceLocalFallback: false },
   )
 }
 

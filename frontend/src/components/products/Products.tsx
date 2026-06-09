@@ -610,6 +610,8 @@ export default function Products() {
           ? productPayloadObject.items
           : (Array.isArray(productPayload) ? productPayload : [])
         const searchFilters = productPayloadObject?.filters || {}
+        const searchProvidedFilterMeta = isObjectRecord(productPayloadObject?.filters)
+          || Array.isArray(productPayloadObject?.initials)
 
         if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
         const versionMismatchError = Object.values(result.errors || {}).find(isApiVersionMismatchError)
@@ -632,6 +634,11 @@ export default function Products() {
             initials: aggregateProductInitials(searchFilters?.initials || productPayloadObject?.initials || []),
           }
         })
+        if (searchProvidedFilterMeta) {
+          filterMetaLoadedRef.current = true
+          setFilterMetaReady(false)
+          invalidateTrackedRequest(filterMetaRequestRef)
+        }
 
         if (!result.hasAnySuccess) {
           throw new Error(getFirstLoaderError(result.errors, tr('products_load_failed', 'Failed to load products')))

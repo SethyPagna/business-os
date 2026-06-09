@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 873.
+- Latest completed implementation move in this roadmap: Move 874.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -214,6 +214,37 @@ Move 873 current state:
   during first paint. The next executable slice is backend/query-path work on
   `/api/products/search` and `/api/products/bootstrap`, which were the slowest
   remaining Product/POS requests in the trace.
+
+Move 874 current state:
+- Docker release `business-os:v6.0.0-202606101840-move874` is running healthy
+  with frontend hash `c3007a11e6a306b3` and source hash
+  `6d8391289817d4a2`.
+- Products no longer fires the separate `/api/products/filters` request after
+  the initial `/api/products/search` response already supplies filter metadata.
+  The first search payload now marks filter metadata as loaded and cancels the
+  redundant filter-meta request.
+- Online read routes now avoid the old 350 ms local fallback race for Product,
+  Inventory, lookup/category/unit, Branch, Users/Roles, and Audit Log reads.
+  Local Dexie/cache helpers remain available for failed live reads and deferred
+  mirror/cache writes, but same-origin/server reads are attempted first while
+  the app is online. `apiFetch` can also use the current same-origin app base
+  while sync URL state is still hydrating.
+- Final local Playwright route-load proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-075Z.json`
+  measured Products 365 ms, Inventory 357 ms, POS 382 ms, and Branches 292 ms
+  with zero failed requests and zero console/page errors.
+- Final public Cloudflare proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-775Z.json`
+  measured Products 5.481 s, Inventory 2.510 s, POS 3.197 s, and Branches
+  2.726 s with zero failed requests and zero console/page errors. POS improved
+  from the earlier Move 874 public 6.078 s sample to 3.197 s, and Branches
+  improved from 5.111 s to 2.726 s. Product remains the largest outlier because
+  `/api/products/search` itself varied up to 5.972 s through the public tunnel.
+- Next executable slice: backend query/index/serialization work for
+  `/api/products/search` and `/api/products/bootstrap`, then another public
+  route trace. A smaller follow-up should also check whether the remaining
+  POS/Branches `api-local-cache` dynamic imports can be delayed until after
+  ready without weakening failed-read recovery.
 
 ## Phase 1: Safe Wins
 

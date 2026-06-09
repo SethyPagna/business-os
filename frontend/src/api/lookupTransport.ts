@@ -1,6 +1,4 @@
 import { apiFetch, route } from './http.ts'
-import { getLocalDb } from './lazyLocalDb.ts'
-import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 
 type LookupPayload = ExpectedUpdatedAtPayload
@@ -10,6 +8,7 @@ type LookupConfig = {
   routeKey: string
   path: string
 }
+const LOOKUP_MIRROR_WRITE_DELAY_MS = 10_000
 
 const CATEGORY_CONFIG: LookupConfig = {
   kind: 'categories',
@@ -24,14 +23,25 @@ const UNIT_CONFIG: LookupConfig = {
 }
 
 function listLookupRows(config: LookupConfig): Promise<unknown> {
-  return routeMirrored(
+  return route(
     `${config.routeKey}:get`,
-    () => apiFetch('GET', config.path),
     async () => {
+      const result = await apiFetch('GET', config.path)
+      const run = (): void => {
+        import('./localMirrors.ts')
+          .then(({ mirrorTable }) => mirrorTable(config.kind)(result))
+          .catch(() => {})
+      }
+      if (typeof window === 'undefined') Promise.resolve().then(run).catch(() => {})
+      else window.setTimeout(run, LOOKUP_MIRROR_WRITE_DELAY_MS)
+      return result
+    },
+    async () => {
+      const { getLocalDb } = await import('./lazyLocalDb.ts')
       const db = await getLocalDb()
       return db.table(config.kind).orderBy('name').toArray()
     },
-    mirrorTable(config.kind),
+    { raceLocalFallback: false },
   )
 }
 

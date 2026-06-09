@@ -8,8 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 873, make Product and Inventory read transports
-  live-server-first by lazy-loading local cache fallback/write helpers.
+- Latest completed move: Move 874, remove duplicate Product filter startup
+  reads and keep online read routes on the live/same-origin path before local
+  fallback.
 
 ## Current Baseline
 
@@ -17,7 +18,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `291cb07b12cdf13b`
+  `c3007a11e6a306b3`
 - latest verified source hash from the most recent Docker-served live check:
   `6d8391289817d4a2`
 
@@ -95,6 +96,10 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T20-40-13-816Z.json`
 - latest Move 873 Cloudflare route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T20-57-37-630Z.json`
+- latest Move 874 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-075Z.json`
+- latest Move 874 Cloudflare affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-775Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -117,6 +122,37 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 874 removes a duplicate Products filter startup request by treating the
+  filter metadata returned by `/api/products/search` as authoritative for the
+  first page load. It also extends the live-server-first route behavior to
+  lookup, branch, users, roles, audit-log, product, and inventory reads: local
+  cache/fallback helpers are now lazy-loaded for failed reads or deferred
+  mirror/cache writes instead of being raced after 350 ms during healthy online
+  startup. `apiFetch` can also use the current same-origin app URL while the
+  sync URL is still hydrating, so read routes do not fall into Dexie merely
+  because bootstrap state is settling.
+- Docker image `business-os:v6.0.0-202606101840-move874` is live with frontend
+  hash `c3007a11e6a306b3` and source hash `6d8391289817d4a2`. Final local
+  Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-075Z.json`
+  measured Products 365 ms, Inventory 357 ms, POS 382 ms, and Branches 292 ms
+  with zero failed requests and zero page/console errors. Final public
+  Cloudflare trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-775Z.json`
+  measured Products 5.481 s, Inventory 2.510 s, POS 3.197 s, and Branches
+  2.726 s with zero failed requests and zero page/console errors. Compared
+  with the prior public pass after the first Move 874 release, POS improved
+  from 6.078 s to 3.197 s and Branches from 5.111 s to 2.726 s; Products still
+  varies on `/api/products/search`, which remains the next honest bottleneck.
+- Current plan position after Move 874: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: backend
+  query/index/response-path work for `/api/products/search` and
+  `/api/products/bootstrap`, plus a follow-up on the remaining POS/Branches
+  `api-local-cache` dynamic import path if it still appears before ready in
+  public traces.
 
 - Move 873 makes Product and Inventory read transports prefer the live server
   path without first downloading local fallback/cache helpers. Product search,

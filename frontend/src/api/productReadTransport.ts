@@ -50,6 +50,7 @@ function routeCachedProductQuery(cacheKey: string, path: string): Promise<unknow
       return result
     },
     () => readProductCache(cacheKey),
+    { raceLocalFallback: false },
   )
 }
 
@@ -66,6 +67,7 @@ export function getProducts(): Promise<unknown> {
       const db = await getLocalDb()
       return db.table('products').orderBy('name').toArray()
     },
+    { raceLocalFallback: false },
   )
 }
 

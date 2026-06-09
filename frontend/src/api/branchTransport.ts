@@ -1,11 +1,10 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
-import { getLocalDb } from './lazyLocalDb.ts'
-import { mirrorTable, routeMirrored } from './localMirrors.ts'
 import { withExpectedUpdatedAt, type ExpectedUpdatedAtPayload } from './expectedUpdatedAt.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 
 type BranchPayload = ExpectedUpdatedAtPayload
+const BRANCH_MIRROR_WRITE_DELAY_MS = 10_000
 
 function getDevicePayload(): BranchPayload {
   return { ...getClientDeviceInfo() }
@@ -16,14 +15,25 @@ function encodeId(id: string | number): string {
 }
 
 export function getBranches(): Promise<unknown> {
-  return routeMirrored(
+  return route(
     'branches:get',
-    () => apiFetch('GET', '/api/branches'),
     async () => {
+      const result = await apiFetch('GET', '/api/branches')
+      const run = (): void => {
+        import('./localMirrors.ts')
+          .then(({ mirrorTable }) => mirrorTable('branches')(result))
+          .catch(() => {})
+      }
+      if (typeof window === 'undefined') Promise.resolve().then(run).catch(() => {})
+      else window.setTimeout(run, BRANCH_MIRROR_WRITE_DELAY_MS)
+      return result
+    },
+    async () => {
+      const { getLocalDb } = await import('./lazyLocalDb.ts')
       const db = await getLocalDb()
       return db.table('branches').toArray()
     },
-    mirrorTable('branches'),
+    { raceLocalFallback: false },
   )
 }
 
@@ -39,6 +49,7 @@ export function getBranchSummary(): Promise<unknown> {
       out_of_stock: 0,
       stock_value_usd: 0,
     }),
+    { raceLocalFallback: false },
   )
 }
 
@@ -89,9 +100,11 @@ export function getTransfers(): Promise<unknown> {
     'transfers:get',
     () => apiFetch('GET', '/api/transfers'),
     async () => {
+      const { getLocalDb } = await import('./lazyLocalDb.ts')
       const db = await getLocalDb()
       return db.table('stock_transfers').orderBy('created_at').reverse().toArray()
     },
+    { raceLocalFallback: false },
   )
 }
 

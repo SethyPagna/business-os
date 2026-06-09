@@ -2,6 +2,25 @@
 
 Auto-generated performance scan for source size/complexity and built frontend chunks.
 
+## Latest Manual Note
+
+- Move 874 release `business-os:v6.0.0-202606101840-move874` is live with
+  frontend hash `c3007a11e6a306b3`.
+- Startup optimization removed a duplicate Product filter metadata request and
+  changed selected online reads to try the live/same-origin server before
+  local fallback. The affected routes keep local fallback for failed reads and
+  deferred mirror/cache writes.
+- Final local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-075Z.json`:
+  Products 365 ms, Inventory 357 ms, POS 382 ms, Branches 292 ms, zero failed
+  requests/errors.
+- Final public Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-09T21-48-49-775Z.json`:
+  Products 5.481 s, Inventory 2.510 s, POS 3.197 s, Branches 2.726 s, zero
+  failed requests/errors. Remaining primary bottleneck is public
+  `/api/products/search` and `/api/products/bootstrap` variance, not a fake
+  loading delay.
+
 ## 1. Scope
 
 - Frontend source: `frontend/src`

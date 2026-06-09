@@ -37,6 +37,7 @@ type CacheState = { data: any; stale: boolean }
 type InflightWrite = { promise: Promise<any>; startedAt: number }
 type RouteFn<T = any> = () => T | Promise<T>
 type ApiFetchOptions = { skipWriteDedupe?: boolean }
+type RouteOptions = { isWrite?: boolean; raceLocalFallback?: boolean }
 type RequestInitWithBody = RequestInit & { body?: string }
 type RefreshEventDetail = { reason?: string; channel?: string }
 type CallLogEntry = { ts: string; channel: string; source: string; ms: number; ok: boolean }
@@ -88,6 +89,19 @@ const HEALTHY_SERVER_LOCAL_FALLBACK_MS = 350
 export const FRONTEND_BUILD_INFO = {
   hash: typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev',
   revision: typeof __FRONTEND_BUILD_REVISION__ !== 'undefined' ? String(__FRONTEND_BUILD_REVISION__ || '') : 'dev',
+}
+
+function getSameOriginApiBaseUrl(): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return String(window.location?.origin || '').replace(/\/$/, '')
+  } catch (_) {
+    return ''
+  }
+}
+
+function getReadServerBaseUrl(): string {
+  return String(getSyncServerUrl() || getSameOriginApiBaseUrl() || '').replace(/\/$/, '')
 }
 
 function hasStoredAuthSession(): boolean {
@@ -550,9 +564,10 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
   }
 
   const requestPromise: Promise<any> = (async () => {
-    const syncServerUrl = getSyncServerUrl()
+    const syncServerUrl = getReadServerBaseUrl()
     const syncToken = getSyncToken()
-    const base    = syncServerUrl.replace(/\/$/, '')
+    const base = syncServerUrl.replace(/\/$/, '')
+    if (!base) throw new Error('Sync server URL is not configured.')
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'bypass-tunnel-reminder': 'true', ...getClientMetaHeaders() }
     if (syncToken) headers['x-sync-token'] = syncToken
 
@@ -966,13 +981,22 @@ async function raceServerReadWithLocalFallback<T>(
  *   - Cache tag invalidation: invalidate whole entity groups instantly
  *   - Active health awareness: skips server call if known offline
  */
-export async function route<T = any>(channel: string, serverFn: RouteFn<T>, localFn?: RouteFn<T> | null, isWrite = false): Promise<T | null> {
+export async function route<T = any>(
+  channel: string,
+  serverFn: RouteFn<T>,
+  localFn?: RouteFn<T> | null,
+  options: boolean | RouteOptions = false,
+): Promise<T | null> {
   const t0 = Date.now()
   const syncServerUrl = getSyncServerUrl()
+  const readServerBaseUrl = getReadServerBaseUrl()
+  const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
+  const raceLocalFallback = typeof options === 'boolean' ? true : options?.raceLocalFallback !== false
+  const browserExplicitlyOffline = typeof navigator !== 'undefined' && navigator.onLine === false
 
   // ?€?€ Reads ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
   if (!isWrite) {
-    if (syncServerUrl) {
+    if (readServerBaseUrl) {
       const { data: cached, stale } = cacheGetStale(channel)
 
       if (cached !== null && !stale) {
@@ -996,11 +1020,15 @@ export async function route<T = any>(channel: string, serverFn: RouteFn<T>, loca
       }
 
       // No cache ??try server (skip if known offline)
-      if (_serverOnline || !localFn) {
+      if ((_serverOnline || readServerBaseUrl) && !browserExplicitlyOffline || !localFn) {
         // Request deduplication: if same request already in flight, wait for it instead of re-requesting
         if (hasReusableInflight(channel)) {
           if (localFn) {
-            return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0, 'cache-dedup', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
+            if (raceLocalFallback) {
+              return raceServerReadWithLocalFallback(channel, _inflight[channel], localFn, t0, 'cache-dedup', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
+            }
+            logCall(channel, 'cache-dedup', Date.now() - t0)
+            return _inflight[channel]
           }
           logCall(channel, 'cache-dedup', Date.now() - t0)
           return _inflight[channel]
@@ -1020,7 +1048,7 @@ export async function route<T = any>(channel: string, serverFn: RouteFn<T>, loca
         _inflight[channel] = promise
         _inflightStartedAt[channel] = Date.now()
         
-        if (localFn) {
+        if (localFn && raceLocalFallback) {
           return raceServerReadWithLocalFallback(channel, promise, localFn, t0, '', HEALTHY_SERVER_LOCAL_FALLBACK_MS)
         } else {
           try {
