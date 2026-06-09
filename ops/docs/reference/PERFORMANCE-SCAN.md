@@ -106,6 +106,24 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 - Large JS chunks are candidates for lazy-loading or manual chunk strategy refinement.
 - Maintain functional parity first; apply incremental performance changes with build validation.
 <!-- phase29-manual-notes:start -->
+- Move 872 removes product-only first-paint leakage from Audit Log and
+  Library/Files. Generic local fallback/cache helpers (`lazyLocalDb`,
+  `localMirrors`, `queryCache`, and `expectedUpdatedAt`) now build into
+  `api-local-cache`; `lookupTransport` builds into `lookup-api`;
+  `frontend/src/utils/pricing.ts` builds into `app-shared`; and Audit
+  Log/Files route preload lists no longer include `product-shared`. Late admin
+  route-entry warmup was narrowed to avoid importing the next unrelated page
+  during current-page first paint. Local chunk proof showed `AuditLog-*`,
+  `FilesPage-*`, and `app-shared-*` contain no `product-shared` or
+  `product-read-api`, and the product-read chunk shrank to about 1.56 kB.
+  Docker image `business-os:v6.0.0-202606101550-move872` is live with frontend
+  hash `1df23f1eac671f2f` and source hash `6d8391289817d4a2`. Cloudflare
+  Playwright proof `ops/runtime/reports/route-load-trace-2026-06-09T20-40-13-816Z.json`
+  measured Audit Log at 2.440 s ready with zero failures/errors; comparison
+  trace `ops/runtime/reports/route-load-trace-2026-06-09T20-41-04-387Z.json`
+  measured Products 2.549 s, Inventory 8.367 s, POS 2.664 s, Files 3.381 s,
+  and Branches 3.849 s with zero failures/errors. Inventory/Product variance
+  remains the next performance target.
 - Move 871 gates the admin auth bootstrap preload to authenticated admin
   shells only. This removes anonymous `/login` and public-shell
   `/api/auth/bootstrap` preload noise while preserving one credentialed

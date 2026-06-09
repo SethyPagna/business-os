@@ -288,7 +288,7 @@ const ADMIN_PAGE_SEQUENCE: readonly PageId[] = [
   'backup',
 ] satisfies AdminPageId[]
 
-const PAGE_ENTRY_WARMUP_AHEAD_COUNT = 1
+const PAGE_ENTRY_WARMUP_AHEAD_COUNT = 0
 const NARROW_PAGE_ENTRY_WARMUP_IDS: ReadonlySet<PageId> = new Set([
   'sales',
   'returns',
@@ -1186,6 +1186,7 @@ function usePageEntryWarmup(user: AppUser | null, activePageId: AdminPageId, can
     const upcomingPageIds = shouldNarrowWarmup
       ? ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1, currentIndex + 1 + PAGE_ENTRY_WARMUP_AHEAD_COUNT)
       : ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1)
+    if (!upcomingPageIds.length) return undefined
     const importerLoaders: WarmupLoader[] = upcomingPageIds.map((pageId) => {
       const importer = PAGE_IMPORTERS[pageId]
       return () => importWithTimeout(importer, pageId).catch(() => null)

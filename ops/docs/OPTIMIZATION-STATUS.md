@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 871, gate the admin auth bootstrap preload to
-  authenticated admin shells only, removing anonymous/login auth-bootstrap
-  noise while preserving the direct-visit speed hint.
+- Latest completed move: Move 872, split generic local cache/fallback helpers
+  out of product chunks and stop Audit Log/Files from preloading product-only
+  code during first paint.
 
 ## Current Baseline
 
@@ -18,9 +18,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `69e2e819e937bff6`
+  `1df23f1eac671f2f`
 - latest verified source hash from the most recent Docker-served live check:
-  `c923862d80ad7213`
+  `6d8391289817d4a2`
 
 Latest verified reports:
 
@@ -90,6 +90,10 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T19-35-23-925Z.json`
 - latest Move 871 Cloudflare route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T20-03-59-485Z.json`
+- latest Move 872 Cloudflare route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-41-04-387Z.json`
+- latest Move 872 focused Audit Log route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-40-13-816Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -112,6 +116,34 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 872 removes product-only first-paint leakage from Audit Log and
+  Library/Files. `frontend/src/utils/pricing.ts` now belongs to `app-shared`
+  instead of `product-shared`; `lazyLocalDb`, `localMirrors`, `queryCache`,
+  and `expectedUpdatedAt` now build into a neutral `api-local-cache` chunk;
+  `lookupTransport` builds into `lookup-api`; and the Audit Log/Files backend
+  route preload lists no longer include `product-shared`. Late admin
+  route-entry warmup is also disabled for the narrow late-stack pages so an
+  active page does not borrow bandwidth for the next unrelated page. Local
+  build proof showed `AuditLog-*`, `FilesPage-*`, and `app-shared-*` contain
+  no `product-shared` or `product-read-api`, while `product-read-api` shrank
+  to about 1.56 kB and generic local fallback code moved to
+  `api-local-cache`.
+- Docker image `business-os:v6.0.0-202606101550-move872` is live with frontend
+  hash `1df23f1eac671f2f` and source hash `6d8391289817d4a2`. Cloudflare
+  startup warmup completed with zero failures. Focused Audit Log proof
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-40-13-816Z.json`
+  measured 2.440 s ready, 32 requests, 2 API calls, 26 scripts, zero failed
+  requests, and zero page/console errors; its fallback request now loads
+  `api-local-cache` instead of `product-read-api`. Five-route comparison
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-41-04-387Z.json`
+  measured Products 2.549 s, Inventory 8.367 s, POS 2.664 s, Files 3.381 s,
+  and Branches 3.849 s with zero failures/errors. The Inventory number is a
+  variance/regression target for the next slice, not accepted as solved.
+- Current plan position after Move 872: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps.
 
 - Move 871 makes the admin SPA auth bootstrap preload conditional on a real
   `bos_session` cookie and skips the preload on `/login` and public portal

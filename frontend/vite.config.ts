@@ -348,6 +348,8 @@ const deferredModulePreloadPrefixes = [
   'assets/pending-sync-api-',
   'assets/product-export-',
   'assets/product-image-upload-api-',
+  'assets/api-local-cache-',
+  'assets/lookup-api-',
   'assets/product-read-api-',
   'assets/product-write-api-',
   'assets/rfid-api-',
@@ -562,12 +564,18 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/requestIds.ts')) return 'request-ids'
     if (normalized.endsWith('/src/api/conflicts.ts')) return 'api-conflicts'
     if (
-      normalized.endsWith('/src/api/productReadTransport.ts')
-      || normalized.endsWith('/src/api/lookupTransport.ts')
-      || normalized.endsWith('/src/api/expectedUpdatedAt.ts')
-      || normalized.endsWith('/src/api/localMirrors.ts')
+      normalized.endsWith('/src/api/localMirrors.ts')
       || normalized.endsWith('/src/api/lazyLocalDb.ts')
       || normalized.endsWith('/src/api/queryCache.ts')
+      || normalized.endsWith('/src/api/expectedUpdatedAt.ts')
+    ) {
+      return 'api-local-cache'
+    }
+    if (normalized.endsWith('/src/api/lookupTransport.ts')) {
+      return 'lookup-api'
+    }
+    if (
+      normalized.endsWith('/src/api/productReadTransport.ts')
     ) {
       return 'product-read-api'
     }
@@ -598,13 +606,15 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/formatters.ts')) {
       return 'shared-formatters'
     }
+    if (normalized.endsWith('/src/utils/pricing.ts')) {
+      return 'app-shared'
+    }
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/products/shared/')
       || normalized.includes('/src/components/products/helpers/productGalleryHelpers.ts')
       || normalized.includes('/src/components/products/helpers/productSupplierOptions.ts')
       || normalized.includes('/src/utils/productBatches.ts')
-      || normalized.includes('/src/utils/pricing.ts')
       || normalized.endsWith('/src/utils/productGrouping.ts')
       || normalized.includes('/src/utils/color.ts')
     ) {

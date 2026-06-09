@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 871.
+- Latest completed implementation move in this roadmap: Move 872.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -164,6 +164,34 @@ Move 871 current state:
 - Next executable slice: inspect and reduce the client dependency path that
   pulls `product-read-api` and language chunks into Audit Log/Files first
   paint, then re-run route-load traces before any broader rewiring.
+
+Move 872 current state:
+- Docker release `business-os:v6.0.0-202606101550-move872` is running healthy
+  with frontend hash `1df23f1eac671f2f` and source hash
+  `6d8391289817d4a2`.
+- Audit Log and Library/Files no longer route-preload `product-shared`, and
+  generic local fallback helpers were split out of `product-read-api` into the
+  neutral `api-local-cache` chunk. `lookupTransport` now has its own
+  `lookup-api` chunk, while `frontend/src/utils/pricing.ts` is shared through
+  `app-shared` instead of product chunks.
+- Late admin route-entry warmup now skips automatic next-page imports for the
+  narrow late-stack pages. Intent hover/touch warmup remains available, but
+  active pages no longer compete with unrelated next-page code during first
+  paint.
+- Local chunk proof showed `AuditLog-*`, `FilesPage-*`, and `app-shared-*`
+  contain no `product-shared` or `product-read-api`; the product-read chunk is
+  now about 1.56 kB and only carries product read transport glue.
+- Live Cloudflare proof:
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-40-13-816Z.json`
+  measured Audit Log at 2.440 s ready, zero failures, and zero errors; the
+  local fallback helper request is now `api-local-cache`, not
+  `product-read-api`.
+- Five-route comparison:
+  `ops/runtime/reports/route-load-trace-2026-06-09T20-41-04-387Z.json`
+  measured Products 2.549 s, Inventory 8.367 s, POS 2.664 s, Files 3.381 s,
+  and Branches 3.849 s, all with zero failures/errors. The next executable
+  slice is to reduce Inventory/Product API and static-asset variance without
+  reintroducing broad preload contention.
 
 ## Phase 1: Safe Wins
 
