@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 876, defer POS/Inventory secondary startup
-  metadata and keep first-route reads focused on visible rows.
+- Latest completed move: Move 877, let stored-session admin shells paint
+  immediately while server auth/bootstrap verifies in the background.
 
 ## Current Baseline
 
@@ -17,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `10b61c8879b34f05`
+  `3cfe4873964ca1ab`
 - latest verified source hash from the most recent Docker-served live check:
   `d7832416a03cf0ce`
 
@@ -107,6 +107,11 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-10T00-12-13-091Z.json`
 - latest Move 876 warmed Cloudflare affected-route trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T00-13-39-711Z.json`
+- latest Move 877 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-01-307Z.json`
+- latest Move 877 Cloudflare affected-route traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-20-631Z.json`
+  and `ops/runtime/reports/route-load-trace-2026-06-10T00-42-37-305Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -129,6 +134,31 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 877 changes the authenticated startup path so stored-session admin
+  shells set `authReady` immediately, letting direct route pages render from
+  the real stored user/session while `/api/auth/bootstrap` verifies shortly
+  after first paint. The existing authenticated admin auth-bootstrap preload is
+  kept because the no-preload experiment regressed Cloudflare timing on
+  Inventory/POS by making verification arrive unpredictably late.
+- Docker image `business-os:v6.0.0-202606100905-move877` is live with frontend
+  hash `3cfe4873964ca1ab` and source hash `d7832416a03cf0ce`. Local Playwright
+  route trace `ops/runtime/reports/route-load-trace-2026-06-10T00-42-01-307Z.json`
+  measured Products 271 ms, Inventory 290 ms, POS 295 ms, and Branches 232 ms
+  with zero failed requests and zero page/console errors. In-app Browser smoke
+  then logged in locally and verified POS, Products, and Inventory render real
+  product rows with no framework overlay and no relevant app console errors.
+- Public Cloudflare was measured twice after warmup. Trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-20-631Z.json`
+  measured Products 2.953 s, Inventory 3.143 s, POS 3.037 s, and Branches
+  2.820 s. Repeat trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-37-305Z.json`
+  measured Products 2.272 s, Inventory 3.938 s, POS 2.888 s, and Branches
+  2.140 s. Both had zero failed requests and zero page/console errors.
+  Products and Branches improved on the warmed repeat; POS and Inventory are
+  still gated by `/api/products/bootstrap` and `/api/inventory/bootstrap`
+  timing through Cloudflare, so the next slice should reduce those first-page
+  payload paths without racing stale cache data or adding fake loader delays.
 
 - Move 875 adds Postgres indexes for the traced Product/POS read hot paths:
   `(is_active, created_at DESC, id DESC)` for Product `created_desc` startup

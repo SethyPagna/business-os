@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 876.
+- Latest completed implementation move in this roadmap: Move 877.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,40 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 877 current state:
+- Docker release `business-os:v6.0.0-202606100905-move877` is running healthy
+  with frontend hash `3cfe4873964ca1ab` and source hash
+  `d7832416a03cf0ce`.
+- Stored-session admin shells now mark auth as ready immediately so direct
+  route pages can paint from the real stored user/session while
+  `/api/auth/bootstrap` verifies shortly after first paint. The authenticated
+  admin auth-bootstrap preload remains in place; a no-preload variant was live
+  tested and rejected because it made bootstrap verification arrive later and
+  worsened Inventory/POS Cloudflare timing.
+- Local Playwright proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-01-307Z.json`
+  measured Products 271 ms, Inventory 290 ms, POS 295 ms, and Branches 232 ms
+  with zero failed requests and zero console/page errors.
+- Cloudflare proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-20-631Z.json`
+  measured Products 2.953 s, Inventory 3.143 s, POS 3.037 s, and Branches
+  2.820 s. Warm repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-37-305Z.json`
+  measured Products 2.272 s, Inventory 3.938 s, POS 2.888 s, and Branches
+  2.140 s. Both traces had zero failed requests and zero console/page errors.
+- In-app Browser proof: after local login, POS, Products, and Inventory rendered
+  real product rows and expected route controls with no framework overlay and
+  no relevant app console errors.
+- Next executable slice: reduce `/api/products/bootstrap` and
+  `/api/inventory/bootstrap` first-page payload/critical timing through
+  Cloudflare without racing stale local cache data or adding artificial loader
+  delay.
+- Verification passed: `git diff --check`, backend route-contract and server
+  utility tests, schema audit, frontend typecheck, frontend JSX/source syntax
+  check, frontend production build, Docker release build/start health, local
+  focused route-load trace, repeated public Cloudflare route-load traces, and
+  in-app Browser authenticated smoke checks.
 
 Move 876 current state:
 - Docker release `business-os:v6.0.0-202606100815-move876` is running healthy

@@ -1,8 +1,43 @@
 # Business OS Optimization Session Log
 
-Last updated: 2026-06-05
+Last updated: 2026-06-10
 
 This is a concise running log of what actually happened in recent sessions.
+
+## 2026-06-10
+
+### Accepted
+
+- Let stored-session admin shells paint before server bootstrap verification
+  - area: frontend startup performance and auth readiness
+  - result: kept
+  - note: `frontend/src/AppContext.tsx` now marks auth ready immediately when
+    a valid stored session exists, then runs `/api/auth/bootstrap`
+    verification shortly after first paint. The existing authenticated admin
+    auth-bootstrap preload is preserved; a no-preload variant was live tested
+    and rejected because it delayed verification and hurt Inventory/POS
+    Cloudflare timing.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606100905-move877` is running with frontend hash
+    `3cfe4873964ca1ab` and source hash `d7832416a03cf0ce`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T00-42-01-307Z.json`
+    measured Products 271 ms, Inventory 290 ms, POS 295 ms, and Branches
+    232 ms with zero failed requests and zero page/console errors.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T00-42-20-631Z.json`
+    measured Products 2.953 s, Inventory 3.143 s, POS 3.037 s, and Branches
+    2.820 s; repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T00-42-37-305Z.json`
+    measured Products 2.272 s, Inventory 3.938 s, POS 2.888 s, and Branches
+    2.140 s. Both had zero failed requests and zero page/console errors.
+  - Browser proof: after local login in the in-app Browser, POS, Products, and
+    Inventory rendered real product rows with no framework overlay and no
+    relevant app console errors.
+  - next target: reduce `/api/products/bootstrap` and
+    `/api/inventory/bootstrap` first-page payload/critical timing through
+    Cloudflare without racing stale local cache data or adding artificial
+    loader delays.
 
 ## 2026-06-04
 
