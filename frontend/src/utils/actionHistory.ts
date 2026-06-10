@@ -78,11 +78,31 @@ declare global {
 
 const ACTION_HISTORY_LOAD_TIMEOUT_MS = 10000
 const ACTION_HISTORY_USERS_TIMEOUT_MS = 8000
+const ACTION_HISTORY_INITIAL_READ_DELAY_MS = 2500
+const ACTION_HISTORY_IDLE_TIMEOUT_MS = 5000
 let actionHistoryTransportPromise: Promise<ActionHistoryTransportModule> | null = null
 
 function loadActionHistoryTransport(): Promise<ActionHistoryTransportModule> {
   if (!actionHistoryTransportPromise) actionHistoryTransportPromise = import('../api/actionHistoryTransport.ts')
   return actionHistoryTransportPromise
+}
+
+function scheduleActionHistoryRead(task: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  let idleId: number | null = null
+  const timerId = window.setTimeout(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(task, { timeout: ACTION_HISTORY_IDLE_TIMEOUT_MS })
+      return
+    }
+    task()
+  }, ACTION_HISTORY_INITIAL_READ_DELAY_MS)
+  return () => {
+    window.clearTimeout(timerId)
+    if (idleId != null && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(idleId)
+    }
+  }
 }
 
 function normalizeActionHistoryId(value: unknown): ActionHistoryId | null {
@@ -156,24 +176,29 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
 
   useEffect(() => {
     if (!enabled) return
-    refreshServerItems()
+    return scheduleActionHistoryRead(() => {
+      refreshServerItems()
+    })
   }, [enabled, refreshServerItems])
 
   useEffect(() => {
     if (!enabled) return
     if (!isAdmin) return
-    const requestId = beginTrackedRequest(usersRequestRef)
-    withLoaderTimeout(
-      async () => (await loadActionHistoryTransport()).getActionHistoryUsers(),
-      'Action history users',
-      ACTION_HISTORY_USERS_TIMEOUT_MS,
-    )
-      .then((rows) => {
-        if (!isTrackedRequestCurrent(usersRequestRef, requestId)) return
-        setUserOptions(Array.isArray(rows) ? rows : [])
-      })
-      .catch(() => {})
+    const cancelScheduledRead = scheduleActionHistoryRead(() => {
+      const requestId = beginTrackedRequest(usersRequestRef)
+      withLoaderTimeout(
+        async () => (await loadActionHistoryTransport()).getActionHistoryUsers(),
+        'Action history users',
+        ACTION_HISTORY_USERS_TIMEOUT_MS,
+      )
+        .then((rows) => {
+          if (!isTrackedRequestCurrent(usersRequestRef, requestId)) return
+          setUserOptions(Array.isArray(rows) ? rows : [])
+        })
+        .catch(() => {})
+    })
     return () => {
+      cancelScheduledRead()
       invalidateTrackedRequest(usersRequestRef)
     }
   }, [enabled, isAdmin])

@@ -187,6 +187,24 @@ function clearTimeoutRef(ref: MutableRefObject<number | null>): void {
   ref.current = null
 }
 
+function scheduleUsersSecondaryRead(task: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  let idleId: number | null = null
+  const timerId = window.setTimeout(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(task, { timeout: USERS_SECONDARY_READ_IDLE_TIMEOUT_MS })
+      return
+    }
+    task()
+  }, USERS_SECONDARY_READ_DELAY_MS)
+  return () => {
+    window.clearTimeout(timerId)
+    if (idleId !== null && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(idleId)
+    }
+  }
+}
+
 /**
  * 1. Users Page Module
  * 1.1 Purpose
@@ -236,6 +254,8 @@ const USERS_LIST_TIMEOUT_MS = 8000
 const ROLES_LIST_TIMEOUT_MS = 8000
 const USER_MUTATION_TIMEOUT_MS = 12000
 const ROLE_MUTATION_TIMEOUT_MS = 12000
+const USERS_SECONDARY_READ_DELAY_MS = 2500
+const USERS_SECONDARY_READ_IDLE_TIMEOUT_MS = 5000
 
 /**
  * 1.2.1 Render-safe fallback for nullable contact values.
@@ -294,6 +314,7 @@ export default function Users() {
   const rolesLoadedOnceRef = useRef(false)
   const rolesRequestRef = useRef(0)
   const rolesPromiseRef = useRef<Promise<void> | null>(null)
+  const rolesSecondaryReadCancelRef = useRef<(() => void) | null>(null)
   const tr = useCallback((key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
@@ -462,13 +483,31 @@ export default function Users() {
       invalidateTrackedRequest(rolesRequestRef)
       loadPromiseRef.current = null
       rolesPromiseRef.current = null
+      if (rolesSecondaryReadCancelRef.current) {
+        rolesSecondaryReadCancelRef.current()
+        rolesSecondaryReadCancelRef.current = null
+      }
       setLoading(false)
       setRolesLoading(false)
       return
     }
     load({ silent: loadedOnceRef.current })
-    loadRoles({ silent: rolesLoadedOnceRef.current })
-  }, [canManage, isActive, load, loadRoles])
+    if (tab === 'roles') {
+      if (rolesSecondaryReadCancelRef.current) {
+        rolesSecondaryReadCancelRef.current()
+        rolesSecondaryReadCancelRef.current = null
+      }
+      loadRoles({ silent: rolesLoadedOnceRef.current })
+      return
+    }
+    if (!rolesLoadedOnceRef.current && !rolesPromiseRef.current) {
+      if (rolesSecondaryReadCancelRef.current) rolesSecondaryReadCancelRef.current()
+      rolesSecondaryReadCancelRef.current = scheduleUsersSecondaryRead(() => {
+        rolesSecondaryReadCancelRef.current = null
+        loadRoles({ silent: true })
+      })
+    }
+  }, [canManage, isActive, load, loadRoles, tab])
   useEffect(() => {
     if (!isActive) {
       setHistoryReady(false)

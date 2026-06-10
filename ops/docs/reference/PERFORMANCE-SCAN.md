@@ -2562,4 +2562,30 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   3.223 s. Both remote traces had zero failed requests/errors. Remaining
   hotspot: Cloudflare/tunnel variance and first-route API transfer time, not
   app-owned chunk cycles or artificial waits.
+- Move 894 continues the real-load performance pass by moving passive secondary
+  reads out of route first-paint windows. Shared action history now delays its
+  initial server history/admin-user reads until after load/idle while keeping
+  writes, undo, and redo immediate. Inventory keeps the primary
+  `/api/inventory/bootstrap?...metadata=0` product load first-class and moves
+  the `metadataOnly=1` filter refresh to an idle scheduled read. Users keeps
+  `/api/users` as the primary first-load request and defers `/api/roles` on the
+  default Users tab while still loading roles immediately on the Roles tab or
+  when role-backed forms need them. Vite no longer creates a separate
+  `shared-export-menu` startup chunk; the small export trigger folds into route
+  chunks to remove one Cloudflare round trip. Docker image
+  `business-os:v6.0.0-202606100822-move894` served frontend hash
+  `481c0829fc62462f`. Local route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T14-23-12-097Z.json` passed
+  with zero failures/errors: Products 352 ms, Inventory 427 ms, Sales 320 ms,
+  Returns 269 ms, Contacts 312 ms, Branches 276 ms, Users 263 ms, Audit Log
+  516 ms. The public first-window trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T14-24-46-325Z.json` also
+  passed with zero failures/errors; request counts were reduced to one primary
+  API on Sales, Returns, Contacts, Branches, Users, and Audit Log, with
+  Inventory at two because authenticated bootstrap plus inventory bootstrap are
+  both required. Public LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T14-23-15-647Z.json` stayed
+  error-free; Products, Sales, Contacts, Branches, and Audit Log were near
+  one-second LCP, while Inventory, Returns, and Users remain the next
+  Cloudflare/tunnel latency hotspots.
 <!-- phase29-manual-notes:end -->

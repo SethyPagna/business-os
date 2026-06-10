@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 845 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 894 in this file.
 
 ## Goal
 
@@ -9731,6 +9731,42 @@ Decision rule:
   project-doc refresh, Phase 29 audit, storage prune, and in-app Browser
   DOM/log/interaction checks passed.
 - Current plan position after Move 845: Phase 8.4 remains active for live
+  browser checks and measured startup/interaction reductions; Phase 26 stays at
+  51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 894: Defer passive route reads past first paint
+
+- Ownership slice: Phase 8.4/Phase 29 performance cleanup. Passive route
+  startup reads that do not own the first visible data are now delayed until
+  after load/idle.
+- Code-flow slice: shared action history delays initial server history and
+  admin-user reads without delaying writes, undo, or redo; Inventory delays the
+  metadata-only filter refresh while preserving the real product bootstrap; the
+  Users route delays role reads on the default Users tab while still loading
+  roles immediately on the Roles tab or form intent paths.
+- Chunk slice: `shared-export-menu` is no longer a separate Vite startup chunk,
+  removing a tiny-but-expensive Cloudflare round trip from read-only route
+  startup.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` now proves the
+  delayed action-history, Inventory metadata, Users role-read, and export-menu
+  chunk behavior.
+- Live proof: Docker image `business-os:v6.0.0-202606100822-move894` served
+  frontend hash `481c0829fc62462f`. Local route-load report
+  `ops/runtime/reports/route-load-trace-2026-06-10T14-23-12-097Z.json` passed
+  with zero failures/errors and sub-600 ms ready times across Products,
+  Inventory, Sales, Returns, Contacts, Branches, Users, and Audit Log. Public
+  route-load report
+  `ops/runtime/reports/route-load-trace-2026-06-10T14-24-46-325Z.json` passed
+  with zero failures/errors and slimmer first-window API counts.
+- Verification proof: focused performance guard, frontend typecheck,
+  JSX/source check, full frontend utility suite, frontend production build,
+  Docker release build/start/health, local Playwright route-load trace, public
+  Cloudflare route-load trace, and public Cloudflare LCP trace passed. Public
+  LCP remains variable for Inventory, Returns, and Users, so those stay as the
+  next measured hotspots.
+- Current plan position after Move 894: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,

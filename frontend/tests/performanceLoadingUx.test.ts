@@ -416,6 +416,7 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productWriteTranspo
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productImageUploadTransport\.ts'\)\) return 'product-image-upload-api'/, 'Products page image upload intent should use a narrow product-image upload chunk instead of the full file transport')
 assert.match(viteConfig, /'assets\/product-image-upload-api-',/, 'Product image upload intent chunk should be excluded from eager modulepreload')
 assert.doesNotMatch(viteConfig, /'assets\/quick-preference-toggles-',/, 'Tiny context-backed preference toggles should not cost a separate startup request')
+assert.doesNotMatch(viteConfig, /shared-export-menu|ExportMenu\.tsx'\)\) return/, 'Tiny export menu trigger should not cost a separate startup request on read-only route load')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/branchTransport\.ts'\)\) return 'branch-api'[\s\S]*normalized\.endsWith\('\/src\/api\/inventoryTransport\.ts'\)\) return 'inventory-api'/, 'Products page branch and stock intents should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userAdminTransport\.ts'\)\) return 'user-admin-api'[\s\S]*normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'/, 'Users admin reads and mutations should use a focused route chunk instead of app-api-methods')
 assert.doesNotMatch(viteConfig, /normalized\.endsWith\('\/src\/api\/accessControlTransport\.ts'\)\) return 'access-control-api'/, 'retired access-control wrapper should not keep a manual chunk rule')
@@ -1075,6 +1076,26 @@ assert.match(
 )
 assert.match(
   actionHistory,
+  /const ACTION_HISTORY_INITIAL_READ_DELAY_MS = 2500/,
+  'passive action-history reads should wait until after primary route paint',
+)
+assert.match(
+  actionHistory,
+  /requestIdleCallback\(task,\s*\{\s*timeout:\s*ACTION_HISTORY_IDLE_TIMEOUT_MS\s*\}/,
+  'passive action-history reads should use idle scheduling instead of competing with first paint',
+)
+assert.match(
+  actionHistory,
+  /scheduleActionHistoryRead\(\(\) => \{[\s\S]*refreshServerItems\(\)/,
+  'initial server history refresh should use the post-paint scheduler',
+)
+assert.match(
+  actionHistory,
+  /scheduleActionHistoryRead\(\(\) => \{[\s\S]*getActionHistoryUsers/,
+  'initial action-history user lookup should use the post-paint scheduler',
+)
+assert.match(
+  actionHistory,
   /withLoaderTimeout\(\s*async \(\) => \(await loadActionHistoryTransport\(\)\)\.getActionHistory\(scope, Math\.max\(3, limit\), \{[\s\S]*'Action history',\s*ACTION_HISTORY_LOAD_TIMEOUT_MS,\s*\)/,
   'action history server reads should timeout slow history requests',
 )
@@ -1498,6 +1519,21 @@ assert.match(
   inventory,
   /withLoaderTimeout\(\s*\(\) => \{[\s\S]*getInventoryBootstrap\(productQuery\)[\s\S]*'Inventory bootstrap',\s*INVENTORY_PRODUCTS_TIMEOUT_MS,\s*\)/,
   'inventory product bootstrap should timeout slow product startup reads',
+)
+assert.match(
+  inventory,
+  /const INVENTORY_METADATA_READ_DELAY_MS = 2500/,
+  'inventory filter metadata should have a named post-paint delay',
+)
+assert.match(
+  inventory,
+  /window\.requestIdleCallback\(task, \{ timeout: INVENTORY_METADATA_IDLE_TIMEOUT_MS \}\)/,
+  'inventory filter metadata should wait for idle time instead of competing with first paint',
+)
+assert.match(
+  inventory,
+  /inventoryMetadataCancelRef\.current = scheduleInventoryMetadataRead\(\(\) => \{[\s\S]*searchInventoryProducts\(metadataQuery\)/,
+  'inventory metadata-only product search should be scheduled after the primary product load commits',
 )
 assert.match(
   inventory,
@@ -2203,6 +2239,21 @@ assert.match(
   usersPage,
   /const ROLES_LIST_TIMEOUT_MS = 8000/,
   'roles list should use an explicit timeout constant',
+)
+assert.match(
+  usersPage,
+  /const USERS_SECONDARY_READ_DELAY_MS = 2500/,
+  'Users secondary reads should have a named post-paint delay',
+)
+assert.match(
+  usersPage,
+  /window\.requestIdleCallback\(task, \{ timeout: USERS_SECONDARY_READ_IDLE_TIMEOUT_MS \}\)/,
+  'Users secondary reads should wait for idle time instead of competing with first paint',
+)
+assert.match(
+  usersPage,
+  /if \(tab === 'roles'\) \{[\s\S]*loadRoles\(\{ silent: rolesLoadedOnceRef\.current \}\)[\s\S]*return[\s\S]*rolesSecondaryReadCancelRef\.current = scheduleUsersSecondaryRead\(\(\) => \{[\s\S]*loadRoles\(\{ silent: true \}\)/,
+  'Users should defer role reads on the default users tab but load roles immediately on the Roles tab',
 )
 assert.match(
   usersPage,

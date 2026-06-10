@@ -1,8 +1,8 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 657,
-  "largeFiles": 81,
+  "filesScanned": 660,
+  "largeFiles": 82,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
   "wrapperRemovalCandidates": 0,
@@ -39,11 +39,11 @@
       36
     ],
     [
-      "frontend/components/products",
-      34
+      "ops/scripts/runtime/live-checks",
+      35
     ],
     [
-      "ops/scripts/runtime/live-checks",
+      "frontend/components/products",
       34
     ],
     [
@@ -55,12 +55,12 @@
       24
     ],
     [
-      "frontend/components/shared",
+      "frontend/components/catalog",
       19
     ],
     [
-      "frontend/components/catalog",
-      18
+      "frontend/components/shared",
+      19
     ],
     [
       "frontend/components/inventory",
@@ -127,6 +127,10 @@
       6
     ],
     [
+      "ops/scripts/runtime/cloudflare",
+      6
+    ],
+    [
       "ops/scripts/verification",
       6
     ],
@@ -140,10 +144,6 @@
     ],
     [
       "ops/scripts/architecture",
-      5
-    ],
-    [
-      "ops/scripts/runtime/cloudflare",
       5
     ],
     [
@@ -176,6 +176,7 @@
     "frontend/src/components/catalog/CatalogEditorSurface.tsx",
     "frontend/src/components/catalog/CatalogPage.tsx",
     "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
+    "frontend/src/components/catalog/PublicCatalogPage.tsx",
     "frontend/src/components/catalog/portalContentI18n.ts",
     "frontend/src/components/catalog/portalLanguagePacks.ts",
     "frontend/src/components/contacts/CustomersTab.tsx",

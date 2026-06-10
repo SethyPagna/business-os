@@ -209,6 +209,24 @@ let userReadTransportPromise: Promise<UserReadTransportModule> | null = null
 let inventoryWriteTransportPromise: Promise<InventoryWriteTransportModule> | null = null
 let inventoryExportModulePromise: Promise<InventoryExportModule> | null = null
 
+function scheduleInventoryMetadataRead(task: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  let idleId: number | null = null
+  const timerId = window.setTimeout(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      idleId = window.requestIdleCallback(task, { timeout: INVENTORY_METADATA_IDLE_TIMEOUT_MS })
+      return
+    }
+    task()
+  }, INVENTORY_METADATA_READ_DELAY_MS)
+  return () => {
+    window.clearTimeout(timerId)
+    if (idleId !== null && typeof window.cancelIdleCallback === 'function') {
+      window.cancelIdleCallback(idleId)
+    }
+  }
+}
+
 function loadBranchTransport(): Promise<BranchTransportModule> {
   if (!branchTransportPromise) branchTransportPromise = import('../../api/branchTransport.ts')
   return branchTransportPromise
@@ -286,6 +304,8 @@ const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
 const INVENTORY_RETURNS_STATS_TIMEOUT_MS = 12000
 const INVENTORY_DASHBOARD_STATS_TIMEOUT_MS = 12000
 const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
+const INVENTORY_METADATA_READ_DELAY_MS = 2500
+const INVENTORY_METADATA_IDLE_TIMEOUT_MS = 5000
 
 function reuseSetWhenUnchanged<T>(current: Set<T>, nextValues: T[] = []): Set<T> {
   const next = new Set(nextValues)
@@ -556,7 +576,7 @@ export default function Inventory() {
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef<number | null>(null)
-  const inventoryMetadataTimerRef = useRef<number | null>(null)
+  const inventoryMetadataCancelRef = useRef<(() => void) | null>(null)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const pendingLoadRef = useRef<{ silent: boolean; options?: LoadOptions } | null>(null)
   const latestLoadRef = useRef<((silent?: boolean, options?: LoadOptions) => Promise<void>) | null>(null)
@@ -891,9 +911,7 @@ export default function Inventory() {
         setLoadError(null)
 
         if (needsProductSummary && typeof window !== 'undefined') {
-          if (inventoryMetadataTimerRef.current !== null) {
-            window.clearTimeout(inventoryMetadataTimerRef.current)
-          }
+          if (inventoryMetadataCancelRef.current) inventoryMetadataCancelRef.current()
           const metadataQuery = {
             ...productQuery,
             page: 1,
@@ -901,18 +919,20 @@ export default function Inventory() {
             metadata: '1',
             metadataOnly: '1',
           }
-          inventoryMetadataTimerRef.current = null
-          void getInventoryApi().searchInventoryProducts(metadataQuery)
-            .then((metadataResult: any) => {
-              if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-              if (Array.isArray(metadataResult?.initials)) {
-                setInventoryInitials(metadataResult.initials)
-              }
-              if (metadataResult?.filters && typeof metadataResult.filters === 'object') {
-                setInventoryProductFilters(metadataResult.filters)
-              }
-            })
-            .catch(() => {})
+          inventoryMetadataCancelRef.current = scheduleInventoryMetadataRead(() => {
+            inventoryMetadataCancelRef.current = null
+            void getInventoryApi().searchInventoryProducts(metadataQuery)
+              .then((metadataResult: any) => {
+                if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+                if (Array.isArray(metadataResult?.initials)) {
+                  setInventoryInitials(metadataResult.initials)
+                }
+                if (metadataResult?.filters && typeof metadataResult.filters === 'object') {
+                  setInventoryProductFilters(metadataResult.filters)
+                }
+              })
+              .catch(() => {})
+          })
         }
 
         if (needsStatsData) {
@@ -1026,7 +1046,10 @@ export default function Inventory() {
       if (!isActive) {
         setHistoryReady(false)
         if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
-        if (inventoryMetadataTimerRef.current !== null) window.clearTimeout(inventoryMetadataTimerRef.current)
+        if (inventoryMetadataCancelRef.current) {
+          inventoryMetadataCancelRef.current()
+          inventoryMetadataCancelRef.current = null
+        }
         invalidateTrackedRequest(loadRequestRef)
         loadPromiseRef.current = null
       pendingLoadRef.current = null
@@ -1110,7 +1133,10 @@ export default function Inventory() {
   }, [ensureInventoryUsersLoaded, inventorySection, isActive, isAdmin, tab])
   useEffect(() => () => {
     if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
-    if (inventoryMetadataTimerRef.current !== null) window.clearTimeout(inventoryMetadataTimerRef.current)
+    if (inventoryMetadataCancelRef.current) {
+      inventoryMetadataCancelRef.current()
+      inventoryMetadataCancelRef.current = null
+    }
     invalidateTrackedRequest(loadRequestRef)
     loadPromiseRef.current = null
   }, [])

@@ -765,7 +765,6 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
       return 'image-lightbox'
     }
-    if (normalized.includes('/src/components/shared/ExportMenu.tsx')) return 'shared-export-menu'
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-lazy-portal-menu'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'
