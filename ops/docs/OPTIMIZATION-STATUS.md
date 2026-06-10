@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 886, cache the combined product bootstrap
-  payload and memoize branch-list reads during startup bursts.
+- Latest completed move: Move 887, reuse the already-validated session user,
+  role, and organization context when building auth bootstrap.
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `72b9ecdfda6fdef1`
 - latest verified source hash from the most recent Docker-served live check:
-  `5717dc8b4355f02b`
+  `859f5717dd65a03b`
 
 Latest verified reports:
 
@@ -48,11 +48,11 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T07-33-44-286Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-10-54-346Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T07-35-08-729Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-17-34-555Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
 - latest focused public-host LCP trace:
@@ -150,6 +150,13 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-10T07-33-44-286Z.json`
 - latest Move 886 Cloudflare affected-route trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T07-35-08-729Z.json`
+- latest Move 887 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-10-54-346Z.json`
+- latest Move 887 Cloudflare affected-route traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-11-14-272Z.json`
+  and `ops/runtime/reports/route-load-trace-2026-06-10T08-17-34-555Z.json`
+- latest Move 887 public Inventory direct probe screenshot:
+  `ops/runtime/reports/move887-inventory-public-probe.png`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -172,6 +179,39 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 887 removes duplicate auth-bootstrap reads from the protected route
+  startup path. `backend/src/routes/auth.ts` now reuses the already-validated
+  `req.user` payload from `authToken` when it matches the requested actor,
+  and `buildUserPayload(...)` can reuse joined role permissions plus joined
+  organization/group context instead of re-querying `users`, `roles`, and
+  organization context for the same request.
+- Docker image `business-os:v6.0.0-202606101610-move887` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `859f5717dd65a03b`.
+  Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-10-54-346Z.json`
+  measured Products 330 ms, Inventory 318 ms, POS 311 ms, and Branches 253 ms
+  with zero failed requests and zero page/console errors. Local
+  `/api/auth/bootstrap` timings were 138 ms, 98 ms, 95 ms, and 90 ms.
+- Public Cloudflare trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-11-14-272Z.json`
+  measured Products 3.036 s, Inventory 6.511 s, POS 4.057 s, and Branches
+  2.536 s with zero failed requests. Inventory logged one Chrome preload
+  warning for `/api/auth/bootstrap`; all API responses were HTTP 200.
+  A repeat trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-17-34-555Z.json`
+  completed all four routes at Products 9.239 s, Inventory 4.107 s, POS
+  2.786 s, and Branches 3.758 s with zero failed requests; Products logged
+  the same auth-bootstrap preload warning. A direct public Inventory probe
+  rendered real Inventory/Products/Movements data in about 14.9 s with no
+  console/page errors and screenshot
+  `ops/runtime/reports/move887-inventory-public-probe.png`.
+- Current plan position after Move 887: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: target
+  the auth-bootstrap preload policy and remaining Cloudflare/auth variance,
+  because the public traces now show the preload is sometimes unused/noisy.
 
 - Move 886 caches the combined `/api/products/bootstrap` response by the
   existing product read-cache key and catalog snapshot. `backend/src/routes/products.ts`

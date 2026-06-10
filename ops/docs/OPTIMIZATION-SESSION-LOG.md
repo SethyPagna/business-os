@@ -8,6 +8,34 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Reuse validated session user in auth bootstrap
+  - area: backend auth bootstrap performance, duplicate user/role/organization
+    reads
+  - result: kept
+  - note: auth bootstrap now uses the already-validated `req.user` payload from
+    `authToken` when it matches the requested actor, and `buildUserPayload`
+    reuses joined role permissions plus joined organization/group context
+    instead of re-querying those tables in the same request.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101610-move887` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `859f5717dd65a03b`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T08-10-54-346Z.json`
+    measured Products 330 ms, Inventory 318 ms, POS 311 ms, and Branches
+    253 ms with zero failures/errors. Local `/api/auth/bootstrap` timings were
+    138 ms, 98 ms, 95 ms, and 90 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T08-11-14-272Z.json`
+    measured Products 3.036 s, Inventory 6.511 s, POS 4.057 s, and Branches
+    2.536 s with zero failed requests, while
+    `ops/runtime/reports/route-load-trace-2026-06-10T08-17-34-555Z.json`
+    completed all four routes at Products 9.239 s, Inventory 4.107 s, POS
+    2.786 s, and Branches 3.758 s. The public traces exposed a recurring
+    `/api/auth/bootstrap` preload warning; direct Inventory probe rendered real
+    data with no console/page errors.
+  - next target: tune the authenticated admin auth-bootstrap preload policy
+    and remaining Cloudflare/auth variance.
+
 - Cache combined product bootstrap payload
   - area: backend product/POS bootstrap performance, branch-list startup reads,
     product read-cache reuse

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 886.
+- Latest completed implementation move in this roadmap: Move 887.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,44 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 887 current state:
+- Docker release `business-os:v6.0.0-202606101610-move887` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `859f5717dd65a03b`.
+- Auth bootstrap now reuses the session user payload already validated by
+  `authToken` when the requested actor id matches `req.user.id`. The payload
+  builder also reuses joined role permissions and joined organization/group
+  context instead of re-querying `users`, `roles`, and organization context in
+  the same request.
+- `backend/test/offlineSecurity.test.ts` now guards this contract so auth
+  bootstrap cannot silently reintroduce duplicate role/organization lookups
+  after the session middleware already joined that data.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-10-54-346Z.json`
+  measured Products 330 ms, Inventory 318 ms, POS 311 ms, and Branches 253 ms
+  with zero failed requests/errors. Local `/api/auth/bootstrap` timings were
+  138 ms, 98 ms, 95 ms, and 90 ms respectively.
+- Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-11-14-272Z.json`
+  measured Products 3.036 s, Inventory 6.511 s, POS 4.057 s, and Branches
+  2.536 s with zero failed requests; Inventory logged one Chrome warning that
+  the `/api/auth/bootstrap` preload was not consumed quickly enough. A warmed
+  repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-17-34-555Z.json`
+  completed all four routes at Products 9.239 s, Inventory 4.107 s, POS
+  2.786 s, and Branches 3.758 s with zero failed requests; Products logged the
+  same preload warning. A direct public Inventory probe rendered real data in
+  about 14.9 s with no console/page errors.
+- Verification passed: focused auth/offline security guard, backend route
+  contracts, backend server entry verification, full backend `test:utils`,
+  Docker release build/start/health with completed Cloudflare startup warmup,
+  local Playwright route-load trace, Cloudflare route-load traces, and direct
+  public Inventory probe.
+- Next executable slice: adjust or remove the authenticated admin
+  `/api/auth/bootstrap` preload policy if measured traces keep proving it is
+  unused/noisy, while preserving fast stored-session startup and avoiding fake
+  ready states.
 
 Move 886 current state:
 - Docker release `business-os:v6.0.0-202606101520-move886` is running healthy

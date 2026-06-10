@@ -4,25 +4,28 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 886 release `business-os:v6.0.0-202606101520-move886` is live with
-  frontend hash `72b9ecdfda6fdef1` and source hash `5717dc8b4355f02b`.
-- Product bootstrap now caches the combined branch-list plus cached product
-  search payload by product read-cache key and catalog snapshot. Branch-list
-  reads also have a short in-process memo for startup bursts.
+- Move 887 release `business-os:v6.0.0-202606101610-move887` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `859f5717dd65a03b`.
+- Auth bootstrap now reuses the already-validated session user payload,
+  joined role permissions, and joined organization/group context instead of
+  re-querying the same user/role/organization data during the bootstrap
+  response.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T07-33-44-286Z.json`:
-  Products 350 ms, Inventory 350 ms, POS 242 ms, Branches 245 ms, zero failed
-  requests/errors. Local `/api/products/bootstrap` on POS completed in 289 ms;
-  local `/api/auth/bootstrap` timings were 137 ms, 108 ms, 91 ms, and 88 ms.
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-10-54-346Z.json`:
+  Products 330 ms, Inventory 318 ms, POS 311 ms, Branches 253 ms, zero failed
+  requests/errors. Local `/api/auth/bootstrap` timings were 138 ms, 98 ms,
+  95 ms, and 90 ms.
 - Public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T07-35-08-729Z.json` had
-  zero failed requests/errors and measured Products 2.356 s, Inventory
-  2.480 s, POS 3.097 s, and Branches 3.889 s. This public pass was dominated
-  by `/api/auth/bootstrap` tunnel/auth latency; product bootstrap did not
-  appear before the route-ready marker.
-- Next target: continue reducing authenticated startup/auth-tunnel latency and
-  delayed product metadata reads while preserving correct, complete product
-  data.
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-11-14-272Z.json` had
+  zero failed requests and measured Products 3.036 s, Inventory 6.511 s, POS
+  4.057 s, and Branches 2.536 s; Inventory logged a Chrome preload warning for
+  `/api/auth/bootstrap`. Warmed repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-17-34-555Z.json`
+  completed all four routes at Products 9.239 s, Inventory 4.107 s, POS
+  2.786 s, and Branches 3.758 s with zero failed requests; Products logged the
+  same preload warning.
+- Next target: tune the authenticated admin auth-bootstrap preload policy and
+  remaining Cloudflare/auth variance while preserving real data readiness.
 
 ## 1. Scope
 

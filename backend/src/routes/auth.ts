@@ -238,31 +238,51 @@ function getOtpTargetUser(userId) {
   `).get(userId)
 }
 
+function getJoinedOrganizationContext(user) {
+  if (!user || !Object.prototype.hasOwnProperty.call(user, 'organization_name')) return null
+  return {
+    organization_id: user.organization_id || null,
+    organization_name: user.organization_name || null,
+    organization_slug: user.organization_slug || null,
+    organization_public_id: user.organization_public_id || null,
+    organization_group_id: user.organization_group_id || null,
+    organization_group_name: user.organization_group_name || null,
+    organization_group_slug: user.organization_group_slug || null,
+  }
+}
+
 /**
  * 1.7 Build API-safe user payload:
  * - strips password and otp_secret
  * - merges role permissions + user overrides
  */
-function buildUserPayload(user) {
+function buildUserPayload(user, options = {}) {
   const {
     password: _pw,
     phone_lookup: _phoneLookup,
     otp_secret: _sec,
     otp_pending_secret: _pendingSec,
     otp_pending_created_at: _pendingCreatedAt,
+    role_permissions: sourceRolePermissions,
+    role_code: _sourceRoleCode,
+    role_is_system: _sourceRoleIsSystem,
     ...safeUser
   } = user
   const userPerms = tryParse(safeUser.permissions, {})
   let mergedPerms = { ...userPerms }
   if (safeUser.role_id) {
-    const role = db.prepare('SELECT name, permissions FROM roles WHERE id = ?').get(safeUser.role_id)
+    const role = sourceRolePermissions || safeUser.role_name
+      ? { name: safeUser.role_name, permissions: sourceRolePermissions }
+      : db.prepare('SELECT name, permissions FROM roles WHERE id = ?').get(safeUser.role_id)
     if (role) {
       const rolePerms = tryParse(role.permissions, {})
       mergedPerms = { ...rolePerms, ...userPerms }
       safeUser.role_name = role.name
     }
   }
-  const organizationContext = getOrganizationContextForUser(safeUser.id)
+  const organizationContext = options.organizationContext
+    || getJoinedOrganizationContext(safeUser)
+    || getOrganizationContextForUser(safeUser.id)
   return {
     ...safeUser,
     ...(organizationContext || {}),
@@ -458,11 +478,13 @@ function getBootstrapSystemSnapshot(req, organizationPublicId = '') {
 }
 
 async function buildAuthenticatedBootstrap(req, userId) {
-  const actor = getUserById(userId)
+  const actor = Number(req?.user?.id || 0) === Number(userId || 0)
+    ? req.user
+    : getUserById(userId)
   if (!actor) return null
 
-  const user = buildUserPayload(actor)
-  const organizationContext = getOrganizationContextForUser(actor.id)
+  const organizationContext = getJoinedOrganizationContext(actor) || getOrganizationContextForUser(actor.id)
+  const user = buildUserPayload(actor, { organizationContext })
   const organization = organizationContext?.organization_id ? {
     id: organizationContext.organization_id,
     name: organizationContext.organization_name,

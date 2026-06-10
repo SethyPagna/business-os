@@ -63,6 +63,14 @@ runTest('auth bootstrap caches sanitized settings until settings version changes
   assert.match(authSource, /const snapshot = await sanitizeSettingsSnapshotAsync\(settings\)/)
 })
 
+runTest('auth bootstrap reuses the validated session payload for user role and organization context', () => {
+  assert.match(authSource, /function getJoinedOrganizationContext\(user\)/)
+  assert.match(authSource, /role_permissions: sourceRolePermissions/)
+  assert.match(authSource, /sourceRolePermissions \|\| safeUser\.role_name/)
+  assert.match(authSource, /Number\(req\?\.user\?\.id \|\| 0\) === Number\(userId \|\| 0\)/)
+  assert.match(authSource, /buildUserPayload\(actor, \{ organizationContext \}\)/)
+})
+
 runTest('generic sync outbox endpoint is mounted and only accepts allowlisted operation ids', () => {
   assert.match(serverSource, /target\.use\('\/api\/sync', require\('\.\/src\/routes\/sync\.ts'\)\)/)
   assert.match(syncSource, /const OUTBOX_OPERATION_MAP =/)
