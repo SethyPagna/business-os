@@ -174,7 +174,6 @@ const routePreloadChunkNames = {
     'app-api',
     'shared-lazy-portal-menu',
     'shared-ui',
-    'lang-en',
   ],
   pos: [
     'POS',
@@ -186,7 +185,6 @@ const routePreloadChunkNames = {
     'app-api',
     'shared-lazy-portal-menu',
     'shared-ui',
-    'lang-en',
   ],
   inventory: [
     'Inventory',
@@ -200,7 +198,6 @@ const routePreloadChunkNames = {
     'app-api',
     'shared-lazy-portal-menu',
     'shared-ui',
-    'lang-en',
   ],
   branches: [
     'Branches',
@@ -214,7 +211,6 @@ const routePreloadChunkNames = {
     'api-local-cache',
     'shared-lazy-portal-menu',
     'shared-ui',
-    'lang-en',
   ],
 } satisfies Record<string, readonly string[]>
 

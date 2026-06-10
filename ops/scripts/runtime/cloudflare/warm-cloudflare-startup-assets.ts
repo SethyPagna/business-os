@@ -17,7 +17,7 @@ const DEFAULT_ASSET_GRAPH_DEPTH = 1
 const TIMESTAMP = new Date().toISOString().replace(/[:.]/g, '-')
 const DEFAULT_OUTPUT = `ops/runtime/reports/cloudflare-startup-warmup-${TIMESTAMP}.json`
 const LATEST_OUTPUT = 'ops/runtime/reports/cloudflare-startup-warmup-latest.json'
-const ADMIN_FIRST_WINDOW_DEPENDENCY_RE = /\/assets\/(?:AdminRoot|Sidebar|app-(?:api|auth|bootstrap|local-db|routing|shared|shell)|api-http-(?:core|state)|catalog-(?:icons|public|public-core)|dashboard-(?:api|charts)|product-(?:read-api|shared)|productDisplayHelpers|inventory-api|branch-api|audit-log-api|file-api|ai-api|multipart-headers-api|user-(?:admin-api|read-api|permission-definitions)|refresh-cw|monitor-smartphone|vendor-dexie|csv-utils|route-sync-utils|settings-refresh|shared-(?:action-history|formatters|lazy-portal-menu|modal|page-header|portal-menu|ui)|lang-en)-/i
+const ADMIN_FIRST_WINDOW_DEPENDENCY_RE = /\/assets\/(?:AdminRoot|Sidebar|app-(?:api|auth|bootstrap|local-db|routing|shared|shell)|api-http-(?:core|state)|catalog-(?:icons|public|public-core)|dashboard-(?:api|charts)|product-(?:read-api|shared)|productDisplayHelpers|inventory-api|branch-api|audit-log-api|file-api|ai-api|multipart-headers-api|user-(?:admin-api|read-api|permission-definitions)|refresh-cw|monitor-smartphone|vendor-dexie|csv-utils|route-sync-utils|settings-refresh|shared-(?:action-history|formatters|lazy-portal-menu|modal|page-header|portal-menu|ui))-/i
 
 function assertInsideWorkspace(target) {
   const relative = path.relative(ROOT_DIR, target)

@@ -247,15 +247,25 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   audit_log: 'Audit Log',
   backup: 'Backup',
   branch: 'Branch',
+  branches: 'Branch',
+  cart: 'Cart',
+  cart_empty: 'Cart is empty',
   cancel: 'Cancel',
   categories: 'Categories',
   close: 'Close',
   completed: 'Completed',
   contacts: 'Contacts',
+  cogs: 'COGS',
+  cogs_header: 'COGS',
+  cost: 'Cost',
+  cost_in_purchase: 'Cost In (Purchase)',
+  current_stock: 'Current Stock',
   custom: 'Custom',
   customer_portal: 'Customer Portal',
   dashboard: 'Dashboard',
   delete: 'Delete',
+  details: 'Details',
+  done: 'Done',
   edit: 'Edit',
   error: 'Error',
   export: 'Export',
@@ -273,24 +283,41 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   movements: 'Movements',
   next: 'Next',
   no_recent_actions: 'No recent actions',
+  net_sold: 'Net Sold',
+  net_sold_header: 'Net Sold',
   offline_mode: 'Offline mode',
   offline_mode_active: 'Offline mode: sales are saved on this device and will sync when the server reconnects.',
   offline_mode_ready_sync: 'Server is back online. Offline actions can sync now.',
   page: 'Page',
   pending: 'pending',
   point_of_sale: 'Point of Sale',
+  pos_delivery: 'Delivery',
   previous: 'Previous',
+  product: 'Product',
+  product_name: 'Product Name',
   products: 'Products',
+  profit: 'Profit',
+  profit_header: 'Profit',
+  quantity: 'Quantity',
   receipt_settings: 'Receipt Settings',
   redo: 'Redo',
   returns: 'Returns',
+  revenue: 'Revenue',
+  revenue_header: 'Revenue',
   sales: 'Sales',
   save: 'Save',
   search: 'Search',
+  select_all: 'Select all',
+  selling_price_label: 'Selling Price',
   server_back_online: 'Server is back online. You can keep working.',
   server_reconnecting: 'Server reconnecting',
   server_tunnel_reconnecting: 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.',
   settings: 'Settings',
+  stock: 'Stock',
+  stock_status: 'Stock',
+  stock_val: 'Stock Val',
+  stock_value: 'Stock Value',
+  status: 'Status',
   status_active: 'Active',
   status_ready: 'Ready',
   sync_now: 'Sync now',
@@ -303,6 +330,8 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   waiting_for_server: 'Waiting for server',
 }
 const CORE_LANGUAGE_CODES = new Set(['en'])
+const CORE_LANGUAGE_PACK_DEFER_MS = 9000
+const CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS = 20000
 
 const LANG_LOADERS: Record<string, () => Promise<TranslationPack>> = {
   en: async () => {
@@ -1289,19 +1318,19 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const runWhenIdle = () => {
         if (cancelled) return
         if (typeof window.requestIdleCallback === 'function') {
-          idleId = window.requestIdleCallback(loadLanguagePack, { timeout: 7000 })
+          idleId = window.requestIdleCallback(loadLanguagePack, { timeout: CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS })
           return
         }
-        timerId = window.setTimeout(loadLanguagePack, 1200)
+        loadLanguagePack()
       }
 
       if (document.readyState === 'complete') {
-        timerId = window.setTimeout(runWhenIdle, 900)
+        timerId = window.setTimeout(runWhenIdle, CORE_LANGUAGE_PACK_DEFER_MS)
         return
       }
 
       loadListener = () => {
-        timerId = window.setTimeout(runWhenIdle, 900)
+        timerId = window.setTimeout(runWhenIdle, CORE_LANGUAGE_PACK_DEFER_MS)
       }
       window.addEventListener('load', loadListener, { once: true })
     }

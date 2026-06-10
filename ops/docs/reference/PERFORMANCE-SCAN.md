@@ -4,29 +4,30 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 878 release `business-os:v6.0.0-202606101015-move878` is live with
-  frontend hash `f2bad1063e780904` and source hash `656d14b6f1a93983`.
-- Built HTML now includes route-specific direct-visit preload maps for Products,
-  POS, Inventory, and Branches; Cloudflare startup warmup parses that inline
-  map. Backend SPA `Link` headers now match measured first-window route chunks
-  instead of advertising stale catalog/public, login, Dexie, or CSV chunks on
-  unrelated admin routes. The server-side `app-api` chunk resolver now avoids
-  the `app-api-methods-*` collision.
+- Move 881 release `business-os:v6.0.0-202606101036-move881` is live with
+  frontend hash `03f42ffd0c8ed880` and source hash `74234e58f3024aaa`.
+- Full language packs are no longer admin first-window dependencies. The
+  compact `AppContext` English core pack now covers critical route labels, and
+  the full `lang-en`/`lang-km` chunks load only after the page has had a chance
+  to become usable. Vite route-aware modulepreloads, backend SPA `Link`
+  headers, generated `backend/server.js`, and Cloudflare startup warmup all
+  share the same policy.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-25-423Z.json`:
-  Products 253 ms, Inventory 305 ms, POS 334 ms, Branches 260 ms, zero failed
-  requests/errors.
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-01-788Z.json`:
+  Products 206 ms, Inventory 240 ms, POS 267 ms, Branches 239 ms, zero failed
+  requests/errors, zero language-pack startup requests, and no raw critical
+  translation keys.
 - Public Cloudflare route-load traces:
-  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-42-448Z.json`
-  measured Products 2.283 s, Inventory 3.369 s, POS 2.681 s, Branches 3.092 s;
-  repeat `ops/runtime/reports/route-load-trace-2026-06-10T01-18-58-363Z.json`
-  measured Products 5.188 s, Inventory 5.027 s, POS 2.877 s, Branches 3.178 s.
-  Both traces had zero failed requests/errors. The repeat regression is
-  dominated by Cloudflare/tunnel transfer variance and non-current-route code
-  warmups, not app-owned HTTP failures or fake loader delay.
-- Next target: split or defer background lazy chunk warmups that still fetch
-  login/catalog/shared modal/header chunks shortly after route startup on
-  remote links, while keeping warm navigation fast inside the same session.
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-23-396Z.json`
+  measured Products 7.699 s, Inventory 6.624 s, POS 4.434 s, Branches 6.108 s;
+  repeat `ops/runtime/reports/route-load-trace-2026-06-10T02-41-08-933Z.json`
+  measured Products 4.609 s, Inventory 5.502 s, POS 2.823 s, Branches 4.190 s.
+  Both traces had zero failed requests/errors and zero `lang-en`/`lang-km`
+  startup requests. The remaining remote regression is dominated by
+  Cloudflare/tunnel transfer plus `/api/auth/bootstrap` variance, not full
+  language-pack preload or synthetic loader delay.
+- Next target: reduce Cloudflare/tunnel and authenticated bootstrap variance
+  while preserving correct, complete data and the no-fake-loader policy.
 
 ## 1. Scope
 

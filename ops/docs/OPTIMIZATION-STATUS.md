@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 880, stabilize admin startup chunk graph without
-  reintroducing login/catalog startup payloads.
+- Latest completed move: Move 881, defer full language packs out of admin
+  first-window route startup while keeping critical English labels available.
 
 ## Current Baseline
 
@@ -17,9 +17,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `b7bc8cf415985ebf`
+  `03f42ffd0c8ed880`
 - latest verified source hash from the most recent Docker-served live check:
-  `54446f49482700a5`
+  `74234e58f3024aaa`
 
 Latest verified reports:
 
@@ -127,6 +127,11 @@ Latest verified reports:
 - latest Move 880 Cloudflare affected-route traces:
   `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-306Z.json`
   and `ops/runtime/reports/route-load-trace-2026-06-10T02-13-36-332Z.json`
+- latest Move 881 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-01-788Z.json`
+- latest Move 881 Cloudflare affected-route traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-23-396Z.json`
+  and `ops/runtime/reports/route-load-trace-2026-06-10T02-41-08-933Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -149,6 +154,37 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 881 removes the full English/Khmer language bundles from admin
+  first-window route startup. `AppContext` now carries a broader critical
+  English core label pack for Products, POS, Inventory, Branches, and dashboard
+  stats, then defers the full current-language pack until after load/idle.
+  Vite route-aware modulepreloads, backend SPA `Link` headers, and the
+  Cloudflare startup warmup allowlist now agree that `lang-en` is a deferred
+  enhancement, not a route-open dependency.
+- Docker image `business-os:v6.0.0-202606101036-move881` is live with frontend
+  hash `03f42ffd0c8ed880` and source hash `74234e58f3024aaa`. Local Playwright
+  route trace `ops/runtime/reports/route-load-trace-2026-06-10T02-40-01-788Z.json`
+  measured Products 206 ms, Inventory 240 ms, POS 267 ms, and Branches 239 ms
+  with zero failed requests, zero page/console errors, zero `lang-en`/`lang-km`
+  startup requests, and no raw critical translation keys in the body sample.
+- Public Cloudflare was measured twice after the release. First pass
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-23-396Z.json`
+  measured Products 7.699 s, Inventory 6.624 s, POS 4.434 s, and Branches
+  6.108 s with zero failures/errors and zero language-pack startup requests.
+  Warmed repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-41-08-933Z.json`
+  measured Products 4.609 s, Inventory 5.502 s, POS 2.823 s, and Branches
+  4.190 s with zero failures/errors and zero language-pack startup requests.
+  The remaining remote bottleneck is Cloudflare/tunnel transfer plus
+  `/api/auth/bootstrap` variance, not full language-pack preload or fake
+  loader delay.
+- Current plan position after Move 881: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: reduce
+  Cloudflare/tunnel and auth-bootstrap variance without delaying real data or
+  hiding incomplete loads behind spinners.
 
 - Move 880 fixes the Vite circular chunk warning left by Move 879 without
   moving login, public catalog, or heavy route chunks back into authenticated

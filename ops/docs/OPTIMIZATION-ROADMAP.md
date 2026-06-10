@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 880.
+- Latest completed implementation move in this roadmap: Move 881.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,34 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 881 current state:
+- Docker release `business-os:v6.0.0-202606101036-move881` is running healthy
+  with frontend hash `03f42ffd0c8ed880` and source hash
+  `74234e58f3024aaa`.
+- Admin direct-route startup no longer preloads the full `lang-en` bundle.
+  `frontend/src/AppContext.tsx` keeps the critical English labels needed for
+  first-window Products, POS, Inventory, Branches, and stats surfaces in the
+  compact core pack, then defers the full language pack until after load/idle.
+  `frontend/vite.config.ts`, `backend/server.ts`, generated `backend/server.js`,
+  and `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts` now
+  agree that language packs are not first-window route dependencies.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-01-788Z.json`
+  measured Products 206 ms, Inventory 240 ms, POS 267 ms, and Branches 239 ms
+  with zero failed requests/errors, zero `lang-en`/`lang-km` startup requests,
+  and no raw critical translation keys.
+- Cloudflare traces
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-23-396Z.json` and
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-41-08-933Z.json` also
+  show zero language-pack startup requests and zero failures/errors. The warmed
+  repeat measured Products 4.609 s, Inventory 5.502 s, POS 2.823 s, and
+  Branches 4.190 s, so the next real bottleneck remains remote tunnel/auth
+  variance rather than language-pack preload.
+- Verification passed: backend server-entry generation, frontend typecheck,
+  JSX/source syntax check, frontend performance guard, focused backend route
+  contracts and server-utils tests, production frontend build, Docker release
+  build/start/health, local Playwright trace, and Cloudflare Playwright traces.
 
 Move 880 current state:
 - Docker release `business-os:v6.0.0-202606101009-move880` is running healthy

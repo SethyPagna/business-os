@@ -8,6 +8,35 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Defer full language packs from admin route startup
+  - area: frontend startup performance, route preloads, backend SPA headers,
+    Cloudflare warmup
+  - result: kept
+  - note: `AppContext` now includes the critical first-window English labels
+    used by Products, POS, Inventory, Branches, and stat surfaces, then defers
+    the full language JSON chunk until after load/idle. Vite direct-route
+    preload maps, backend SPA `Link` headers, the generated `server.js`, and
+    the Cloudflare startup warmup allowlist no longer treat `lang-en` as a
+    first-window dependency.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101036-move881` is running with frontend hash
+    `03f42ffd0c8ed880` and source hash `74234e58f3024aaa`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T02-40-01-788Z.json`
+    measured Products 206 ms, Inventory 240 ms, POS 267 ms, and Branches
+    239 ms with zero failures/errors, zero language-pack startup requests, and
+    no raw critical translation keys in the sampled page text.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T02-40-23-396Z.json`
+    measured Products 7.699 s, Inventory 6.624 s, POS 4.434 s, and Branches
+    6.108 s; warmed repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T02-41-08-933Z.json`
+    measured Products 4.609 s, Inventory 5.502 s, POS 2.823 s, and Branches
+    4.190 s. Both had zero failures/errors and zero `lang-en`/`lang-km`
+    startup requests.
+  - next target: reduce Cloudflare/tunnel and `/api/auth/bootstrap` variance
+    without adding artificial loading delays or hiding incomplete data.
+
 - Stabilize admin startup chunk graph
   - area: frontend startup performance, Vite manual chunking, Docker/Cloudflare
     verification
