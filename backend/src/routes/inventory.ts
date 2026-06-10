@@ -25,7 +25,7 @@ const {
 } = require('../productBatches.ts')
 
 const router = express.Router()
-const INVENTORY_PRODUCT_SNAPSHOT_VERSION_MEMO_MS = 1000
+const INVENTORY_PRODUCT_SNAPSHOT_VERSION_MEMO_MS = 5000
 let inventoryProductSnapshotVersionMemo = { value: '', builtAt: 0 }
 
 function asyncRoute(handler) {
@@ -329,96 +329,7 @@ function getCachedInventoryProductSearchPayload(query = {}) {
   return getOrSetJson(buildInventoryProductReadCacheKey('products', query), 12, () => buildInventoryProductSearchPayload(query))
 }
 
-function buildInventoryProductSearchPayload(query = {}) {
-  const page = normalizePositiveInt(query.page, 1, { min: 1, max: 100000 })
-  const pageSize = normalizePositiveInt(query.pageSize || query.page_size, 20, { min: 1, max: 100 })
-  const offset = (page - 1) * pageSize
-  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query)
-  const joinSql = joins.join('\n')
-  const whereSql = `WHERE ${where.join(' AND ')}`
-  const branchScoped = Number.isFinite(Number(params.branchId))
-  const financialJoinSql = buildInventoryFinancialJoinSql({ branchScoped })
-  const financialSelectSql = inventoryFinancialSelectSql()
-  const total = db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM products p
-    ${joinSql}
-    ${whereSql}
-  `).get(params)?.count || 0
-  const baseRows = db.prepare(`
-    SELECT p.*,
-      ${stockExpr} AS display_quantity,
-      COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
-      COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
-      ${financialSelectSql},
-      (
-        SELECT COALESCE(
-          json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
-            FILTER (WHERE bs2.branch_id IS NOT NULL),
-          '[]'::json
-        )::text
-        FROM branch_stock bs2
-        JOIN branches b2 ON b2.id = bs2.branch_id
-        WHERE bs2.product_id = p.id
-      ) AS branch_stock_json
-    FROM products p
-    ${joinSql}
-    ${financialJoinSql}
-    ${whereSql}
-    ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
-    LIMIT @pageSize OFFSET @offset
-  `).all({ ...params, pageSize, offset })
-  const familyRootIdSet = new Set()
-  for (const product of baseRows) {
-    const productId = Number(product?.id || 0)
-    const parentId = Number(product?.parent_id || 0)
-    if (parentId > 0) {
-      familyRootIdSet.add(parentId)
-    } else if (Number(product?.is_group || 0) && productId > 0) {
-      familyRootIdSet.add(productId)
-    }
-  }
-  const familyRootIds = collectSetValues(familyRootIdSet)
-  let rows = baseRows
-  if (familyRootIds.length) {
-    const familyIdSql = familyRootIds.join(',')
-    const familyRows = db.prepare(`
-      SELECT p.*,
-        ${stockExpr} AS display_quantity,
-        COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
-        COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
-        ${financialSelectSql},
-        (
-          SELECT COALESCE(
-            json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
-              FILTER (WHERE bs2.branch_id IS NOT NULL),
-            '[]'::json
-          )::text
-          FROM branch_stock bs2
-          JOIN branches b2 ON b2.id = bs2.branch_id
-          WHERE bs2.product_id = p.id
-        ) AS branch_stock_json
-      FROM products p
-      ${joinSql}
-      ${financialJoinSql}
-      WHERE p.is_active = 1
-        AND (p.id IN (${familyIdSql}) OR COALESCE(p.parent_id, 0) IN (${familyIdSql}))
-      ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
-    `).all(params)
-    const merged = new Map()
-    for (const product of familyRows) {
-      merged.set(Number(product.id), product)
-    }
-    for (const product of baseRows) {
-      merged.set(Number(product.id), product)
-    }
-    rows = collectSortedInventoryProductRows(merged)
-  }
-  const hydratedRows = hydrateInventoryProducts(rows, params.branchId)
-  rows = []
-  for (const row of hydratedRows) {
-    rows.push(sanitizeInventoryResponseProduct(row))
-  }
+function getInventoryProductMetadata(query = {}) {
   const metadataQuery = { ...query, initial: 'all' }
   const metaFilters = appendInventoryProductFilters(metadataQuery)
   const metaJoinSql = metaFilters.joins.join('\n')
@@ -444,14 +355,113 @@ function buildInventoryProductSearchPayload(query = {}) {
       AND COALESCE(trim(p.name), '') != ''
     GROUP BY value
   `).all(metaFilters.params))
+  return { filters: { brands }, initials }
+}
+
+function buildInventoryProductSearchPayload(query = {}) {
+  const page = normalizePositiveInt(query.page, 1, { min: 1, max: 100000 })
+  const pageSize = normalizePositiveInt(query.pageSize || query.page_size, 20, { min: 1, max: 100 })
+  const offset = (page - 1) * pageSize
+  const includeMetadata = String(query.metadata ?? query.includeMetadata ?? '1') !== '0'
+  const metadataOnly = ['1', 'true', 'yes'].includes(String(query.metadataOnly ?? query.metadata_only ?? '').trim().toLowerCase())
+  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query)
+  const joinSql = joins.join('\n')
+  const whereSql = `WHERE ${where.join(' AND ')}`
+  const branchScoped = Number.isFinite(Number(params.branchId))
+  const financialJoinSql = buildInventoryFinancialJoinSql({ branchScoped })
+  const financialSelectSql = inventoryFinancialSelectSql()
+  const total = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM products p
+    ${joinSql}
+    ${whereSql}
+  `).get(params)?.count || 0
+  let rows = []
+  if (!metadataOnly) {
+    const baseRows = db.prepare(`
+      SELECT p.*,
+        ${stockExpr} AS display_quantity,
+        COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
+        COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+        ${financialSelectSql},
+        (
+          SELECT COALESCE(
+            json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+              FILTER (WHERE bs2.branch_id IS NOT NULL),
+            '[]'::json
+          )::text
+          FROM branch_stock bs2
+          JOIN branches b2 ON b2.id = bs2.branch_id
+          WHERE bs2.product_id = p.id
+        ) AS branch_stock_json
+      FROM products p
+      ${joinSql}
+      ${financialJoinSql}
+      ${whereSql}
+      ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+      LIMIT @pageSize OFFSET @offset
+    `).all({ ...params, pageSize, offset })
+    const familyRootIdSet = new Set()
+    for (const product of baseRows) {
+      const productId = Number(product?.id || 0)
+      const parentId = Number(product?.parent_id || 0)
+      if (parentId > 0) {
+        familyRootIdSet.add(parentId)
+      } else if (Number(product?.is_group || 0) && productId > 0) {
+        familyRootIdSet.add(productId)
+      }
+    }
+    const familyRootIds = collectSetValues(familyRootIdSet)
+    rows = baseRows
+    if (familyRootIds.length) {
+      const familyIdSql = familyRootIds.join(',')
+      const familyRows = db.prepare(`
+        SELECT p.*,
+          ${stockExpr} AS display_quantity,
+          COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0), 0) AS stock_value_usd,
+          COALESCE(${stockExpr} * COALESCE(NULLIF(p.purchase_price_khr, 0), p.cost_price_khr, 0), 0) AS stock_value_khr,
+          ${financialSelectSql},
+          (
+            SELECT COALESCE(
+              json_agg(json_build_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+                FILTER (WHERE bs2.branch_id IS NOT NULL),
+              '[]'::json
+            )::text
+            FROM branch_stock bs2
+            JOIN branches b2 ON b2.id = bs2.branch_id
+            WHERE bs2.product_id = p.id
+          ) AS branch_stock_json
+        FROM products p
+        ${joinSql}
+        ${financialJoinSql}
+        WHERE p.is_active = 1
+          AND (p.id IN (${familyIdSql}) OR COALESCE(p.parent_id, 0) IN (${familyIdSql}))
+        ORDER BY p.name COLLATE NOCASE ASC, p.id ASC
+      `).all(params)
+      const merged = new Map()
+      for (const product of familyRows) {
+        merged.set(Number(product.id), product)
+      }
+      for (const product of baseRows) {
+        merged.set(Number(product.id), product)
+      }
+      rows = collectSortedInventoryProductRows(merged)
+    }
+    const hydratedRows = hydrateInventoryProducts(rows, params.branchId)
+    rows = []
+    for (const row of hydratedRows) {
+      rows.push(sanitizeInventoryResponseProduct(row))
+    }
+  }
+  const metadata = includeMetadata ? getInventoryProductMetadata(query) : { filters: { brands: [] }, initials: [] }
   return {
     items: rows,
     total,
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
-    filters: { brands, initials },
-    initials,
+    filters: metadata.filters,
+    initials: metadata.initials,
   }
 }
 

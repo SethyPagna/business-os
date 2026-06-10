@@ -4,22 +4,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 875 release `business-os:v6.0.0-202606101915-move875` is live with
-  frontend hash `c3007a11e6a306b3`.
-- Backend startup optimization added Postgres indexes for Product/POS catalog
-  route hot paths: Product `created_desc`, POS `name_asc`, and cold
-  brand/category/supplier filter metadata scans. The product catalog
-  snapshot-version memo window also increased from 1 second to 5 seconds with
-  write invalidation preserved.
+- Move 876 release `business-os:v6.0.0-202606100815-move876` is live with
+  frontend hash `10b61c8879b34f05`.
+- POS now lazy-loads product/lookup/contact read transports and defers
+  secondary option fetches until after the product list is usable. Inventory
+  first-page product bootstrap now sends `metadata=0`; backend inventory reads
+  support `metadata=0` and `metadataOnly=1`, so brand/initial metadata refreshes
+  after first paint instead of blocking the visible rows.
 - Final local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-09T23-51-12-489Z.json`:
-  Products 363 ms, Inventory 391 ms, POS 387 ms, Branches 382 ms, zero failed
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-12-13-091Z.json`:
+  Products 296 ms, Inventory 333 ms, POS 303 ms, Branches 262 ms, zero failed
   requests/errors.
-- Final public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-09T23-54-13-632Z.json`:
-  Products 2.099 s, Inventory 2.990 s, POS 2.750 s, Branches 2.150 s, zero
-  failed requests/errors. Products is now under the 2.5 s target on the clean
-  public pass; POS and Inventory remain the next startup optimization targets.
+- Warmed public Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-13-39-711Z.json`:
+  Products 4.258 s, Inventory 2.512 s, POS 2.294 s, Branches 3.792 s, zero
+  failed requests/errors. POS is now under the 2.5 s target. Inventory is just
+  above target on this pass; Products/Branches are now dominated by shared
+  language/auth/app chunks and Cloudflare static delivery variance.
 
 ## 1. Scope
 

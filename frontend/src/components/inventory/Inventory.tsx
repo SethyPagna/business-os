@@ -31,6 +31,7 @@ const InventoryReasonManagerModal = lazy(() => import('./InventoryReasonManagerM
 const InventoryStatDetailModal = lazy(() => import('./InventoryStatDetailModal')) as any
 
 const INVENTORY_HISTORY_READY_DELAY_MS = 250
+const INVENTORY_PRODUCT_METADATA_READY_DELAY_MS = 1200
 
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -558,6 +559,7 @@ export default function Inventory() {
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef<number | null>(null)
+  const inventoryMetadataTimerRef = useRef<number | null>(null)
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const pendingLoadRef = useRef<{ silent: boolean; options?: LoadOptions } | null>(null)
   const latestLoadRef = useRef<((silent?: boolean, options?: LoadOptions) => Promise<void>) | null>(null)
@@ -732,6 +734,7 @@ export default function Inventory() {
         stockState: stockFilter,
         groupState: groupFilter,
         initial: inventoryInitialFilter,
+        metadata: '0',
       }
       const statsQuery = {
         branchId: branchOpts.branchId,
@@ -891,6 +894,33 @@ export default function Inventory() {
         loadedOnceRef.current = true
         setLoadError(null)
 
+        if (needsProductSummary && typeof window !== 'undefined') {
+          if (inventoryMetadataTimerRef.current !== null) {
+            window.clearTimeout(inventoryMetadataTimerRef.current)
+          }
+          const metadataQuery = {
+            ...productQuery,
+            page: 1,
+            pageSize: 1,
+            metadata: '1',
+            metadataOnly: '1',
+          }
+          inventoryMetadataTimerRef.current = window.setTimeout(() => {
+            inventoryMetadataTimerRef.current = null
+            getInventoryApi().searchInventoryProducts(metadataQuery)
+              .then((metadataResult: any) => {
+                if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+                if (Array.isArray(metadataResult?.initials)) {
+                  setInventoryInitials(metadataResult.initials)
+                }
+                if (metadataResult?.filters && typeof metadataResult.filters === 'object') {
+                  setInventoryProductFilters(metadataResult.filters)
+                }
+              })
+              .catch(() => {})
+          }, INVENTORY_PRODUCT_METADATA_READY_DELAY_MS)
+        }
+
         if (needsStatsData) {
           void settleLoaderMap({
             returns: () => withLoaderTimeout(
@@ -999,11 +1029,12 @@ export default function Inventory() {
   }, [load])
 
   useEffect(() => {
-    if (!isActive) {
-      setHistoryReady(false)
-      if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
-      invalidateTrackedRequest(loadRequestRef)
-      loadPromiseRef.current = null
+      if (!isActive) {
+        setHistoryReady(false)
+        if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
+        if (inventoryMetadataTimerRef.current !== null) window.clearTimeout(inventoryMetadataTimerRef.current)
+        invalidateTrackedRequest(loadRequestRef)
+        loadPromiseRef.current = null
       pendingLoadRef.current = null
       setLoading(false)
       return
@@ -1087,6 +1118,7 @@ export default function Inventory() {
   }, [ensureInventoryUsersLoaded, inventorySection, isActive, isAdmin, tab])
   useEffect(() => () => {
     if (loadWatchdogRef.current !== null) window.clearTimeout(loadWatchdogRef.current)
+    if (inventoryMetadataTimerRef.current !== null) window.clearTimeout(inventoryMetadataTimerRef.current)
     invalidateTrackedRequest(loadRequestRef)
     loadPromiseRef.current = null
   }, [])

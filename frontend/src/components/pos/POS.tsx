@@ -48,12 +48,6 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
-import {
-  getProductBootstrap as getPosProductBootstrap,
-  getProductFilters as getPosProductFilters,
-  searchProducts as searchPosProducts,
-} from '../../api/productReadTransport.ts'
-import { getCategories as getPosCategories } from '../../api/lookupTransport.ts'
 import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -79,9 +73,9 @@ const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
 const POS_CHECKOUT_TIMEOUT_MS = 20000
-const POS_CONTACT_OPTIONS_READY_DELAY_MS = 250
-const POS_FILTER_META_READY_DELAY_MS = 250
-const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 250
+const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1500
+const POS_FILTER_META_READY_DELAY_MS = 1500
+const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 1500
 
 import type { ContactOption } from '../contacts/contactOptionUtils'
 
@@ -350,26 +344,22 @@ function normalizeCategory(category: unknown): CategoryRecord | null {
   }
 }
 
-function loadPosProductBootstrap(query: QueryParams): Promise<ProductBootstrapPayload> {
-  return getPosProductBootstrap(query) as Promise<ProductBootstrapPayload>
-}
-
-function searchPosCatalogProducts(query: QueryParams): Promise<ProductPayload | ProductRecord[]> {
-  return searchPosProducts(query) as Promise<ProductPayload | ProductRecord[]>
-}
-
-function loadPosProductFilters(query: QueryParams = {}): Promise<Partial<ProductFilterMeta>> {
-  return getPosProductFilters(query) as Promise<Partial<ProductFilterMeta>>
-}
-
-function loadPosCategories(): Promise<unknown[]> {
-  return getPosCategories() as Promise<unknown[]>
-}
-
+let productReadTransportPromise: Promise<typeof import('../../api/productReadTransport.ts')> | null = null
+let lookupTransportPromise: Promise<typeof import('../../api/lookupTransport.ts')> | null = null
 let contactReadTransportPromise: Promise<typeof import('../../api/contactReadTransport.ts')> | null = null
 let contactWriteTransportPromise: Promise<typeof import('../../api/contactWriteTransport.ts')> | null = null
 let portalTransportPromise: Promise<typeof import('../../api/portalTransport.ts')> | null = null
 let saleWriteTransportPromise: Promise<typeof import('../../api/saleWriteTransport.ts')> | null = null
+
+function getProductReadTransport(): Promise<typeof import('../../api/productReadTransport.ts')> {
+  if (!productReadTransportPromise) productReadTransportPromise = import('../../api/productReadTransport.ts')
+  return productReadTransportPromise
+}
+
+function getLookupTransport(): Promise<typeof import('../../api/lookupTransport.ts')> {
+  if (!lookupTransportPromise) lookupTransportPromise = import('../../api/lookupTransport.ts')
+  return lookupTransportPromise
+}
 
 function getContactReadTransport(): Promise<typeof import('../../api/contactReadTransport.ts')> {
   if (!contactReadTransportPromise) contactReadTransportPromise = import('../../api/contactReadTransport.ts')
@@ -389,6 +379,26 @@ function getPortalTransport(): Promise<typeof import('../../api/portalTransport.
 function getSaleWriteTransport(): Promise<typeof import('../../api/saleWriteTransport.ts')> {
   if (!saleWriteTransportPromise) saleWriteTransportPromise = import('../../api/saleWriteTransport.ts')
   return saleWriteTransportPromise
+}
+
+async function loadPosProductBootstrap(query: QueryParams): Promise<ProductBootstrapPayload> {
+  const { getProductBootstrap } = await getProductReadTransport()
+  return getProductBootstrap(query) as Promise<ProductBootstrapPayload>
+}
+
+async function searchPosCatalogProducts(query: QueryParams): Promise<ProductPayload | ProductRecord[]> {
+  const { searchProducts } = await getProductReadTransport()
+  return searchProducts(query) as Promise<ProductPayload | ProductRecord[]>
+}
+
+async function loadPosProductFilters(query: QueryParams = {}): Promise<Partial<ProductFilterMeta>> {
+  const { getProductFilters } = await getProductReadTransport()
+  return getProductFilters(query) as Promise<Partial<ProductFilterMeta>>
+}
+
+async function loadPosCategories(): Promise<unknown[]> {
+  const { getCategories } = await getLookupTransport()
+  return getCategories() as Promise<unknown[]>
 }
 
 async function loadPosCustomers(): Promise<CustomerRecord[]> {

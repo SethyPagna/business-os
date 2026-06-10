@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 875.
+- Latest completed implementation move in this roadmap: Move 876.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,36 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 876 current state:
+- Docker release `business-os:v6.0.0-202606100815-move876` is running healthy
+  with frontend hash `10b61c8879b34f05` and source hash
+  `d7832416a03cf0ce`.
+- POS now lazy-loads product, lookup, and contact read transports instead of
+  binding them into first paint. Secondary POS filter/contact/category option
+  loads are deferred until after the product list is usable, while opening the
+  filter surface still starts the needed option load immediately.
+- Inventory product bootstrap now sends `metadata=0` for the visible first-page
+  row load. The backend supports `metadata=0` and `metadataOnly=1`, so
+  expensive brand/initial metadata scans can refresh after first paint without
+  blocking the product list. Inventory product snapshot-version memoing now
+  matches the Product route's 5 second startup-burst window.
+- Local Playwright proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-12-13-091Z.json`
+  measured Products 296 ms, Inventory 333 ms, POS 303 ms, and Branches 262 ms
+  with zero failed requests and zero console/page errors.
+- Warmed public Cloudflare proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-13-39-711Z.json`
+  measured Products 4.258 s, Inventory 2.512 s, POS 2.294 s, and Branches
+  3.792 s with zero failed requests and zero console/page errors. POS is now
+  under the 2.5 s public route-ready target. Inventory is effectively at the
+  threshold but still slightly above it on this pass; Products/Branches are now
+  dominated by shared language/auth/app chunks and Cloudflare static delivery
+  variance rather than the POS/Inventory secondary metadata work.
+- Verification passed: `git diff --check`, backend route-contract and server
+  utility tests, schema audit, frontend typecheck, frontend JSX/source syntax
+  check, frontend production build, Docker release build/start health, local
+  focused route-load trace, and public Cloudflare route-load trace.
 
 Move 875 current state:
 - Docker release `business-os:v6.0.0-202606101915-move875` is running healthy

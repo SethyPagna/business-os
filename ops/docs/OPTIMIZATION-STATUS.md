@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 875, add product catalog read indexes and reduce
-  repeated product snapshot-version scans during startup route bursts.
+- Latest completed move: Move 876, defer POS/Inventory secondary startup
+  metadata and keep first-route reads focused on visible rows.
 
 ## Current Baseline
 
@@ -17,9 +17,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `c3007a11e6a306b3`
+  `10b61c8879b34f05`
 - latest verified source hash from the most recent Docker-served live check:
-  `6d8391289817d4a2`
+  `d7832416a03cf0ce`
 
 Latest verified reports:
 
@@ -103,6 +103,10 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-09T23-51-12-489Z.json`
 - latest Move 875 final Cloudflare affected-route trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T23-54-13-632Z.json`
+- latest Move 876 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-12-13-091Z.json`
+- latest Move 876 warmed Cloudflare affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T00-13-39-711Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
