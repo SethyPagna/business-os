@@ -560,6 +560,7 @@ function manualChunks(id: string): string | undefined {
   // small enough that first-open admin pages do not drag the whole app shell
   // over the wire up front.
   const normalized = id.replace(/\\/g, '/')
+  if (normalized.includes('vite/preload-helper')) return 'vendor'
   if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
     const iconName = path.basename(normalized, '.js')
     if (routeSharedIconNames.has(iconName) || appShellIconNames.has(iconName)) return 'shared-ui'
@@ -817,11 +818,10 @@ export default defineConfig({
     // the backend asset resolver, so the shipped build can stay lean.
     emptyOutDir: true,
     sourcemap: false,
-    modulePreload: {
-      resolveDependencies(_filename: string, deps: string[]): string[] {
-        return deps.filter((dep) => !shouldDeferModulePreload(dep))
-      },
-    },
+    // Business OS injects route-aware modulepreloads after the final bundle is
+    // known. Disable Vite's generic helper so the public portal does not import
+    // the admin auth chunk just to run the preload wrapper.
+    modulePreload: false,
     // Inline only files below 1 byte (effectively disables inlining)
     // Prevents base64 data: URLs for small images which confuse CSP/CORS
     assetsInlineLimit: 1,

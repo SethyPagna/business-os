@@ -571,7 +571,6 @@ export default function Products() {
         else setRefreshingProducts(true)
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          if (firstLoad) setLoading(false)
           setRefreshingProducts(false)
           setLoadError(tr('products_load_slow', 'Products are taking longer than expected. Tap Retry or revisit the page in a moment.'))
         }, 10000)

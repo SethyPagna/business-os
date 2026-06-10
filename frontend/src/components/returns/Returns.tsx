@@ -321,7 +321,6 @@ export default function Returns() {
         if (!loadedOnceRef.current) {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(returnsRequestRef, requestId)) return
-            setLoading(false)
             setLoadError(tr('returns_load_slow', 'Returns are taking longer than expected. Tap Refresh or revisit in a moment.', 'ការបង្វិលត្រឡប់កំពុងចំណាយពេលយូរជាងដែលរំពឹងទុក។ សូមចុចស្រស់ថ្មី ឬត្រឡប់មកវិញបន្តិចទៀត។'))
           }, 15000)
         }

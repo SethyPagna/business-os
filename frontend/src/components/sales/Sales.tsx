@@ -308,7 +308,6 @@ export default function Sales() {
         if (!loadedOnceRef.current) {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
-            setLoading(false)
             setLoadError(translateOr('sales_load_slow', 'Sales are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
           }, 15000)
         }

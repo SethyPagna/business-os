@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 892, remove fixed 250 ms post-load readiness
-  delays from admin history/filter controls after primary page data has
-  settled.
+- Latest completed move: Move 893, keep slow-load watchdogs from finishing
+  real page loads and remove public-portal startup dependency on the admin auth
+  chunk.
 
 ## Current Baseline
 
@@ -18,7 +18,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `3b3318b9e0bba69b`
+  `f1e735074a86dda8`
 - latest verified source hash from the most recent Docker-served live check:
   `e5d243e151a194e4`
 
@@ -58,6 +58,16 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-10T12-06-57-495Z.json`
 - latest focused public-host LCP trace:
   `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`
+- latest Move 893 local route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T13-33-38-974Z.json`
+- latest Move 893 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-33-38-825Z.json`
+- latest Move 893 public portal LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-34-15-883Z.json`
+- latest Move 893 public admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T13-34-19-457Z.json`
+- latest Move 893 public admin LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-35-09-532Z.json`
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:

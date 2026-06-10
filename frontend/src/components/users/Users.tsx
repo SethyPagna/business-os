@@ -405,7 +405,6 @@ export default function Users() {
         setLoadError(null)
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setLoading(false)
           setLoadError(tr('users_load_slow', 'Users are taking longer than expected. Tap Refresh or revisit the page in a moment.'))
         }, 10000)
       }

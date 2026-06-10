@@ -8,6 +8,39 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Prevent slow-load watchdogs from ending real loading and remove public admin-auth startup drag
+  - area: frontend loading correctness, public portal startup chunks, route LCP
+  - result: kept
+  - note: slow-load watchdogs across Products, Inventory, Sales, Returns,
+    Branches, Users, Audit Log, and contact tabs no longer call
+    `setLoading(false)`. The warning path can still explain slow requests, but
+    only the real request completion can render the page as loaded. Vite
+    generic modulepreload injection is disabled, the virtual preload helper is
+    pinned to the neutral `vendor` chunk, and the built entry no longer
+    statically imports `app-auth` before public portal render.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606102330-move893` is running with frontend hash
+    `f1e735074a86dda8` and source hash `e5d243e151a194e4`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T13-33-38-974Z.json`
+    measured the eight admin routes at 260-409 ms ready with zero
+    failures/errors, and
+    `ops/runtime/reports/lcp-route-trace-2026-06-10T13-33-38-825Z.json`
+    measured local LCP at 108-752 ms for admin routes plus 392 ms for Public
+    Catalog.
+  - public proof:
+    `ops/runtime/reports/lcp-route-trace-2026-06-10T13-34-15-883Z.json`
+    measured the public portal LCP at 2.004 s, under the 2.5 s target and down
+    from the earlier 4.912 s trace. Public admin traces completed with zero
+    failures/errors, but Cloudflare route LCP remains above target on Products,
+    Inventory, Returns, Branches, and Users.
+  - verification: focused performance-loading guard, full frontend
+    `typecheck`, `check:jsx`, `test:utils`, frontend production build,
+    generated entry inspection, Docker release build/start/health, local and
+    public route/LCP traces.
+  - next target: split and measure route-specific admin above-the-fold payloads
+    over Cloudflare while preserving the now-correct no-fake-loading behavior.
+
 - Remove fixed post-load readiness delays from admin controls
   - area: frontend route readiness, history/filter control responsiveness,
     loading UX guardrails

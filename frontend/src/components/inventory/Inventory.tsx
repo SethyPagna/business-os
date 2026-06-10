@@ -712,7 +712,6 @@ export default function Inventory() {
         if (!loadedOnceRef.current) {
           loadWatchdogRef.current = window.setTimeout(() => {
             if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-            setLoading(false)
             setLoadError(tr('inventory_load_slow', 'Inventory is taking longer than expected. Tap Refresh or revisit in a moment.'))
           }, 15000)
         }

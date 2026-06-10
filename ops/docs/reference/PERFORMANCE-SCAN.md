@@ -4,29 +4,39 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 892 release `business-os:v6.0.0-202606102045-move892` is live with
-  frontend hash `3b3318b9e0bba69b` and source hash `e5d243e151a194e4`.
-- Repeated 250 ms post-load readiness timers were removed from admin
-  history/filter/control gates across Products, Inventory, Sales, Returns,
-  Branches, Files, Users, Backup, and contact tabs. These controls still wait
-  for real primary page data to settle, but no longer add a fixed delay after
-  that real work completes.
+- Move 893 release `business-os:v6.0.0-202606102330-move893` is live with
+  frontend hash `f1e735074a86dda8` and source hash `e5d243e151a194e4`.
+- Slow-load watchdogs no longer end real page loading in Products, Inventory,
+  Sales, Returns, Branches, Users, Audit Log, or contact tabs. They can show a
+  slow-load warning, but the UI does not switch to empty/zero-state rendering
+  until the actual request finishes.
+- Public portal startup no longer statically imports the admin `app-auth`
+  chunk. Vite's generic modulepreload injection is disabled, the virtual
+  preload helper is pinned to the neutral `vendor` chunk, and the existing
+  route-aware preload plugin remains responsible for page-specific preloads.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`:
-  Products 299 ms, Inventory 296 ms, Sales 253 ms, Returns 229 ms, Backup
-  264 ms, Files 244 ms, Branches 223 ms, and Users 254 ms, zero failed
+  `ops/runtime/reports/route-load-trace-2026-06-10T13-33-38-974Z.json`:
+  Products 409 ms, Inventory 315 ms, Sales 343 ms, Returns 260 ms, Contacts
+  276 ms, Branches 368 ms, Users 315 ms, and Audit Log 367 ms, zero failed
   requests/errors.
-- Public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-48-36-079Z.json` had
-  zero failed requests/errors and measured Products 4.691 s, Inventory
-  5.351 s, Sales 3.587 s, Returns 4.698 s, Backup 3.796 s, Files 6.207 s, and
-  Branches 37.769 s. Users passed separately at 3.277 s in
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-50-08-601Z.json` after
-  earlier public reruns hit Cloudflare connect timeouts before browser
-  navigation.
-- The next target is to keep removing real fixed waits/request waterfalls and
-  apply the Cloudflare public portal cache rule once the active token has
-  `Zone.Cache Rules: Edit`.
+- Local Playwright LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-33-38-825Z.json`:
+  Products 752 ms, Inventory 440 ms, Sales 112 ms, Returns 328 ms, Contacts
+  168 ms, Branches 428 ms, Users 352 ms, Audit Log 108 ms, and Public Catalog
+  392 ms, zero failed requests/errors.
+- Public portal LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-34-15-883Z.json`:
+  Public Catalog 2.004 s, zero failed requests/errors, improved from the
+  earlier 4.912 s trace and now below the 2.5 s target.
+- Public admin traces completed with zero failed requests/errors:
+  `ops/runtime/reports/route-load-trace-2026-06-10T13-34-19-457Z.json`
+  measured ready at 2.560-4.142 s, and
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-35-09-532Z.json`
+  measured Sales/Contacts/Audit Log near 1 s while Products, Inventory,
+  Returns, Branches, and Users remained above target at 3.472-4.836 s.
+- The next target is route-specific public-admin above-the-fold payload and
+  Cloudflare document/API latency reduction, while keeping the no-fake-loading
+  watchdog policy and public portal under 2.5 s.
 
 ## 1. Scope
 

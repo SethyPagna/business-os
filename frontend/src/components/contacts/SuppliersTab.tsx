@@ -485,7 +485,6 @@ function SuppliersTab({ t, notify, active = true }: SuppliersTabProps) {
         setLoadError('')
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setLoading(false)
           setLoadError(tr('suppliers_load_slow', 'Suppliers are taking longer than expected. Tap Retry or revisit the page in a moment.'))
         }, 15000)
       }

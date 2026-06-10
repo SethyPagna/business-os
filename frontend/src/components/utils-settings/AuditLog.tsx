@@ -423,7 +423,6 @@ export default function AuditLog() {
       if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
       loadWatchdogRef.current = window.setTimeout(() => {
         if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId) || loadedOnceRef.current) return
-        setLoading(false)
         setError('Audit log is taking longer than expected. Tap Refresh to try again.')
       }, 20000)
     }

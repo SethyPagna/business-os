@@ -534,7 +534,6 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
         setLoadError('')
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setLoading(false)
           setLoadError(tr('delivery_contacts_load_slow', 'Delivery contacts are taking longer than expected. Tap Retry or revisit the page in a moment.'))
         }, 15000)
       }

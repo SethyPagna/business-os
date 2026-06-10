@@ -116,6 +116,29 @@ const actionHistoryBar = fs.readFileSync(new URL('../src/components/shared/Actio
 const actionHistoryTransport = fs.readFileSync(new URL('../src/api/actionHistoryTransport.ts', import.meta.url), 'utf8')
 const loaders = fs.readFileSync(new URL('../src/utils/loaders.ts', import.meta.url), 'utf8')
 
+function assertLoadWatchdogKeepsLoading(source: string, name: string): void {
+  const watchdogBlocks = source.match(/loadWatchdogRef\.current\s*=\s*window\.setTimeout\(\(\) => \{[\s\S]*?\n\s*\},\s*[\d_]+/g) || []
+  assert.ok(watchdogBlocks.length > 0, `${name} should keep an explicit slow-load watchdog`)
+  for (const block of watchdogBlocks) {
+    assert.doesNotMatch(block, /setLoading\(false\)/, `${name} slow-load watchdog should not clear loading before the request settles`)
+  }
+}
+
+for (const [name, source] of [
+  ['Products', products],
+  ['Inventory', inventory],
+  ['Sales', sales],
+  ['Returns', returns],
+  ['Branches', branches],
+  ['Customers', customers],
+  ['Suppliers', suppliers],
+  ['Delivery contacts', delivery],
+  ['Audit Log', auditLog],
+  ['Users', usersPage],
+] as const) {
+  assertLoadWatchdogKeepsLoading(source, name)
+}
+
 assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
 assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/pathRouting\.ts'/, 'app context should derive the initial route page without importing the heavier admin shell utility chunk')
 assert.doesNotMatch(appContext, /import en from '\.\/lang\/en\.json'/, 'app context should not statically load the full English language pack during startup')
@@ -276,6 +299,8 @@ assert.match(viteConfig, /public:\s*\[[\s\S]*'PublicCatalogRoot'[\s\S]*'catalog-
 assert.match(viteConfig, /public:\s*\[[\s\S]*'route-sync-utils'[\s\S]*'app-portal'/, 'public routes should preload one small synchronous helper chunk instead of waiting on multiple late catalog waterfalls')
 assert.match(viteConfig, /admin:\s*\[[\s\S]*'AdminRoot'[\s\S]*'app-auth'[\s\S]*'app-bootstrap'[\s\S]*\][\s\S]*login:\s*\[[\s\S]*'AdminRoot'[\s\S]*'auth-login'[\s\S]*'app-auth'[\s\S]*'app-bootstrap'/, 'authenticated admin routes should skip the sign-in chunk while direct login routes still preload it')
 assert.match(viteConfig, /isLoginPath\(pathname\)[\s\S]*preloads\.login[\s\S]*preloads\.admin/, 'route-aware preload script should reserve auth-login preloads for direct login paths')
+assert.match(viteConfig, /modulePreload:\s*false/, 'Vite generic modulepreload injection should stay disabled so public startup does not import the helper from the app-auth chunk')
+assert.match(viteConfig, /includes\('vite\/preload-helper'\)[\s\S]*return 'vendor'/, 'Vite preload helper should stay in the neutral vendor chunk instead of the admin auth chunk')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_DELAY_MS = 45_000/, 'offline queue and snapshot maintenance should stay out of the first-load network window')
 assert.match(webApi, /const INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS = 60_000/, 'initial offline maintenance should still run during a long-lived authenticated session')
 assert.match(webApi, /const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200/, 'bootstrap storage cleanup and persistence should be delayed past first paint')

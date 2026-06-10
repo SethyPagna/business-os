@@ -319,7 +319,6 @@ export default function Branches() {
         setLoadError(null)
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setLoading(false)
           setLoadError(tr('branches_load_slow', 'Branches are taking longer than expected. Tap Retry or revisit in a moment.'))
         }, 15_000)
       }

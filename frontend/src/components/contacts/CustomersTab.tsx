@@ -402,7 +402,6 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
         setLoadError('')
         loadWatchdogRef.current = window.setTimeout(() => {
           if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-          setLoading(false)
           setLoadError(tr(t, 'customers_load_slow', 'Customers are taking longer than expected. Tap Retry or revisit the page in a moment.'))
         }, 15000)
       }

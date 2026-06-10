@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 892.
+- Latest completed implementation move in this roadmap: Move 893.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,55 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 893 current state:
+- Docker release `business-os:v6.0.0-202606102330-move893` is running healthy
+  with frontend hash `f1e735074a86dda8` and source hash
+  `e5d243e151a194e4`.
+- Slow-load watchdog timers in Products, Inventory, Sales, Returns, Branches,
+  Users, Audit Log, and contact tabs no longer call `setLoading(false)`.
+  They may still surface a slow-load warning, but only the real request
+  completion path can end loading. This prevents the bad `0 rows` / `no data`
+  flash while a legitimate request is still in flight.
+- Vite generic modulepreload injection is disabled and the Vite virtual preload
+  helper is pinned to the neutral `vendor` chunk. The built entry no longer
+  statically imports `app-auth`, so the public portal does not pay for admin
+  auth code before it can render. Route-aware modulepreloads remain injected by
+  the existing Business OS preload plugin.
+- Local route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T13-33-38-974Z.json`
+  measured Products 409 ms, Inventory 315 ms, Sales 343 ms, Returns 260 ms,
+  Contacts 276 ms, Branches 368 ms, Users 315 ms, and Audit Log 367 ms with
+  zero failed requests and zero page/console errors.
+- Local LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-33-38-825Z.json`
+  measured Products 752 ms, Inventory 440 ms, Sales 112 ms, Returns 328 ms,
+  Contacts 168 ms, Branches 428 ms, Users 352 ms, Audit Log 108 ms, and Public
+  Catalog 392 ms with zero failed requests/errors.
+- Public portal LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-34-15-883Z.json`
+  measured Public Catalog LCP at 2.004 s, down from the earlier 4.912 s trace
+  and under the 2.5 s target.
+- Public admin route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T13-34-19-457Z.json`
+  completed Products, Inventory, Sales, Returns, Contacts, Branches, Users,
+  and Audit Log with zero failed requests/errors. Ready timings were still
+  tunnel-sensitive at 2.560-4.142 s.
+- Public admin LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-35-09-532Z.json`
+  measured Sales 984 ms, Contacts 1.012 s, and Audit Log 1.064 s, but
+  Products, Inventory, Returns, Branches, and Users remained above target at
+  3.472-4.836 s over Cloudflare.
+- Verification passed: focused performance-loading guard, full frontend
+  `typecheck`, `check:jsx`, `test:utils`, frontend production build, generated
+  entry inspection proving no `app-auth` startup import, Docker release
+  build/start/health, local Playwright route-load trace, local Playwright LCP
+  trace, public portal LCP trace, public admin route-load trace, and public
+  admin LCP trace.
+- Next executable slice: reduce the remaining public-admin LCP routes by
+  splitting route-specific above-the-fold payloads and measuring Cloudflare
+  document/API latency separately; keep public portal under 2.5 s while doing
+  that.
 
 Move 892 current state:
 - Docker release `business-os:v6.0.0-202606102045-move892` is running healthy
