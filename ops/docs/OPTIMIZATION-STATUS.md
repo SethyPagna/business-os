@@ -8,8 +8,8 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 898, trim route startup CSS and preload hints
-  so direct visits fetch only first-window route dependencies.
+- Latest completed move: Move 899, embed admin bootstrap data and push public
+  route chunks into first-byte preload headers.
 
 ## Current Baseline
 
@@ -17,9 +17,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `babcce511ce13f1a`
+  `0fbf2d5bae2d7bc4`
 - latest verified source hash from the most recent Docker-served live check:
-  `a8da203159cc2cda`
+  `57522f983df9a865`
 
 Latest verified reports:
 
@@ -74,6 +74,17 @@ Latest verified reports:
 - latest Move 898 public admin LCP traces:
   `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-52-779Z.json`
   and `ops/runtime/reports/lcp-route-trace-2026-06-10T17-03-27-028Z.json`
+- latest Move 899 local route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-26-404Z.json`
+- latest Move 899 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-27-005Z.json`
+- latest Move 899 public admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-27-600Z.json`
+- latest Move 899 public admin LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-28-098Z.json`
+- latest Move 899 public-host traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-28-00-619Z.json`
+  and `ops/runtime/reports/lcp-route-trace-2026-06-10T20-28-01-127Z.json`
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:
@@ -4881,7 +4892,63 @@ Recent route-level win:
   Inventory's first route surface further, and continuing public-tunnel
   variance checks.
 
-## Current Move 898
+## Current Move 899
+
+- Move 899 removes another real double-load path. Authenticated admin SPA
+  shell responses now embed the existing `/api/auth/bootstrap` payload as
+  `business-os-auth-bootstrap`, and `appBootstrapTransport` consumes that
+  JSON before reusing the early fetch promise or calling the network. The
+  route-preload script now checks for that embedded payload before starting
+  `/api/auth/bootstrap`, so direct admin visits do not pay both HTML parse
+  and a separate auth round trip.
+- Direct-route preload priority was hardened. Vite's injected route
+  modulepreloads set `fetchPriority`/`fetchpriority=high`, backend Link
+  modulepreload headers also carry `fetchpriority=high`, and public portal
+  routes now receive first-byte modulepreload Link headers for the public
+  shell (`PublicCatalogRoot`, `app-portal`, `app-shell`, `shared-ui`, and
+  selected catalog chunks) instead of waiting only for the injected preload
+  script to run.
+- Runtime proof: Docker image `business-os:v6.0.0-202606110424` is healthy at
+  `http://127.0.0.1:4000/health` with frontend hash `0fbf2d5bae2d7bc4` and
+  source hash `57522f983df9a865`. `/inventory` HTML contains
+  `business-os-auth-bootstrap`, and `/public` now returns 13 modulepreload
+  Link entries plus the public font preload.
+- Verification proof: `git diff --check`, backend server-entry check, backend
+  utility suite, frontend utility suite, focused performance-loading guard,
+  backend route-contract guard, frontend typecheck, frontend production build,
+  Docker release build, Docker start, local route-load/LCP traces, public
+  admin route-load/LCP traces, and public-host portal traces all ran.
+- Local Playwright proof: route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-26-404Z.json`
+  passed with zero failures/errors: Inventory 349 ms, Users 218 ms, Public
+  Catalog 315 ms. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-27-005Z.json`
+  measured Inventory 360 ms, Users 284 ms, and Public Catalog 308 ms. The
+  old `/api/auth/bootstrap` request is absent from the first window; Inventory
+  only fetched real route data (`/api/inventory/bootstrap`) in route-load, and
+  Users only fetched `/api/users`.
+- Public Cloudflare proof: route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-27-600Z.json`
+  passed with zero failed requests, zero console errors, and zero first-window
+  API calls: Inventory 2.644 s, Users 3.621 s, Public Catalog 4.744 s. LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-28-098Z.json`
+  measured Inventory 3.196 s, Users 3.616 s, and Public Catalog 4.528 s.
+  Direct public-host proof
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-28-01-127Z.json`
+  measured Public Catalog 3.860 s.
+- Remaining honest target: public/admin Cloudflare document delivery is still
+  the bottleneck, not fake loaders or route APIs. `https://leangcosmetics.dpdns.org/public`
+  returned `cf-cache-status: DYNAMIC`; the route-load report shows the public
+  document itself taking 4.662 s before scripts. Next executable slice should
+  add or configure a real Cloudflare edge-cache/cache-rule path for public
+  portal HTML (or equivalent tunnel bypass), then rerun the same LCP traces.
+- Current plan position after Move 899: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+## Previous Move 898
 
 - Move 898 trims the next real startup layer. Public portal-only CSS now lives
   in `frontend/src/styles/public-portal.css` and loads from

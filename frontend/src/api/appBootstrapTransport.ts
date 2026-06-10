@@ -26,6 +26,8 @@ type EarlyAuthBootstrapWindow = Window & {
   __businessOsAuthBootstrapPromise?: Promise<unknown> | null
 }
 
+const EMBEDDED_AUTH_BOOTSTRAP_SCRIPT_ID = 'business-os-auth-bootstrap'
+
 function emptyBootstrap(user: unknown = null): AppBootstrapPayload {
   return {
     user,
@@ -85,6 +87,20 @@ function takeEarlyAuthBootstrapPromise(): Promise<unknown> | null {
   return promise
 }
 
+function takeEmbeddedAuthBootstrapPayload(): unknown | null {
+  if (typeof document === 'undefined') return null
+  const node = document.getElementById(EMBEDDED_AUTH_BOOTSTRAP_SCRIPT_ID)
+  if (!node) return null
+  const raw = String(node.textContent || '').trim()
+  node.remove()
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch (_) {
+    return null
+  }
+}
+
 export async function getAppBootstrap(): Promise<unknown> {
   const hasServer = Boolean(ensureBootstrapServerUrl())
   const hasStoredSession = hasStoredUserSession()
@@ -94,6 +110,8 @@ export async function getAppBootstrap(): Promise<unknown> {
   }
 
   try {
+    const embeddedBootstrapPayload = takeEmbeddedAuthBootstrapPayload()
+    if (embeddedBootstrapPayload) return embeddedBootstrapPayload
     const earlyBootstrapPromise = takeEarlyAuthBootstrapPromise()
     if (earlyBootstrapPromise) return await earlyBootstrapPromise
     return await apiFetch('GET', '/api/auth/bootstrap')

@@ -2643,4 +2643,25 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   rerun `ops/runtime/reports/lcp-route-trace-2026-06-10T17-03-27-028Z.json`
   leave Inventory as the next honest target at about 2.64-2.72 s through
   Cloudflare while local Inventory is 480 ms.
+- Move 899 records the auth bootstrap and public route first-byte preload
+  slice. Authenticated admin HTML now embeds the existing auth bootstrap
+  payload as `business-os-auth-bootstrap`, the client consumes that payload
+  before fetching `/api/auth/bootstrap`, and the route-preload script skips the
+  early auth fetch when the embedded payload exists. Backend/Vite
+  modulepreloads carry `fetchpriority=high`, and public portal routes now get
+  HTTP Link modulepreloads for the public shell/catalog chunks. Docker image
+  `business-os:v6.0.0-202606110424` served frontend hash
+  `0fbf2d5bae2d7bc4` and source hash `57522f983df9a865`. Local route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-26-404Z.json`
+  passed Inventory 349 ms, Users 218 ms, Public Catalog 315 ms; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-27-005Z.json`
+  measured 284-360 ms. Public admin route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-27-600Z.json`
+  had zero first-window API calls and zero failures/errors, while public admin
+  LCP `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-28-098Z.json`
+  measured 3.196-4.528 s. Direct public-host LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-28-01-127Z.json`
+  measured 3.860 s. Remaining bottleneck is Cloudflare document delivery:
+  `/public` returned `cf-cache-status: DYNAMIC`, and the route-load report
+  showed the HTML document itself taking 4.662 s before scripts.
 <!-- phase29-manual-notes:end -->

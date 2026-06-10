@@ -292,6 +292,9 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
     if (/\\.[a-z0-9]+$/i.test(pathname)) return false;
     return !isAdminAppPath(pathname);
   }
+  function hasEmbeddedAuthBootstrap() {
+    return !!document.getElementById('business-os-auth-bootstrap');
+  }
   function routePreloadKey(pathname) {
     var segment = pathname.split('/').filter(Boolean)[0] || '';
     if (segment === 'product') return 'products';
@@ -301,7 +304,7 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   }
   var pathname = normalizePath(window.location && window.location.pathname);
   var routeKey = routePreloadKey(pathname);
-  if (!isPublicCatalogPath(pathname) && !isLoginPath(pathname) && typeof window.fetch === 'function' && !window.__businessOsAuthBootstrapPromise) {
+  if (!isPublicCatalogPath(pathname) && !isLoginPath(pathname) && !hasEmbeddedAuthBootstrap() && typeof window.fetch === 'function' && !window.__businessOsAuthBootstrapPromise) {
     window.__businessOsAuthBootstrapStartedAt = Date.now();
     window.__businessOsAuthBootstrapPromise = window.fetch('/api/auth/bootstrap', {
       credentials: 'include',
@@ -339,6 +342,8 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
     var link = document.createElement('link');
     link.rel = 'modulepreload';
     link.href = href;
+    link.fetchPriority = 'high';
+    link.setAttribute('fetchpriority', 'high');
     document.head.appendChild(link);
   });
 }());`)}</script>`

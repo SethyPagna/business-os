@@ -1211,4 +1211,6 @@ router.post('/password-reset/complete', async (_req, res) => {
   return err(res, 'Email recovery links are handled by Business OS OTP/password reset. Request a new OTP reset or ask an admin to reset the password.', 400)
 })
 
-module.exports = router
+module.exports = Object.assign(router, {
+  buildAuthenticatedBootstrap,
+})

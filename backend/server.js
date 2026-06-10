@@ -39,6 +39,7 @@ if (!startRequestedWorkerRole()) {
     const express = require('express');
     const { requestContextMiddleware } = require('./src/requestContext.ts');
     const { authToken, networkAccessGuard } = require('./src/middleware.ts');
+    const { getSessionUser } = require('./src/sessionAuth.ts');
     const { maintenanceWriteGuard } = require('./src/maintenanceLock.ts');
     const { db, runDatabaseMaintenance } = require('./src/database.ts');
     const { wss_clients } = require('./src/helpers.ts');
@@ -54,6 +55,7 @@ if (!startRequestedWorkerRole()) {
     let databaseMaintenanceTimer = null;
     const uploadFallbackCache = new Map();
     const PUBLIC_PORTAL_BOOTSTRAP_SCRIPT_ID = 'business-os-portal-bootstrap';
+    const ADMIN_AUTH_BOOTSTRAP_SCRIPT_ID = 'business-os-auth-bootstrap';
     const LEGACY_FRONTEND_ASSET_PREFIXES = [
         'index-',
         'app-shared-',
@@ -73,6 +75,16 @@ if (!startRequestedWorkerRole()) {
         'CustomersTab-',
     ];
     const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = ['app-bootstrap', 'app-auth'];
+    const SPA_PUBLIC_MODULE_PRELOAD_CHUNKS = [
+        'index',
+        'vendor-react',
+        'vendor',
+        'app-routing',
+        'PublicCatalogRoot',
+        'app-portal',
+        'app-shell',
+        'shared-ui',
+    ];
     const SPA_ADMIN_FIRST_WINDOW_CHUNKS = [
         'AdminRoot',
         'vendor-react',
@@ -204,7 +216,9 @@ if (!startRequestedWorkerRole()) {
         const routeChunks = SPA_ROUTE_MODULE_PRELOAD_CHUNKS
             .filter((entry) => entry.match(normalizedPath))
             .flatMap((entry) => entry.chunks);
-        const baseChunks = isPublicPortalRoute ? [] : [...SPA_ADMIN_MODULE_PRELOAD_CHUNKS, ...SPA_ADMIN_FIRST_WINDOW_CHUNKS];
+        const baseChunks = isPublicPortalRoute
+            ? SPA_PUBLIC_MODULE_PRELOAD_CHUNKS
+            : [...SPA_ADMIN_MODULE_PRELOAD_CHUNKS, ...SPA_ADMIN_FIRST_WINDOW_CHUNKS];
         return [...new Set([...baseChunks, ...routeChunks])];
     }
     function appendLinkHeader(res, value) {
@@ -222,7 +236,7 @@ if (!startRequestedWorkerRole()) {
             const assetName = resolveFrontendChunkAssetName(chunkBase);
             if (!assetName)
                 continue;
-            appendLinkHeader(res, `</assets/${assetName}>; rel=modulepreload`);
+            appendLinkHeader(res, `</assets/${assetName}>; rel=modulepreload; fetchpriority=high`);
         }
     }
     function resolveFrontendStyleAssetNames() {
@@ -296,6 +310,17 @@ if (!startRequestedWorkerRole()) {
             ? html.replace('</head>', `${script}\n </head>`)
             : `${html}\n${script}`;
     }
+    function injectAdminAuthBootstrap(html, payload) {
+        if (!html || !payload || html.includes(`id="${ADMIN_AUTH_BOOTSTRAP_SCRIPT_ID}"`))
+            return html;
+        const script = `<script type="application/json" id="${ADMIN_AUTH_BOOTSTRAP_SCRIPT_ID}">${escapeInlineJson(payload)}</script>`;
+        if (html.includes('<script data-business-os-route-preloads>')) {
+            return html.replace('<script data-business-os-route-preloads>', `${script}\n    <script data-business-os-route-preloads>`);
+        }
+        return html.includes('</head>')
+            ? html.replace('</head>', `${script}\n </head>`)
+            : `${html}\n${script}`;
+    }
     async function sendPublicSpaIndex(_req, res) {
         const htmlPath = path.join(FRONTEND_DIST, 'index.html');
         const portalRouter = require('./src/routes/portal.ts');
@@ -308,6 +333,29 @@ if (!startRequestedWorkerRole()) {
         setPublicSpaHtmlCacheHeaders(res, payload?.config?.refreshSeconds);
         res.type('html');
         return res.send(injectPublicPortalBootstrap(html, payload));
+    }
+    async function sendAdminSpaIndex(req, res) {
+        const htmlPath = path.join(FRONTEND_DIST, 'index.html');
+        const sessionUser = getSessionUser(req);
+        if (!sessionUser?.id)
+            return res.sendFile(htmlPath);
+        try {
+            req.user = req.user || sessionUser;
+            const authRouter = require('./src/routes/auth.ts');
+            const buildPayload = authRouter?.buildAuthenticatedBootstrap;
+            if (typeof buildPayload !== 'function')
+                return res.sendFile(htmlPath);
+            const payload = await buildPayload(req, sessionUser.id);
+            if (!payload)
+                return res.sendFile(htmlPath);
+            const html = await fs.promises.readFile(htmlPath, 'utf8');
+            res.type('html');
+            return res.send(injectAdminAuthBootstrap(html, payload));
+        }
+        catch (error) {
+            console.warn(`[server] admin auth inline bootstrap unavailable: ${error?.message || error}`);
+            return res.sendFile(htmlPath);
+        }
     }
     function sendSpaIndex(req, res, _next) {
         setAdminSpaHtmlHeaders(req, res);
@@ -322,7 +370,7 @@ if (!startRequestedWorkerRole()) {
                 return res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
             });
         }
-        return res.sendFile(path.join(FRONTEND_DIST, 'index.html'));
+        return sendAdminSpaIndex(req, res);
     }
     function loadCompressionMiddleware() {
         // Compression is optional so the server can still boot in minimal installs.

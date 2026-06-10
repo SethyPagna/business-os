@@ -1,8 +1,36 @@
 # Business OS Optimization Session Log
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
 
 This is a concise running log of what actually happened in recent sessions.
+
+## 2026-06-11
+
+### Accepted
+
+- Embed admin auth bootstrap and push public route preloads to first byte
+  - area: route startup performance, admin auth bootstrap, public portal LCP
+  - result: kept
+  - note: authenticated admin SPA HTML now embeds the existing bootstrap
+    payload as `business-os-auth-bootstrap`; the frontend consumes it before
+    fetching `/api/auth/bootstrap`; and the preload script skips the early auth
+    fetch when the payload exists. Backend/Vite modulepreloads use high fetch
+    priority, and public portal routes now receive HTTP Link modulepreloads for
+    the public shell/catalog chunks.
+  - verification: backend and frontend utility suites, focused performance
+    guard, backend route contracts, frontend typecheck/build, Docker release
+    `business-os:v6.0.0-202606110424`, Docker start, local route-load/LCP,
+    public admin route-load/LCP, and public-host portal traces passed.
+  - live proof: local LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-27-005Z.json`
+    measured Inventory 360 ms, Users 284 ms, and Public Catalog 308 ms.
+    Public admin route-load
+    `ops/runtime/reports/route-load-trace-2026-06-10T20-27-27-600Z.json`
+    had zero first-window API calls and zero failures/errors.
+  - remaining: Cloudflare still serves public HTML as `cf-cache-status:
+    DYNAMIC`; direct public-host `/public` LCP was 3.860 s, with the document
+    itself taking 4.662 s in the route-load trace. Next slice should configure
+    a real public HTML edge-cache path or equivalent tunnel bypass.
 
 ## 2026-06-10
 

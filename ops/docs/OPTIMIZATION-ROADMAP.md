@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 895.
+- Latest completed implementation move in this roadmap: Move 899.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15256,3 +15256,42 @@ Move 898 status:
   inspect the remaining public Inventory settle-window chunks and reduce
   Cloudflare/tunnel variance without hiding incomplete data behind fake
   loaders.
+
+Move 899 status:
+- Move 899 removes the direct admin auth double-load path. Authenticated SPA
+  HTML now embeds the existing auth bootstrap payload as
+  `business-os-auth-bootstrap`; the frontend consumes that embedded JSON before
+  using the early auth promise or fetching `/api/auth/bootstrap`; and the Vite
+  route-preload script skips the early fetch when the payload is already in the
+  document.
+- Route preload priority is stronger. Injected modulepreload links and backend
+  Link modulepreload headers now carry `fetchpriority=high`, and public portal
+  routes receive HTTP Link modulepreloads for the public shell and catalog
+  chunks at first byte.
+- Runtime proof: Docker image `business-os:v6.0.0-202606110424` is healthy
+  with frontend hash `0fbf2d5bae2d7bc4` and source hash
+  `57522f983df9a865`.
+- Verification proof: diff check, backend server-entry check, backend and
+  frontend utility suites, focused performance guard, backend route contract,
+  frontend typecheck/build, Docker release/start, and local/public Playwright
+  route-load/LCP traces passed.
+- Live proof: local route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-26-404Z.json`
+  measured Inventory 349 ms, Users 218 ms, Public Catalog 315 ms. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-27-005Z.json`
+  measured Inventory 360 ms, Users 284 ms, Public Catalog 308 ms. Public
+  admin route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T20-27-27-600Z.json`
+  had zero first-window API calls and zero failures/errors, with Inventory
+  2.644 s, Users 3.621 s, Public Catalog 4.744 s. Public admin LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-27-28-098Z.json`
+  measured Inventory 3.196 s, Users 3.616 s, Public Catalog 4.528 s.
+- Remaining target: the public/admin Cloudflare document path is still
+  `DYNAMIC`; direct public-host `/public` measured 3.860 s LCP and the
+  route-load report showed the document itself taking 4.662 s. The next slice
+  should make public portal HTML cacheable at the Cloudflare edge through a
+  real cache rule/header policy or tunnel-bypass deployment path, then rerun
+  the same traces.
+- Current plan position after Move 899: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active.
