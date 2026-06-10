@@ -40,6 +40,14 @@ runTest('auth sessions are issued as HttpOnly cookies and cleared on logout', ()
   assert.doesNotMatch(sessionSource, /searchParams\.get\('token'\)/)
 })
 
+runTest('auth session last-seen writes are throttled during route startup', () => {
+  assert.match(sessionSource, /const SESSION_TOUCH_INTERVAL_MS = Math\.max\(10 \* 1000/)
+  assert.match(sessionSource, /const sessionTouchCache = new Map\(\)/)
+  assert.match(sessionSource, /function touchSessionIfDue\(row, req\)/)
+  assert.match(sessionSource, /if \(lastTouchedAt && nowMs - lastTouchedAt < SESSION_TOUCH_INTERVAL_MS\) return/)
+  assert.match(sessionSource, /touchSessionIfDue\(row, req\)/)
+})
+
 runTest('generic sync outbox endpoint is mounted and only accepts allowlisted operation ids', () => {
   assert.match(serverSource, /target\.use\('\/api\/sync', require\('\.\/src\/routes\/sync\.ts'\)\)/)
   assert.match(syncSource, /const OUTBOX_OPERATION_MAP =/)

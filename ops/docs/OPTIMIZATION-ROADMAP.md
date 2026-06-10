@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 882.
+- Latest completed implementation move in this roadmap: Move 883.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,39 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 883 current state:
+- Docker release `business-os:v6.0.0-202606101302-move883` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `6a168caab1837c73`.
+- Authenticated protected requests still validate the live session row, but
+  `backend/src/sessionAuth.ts` no longer writes `user_sessions.last_seen_at`,
+  IP, and user-agent on every `getSessionUser(req)` call. Those session-touch
+  writes are now throttled to once per session per minute by default, reducing
+  startup/navigation write pressure during route-load audits without weakening
+  auth validation.
+- `backend/test/offlineSecurity.test.ts` now guards the throttled session-touch
+  contract. `backend/test/portalInventoryRegression.test.ts` was refreshed to
+  match the current public portal bootstrap payload/cache contract.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T05-06-54-839Z.json`
+  measured Products 213 ms, Inventory 248 ms, POS 278 ms, and Branches 280 ms
+  with zero failed requests/errors. Local `/api/auth/bootstrap` timings were
+  96 ms, 86 ms, 94 ms, and 114 ms respectively.
+- Cloudflare route-load traces
+  `ops/runtime/reports/route-load-trace-2026-06-10T05-08-01-552Z.json` and
+  `ops/runtime/reports/route-load-trace-2026-06-10T05-09-11-736Z.json` had zero
+  failures/errors. The warmed repeat measured Products 2.676 s, Inventory
+  2.487 s, POS 1.883 s, and Branches 1.859 s, with warmed bootstrap timings
+  around 2.373 s, 2.456 s, 1.562 s, and 1.536 s.
+- Cloudflare startup warmup warned during release start, but Docker health and
+  both local/Cloudflare route traces passed. The remaining remote bottleneck is
+  real authenticated bootstrap payload/query/tunnel variance, not repeated
+  last-seen writes or artificial loader delay.
+- Verification passed: focused auth/offline security guard, backend server
+  entry verification, backend route-contract and portal regression tests, full
+  backend `test:utils`, Docker release build/start/health, local Playwright
+  route-load trace, and repeated Cloudflare route-load traces.
 
 Move 882 current state:
 - Docker release `business-os:v6.0.0-202606101205-move882` is running healthy

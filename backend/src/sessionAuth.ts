@@ -10,6 +10,9 @@ const SESSION_14D_MS = Math.max(SESSION_3D_MS, Number(process.env.AUTH_SESSION_1
 const SESSION_7D_MS = Math.max(DEFAULT_SESSION_MS, Number(process.env.AUTH_SESSION_7D_MS || 7 * 24 * 60 * 60 * 1000))
 const SESSION_30D_MS = Math.max(SESSION_14D_MS, Number(process.env.AUTH_SESSION_30D_MS || 30 * 24 * 60 * 60 * 1000))
 const SESSION_ROTATION_GRACE_MS = Math.max(0, Number(process.env.AUTH_SESSION_ROTATION_GRACE_MS || 20 * 1000))
+const SESSION_TOUCH_INTERVAL_MS = Math.max(10 * 1000, Number(process.env.AUTH_SESSION_TOUCH_INTERVAL_MS || 60 * 1000))
+const SESSION_TOUCH_CACHE_MAX = Math.max(100, Number(process.env.AUTH_SESSION_TOUCH_CACHE_MAX || 5000))
+const sessionTouchCache = new Map()
 
 function getDb() {
   return require('./database.ts').db
@@ -109,6 +112,37 @@ function getPresentedSessionToken(req) {
   return ''
 }
 
+function pruneSessionTouchCache(nowMs) {
+  if (sessionTouchCache.size <= SESSION_TOUCH_CACHE_MAX) return
+  const staleBefore = nowMs - SESSION_TOUCH_INTERVAL_MS * 2
+  for (const [sessionId, touchedAt] of sessionTouchCache) {
+    if (sessionTouchCache.size <= SESSION_TOUCH_CACHE_MAX) break
+    if (Number(touchedAt || 0) > staleBefore) continue
+    sessionTouchCache.delete(sessionId)
+  }
+}
+
+function touchSessionIfDue(row, req) {
+  const sessionId = Number(row?.session_id || 0)
+  if (!sessionId) return
+  const nowMs = Date.now()
+  const lastTouchedAt = Number(sessionTouchCache.get(sessionId) || 0)
+  if (lastTouchedAt && nowMs - lastTouchedAt < SESSION_TOUCH_INTERVAL_MS) return
+  sessionTouchCache.set(sessionId, nowMs)
+  pruneSessionTouchCache(nowMs)
+  getDb().prepare(`
+    UPDATE user_sessions
+    SET last_seen_at = CURRENT_TIMESTAMP,
+        last_ip = ?,
+        user_agent = COALESCE(?, user_agent)
+    WHERE id = ?
+  `).run(
+    String(req?.ip || req?.socket?.remoteAddress || '').trim() || null,
+    String(req?.headers?.['user-agent'] || '').trim() || null,
+    sessionId,
+  )
+}
+
 function getSessionUser(req) {
   const token = getPresentedSessionToken(req)
   if (!token) return null
@@ -157,17 +191,7 @@ function getSessionUser(req) {
   `).get(tokenHash, nowIso, nowIso)
   if (!row) return null
 
-  getDb().prepare(`
-    UPDATE user_sessions
-    SET last_seen_at = CURRENT_TIMESTAMP,
-        last_ip = ?,
-        user_agent = COALESCE(?, user_agent)
-    WHERE id = ?
-  `).run(
-    String(req?.ip || req?.socket?.remoteAddress || '').trim() || null,
-    String(req?.headers?.['user-agent'] || '').trim() || null,
-    row.session_id,
-  )
+  touchSessionIfDue(row, req)
 
   return row
 }
@@ -209,6 +233,7 @@ module.exports = {
   clearAuthSessionCookie,
   getPresentedSessionToken,
   getSessionUser,
+  touchSessionIfDue,
   revokeAuthSession,
   revokeUserSessions,
 }

@@ -8,6 +8,33 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Throttle auth session last-seen writes
+  - area: backend auth bootstrap performance, protected-route startup,
+    Docker/Cloudflare verification
+  - result: kept
+  - note: `getSessionUser(req)` still validates the live session row for every
+    protected request, but session last-seen/IP/user-agent writes are now
+    bounded to once per session per minute by default. This removes repeated
+    write pressure from route startup and live audits without masking real data
+    loading or weakening session validation.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101302-move883` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `6a168caab1837c73`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T05-06-54-839Z.json`
+    measured Products 213 ms, Inventory 248 ms, POS 278 ms, and Branches
+    280 ms with zero failures/errors. Local `/api/auth/bootstrap` timings were
+    96 ms, 86 ms, 94 ms, and 114 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T05-08-01-552Z.json`
+    measured Products 3.444 s, Inventory 3.275 s, POS 3.219 s, and Branches
+    2.870 s; warmed repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T05-09-11-736Z.json`
+    measured Products 2.676 s, Inventory 2.487 s, POS 1.883 s, and Branches
+    1.859 s. Both had zero failures/errors.
+  - next target: reduce the real authenticated bootstrap payload/query path
+    and Cloudflare variance while preserving complete data.
+
 - Remove stored-session bootstrap delay
   - area: frontend startup performance, auth bootstrap, POS secondary-read
     guards, Docker/Cloudflare verification
