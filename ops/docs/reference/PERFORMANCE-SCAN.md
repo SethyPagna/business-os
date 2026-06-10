@@ -4,29 +4,29 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 877 release `business-os:v6.0.0-202606100905-move877` is live with
-  frontend hash `3cfe4873964ca1ab` and source hash `d7832416a03cf0ce`.
-- Stored-session admin shells now set auth readiness immediately, so direct
-  route pages can paint from the real stored user/session while
-  `/api/auth/bootstrap` verifies shortly after first paint. The authenticated
-  admin auth-bootstrap preload remains because the no-preload variant was live
-  tested and regressed Inventory/POS Cloudflare timing.
+- Move 878 release `business-os:v6.0.0-202606101015-move878` is live with
+  frontend hash `f2bad1063e780904` and source hash `656d14b6f1a93983`.
+- Built HTML now includes route-specific direct-visit preload maps for Products,
+  POS, Inventory, and Branches; Cloudflare startup warmup parses that inline
+  map. Backend SPA `Link` headers now match measured first-window route chunks
+  instead of advertising stale catalog/public, login, Dexie, or CSV chunks on
+  unrelated admin routes. The server-side `app-api` chunk resolver now avoids
+  the `app-api-methods-*` collision.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-01-307Z.json`:
-  Products 271 ms, Inventory 290 ms, POS 295 ms, Branches 232 ms, zero failed
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-25-423Z.json`:
+  Products 253 ms, Inventory 305 ms, POS 334 ms, Branches 260 ms, zero failed
   requests/errors.
 - Public Cloudflare route-load traces:
-  `ops/runtime/reports/route-load-trace-2026-06-10T00-42-20-631Z.json`
-  measured Products 2.953 s, Inventory 3.143 s, POS 3.037 s, Branches 2.820 s;
-  repeat `ops/runtime/reports/route-load-trace-2026-06-10T00-42-37-305Z.json`
-  measured Products 2.272 s, Inventory 3.938 s, POS 2.888 s, Branches 2.140 s.
-  Both traces had zero failed requests/errors. Products and Branches improved
-  on the warm repeat; POS and Inventory remain gated by
-  `/api/products/bootstrap` and `/api/inventory/bootstrap` through Cloudflare.
-- In-app Browser authenticated smoke verified POS, Products, and Inventory
-  render real product rows with no framework overlay and no relevant app console
-  errors. Next target: reduce first-page product/inventory bootstrap payload and
-  critical timing without racing stale cache or adding artificial loaders.
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-42-448Z.json`
+  measured Products 2.283 s, Inventory 3.369 s, POS 2.681 s, Branches 3.092 s;
+  repeat `ops/runtime/reports/route-load-trace-2026-06-10T01-18-58-363Z.json`
+  measured Products 5.188 s, Inventory 5.027 s, POS 2.877 s, Branches 3.178 s.
+  Both traces had zero failed requests/errors. The repeat regression is
+  dominated by Cloudflare/tunnel transfer variance and non-current-route code
+  warmups, not app-owned HTTP failures or fake loader delay.
+- Next target: split or defer background lazy chunk warmups that still fetch
+  login/catalog/shared modal/header chunks shortly after route startup on
+  remote links, while keeping warm navigation fast inside the same session.
 
 ## 1. Scope
 

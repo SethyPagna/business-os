@@ -105,24 +105,23 @@ const LEGACY_FRONTEND_ASSET_PREFIXES = [
 const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = ['app-bootstrap']
 const SPA_ADMIN_FIRST_WINDOW_CHUNKS = [
   'AdminRoot',
-  'auth-login',
   'app-api',
   'api-http-core',
   'api-http-state',
   'app-shell',
   'Sidebar',
   'shared-ui',
-  'catalog-icons',
 ]
 const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
+  { match: (routePath) => routePath.startsWith('/login'), chunks: ['auth-login'] },
   { match: (routePath) => routePath === '/' || routePath === '/index.html' || routePath.startsWith('/dashboard'), chunks: ['Dashboard', 'dashboard-api', 'dashboard-charts', 'app-shared', 'shared-formatters'] },
-  { match: (routePath) => routePath.startsWith('/pos'), chunks: ['POS', 'app-local-db', 'vendor-dexie', 'csv-utils', 'product-read-api', 'productDisplayHelpers', 'product-shared', 'app-shared', 'lang-en'] },
-  { match: (routePath) => routePath.startsWith('/products'), chunks: ['Products', 'product-read-api', 'productDisplayHelpers', 'product-shared', 'app-shared', 'shared-action-history', 'catalog', 'catalog-public-core', 'catalog-public'] },
-  { match: (routePath) => routePath.startsWith('/inventory'), chunks: ['Inventory', 'vendor-dexie', 'csv-utils', 'product-read-api', 'inventory-api', 'InventoryProductsSurface', 'product-shared', 'app-shared', 'shared-action-history', 'shared-formatters'] },
+  { match: (routePath) => routePath.startsWith('/pos'), chunks: ['POS', 'product-read-api', 'product-shared', 'route-sync-utils', 'settings-refresh', 'app-api', 'shared-lazy-portal-menu', 'shared-ui', 'lang-en'] },
+  { match: (routePath) => routePath.startsWith('/products'), chunks: ['Products', 'product-read-api', 'product-shared', 'productDisplayHelpers', 'shared-action-history', 'route-sync-utils', 'settings-refresh', 'app-api', 'shared-lazy-portal-menu', 'shared-ui', 'lang-en'] },
+  { match: (routePath) => routePath.startsWith('/inventory'), chunks: ['Inventory', 'inventory-api', 'product-shared', 'shared-action-history', 'shared-formatters', 'route-sync-utils', 'settings-refresh', 'app-api', 'shared-lazy-portal-menu', 'shared-ui', 'lang-en'] },
   { match: (routePath) => routePath.startsWith('/sales'), chunks: ['Sales'] },
   { match: (routePath) => routePath.startsWith('/returns'), chunks: ['Returns'] },
   { match: (routePath) => routePath.startsWith('/contacts'), chunks: ['Contacts'] },
-  { match: (routePath) => routePath.startsWith('/branches'), chunks: ['Branches', 'app-local-db', 'vendor-dexie', 'csv-utils', 'branch-api', 'product-read-api', 'route-sync-utils', 'settings-refresh', 'shared-ui', 'shared-action-history', 'shared-page-header', 'shared-modal', 'shared-lazy-portal-menu', 'app-shared', 'product-shared'] },
+  { match: (routePath) => routePath.startsWith('/branches'), chunks: ['Branches', 'branch-api', 'product-shared', 'shared-action-history', 'route-sync-utils', 'settings-refresh', 'app-api', 'api-local-cache', 'shared-lazy-portal-menu', 'shared-ui', 'lang-en'] },
   { match: (routePath) => routePath.startsWith('/audit-log'), chunks: ['AuditLog', 'audit-log-api', 'refresh-cw', 'monitor-smartphone', 'route-sync-utils', 'settings-refresh', 'shared-ui', 'shared-lazy-portal-menu', 'app-shared', 'lang-en'] },
   { match: (routePath) => routePath.startsWith('/receipt-settings'), chunks: ['ReceiptSettings'] },
   { match: (routePath) => routePath.startsWith('/backup'), chunks: ['Backup'] },
@@ -153,6 +152,7 @@ const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
   },
 ]
 const FRONTEND_CHUNK_BASE_COLLISIONS = {
+  'app-api': ['methods'],
   vendor: ['dexie', 'react', 'zxing'],
   catalog: ['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'],
   'catalog-public': ['core', 'utils'],

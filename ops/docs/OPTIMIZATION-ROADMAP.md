@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 877.
+- Latest completed implementation move in this roadmap: Move 878.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,48 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 878 current state:
+- Docker release `business-os:v6.0.0-202606101015-move878` is running healthy
+  with frontend hash `f2bad1063e780904` and source hash
+  `656d14b6f1a93983`.
+- Direct admin route startup now has route-specific preload maps for Products,
+  POS, Inventory, and Branches in the built HTML. The Cloudflare startup warmup
+  script parses that inline map and warms the current route's admin + route
+  chunks instead of only the generic shell graph.
+- Backend SPA `Link` headers were tightened to match the measured
+  first-window route chunks. Products no longer advertises the old catalog and
+  public-catalog chunks; POS/Inventory/Branches no longer advertise
+  Dexie/CSV/import-only chunks as first-window work. The `app-api` chunk
+  resolver now guards against the `app-api-methods-*` collision, and the
+  `auth-login` chunk is only a `/login` route preload rather than a default
+  admin-route preload.
+- Local Playwright proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-25-423Z.json`
+  measured Products 253 ms, Inventory 305 ms, POS 334 ms, and Branches 260 ms
+  with zero failed requests and zero console/page errors.
+- Cloudflare proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-42-448Z.json`
+  measured Products 2.283 s, Inventory 3.369 s, POS 2.681 s, and Branches
+  3.092 s. Repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-58-363Z.json`
+  measured Products 5.188 s, Inventory 5.027 s, POS 2.877 s, and Branches
+  3.178 s. Both traces had zero failed requests and zero console/page errors;
+  the slow repeat was dominated by Cloudflare/tunnel transfer variance and
+  background code warmup chunks, not app-owned HTTP errors.
+- Header proof: authenticated `/products` now advertises 18 Link entries and
+  points at `app-api-BGnyLXt1.js` instead of `app-api-methods-*`; it no longer
+  advertises `auth-login`, `catalog-*`, or `catalog-public-*` chunks in the
+  HTTP preload header.
+- Next executable slice: split or defer non-current-route lazy chunk warmups
+  that still fetch `auth-login`, catalog, shared modal/header, and
+  InventoryProductsSurface chunks shortly after startup on remote links, while
+  preserving instant navigation for warm same-session users.
+- Verification passed: `git diff --check`, backend route-contract and server
+  utility tests, frontend typecheck, frontend JSX/source syntax check, frontend
+  performance verifier, frontend production build, Docker release build/start
+  health, local focused route-load trace, and repeated Cloudflare route-load
+  traces.
 
 Move 877 current state:
 - Docker release `business-os:v6.0.0-202606100905-move877` is running healthy

@@ -163,13 +163,63 @@ const routePreloadChunkNames = {
     'app-portal',
     'portal-tools',
   ],
-}
+  products: [
+    'Products',
+    'product-read-api',
+    'product-shared',
+    'productDisplayHelpers',
+    'shared-action-history',
+    'route-sync-utils',
+    'settings-refresh',
+    'app-api',
+    'shared-lazy-portal-menu',
+    'shared-ui',
+    'lang-en',
+  ],
+  pos: [
+    'POS',
+    'product-read-api',
+    'product-shared',
+    'route-sync-utils',
+    'settings-refresh',
+    'app-api',
+    'shared-lazy-portal-menu',
+    'shared-ui',
+    'lang-en',
+  ],
+  inventory: [
+    'Inventory',
+    'inventory-api',
+    'product-shared',
+    'shared-action-history',
+    'shared-formatters',
+    'route-sync-utils',
+    'settings-refresh',
+    'app-api',
+    'shared-lazy-portal-menu',
+    'shared-ui',
+    'lang-en',
+  ],
+  branches: [
+    'Branches',
+    'branch-api',
+    'product-shared',
+    'shared-action-history',
+    'route-sync-utils',
+    'settings-refresh',
+    'app-api',
+    'api-local-cache',
+    'shared-lazy-portal-menu',
+    'shared-ui',
+    'lang-en',
+  ],
+} satisfies Record<string, readonly string[]>
 
 function isBundleChunk(value: unknown): value is OutputChunk {
   return Boolean(value && typeof value === 'object' && (value as OutputChunk).type === 'chunk')
 }
 
-function toRoutePreloadFiles(bundle: OutputBundle, names: string[]): string[] {
+function toRoutePreloadFiles(bundle: OutputBundle, names: readonly string[]): string[] {
   const wanted = new Set(names)
   const files = Object.values(bundle)
     .filter(isBundleChunk)
@@ -179,7 +229,7 @@ function toRoutePreloadFiles(bundle: OutputBundle, names: string[]): string[] {
   return Array.from(new Set(files))
 }
 
-function buildRoutePreloadScript(preloads: Record<'admin' | 'login' | 'public', string[]>): string {
+function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   return `<script data-business-os-route-preloads>${escapeInlineScript(`(function installBusinessOsRoutePreloads() {
   var preloads = ${JSON.stringify(preloads)};
   function normalizePath(value) {
@@ -232,10 +282,23 @@ function buildRoutePreloadScript(preloads: Record<'admin' | 'login' | 'public', 
     if (/\\.[a-z0-9]+$/i.test(pathname)) return false;
     return !isAdminAppPath(pathname);
   }
+  function routePreloadKey(pathname) {
+    var segment = pathname.split('/').filter(Boolean)[0] || '';
+    if (segment === 'product') return 'products';
+    if (segment === 'point-of-sale') return 'pos';
+    if (segment === 'branch') return 'branches';
+    return segment;
+  }
   var pathname = normalizePath(window.location && window.location.pathname);
-  var files = isPublicCatalogPath(pathname) ? preloads.public : (isLoginPath(pathname) ? preloads.login : preloads.admin);
+  var routeKey = routePreloadKey(pathname);
+  var files = isPublicCatalogPath(pathname)
+    ? preloads.public
+    : (isLoginPath(pathname) ? preloads.login : [].concat(preloads.admin || [], preloads[routeKey] || []));
+  var seen = {};
   files.forEach(function preload(file) {
     var href = '/' + String(file || '').replace(/^\\/+/, '');
+    if (seen[href]) return;
+    seen[href] = true;
     if (!href || document.querySelector('link[rel="modulepreload"][href="' + href + '"]')) return;
     var link = document.createElement('link');
     link.rel = 'modulepreload';
@@ -254,9 +317,10 @@ function injectRouteAwareModulePreloads(): Plugin {
         const bundle = ctx?.bundle
         if (!bundle || html.includes('data-business-os-route-preloads')) return html
         const preloads = {
-          admin: toRoutePreloadFiles(bundle, routePreloadChunkNames.admin),
-          login: toRoutePreloadFiles(bundle, routePreloadChunkNames.login),
-          public: toRoutePreloadFiles(bundle, routePreloadChunkNames.public),
+          ...Object.fromEntries(
+            Object.entries(routePreloadChunkNames)
+              .map(([key, names]) => [key, toRoutePreloadFiles(bundle, names)]),
+          ),
         }
         const script = buildRoutePreloadScript(preloads)
         return html.replace(/(\s*<script type="module")/, `\n    ${script}$1`)

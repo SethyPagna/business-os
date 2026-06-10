@@ -161,6 +161,43 @@ function extractLinkHeaderAssets(baseUrl, linkHeader) {
   return [...assets]
 }
 
+function routePreloadKey(routePath) {
+  const normalized = normalizeRoutePath(routePath)
+  const segment = normalized.split('/').filter(Boolean)[0] || ''
+  if (segment === 'product') return 'products'
+  if (segment === 'point-of-sale') return 'pos'
+  if (segment === 'branch') return 'branches'
+  return segment || 'admin'
+}
+
+function parseInlineRoutePreloadMap(html) {
+  const match = String(html || '').match(/<script\b[^>]*data-business-os-route-preloads[^>]*>([\s\S]*?)<\/script>/i)
+  const source = match?.[1] || ''
+  const preloadsMatch = source.match(/var\s+preloads\s*=\s*(\{[\s\S]*?\});/)
+  if (!preloadsMatch) return {}
+  try {
+    const parsed = JSON.parse(preloadsMatch[1])
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch (_) {
+    return {}
+  }
+}
+
+function extractInlineRoutePreloadAssets(baseUrl, html, routePath) {
+  const preloadMap = parseInlineRoutePreloadMap(html)
+  const routeKey = routePreloadKey(routePath)
+  const fileNames = [
+    ...(Array.isArray(preloadMap.admin) ? preloadMap.admin : []),
+    ...(Array.isArray(preloadMap[routeKey]) ? preloadMap[routeKey] : []),
+  ]
+  const assets = new Set()
+  for (const fileName of fileNames) {
+    const asset = isWarmableAsset(baseUrl, `/${String(fileName || '').replace(/^\/+/, '')}`)
+    if (asset) assets.add(asset)
+  }
+  return [...assets]
+}
+
 function extractFetchedChunkDependencies(baseUrl, assetUrl, source) {
   const assets = new Set()
   const dependencyRe = /["']\.\/([^"']+\.(?:js|css))["']/g
@@ -332,6 +369,7 @@ async function warmSurface(name, baseUrl, routePath, args) {
     ? [...new Set([
       ...extractStartupAssets(baseUrl, html),
       ...extractLinkHeaderAssets(baseUrl, documentResult.linkHeader),
+      ...extractInlineRoutePreloadAssets(baseUrl, html, routePath),
     ])]
     : []
   const apiUrls = args.includeApi && name === 'public'

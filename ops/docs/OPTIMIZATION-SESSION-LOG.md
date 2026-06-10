@@ -8,6 +8,36 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Align direct-route preload hints with measured first-window routes
+  - area: frontend/backend startup performance and Cloudflare warmup
+  - result: kept
+  - note: `frontend/vite.config.ts` now emits route-specific preload maps for
+    Products, POS, Inventory, and Branches. The Cloudflare startup warmup
+    script parses that map, and `backend/server.ts` sends leaner direct-route
+    `Link` headers that avoid stale catalog, login, Dexie, and CSV preloads on
+    the wrong pages.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101015-move878` is running with frontend hash
+    `f2bad1063e780904` and source hash `656d14b6f1a93983`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T01-18-25-423Z.json`
+    measured Products 253 ms, Inventory 305 ms, POS 334 ms, and Branches
+    260 ms with zero failed requests and zero page/console errors.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T01-18-42-448Z.json`
+    measured Products 2.283 s, Inventory 3.369 s, POS 2.681 s, and Branches
+    3.092 s; repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T01-18-58-363Z.json`
+    measured Products 5.188 s, Inventory 5.027 s, POS 2.877 s, and Branches
+    3.178 s. Both had zero failed requests and zero page/console errors.
+  - header proof: authenticated `/products` now resolves the direct `app-api`
+    preload to `app-api-BGnyLXt1.js`, no longer `app-api-methods-*`, and no
+    longer advertises `auth-login`, catalog, or public-catalog chunks in the
+    HTTP preload header.
+  - next target: split or defer non-current-route code warmups that still fetch
+    login/catalog/shared modal chunks shortly after route startup on remote
+    links.
+
 - Let stored-session admin shells paint before server bootstrap verification
   - area: frontend startup performance and auth readiness
   - result: kept
