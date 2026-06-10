@@ -84,6 +84,12 @@ const LOGIN_LOCK_DURATION_MS = Math.max(1000, Number(process.env.AUTH_LOGIN_LOCK
 const SERVER_START_TIME = Math.floor(Date.now() / 1000)
 const MAX_LOGIN_IDENTIFIER_LENGTH = Math.max(32, Number(process.env.AUTH_MAX_LOGIN_IDENTIFIER_LENGTH || 160))
 const MAX_PASSWORD_LENGTH = Math.max(32, Number(process.env.AUTH_MAX_PASSWORD_LENGTH || 4096))
+const AUTH_BOOTSTRAP_SETTINGS_CACHE_TTL_MS = Math.max(1000, Number(process.env.AUTH_BOOTSTRAP_SETTINGS_CACHE_TTL_MS || 5000))
+let authBootstrapSettingsCache = {
+  expiresAt: 0,
+  snapshot: null,
+  version: '',
+}
 
 /**
  * 1. Shared Helpers
@@ -372,13 +378,44 @@ function getUserById(userId) {
   return db.prepare('SELECT * FROM users WHERE id = ? AND deleted_at IS NULL').get(userId)
 }
 
+function getSettingsSnapshotVersion() {
+  try {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS count,
+             MAX(COALESCE(updated_at::text, CURRENT_TIMESTAMP::text)) AS updated_at
+      FROM settings
+    `).get()
+    return `${Number(row?.count || 0)}:${String(row?.updated_at || '')}`
+  } catch (_) {
+    return ''
+  }
+}
+
 async function getSettingsSnapshot() {
+  const now = Date.now()
+  const version = getSettingsSnapshotVersion()
+  if (
+    authBootstrapSettingsCache.snapshot
+    && (
+      (version && authBootstrapSettingsCache.version === version)
+      || (!version && now < authBootstrapSettingsCache.expiresAt)
+    )
+  ) {
+    return { ...authBootstrapSettingsCache.snapshot }
+  }
+
   const rows = db.prepare('SELECT key, value FROM settings').all()
   const settings = {}
   for (const row of rows) {
     settings[row.key] = row.value
   }
-  return sanitizeSettingsSnapshotAsync(settings)
+  const snapshot = await sanitizeSettingsSnapshotAsync(settings)
+  authBootstrapSettingsCache = {
+    expiresAt: now + AUTH_BOOTSTRAP_SETTINGS_CACHE_TTL_MS,
+    snapshot,
+    version,
+  }
+  return { ...snapshot }
 }
 
 function getBootstrapSystemSnapshot(req, organizationPublicId = '') {

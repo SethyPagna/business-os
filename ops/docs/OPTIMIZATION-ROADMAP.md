@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 884.
+- Latest completed implementation move in this roadmap: Move 885.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,38 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 885 current state:
+- Docker release `business-os:v6.0.0-202606101430-move885` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `1b515f91844b680f`.
+- Auth bootstrap now caches the sanitized settings snapshot by a cheap
+  settings version key built from `COUNT(*)` and `MAX(updated_at)`. When the
+  version is unchanged, repeated route loads reuse the sanitized snapshot
+  instead of re-running upload path sanitization and R2/object-storage
+  existence checks. A short TTL fallback exists only for legacy schemas that
+  cannot expose settings `updated_at`.
+- `backend/test/offlineSecurity.test.ts` now guards the auth bootstrap
+  settings-cache contract in addition to the existing session-touch throttle
+  and no-filesystem-write guards.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-38-59-085Z.json`
+  measured Products 329 ms, Inventory 366 ms, POS 327 ms, and Branches 243 ms
+  with zero failed requests/errors. Local `/api/auth/bootstrap` timings were
+  129 ms, 110 ms, 102 ms, and 92 ms respectively.
+- Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-40-06-231Z.json`
+  measured Products 2.328 s, Inventory 2.729 s, POS 3.652 s, and Branches
+  4.449 s with zero failures/errors. Remote readiness is still dominated by
+  Cloudflare/tunnel/auth latency; POS also exposed a real
+  `/api/products/bootstrap` response at 4.110 s.
+- Verification passed: focused auth/offline security guard, backend server
+  entry verification, backend route contracts, full backend `test:utils`,
+  Docker release build/start/health with completed Cloudflare startup warmup,
+  local Playwright route-load trace, and Cloudflare route-load trace.
+- Next executable slice: reduce POS/product bootstrap query payload/timing,
+  especially the first-page product bootstrap path, while preserving complete
+  product rows, branch stock, images, and family metadata.
 
 Move 884 current state:
 - Docker release `business-os:v6.0.0-202606101340-move884` is running healthy

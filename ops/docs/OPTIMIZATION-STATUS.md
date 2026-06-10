@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 884, remove auth-bootstrap filesystem metadata
-  rewrites and make remote route-load navigation timeout configurable for
-  Cloudflare variance checks.
+- Latest completed move: Move 885, cache sanitized auth-bootstrap settings by
+  settings version so repeated route loads do not redo object-storage media
+  existence checks.
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `72b9ecdfda6fdef1`
 - latest verified source hash from the most recent Docker-served live check:
-  `75e0fcde4f49af12`
+  `1b515f91844b680f`
 
 Latest verified reports:
 
@@ -49,11 +49,11 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T06-03-17-577Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-38-59-085Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-40-06-231Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
 - latest focused public-host LCP trace:
@@ -143,6 +143,10 @@ Latest verified reports:
 - latest Move 884 Cloudflare affected-route traces:
   `ops/runtime/reports/route-load-trace-2026-06-10T06-04-33-853Z.json`
   and `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json`
+- latest Move 885 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-38-59-085Z.json`
+- latest Move 885 Cloudflare affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-40-06-231Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -165,6 +169,33 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 885 adds a version-aware sanitized settings cache to the auth bootstrap
+  hot path. `backend/src/routes/auth.ts` now checks a cheap
+  `COUNT(*) + MAX(updated_at)` settings version and reuses the sanitized
+  snapshot when it is unchanged, so repeated route loads do not redo R2/media
+  existence checks for settings upload paths. A short TTL remains only for
+  legacy schemas that cannot expose `updated_at`.
+- Docker image `business-os:v6.0.0-202606101430-move885` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `1b515f91844b680f`.
+  Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-38-59-085Z.json`
+  measured Products 329 ms, Inventory 366 ms, POS 327 ms, and Branches 243 ms
+  with zero failed requests and zero page/console errors. Local
+  `/api/auth/bootstrap` timings were 129 ms, 110 ms, 102 ms, and 92 ms.
+- Public Cloudflare trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-40-06-231Z.json`
+  measured Products 2.328 s, Inventory 2.729 s, POS 3.652 s, and Branches
+  4.449 s with zero failed requests and zero page/console errors. Remote
+  timing remains dominated by real Cloudflare/tunnel/auth latency; POS also
+  showed a real `/api/products/bootstrap` response at 4.110 s, making product
+  bootstrap the next concrete backend target.
+- Current plan position after Move 885: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: reduce
+  POS/product bootstrap query payload/timing without fake data or incomplete
+  first-page rows.
 
 - Move 884 removes a filesystem side effect from authenticated bootstrap.
   `/api/auth/bootstrap` now returns the organization storage layout with

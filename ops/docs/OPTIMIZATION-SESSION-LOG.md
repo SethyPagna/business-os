@@ -8,6 +8,30 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Cache sanitized auth-bootstrap settings by version
+  - area: backend auth bootstrap performance, settings/media sanitization,
+    R2/object-storage existence checks
+  - result: kept
+  - note: auth bootstrap now reuses a sanitized settings snapshot when
+    `COUNT(*) + MAX(updated_at)` for settings is unchanged, avoiding repeated
+    upload path sanitization and object-storage existence checks during normal
+    page-to-page navigation. Legacy schemas fall back to a short TTL.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101430-move885` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `1b515f91844b680f`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T06-38-59-085Z.json`
+    measured Products 329 ms, Inventory 366 ms, POS 327 ms, and Branches
+    243 ms with zero failures/errors. Local `/api/auth/bootstrap` timings were
+    129 ms, 110 ms, 102 ms, and 92 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T06-40-06-231Z.json`
+    measured Products 2.328 s, Inventory 2.729 s, POS 3.652 s, and Branches
+    4.449 s with zero failures/errors. POS also showed a real
+    `/api/products/bootstrap` response at 4.110 s.
+  - next target: reduce POS/product bootstrap query payload/timing without
+    losing complete product rows or branch/image/family metadata.
+
 - Remove auth-bootstrap filesystem writes
   - area: backend auth bootstrap performance, organization storage payload,
     Cloudflare route-load diagnostics

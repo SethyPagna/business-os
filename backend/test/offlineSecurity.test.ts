@@ -54,6 +54,15 @@ runTest('auth bootstrap does not rewrite organization filesystem metadata on eve
   assert.match(authSource, /storage: organization \? getOrganizationFilesystemLayout\(organization\) : null/)
 })
 
+runTest('auth bootstrap caches sanitized settings until settings version changes', () => {
+  assert.match(authSource, /const AUTH_BOOTSTRAP_SETTINGS_CACHE_TTL_MS = Math\.max\(1000/)
+  assert.match(authSource, /let authBootstrapSettingsCache = \{[\s\S]*snapshot: null[\s\S]*version: ''/)
+  assert.match(authSource, /function getSettingsSnapshotVersion\(\)/)
+  assert.match(authSource, /MAX\(COALESCE\(updated_at::text, CURRENT_TIMESTAMP::text\)\) AS updated_at/)
+  assert.match(authSource, /authBootstrapSettingsCache\.snapshot[\s\S]*authBootstrapSettingsCache\.version === version/)
+  assert.match(authSource, /const snapshot = await sanitizeSettingsSnapshotAsync\(settings\)/)
+})
+
 runTest('generic sync outbox endpoint is mounted and only accepts allowlisted operation ids', () => {
   assert.match(serverSource, /target\.use\('\/api\/sync', require\('\.\/src\/routes\/sync\.ts'\)\)/)
   assert.match(syncSource, /const OUTBOX_OPERATION_MAP =/)

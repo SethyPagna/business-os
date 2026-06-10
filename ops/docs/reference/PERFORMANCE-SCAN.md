@@ -4,29 +4,25 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 884 release `business-os:v6.0.0-202606101340-move884` is live with
-  frontend hash `72b9ecdfda6fdef1` and source hash `75e0fcde4f49af12`.
-- Auth bootstrap no longer rewrites organization filesystem metadata/readme
-  files on every protected route load. It now returns
-  `getOrganizationFilesystemLayout(organization)` while explicit organization
-  setup/current routes keep the ensure/write helper.
-- The route-load trace runner now honors `BOS_ROUTE_LOAD_NAV_TIMEOUT_MS` for
-  `page.goto(...)`, making Cloudflare navigation variance measurable without
-  weakening the route-ready timeout.
+- Move 885 release `business-os:v6.0.0-202606101430-move885` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `1b515f91844b680f`.
+- Auth bootstrap now caches the sanitized settings snapshot by a settings
+  version key from `COUNT(*) + MAX(updated_at)`. Repeated route loads reuse the
+  sanitized snapshot while settings are unchanged, avoiding repeated
+  object-storage/media existence checks for upload-backed setting values.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T06-03-17-577Z.json`:
-  Products 275 ms, Inventory 247 ms, POS 289 ms, Branches 224 ms, zero failed
-  requests/errors. Local `/api/auth/bootstrap` timings were 135 ms, 104 ms,
-  103 ms, and 102 ms.
-- Public Cloudflare route-load traces
-  `ops/runtime/reports/route-load-trace-2026-06-10T06-04-33-853Z.json` and
-  `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json` had zero
-  failed requests/errors. The repeat measured Products 3.203 s, Inventory
-  3.553 s, POS 3.325 s, and Branches 2.828 s; remote timing is still dominated
-  by real `/api/auth/bootstrap` tunnel/query latency rather than app-side
-  synthetic waits or organization filesystem rewrites.
-- Next target: reduce settings snapshot sanitization/object-storage existence
-  work in auth bootstrap while preserving correct, complete data.
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-38-59-085Z.json`:
+  Products 329 ms, Inventory 366 ms, POS 327 ms, Branches 243 ms, zero failed
+  requests/errors. Local `/api/auth/bootstrap` timings were 129 ms, 110 ms,
+  102 ms, and 92 ms.
+- Public Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-40-06-231Z.json` had
+  zero failed requests/errors and measured Products 2.328 s, Inventory
+  2.729 s, POS 3.652 s, and Branches 4.449 s. Remote timing remains dominated
+  by real Cloudflare/tunnel/auth latency; POS also exposed
+  `/api/products/bootstrap` at 4.110 s.
+- Next target: reduce POS/product bootstrap query payload/timing while
+  preserving correct, complete product data.
 
 ## 1. Scope
 
