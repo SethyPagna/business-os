@@ -4,27 +4,24 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 888 release `business-os:v6.0.0-202606101700-move888` is live with
-  frontend hash `72b9ecdfda6fdef1` and source hash `f7d6f6a5e4f7323a`.
-- Authenticated admin HTML no longer emits the credentialed
-  `/api/auth/bootstrap` fetch preload by default. The old preload remains
-  available behind `ADMIN_AUTH_BOOTSTRAP_PRELOAD=1`, while route-owned
-  modulepreload hints and the real app-side auth bootstrap fetch remain
-  unchanged.
+- Move 889 release `business-os:v6.0.0-202606101810-move889` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `9c3cbdbe690bf625`.
+- Runtime descriptor state is memoized for authenticated startup bursts.
+  `/api/auth/bootstrap` no longer re-reads the runtime-state file or re-hashes
+  `DATA_ROOT` on every protected route load; runtime-state writes refresh the
+  memo immediately and reads return cloned state.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T08-33-11-666Z.json`:
-  Products 231 ms, Inventory 270 ms, POS 306 ms, Branches 235 ms, zero failed
-  requests/errors. Local `/api/auth/bootstrap` timings were 195 ms, 244 ms,
-  253 ms, and 200 ms.
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`:
+  Products 369 ms, Inventory 340 ms, POS 317 ms, Branches 244 ms, zero failed
+  requests/errors. Local `/api/auth/bootstrap` timings were 299 ms, 299 ms,
+  252 ms, and 205 ms.
 - Public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T08-33-35-826Z.json` had
-  zero failed requests/errors and measured Products 3.563 s, Inventory
-  3.274 s, POS 3.999 s, and Branches 3.414 s. Public `/api/auth/bootstrap`
-  timings were 3.339 s, 3.093 s, 3.881 s, and 3.359 s. A live public
-  `/products` header probe returned HTTP 200 with route-owned modulepreload
-  links and no `/api/auth/bootstrap` Link header.
-- Next target: reduce true `/api/auth/bootstrap` response time and Cloudflare
-  variance while preserving real data readiness.
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json` had
+  zero failed requests/errors and measured Products 3.606 s, Inventory
+  3.945 s, POS 3.312 s, and Branches 4.621 s. Public `/api/auth/bootstrap`
+  timings were 3.479 s, 3.818 s, 3.175 s, and 4.596 s.
+- Next target: trace and reduce Cloudflare/tunnel/auth variance directly while
+  preserving real data readiness and avoiding synthetic loading delays.
 
 ## 1. Scope
 

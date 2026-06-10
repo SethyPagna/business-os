@@ -8,6 +8,32 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Memoize runtime descriptor state for auth startup
+  - area: backend auth bootstrap performance, runtime-state filesystem reads,
+    runtime descriptor hashing
+  - result: kept
+  - note: runtime descriptor state now uses a short in-process memo, cloned
+    returns, write-through refreshes, and a precomputed `DATA_ROOT` hash key so
+    protected route startup bursts avoid repeated synchronous runtime-state
+    file reads and repeated hash work.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101810-move889` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `9c3cbdbe690bf625`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`
+    measured Products 369 ms, Inventory 340 ms, POS 317 ms, and Branches
+    244 ms with zero failures/errors. Local `/api/auth/bootstrap` timings were
+    299 ms, 299 ms, 252 ms, and 205 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json`
+    measured Products 3.606 s, Inventory 3.945 s, POS 3.312 s, and Branches
+    4.621 s with zero failures/errors. Public `/api/auth/bootstrap` timings
+    were 3.479 s, 3.818 s, 3.175 s, and 4.596 s, so the remaining remote
+    latency is the Cloudflare/tunnel/auth leg rather than local runtime-state
+    file work.
+  - next target: trace Cloudflare/tunnel/auth variance directly and reduce it
+    without fake ready states or incomplete first data.
+
 - Make auth-bootstrap fetch preload opt-in
   - area: backend admin HTML headers, Cloudflare preload warning noise,
     stored-session startup

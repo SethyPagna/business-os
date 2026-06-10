@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 888.
+- Latest completed implementation move in this roadmap: Move 889.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,39 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 889 current state:
+- Docker release `business-os:v6.0.0-202606101810-move889` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `9c3cbdbe690bf625`.
+- Runtime descriptor state is now memoized for authenticated startup bursts.
+  `backend/src/runtimeState/index.ts` keeps a short in-process clone of the
+  runtime state, refreshes it on writes, and precomputes the `DATA_ROOT` hash
+  key so `/api/auth/bootstrap` avoids repeated synchronous runtime-state file
+  reads and repeated hash work across rapid protected route loads.
+- `backend/test/runtimeVersion.test.ts` now guards the runtime-state memo,
+  bounded TTL, cloned returns, and precomputed data-root hash key so the auth
+  bootstrap hot path does not silently fall back to per-request filesystem/hash
+  work.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`
+  measured Products 369 ms, Inventory 340 ms, POS 317 ms, and Branches 244 ms
+  with zero failed requests/errors. Local `/api/auth/bootstrap` timings were
+  299 ms, 299 ms, 252 ms, and 205 ms respectively.
+- Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json`
+  completed Products 3.606 s, Inventory 3.945 s, POS 3.312 s, and Branches
+  4.621 s with zero failed requests and zero warnings/errors. Public
+  `/api/auth/bootstrap` timings were 3.479 s, 3.818 s, 3.175 s, and 4.596 s,
+  which confirms the remaining remote cost is Cloudflare/tunnel/auth-path
+  variance rather than local runtime-state filesystem work.
+- Verification passed: focused runtime-version guard, backend route contracts,
+  backend server entry verification, full backend `test:utils`, Docker release
+  build/start/health, local Playwright route-load trace, and Cloudflare
+  route-load trace.
+- Next executable slice: trace and reduce Cloudflare/tunnel/auth variance
+  directly while preserving real data readiness and avoiding synthetic
+  loading delays.
 
 Move 888 current state:
 - Docker release `business-os:v6.0.0-202606101700-move888` is running healthy

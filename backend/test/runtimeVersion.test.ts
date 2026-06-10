@@ -7,6 +7,7 @@ const path = require('path')
 const { readFrontendBuildInfoFromRoot } = require('../src/runtimeVersion.ts')
 
 let failed = 0
+const runtimeStateSource = fs.readFileSync(path.join(__dirname, '..', 'src/runtimeState/index.ts'), 'utf8')
 
 function runTest(name, fn) {
   try {
@@ -43,6 +44,15 @@ runTest('runtime version returns empty frontend metadata when dist manifest is a
     hash: '',
     builtAt: '',
   })
+})
+
+runTest('runtime descriptor memoizes runtime-state reads for bootstrap bursts', () => {
+  assert.match(runtimeStateSource, /const RUNTIME_STATE_MEMO_MS = Math\.max\(1000/)
+  assert.match(runtimeStateSource, /let runtimeStateMemo = \{ state: null, expiresAt: 0 \}/)
+  assert.match(runtimeStateSource, /function cloneRuntimeState\(state\)/)
+  assert.match(runtimeStateSource, /runtimeStateMemo\.state && runtimeStateMemo\.expiresAt > now/)
+  assert.match(runtimeStateSource, /const DATA_ROOT_KEY = crypto\.createHash\('sha256'\)\.update\(DATA_ROOT\)/)
+  assert.match(runtimeStateSource, /dataRootKey: DATA_ROOT_KEY/)
 })
 
 if (failed > 0) {

@@ -7,6 +7,9 @@ const { DATA_ROOT } = require('../config/index.ts')
 
 const RUNTIME_META_DIR = path.join(DATA_ROOT, 'meta')
 const RUNTIME_STATE_FILE = path.join(RUNTIME_META_DIR, 'runtime-state.json')
+const RUNTIME_STATE_MEMO_MS = Math.max(1000, Number(process.env.RUNTIME_STATE_MEMO_MS || 5000))
+const DATA_ROOT_KEY = crypto.createHash('sha256').update(DATA_ROOT).digest('hex').slice(0, 16)
+let runtimeStateMemo = { state: null, expiresAt: 0 }
 
 /**
  * @typedef {{ storageVersion: number, updatedAt: string | null, reason: string }} RuntimeState
@@ -15,6 +18,14 @@ const RUNTIME_STATE_FILE = path.join(RUNTIME_META_DIR, 'runtime-state.json')
 
 function ensureRuntimeMetaDir() {
   fs.mkdirSync(RUNTIME_META_DIR, { recursive: true })
+}
+
+function cloneRuntimeState(state) {
+  return {
+    storageVersion: Math.max(1, Number(state?.storageVersion || 1)),
+    updatedAt: String(state?.updatedAt || '').trim() || null,
+    reason: String(state?.reason || '').trim() || 'bootstrap',
+  }
 }
 
 /**
@@ -43,16 +54,25 @@ function readRuntimeState() {
  */
 function writeRuntimeState(state) {
   ensureRuntimeMetaDir()
-  fs.writeFileSync(RUNTIME_STATE_FILE, JSON.stringify(state, null, 2), 'utf8')
-  return state
+  const next = cloneRuntimeState(state)
+  fs.writeFileSync(RUNTIME_STATE_FILE, JSON.stringify(next, null, 2), 'utf8')
+  runtimeStateMemo = { state: next, expiresAt: Date.now() + RUNTIME_STATE_MEMO_MS }
+  return cloneRuntimeState(next)
 }
 
 /**
  * @returns {RuntimeState}
  */
 function getRuntimeState() {
+  const now = Date.now()
+  if (runtimeStateMemo.state && runtimeStateMemo.expiresAt > now) {
+    return cloneRuntimeState(runtimeStateMemo.state)
+  }
   const state = readRuntimeState()
-  if (fs.existsSync(RUNTIME_STATE_FILE)) return state
+  if (fs.existsSync(RUNTIME_STATE_FILE)) {
+    runtimeStateMemo = { state: cloneRuntimeState(state), expiresAt: now + RUNTIME_STATE_MEMO_MS }
+    return cloneRuntimeState(state)
+  }
   return writeRuntimeState({
     storageVersion: state.storageVersion,
     updatedAt: new Date().toISOString(),
@@ -83,7 +103,7 @@ function buildRuntimeDescriptor(organizationPublicId = '') {
     serverStartTime: null,
     storageVersion: String(state.storageVersion),
     updatedAt: state.updatedAt,
-    dataRootKey: crypto.createHash('sha256').update(DATA_ROOT).digest('hex').slice(0, 16),
+    dataRootKey: DATA_ROOT_KEY,
     organizationPublicId: String(organizationPublicId || '').trim() || null,
   }
 }

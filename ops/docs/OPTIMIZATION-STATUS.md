@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 888, make the authenticated admin
-  `/api/auth/bootstrap` fetch preload opt-in after public traces showed it was
-  often unused/noisy.
+- Latest completed move: Move 889, memoize runtime descriptor state during
+  authenticated startup bursts so `/api/auth/bootstrap` no longer re-reads the
+  runtime-state file or re-hashes `DATA_ROOT` on every protected route load.
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `72b9ecdfda6fdef1`
 - latest verified source hash from the most recent Docker-served live check:
-  `f7d6f6a5e4f7323a`
+  `9c3cbdbe690bf625`
 
 Latest verified reports:
 
@@ -49,11 +49,11 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T08-33-11-666Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T08-33-35-826Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
 - latest focused public-host LCP trace:
@@ -162,6 +162,10 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-10T08-33-11-666Z.json`
 - latest Move 888 Cloudflare affected-route trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T08-33-35-826Z.json`
+- latest Move 889 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`
+- latest Move 889 Cloudflare affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -184,6 +188,34 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 889 memoizes runtime descriptor state for authenticated startup bursts.
+  `backend/src/runtimeState/index.ts` now keeps a short in-process clone of
+  the runtime state, updates that memo on writes, and uses a precomputed
+  `DATA_ROOT` hash key so the auth bootstrap path avoids repeated synchronous
+  runtime-state file reads and repeated hash work during page-to-page startup.
+  The memo has a bounded TTL and runtime-state writes refresh it immediately,
+  preserving current-process correctness while reducing hot-path I/O.
+- Docker image `business-os:v6.0.0-202606101810-move889` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `9c3cbdbe690bf625`.
+  Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`
+  measured Products 369 ms, Inventory 340 ms, POS 317 ms, and Branches 244 ms
+  with zero failed requests and zero page/console errors. Local
+  `/api/auth/bootstrap` timings were 299 ms, 299 ms, 252 ms, and 205 ms.
+- Public Cloudflare trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json`
+  measured Products 3.606 s, Inventory 3.945 s, POS 3.312 s, and Branches
+  4.621 s with zero failed requests and zero page/console errors. Public
+  `/api/auth/bootstrap` timings were 3.479 s, 3.818 s, 3.175 s, and 4.596 s,
+  confirming the remaining startup cost is dominated by the public
+  Cloudflare/tunnel/auth path rather than local runtime-state file work.
+- Current plan position after Move 889: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: trace the
+  Cloudflare/tunnel/auth leg directly and reduce public variance without
+  introducing fake ready states or incomplete first data.
 
 - Move 888 turns the authenticated admin `/api/auth/bootstrap` fetch preload
   into an explicit opt-in via `ADMIN_AUTH_BOOTSTRAP_PRELOAD=1`. The default
