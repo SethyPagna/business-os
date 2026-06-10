@@ -8,6 +8,31 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Cache combined product bootstrap payload
+  - area: backend product/POS bootstrap performance, branch-list startup reads,
+    product read-cache reuse
+  - result: kept
+  - note: `/api/products/bootstrap` now reuses a combined cached payload built
+    from the branch list and cached product search result, keyed by the
+    existing product read-cache/catalog snapshot. Branch-list reads also have
+    a short in-process memo for route startup bursts and are cleared when the
+    product catalog snapshot invalidates.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101520-move886` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `5717dc8b4355f02b`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T07-33-44-286Z.json`
+    measured Products 350 ms, Inventory 350 ms, POS 242 ms, and Branches
+    245 ms with zero failures/errors. Local `/api/products/bootstrap` on POS
+    completed in 289 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T07-35-08-729Z.json`
+    measured Products 2.356 s, Inventory 2.480 s, POS 3.097 s, and Branches
+    3.889 s with zero failures/errors. This public pass was dominated by
+    `/api/auth/bootstrap` tunnel/auth latency rather than product bootstrap.
+  - next target: keep reducing authenticated startup/auth-tunnel latency and
+    delayed product metadata reads without incomplete first-page payloads.
+
 - Cache sanitized auth-bootstrap settings by version
   - area: backend auth bootstrap performance, settings/media sanitization,
     R2/object-storage existence checks

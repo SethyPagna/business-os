@@ -4,25 +4,25 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 885 release `business-os:v6.0.0-202606101430-move885` is live with
-  frontend hash `72b9ecdfda6fdef1` and source hash `1b515f91844b680f`.
-- Auth bootstrap now caches the sanitized settings snapshot by a settings
-  version key from `COUNT(*) + MAX(updated_at)`. Repeated route loads reuse the
-  sanitized snapshot while settings are unchanged, avoiding repeated
-  object-storage/media existence checks for upload-backed setting values.
+- Move 886 release `business-os:v6.0.0-202606101520-move886` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `5717dc8b4355f02b`.
+- Product bootstrap now caches the combined branch-list plus cached product
+  search payload by product read-cache key and catalog snapshot. Branch-list
+  reads also have a short in-process memo for startup bursts.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T06-38-59-085Z.json`:
-  Products 329 ms, Inventory 366 ms, POS 327 ms, Branches 243 ms, zero failed
-  requests/errors. Local `/api/auth/bootstrap` timings were 129 ms, 110 ms,
-  102 ms, and 92 ms.
+  `ops/runtime/reports/route-load-trace-2026-06-10T07-33-44-286Z.json`:
+  Products 350 ms, Inventory 350 ms, POS 242 ms, Branches 245 ms, zero failed
+  requests/errors. Local `/api/products/bootstrap` on POS completed in 289 ms;
+  local `/api/auth/bootstrap` timings were 137 ms, 108 ms, 91 ms, and 88 ms.
 - Public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T06-40-06-231Z.json` had
-  zero failed requests/errors and measured Products 2.328 s, Inventory
-  2.729 s, POS 3.652 s, and Branches 4.449 s. Remote timing remains dominated
-  by real Cloudflare/tunnel/auth latency; POS also exposed
-  `/api/products/bootstrap` at 4.110 s.
-- Next target: reduce POS/product bootstrap query payload/timing while
-  preserving correct, complete product data.
+  `ops/runtime/reports/route-load-trace-2026-06-10T07-35-08-729Z.json` had
+  zero failed requests/errors and measured Products 2.356 s, Inventory
+  2.480 s, POS 3.097 s, and Branches 3.889 s. This public pass was dominated
+  by `/api/auth/bootstrap` tunnel/auth latency; product bootstrap did not
+  appear before the route-ready marker.
+- Next target: continue reducing authenticated startup/auth-tunnel latency and
+  delayed product metadata reads while preserving correct, complete product
+  data.
 
 ## 1. Scope
 

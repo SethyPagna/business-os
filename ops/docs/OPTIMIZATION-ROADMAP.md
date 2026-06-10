@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 885.
+- Latest completed implementation move in this roadmap: Move 886.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,39 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 886 current state:
+- Docker release `business-os:v6.0.0-202606101520-move886` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `5717dc8b4355f02b`.
+- POS product bootstrap now uses `getCachedProductBootstrapPayload(query)` to
+  cache the combined branch-list plus product-search payload by the existing
+  product read-cache key and catalog snapshot. The branch list also has a
+  short 5 second in-process memo for startup bursts, and the memo is cleared
+  through product catalog snapshot invalidation.
+- `backend/test/productSearchPagination.test.ts` now guards the combined
+  product-bootstrap cache key and branch-list memo so the POS startup path
+  does not silently fall back to rebuilding branch/product bootstrap data on
+  every route open.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T07-33-44-286Z.json`
+  measured Products 350 ms, Inventory 350 ms, POS 242 ms, and Branches 245 ms
+  with zero failed requests/errors. Local `/api/products/bootstrap` on POS
+  completed in 289 ms, and local `/api/auth/bootstrap` timings were 137 ms,
+  108 ms, 91 ms, and 88 ms respectively.
+- Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T07-35-08-729Z.json`
+  measured Products 2.356 s, Inventory 2.480 s, POS 3.097 s, and Branches
+  3.889 s with zero failures/errors. Remote readiness is now visibly dominated
+  by `/api/auth/bootstrap` tunnel/auth timing in this pass; product bootstrap
+  did not appear before the route-ready marker.
+- Verification passed: focused product pagination/cache guard, backend route
+  contracts, backend server entry verification, full backend `test:utils`,
+  Docker release build/start/health with completed Cloudflare startup warmup,
+  local Playwright route-load trace, and Cloudflare route-load trace.
+- Next executable slice: keep reducing authenticated startup/auth-tunnel
+  latency and delayed product metadata reads without fake data, stale cached
+  rows, or incomplete first-page payloads.
 
 Move 885 current state:
 - Docker release `business-os:v6.0.0-202606101430-move885` is running healthy

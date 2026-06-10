@@ -43,7 +43,9 @@ const {
 
 const router = express.Router()
 const PRODUCT_CATALOG_SNAPSHOT_VERSION_MEMO_MS = 5000
+const PRODUCT_BRANCH_LIST_MEMO_MS = 5000
 let productCatalogSnapshotVersionMemo = { value: '', builtAt: 0 }
+let productBranchListMemo = { value: null, builtAt: 0 }
 
 function asyncRoute(handler) {
   return (req, res, next) => Promise.resolve(handler(req, res, next)).catch(next)
@@ -62,7 +64,13 @@ function getActiveBranches() {
 }
 
 function getBranchListForBootstrap() {
-  return db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all()
+  const now = Date.now()
+  if (productBranchListMemo.value && (now - productBranchListMemo.builtAt) < PRODUCT_BRANCH_LIST_MEMO_MS) {
+    return productBranchListMemo.value.map((branch) => ({ ...branch }))
+  }
+  const value = db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all()
+  productBranchListMemo = { value, builtAt: now }
+  return value.map((branch) => ({ ...branch }))
 }
 
 function settingsHasUpdatedAt() {
@@ -504,6 +512,7 @@ function getProductCatalogSnapshotVersion() {
 
 function invalidateProductCatalogSnapshotVersion() {
   productCatalogSnapshotVersionMemo = { value: '', builtAt: 0 }
+  productBranchListMemo = { value: null, builtAt: 0 }
 }
 
 function broadcastProductsUpdate(data = {}) {
@@ -531,6 +540,13 @@ function buildProductReadCacheKey(kind, query = {}) {
 
 function getCachedProductSearchPayload(query = {}) {
   return getOrSetJson(buildProductReadCacheKey('search', query), 20, () => buildProductSearchPayload(query))
+}
+
+function getCachedProductBootstrapPayload(query = {}) {
+  return getOrSetJson(buildProductReadCacheKey('bootstrap', query), 20, async () => ({
+    branches: getBranchListForBootstrap(),
+    products: await getCachedProductSearchPayload(query),
+  }))
 }
 
 function getCachedProductFilters(query = {}) {
@@ -964,10 +980,7 @@ function buildProductSearchPayload(query = {}) {
 // GET /api/products/bootstrap - first POS/catalog route read with branch metadata
 router.get('/bootstrap', authToken, asyncRoute(async (req, res) => {
   try {
-    ok(res, {
-      branches: getBranchListForBootstrap(),
-      products: await getCachedProductSearchPayload(req.query),
-    })
+    ok(res, await getCachedProductBootstrapPayload(req.query))
   } catch (error) {
     err(res, error?.message || 'Failed to bootstrap products')
   }
