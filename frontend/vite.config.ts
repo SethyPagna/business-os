@@ -180,6 +180,7 @@ const routePreloadChunkNames = {
     'POS',
     'product-read-api',
     'product-shared',
+    'productDisplayHelpers',
     'route-sync-utils',
     'settings-refresh',
     'app-api',
@@ -189,6 +190,7 @@ const routePreloadChunkNames = {
   ],
   inventory: [
     'Inventory',
+    'InventoryProductsSurface',
     'inventory-api',
     'product-shared',
     'shared-action-history',
@@ -205,6 +207,7 @@ const routePreloadChunkNames = {
     'branch-api',
     'product-shared',
     'shared-action-history',
+    'shared-page-header',
     'route-sync-utils',
     'settings-refresh',
     'app-api',
@@ -563,9 +566,9 @@ function manualChunks(id: string): string | undefined {
   const normalized = id.replace(/\\/g, '/')
   if (normalized.includes('/node_modules/lucide-react/dist/esm/icons/')) {
     const iconName = path.basename(normalized, '.js')
+    if (routeSharedIconNames.has(iconName) || appShellIconNames.has(iconName)) return 'shared-ui'
     if (authLoginIconNames.has(iconName)) return 'auth-login'
     if (publicCatalogIconNames.has(iconName)) return 'catalog-icons'
-    if (routeSharedIconNames.has(iconName) || appShellIconNames.has(iconName)) return 'shared-ui'
     return undefined
   }
   if (!id.includes('node_modules')) {
@@ -644,7 +647,13 @@ function manualChunks(id: string): string | undefined {
       return 'product-read-api'
     }
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
-    if (normalized.endsWith('/src/api/authTransport.ts')) return 'app-auth'
+    if (
+      normalized.endsWith('/src/api/authTransport.ts')
+      || normalized.endsWith('/src/AppContext.tsx')
+      || normalized.endsWith('/src/app/AppContextCore.tsx')
+    ) {
+      return 'app-auth'
+    }
     if (normalized.endsWith('/src/api/systemRuntime.ts')) return 'app-system'
     if (normalized.endsWith('/src/api/browserDialogs.ts')) return 'browser-dialogs'
     if (normalized.endsWith('/src/api/portalPublicTransport.ts')) return 'app-portal'
@@ -676,6 +685,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/products/shared/')
+      || normalized.includes('/src/components/products/helpers/productFilterHelpers.ts')
       || normalized.includes('/src/components/products/helpers/productGalleryHelpers.ts')
       || normalized.includes('/src/components/products/helpers/productSupplierOptions.ts')
       || normalized.includes('/src/utils/productBatches.ts')

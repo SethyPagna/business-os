@@ -8,8 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 878, align direct-route preload hints and
-  Cloudflare startup warming with the measured first-window admin routes.
+- Latest completed move: Move 879, remove remaining POS/Inventory artificial
+  startup waits and split first-window admin chunks away from login/catalog
+  payloads.
 
 ## Current Baseline
 
@@ -17,9 +18,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `f2bad1063e780904`
+  `ecede1516f03dac6`
 - latest verified source hash from the most recent Docker-served live check:
-  `656d14b6f1a93983`
+  `54446f49482700a5`
 
 Latest verified reports:
 
@@ -117,6 +118,11 @@ Latest verified reports:
 - latest Move 878 Cloudflare affected-route traces:
   `ops/runtime/reports/route-load-trace-2026-06-10T01-18-42-448Z.json`
   and `ops/runtime/reports/route-load-trace-2026-06-10T01-18-58-363Z.json`
+- latest Move 879 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-55-17-751Z.json`
+- latest Move 879 Cloudflare affected-route traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-55-21-233Z.json`
+  and `ops/runtime/reports/route-load-trace-2026-06-10T01-56-02-633Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:

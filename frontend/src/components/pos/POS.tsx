@@ -73,10 +73,6 @@ const POS_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const POS_CUSTOMER_CREATE_TIMEOUT_MS = 12000
 const POS_DELIVERY_CREATE_TIMEOUT_MS = 12000
 const POS_CHECKOUT_TIMEOUT_MS = 20000
-const POS_CONTACT_OPTIONS_READY_DELAY_MS = 1500
-const POS_FILTER_META_READY_DELAY_MS = 1500
-const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 1500
-
 import type { ContactOption } from '../contacts/contactOptionUtils'
 
 type ContactOptionUtilsModule = typeof import('../contacts/contactOptionUtils')
@@ -925,10 +921,8 @@ export default function POS() {
       return undefined
     }
     if (!catalogLoadedOnceRef.current || catalogRefreshing || categoryOptionsLoadedRef.current) return undefined
-    const timer = window.setTimeout(() => {
-      setCategoryOptionsReady(true)
-    }, POS_CATEGORY_OPTIONS_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setCategoryOptionsReady(true)
+    return undefined
   }, [catalogRefreshing, isActive])
 
   useEffect(() => {
@@ -947,10 +941,8 @@ export default function POS() {
       return undefined
     }
     if (!catalogLoadedOnceRef.current || catalogRefreshing) return undefined
-    const timer = window.setTimeout(() => {
-      setContactOptionsReady(true)
-    }, POS_CONTACT_OPTIONS_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setContactOptionsReady(true)
+    return undefined
   }, [catalogRefreshing, isActive])
 
   useEffect(() => {
@@ -967,10 +959,8 @@ export default function POS() {
       return undefined
     }
     if (!catalogLoadedOnceRef.current || catalogRefreshing || filterMetaLoadedRef.current) return undefined
-    const timer = window.setTimeout(() => {
-      setFilterMetaReady(true)
-    }, POS_FILTER_META_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setFilterMetaReady(true)
+    return undefined
   }, [catalogRefreshing, isActive])
 
   useEffect(() => {

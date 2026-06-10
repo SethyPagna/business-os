@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 878.
+- Latest completed implementation move in this roadmap: Move 879.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -73,42 +73,44 @@ What remains:
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
 
-Move 878 current state:
-- Docker release `business-os:v6.0.0-202606101015-move878` is running healthy
-  with frontend hash `f2bad1063e780904` and source hash
-  `656d14b6f1a93983`.
+Move 879 current state:
+- Docker release `business-os:v6.0.0-202606100950-move879` is running healthy
+  with frontend hash `ecede1516f03dac6` and source hash
+  `54446f49482700a5`.
 - Direct admin route startup now has route-specific preload maps for Products,
   POS, Inventory, and Branches in the built HTML. The Cloudflare startup warmup
   script parses that inline map and warms the current route's admin + route
   chunks instead of only the generic shell graph.
-- Backend SPA `Link` headers were tightened to match the measured
-  first-window route chunks. Products no longer advertises the old catalog and
-  public-catalog chunks; POS/Inventory/Branches no longer advertise
-  Dexie/CSV/import-only chunks as first-window work. The `app-api` chunk
-  resolver now guards against the `app-api-methods-*` collision, and the
-  `auth-login` chunk is only a `/login` route preload rather than a default
-  admin-route preload.
+- Backend SPA `Link` headers were tightened again to include route-owned
+  dependencies found by live traces: POS `productDisplayHelpers`, Inventory
+  `InventoryProductsSurface`, and Branches `shared-page-header`. Products no
+  longer imports public catalog chunks in its first window because shared
+  product filter helpers now resolve to `product-shared`. Shared Lucide icons
+  prefer `shared-ui` before auth/catalog buckets, and the normal admin shell
+  imports `app-auth` instead of the full login form chunk.
+- POS no longer waits 1.5 s before category/contact/filter metadata becomes
+  ready after the real catalog load. Inventory no longer waits 1.2 s before
+  requesting product filter metadata after the primary product page loads.
 - Local Playwright proof:
-  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-25-423Z.json`
-  measured Products 253 ms, Inventory 305 ms, POS 334 ms, and Branches 260 ms
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-55-17-751Z.json`
+  measured Products 260 ms, Inventory 317 ms, POS 381 ms, and Branches 284 ms
   with zero failed requests and zero console/page errors.
 - Cloudflare proof:
-  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-42-448Z.json`
-  measured Products 2.283 s, Inventory 3.369 s, POS 2.681 s, and Branches
-  3.092 s. Repeat
-  `ops/runtime/reports/route-load-trace-2026-06-10T01-18-58-363Z.json`
-  measured Products 5.188 s, Inventory 5.027 s, POS 2.877 s, and Branches
-  3.178 s. Both traces had zero failed requests and zero console/page errors;
-  the slow repeat was dominated by Cloudflare/tunnel transfer variance and
-  background code warmup chunks, not app-owned HTTP errors.
-- Header proof: authenticated `/products` now advertises 18 Link entries and
-  points at `app-api-BGnyLXt1.js` instead of `app-api-methods-*`; it no longer
-  advertises `auth-login`, `catalog-*`, or `catalog-public-*` chunks in the
-  HTTP preload header.
-- Next executable slice: split or defer non-current-route lazy chunk warmups
-  that still fetch `auth-login`, catalog, shared modal/header, and
-  InventoryProductsSurface chunks shortly after startup on remote links, while
-  preserving instant navigation for warm same-session users.
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-55-21-233Z.json`
+  measured Products 7.697 s, Inventory 3.179 s, POS 2.456 s, and Branches
+  2.510 s. Repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-56-02-633Z.json`
+  measured Products 2.303 s, Inventory 1.629 s, POS 2.279 s, and Branches
+  1.862 s. Both traces had zero failed requests and zero console/page errors;
+  the slow first Products pass was dominated by Cloudflare/tunnel transfer
+  variance and one `/api/products/search` response, not app-owned HTTP errors.
+- Header proof: authenticated `/products`, `/pos`, `/inventory`, and
+  `/branches` advertise the route-owned chunks from Docker and no old duplicate
+  app containers were running.
+- Next executable slice: reduce Cloudflare variance dominated by
+  `/api/auth/bootstrap` and first static chunk transfer; cleanly reduce the
+  `app-auth`/`app-shared`/`shared-ui` chunk cycle without reintroducing the
+  login chunk or any fake loader wait.
 - Verification passed: `git diff --check`, backend route-contract and server
   utility tests, frontend typecheck, frontend JSX/source syntax check, frontend
   performance verifier, frontend production build, Docker release build/start

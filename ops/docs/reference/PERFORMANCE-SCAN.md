@@ -2508,4 +2508,29 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   admin Cloudflare route-load passed with zero failures/errors but remains the
   next hotspot: Products 3.402 s, Inventory 3.306 s, POS 3.912 s, Branches
   4.333 s.
+- Move 879 records the next route-startup and double-load reduction. POS
+  removed the last 1.5 s artificial category/contact/filter metadata waits
+  after the real catalog load. Inventory removed the 1.2 s artificial product
+  metadata wait after the primary product page load. Backend route preload
+  hints now include POS `productDisplayHelpers`, Inventory
+  `InventoryProductsSurface`, and Branches `shared-page-header`. Products no
+  longer imports public catalog chunks in its first window because
+  `productFilterHelpers.ts` is owned by `product-shared`; shared Lucide icons
+  prefer `shared-ui` before auth/catalog buckets; and
+  `AppContext.tsx`/`AppContextCore.tsx` moved to `app-auth`, dropping the
+  normal admin shell's dependency on the full login form chunk. Docker image
+  `business-os:v6.0.0-202606100950-move879` served frontend hash
+  `ecede1516f03dac6`. Local Playwright route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-55-17-751Z.json` passed
+  with zero failures/errors: Products 260 ms, Inventory 317 ms, POS 381 ms,
+  and Branches 284 ms. Cloudflare trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-55-21-233Z.json` had one
+  slow Products pass at 7.697 s and measured Inventory 3.179 s, POS 2.456 s,
+  Branches 2.510 s; repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T01-56-02-633Z.json`
+  measured Products 2.303 s, Inventory 1.629 s, POS 2.279 s, and Branches
+  1.862 s. Both remote traces had zero failed requests/errors. Remaining
+  hotspot: Cloudflare variance around `/api/auth/bootstrap`, first static
+  chunk delivery, and a Vite circular chunk warning between `app-auth`,
+  `app-shared`, `shared-ui`, and `route-sync-utils`.
 <!-- phase29-manual-notes:end -->

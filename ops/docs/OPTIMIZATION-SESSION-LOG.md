@@ -8,6 +8,47 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove remaining route startup wait overhead and split admin auth/login
+  chunks
+  - area: frontend startup performance, route preloads, Docker/Cloudflare
+    verification
+  - result: kept
+  - note: POS no longer waits 1.5 s before exposing category, contact, and
+    filter metadata after the real catalog data is loaded. Inventory no longer
+    waits 1.2 s before requesting product-filter metadata after the primary
+    product page loads. Direct route hints now include POS
+    `productDisplayHelpers`, Inventory `InventoryProductsSurface`, and Branches
+    `shared-page-header`. The shared product filter helpers now live in
+    `product-shared`, so Products no longer pulls public catalog chunks in its
+    first window. Shared Lucide icons now prefer `shared-ui` before
+    auth/catalog buckets, and `AppContext`/`AppContextCore` moved into the
+    `app-auth` chunk so the normal authenticated admin shell no longer imports
+    the full login form chunk.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606100950-move879` is running with frontend hash
+    `ecede1516f03dac6` and source hash `54446f49482700a5`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T01-55-17-751Z.json`
+    measured Products 260 ms, Inventory 317 ms, POS 381 ms, and Branches
+    284 ms with zero failed requests and zero page/console errors.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T01-55-21-233Z.json`
+    measured Products 7.697 s, Inventory 3.179 s, POS 2.456 s, and Branches
+    2.510 s with zero failed requests/errors; repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T01-56-02-633Z.json`
+    measured Products 2.303 s, Inventory 1.629 s, POS 2.279 s, and Branches
+    1.862 s with zero failed requests/errors.
+  - header proof: authenticated `/products`, `/pos`, `/inventory`, and
+    `/branches` all return route-owned modulepreload hints from Docker; no
+    duplicate old app containers were running.
+  - remaining note: Vite reports a circular chunk warning around `app-auth`,
+    `app-shared`, `shared-ui`, and `route-sync-utils`. Runtime and tests pass,
+    and the split removes the full login chunk from admin boot, but the next
+    performance slice should reduce that shared-context cycle cleanly.
+  - next target: reduce Cloudflare variance dominated by `/api/auth/bootstrap`
+    and first static chunk transfer without hiding real work behind spinners or
+    synthetic delays.
+
 - Align direct-route preload hints with measured first-window routes
   - area: frontend/backend startup performance and Cloudflare warmup
   - result: kept

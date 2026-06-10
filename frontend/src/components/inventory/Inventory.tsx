@@ -31,7 +31,6 @@ const InventoryReasonManagerModal = lazy(() => import('./InventoryReasonManagerM
 const InventoryStatDetailModal = lazy(() => import('./InventoryStatDetailModal')) as any
 
 const INVENTORY_HISTORY_READY_DELAY_MS = 250
-const INVENTORY_PRODUCT_METADATA_READY_DELAY_MS = 1200
 
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -905,20 +904,18 @@ export default function Inventory() {
             metadata: '1',
             metadataOnly: '1',
           }
-          inventoryMetadataTimerRef.current = window.setTimeout(() => {
-            inventoryMetadataTimerRef.current = null
-            getInventoryApi().searchInventoryProducts(metadataQuery)
-              .then((metadataResult: any) => {
-                if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
-                if (Array.isArray(metadataResult?.initials)) {
-                  setInventoryInitials(metadataResult.initials)
-                }
-                if (metadataResult?.filters && typeof metadataResult.filters === 'object') {
-                  setInventoryProductFilters(metadataResult.filters)
-                }
-              })
-              .catch(() => {})
-          }, INVENTORY_PRODUCT_METADATA_READY_DELAY_MS)
+          inventoryMetadataTimerRef.current = null
+          void getInventoryApi().searchInventoryProducts(metadataQuery)
+            .then((metadataResult: any) => {
+              if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+              if (Array.isArray(metadataResult?.initials)) {
+                setInventoryInitials(metadataResult.initials)
+              }
+              if (metadataResult?.filters && typeof metadataResult.filters === 'object') {
+                setInventoryProductFilters(metadataResult.filters)
+              }
+            })
+            .catch(() => {})
         }
 
         if (needsStatsData) {
