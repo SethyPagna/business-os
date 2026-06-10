@@ -31,7 +31,6 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
-const SUPPLIERS_HISTORY_READY_DELAY_MS = 250
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -544,10 +543,8 @@ function SuppliersTab({ t, notify, active = true }: SuppliersTabProps) {
       return undefined
     }
     if (!loadedOnceRef.current || loading) return undefined
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, SUPPLIERS_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [active, loading])
   useEffect(() => {
     if (!active || syncChannelName !== 'suppliers') return

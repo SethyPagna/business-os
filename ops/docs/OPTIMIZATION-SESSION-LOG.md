@@ -8,6 +8,37 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove fixed post-load readiness delays from admin controls
+  - area: frontend route readiness, history/filter control responsiveness,
+    loading UX guardrails
+  - result: kept
+  - note: repeated 250 ms timers were removed from post-ready history/filter
+    gates across Products, Inventory, Sales, Returns, Branches, Files, Users,
+    Backup, and contact tabs. The controls still wait for the real primary
+    page data load, but no longer wait an extra fixed delay afterward.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606102045-move892` is running with frontend hash
+    `3b3318b9e0bba69b` and source hash `e5d243e151a194e4`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`
+    measured Products 299 ms, Inventory 296 ms, Sales 253 ms, Returns
+    229 ms, Backup 264 ms, Files 244 ms, Branches 223 ms, and Users 254 ms
+    with zero failures/errors.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T12-48-36-079Z.json`
+    completed Products, Inventory, Sales, Returns, Backup, Files, and Branches
+    with zero failures/errors, but Branches showed a 37.769 s public-host
+    variance spike. Users passed separately in
+    `ops/runtime/reports/route-load-trace-2026-06-10T12-50-08-601Z.json` at
+    3.277 s after earlier Cloudflare connect timeouts.
+  - verification: focused performance-loading guard, focused API transport
+    guard, full frontend `test:utils`, frontend production build, Docker
+    release build/start/health, local and public Playwright traces, container
+    health inspection, and direct public health probes.
+  - next target: continue eliminating real fixed waits/request waterfalls, and
+    apply the Cloudflare public portal cache rule once the token has
+    `Zone.Cache Rules: Edit`.
+
 - Stabilize auth settings cache key and warm public portal APIs
   - area: backend auth bootstrap cache stability, release startup warmup,
     Cloudflare public portal cache-rule automation

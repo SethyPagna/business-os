@@ -30,8 +30,6 @@ const InventoryBatchModal = lazy(() => import('./InventoryBatchModal')) as any
 const InventoryReasonManagerModal = lazy(() => import('./InventoryReasonManagerModal')) as any
 const InventoryStatDetailModal = lazy(() => import('./InventoryStatDetailModal')) as any
 
-const INVENTORY_HISTORY_READY_DELAY_MS = 250
-
 import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -1044,10 +1042,8 @@ export default function Inventory() {
       return undefined
     }
     if (!loadedOnceRef.current || loading) return undefined
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, INVENTORY_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [isActive, loading])
   useEffect(() => {
     if (!isActive || typeof window === 'undefined') return

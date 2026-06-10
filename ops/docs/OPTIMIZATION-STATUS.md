@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 891, stabilize the auth settings snapshot cache
-  key, warm public portal APIs during release startup, and prepare Cloudflare
-  cache-rule automation for safe public portal read APIs.
+- Latest completed move: Move 892, remove fixed 250 ms post-load readiness
+  delays from admin history/filter controls after primary page data has
+  settled.
 
 ## Current Baseline
 
@@ -18,7 +18,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `72b9ecdfda6fdef1`
+  `3b3318b9e0bba69b`
 - latest verified source hash from the most recent Docker-served live check:
   `e5d243e151a194e4`
 
@@ -49,11 +49,11 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-48-36-079Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T12-06-57-495Z.json`
 - latest focused public-host LCP trace:
@@ -182,6 +182,12 @@ Latest verified reports:
   and `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`
 - latest Move 891 Cloudflare startup warmup:
   `ops/runtime/reports/cloudflare-startup-warmup-move891-include-api.json`
+- latest Move 892 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`
+- latest Move 892 Cloudflare affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-48-36-079Z.json`
+- latest Move 892 Cloudflare Users retry trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-50-08-601Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -204,6 +210,46 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 892 removes fixed 250 ms post-load readiness delays from admin
+  history/filter/control gates after primary page data settles. Products,
+  Inventory, Sales, Returns, Branches, Files, Users, Backup, and the customer,
+  supplier, and delivery contact tabs now enable their post-ready history or
+  secondary filter loaders immediately once the real primary load is complete,
+  instead of waiting on a timer. The Server page keeps its separate 250 ms
+  online-count delay because that guard prevents duplicate startup health
+  probes rather than masking UI loading.
+- Docker image `business-os:v6.0.0-202606102045-move892` is live with
+  frontend hash `3b3318b9e0bba69b` and source hash `e5d243e151a194e4`.
+  Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`
+  measured Products 299 ms, Inventory 296 ms, Sales 253 ms, Returns 229 ms,
+  Backup 264 ms, Files 244 ms, Branches 223 ms, and Users 254 ms with zero
+  failed requests and zero page/console errors.
+- Public admin Cloudflare route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-48-36-079Z.json`
+  measured Products 4.691 s, Inventory 5.351 s, Sales 3.587 s, Returns
+  4.698 s, Backup 3.796 s, Files 6.207 s, and Branches 37.769 s with zero
+  failed requests and zero page/console errors. The Branches number is a
+  tunnel/Cloudflare variance spike; a separate Users retry
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-50-08-601Z.json`
+  measured Users 3.277 s with zero failed requests and zero errors after the
+  first public rerun hit a Cloudflare connect timeout before browser
+  navigation.
+- Verification passed: focused `performanceLoadingUx` guard, focused
+  `apiHttp` guard, full frontend `test:utils`, frontend production build,
+  Docker release build/start/health, local eight-route Playwright trace, public
+  seven-route Cloudflare trace, public Users retry trace, Docker process
+  health check, and direct public health probes. Public probes remained
+  dynamic through Cloudflare: admin `/health` 1.753 s and public `/public`
+  2.099 s in the post-start check.
+- Current plan position after Move 892: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: continue
+  replacing stale source guards and real loading waterfalls, then apply the
+  Cloudflare public portal cache rule once the token has `Zone.Cache Rules:
+  Edit`.
 
 - Move 891 stabilizes the authenticated startup cache key and warms public
   portal read APIs during release startup. `backend/src/routes/auth.ts` no

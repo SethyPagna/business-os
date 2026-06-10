@@ -4,33 +4,29 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 891 release `business-os:v6.0.0-202606101930-move891` is live with
-  frontend hash `72b9ecdfda6fdef1` and source hash `e5d243e151a194e4`.
-- Auth settings snapshot versioning no longer uses `CURRENT_TIMESTAMP` as a
-  fallback for blank legacy settings `updated_at` values, preventing
-  `/api/auth/bootstrap` from invalidating the sanitized settings cache on every
-  request. Release startup now warms public portal APIs with `--include-api`.
+- Move 892 release `business-os:v6.0.0-202606102045-move892` is live with
+  frontend hash `3b3318b9e0bba69b` and source hash `e5d243e151a194e4`.
+- Repeated 250 ms post-load readiness timers were removed from admin
+  history/filter/control gates across Products, Inventory, Sales, Returns,
+  Branches, Files, Users, Backup, and contact tabs. These controls still wait
+  for real primary page data to settle, but no longer add a fixed delay after
+  that real work completes.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`:
-  Products 450 ms, Inventory 234 ms, POS 366 ms, Branches 238 ms, zero failed
-  requests/errors. Actual local `/api/auth/bootstrap` request durations were
-  18 ms, 11 ms, 12 ms, and 11 ms.
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`:
+  Products 299 ms, Inventory 296 ms, Sales 253 ms, Returns 229 ms, Backup
+  264 ms, Files 244 ms, Branches 223 ms, and Users 254 ms, zero failed
+  requests/errors.
 - Public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json` had
-  zero failed requests/errors and measured Products 6.253 s, Inventory
-  4.086 s, POS 5.419 s, and Branches 5.202 s. Actual public
-  `/api/auth/bootstrap` request durations were 1.901 s, 792 ms, 2.115 s, and
-  1.786 s, while document requests ranged from 2.053 s to 2.686 s.
-- Public portal startup warmup
-  `ops/runtime/reports/cloudflare-startup-warmup-move891-include-api.json`
-  warmed 283 targets with 282 cache HIT results, one DYNAMIC result, and zero
-  failures. Public portal LCP improved from 7.016 s to 2.908 s on the warmed
-  repeat, still above the 2.5 s target.
-- Cloudflare cache-rule automation now includes safe public portal read APIs,
-  but applying the rule returned HTTP 403 because the active token lacks
-  `Zone.Cache Rules: Edit`. The next target is to apply that cache rule with a
-  stronger token or equivalent manual rule, then continue reducing admin
-  document/auth tunnel variance.
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-48-36-079Z.json` had
+  zero failed requests/errors and measured Products 4.691 s, Inventory
+  5.351 s, Sales 3.587 s, Returns 4.698 s, Backup 3.796 s, Files 6.207 s, and
+  Branches 37.769 s. Users passed separately at 3.277 s in
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-50-08-601Z.json` after
+  earlier public reruns hit Cloudflare connect timeouts before browser
+  navigation.
+- The next target is to keep removing real fixed waits/request waterfalls and
+  apply the Cloudflare public portal cache rule once the active token has
+  `Zone.Cache Rules: Edit`.
 
 ## 1. Scope
 

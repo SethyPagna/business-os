@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 891.
+- Latest completed implementation move in this roadmap: Move 892.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,45 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 892 current state:
+- Docker release `business-os:v6.0.0-202606102045-move892` is running healthy
+  with frontend hash `3b3318b9e0bba69b` and source hash
+  `e5d243e151a194e4`.
+- Fixed 250 ms post-load readiness delays were removed from repeated admin
+  history/filter/control gates. Products, Inventory, Sales, Returns, Branches,
+  Files, Users, Backup, and the contact tabs now enable their post-ready
+  action-history or secondary filter loaders immediately after the real primary
+  page data load settles. This removes UI overhead without treating incomplete
+  data as loaded.
+- `frontend/tests/performanceLoadingUx.test.ts` now guards the no-fixed-delay
+  policy while preserving the explicit post-ready action-history gates.
+  `frontend/tests/apiHttp.test.ts` was also updated to match the current
+  live-server-first cached transport strategy: read routes use deferred
+  mirror/cache writes with `{ raceLocalFallback: false }`, not stale
+  `routeMirrored(...)` assertions.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`
+  measured Products 299 ms, Inventory 296 ms, Sales 253 ms, Returns 229 ms,
+  Backup 264 ms, Files 244 ms, Branches 223 ms, and Users 254 ms with zero
+  failed requests and zero page/console errors.
+- Public admin Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-48-36-079Z.json`
+  measured Products 4.691 s, Inventory 5.351 s, Sales 3.587 s, Returns
+  4.698 s, Backup 3.796 s, Files 6.207 s, and Branches 37.769 s with zero
+  failed requests and zero page/console errors. A separate Users retry
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-50-08-601Z.json`
+  measured Users 3.277 s with zero failures/errors after earlier public reruns
+  hit Cloudflare connect timeouts before browser navigation.
+- Verification passed: focused performance-loading guard, focused API transport
+  guard, full frontend `test:utils`, frontend production build, Docker release
+  build/start/health, local eight-route Playwright trace, public seven-route
+  Cloudflare trace, public Users retry trace, container health inspection, and
+  direct public health probes.
+- Next executable slice: keep removing real fixed waits and request waterfalls
+  from visible routes, while treating the remaining public-host spikes as
+  Cloudflare/tunnel/cache-rule work rather than local UI code until the cache
+  rule can be applied with `Zone.Cache Rules: Edit`.
 
 Move 891 current state:
 - Docker release `business-os:v6.0.0-202606101930-move891` is running healthy

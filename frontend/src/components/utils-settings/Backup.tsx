@@ -734,7 +734,6 @@ const DRIVE_SYNC_MIN_INTERVAL_MINUTES = 60
 const DRIVE_SYNC_MAX_INTERVAL_MINUTES = 24 * 60
 const DRIVE_SYNC_PRESET_HOURS = [3, 6, 9, 12, 24]
 const DRIVE_SYNC_STATUS_TIMEOUT_MS = 5000
-const BACKUP_HISTORY_READY_DELAY_MS = 250
 const DRIVE_SYNC_JOB_POLL_MS = 2000
 
 function secondsToSyncMinutes(seconds: unknown): number {
@@ -1435,10 +1434,8 @@ export default function Backup() {
       setHistoryReady(false)
       return undefined
     }
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, BACKUP_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [isActive])
 
   const beginBackupAction = useCallback((action: BackupAction) => {

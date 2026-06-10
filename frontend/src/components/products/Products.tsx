@@ -109,10 +109,6 @@ const ProductDetailModal = lazy(() => import('./surfaces/ProductDetailModal'))
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 const ActionHistoryBar = lazy(() => import('../shared/ActionHistoryBar'))
 
-const PRODUCTS_HISTORY_READY_DELAY_MS = 250
-const PRODUCTS_FILTER_META_READY_DELAY_MS = 250
-const PRODUCTS_AUX_OPTIONS_READY_DELAY_MS = 250
-
 type EntityId = string | number
 type Loader<T = unknown> = () => Promise<T>
 type ProductWriteHelpers = typeof import('./helpers/productWriteHelpers.ts')
@@ -747,10 +743,8 @@ export default function Products() {
       return undefined
     }
     if (!loadedOnceRef.current || loading || auxOptionsLoadedRef.current) return undefined
-    const timer = window.setTimeout(() => {
-      setAuxOptionsReady(true)
-    }, PRODUCTS_AUX_OPTIONS_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setAuxOptionsReady(true)
+    return undefined
   }, [isActive, loading])
   useEffect(() => {
     if (!isActive || auxOptionsLoadedRef.current) return
@@ -772,10 +766,8 @@ export default function Products() {
       return undefined
     }
     if (!loadedOnceRef.current || loading) return undefined
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, PRODUCTS_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [isActive, loading])
   useEffect(() => {
     if (!isActive) {
@@ -783,10 +775,8 @@ export default function Products() {
       return undefined
     }
     if (!loadedOnceRef.current || loading || filterMetaLoadedRef.current) return undefined
-    const timer = window.setTimeout(() => {
-      setFilterMetaReady(true)
-    }, PRODUCTS_FILTER_META_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setFilterMetaReady(true)
+    return undefined
   }, [isActive, loading])
   useEffect(() => {
     if (!isActive || !filterMetaReady || filterMetaLoadedRef.current) return

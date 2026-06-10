@@ -32,7 +32,6 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazy(() => import('./ContactImportModal'))
 const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
-const DELIVERY_HISTORY_READY_DELAY_MS = 250
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -592,10 +591,8 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
       return undefined
     }
     if (!loadedOnceRef.current || loading) return undefined
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, DELIVERY_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [active, loading])
   useEffect(() => {
     if (!active || syncChannelName !== 'deliveryContacts') return

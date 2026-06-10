@@ -755,10 +755,10 @@ assert.doesNotMatch(dashboard, /t\('(range_today|range_7d|range_this_month|range
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')
 assert.match(inventory, /inventory-history-row[\s\S]{0,160}<ActionHistoryBar/, 'inventory history controls should render inside the dedicated history row')
-assert.match(inventory, /const INVENTORY_HISTORY_READY_DELAY_MS = 250/, 'Inventory background history should wait briefly after first route-ready work without adding a fake 1.8s delay')
+assert.doesNotMatch(inventory, /INVENTORY_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Inventory background history should not add a fixed post-load delay')
 assert.match(inventory, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Inventory should have an explicit post-ready action-history gate')
 assert.match(inventory, /useActionHistory\(\{ limit: 10, notify, scope: 'inventory', enabled: historyReady, user \}\)/, 'Inventory should not fetch server action history during first route load and should pass user without importing AppContext inside the hook')
-assert.match(inventory, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*INVENTORY_HISTORY_READY_DELAY_MS/, 'Inventory should enable history only after the first inventory data load settles')
+assert.match(inventory, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Inventory should enable history immediately after the first inventory data load settles')
 assert.match(inventory, /const InventoryProductsSurface = lazy\(\(\) => import\('\.\/InventoryProductsSurface'\)\) as any/, 'Inventory products surface should stay in its own route subchunk')
 assert.doesNotMatch(inventory, /import InventoryProductsSurface from '\.\/InventoryProductsSurface'/, 'Inventory should not statically pull the product surface into the main inventory route chunk')
 assert.match(inventory, /const InventoryStockModals = lazy\(\(\) => import\('\.\/InventoryStockModals'\)\) as any/, 'Inventory stock modals should stay in a click-only lazy chunk')
@@ -774,18 +774,18 @@ assert.match(inventory, /const InventoryStatDetailModal = lazy\(\(\) => import\(
 assert.doesNotMatch(inventory, /statDetail\.detailSections|statDetail\.details/, 'Inventory should not keep stat detail modal markup in the first route chunk')
 assert.doesNotMatch(inventory, /lucide-react\/dist\/esm\/icons\/x\.js/, 'Inventory should not import the close icon just for lazy modal chrome')
 assert.match(inventoryStatDetailModal, /export default function InventoryStatDetailModal/, 'Inventory stat detail modal markup should live in the lazy stat detail component')
-assert.match(sales, /const SALES_HISTORY_READY_DELAY_MS = 250/, 'Sales background history should wait briefly after first route-ready work without adding a fake 1.8s delay')
+assert.doesNotMatch(sales, /SALES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Sales background history should not add a fixed post-load delay')
 assert.match(sales, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Sales should have an explicit post-ready action-history gate')
 assert.match(sales, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/, 'Sales should not fetch server action history during first route load')
-assert.match(sales, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*SALES_HISTORY_READY_DELAY_MS/, 'Sales should enable history only after the first sales data load settles')
-assert.match(returns, /const RETURNS_HISTORY_READY_DELAY_MS = 250/, 'Returns background history should wait briefly after first route-ready work without adding a fake 1.8s delay')
+assert.match(sales, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Sales should enable history immediately after the first sales data load settles')
+assert.doesNotMatch(returns, /RETURNS_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Returns background history should not add a fixed post-load delay')
 assert.match(returns, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Returns should have an explicit post-ready action-history gate')
 assert.match(returns, /useActionHistory\(\{ limit: 8, notify, scope: 'returns', enabled: historyReady, user \}\)/, 'Returns should not fetch server action history during first route load')
-assert.match(returns, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*RETURNS_HISTORY_READY_DELAY_MS/, 'Returns should enable history only after the first returns data load settles')
-assert.match(products, /const PRODUCTS_HISTORY_READY_DELAY_MS = 250/, 'Products background history should wait briefly after first route-ready work without adding a fake 1.8s delay')
+assert.match(returns, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Returns should enable history immediately after the first returns data load settles')
+assert.doesNotMatch(products, /PRODUCTS_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Products background history should not add a fixed post-load delay')
 assert.match(products, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Products should have an explicit post-ready action-history gate')
 assert.match(products, /useActionHistory\(\{ limit: 10, notify, scope: 'products', enabled: historyReady, user \}\)/, 'Products should not fetch server action history during first route load')
-assert.match(products, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*PRODUCTS_HISTORY_READY_DELAY_MS/, 'Products should enable history only after the first product data load settles')
+assert.match(products, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Products should enable history immediately after the first product data load settles')
 assert.match(products, /const ActionHistoryBar = lazy\(\(\) => import\('\.\.\/shared\/ActionHistoryBar'\)\)/, 'Products should lazy-load action history chrome after first route-ready work')
 assert.doesNotMatch(products, /import ActionHistoryBar from '\.\.\/shared\/ActionHistoryBar'/, 'Products should not statically import action history chrome during first route render')
 assert.match(products, /function loadProductWriteHelpers\(\): Promise<[^>]+> \{[\s\S]*import\('\.\/helpers\/productWriteHelpers\.ts'\)/, 'Products should load write-only helper logic on demand')
@@ -793,10 +793,10 @@ assert.doesNotMatch(products, /from '\.\/helpers\/productWriteHelpers\.ts'/, 'Pr
 
 assert.match(backup, /useState<BackupSectionId>\('all'\)/, 'Backup should default to the lightweight overview tab without showing duplicate All and Overview tabs')
 assert.match(backup, /BackupOverview/, 'Backup overview should provide lightweight section entry points')
-assert.match(backup, /const BACKUP_HISTORY_READY_DELAY_MS = 250/, 'Backup background history should wait briefly after first route-ready work without adding a fake 1.8s delay')
+assert.doesNotMatch(backup, /BACKUP_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Backup background history should not add a fixed post-load delay')
 assert.match(backup, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Backup should have an explicit post-ready action-history gate')
 assert.match(backup, /useActionHistory\(\{ limit: 3, notify, scope: 'backup', enabled: historyReady, user \}\)/, 'Backup should not fetch server action history during first route load')
-assert.match(backup, /window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*BACKUP_HISTORY_READY_DELAY_MS/, 'Backup should enable history only after the overview has rendered')
+assert.match(backup, /if \(!isActive\) \{[\s\S]*setHistoryReady\(false\)[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Backup should enable history immediately after the overview has rendered')
 assert.doesNotMatch(backup, /import \{ ResetData, FactoryReset \} from '\.\/ResetData'/, 'Backup should not statically import destructive reset tools during normal backup route load')
 assert.match(backup, /const LazyResetData = lazy\(async \(\) => \{[\s\S]*await import\('\.\/ResetData'\)[\s\S]*module\.ResetData/, 'Backup should load reset tools only when advanced maintenance is opened')
 assert.match(backup, /const LazyFactoryReset = lazy\(async \(\) => \{[\s\S]*await import\('\.\/ResetData'\)[\s\S]*module\.FactoryReset/, 'Backup should load factory reset only when advanced maintenance is opened')
@@ -910,10 +910,10 @@ for (const [name, source] of [
   assert.match(source, /buildSelectedSnapshots\([^,]+, ids\)/, `${name} contacts should snapshot bulk selections through the shared Set helper`)
   assert.match(source, /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\)/, `${name} contacts should count active filters without temporary filtered arrays`)
   assert.match(source, /const failedIdSet = new Set\(failedIds\)/, `${name} contacts should reuse a failed-id Set when filtering deleted snapshots`)
-  assert.match(source, /const \w+_HISTORY_READY_DELAY_MS = 250/, `${name} contacts should delay background history briefly after first route-ready work without adding a fake 1.8s delay`)
+  assert.doesNotMatch(source, /_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, `${name} contacts should not add a fixed post-load history delay`)
   assert.match(source, /const \[historyReady, setHistoryReady\] = useState\(false\)/, `${name} contacts should have an explicit post-ready action-history gate`)
   assert.match(source, /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/, `${name} contacts should not fetch server action history during first contact data load`)
-  assert.match(source, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*_HISTORY_READY_DELAY_MS/, `${name} contacts should enable history only after the first contact data load settles`)
+  assert.match(source, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, `${name} contacts should enable history immediately after the first contact data load settles`)
   assert.doesNotMatch(source, /if \(!loadedOnceRef\.current\) \{[\s\S]{0,240}loadedOnceRef\.current = true/, `${name} contacts should not lock in a failed first load as a completed render`)
   assert.doesNotMatch(source, /\.filter\(\([^)]*\) => ids\.includes\(Number\([^)]*\.id \|\| 0\)\)\)\.map/, `${name} contacts should not scan selected ids with Array.includes while snapshotting`)
   assert.doesNotMatch(source, /\[yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\.filter\(Boolean\)\.length/, `${name} contacts should not allocate a boolean array just to count active filters`)
@@ -1200,8 +1200,8 @@ assert.match(
 )
 assert.match(
   branches,
-  /const BRANCHES_HISTORY_READY_DELAY_MS = 250/,
-  'Branches background history should wait until after first route-ready work',
+  /const \[historyReady, setHistoryReady\] = useState\(false\)/,
+  'Branches should have an explicit post-ready action-history gate',
 )
 assert.match(
   branches,
@@ -1218,11 +1218,7 @@ assert.match(
   /const LazyTransferModal = lazy\(async \(\) => \(\{ default: \(await import\('\.\/TransferModal'\)\)\.default \}\)\)/,
   'Branches route should lazy-load the transfer modal only after transfer intent',
 )
-assert.match(
-  branches,
-  /const \[historyReady, setHistoryReady\] = useState\(false\)/,
-  'Branches should have an explicit post-ready action-history gate',
-)
+assert.doesNotMatch(branches, /BRANCHES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Branches background history should not add a fixed post-load delay')
 assert.match(
   branches,
   /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/,
@@ -1230,8 +1226,8 @@ assert.match(
 )
 assert.match(
   branches,
-  /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*BRANCHES_HISTORY_READY_DELAY_MS/,
-  'Branches should enable history only after the first branch data load settles',
+  /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/,
+  'Branches should enable history immediately after the first branch data load settles',
 )
 assert.match(
   branches,
@@ -2185,14 +2181,10 @@ assert.match(
 )
 assert.match(
   usersPage,
-  /const USERS_HISTORY_READY_DELAY_MS = 250/,
-  'Users background history should wait until after first route-ready work',
-)
-assert.match(
-  usersPage,
   /const \[historyReady, setHistoryReady\] = useState\(false\)/,
   'Users should have an explicit post-ready action-history gate',
 )
+assert.doesNotMatch(usersPage, /USERS_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Users background history should not add a fixed post-load delay')
 assert.match(
   usersPage,
   /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user: currentUser \}\)/,
@@ -2200,8 +2192,8 @@ assert.match(
 )
 assert.match(
   usersPage,
-  /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*USERS_HISTORY_READY_DELAY_MS/,
-  'Users should enable history only after the first user data load settles',
+  /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/,
+  'Users should enable history immediately after the first user data load settles',
 )
 assert.match(
   usersPage,
@@ -2674,14 +2666,10 @@ assert.match(
 )
 assert.match(
   products,
-  /const PRODUCTS_AUX_OPTIONS_READY_DELAY_MS = 250/,
-  'products auxiliary category, unit, and branch reads should wait until after first product route-ready work',
+  /if \(!loadedOnceRef\.current \|\| loading \|\| auxOptionsLoadedRef\.current\) return undefined[\s\S]*setAuxOptionsReady\(true\)[\s\S]*return undefined/,
+  'products auxiliary category, unit, and branch reads should become ready immediately after first product route-ready work',
 )
-assert.match(
-  products,
-  /if \(!loadedOnceRef\.current \|\| loading \|\| auxOptionsLoadedRef\.current\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setAuxOptionsReady\(true\)[\s\S]*PRODUCTS_AUX_OPTIONS_READY_DELAY_MS/,
-  'products should enable auxiliary options only after the first product load settles',
-)
+assert.doesNotMatch(products, /PRODUCTS_AUX_OPTIONS_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setAuxOptionsReady\(true\)/, 'products auxiliary options should not add a fixed post-load delay')
 assert.match(
   products,
   /const optionUiOpen = isProductFilterMenuOpen[\s\S]*modal === 'form'[\s\S]*modal === 'bulk'[\s\S]*modal === 'cats'[\s\S]*modal === 'units'[\s\S]*if \(optionUiOpen\) setAuxOptionsReady\(true\)/,
@@ -2704,14 +2692,10 @@ assert.match(
 )
 assert.match(
   products,
-  /const PRODUCTS_FILTER_META_READY_DELAY_MS = 250/,
-  'products full filter metadata should wait until after first product route-ready work',
+  /if \(!loadedOnceRef\.current \|\| loading \|\| filterMetaLoadedRef\.current\) return undefined[\s\S]*setFilterMetaReady\(true\)[\s\S]*return undefined/,
+  'products full filter metadata should become ready immediately after first product route-ready work',
 )
-assert.match(
-  products,
-  /if \(!loadedOnceRef\.current \|\| loading \|\| filterMetaLoadedRef\.current\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setFilterMetaReady\(true\)[\s\S]*PRODUCTS_FILTER_META_READY_DELAY_MS/,
-  'products should enable full filter metadata only after the first product load settles',
-)
+assert.doesNotMatch(products, /PRODUCTS_FILTER_META_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setFilterMetaReady\(true\)/, 'products filter metadata should not add a fixed post-load delay')
 assert.match(
   products,
   /if \(!isActive \|\| !filterMetaReady \|\| filterMetaLoadedRef\.current\) return[\s\S]*const requestId = beginTrackedRequest\(filterMetaRequestRef\)[\s\S]*withLoaderTimeout\(\(\) => productApi\.getProductFilters\(\{\}\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)[\s\S]*if \(!isTrackedRequestCurrent\(filterMetaRequestRef, requestId\)\) return/,
@@ -2984,14 +2968,10 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /const FILES_HISTORY_READY_DELAY_MS = 250/,
-  'Files background history should wait until after first route-ready work',
-)
-assert.match(
-  filesPage,
   /const \[historyReady, setHistoryReady\] = useState\(false\)/,
   'Files should have an explicit post-ready action-history gate',
 )
+assert.doesNotMatch(filesPage, /FILES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Files background history should not add a fixed post-load delay')
 assert.match(
   filesPage,
   /useActionHistory\(\{ limit: 3, notify, enabled: historyReady, user \}\)/,
@@ -2999,8 +2979,8 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /if \(!filesLoadedOnceRef\.current \|\| loadingFiles\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setHistoryReady\(true\)[\s\S]*FILES_HISTORY_READY_DELAY_MS/,
-  'Files should enable history only after the first file library load settles',
+  /if \(!filesLoadedOnceRef\.current \|\| loadingFiles\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/,
+  'Files should enable history immediately after the first file library load settles',
 )
 assert.match(
   filesPage,

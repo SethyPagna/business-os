@@ -51,7 +51,6 @@ const AI_PROVIDER_MUTATION_TIMEOUT_MS = 12000
 const AI_PROVIDER_TEST_TIMEOUT_MS = 30000
 const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000
 const FILES_ASSET_DELETE_TIMEOUT_MS = 12000
-const FILES_HISTORY_READY_DELAY_MS = 250
 
 type TranslateFunction = (key: string) => string | undefined
 type TranslateWithFallback = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -630,10 +629,8 @@ export default function FilesPage() {
       return undefined
     }
     if (!filesLoadedOnceRef.current || loadingFiles) return undefined
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, FILES_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [isActive, loadingFiles])
 
   useEffect(() => {

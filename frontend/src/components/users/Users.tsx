@@ -236,7 +236,6 @@ const USERS_LIST_TIMEOUT_MS = 8000
 const ROLES_LIST_TIMEOUT_MS = 8000
 const USER_MUTATION_TIMEOUT_MS = 12000
 const ROLE_MUTATION_TIMEOUT_MS = 12000
-const USERS_HISTORY_READY_DELAY_MS = 250
 
 /**
  * 1.2.1 Render-safe fallback for nullable contact values.
@@ -477,10 +476,8 @@ export default function Users() {
       return undefined
     }
     if (!loadedOnceRef.current || loading) return undefined
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, USERS_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [isActive, loading])
   useEffect(() => {
     if (!isActive || !syncChannelName) return

@@ -41,7 +41,6 @@ const RETURNS_LOAD_TIMEOUT_MS = 20000
 const RETURNS_DETAIL_TIMEOUT_MS = 10000
 const RETURNS_SNAPSHOT_TIMEOUT_MS = 10000
 const RETURNS_HISTORY_RESTORE_TIMEOUT_MS = 15000
-const RETURNS_HISTORY_READY_DELAY_MS = 250
 
 let returnsWriteTransportPromise: Promise<ReturnsWriteTransportModule> | null = null
 
@@ -392,10 +391,8 @@ export default function Returns() {
       return undefined
     }
     if (!loadedOnceRef.current || loading) return undefined
-    const timer = window.setTimeout(() => {
-      setHistoryReady(true)
-    }, RETURNS_HISTORY_READY_DELAY_MS)
-    return () => window.clearTimeout(timer)
+    setHistoryReady(true)
+    return undefined
   }, [isActive, loading])
 
   useEffect(() => {
