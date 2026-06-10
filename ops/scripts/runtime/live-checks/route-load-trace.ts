@@ -3,13 +3,14 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
-import { chromium, type BrowserContext, type Page, type Response } from 'playwright'
+import { chromium, type BrowserContext, type Page, type Request, type Response } from 'playwright'
 import { resolveAuditRoutes, type AuditRoute } from '../audits/audit-manifest.ts'
 import { applySessionToPlaywrightContext, hydratePlaywrightPage, loginWithFetch, type BrowserStorageState } from '../audits/audit-auth.ts'
 
 type RequestRecord = {
   method: string
   ms: number
+  requestMs: number
   resourceType: string
   status: number
   url: string
@@ -97,11 +98,13 @@ async function waitForRouteReady(page: Page, route: AuditRoute): Promise<void> {
   )
 }
 
-function recordResponse(startedAt: number, response: Response): RequestRecord {
+function recordResponse(startedAt: number, requestStartedAt: number, response: Response): RequestRecord {
   const request = response.request()
+  const now = performance.now()
   return {
     method: request.method(),
-    ms: Math.round(performance.now() - startedAt),
+    ms: Math.round(now - startedAt),
+    requestMs: Math.max(0, Math.round(now - requestStartedAt)),
     resourceType: request.resourceType(),
     status: response.status(),
     url: response.url(),
@@ -113,13 +116,21 @@ async function traceRoute(route: AuditRoute, storageState: BrowserStorageState, 
   const responses: RequestRecord[] = []
   const errors: string[] = []
   const startedAt = performance.now()
+  const requestStarts = new WeakMap<Request, number>()
+  page.on('request', (request) => {
+    requestStarts.set(request, performance.now())
+  })
   page.on('response', (response) => {
-    responses.push(recordResponse(startedAt, response))
+    const request = response.request()
+    responses.push(recordResponse(startedAt, requestStarts.get(request) || startedAt, response))
   })
   page.on('requestfailed', (request) => {
+    const now = performance.now()
+    const requestStartedAt = requestStarts.get(request) || startedAt
     responses.push({
       method: request.method(),
-      ms: Math.round(performance.now() - startedAt),
+      ms: Math.round(now - startedAt),
+      requestMs: Math.max(0, Math.round(now - requestStartedAt)),
       resourceType: request.resourceType(),
       status: 0,
       url: request.url(),

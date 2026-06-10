@@ -122,7 +122,7 @@ runTest('sales router registers combined dashboard startup route', () => {
 
 runTest('SPA shell sends route-owned modulepreload hints for direct visits', () => {
   const source = fs.readFileSync(path.join(__dirname, '../server.ts'), 'utf8')
-  assert.match(source, /const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = \['app-bootstrap'\]/)
+  assert.match(source, /const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = \['app-bootstrap', 'app-auth'\]/)
   assert.match(source, /const SPA_ADMIN_FIRST_WINDOW_CHUNKS = \[[\s\S]*'AdminRoot'[\s\S]*'app-api'[\s\S]*'api-http-core'[\s\S]*'Sidebar'[\s\S]*\]/)
   assert.doesNotMatch(source.match(/const SPA_ADMIN_FIRST_WINDOW_CHUNKS = \[[\s\S]*?\]/)?.[0] || '', /'auth-login'|'catalog-icons'/)
   assert.match(source, /routePath\.startsWith\('\/login'\), chunks: \['auth-login'\]/)

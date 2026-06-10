@@ -4,24 +4,27 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 889 release `business-os:v6.0.0-202606101810-move889` is live with
-  frontend hash `72b9ecdfda6fdef1` and source hash `9c3cbdbe690bf625`.
-- Runtime descriptor state is memoized for authenticated startup bursts.
-  `/api/auth/bootstrap` no longer re-reads the runtime-state file or re-hashes
-  `DATA_ROOT` on every protected route load; runtime-state writes refresh the
-  memo immediately and reads return cloned state.
+- Move 890 release `business-os:v6.0.0-202606101845-move890` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `faefeba603477308`.
+- Admin HTML now includes the tiny `app-auth` chunk beside `app-bootstrap` in
+  server-side modulepreload Link headers for authenticated admin routes.
+  `route-load-trace.ts` now records `requestMs`, so performance reports
+  separate true request duration from elapsed time since page navigation.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`:
-  Products 369 ms, Inventory 340 ms, POS 317 ms, Branches 244 ms, zero failed
-  requests/errors. Local `/api/auth/bootstrap` timings were 299 ms, 299 ms,
-  252 ms, and 205 ms.
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`:
+  Products 254 ms, Inventory 306 ms, POS 400 ms, Branches 252 ms, zero failed
+  requests/errors. Actual local `/api/auth/bootstrap` request durations were
+  14 ms, 11 ms, 20 ms, and 10 ms.
 - Public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json` had
-  zero failed requests/errors and measured Products 3.606 s, Inventory
-  3.945 s, POS 3.312 s, and Branches 4.621 s. Public `/api/auth/bootstrap`
-  timings were 3.479 s, 3.818 s, 3.175 s, and 4.596 s.
-- Next target: trace and reduce Cloudflare/tunnel/auth variance directly while
-  preserving real data readiness and avoiding synthetic loading delays.
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json` had
+  zero failed requests/errors and measured Products 5.799 s, Inventory
+  6.790 s, POS 3.943 s, and Branches 6.212 s. Actual public
+  `/api/auth/bootstrap` request durations were 2.059 s, 2.660 s, 1.132 s,
+  and 1.041 s, while document requests ranged from 1.468 s to 3.798 s.
+- Direct public auth-bootstrap probes after login usually returned in
+  638-671 ms, with occasional 1.4-1.7 s tunnel spikes; the next target is
+  Cloudflare document/auth variance or a safe same-origin startup snapshot
+  that keeps first paint real without fake loading delays.
 
 ## 1. Scope
 

@@ -102,7 +102,7 @@ const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'Receipt-',
   'CustomersTab-',
 ]
-const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = ['app-bootstrap']
+const SPA_ADMIN_MODULE_PRELOAD_CHUNKS = ['app-bootstrap', 'app-auth']
 const SPA_ADMIN_FIRST_WINDOW_CHUNKS = [
   'AdminRoot',
   'app-api',

@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 889, memoize runtime descriptor state during
-  authenticated startup bursts so `/api/auth/bootstrap` no longer re-reads the
-  runtime-state file or re-hashes `DATA_ROOT` on every protected route load.
+- Latest completed move: Move 890, add the admin `app-auth` chunk to
+  server-side modulepreload hints and improve route-load traces so reports
+  separate page-start timing from actual request duration.
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `72b9ecdfda6fdef1`
 - latest verified source hash from the most recent Docker-served live check:
-  `9c3cbdbe690bf625`
+  `faefeba603477308`
 
 Latest verified reports:
 
@@ -49,11 +49,11 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
 - latest focused public-host LCP trace:
@@ -166,6 +166,11 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-10T09-32-33-678Z.json`
 - latest Move 889 Cloudflare affected-route trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T09-33-49-433Z.json`
+- latest Move 890 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`
+- latest Move 890 Cloudflare affected-route traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-46-57-880Z.json`
+  and `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -188,6 +193,40 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 890 starts the admin auth/context chunk earlier and makes the route
+  trace more precise. `backend/server.ts` now includes `app-auth` beside
+  `app-bootstrap` in server-side admin modulepreload Link headers, while still
+  keeping the sign-in-only `auth-login` chunk out of normal admin routes.
+  `ops/scripts/runtime/live-checks/route-load-trace.ts` now records
+  `requestMs` per response, so reports distinguish real network/API duration
+  from elapsed time since page navigation.
+- Docker image `business-os:v6.0.0-202606101845-move890` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `faefeba603477308`.
+  Local and public header probes confirmed `/products` now includes
+  `app-auth` as a modulepreload header alongside `app-bootstrap`,
+  `AdminRoot`, and the route chunk.
+- Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`
+  measured Products 254 ms, Inventory 306 ms, POS 400 ms, and Branches 252 ms
+  with zero failed requests and zero page/console errors. Actual local
+  `/api/auth/bootstrap` request durations were 14 ms, 11 ms, 20 ms, and 10 ms.
+- Public Cloudflare route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json`
+  measured Products 5.799 s, Inventory 6.790 s, POS 3.943 s, and Branches
+  6.212 s with zero failed requests and zero page/console errors. The same
+  report shows actual public `/api/auth/bootstrap` request durations of
+  2.059 s, 2.660 s, 1.132 s, and 1.041 s, while the initial document request
+  also ranged from 1.468 s to 3.798 s. A direct public auth-bootstrap probe
+  after login usually returned in 638-671 ms, with occasional 1.4-1.7 s
+  spikes, confirming the remaining work is Cloudflare/tunnel/document/API
+  variance rather than local route code.
+- Current plan position after Move 890: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: reduce
+  Cloudflare document/auth variance or add a safe same-origin startup snapshot
+  that keeps first paint real without waiting on the slow public leg.
 
 - Move 889 memoizes runtime descriptor state for authenticated startup bursts.
   `backend/src/runtimeState/index.ts` now keeps a short in-process clone of

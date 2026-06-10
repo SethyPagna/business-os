@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 889.
+- Latest completed implementation move in this roadmap: Move 890.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,42 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 890 current state:
+- Docker release `business-os:v6.0.0-202606101845-move890` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `faefeba603477308`.
+- Admin HTML now preloads the tiny authenticated startup context chunk earlier.
+  `backend/server.ts` includes `app-auth` beside `app-bootstrap` in
+  server-side admin modulepreload Link headers, while the login-only
+  `auth-login` chunk remains out of normal admin routes. Local and public
+  `/products` header probes confirmed `app-auth`, `app-bootstrap`,
+  `AdminRoot`, and the route chunk are all present.
+- `ops/scripts/runtime/live-checks/route-load-trace.ts` now records
+  `requestMs` for every response and failure. This keeps future route-load
+  work honest by separating real request duration from elapsed time since page
+  navigation, which had made public auth-bootstrap timing look worse than the
+  actual request.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`
+  measured Products 254 ms, Inventory 306 ms, POS 400 ms, and Branches 252 ms
+  with zero failed requests and zero page/console errors. Actual local
+  `/api/auth/bootstrap` request durations were 14 ms, 11 ms, 20 ms, and 10 ms.
+- Public Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json`
+  measured Products 5.799 s, Inventory 6.790 s, POS 3.943 s, and Branches
+  6.212 s with zero failed requests and zero page/console errors. The same
+  report shows public `/api/auth/bootstrap` request durations of 2.059 s,
+  2.660 s, 1.132 s, and 1.041 s, while document requests ranged from 1.468 s
+  to 3.798 s. A direct public auth-bootstrap probe after login usually
+  returned in 638-671 ms, with occasional 1.4-1.7 s tunnel spikes.
+- Verification passed: backend server-entry build, backend route contracts,
+  backend server entry verification, full backend `test:utils`, Docker release
+  build/start/health, local Playwright route-load trace, public Cloudflare
+  route-load trace, and local/public modulepreload header probes.
+- Next executable slice: reduce Cloudflare document/auth variance directly or
+  add a safe same-origin startup snapshot that keeps first paint real without
+  waiting on the slow public leg.
 
 Move 889 current state:
 - Docker release `business-os:v6.0.0-202606101810-move889` is running healthy

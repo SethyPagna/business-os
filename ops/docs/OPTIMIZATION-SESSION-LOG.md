@@ -8,6 +8,35 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Preload admin auth chunk and separate request timing in route traces
+  - area: backend admin HTML startup hints, route-load diagnostics,
+    Cloudflare/tunnel variance measurement
+  - result: kept
+  - note: admin HTML now includes `app-auth` beside `app-bootstrap` in
+    server-side modulepreload headers for authenticated admin routes, while
+    keeping the login-only `auth-login` chunk out of normal admin pages. The
+    route-load trace runner now records `requestMs` so reports distinguish
+    actual request duration from elapsed time since page navigation.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101845-move890` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `faefeba603477308`; local and public
+    `/products` header probes confirmed the `app-auth` modulepreload link.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`
+    measured Products 254 ms, Inventory 306 ms, POS 400 ms, and Branches
+    252 ms with zero failures/errors. Actual local `/api/auth/bootstrap`
+    request durations were 14 ms, 11 ms, 20 ms, and 10 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json`
+    measured Products 5.799 s, Inventory 6.790 s, POS 3.943 s, and Branches
+    6.212 s with zero failures/errors. Actual public `/api/auth/bootstrap`
+    request durations were 2.059 s, 2.660 s, 1.132 s, and 1.041 s, while the
+    document request ranged from 1.468 s to 3.798 s. A direct public
+    auth-bootstrap probe after login usually returned in 638-671 ms, with
+    occasional 1.4-1.7 s spikes.
+  - next target: reduce Cloudflare document/auth variance directly or add a
+    safe startup snapshot that keeps data real and avoids fake ready states.
+
 - Memoize runtime descriptor state for auth startup
   - area: backend auth bootstrap performance, runtime-state filesystem reads,
     runtime descriptor hashing
