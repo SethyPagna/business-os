@@ -144,6 +144,7 @@ runTest('SPA shell sends route-owned modulepreload hints for direct visits', () 
   assert.match(source, /const FRONTEND_CHUNK_BASE_COLLISIONS = \{[\s\S]*catalog: \['context', 'display', 'editor', 'icons', 'preview', 'products', 'public', 'secondary-tabs', 'ui'\]/)
   assert.match(source, /function resolveFrontendChunkAssetName\(chunkBase = ''\)/)
   assert.match(source, /function appendSpaModulePreloadHeaders\(req, res\)/)
+  assert.match(source, /function appendSpaStylePreloadHeaders\(res\)[\s\S]*\/\^\(index\|vendor\)-\/\.test\(assetName\)[\s\S]*rel=preload; as=style; crossorigin/)
   assert.match(source, /return sendSpaIndex\(req, res, next\)/)
 })
 

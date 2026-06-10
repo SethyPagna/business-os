@@ -2618,4 +2618,29 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   put Inventory at 2.332 s. Public route-load rerun
   `ops/runtime/reports/route-load-trace-2026-06-10T16-18-06-118Z.json`
   passed with all measured routes at 2.268-2.468 s and zero failures/errors.
+- Move 898 records route startup CSS and preload trimming. Public portal-only
+  styles moved from global `main.css` into `public-portal.css` loaded by
+  `CatalogPreviewSurface`, reducing the global app CSS from 159.28 kB /
+  25.23 kB gzip to 151.23 kB / 23.94 kB gzip and emitting
+  `catalog-public-DKq73_Mw.css` as a 6.85 kB / 1.29 kB gzip route stylesheet.
+  Backend style preload hints now skip HTML-owned base `index-*`/`vendor-*`
+  CSS and keep `crossorigin` only on route-split CSS, removing the `/public`
+  credentials-mode preload warning. The Vite route preload map now includes
+  selected route chunks without recursively preloading action-only modal,
+  profile, file-picker, and login chunks; generated `index.html` dropped from
+  29.60 kB raw / 6.97 kB gzip to 25.09 kB raw / about 6.66 kB gzip. Docker
+  image `business-os:v6.0.0-202606110059` served frontend hash
+  `babcce511ce13f1a`. Local route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-02-25-564Z.json`
+  passed Products 351 ms, Inventory 263 ms, Users 329 ms, and Public Catalog
+  265 ms; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-26-069Z.json`
+  measured 132-480 ms. Public Cloudflare route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-08-20-923Z.json`
+  passed Products 2.119 s, Inventory 2.197 s, Users 2.072 s, and Public
+  Catalog 1.784 s. Public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-52-779Z.json` and
+  rerun `ops/runtime/reports/lcp-route-trace-2026-06-10T17-03-27-028Z.json`
+  leave Inventory as the next honest target at about 2.64-2.72 s through
+  Cloudflare while local Inventory is 480 ms.
 <!-- phase29-manual-notes:end -->

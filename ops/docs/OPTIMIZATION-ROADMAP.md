@@ -15213,3 +15213,46 @@ Move 897 status:
   R2/access follow-up open; Phase 29 remains active. Next executable slices:
   reduce `index-C5SmvlgI.css`, split Inventory's first-viewport route work,
   and keep public-tunnel variance checks in the live test loop.
+
+Move 898 status:
+- Move 898 executes the next startup-trim slice instead of adding another
+  artificial loader. Public portal-only CSS moved from global `main.css` into
+  `public-portal.css`, loaded by `CatalogPreviewSurface`; the main app CSS
+  dropped from 159.28 kB / 25.23 kB gzip to 151.23 kB / 23.94 kB gzip, and the
+  public route CSS now ships as a 6.85 kB / 1.29 kB gzip route asset.
+- Backend style preload headers now skip HTML-owned base `index-*` and
+  `vendor-*` CSS while keeping `crossorigin` on route-split CSS preloads, so
+  `/public` no longer emits credentials-mode style preload warnings.
+- Vite route-aware modulepreload generation now includes only the selected
+  route chunks, not every recursive static import. This prevents Products,
+  Inventory, and Users direct visits from preloading action-only modal,
+  profile, file-picker, and login chunks before the first window. The generated
+  HTML shell dropped from 29.60 kB raw / 6.97 kB gzip to 25.09 kB raw /
+  roughly 6.66 kB gzip.
+- Verification proof: focused performance guard, backend server utility test,
+  backend route contract, frontend typecheck, JSX/source check, production
+  build, Docker release build/start, local route-load/LCP traces, and public
+  Cloudflare route-load/LCP traces passed. Docker image
+  `business-os:v6.0.0-202606110059` is healthy with frontend hash
+  `babcce511ce13f1a` and source hash `a8da203159cc2cda`.
+- Live proof: local route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-02-25-564Z.json`
+  passed with Products 351 ms, Inventory 263 ms, Users 329 ms, Public Catalog
+  265 ms; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-26-069Z.json`
+  measured Products 132 ms, Inventory 480 ms, Users 304 ms, and Public Catalog
+  256 ms. Public route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-08-20-923Z.json`
+  passed with Products 2.119 s, Inventory 2.197 s, Users 2.072 s, and Public
+  Catalog 1.784 s. Public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-52-779Z.json` and
+  targeted rerun
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-03-27-028Z.json` left
+  Inventory slightly above target at about 2.64-2.72 s through Cloudflare,
+  while Users improved to 1.012 s on rerun.
+- Current plan position after Move 898: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next executable slice:
+  inspect the remaining public Inventory settle-window chunks and reduce
+  Cloudflare/tunnel variance without hiding incomplete data behind fake
+  loaders.

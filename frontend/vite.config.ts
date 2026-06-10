@@ -230,20 +230,10 @@ function isBundleChunk(value: unknown): value is OutputChunk {
 function toRoutePreloadFiles(bundle: OutputBundle, names: readonly string[]): string[] {
   const wanted = new Set(names)
   const chunks = Object.values(bundle).filter(isBundleChunk)
-  const chunksByFileName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]))
   const files = new Set<string>()
 
-  function addChunk(chunk: OutputChunk): void {
-    if (files.has(chunk.fileName)) return
-    files.add(chunk.fileName)
-    for (const importFile of chunk.imports) {
-      const importedChunk = chunksByFileName.get(importFile)
-      if (importedChunk) addChunk(importedChunk)
-    }
-  }
-
   for (const chunk of chunks) {
-    if (wanted.has(chunk.name)) addChunk(chunk)
+    if (wanted.has(chunk.name)) files.add(chunk.fileName)
   }
 
   return Array.from(files).sort()

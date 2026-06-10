@@ -1,6 +1,6 @@
 # Business OS Optimization Status
 
-Last updated: 2026-06-10
+Last updated: 2026-06-11
 
 ## Phase Board
 
@@ -8,8 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 895, align Inventory/Returns/Users route
-  surfaces and frontend/backend preload hints with first-paint dependencies.
+- Latest completed move: Move 898, trim route startup CSS and preload hints
+  so direct visits fetch only first-window route dependencies.
 
 ## Current Baseline
 
@@ -17,9 +17,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `0dcd7c3e85311dd1`
+  `babcce511ce13f1a`
 - latest verified source hash from the most recent Docker-served live check:
-  `797c2adf20649e81`
+  `a8da203159cc2cda`
 
 Latest verified reports:
 
@@ -65,6 +65,15 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-33-634Z.json`
 - latest Move 895 public admin LCP trace:
   `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-36-800Z.json`
+- latest Move 898 local route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-02-25-564Z.json`
+- latest Move 898 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-26-069Z.json`
+- latest Move 898 public admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-08-20-923Z.json`
+- latest Move 898 public admin LCP traces:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-52-779Z.json`
+  and `ops/runtime/reports/lcp-route-trace-2026-06-10T17-03-27-028Z.json`
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:
@@ -4871,6 +4880,53 @@ Recent route-level win:
   guardrail. Next honest targets are reducing the 159 kB CSS file, splitting
   Inventory's first route surface further, and continuing public-tunnel
   variance checks.
+
+## Current Move 898
+
+- Move 898 trims the next real startup layer. Public portal-only CSS now lives
+  in `frontend/src/styles/public-portal.css` and loads from
+  `CatalogPreviewSurface` instead of the global app stylesheet. Production CSS
+  changed from `index-C5SmvlgI.css` at 159.28 kB / 25.23 kB gzip to
+  `index-BY99XyCv.css` at 151.23 kB / 23.94 kB gzip, with the public route CSS
+  emitted separately as `catalog-public-DKq73_Mw.css` at 6.85 kB / 1.29 kB
+  gzip.
+- Direct-route hints are cleaner. The backend now skips HTML-owned
+  `index-*`/`vendor-*` CSS in Link preload headers and sends `crossorigin`
+  only for route-split style preloads, removing the prior credentials-mode
+  preload warning on `/public`.
+- The Vite route preload map now includes the selected route chunks without
+  recursively expanding every static import. This keeps direct Products,
+  Inventory, and Users visits from asking the browser to fetch action-only
+  modal/profile/file-picker/login chunks in the first window. The generated
+  `index.html` shrank from 29.60 kB raw / 6.97 kB gzip to 25.09 kB raw /
+  roughly 6.66 kB gzip.
+- Runtime proof: Docker image `business-os:v6.0.0-202606110059` is healthy at
+  `http://127.0.0.1:4000/health` with frontend hash `babcce511ce13f1a` and
+  source hash `a8da203159cc2cda`.
+- Local Playwright proof: route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-02-25-564Z.json`
+  passed with zero failures/errors: Products 351 ms, Inventory 263 ms, Users
+  329 ms, Public Catalog 265 ms. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-26-069Z.json`
+  measured Products 132 ms, Inventory 480 ms, Users 304 ms, and Public Catalog
+  256 ms.
+- Public Cloudflare proof: route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T17-08-20-923Z.json`
+  passed with zero failures/errors: Products 2.119 s, Inventory 2.197 s, Users
+  2.072 s, Public Catalog 1.784 s. LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-02-52-779Z.json`
+  passed with Products 1.328 s, Public Catalog 1.852 s, Inventory 2.640 s, and
+  Users 2.796 s; targeted rerun
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T17-03-27-028Z.json`
+  measured Users 1.012 s and Inventory 2.724 s.
+- Current plan position after Move 898: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail. Remaining honest target: public Inventory LCP is still slightly
+  above 2.5 s through Cloudflare while local is 480 ms; the next slice should
+  inspect why non-critical profile/modal chunks still appear during the settle
+  window and keep static/tunnel variance checks in the live loop.
 
 ## Previous Move 896
 

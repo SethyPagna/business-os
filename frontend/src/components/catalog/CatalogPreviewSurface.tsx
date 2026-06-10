@@ -7,6 +7,7 @@ import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
+import '../../styles/public-portal.css'
 
 const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
 

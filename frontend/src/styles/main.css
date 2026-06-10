@@ -169,270 +169,13 @@ body.lang-km .input {
   }
 }
 
-body[data-public-portal='true'] .skiptranslate iframe,
-body[data-public-portal='true'] .goog-te-banner-frame {
-  display: none !important;
-}
-
-body[data-public-portal='true'] {
-  top: 0 !important;
-  position: static !important;
-}
-
-html[data-public-portal='true'] body.translated-ltr,
-html[data-public-portal='true'] body.translated-rtl {
-  top: 0 !important;
-  position: static !important;
-}
-
-body[data-public-portal='true'] #business-os-portal-translate-widget {
-  position: static !important;
-  width: 100% !important;
-  min-height: 40px;
-}
-
-body[data-public-portal='true'] #business-os-portal-translate-widget .goog-te-gadget {
-  display: flex !important;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 0.5rem;
-  color: inherit !important;
-  font-size: 0 !important;
-}
-
-body[data-public-portal='true'] #business-os-portal-translate-widget .goog-te-combo {
-  min-width: 12rem;
-  max-width: 100%;
-  border-radius: 0.75rem;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: rgba(15, 23, 42, 0.35);
-  color: #fff;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem !important;
-  outline: none;
-}
-
-body[data-public-portal='true'] #business-os-portal-translate-widget .goog-logo-link,
-body[data-public-portal='true'] #business-os-portal-translate-widget .goog-te-gadget span {
-  display: none !important;
-}
-
-body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-widget .goog-te-combo {
-  border-color: rgb(226 232 240);
-  background: #fff;
-  color: rgb(51 65 85);
-}
-
-body[data-public-portal='true'] .portal-contact-value {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  word-break: break-word;
-}
-
-body[data-public-portal='true'] .portal-contact-value-address {
-  -webkit-line-clamp: 2;
-}
-
-@media (min-width: 640px) {
-  body[data-public-portal='true'] .portal-contact-value {
-    display: block;
-    overflow: visible;
-    -webkit-line-clamp: unset;
-  }
-}
-
-.portal-image-checker {
-  background-color: #ffffff;
-  background-image:
-    linear-gradient(45deg, rgba(148, 163, 184, 0.08) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(148, 163, 184, 0.08) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.08) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.08) 75%);
-  background-size: 22px 22px;
-  background-position: 0 0, 0 11px, 11px -11px, -11px 0;
-}
-
-.dark [data-portal-root='true'],
-[data-portal-root='true'].dark,
-.dark [data-portal-root='true'] section {
-  color-scheme: dark;
-}
-
-.dark [data-portal-root='true'] .bg-white,
-.dark [data-portal-root='true'] .bg-slate-50,
-.dark [data-portal-root='true'] .bg-slate-100,
-[data-portal-root='true'].dark .bg-white,
-[data-portal-root='true'].dark .bg-slate-50,
-[data-portal-root='true'].dark .bg-slate-100 {
-  background-color: rgba(15, 23, 42, 0.92) !important;
-}
-
-.dark [data-portal-root='true'] .bg-white,
-.dark [data-portal-root='true'] .bg-slate-50,
-.dark [data-portal-root='true'] .bg-slate-100,
-[data-portal-root='true'].dark .bg-white,
-[data-portal-root='true'].dark .bg-slate-50,
-[data-portal-root='true'].dark .bg-slate-100 {
-  background-color: rgba(15, 23, 42, 0.92) !important;
-}
-
-.dark [data-portal-root='true'] .bg-cyan-50,
-.dark [data-portal-root='true'] .bg-blue-50,
-.dark [data-portal-root='true'] .bg-sky-50,
-[data-portal-root='true'].dark .bg-cyan-50,
-[data-portal-root='true'].dark .bg-blue-50,
-[data-portal-root='true'].dark .bg-sky-50 {
-  background-color: rgba(30, 64, 175, 0.22) !important;
-}
-
-.dark [data-portal-root='true'] .bg-amber-50,
-.dark [data-portal-root='true'] .bg-orange-50,
-[data-portal-root='true'].dark .bg-amber-50,
-[data-portal-root='true'].dark .bg-orange-50 {
-  background-color: rgba(120, 53, 15, 0.28) !important;
-}
-
-.dark [data-portal-root='true'] .bg-emerald-50,
-.dark [data-portal-root='true'] .bg-green-50,
-[data-portal-root='true'].dark .bg-emerald-50,
-[data-portal-root='true'].dark .bg-green-50 {
-  background-color: rgba(6, 78, 59, 0.26) !important;
-}
-
-.dark [data-portal-root='true'] .portal-nav-tab-active,
-[data-portal-root='true'].dark .portal-nav-tab-active {
-  background-color: #2563eb !important;
-  color: #ffffff !important;
-}
-
-[data-portal-root='true'].dark .portal-nav-shell,
-.dark [data-portal-root='true'] .portal-nav-shell {
-  background-color: rgba(2, 6, 23, 0.98) !important;
-  border-color: rgba(30, 41, 59, 0.95) !important;
-  box-shadow: none !important;
-}
-
-[data-portal-root='true'].dark .portal-header-shell,
-.dark [data-portal-root='true'] .portal-header-shell {
-  background-color: rgba(15, 23, 42, 0.94) !important;
-  border-color: rgba(51, 65, 85, 0.82) !important;
-  box-shadow: none !important;
-}
-
-[data-portal-root='true'].dark .portal-logo-frame,
-.dark [data-portal-root='true'] .portal-logo-frame {
-  box-shadow: none !important;
-}
-
-[data-portal-root='true'].dark .portal-nav-track,
-.dark [data-portal-root='true'] .portal-nav-track {
-  background-color: rgba(2, 6, 23, 0.96) !important;
-  border-color: rgba(30, 41, 59, 0.9) !important;
-  box-shadow: none !important;
-}
-
-[data-portal-root='true'] .portal-nav-scroll {
-  scrollbar-width: none;
-}
-
-[data-portal-root='true'] .portal-nav-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-[data-portal-root='true'] .portal-nav-tab-active {
-  background-color: #ffffff !important;
-  color: #020617 !important;
-}
-
-[data-portal-root='true'].dark .portal-nav-tab-active,
-.dark [data-portal-root='true'] .portal-nav-tab-active {
-  background-color: rgba(30, 41, 59, 0.98) !important;
-  color: #f8fafc !important;
-  box-shadow: none !important;
-}
-
-.dark [data-portal-root='true'] .text-slate-900,
-.dark [data-portal-root='true'] .text-gray-900,
-[data-portal-root='true'].dark .text-slate-900,
-[data-portal-root='true'].dark .text-gray-900 {
-  color: #f8fafc !important;
-}
-
-.dark [data-portal-root='true'] .text-slate-800,
-.dark [data-portal-root='true'] .text-slate-700,
-.dark [data-portal-root='true'] .text-gray-700,
-[data-portal-root='true'].dark .text-slate-800,
-[data-portal-root='true'].dark .text-slate-700,
-[data-portal-root='true'].dark .text-gray-700 {
-  color: #dbeafe !important;
-}
-
-.dark [data-portal-root='true'] .text-slate-600,
-.dark [data-portal-root='true'] .text-gray-600,
-[data-portal-root='true'].dark .text-slate-600,
-[data-portal-root='true'].dark .text-gray-600 {
-  color: #cbd5e1 !important;
-}
-
-.dark [data-portal-root='true'] .text-slate-500,
-.dark [data-portal-root='true'] .text-gray-500,
-[data-portal-root='true'].dark .text-slate-500,
-[data-portal-root='true'].dark .text-gray-500 {
-  color: #94a3b8 !important;
-}
-
-.dark [data-portal-root='true'] .border-slate-100,
-.dark [data-portal-root='true'] .border-slate-200,
-.dark [data-portal-root='true'] .border-slate-300,
-[data-portal-root='true'].dark .border-slate-100,
-[data-portal-root='true'].dark .border-slate-200,
-[data-portal-root='true'].dark .border-slate-300 {
-  border-color: rgba(51, 65, 85, 0.95) !important;
-}
-
-.dark [data-portal-root='true'] .from-white,
-.dark [data-portal-root='true'] .from-slate-50,
-[data-portal-root='true'].dark .from-white,
-[data-portal-root='true'].dark .from-slate-50 {
-  --tw-gradient-from: #0f172a var(--tw-gradient-from-position) !important;
-  --tw-gradient-to: rgb(15 23 42 / 0) var(--tw-gradient-to-position) !important;
-  --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to) !important;
-}
-
-.dark [data-portal-root='true'] .to-white,
-.dark [data-portal-root='true'] .to-slate-50,
-[data-portal-root='true'].dark .to-white,
-[data-portal-root='true'].dark .to-slate-50 {
-  --tw-gradient-to: #1e293b var(--tw-gradient-to-position) !important;
-}
-
-.dark [data-portal-root='true'] .portal-image-checker,
-[data-portal-root='true'].dark .portal-image-checker {
-  background-color: #0f172a;
-  background-image:
-    linear-gradient(45deg, rgba(148, 163, 184, 0.13) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(148, 163, 184, 0.13) 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, rgba(148, 163, 184, 0.13) 75%),
-    linear-gradient(-45deg, transparent 75%, rgba(148, 163, 184, 0.13) 75%);
-}
-
-.dark body[data-public-portal='true'] .portal-tools-bar #business-os-portal-translate-widget .goog-te-combo {
-  border-color: rgba(51, 65, 85, 0.95);
-  background: #0f172a;
-  color: #f8fafc;
-}
-
-/* ── Page background override ──────────────────────────────── */
 body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; }
 /* Applied directly via JS below when variable is set */
 
-/* ══════════════════════════════════════════════════════════════
-   DARK MODE — Claude-inspired dark grey palette
+/* DARK MODE - Claude-inspired dark grey palette
    Page: #1e1e22  |  Cards: #28282f  |  Sidebar: #17171c
    Inputs: #313138  |  Borders: #3a3a44  |  Text: #e8e8ed
-   ══════════════════════════════════════════════════════════════ */
+*/
 .dark body                   { background-color: #181a20; color: #f1f3f7; }
 .dark .card                  { background-color: #22252c !important; border-color: #3a3f49 !important; box-shadow: 0 8px 22px rgba(0,0,0,0.22) !important; }
 .dark .input                 { background-color: #1d2027 !important; border-color: #4b5563 !important; color: #f1f3f7 !important; }
@@ -543,9 +286,7 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .dark .three-dot-btn { color: #a8b5c8 !important; }
 .dark .three-dot-btn:hover { background-color: #1c2937 !important; color: #f8fbff !important; }
 
-/* ══════════════════════════════════════════════════════════════
-   COMPONENT LIBRARY
-   ══════════════════════════════════════════════════════════════ */
+/* COMPONENT LIBRARY */
 @layer components {
   .btn-primary {
     @apply bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-4 py-2 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-blue-700 shadow-sm;
@@ -677,7 +418,7 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   .mobile-card-table td::before { content:attr(data-label); font-weight:600; color:#6b7280; margin-right:.5rem; flex-shrink:0; }
   
   /* Mobile table overflow fixes */
-  /* NOTE: Do NOT set display:block on thead/tbody — it detaches header column widths
+  /* NOTE: Do NOT set display:block on thead/tbody - it detaches header column widths
      from data cells and causes the misalignment visible on tablets. Instead each
      page wraps its table in an overflow-x:auto container. */
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }

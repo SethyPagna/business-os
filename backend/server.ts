@@ -273,7 +273,8 @@ function resolveFrontendStyleAssetNames() {
 
 function appendSpaStylePreloadHeaders(res) {
   for (const assetName of resolveFrontendStyleAssetNames()) {
-    appendLinkHeader(res, `</assets/${assetName}>; rel=preload; as=style`)
+    if (/^(index|vendor)-/.test(assetName)) continue
+    appendLinkHeader(res, `</assets/${assetName}>; rel=preload; as=style; crossorigin`)
   }
 }
 
