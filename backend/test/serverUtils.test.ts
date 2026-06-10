@@ -287,7 +287,7 @@ runTest('setHtmlNoCacheHeaders serves SPA shell in standards UTF-8 HTML mode', (
   assert.equal(headers.get('Cache-Control'), 'no-cache, no-store, must-revalidate')
 })
 
-runTest('setAdminSpaHtmlHeaders preloads admin bootstrap only for authenticated admin shells', () => {
+runTest('setAdminSpaHtmlHeaders keeps auth bootstrap preload opt-in only', () => {
   const collectHeaders = (path, cookie = '') => {
     const headers = new Map()
     const res = {
@@ -307,10 +307,15 @@ runTest('setAdminSpaHtmlHeaders preloads admin bootstrap only for authenticated 
     return headers
   }
 
+  delete process.env.ADMIN_AUTH_BOOTSTRAP_PRELOAD
   const dashboardHeaders = collectHeaders('/dashboard', 'bos_session=test-session')
   assert.equal(dashboardHeaders.get('Content-Type'), 'text/html; charset=utf-8')
-  assert.match(dashboardHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
-  assert.match(dashboardHeaders.get('Link') || '', /crossorigin=use-credentials/)
+  assert.equal(dashboardHeaders.get('Link') || '', '')
+
+  process.env.ADMIN_AUTH_BOOTSTRAP_PRELOAD = '1'
+  const optInDashboardHeaders = collectHeaders('/dashboard', 'bos_session=test-session')
+  assert.match(optInDashboardHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
+  assert.match(optInDashboardHeaders.get('Link') || '', /crossorigin=use-credentials/)
 
   const branchesHeaders = collectHeaders('/branches', 'bos_session=test-session')
   assert.match(branchesHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
@@ -336,6 +341,8 @@ runTest('setAdminSpaHtmlHeaders preloads admin bootstrap only for authenticated 
   assert.equal(publicHeaders.get('Link') || '', '')
   assert.doesNotMatch(publicHeaders.get('Link') || '', /\/api\/portal\/bootstrap/)
   assert.doesNotMatch(publicHeaders.get('Link') || '', /\/api\/auth\/bootstrap/)
+
+  delete process.env.ADMIN_AUTH_BOOTSTRAP_PRELOAD
 })
 
 if (failed > 0) {

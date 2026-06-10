@@ -8,6 +8,31 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Make auth-bootstrap fetch preload opt-in
+  - area: backend admin HTML headers, Cloudflare preload warning noise,
+    stored-session startup
+  - result: kept
+  - note: authenticated admin shells no longer emit the credentialed
+    `/api/auth/bootstrap` fetch preload by default. The old preload remains
+    available behind `ADMIN_AUTH_BOOTSTRAP_PRELOAD=1`, while route-owned
+    modulepreload hints and the real app-side auth bootstrap fetch remain
+    unchanged.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101700-move888` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `f7d6f6a5e4f7323a`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T08-33-11-666Z.json`
+    measured Products 231 ms, Inventory 270 ms, POS 306 ms, and Branches
+    235 ms with zero failures/errors.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T08-33-35-826Z.json`
+    measured Products 3.563 s, Inventory 3.274 s, POS 3.999 s, and Branches
+    3.414 s with zero failures/errors and no auth-bootstrap preload warning.
+    A live public `/products` header probe returned route-owned modulepreload
+    links and no `/api/auth/bootstrap` Link header.
+  - next target: reduce true `/api/auth/bootstrap` response time and
+    Cloudflare variance now that unused preload noise is gone by default.
+
 - Reuse validated session user in auth bootstrap
   - area: backend auth bootstrap performance, duplicate user/role/organization
     reads

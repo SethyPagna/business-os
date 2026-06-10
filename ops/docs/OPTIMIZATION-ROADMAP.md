@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 887.
+- Latest completed implementation move in this roadmap: Move 888.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,40 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 888 current state:
+- Docker release `business-os:v6.0.0-202606101700-move888` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `f7d6f6a5e4f7323a`.
+- Authenticated admin HTML no longer preloads `/api/auth/bootstrap` by default.
+  `backend/src/serverUtils.ts` now keeps that fetch preload behind
+  `ADMIN_AUTH_BOOTSTRAP_PRELOAD=1`, while preserving no-cache HTML headers and
+  route-owned modulepreload hints. This directly targets the repeated Chrome
+  preload warnings seen in Move 887 public traces.
+- `backend/test/serverUtils.test.ts` now guards the new policy: default
+  authenticated admin shells do not emit the auth-bootstrap fetch preload,
+  while the old credentialed preload remains available when the env flag is
+  explicitly enabled.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-33-11-666Z.json`
+  measured Products 231 ms, Inventory 270 ms, POS 306 ms, and Branches 235 ms
+  with zero failed requests/errors. Local `/api/auth/bootstrap` timings were
+  195 ms, 244 ms, 253 ms, and 200 ms respectively.
+- Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T08-33-35-826Z.json`
+  completed Products 3.563 s, Inventory 3.274 s, POS 3.999 s, and Branches
+  3.414 s with zero failed requests and zero warnings/errors. Public
+  `/api/auth/bootstrap` timings were 3.339 s, 3.093 s, 3.881 s, and 3.359 s.
+  A live public `/products` header probe returned HTTP 200 with route-owned
+  modulepreload links and no `/api/auth/bootstrap` Link header.
+- Verification passed: focused server utility test, backend route contracts,
+  backend server entry verification, full backend `test:utils`, Docker release
+  build/start/health with completed Cloudflare startup warmup, local
+  Playwright route-load trace, Cloudflare route-load trace, and public header
+  probe.
+- Next executable slice: continue reducing true `/api/auth/bootstrap` response
+  time and Cloudflare variance now that the unused fetch-preload warning is
+  gone by default.
 
 Move 887 current state:
 - Docker release `business-os:v6.0.0-202606101610-move887` is running healthy

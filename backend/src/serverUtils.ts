@@ -10,6 +10,10 @@ const DANGEROUS_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor'])
 const STRIP_CONTROL_CHARS_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g
 const STRIP_BIDI_RE = /[\u202A-\u202E\u2066-\u2069]/g
 
+function isAdminAuthBootstrapPreloadEnabled() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.ADMIN_AUTH_BOOTSTRAP_PRELOAD || '').trim())
+}
+
 function buildOriginFromParts(protocol, host) {
   const normalizedProtocol = String(protocol || '').trim().replace(/:$/, '').toLowerCase()
   const normalizedHost = String(host || '').trim()
@@ -277,7 +281,7 @@ function setAdminSpaHtmlHeaders(req, res) {
   const path = String(req?.path || '').split('?')[0].toLowerCase()
   const isLoginRoute = path === '/login' || path.startsWith('/login/')
   const hasSessionCookie = /(?:^|;\s*)bos_session=/.test(String(req?.headers?.cookie || ''))
-  if (isCustomerPortalRoutePath(path) || isLoginRoute || !hasSessionCookie) {
+  if (isCustomerPortalRoutePath(path) || isLoginRoute || !hasSessionCookie || !isAdminAuthBootstrapPreloadEnabled()) {
     return
   }
   const bootstrapPreload = '</api/auth/bootstrap>; rel=preload; as=fetch; crossorigin=use-credentials'
