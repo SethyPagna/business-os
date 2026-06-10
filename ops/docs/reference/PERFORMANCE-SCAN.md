@@ -2533,4 +2533,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   hotspot: Cloudflare variance around `/api/auth/bootstrap`, first static
   chunk delivery, and a Vite circular chunk warning between `app-auth`,
   `app-shared`, `shared-ui`, and `route-sync-utils`.
+- Move 880 records the follow-up chunk-graph stabilization. Shared lazy
+  widgets that only need app hooks now import from `AppContextCore`, and Vite
+  manual chunking separates `app-context-core`, `pricing-utils`, and
+  `shared-export-menu`. Production build now finishes without circular chunk
+  warnings; `app-shared` drops from roughly 9.46 kB to 5.52 kB, while
+  `pricing-utils` is 1.65 kB and `app-context-core` is 1.68 kB. Docker image
+  `business-os:v6.0.0-202606101009-move880` served frontend hash
+  `b7bc8cf415985ebf`. Local Playwright route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-221Z.json` passed
+  with zero failures/errors: Products 259 ms, Inventory 275 ms, POS 335 ms,
+  and Branches 253 ms. First public Cloudflare trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-306Z.json`
+  measured Products 8.326 s, Inventory 3.404 s, POS 3.684 s, and Branches
+  4.958 s; warmed repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-36-332Z.json`
+  measured Products 2.658 s, Inventory 2.508 s, POS 3.148 s, and Branches
+  3.223 s. Both remote traces had zero failed requests/errors. Remaining
+  hotspot: Cloudflare/tunnel variance and first-route API transfer time, not
+  app-owned chunk cycles or artificial waits.
 <!-- phase29-manual-notes:end -->

@@ -8,6 +8,36 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Stabilize admin startup chunk graph
+  - area: frontend startup performance, Vite manual chunking, Docker/Cloudflare
+    verification
+  - result: kept
+  - note: `BackgroundImportTracker` and `NotificationCenter` now import
+    app hooks from `AppContextCore` instead of the full provider module. Vite
+    manual chunks now keep `AppContextCore`, pricing helpers, and the shared
+    export menu in neutral focused chunks. This removes the circular chunk
+    warnings between `app-auth`, `app-shared`, `shared-ui`, and lazy portal
+    menu without restoring the full login or catalog chunks to admin startup.
+  - bundle proof: production build has no circular chunk warnings.
+    `app-shared` is about 5.52 kB instead of about 9.46 kB, with
+    `pricing-utils` at 1.65 kB and `app-context-core` at 1.68 kB.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101009-move880` is running with frontend hash
+    `b7bc8cf415985ebf` and source hash `54446f49482700a5`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-221Z.json`
+    measured Products 259 ms, Inventory 275 ms, POS 335 ms, and Branches
+    253 ms with zero failed requests and zero page/console errors.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-306Z.json`
+    measured Products 8.326 s, Inventory 3.404 s, POS 3.684 s, and Branches
+    4.958 s with zero failures/errors; warmed repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T02-13-36-332Z.json`
+    measured Products 2.658 s, Inventory 2.508 s, POS 3.148 s, and Branches
+    3.223 s with zero failures/errors.
+  - next target: reduce remaining Cloudflare/tunnel and first-route API
+    variance while keeping fully correct data and no synthetic loader delays.
+
 - Remove remaining route startup wait overhead and split admin auth/login
   chunks
   - area: frontend startup performance, route preloads, Docker/Cloudflare

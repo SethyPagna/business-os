@@ -647,10 +647,10 @@ function manualChunks(id: string): string | undefined {
       return 'product-read-api'
     }
     if (normalized.endsWith('/src/api/appBootstrapTransport.ts')) return 'app-bootstrap'
+    if (normalized.endsWith('/src/app/AppContextCore.tsx')) return 'app-context-core'
     if (
       normalized.endsWith('/src/api/authTransport.ts')
       || normalized.endsWith('/src/AppContext.tsx')
-      || normalized.endsWith('/src/app/AppContextCore.tsx')
     ) {
       return 'app-auth'
     }
@@ -680,7 +680,7 @@ function manualChunks(id: string): string | undefined {
       return 'shared-formatters'
     }
     if (normalized.endsWith('/src/utils/pricing.ts')) {
-      return 'app-shared'
+      return 'pricing-utils'
     }
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
@@ -768,6 +768,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
       return 'image-lightbox'
     }
+    if (normalized.includes('/src/components/shared/ExportMenu.tsx')) return 'shared-export-menu'
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-lazy-portal-menu'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'

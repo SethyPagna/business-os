@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 879.
+- Latest completed implementation move in this roadmap: Move 880.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,38 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 880 current state:
+- Docker release `business-os:v6.0.0-202606101009-move880` is running healthy
+  with frontend hash `b7bc8cf415985ebf` and source hash
+  `54446f49482700a5`.
+- The Vite circular chunk warning left by Move 879 is resolved. Shared lazy
+  widgets that only need app hooks now import from `AppContextCore`, and manual
+  chunking separates `app-context-core`, `pricing-utils`, and
+  `shared-export-menu` so `app-auth`, `app-shared`, `shared-ui`, and lazy
+  portal menu no longer form a circular chunk graph.
+- Production build proof: `app-shared` is now about 5.52 kB instead of about
+  9.46 kB, `pricing-utils` is 1.65 kB, `app-context-core` is 1.68 kB, and the
+  build finishes without circular chunk warnings.
+- Local Playwright proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-221Z.json`
+  measured Products 259 ms, Inventory 275 ms, POS 335 ms, and Branches 253 ms
+  with zero failed requests and zero console/page errors.
+- Cloudflare proof:
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-306Z.json`
+  measured Products 8.326 s, Inventory 3.404 s, POS 3.684 s, and Branches
+  4.958 s on the first post-release pass. Warmed repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-36-332Z.json`
+  measured Products 2.658 s, Inventory 2.508 s, POS 3.148 s, and Branches
+  3.223 s. Both traces had zero failed requests and zero console/page errors.
+- Next executable slice: reduce remaining Cloudflare/tunnel variance and
+  first-route API transfer time without stale cache races, fake waits, or
+  incomplete data.
+- Verification passed: `git diff --check`, backend route-contract and server
+  utility tests, frontend typecheck, frontend JSX/source syntax check,
+  frontend performance verifier, frontend production build, Docker release
+  build/start health, local focused route-load trace, and repeated Cloudflare
+  route-load traces.
 
 Move 879 current state:
 - Docker release `business-os:v6.0.0-202606100950-move879` is running healthy

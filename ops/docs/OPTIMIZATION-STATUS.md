@@ -8,9 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 879, remove remaining POS/Inventory artificial
-  startup waits and split first-window admin chunks away from login/catalog
-  payloads.
+- Latest completed move: Move 880, stabilize admin startup chunk graph without
+  reintroducing login/catalog startup payloads.
 
 ## Current Baseline
 
@@ -18,7 +17,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `ecede1516f03dac6`
+  `b7bc8cf415985ebf`
 - latest verified source hash from the most recent Docker-served live check:
   `54446f49482700a5`
 
@@ -123,6 +122,11 @@ Latest verified reports:
 - latest Move 879 Cloudflare affected-route traces:
   `ops/runtime/reports/route-load-trace-2026-06-10T01-55-21-233Z.json`
   and `ops/runtime/reports/route-load-trace-2026-06-10T01-56-02-633Z.json`
+- latest Move 880 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-221Z.json`
+- latest Move 880 Cloudflare affected-route traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-306Z.json`
+  and `ops/runtime/reports/route-load-trace-2026-06-10T02-13-36-332Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -145,6 +149,35 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 880 fixes the Vite circular chunk warning left by Move 879 without
+  moving login, public catalog, or heavy route chunks back into authenticated
+  startup. Lazy shared widgets now import `useApp`/`useSync` from the light
+  `AppContextCore` module instead of the full provider, and manual chunking
+  separates `app-context-core`, `pricing-utils`, and `shared-export-menu`.
+  Production build emits no circular chunk warnings; `app-shared` drops from
+  roughly 9.46 kB to 5.52 kB, with `pricing-utils` at 1.65 kB and
+  `app-context-core` at 1.68 kB.
+- Docker image `business-os:v6.0.0-202606101009-move880` is live with frontend
+  hash `b7bc8cf415985ebf` and source hash `54446f49482700a5`. Local Playwright
+  route trace `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-221Z.json`
+  measured Products 259 ms, Inventory 275 ms, POS 335 ms, and Branches 253 ms
+  with zero failed requests and zero page/console errors.
+- Public Cloudflare was measured twice after the release. The first pass
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-01-306Z.json`
+  measured Products 8.326 s, Inventory 3.404 s, POS 3.684 s, and Branches
+  4.958 s with zero failures/errors. Warmed repeat
+  `ops/runtime/reports/route-load-trace-2026-06-10T02-13-36-332Z.json`
+  measured Products 2.658 s, Inventory 2.508 s, POS 3.148 s, and Branches
+  3.223 s with zero failures/errors. The remaining bottleneck is remote
+  Cloudflare/tunnel transfer and first-route API variance, not app-owned
+  chunk cycles or synthetic loader delays.
+- Current plan position after Move 880: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: reduce
+  public/admin Cloudflare variance and first-route API transfer time while
+  preserving fully loaded, correct data.
 
 - Move 877 changes the authenticated startup path so stored-session admin
   shells set `authReady` immediately, letting direct route pages render from
