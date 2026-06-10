@@ -9,11 +9,13 @@ const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
 const DEFAULT_POLICY = path.join(ROOT, 'ops', 'automation', 'business-os-automation.json')
 
 function parseArgs(argv) {
-  const args = { policy: DEFAULT_POLICY, apply: false }
+  const args = { policy: DEFAULT_POLICY, apply: false, cacheOnly: false, requireCacheRules: false }
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index]
     if (value === '--policy') args.policy = path.resolve(ROOT, argv[++index] || args.policy)
     else if (value === '--apply') args.apply = true
+    else if (value === '--cache-only') args.cacheOnly = true
+    else if (value === '--require-cache-rules') args.requireCacheRules = true
   }
   return args
 }
@@ -176,48 +178,52 @@ async function tryApplyRuleset(label, fn) {
   }
 }
 
-async function applyCloudflareAutomation({ token, zone, accountId, adminHost, publicHost, policy, emails }) {
+async function applyCloudflareAutomation({ token, zone, accountId, adminHost, publicHost, policy, emails, cacheOnly = false }) {
   const adminAccessMode = normalizeAdminAccessMode(policy)
-  const accessApp = await upsertAccessApp({ token, accountId, adminHost, emails, policy, mode: adminAccessMode })
-  console.log(`Access admin app: ${accessApp.created ? 'created' : 'updated'} (${accessApp.domain}, ${accessApp.mode})`)
+  if (!cacheOnly) {
+    const accessApp = await upsertAccessApp({ token, accountId, adminHost, emails, policy, mode: adminAccessMode })
+    console.log(`Access admin app: ${accessApp.created ? 'created' : 'updated'} (${accessApp.domain}, ${accessApp.mode})`)
+  }
 
   const hostSet = [adminHost, publicHost].map((host) => `"${host}"`).join(' ')
 
-  await tryApplyRuleset('WAF custom rules', () => upsertEntrypointRuleset({
-    token,
-    zoneId: zone.id,
-    phase: 'http_request_firewall_custom',
-    name: 'Business OS custom WAF',
-    rules: [
-      {
-        action: 'block',
-        expression: `(http.host in {${hostSet}} and (lower(http.request.uri.query) contains "<script" or lower(http.request.uri.query) contains "union select" or lower(http.request.uri.query) contains "../" or lower(http.request.uri.path) contains "../"))`,
-        description: 'Business OS obvious injection block',
-        enabled: true,
-      },
-    ],
-  }))
-
-  await tryApplyRuleset('Rate-limit rules', () => upsertEntrypointRuleset({
-    token,
-    zoneId: zone.id,
-    phase: 'http_ratelimit',
-    name: 'Business OS rate limits',
-    rules: [
-      {
-        action: 'block',
-        expression: `(http.host eq "${adminHost}" and http.request.uri.path contains "/api/auth/")`,
-        description: 'Business OS auth rate limit',
-        enabled: true,
-        ratelimit: {
-          characteristics: ['ip.src', 'cf.colo.id'],
-          period: 10,
-          requests_per_period: 10,
-          mitigation_timeout: 10,
+  if (!cacheOnly) {
+    await tryApplyRuleset('WAF custom rules', () => upsertEntrypointRuleset({
+      token,
+      zoneId: zone.id,
+      phase: 'http_request_firewall_custom',
+      name: 'Business OS custom WAF',
+      rules: [
+        {
+          action: 'block',
+          expression: `(http.host in {${hostSet}} and (lower(http.request.uri.query) contains "<script" or lower(http.request.uri.query) contains "union select" or lower(http.request.uri.query) contains "../" or lower(http.request.uri.path) contains "../"))`,
+          description: 'Business OS obvious injection block',
+          enabled: true,
         },
-      },
-    ],
-  }))
+      ],
+    }))
+
+    await tryApplyRuleset('Rate-limit rules', () => upsertEntrypointRuleset({
+      token,
+      zoneId: zone.id,
+      phase: 'http_ratelimit',
+      name: 'Business OS rate limits',
+      rules: [
+        {
+          action: 'block',
+          expression: `(http.host eq "${adminHost}" and http.request.uri.path contains "/api/auth/")`,
+          description: 'Business OS auth rate limit',
+          enabled: true,
+          ratelimit: {
+            characteristics: ['ip.src', 'cf.colo.id'],
+            period: 10,
+            requests_per_period: 10,
+            mitigation_timeout: 10,
+          },
+        },
+      ],
+    }))
+  }
 
   await tryApplyRuleset('Public portal cache rules', () => upsertEntrypointRuleset({
     token,
@@ -292,6 +298,7 @@ async function main() {
   console.log(`Rate limit profile: ${policy.cloudflare?.rateLimitProfile || 'normal'}`)
   console.log(`Admin access mode: ${adminAccessMode}`)
   console.log(`Access emails configured: ${emails.length}`)
+  console.log(`Apply scope: ${args.cacheOnly ? 'public portal cache only' : 'full configured automation'}`)
 
   if (needs.length) {
     console.log('\nCloudflare automation needs:')
@@ -301,10 +308,16 @@ async function main() {
   if (optionalNeeds.length) {
     console.log('\nOptional Cloudflare automation improvements:')
     optionalNeeds.forEach((need) => console.log(`- ${need}`))
+    if (args.requireCacheRules) {
+      console.log('\nPublic portal cache rule is required for the current performance target.')
+      console.log('Retry after granting the token Zone Cache Rules Edit, then run:')
+      console.log('  node ops\\scripts\\runtime\\cloudflare\\verify-cloudflare-automation.ts --apply --cache-only --require-cache-rules')
+      process.exit(2)
+    }
   }
 
   if (args.apply && !needs.length) {
-    await applyCloudflareAutomation({ token, zone, accountId, adminHost, publicHost, policy, emails })
+    await applyCloudflareAutomation({ token, zone, accountId, adminHost, publicHost, policy, emails, cacheOnly: args.cacheOnly })
   }
 }
 

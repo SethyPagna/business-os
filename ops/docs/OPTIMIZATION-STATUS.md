@@ -8,8 +8,8 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 899, embed admin bootstrap data and push public
-  route chunks into first-byte preload headers.
+- Latest completed move: Move 900, harden the Cloudflare public cache-rule
+  apply path and confirm the remaining permission blocker.
 
 ## Current Baseline
 
@@ -85,6 +85,10 @@ Latest verified reports:
 - latest Move 899 public-host traces:
   `ops/runtime/reports/route-load-trace-2026-06-10T20-28-00-619Z.json`
   and `ops/runtime/reports/lcp-route-trace-2026-06-10T20-28-01-127Z.json`
+- latest Move 900 Cloudflare warmup/cache proof:
+  `ops/runtime/reports/cloudflare-startup-warmup-move900.json`
+- latest Move 900 public-host LCP baseline:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-43-57-637Z.json`
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:
@@ -4892,7 +4896,49 @@ Recent route-level win:
   Inventory's first route surface further, and continuing public-tunnel
   variance checks.
 
-## Current Move 899
+## Current Move 900
+
+- Move 900 hardens the Cloudflare cache-rule execution path for the remaining
+  public LCP blocker. `verify-cloudflare-automation.ts` now supports
+  `--cache-only` and `--require-cache-rules`, and `ops/package.json` exposes
+  `npm --prefix ops run cloudflare:apply-cache` so the next run can apply only
+  the public portal cache rule after the token receives `Zone Cache Rules
+  Edit`.
+- Safety behavior changed intentionally: `cloudflare:apply-cache` now fails
+  before mutating unrelated Access/WAF/rate-limit settings when Cache Rules
+  are still unavailable. The command prints the exact retry command:
+  `node ops\scripts\runtime\cloudflare\verify-cloudflare-automation.ts --apply --cache-only --require-cache-rules`.
+- Verification proof: `node backend\test\fullAutomation.test.ts` passed, and
+  `npm.cmd --prefix ops run cloudflare:verify` reported active token, ready
+  DNS/Access/Rulesets APIs, and `Cache Rules API: needs stronger token`.
+  `npm.cmd --prefix ops run cloudflare:apply-cache` failed early as designed
+  because Cloudflare returned HTTP 403 for `Zone.Cache Rules: Edit`.
+- Live cache proof: `https://leangcosmetics.dpdns.org/public` returned
+  `CF-Cache-Status: DYNAMIC` with
+  `Cache-Control: public, max-age=20, s-maxage=20, stale-while-revalidate=120`.
+  Warmup report
+  `ops/runtime/reports/cloudflare-startup-warmup-move900.json` passed with
+  zero failures and 86 cached asset hits, while public document
+  `https://leangcosmetics.dpdns.org/public` remained `DYNAMIC` at 2.339 s and
+  `/api/portal/bootstrap` remained `DYNAMIC` at 1.796 s.
+- Public-host LCP baseline after the automation hardening:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T20-43-57-637Z.json`
+  measured Public Catalog at 3.592 s with zero failed requests/errors.
+- Remaining target: grant/update the local Cloudflare API token with
+  `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`, `npm --prefix ops run
+  warm-cloudflare-startup -- --public-url https://leangcosmetics.dpdns.org
+  --admin-routes /inventory,/users --include-api`, and the public-host LCP
+  trace again. The app-origin headers are already cacheable for public portal
+  reads; Cloudflare needs the cache setting rule to cache HTML/API responses at
+  the edge.
+- Current plan position after Move 900: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+## Previous Move 899
 
 - Move 899 removes another real double-load path. Authenticated admin SPA
   shell responses now embed the existing `/api/auth/bootstrap` payload as

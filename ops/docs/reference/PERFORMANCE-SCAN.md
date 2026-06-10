@@ -2664,4 +2664,17 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   measured 3.860 s. Remaining bottleneck is Cloudflare document delivery:
   `/public` returned `cf-cache-status: DYNAMIC`, and the route-load report
   showed the HTML document itself taking 4.662 s before scripts.
+- Move 900 records the Cloudflare cache-rule execution hardening. The public
+  portal app-origin headers are cacheable, but the live edge still returns
+  `CF-Cache-Status: DYNAMIC` because the current token cannot read/apply
+  `http_request_cache_settings`. `verify-cloudflare-automation.ts` now exposes
+  `--cache-only` and `--require-cache-rules`, and
+  `npm --prefix ops run cloudflare:apply-cache` fails early until the token has
+  `Zone Cache Rules Edit`. Verification passed through
+  `node backend\test\fullAutomation.test.ts` and
+  `npm.cmd --prefix ops run cloudflare:verify`; the apply-cache command
+  reported Cloudflare HTTP 403 as expected. Warmup proof
+  `ops/runtime/reports/cloudflare-startup-warmup-move900.json` had zero
+  failures and 86 asset cache hits, while `/public` remained `DYNAMIC` at
+  2.339 s and `/api/portal/bootstrap` remained `DYNAMIC` at 1.796 s.
 <!-- phase29-manual-notes:end -->

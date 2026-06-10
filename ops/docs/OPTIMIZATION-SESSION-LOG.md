@@ -8,6 +8,24 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Harden Cloudflare public cache-rule apply path
+  - area: Cloudflare cache rules, public portal LCP, automation safety
+  - result: kept
+  - note: `verify-cloudflare-automation.ts` now has `--cache-only` and
+    `--require-cache-rules`, exposed as
+    `npm --prefix ops run cloudflare:apply-cache`, so the remaining public
+    portal cache rule can be applied without touching Access/WAF/rate-limit
+    settings once the token permission is fixed.
+  - verification: `node backend\test\fullAutomation.test.ts` passed;
+    `npm.cmd --prefix ops run cloudflare:verify` confirmed Cache Rules still
+    need a stronger token; `npm.cmd --prefix ops run cloudflare:apply-cache`
+    failed early as designed with Cloudflare HTTP 403 for `Zone.Cache Rules:
+    Edit`.
+  - live proof: `ops/runtime/reports/cloudflare-startup-warmup-move900.json`
+    passed with zero failures and 86 asset cache hits. The public document and
+    `/api/portal/bootstrap` remained `DYNAMIC`, confirming the remaining LCP
+    bottleneck is Cloudflare cache-rule permission, not app-origin headers.
+
 - Embed admin auth bootstrap and push public route preloads to first byte
   - area: route startup performance, admin auth bootstrap, public portal LCP
   - result: kept

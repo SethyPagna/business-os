@@ -31,6 +31,7 @@ Create a Cloudflare custom token scoped only to the `leangcosmetics.dpdns.org` z
 - `Zone Read`
 - `Zone DNS Edit`
 - `Zone Rulesets Edit`
+- `Zone Cache Rules Edit`
 - `Zone WAF Edit`
 - `Account Access: Apps and Policies Edit`
 - `Account Cloudflare Tunnel Edit`
@@ -38,6 +39,14 @@ Create a Cloudflare custom token scoped only to the `leangcosmetics.dpdns.org` z
 - `Workers R2 Storage Edit`
 
 Cloudflare may show some permission names as `Write` instead of `Edit`; choose the write/edit level when the dashboard offers that wording.
+
+After the token has `Zone Cache Rules Edit`, apply only the public portal cache rule with:
+
+```powershell
+npm --prefix ops run cloudflare:apply-cache
+```
+
+This command fails before mutating anything else if the token still cannot read or write Cache Rules. It is the required Cloudflare-side step for turning `/public` from `cf-cache-status: DYNAMIC` into an edge-cacheable customer portal document.
 
 Add allowed administrator emails, one per line, to:
 

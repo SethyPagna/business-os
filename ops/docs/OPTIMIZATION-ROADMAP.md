@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 899.
+- Latest completed implementation move in this roadmap: Move 900.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15293,5 +15293,30 @@ Move 899 status:
   real cache rule/header policy or tunnel-bypass deployment path, then rerun
   the same traces.
 - Current plan position after Move 899: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active.
+
+Move 900 status:
+- Move 900 hardens the Cloudflare public portal cache-rule path. The
+  Cloudflare automation now has a cache-only apply scope and a
+  `--require-cache-rules` gate, surfaced as
+  `npm --prefix ops run cloudflare:apply-cache`, so the LCP-critical public
+  cache rule can be applied independently after the token permission is fixed.
+- Verification proof: `node backend\test\fullAutomation.test.ts` passed;
+  `npm.cmd --prefix ops run cloudflare:verify` confirmed the token is active
+  with DNS/Access/Rulesets ready but Cache Rules unavailable; and
+  `npm.cmd --prefix ops run cloudflare:apply-cache` failed early as intended
+  with Cloudflare HTTP 403 for `Zone.Cache Rules: Edit`.
+- Live cache proof:
+  `ops/runtime/reports/cloudflare-startup-warmup-move900.json` passed with
+  zero failed requests and 86 asset cache hits. The public document remained
+  `DYNAMIC` at 2.339 s and `/api/portal/bootstrap` remained `DYNAMIC` at
+  1.796 s, matching the measured LCP bottleneck from Move 899.
+- Remaining target: update `ops/runtime/secrets/cloudflare-api-token.txt` with
+  a token that includes `Zone Cache Rules Edit`, run
+  `npm --prefix ops run cloudflare:apply-cache`, then rerun Cloudflare warmup
+  and public-host LCP traces until `/public` and public portal read APIs are
+  served by the Cloudflare edge instead of the tunnel.
+- Current plan position after Move 900: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active.
