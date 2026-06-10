@@ -1,8 +1,8 @@
 {
   "report": "ops/docs/reference/ORGANIZATION-AUDIT.md",
   "summary": "ops/docs/reference/ORGANIZATION-AUDIT.json",
-  "filesScanned": 660,
-  "largeFiles": 82,
+  "filesScanned": 661,
+  "largeFiles": 81,
   "compatibilityWrappers": 0,
   "brokenCompatibilityWrappers": 0,
   "wrapperRemovalCandidates": 0,
@@ -203,7 +203,6 @@
     "frontend/src/components/utils-settings/Settings.tsx",
     "frontend/src/lang/en.json",
     "frontend/src/lang/km.json",
-    "frontend/src/styles/main.css",
     "frontend/src/utils/printReceipt.ts",
     "frontend/src/web-api.ts",
     "frontend/tests/actionStability.test.ts",

@@ -8,6 +8,37 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Cache rendered public portal shell at origin
+  - area: public portal LCP, Cloudflare dynamic HTML fallback, backend route
+    startup
+  - result: kept
+  - note: `/public` now reuses a short-lived rendered SPA shell with embedded
+    public bootstrap JSON. The TTL is clamped to the existing portal refresh
+    window, and the cache is public-only; admin/private SPA HTML is unchanged.
+  - verification: `npm.cmd --prefix backend run build:server-entry`,
+    `node backend\test\routeContracts.test.ts`, full backend `test:utils`,
+    Docker release/start, `git diff --check`, Cloudflare warmup, public header
+    proof, and local/public Playwright route-load/LCP traces passed.
+  - live proof: Docker image `business-os:v6.0.0-202606110513` is healthy with
+    source hash `d465c370f5a130fb`. Local `/public` returned
+    `X-Business-OS-Public-Shell-Cache: miss` in 353 ms then `hit` in 88 ms.
+    Public Cloudflare `/public` returned the origin cache `hit` while
+    `CF-Cache-Status` remained `DYNAMIC`.
+  - Playwright proof: public-host route-load
+    `ops/runtime/reports/route-load-trace-2026-06-10T21-21-45-520Z.json`
+    measured 2.362 s ready; public-host LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-10T21-21-45-903Z.json`
+    measured 2.232 s with zero failed requests/errors. Direct mobile browser
+    smoke saved `ops/runtime/reports/public-portal-move901-mobile.png`.
+  - remaining: Cloudflare still needs a token with `Zone Cache Rules Edit` so
+    `npm --prefix ops run cloudflare:apply-cache` can turn `/public` into a
+    true edge HIT rather than an optimized origin/tunnel hit.
+  - cleanup: deleted the ignored/generated `release/` kit after Docker health
+    and live proof, removing 380,974,775 bytes. It is reproducible from
+    `run\docker\release.bat`; uploads, secrets, database, node_modules, and the
+    running Docker image were preserved. Phase 29 passed afterward with zero
+    failures.
+
 - Harden Cloudflare public cache-rule apply path
   - area: Cloudflare cache rules, public portal LCP, automation safety
   - result: kept

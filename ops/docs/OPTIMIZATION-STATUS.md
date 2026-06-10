@@ -8,8 +8,8 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 900, harden the Cloudflare public cache-rule
-  apply path and confirm the remaining permission blocker.
+- Latest completed move: Move 901, short-cache the rendered public portal SPA
+  shell at origin while Cloudflare HTML remains dynamic.
 
 ## Current Baseline
 
@@ -19,7 +19,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `0fbf2d5bae2d7bc4`
 - latest verified source hash from the most recent Docker-served live check:
-  `57522f983df9a865`
+  `d465c370f5a130fb`
 
 Latest verified reports:
 
@@ -89,6 +89,24 @@ Latest verified reports:
   `ops/runtime/reports/cloudflare-startup-warmup-move900.json`
 - latest Move 900 public-host LCP baseline:
   `ops/runtime/reports/lcp-route-trace-2026-06-10T20-43-57-637Z.json`
+- latest Move 901 local public route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T21-20-49-517Z.json`
+- latest Move 901 local public LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T21-20-50-814Z.json`
+- latest Move 901 public-host route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T21-21-45-520Z.json`
+- latest Move 901 public-host LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T21-21-45-903Z.json`
+- latest Move 901 Cloudflare warmup/cache proof:
+  `ops/runtime/reports/cloudflare-startup-warmup-move901.json`
+- latest Move 901 direct Playwright mobile screenshot:
+  `ops/runtime/reports/public-portal-move901-mobile.png`
+- latest Move 901 Phase 29 audit:
+  `ops/docs/reference/PHASE29-AUDIT.md`
+- latest Move 901 cleanup result:
+  deleted ignored/generated `release/` kit after Docker proof; 380,974,775
+  bytes removed; Phase 29 generated-bulk cleanup candidates now 321,161,326
+  bytes and under policy.
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:

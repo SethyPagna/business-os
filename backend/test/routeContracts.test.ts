@@ -158,6 +158,14 @@ runTest('auth router exports authenticated bootstrap builder for SPA shell injec
   assert.match(source, /module\.exports = Object\.assign\(router,[\s\S]*buildAuthenticatedBootstrap[\s\S]*\)/)
 })
 
+runTest('public SPA shell caches rendered bootstrap HTML for the portal refresh window', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../server.ts'), 'utf8')
+  assert.match(source, /const publicSpaHtmlCache = \{[\s\S]*html: ''[\s\S]*expiresAt: 0[\s\S]*ttlSeconds: 20[\s\S]*\}/)
+  assert.match(source, /function normalizePublicSpaHtmlTtl\(refreshSeconds = 20\)[\s\S]*Math\.max\(5, Math\.min\(60, Number\(refreshSeconds\) \|\| 20\)\)/)
+  assert.match(source, /async function sendPublicSpaIndex\(_req, res\)[\s\S]*publicSpaHtmlCache\.html[\s\S]*publicSpaHtmlCache\.expiresAt > now[\s\S]*X-Business-OS-Public-Shell-Cache', 'hit'/)
+  assert.match(source, /payload\?\.config\?\.refreshSeconds[\s\S]*injectPublicPortalBootstrap\(html, payload\)[\s\S]*publicSpaHtmlCache\.expiresAt = Date\.now\(\) \+ ttlSeconds \* 1000[\s\S]*X-Business-OS-Public-Shell-Cache', 'miss'/)
+})
+
 runTest('files router registers list, upload, and delete routes', () => {
   const router = require('../src/routes/files.ts')
   const paths = getRoutePaths(router)

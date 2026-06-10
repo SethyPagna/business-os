@@ -1,12 +1,12 @@
 # Organization Audit
 
-Generated: 2026-06-10T14:33:18.777Z
+Generated: 2026-06-10T22:01:26.945Z
 
 ## Summary
 
 - Scanned roots: `frontend/src`, `frontend/tests`, `backend/src`, `backend/test`, `ops/scripts`, `ops/docs`, `run`
 - Scanned root files: `package.json`, `backend/package.json`, `frontend/package.json`, `ops/package.json`
-- Files scanned: 660
+- Files scanned: 661
 - Large file threshold: 700 lines
 - File read mode: bounded parallel (24)
 
@@ -21,8 +21,8 @@ Generated: 2026-06-10T14:33:18.777Z
 | .bat | 16 |
 | .ps1 | 8 |
 | .sh | 3 |
+| .css | 2 |
 | .sql | 2 |
-| .css | 1 |
 
 ## Largest Areas
 
@@ -63,21 +63,21 @@ Generated: 2026-06-10T14:33:18.777Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 15148 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 15367 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12071 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10341 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9793 | ops/docs |
-| ops/docs/OPTIMIZATION-STATUS.md | 4936 | ops/docs |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4684 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9871 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 5194 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4761 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| frontend/tests/performanceLoadingUx.test.ts | 3654 | frontend/tests/performanceLoadingUx.test.ts |
-| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3572 | ops/docs/reference |
+| frontend/tests/performanceLoadingUx.test.ts | 3684 | frontend/tests/performanceLoadingUx.test.ts |
+| ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3646 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3498 | frontend/components/catalog |
-| frontend/src/components/inventory/Inventory.tsx | 3490 | frontend/components/inventory |
-| ops/docs/reference/PHASE29-AUDIT.json | 3428 | ops/docs/reference |
+| frontend/src/components/inventory/Inventory.tsx | 3489 | frontend/components/inventory |
+| ops/docs/reference/PHASE29-AUDIT.json | 3432 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/PERFORMANCE-SCAN.md | 2592 | ops/docs/reference |
+| ops/docs/reference/PERFORMANCE-SCAN.md | 2663 | ops/docs/reference |
 | frontend/src/components/products/Products.tsx | 2580 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2362 | frontend/components/pos |
 | backend/src/routes/products.ts | 2310 | backend/routes |

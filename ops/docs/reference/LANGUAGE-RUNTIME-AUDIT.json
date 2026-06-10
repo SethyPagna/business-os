@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-09T05:08:35.673Z",
+  "generatedAt": "2026-06-10T22:01:25.986Z",
   "report": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.md",
   "summary": "ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json",
   "mode": "non-mutating",
@@ -12,7 +12,7 @@
     "ops/config",
     "run"
   ],
-  "sourceFiles": 539,
+  "sourceFiles": 541,
   "fileReadMode": "bounded-parallel",
   "rootWalkMode": "bounded-parallel",
   "rootWalkConcurrency": 3,
@@ -26,7 +26,7 @@
     ],
     [
       "React TSX",
-      121
+      122
     ],
     [
       "Windows batch",
@@ -41,16 +41,16 @@
       3
     ],
     [
+      "CSS",
+      2
+    ],
+    [
       "JSON",
       2
     ],
     [
       "SQL",
       2
-    ],
-    [
-      "CSS",
-      1
     ]
   ],
   "extensionCounts": [
@@ -60,7 +60,7 @@
     ],
     [
       ".tsx",
-      121
+      122
     ],
     [
       ".bat",
@@ -75,16 +75,16 @@
       3
     ],
     [
+      ".css",
+      2
+    ],
+    [
       ".json",
       2
     ],
     [
       ".sql",
       2
-    ],
-    [
-      ".css",
-      1
     ]
   ],
   "defaults": {

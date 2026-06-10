@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 895 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 901 in this file.
 
 ## Goal
 
@@ -9814,6 +9814,41 @@ Decision rule:
   completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
   schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 901: Cache the rendered public portal shell at origin
+
+- Ownership slice: Phase 8.4/Phase 29 public portal startup latency while the
+  Cloudflare cache-rule permission blocker keeps the HTML document dynamic.
+- Code-flow slice: `backend/server.ts` now keeps the injected `/public` SPA
+  shell in a short in-process cache bounded to the existing public portal
+  refresh TTL. The cache stores only the already-public bootstrap payload and
+  does not touch admin/private SPA HTML or write flows.
+- Verification slice: `backend/test/routeContracts.test.ts` guards the cache
+  TTL clamp, miss/hit proof header, embedded bootstrap injection, and refresh
+  window. `backend/server.js` was regenerated from the TypeScript source.
+- Live proof: Docker image `business-os:v6.0.0-202606110513` is healthy with
+  source hash `d465c370f5a130fb`. Local `/public` returned
+  `X-Business-OS-Public-Shell-Cache: miss` in 353 ms then `hit` in 88 ms; the
+  public Cloudflare URL returned `hit` while still reporting
+  `CF-Cache-Status: DYNAMIC`.
+- Playwright proof: local public route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T21-20-49-517Z.json`
+  measured 259 ms ready; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T21-20-50-814Z.json`
+  measured 316 ms. Public-host route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T21-21-45-520Z.json`
+  measured 2.362 s ready; public-host LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T21-21-45-903Z.json`
+  measured 2.232 s with zero failures/errors. Direct Playwright mobile smoke
+  saved `ops/runtime/reports/public-portal-move901-mobile.png`.
+- Keeper boundary: this is not a folder move or language conversion. The next
+  infrastructure slice is still the Cloudflare token permission update so
+  `npm --prefix ops run cloudflare:apply-cache` can convert `/public` from
+  dynamic origin delivery to an edge cache HIT.
+- Cleanup proof: after the Docker release/start proof, the ignored generated
+  `release/` kit was deleted because it is reproducible from
+  `run\docker\release.bat` and is not the running Docker image. Bytes removed:
+  380,974,775. Phase 29 passed afterward with zero failures.
 
 ## Safety Gates
 

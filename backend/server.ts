@@ -85,6 +85,11 @@ let databaseMaintenanceTimer = null
 const uploadFallbackCache = new Map()
 const PUBLIC_PORTAL_BOOTSTRAP_SCRIPT_ID = 'business-os-portal-bootstrap'
 const ADMIN_AUTH_BOOTSTRAP_SCRIPT_ID = 'business-os-auth-bootstrap'
+const publicSpaHtmlCache = {
+  html: '',
+  expiresAt: 0,
+  ttlSeconds: 20,
+}
 
 const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'index-',
@@ -308,8 +313,12 @@ function appendPublicFontPreloadHeaders(res) {
   }
 }
 
+function normalizePublicSpaHtmlTtl(refreshSeconds = 20) {
+  return Math.max(5, Math.min(60, Number(refreshSeconds) || 20))
+}
+
 function setPublicSpaHtmlCacheHeaders(res, refreshSeconds = 20) {
-  const ttlSeconds = Math.max(5, Math.min(60, Number(refreshSeconds) || 20))
+  const ttlSeconds = normalizePublicSpaHtmlTtl(refreshSeconds)
   res.setHeader('Cache-Control', `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}, stale-while-revalidate=120`)
   if (typeof res.removeHeader === 'function') {
     res.removeHeader('Pragma')
@@ -352,6 +361,14 @@ function injectAdminAuthBootstrap(html, payload) {
 
 async function sendPublicSpaIndex(_req, res) {
   const htmlPath = path.join(FRONTEND_DIST, 'index.html')
+  const now = Date.now()
+  if (publicSpaHtmlCache.html && publicSpaHtmlCache.expiresAt > now) {
+    setPublicSpaHtmlCacheHeaders(res, publicSpaHtmlCache.ttlSeconds)
+    res.setHeader('X-Business-OS-Public-Shell-Cache', 'hit')
+    res.type('html')
+    return res.send(publicSpaHtmlCache.html)
+  }
+
   const portalRouter = require('./src/routes/portal.ts')
   const buildPayload = portalRouter?.buildPublicPortalBootstrapPayload
   if (typeof buildPayload !== 'function') {
@@ -359,9 +376,15 @@ async function sendPublicSpaIndex(_req, res) {
   }
   const html = await fs.promises.readFile(htmlPath, 'utf8')
   const payload = await buildPayload()
-  setPublicSpaHtmlCacheHeaders(res, payload?.config?.refreshSeconds)
+  const ttlSeconds = normalizePublicSpaHtmlTtl(payload?.config?.refreshSeconds)
+  const renderedHtml = injectPublicPortalBootstrap(html, payload)
+  publicSpaHtmlCache.html = renderedHtml
+  publicSpaHtmlCache.expiresAt = Date.now() + ttlSeconds * 1000
+  publicSpaHtmlCache.ttlSeconds = ttlSeconds
+  setPublicSpaHtmlCacheHeaders(res, ttlSeconds)
+  res.setHeader('X-Business-OS-Public-Shell-Cache', 'miss')
   res.type('html')
-  return res.send(injectPublicPortalBootstrap(html, payload))
+  return res.send(renderedHtml)
 }
 
 async function sendAdminSpaIndex(req, res) {

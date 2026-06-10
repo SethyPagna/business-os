@@ -2,39 +2,6 @@
 
 Auto-generated performance scan for source size/complexity and built frontend chunks.
 
-## Latest Manual Note
-
-- Move 895 release `business-os:v6.0.0-202606102309` is live with frontend
-  hash `0dcd7c3e85311dd1` and source hash `797c2adf20649e81`.
-- Inventory and Returns now render their primary list/product surfaces from
-  the route chunk instead of adding a first-paint component subchunk waterfall.
-  Inventory's fixed 140 ms mobile full-list reveal delay was removed.
-- Vite route-aware preload hints and backend SPA `Link` modulepreload hints
-  now agree on lean first-window route dependencies:
-  Inventory = `Inventory`, `inventory-api`, `product-shared`, `shared-ui`;
-  Returns = `Returns`, `returns-read-api`; Users = `Users`,
-  `user-admin-api`, `user-permission-definitions`.
-- Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`:
-  Inventory 300 ms, Returns 294 ms, Users 287 ms, zero failed requests/errors.
-- Local Playwright LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-10-860Z.json`:
-  Inventory 332 ms, Returns 352 ms, Users 284 ms, zero failed
-  requests/errors. This meets the sub-2.5 s target locally.
-- Public admin traces completed with zero failed requests/errors, but remain
-  network/API transfer bound:
-  `ops/runtime/reports/route-load-trace-2026-06-10T15-13-33-634Z.json`
-  measured ready at Inventory 8.440 s, Returns 3.623 s, Users 3.609 s; and
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-36-800Z.json`
-  measured Inventory 5.184 s, Returns 3.992 s, Users 3.992 s.
-- Slowest public requests in the final LCP trace were real transfers, not fake
-  loader overhead: `/api/inventory/bootstrap` 5.712 s,
-  `/api/returns?scope=customer` 4.473 s, `/api/users` 4.480 s,
-  `/api/auth/bootstrap` 3.603-4.497 s, and several startup chunks around
-  3.1-5.1 s. The next target is public-path API response time and startup chunk
-  transfer/caching through Cloudflare, while preserving the local sub-500 ms
-  route behavior.
-
 ## 1. Scope
 
 - Frontend source: `frontend/src`
@@ -48,30 +15,30 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Size (KB) | Lines |
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
-| `frontend/src/components/inventory/Inventory.tsx` | 159.8 | 3454 |
+| `frontend/src/components/inventory/Inventory.tsx` | 160.8 | 3489 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 152.5 | 3498 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
-| `frontend/src/components/products/Products.tsx` | 119.6 | 2589 |
-| `frontend/src/components/pos/POS.tsx` | 114.8 | 2362 |
+| `frontend/src/components/products/Products.tsx` | 119.2 | 2580 |
+| `frontend/src/components/pos/POS.tsx` | 115.0 | 2362 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 104.9 | 1555 |
-| `backend/src/routes/products.ts` | 101.8 | 2297 |
+| `backend/src/routes/products.ts` | 102.4 | 2310 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 101.2 | 2170 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 100.4 | 1958 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 88.1 | 1911 |
-| `backend/src/routes/inventory.ts` | 86.1 | 1952 |
-| `frontend/src/components/utils-settings/Backup.tsx` | 80.1 | 1775 |
-| `frontend/src/AppContext.tsx` | 76.0 | 1915 |
-| `frontend/src/App.tsx` | 74.4 | 1966 |
+| `backend/src/routes/inventory.ts` | 86.7 | 1962 |
+| `frontend/src/components/utils-settings/Backup.tsx` | 80.1 | 1779 |
+| `frontend/src/AppContext.tsx` | 76.9 | 1947 |
+| `frontend/src/App.tsx` | 75.8 | 2009 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 68.2 | 1326 |
 | `backend/src/routes/system/index.ts` | 65.6 | 1674 |
 | `backend/src/routes/sales.ts` | 65.2 | 1591 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
-| `frontend/src/components/utils-settings/AuditLog.tsx` | 60.5 | 1322 |
+| `frontend/src/components/utils-settings/AuditLog.tsx` | 59.6 | 1293 |
 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 59.2 | 1116 |
+| `frontend/src/components/users/Users.tsx` | 58.7 | 1280 |
 | `backend/src/services/googleDriveSync/index.ts` | 57.8 | 1564 |
-| `frontend/src/components/users/Users.tsx` | 57.5 | 1245 |
 
 ## 3. Largest Source Files (by lines)
 
@@ -79,26 +46,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 3498 | 152.5 |
-| `frontend/src/components/inventory/Inventory.tsx` | 3454 | 159.8 |
+| `frontend/src/components/inventory/Inventory.tsx` | 3489 | 160.8 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
-| `frontend/src/components/products/Products.tsx` | 2589 | 119.6 |
-| `frontend/src/components/pos/POS.tsx` | 2362 | 114.8 |
-| `backend/src/routes/products.ts` | 2297 | 101.8 |
+| `frontend/src/components/products/Products.tsx` | 2580 | 119.2 |
+| `frontend/src/components/pos/POS.tsx` | 2362 | 115.0 |
+| `backend/src/routes/products.ts` | 2310 | 102.4 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2170 | 101.2 |
-| `frontend/src/App.tsx` | 1966 | 74.4 |
+| `frontend/src/App.tsx` | 2009 | 75.8 |
+| `backend/src/routes/inventory.ts` | 1962 | 86.7 |
 | `frontend/src/components/dashboard/Dashboard.tsx` | 1958 | 100.4 |
-| `backend/src/routes/inventory.ts` | 1952 | 86.1 |
-| `frontend/src/AppContext.tsx` | 1915 | 76.0 |
+| `frontend/src/AppContext.tsx` | 1947 | 76.9 |
 | `frontend/src/components/utils-settings/Settings.tsx` | 1911 | 88.1 |
-| `frontend/src/components/utils-settings/Backup.tsx` | 1775 | 80.1 |
+| `frontend/src/components/utils-settings/Backup.tsx` | 1779 | 80.1 |
 | `backend/src/routes/system/index.ts` | 1674 | 65.6 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
 | `backend/src/routes/sales.ts` | 1591 | 65.2 |
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1555 | 104.9 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
-| `backend/src/routes/portal.ts` | 1428 | 52.3 |
+| `backend/src/routes/portal.ts` | 1435 | 52.6 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `backend/src/fileAssets.ts` | 1336 | 46.3 |
 | `frontend/src/web-api.ts` | 1328 | 52.2 |
@@ -107,31 +74,31 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 | Asset | Size (KB) |
 |---|---:|
-| `frontend/dist/assets/vendor-zxing-BxcS2Ffh.js` | 436.2 |
+| `frontend/dist/assets/vendor-zxing-u0eO-mnb.js` | 436.2 |
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
-| `frontend/dist/assets/index-CW_jNXiu.css` | 155.4 |
-| `frontend/dist/assets/catalog-BslwWpOK.js` | 104.5 |
-| `frontend/dist/assets/Products-CVOvHkZb.js` | 85.9 |
-| `frontend/dist/assets/Inventory-DMHR7CKq.js` | 83.3 |
-| `frontend/dist/assets/catalog-editor-CxwUJJtX.js` | 74.2 |
+| `frontend/dist/assets/index-BY99XyCv.css` | 147.7 |
+| `frontend/dist/assets/Inventory-DS5lEb4Y.js` | 102.6 |
+| `frontend/dist/assets/Products-Bp6IFZTd.js` | 84.7 |
+| `frontend/dist/assets/catalog-W_ElBY_P.js` | 79.5 |
+| `frontend/dist/assets/catalog-editor-DqnvDO9A.js` | 74.1 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-DJl__C-q.js` | 68.0 |
-| `frontend/dist/assets/POS-CP00i9F1.js` | 65.0 |
-| `frontend/dist/assets/AdminRoot-BmAghdYF.js` | 64.6 |
-| `frontend/dist/assets/Dashboard-DctFleqO.js` | 62.6 |
-| `frontend/dist/assets/Settings-DFpYlHqj.js` | 54.9 |
+| `frontend/dist/assets/BulkImportModal-CTg4fHb2.js` | 67.9 |
+| `frontend/dist/assets/POS-CKkMc4Aa.js` | 64.3 |
+| `frontend/dist/assets/AdminRoot-JgALFG0c.js` | 62.8 |
+| `frontend/dist/assets/Dashboard-DCt6gEdG.js` | 62.0 |
+| `frontend/dist/assets/Settings-Dt5Z4Akw.js` | 54.6 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-BrIU9QiG.js` | 51.3 |
-| `frontend/dist/assets/dashboard-charts-CCbMJTEp.js` | 47.9 |
-| `frontend/dist/assets/user-profile-modal-B6eB_Lvd.js` | 43.9 |
-| `frontend/dist/assets/ReceiptSettings-IQLkdtyL.js` | 40.3 |
+| `frontend/dist/assets/Backup-nRRIC7cX.js` | 50.9 |
+| `frontend/dist/assets/shared-ui-DQ6XLwcn.js` | 48.7 |
+| `frontend/dist/assets/user-profile-modal-CYNsYHB0.js` | 47.9 |
+| `frontend/dist/assets/app-auth-C8sNahSz.js` | 40.4 |
+| `frontend/dist/assets/ReceiptSettings-CjVmSdo-.js` | 40.0 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-D1T5rqcX.js` | 37.2 |
-| `frontend/dist/assets/Sales-CfcDQDBu.js` | 36.7 |
-| `frontend/dist/assets/ProductForm-CCA35wiX.js` | 35.8 |
-| `frontend/dist/assets/AuditLog-DRLVtWb8.js` | 35.5 |
+| `frontend/dist/assets/catalog-secondary-tabs-BtF4ha4t.js` | 37.2 |
+| `frontend/dist/assets/Sales-NmQDoLlQ.js` | 35.8 |
+| `frontend/dist/assets/ProductForm-BEJLh5_G.js` | 35.3 |
 
 ## 5. Notes
 
@@ -2677,4 +2644,19 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/cloudflare-startup-warmup-move900.json` had zero
   failures and 86 asset cache hits, while `/public` remained `DYNAMIC` at
   2.339 s and `/api/portal/bootstrap` remained `DYNAMIC` at 1.796 s.
+- Move 901 records the origin-side public portal shell cache. `backend/server.ts`
+  now caches the rendered `/public` HTML plus embedded public bootstrap JSON for
+  the same bounded refresh window as the portal config, and exposes
+  `X-Business-OS-Public-Shell-Cache` for live proof. Local header proof showed
+  `/public` at 353 ms `miss` then 88 ms `hit`; public Cloudflare proof showed
+  the same origin cache `hit` while `CF-Cache-Status` remained `DYNAMIC`.
+  Docker image `business-os:v6.0.0-202606110513` served source hash
+  `d465c370f5a130fb`. Local Playwright measured public catalog ready 259 ms and
+  LCP 316 ms. Public-host Playwright measured ready 2.362 s and LCP 2.232 s
+  with zero failed requests/errors, bringing the public portal under the 2.5 s
+  LCP target even before the Cloudflare cache-rule blocker is fixed. Warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-move901.json` passed with 86
+  HIT and 1 DYNAMIC target. Cleanup deleted the ignored/generated `release/`
+  kit after Docker health and live proof, removing 380,974,775 bytes and
+  bringing Phase 29 generated-bulk cleanup candidates back under policy.
 <!-- phase29-manual-notes:end -->

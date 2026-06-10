@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 900.
+- Latest completed implementation move in this roadmap: Move 901.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15320,3 +15320,47 @@ Move 900 status:
 - Current plan position after Move 900: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active.
+
+Move 901 status:
+- Move 901 reduces public portal origin work while Cloudflare HTML is still
+  `DYNAMIC`. The backend now keeps the rendered `/public` SPA shell plus its
+  embedded public portal bootstrap JSON in a short in-process cache bounded to
+  the existing portal refresh TTL. This removes repeated `index.html` reads,
+  bootstrap payload serialization, and HTML injection on repeated tunnel hits
+  without changing the public freshness contract.
+- Runtime proof: Docker image `business-os:v6.0.0-202606110513` is healthy
+  with frontend hash `0fbf2d5bae2d7bc4` and source hash
+  `d465c370f5a130fb`.
+- Header proof: local `/public` returned `X-Business-OS-Public-Shell-Cache:
+  miss` in 353 ms, then `hit` in 88 ms. The public Cloudflare URL returned
+  `hit` in 1.905 s, then 1.127 s, while `CF-Cache-Status` correctly remained
+  `DYNAMIC` until the cache-rule permission blocker is fixed.
+- Playwright proof: local public catalog route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T21-20-49-517Z.json`
+  measured 259 ms ready and zero failures/errors; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T21-20-50-814Z.json`
+  measured 316 ms. Actual public-host route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T21-21-45-520Z.json`
+  measured 2.362 s ready and zero failures/errors; public-host LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T21-21-45-903Z.json`
+  measured 2.232 s, under the 2.5 s LCP target for this route. A direct
+  Playwright mobile browser smoke saved
+  `ops/runtime/reports/public-portal-move901-mobile.png` with no page errors
+  or failed requests.
+- Verification proof: backend server-entry build, backend route contract,
+  full backend utility suite, Docker release/start, Cloudflare warmup, public
+  header proof, local/public Playwright route-load traces, local/public
+  Playwright LCP traces, schema audit, organization audit, generated
+  references, Phase 29 audit, and `git diff --check` passed.
+- Cleanup proof: the Docker release build generated a reproducible `release/`
+  kit that pushed Phase 29 cleanup candidates above the 512 MB guardrail.
+  After Docker health and live proof, that ignored/generated kit was deleted,
+  removing 380,974,775 bytes while preserving the running Docker image,
+  uploads, secrets, database, and node_modules. Phase 29 then passed with zero
+  failures and generated-bulk cleanup candidates at 321,161,326 bytes.
+- Current plan position after Move 901: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache` so `/public` can become a true
+  Cloudflare edge HIT instead of an origin/tunnel hit.

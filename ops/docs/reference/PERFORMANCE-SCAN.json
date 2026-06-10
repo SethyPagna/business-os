@@ -1,15 +1,15 @@
 {
   "report": "ops/docs/reference/PERFORMANCE-SCAN.md",
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
-  "sourceFiles": 458,
-  "distAssets": 172,
-  "totalSourceBytes": 7041452,
-  "totalSourceLines": 162272,
+  "sourceFiles": 462,
+  "distAssets": 171,
+  "totalSourceBytes": 7139626,
+  "totalSourceLines": 164638,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "backend/src/services/importJobs.ts",
   "largestSourceLines": 3880,
-  "largestBuiltChunk": "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js",
+  "largestBuiltChunk": "frontend/dist/assets/vendor-zxing-u0eO-mnb.js",
   "largestBuiltChunkBytes": 446639,
   "oversizedSourceFiles": [
     "backend/src/routes/inventory.ts",
@@ -34,11 +34,10 @@
     "ops/scripts/architecture/language-runtime-audit.ts"
   ],
   "oversizedBuiltChunks": [
-    "frontend/dist/assets/index-CW_jNXiu.css",
     "frontend/dist/assets/lang-en-DND0-37b.js",
     "frontend/dist/assets/lang-km-c87vG7oG.js",
     "frontend/dist/assets/vendor-react-DKmwvaIJ.js",
-    "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js"
+    "frontend/dist/assets/vendor-zxing-u0eO-mnb.js"
   ],
   "topSourceBySize": [
     {
@@ -48,8 +47,8 @@
     },
     {
       "file": "frontend/src/components/inventory/Inventory.tsx",
-      "size": 163653,
-      "lines": 3454
+      "size": 164631,
+      "lines": 3489
     },
     {
       "file": "backend/src/services/importJobs.ts",
@@ -68,12 +67,12 @@
     },
     {
       "file": "frontend/src/components/products/Products.tsx",
-      "size": 122456,
-      "lines": 2589
+      "size": 122077,
+      "lines": 2580
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 117589,
+      "size": 117775,
       "lines": 2362
     },
     {
@@ -83,8 +82,8 @@
     },
     {
       "file": "backend/src/routes/products.ts",
-      "size": 104272,
-      "lines": 2297
+      "size": 104899,
+      "lines": 2310
     },
     {
       "file": "frontend/src/components/products/import/BulkImportModal.tsx",
@@ -103,23 +102,23 @@
     },
     {
       "file": "backend/src/routes/inventory.ts",
-      "size": 88149,
-      "lines": 1952
+      "size": 88784,
+      "lines": 1962
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.tsx",
-      "size": 82066,
-      "lines": 1775
+      "size": 82056,
+      "lines": 1779
     },
     {
       "file": "frontend/src/AppContext.tsx",
-      "size": 77799,
-      "lines": 1915
+      "size": 78717,
+      "lines": 1947
     },
     {
       "file": "frontend/src/App.tsx",
-      "size": 76206,
-      "lines": 1966
+      "size": 77655,
+      "lines": 2009
     },
     {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
@@ -128,7 +127,7 @@
     },
     {
       "file": "frontend/src/components/users/UserProfileModal.tsx",
-      "size": 69863,
+      "size": 69869,
       "lines": 1326
     },
     {
@@ -148,8 +147,8 @@
     },
     {
       "file": "frontend/src/components/utils-settings/AuditLog.tsx",
-      "size": 62001,
-      "lines": 1322
+      "size": 61014,
+      "lines": 1293
     },
     {
       "file": "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
@@ -157,14 +156,14 @@
       "lines": 1116
     },
     {
+      "file": "frontend/src/components/users/Users.tsx",
+      "size": 60126,
+      "lines": 1280
+    },
+    {
       "file": "backend/src/services/googleDriveSync/index.ts",
       "size": 59175,
       "lines": 1564
-    },
-    {
-      "file": "frontend/src/components/users/Users.tsx",
-      "size": 58830,
-      "lines": 1245
     }
   ],
   "topSourceByLines": [
@@ -180,8 +179,8 @@
     },
     {
       "file": "frontend/src/components/inventory/Inventory.tsx",
-      "size": 163653,
-      "lines": 3454
+      "size": 164631,
+      "lines": 3489
     },
     {
       "file": "frontend/src/lang/km.json",
@@ -195,18 +194,18 @@
     },
     {
       "file": "frontend/src/components/products/Products.tsx",
-      "size": 122456,
-      "lines": 2589
+      "size": 122077,
+      "lines": 2580
     },
     {
       "file": "frontend/src/components/pos/POS.tsx",
-      "size": 117589,
+      "size": 117775,
       "lines": 2362
     },
     {
       "file": "backend/src/routes/products.ts",
-      "size": 104272,
-      "lines": 2297
+      "size": 104899,
+      "lines": 2310
     },
     {
       "file": "frontend/src/components/products/import/BulkImportModal.tsx",
@@ -215,8 +214,13 @@
     },
     {
       "file": "frontend/src/App.tsx",
-      "size": 76206,
-      "lines": 1966
+      "size": 77655,
+      "lines": 2009
+    },
+    {
+      "file": "backend/src/routes/inventory.ts",
+      "size": 88784,
+      "lines": 1962
     },
     {
       "file": "frontend/src/components/dashboard/Dashboard.tsx",
@@ -224,14 +228,9 @@
       "lines": 1958
     },
     {
-      "file": "backend/src/routes/inventory.ts",
-      "size": 88149,
-      "lines": 1952
-    },
-    {
       "file": "frontend/src/AppContext.tsx",
-      "size": 77799,
-      "lines": 1915
+      "size": 78717,
+      "lines": 1947
     },
     {
       "file": "frontend/src/components/utils-settings/Settings.tsx",
@@ -240,8 +239,8 @@
     },
     {
       "file": "frontend/src/components/utils-settings/Backup.tsx",
-      "size": 82066,
-      "lines": 1775
+      "size": 82056,
+      "lines": 1779
     },
     {
       "file": "backend/src/routes/system/index.ts",
@@ -275,8 +274,8 @@
     },
     {
       "file": "backend/src/routes/portal.ts",
-      "size": 53597,
-      "lines": 1428
+      "size": 53844,
+      "lines": 1435
     },
     {
       "file": "frontend/src/components/catalog/portalLanguagePacks.ts",
@@ -296,7 +295,7 @@
   ],
   "topBuiltChunks": [
     {
-      "file": "frontend/dist/assets/vendor-zxing-BxcS2Ffh.js",
+      "file": "frontend/dist/assets/vendor-zxing-u0eO-mnb.js",
       "size": 446639,
       "lines": 0
     },
@@ -316,28 +315,28 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/index-CW_jNXiu.css",
-      "size": 159094,
+      "file": "frontend/dist/assets/index-BY99XyCv.css",
+      "size": 151226,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-BslwWpOK.js",
-      "size": 106957,
+      "file": "frontend/dist/assets/Inventory-DS5lEb4Y.js",
+      "size": 105112,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Products-CVOvHkZb.js",
-      "size": 87968,
+      "file": "frontend/dist/assets/Products-Bp6IFZTd.js",
+      "size": 86764,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Inventory-DMHR7CKq.js",
-      "size": 85313,
+      "file": "frontend/dist/assets/catalog-W_ElBY_P.js",
+      "size": 81438,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-editor-CxwUJJtX.js",
-      "size": 75949,
+      "file": "frontend/dist/assets/catalog-editor-DqnvDO9A.js",
+      "size": 75912,
       "lines": 0
     },
     {
@@ -346,28 +345,28 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/BulkImportModal-DJl__C-q.js",
-      "size": 69665,
+      "file": "frontend/dist/assets/BulkImportModal-CTg4fHb2.js",
+      "size": 69573,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/POS-CP00i9F1.js",
-      "size": 66606,
+      "file": "frontend/dist/assets/POS-CKkMc4Aa.js",
+      "size": 65878,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/AdminRoot-BmAghdYF.js",
-      "size": 66110,
+      "file": "frontend/dist/assets/AdminRoot-JgALFG0c.js",
+      "size": 64275,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Dashboard-DctFleqO.js",
-      "size": 64151,
+      "file": "frontend/dist/assets/Dashboard-DCt6gEdG.js",
+      "size": 63513,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Settings-DFpYlHqj.js",
-      "size": 56200,
+      "file": "frontend/dist/assets/Settings-Dt5Z4Akw.js",
+      "size": 55876,
       "lines": 0
     },
     {
@@ -376,23 +375,28 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Backup-BrIU9QiG.js",
-      "size": 52525,
+      "file": "frontend/dist/assets/Backup-nRRIC7cX.js",
+      "size": 52165,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/dashboard-charts-CCbMJTEp.js",
-      "size": 49056,
+      "file": "frontend/dist/assets/shared-ui-DQ6XLwcn.js",
+      "size": 49828,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/user-profile-modal-B6eB_Lvd.js",
-      "size": 44908,
+      "file": "frontend/dist/assets/user-profile-modal-CYNsYHB0.js",
+      "size": 49090,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ReceiptSettings-IQLkdtyL.js",
-      "size": 41235,
+      "file": "frontend/dist/assets/app-auth-C8sNahSz.js",
+      "size": 41346,
+      "lines": 0
+    },
+    {
+      "file": "frontend/dist/assets/ReceiptSettings-CjVmSdo-.js",
+      "size": 40970,
       "lines": 0
     },
     {
@@ -401,23 +405,18 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-secondary-tabs-D1T5rqcX.js",
-      "size": 38113,
+      "file": "frontend/dist/assets/catalog-secondary-tabs-BtF4ha4t.js",
+      "size": 38076,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Sales-CfcDQDBu.js",
-      "size": 37622,
+      "file": "frontend/dist/assets/Sales-NmQDoLlQ.js",
+      "size": 36619,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ProductForm-CCA35wiX.js",
-      "size": 36624,
-      "lines": 0
-    },
-    {
-      "file": "frontend/dist/assets/AuditLog-DRLVtWb8.js",
-      "size": 36343,
+      "file": "frontend/dist/assets/ProductForm-BEJLh5_G.js",
+      "size": 36193,
       "lines": 0
     }
   ],
@@ -425,5 +424,5 @@
   "sourceReadConcurrency": 24,
   "chunkStatConcurrency": 32,
   "manualNotesPreserved": true,
-  "manualNotesLines": 2149
+  "manualNotesLines": 2553
 }
