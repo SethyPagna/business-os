@@ -367,6 +367,10 @@ function isCacheableStaticPath(pathname) {
     || pathname === '/theme-bootstrap.js'
 }
 
+function isHashedBuildAsset(pathname) {
+  return pathname.startsWith('/assets/')
+}
+
 async function appShellFallback(request) {
   const cache = await caches.open(APP_SHELL_CACHE)
   try {
@@ -405,6 +409,27 @@ async function networkFirstStatic(request) {
   }
 }
 
+async function cacheFirstStatic(request) {
+  const cache = await caches.open(STATIC_CACHE)
+  const cached = await cache.match(request)
+  if (cached) {
+    fetch(request)
+      .then((response) => {
+        if (response && response.ok && response.type === 'basic' && !response.redirected) {
+          cache.put(request, response.clone()).catch(() => {})
+        }
+      })
+      .catch(() => {})
+    return cached
+  }
+
+  const response = await fetch(request)
+  if (response && response.ok && response.type === 'basic' && !response.redirected) {
+    cache.put(request, response.clone()).catch(() => {})
+  }
+  return response
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event
   if (request.method !== 'GET') return
@@ -419,5 +444,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (!isCacheableStaticPath(url.pathname)) return
-  event.respondWith(networkFirstStatic(request))
+  event.respondWith(isHashedBuildAsset(url.pathname)
+    ? cacheFirstStatic(request)
+    : networkFirstStatic(request))
 })

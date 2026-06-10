@@ -22,6 +22,10 @@ type AppBootstrapPayload = {
   offline?: boolean
 }
 
+type EarlyAuthBootstrapWindow = Window & {
+  __businessOsAuthBootstrapPromise?: Promise<unknown> | null
+}
+
 function emptyBootstrap(user: unknown = null): AppBootstrapPayload {
   return {
     user,
@@ -72,6 +76,15 @@ function buildLocalBootstrap(): AppBootstrapPayload {
   }
 }
 
+function takeEarlyAuthBootstrapPromise(): Promise<unknown> | null {
+  if (typeof window === 'undefined') return null
+  const earlyWindow = window as EarlyAuthBootstrapWindow
+  const promise = earlyWindow.__businessOsAuthBootstrapPromise
+  if (!promise || typeof promise.then !== 'function') return null
+  earlyWindow.__businessOsAuthBootstrapPromise = null
+  return promise
+}
+
 export async function getAppBootstrap(): Promise<unknown> {
   const hasServer = Boolean(ensureBootstrapServerUrl())
   const hasStoredSession = hasStoredUserSession()
@@ -81,6 +94,8 @@ export async function getAppBootstrap(): Promise<unknown> {
   }
 
   try {
+    const earlyBootstrapPromise = takeEarlyAuthBootstrapPromise()
+    if (earlyBootstrapPromise) return await earlyBootstrapPromise
     return await apiFetch('GET', '/api/auth/bootstrap')
   } catch (error) {
     if (isInvalidSessionError(error)) {

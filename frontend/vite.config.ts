@@ -142,6 +142,15 @@ function emitBuildManifest(): Plugin {
 const routePreloadChunkNames = {
   admin: [
     'AdminRoot',
+    'vendor-react',
+    'vendor',
+    'app-routing',
+    'app-shell',
+    'Sidebar',
+    'shared-ui',
+    'api-http-core',
+    'api-http-state',
+    'app-api',
     'app-auth',
     'app-bootstrap',
   ],
@@ -168,7 +177,6 @@ const routePreloadChunkNames = {
     'product-read-api',
     'product-shared',
     'productDisplayHelpers',
-    'shared-action-history',
     'route-sync-utils',
     'settings-refresh',
     'app-api',
@@ -205,7 +213,6 @@ const routePreloadChunkNames = {
     'Branches',
     'branch-api',
     'product-shared',
-    'shared-action-history',
     'shared-page-header',
     'route-sync-utils',
     'settings-refresh',
@@ -222,12 +229,24 @@ function isBundleChunk(value: unknown): value is OutputChunk {
 
 function toRoutePreloadFiles(bundle: OutputBundle, names: readonly string[]): string[] {
   const wanted = new Set(names)
-  const files = Object.values(bundle)
-    .filter(isBundleChunk)
-    .filter((chunk) => wanted.has(chunk.name))
-    .map((chunk) => chunk.fileName)
-    .sort()
-  return Array.from(new Set(files))
+  const chunks = Object.values(bundle).filter(isBundleChunk)
+  const chunksByFileName = new Map(chunks.map((chunk) => [chunk.fileName, chunk]))
+  const files = new Set<string>()
+
+  function addChunk(chunk: OutputChunk): void {
+    if (files.has(chunk.fileName)) return
+    files.add(chunk.fileName)
+    for (const importFile of chunk.imports) {
+      const importedChunk = chunksByFileName.get(importFile)
+      if (importedChunk) addChunk(importedChunk)
+    }
+  }
+
+  for (const chunk of chunks) {
+    if (wanted.has(chunk.name)) addChunk(chunk)
+  }
+
+  return Array.from(files).sort()
 }
 
 function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
@@ -292,6 +311,32 @@ function buildRoutePreloadScript(preloads: Record<string, string[]>): string {
   }
   var pathname = normalizePath(window.location && window.location.pathname);
   var routeKey = routePreloadKey(pathname);
+  if (!isPublicCatalogPath(pathname) && !isLoginPath(pathname) && typeof window.fetch === 'function' && !window.__businessOsAuthBootstrapPromise) {
+    window.__businessOsAuthBootstrapStartedAt = Date.now();
+    window.__businessOsAuthBootstrapPromise = window.fetch('/api/auth/bootstrap', {
+      credentials: 'include',
+      headers: {
+        'Accept': 'application/json',
+        'bypass-tunnel-reminder': 'true'
+      },
+      redirect: 'manual'
+    }).then(function parseEarlyAuthBootstrap(response) {
+      return response.text().then(function parseEarlyAuthBootstrapText(text) {
+        var payload = null;
+        try {
+          payload = text ? JSON.parse(text) : null;
+        } catch (_) {}
+        if (!response.ok) {
+          var error = new Error((payload && payload.error) || text || ('HTTP ' + response.status));
+          error.status = response.status;
+          error.code = payload && payload.code;
+          error.reason = payload && payload.reason;
+          throw error;
+        }
+        return payload;
+      });
+    });
+  }
   var files = isPublicCatalogPath(pathname)
     ? preloads.public
     : (isLoginPath(pathname) ? preloads.login : [].concat(preloads.admin || [], preloads[routeKey] || []));
@@ -421,7 +466,6 @@ const deferredModulePreloadPrefixes = [
   'assets/returns-write-api-',
   'assets/sale-write-api-',
   'assets/sales-read-api-',
-  'assets/shared-action-history-',
   'assets/shared-icons-',
   'assets/system-jobs-api-',
   'assets/catalog-',
@@ -623,7 +667,7 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/returnsReadTransport.ts')) return 'returns-read-api'
     if (normalized.endsWith('/src/api/returnsTransport.ts')) return 'returns-write-api'
     if (normalized.endsWith('/src/api/rfidTransport.ts')) return 'rfid-api'
-    if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'shared-action-history'
+    if (normalized.endsWith('/src/api/actionHistoryTransport.ts')) return 'action-history-api'
     if (normalized.endsWith('/src/api/offlineSnapshotTransport.ts')) return 'offline-snapshot-api'
     if (normalized.endsWith('/src/api/pendingSyncTransport.ts')) return 'pending-sync-api'
     if (normalized.endsWith('/src/api/settingsTransport.ts')) return 'settings-api'
@@ -694,11 +738,6 @@ function manualChunks(id: string): string | undefined {
       return 'product-shared'
     }
     if (normalized.endsWith('/src/utils/actionGuards.ts')) return 'route-sync-utils'
-    if (normalized.endsWith('/src/utils/historyHelpers.ts')) return 'shared-action-history'
-    if (normalized.endsWith('/src/utils/bulkOps.ts')) return 'shared-action-history'
-    if (normalized.endsWith('/src/utils/actionHistory.ts')) {
-      return 'shared-action-history'
-    }
     if (
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
       || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
@@ -785,7 +824,6 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
     if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
-    if (normalized.includes('/src/components/shared/ActionHistoryBar.tsx')) return 'shared-action-history'
     if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/SectionSwitcher.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PageHeader.tsx')) return 'shared-page-header'
