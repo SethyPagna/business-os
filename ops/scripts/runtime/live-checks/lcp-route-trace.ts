@@ -3,13 +3,15 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { performance } from 'node:perf_hooks'
-import { chromium, type BrowserContext, type Page, type Response } from 'playwright'
+import { chromium, type BrowserContext, type Page, type Request, type Response } from 'playwright'
 import { resolveAuditRoutes, type AuditRoute } from '../audits/audit-manifest.ts'
 import { applySessionToPlaywrightContext, hydratePlaywrightPage, loginWithFetch, type BrowserStorageState, type LoginSession } from '../audits/audit-auth.ts'
 
 type RequestRecord = {
+  completedMs: number
   method: string
   ms: number
+  requestMs: number
   resourceType: string
   status: number
   url: string
@@ -98,11 +100,15 @@ function isExternalNoise(message: unknown): boolean {
   return EXTERNAL_NOISE_RE.test(String(message || ''))
 }
 
-function recordResponse(startedAt: number, response: Response): RequestRecord {
+function recordResponse(startedAt: number, requestStartedAt: number, response: Response): RequestRecord {
   const request = response.request()
+  const now = performance.now()
+  const completedMs = Math.round(now - startedAt)
   return {
+    completedMs,
     method: request.method(),
-    ms: Math.round(performance.now() - startedAt),
+    ms: completedMs,
+    requestMs: Math.max(0, Math.round(now - requestStartedAt)),
     resourceType: request.resourceType(),
     status: response.status(),
     url: response.url(),
@@ -204,13 +210,23 @@ async function traceRoute(route: AuditRoute, context: BrowserContext, storageSta
   const responses: RequestRecord[] = []
   const consoleErrors: string[] = []
   const startedAt = performance.now()
+  const requestStarts = new WeakMap<Request, number>()
+  page.on('request', (request) => {
+    requestStarts.set(request, performance.now())
+  })
   page.on('response', (response) => {
-    responses.push(recordResponse(startedAt, response))
+    const request = response.request()
+    responses.push(recordResponse(startedAt, requestStarts.get(request) || startedAt, response))
   })
   page.on('requestfailed', (request) => {
+    const now = performance.now()
+    const completedMs = Math.round(now - startedAt)
+    const requestStartedAt = requestStarts.get(request) || startedAt
     responses.push({
+      completedMs,
       method: request.method(),
-      ms: Math.round(performance.now() - startedAt),
+      ms: completedMs,
+      requestMs: Math.max(0, Math.round(now - requestStartedAt)),
       resourceType: request.resourceType(),
       status: 0,
       url: request.url(),
@@ -241,7 +257,7 @@ async function traceRoute(route: AuditRoute, context: BrowserContext, storageSta
   const failed = responses.filter((item) => item.status >= 400 || item.status === 0)
   const slowestRequests = responses
     .slice()
-    .sort((a, b) => b.ms - a.ms)
+    .sort((a, b) => b.requestMs - a.requestMs)
     .slice(0, 8)
   return {
     apiCount: responses.filter((item) => /\/api\/|\/health|\/business-os-build\.json/i.test(item.url)).length,
