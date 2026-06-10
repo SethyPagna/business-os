@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 901.
+- Latest completed implementation move in this roadmap: Move 902.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15364,3 +15364,49 @@ Move 901 status:
   blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
   `npm --prefix ops run cloudflare:apply-cache` so `/public` can become a true
   Cloudflare edge HIT instead of an origin/tunnel hit.
+
+Move 902 status:
+- Move 902 short-caches the public portal bootstrap API payload itself. The
+  backend now builds the first public catalog bootstrap payload through
+  `buildFreshPublicPortalBootstrapPayload(config)`, stores it under the shared
+  `portal:bootstrap` runtime-cache key, keeps a bounded in-process hot cache,
+  and dedupes concurrent builders through a single pending promise.
+- Runtime proof: Docker image `business-os:v6.0.0-202606110644` is healthy
+  with frontend hash `0fbf2d5bae2d7bc4` and source hash
+  `f8ff6e32f4ace3d5`.
+- Header proof: local `/api/portal/bootstrap` returned
+  `X-Business-OS-Portal-Bootstrap-Cache: refreshed` in 280 ms, then
+  `memory-hit` in 52 ms. The public hostname returned `memory-hit` with the
+  same public cache headers; Cloudflare still reported `DYNAMIC` until the
+  cache-rule permission blocker is resolved.
+- Playwright proof: local public catalog route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T22-51-07-262Z.json`
+  measured 503 ms ready and zero failures/errors; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T22-51-07-679Z.json`
+  measured 592 ms. Public-host route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T22-51-51-770Z.json`
+  measured 1.750 s ready; public-host LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T22-51-52-282Z.json`
+  measured 1.860 s with zero failed requests/errors. Direct Playwright mobile
+  smoke saved `ops/runtime/reports/public-portal-move902-mobile.png` with
+  catalog content visible and no failed requests/page errors.
+- Cloudflare warmup proof:
+  `ops/runtime/reports/cloudflare-startup-warmup-move902.json` passed with
+  zero failed requests and 86 cached static targets. The remaining dynamic
+  entries are HTML documents (`/public`, `/inventory`, `/users`); the public
+  portal bootstrap API now returns from app/runtime cache but still needs the
+  Cloudflare Cache Rules permission to become an edge HIT.
+- Verification proof: backend server-entry check, focused portal regression,
+  backend route contract, full backend utility suite, Docker release/start,
+  local/public Playwright route-load traces, local/public Playwright LCP
+  traces, direct Playwright public browser smoke, Cloudflare warmup, and
+  `git diff --check` passed.
+- Cleanup proof: after Docker image/start/live proof, the ignored/generated
+  `release/` kit was deleted, removing 380,975,799 bytes. The kit is
+  reproducible from `run\docker\release.bat`; uploads, secrets, database,
+  node_modules, and the running Docker image were preserved.
+- Current plan position after Move 902: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`.

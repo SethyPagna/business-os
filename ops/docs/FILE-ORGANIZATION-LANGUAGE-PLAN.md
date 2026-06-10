@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 901 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 902 in this file.
 
 ## Goal
 
@@ -9849,6 +9849,36 @@ Decision rule:
   `release/` kit was deleted because it is reproducible from
   `run\docker\release.bat` and is not the running Docker image. Bytes removed:
   380,974,775. Phase 29 passed afterward with zero failures.
+
+### Move 902: Cache the public portal bootstrap API payload
+
+- Ownership slice: Phase 8.4/Phase 29 public portal API fallback latency while
+  Cloudflare Cache Rules remain blocked by token permissions.
+- Code-flow slice: `backend/src/routes/portal.ts` now separates fresh bootstrap
+  construction from cached serving. `buildPublicPortalBootstrapPayload()` uses
+  the shared `portal:bootstrap` runtime-cache key, a bounded in-process payload
+  cache, and a pending-promise guard so concurrent calls reuse one builder.
+- Verification slice: `backend/test/portalInventoryRegression.test.ts` guards
+  the fresh-build helper, runtime cache key, in-flight dedupe, safe proof
+  header, and exported cache-state helper.
+- Live proof: Docker image `business-os:v6.0.0-202606110644` is healthy with
+  source hash `f8ff6e32f4ace3d5`. Local `/api/portal/bootstrap` returned
+  `refreshed` in 280 ms then `memory-hit` in 52 ms through
+  `X-Business-OS-Portal-Bootstrap-Cache`; the public hostname returned
+  `memory-hit` with the same public cache headers.
+- Playwright proof: local public route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T22-51-07-262Z.json`
+  measured 503 ms ready; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T22-51-07-679Z.json`
+  measured 592 ms. Public-host route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T22-51-51-770Z.json`
+  measured 1.750 s ready; public-host LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T22-51-52-282Z.json`
+  measured 1.860 s with zero failures/errors. Direct Playwright mobile smoke
+  saved `ops/runtime/reports/public-portal-move902-mobile.png`.
+- Keeper boundary: this is a backend route/API optimization, not a folder move
+  or language conversion. The remaining external slice is still the Cloudflare
+  token permission update for true edge caching.
 
 ## Safety Gates
 

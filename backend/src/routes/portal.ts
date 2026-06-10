@@ -908,8 +908,15 @@ function getCachedPortalProducts(config) {
   return getOrSetJson('portal:products', ttl, () => getPortalProducts(config))
 }
 
-async function buildPublicPortalBootstrapPayload() {
-  const config = await getCachedPortalConfig()
+const portalBootstrapPayloadCache = {
+  value: null,
+  expiresAt: 0,
+  ttlSeconds: 20,
+  pending: null,
+}
+let portalBootstrapPayloadCacheStatus = 'cold'
+
+async function buildFreshPublicPortalBootstrapPayload(config) {
   const catalog = getPortalCatalogProductPage(config, { page: 1, pageSize: 20 })
   return {
     config,
@@ -918,6 +925,40 @@ async function buildPublicPortalBootstrapPayload() {
     products: catalog.items,
   }
 }
+
+async function buildPublicPortalBootstrapPayload() {
+  const now = Date.now()
+  if (portalBootstrapPayloadCache.value && portalBootstrapPayloadCache.expiresAt > now) {
+    portalBootstrapPayloadCacheStatus = 'memory-hit'
+    return portalBootstrapPayloadCache.value
+  }
+  if (portalBootstrapPayloadCache.pending) {
+    portalBootstrapPayloadCacheStatus = 'pending-hit'
+    return portalBootstrapPayloadCache.pending
+  }
+
+  portalBootstrapPayloadCache.pending = (async () => {
+    const config = await getCachedPortalConfig()
+    const ttl = cacheTtl(config?.refreshSeconds || 20)
+    const payload = await getOrSetJson('portal:bootstrap', ttl, () => buildFreshPublicPortalBootstrapPayload(config))
+    portalBootstrapPayloadCache.value = payload
+    portalBootstrapPayloadCache.ttlSeconds = ttl
+    portalBootstrapPayloadCache.expiresAt = Date.now() + ttl * 1000
+    portalBootstrapPayloadCacheStatus = 'refreshed'
+    return payload
+  })()
+
+  try {
+    return await portalBootstrapPayloadCache.pending
+  } finally {
+    portalBootstrapPayloadCache.pending = null
+  }
+}
+
+function getPublicPortalBootstrapCacheStatus() {
+  return portalBootstrapPayloadCacheStatus
+}
+
 
 function getPortalCatalogMeta() {
   const categories = db.prepare(`
@@ -1056,6 +1097,7 @@ router.get('/bootstrap', asyncRoute(async (_req, res) => {
   const payload = await buildPublicPortalBootstrapPayload()
   const config = payload.config || {}
   setPublicPortalCacheHeaders(res, config?.refreshSeconds || 20)
+  res.setHeader('X-Business-OS-Portal-Bootstrap-Cache', getPublicPortalBootstrapCacheStatus())
   res.json(payload)
 }))
 
@@ -1432,3 +1474,4 @@ router.patch('/submissions/:id/review', authToken, requirePermission('settings')
 
 module.exports = router
 module.exports.buildPublicPortalBootstrapPayload = buildPublicPortalBootstrapPayload
+module.exports.getPublicPortalBootstrapCacheStatus = getPublicPortalBootstrapCacheStatus

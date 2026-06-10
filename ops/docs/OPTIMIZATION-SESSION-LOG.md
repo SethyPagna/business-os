@@ -8,6 +8,36 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Cache public portal bootstrap API payload
+  - area: public portal bootstrap API, backend route startup, Cloudflare
+    dynamic API fallback
+  - result: kept
+  - note: `buildPublicPortalBootstrapPayload()` now uses a fresh-build helper,
+    shared `portal:bootstrap` runtime-cache key, bounded in-process hot cache,
+    and pending-promise dedupe so bursts do not rebuild the first catalog page.
+  - verification: focused portal regression, backend route contracts, full
+    backend utility suite, Docker release/start, public header proof,
+    local/public Playwright route-load and LCP traces, direct mobile Playwright
+    public smoke, Cloudflare warmup, and `git diff --check` passed.
+  - live proof: Docker image `business-os:v6.0.0-202606110644` is healthy with
+    source hash `f8ff6e32f4ace3d5`. Local `/api/portal/bootstrap` returned
+    `X-Business-OS-Portal-Bootstrap-Cache: refreshed` in 280 ms, then
+    `memory-hit` in 52 ms. The public hostname returned `memory-hit` with the
+    same public cache headers.
+  - Playwright proof: public-host route-load
+    `ops/runtime/reports/route-load-trace-2026-06-10T22-51-51-770Z.json`
+    measured 1.750 s ready; public-host LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-10T22-51-52-282Z.json`
+    measured 1.860 s with zero failed requests/errors. Direct mobile browser
+    smoke saved `ops/runtime/reports/public-portal-move902-mobile.png`.
+  - remaining: the app is now answering repeated bootstrap API reads quickly
+    from origin/runtime cache, but Cloudflare still reports `DYNAMIC` until
+    `Zone Cache Rules Edit` is added and `cloudflare:apply-cache` succeeds.
+  - cleanup: deleted the ignored/generated `release/` kit after Docker health
+    and live proof, removing 380,975,799 bytes. It is reproducible from
+    `run\docker\release.bat`; uploads, secrets, database, node_modules, and the
+    running Docker image were preserved.
+
 - Cache rendered public portal shell at origin
   - area: public portal LCP, Cloudflare dynamic HTML fallback, backend route
     startup

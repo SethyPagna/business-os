@@ -64,8 +64,8 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/sales.ts` | 1591 | 65.2 |
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1555 | 104.9 |
+| `backend/src/routes/portal.ts` | 1478 | 54.0 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
-| `backend/src/routes/portal.ts` | 1435 | 52.6 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
 | `backend/src/fileAssets.ts` | 1336 | 46.3 |
 | `frontend/src/web-api.ts` | 1328 | 52.2 |
@@ -2659,4 +2659,17 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   HIT and 1 DYNAMIC target. Cleanup deleted the ignored/generated `release/`
   kit after Docker health and live proof, removing 380,974,775 bytes and
   bringing Phase 29 generated-bulk cleanup candidates back under policy.
+- Move 902 records the public portal bootstrap API cache. The bootstrap route
+  now uses a fresh-build helper behind `buildPublicPortalBootstrapPayload()`,
+  stores successful payloads under `portal:bootstrap`, keeps a bounded
+  in-process hot cache, dedupes concurrent builders, and emits
+  `X-Business-OS-Portal-Bootstrap-Cache` for proof. Local API proof measured
+  280 ms `refreshed` then 52 ms `memory-hit`; public-host API proof returned
+  `memory-hit` with public cache headers while Cloudflare remained `DYNAMIC`.
+  Docker image `business-os:v6.0.0-202606110644` served source hash
+  `f8ff6e32f4ace3d5`. Public-host Playwright measured ready 1.750 s and LCP
+  1.860 s with zero failed requests/errors. Warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-move902.json` passed with zero
+  failed requests and 86 cached static targets; the remaining dynamic targets
+  are HTML documents awaiting the Cloudflare Cache Rules permission.
 <!-- phase29-manual-notes:end -->

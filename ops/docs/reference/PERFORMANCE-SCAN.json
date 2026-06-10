@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 462,
   "distAssets": 171,
-  "totalSourceBytes": 7139626,
-  "totalSourceLines": 164638,
+  "totalSourceBytes": 7141095,
+  "totalSourceLines": 164681,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "backend/src/services/importJobs.ts",
@@ -268,14 +268,14 @@
       "lines": 1555
     },
     {
+      "file": "backend/src/routes/portal.ts",
+      "size": 55313,
+      "lines": 1478
+    },
+    {
       "file": "ops/scripts/runtime/audits/deep-live-audit.ts",
       "size": 56588,
       "lines": 1463
-    },
-    {
-      "file": "backend/src/routes/portal.ts",
-      "size": 53844,
-      "lines": 1435
     },
     {
       "file": "frontend/src/components/catalog/portalLanguagePacks.ts",
@@ -424,5 +424,5 @@
   "sourceReadConcurrency": 24,
   "chunkStatConcurrency": 32,
   "manualNotesPreserved": true,
-  "manualNotesLines": 2553
+  "manualNotesLines": 2566
 }

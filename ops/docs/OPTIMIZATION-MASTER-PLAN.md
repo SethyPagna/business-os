@@ -8,7 +8,7 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 901, public portal origin-shell cache.
+- Latest completed move: Move 902, public portal bootstrap API cache.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -17,8 +17,8 @@ only in chat.
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
 - Latest public portal proof: public-host Playwright LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T21-21-45-903Z.json`
-  measured 2.232 s with zero failed requests/errors.
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T22-51-52-282Z.json`
+  measured 1.860 s with zero failed requests/errors.
 
 ## Program Goals
 
