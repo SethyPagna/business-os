@@ -188,16 +188,18 @@ const routePreloadChunkNames = {
   ],
   inventory: [
     'Inventory',
-    'InventoryProductsSurface',
     'inventory-api',
     'product-shared',
-    'shared-action-history',
-    'shared-formatters',
-    'route-sync-utils',
-    'settings-refresh',
-    'app-api',
-    'shared-lazy-portal-menu',
     'shared-ui',
+  ],
+  returns: [
+    'Returns',
+    'returns-read-api',
+  ],
+  users: [
+    'Users',
+    'user-admin-api',
+    'user-permission-definitions',
   ],
   branches: [
     'Branches',

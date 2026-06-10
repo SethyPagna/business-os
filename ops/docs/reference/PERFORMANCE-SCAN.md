@@ -4,39 +4,36 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 893 release `business-os:v6.0.0-202606102330-move893` is live with
-  frontend hash `f1e735074a86dda8` and source hash `e5d243e151a194e4`.
-- Slow-load watchdogs no longer end real page loading in Products, Inventory,
-  Sales, Returns, Branches, Users, Audit Log, or contact tabs. They can show a
-  slow-load warning, but the UI does not switch to empty/zero-state rendering
-  until the actual request finishes.
-- Public portal startup no longer statically imports the admin `app-auth`
-  chunk. Vite's generic modulepreload injection is disabled, the virtual
-  preload helper is pinned to the neutral `vendor` chunk, and the existing
-  route-aware preload plugin remains responsible for page-specific preloads.
+- Move 895 release `business-os:v6.0.0-202606102309` is live with frontend
+  hash `0dcd7c3e85311dd1` and source hash `797c2adf20649e81`.
+- Inventory and Returns now render their primary list/product surfaces from
+  the route chunk instead of adding a first-paint component subchunk waterfall.
+  Inventory's fixed 140 ms mobile full-list reveal delay was removed.
+- Vite route-aware preload hints and backend SPA `Link` modulepreload hints
+  now agree on lean first-window route dependencies:
+  Inventory = `Inventory`, `inventory-api`, `product-shared`, `shared-ui`;
+  Returns = `Returns`, `returns-read-api`; Users = `Users`,
+  `user-admin-api`, `user-permission-definitions`.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T13-33-38-974Z.json`:
-  Products 409 ms, Inventory 315 ms, Sales 343 ms, Returns 260 ms, Contacts
-  276 ms, Branches 368 ms, Users 315 ms, and Audit Log 367 ms, zero failed
-  requests/errors.
+  `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`:
+  Inventory 300 ms, Returns 294 ms, Users 287 ms, zero failed requests/errors.
 - Local Playwright LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-33-38-825Z.json`:
-  Products 752 ms, Inventory 440 ms, Sales 112 ms, Returns 328 ms, Contacts
-  168 ms, Branches 428 ms, Users 352 ms, Audit Log 108 ms, and Public Catalog
-  392 ms, zero failed requests/errors.
-- Public portal LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-34-15-883Z.json`:
-  Public Catalog 2.004 s, zero failed requests/errors, improved from the
-  earlier 4.912 s trace and now below the 2.5 s target.
-- Public admin traces completed with zero failed requests/errors:
-  `ops/runtime/reports/route-load-trace-2026-06-10T13-34-19-457Z.json`
-  measured ready at 2.560-4.142 s, and
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-35-09-532Z.json`
-  measured Sales/Contacts/Audit Log near 1 s while Products, Inventory,
-  Returns, Branches, and Users remained above target at 3.472-4.836 s.
-- The next target is route-specific public-admin above-the-fold payload and
-  Cloudflare document/API latency reduction, while keeping the no-fake-loading
-  watchdog policy and public portal under 2.5 s.
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-10-860Z.json`:
+  Inventory 332 ms, Returns 352 ms, Users 284 ms, zero failed
+  requests/errors. This meets the sub-2.5 s target locally.
+- Public admin traces completed with zero failed requests/errors, but remain
+  network/API transfer bound:
+  `ops/runtime/reports/route-load-trace-2026-06-10T15-13-33-634Z.json`
+  measured ready at Inventory 8.440 s, Returns 3.623 s, Users 3.609 s; and
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-36-800Z.json`
+  measured Inventory 5.184 s, Returns 3.992 s, Users 3.992 s.
+- Slowest public requests in the final LCP trace were real transfers, not fake
+  loader overhead: `/api/inventory/bootstrap` 5.712 s,
+  `/api/returns?scope=customer` 4.473 s, `/api/users` 4.480 s,
+  `/api/auth/bootstrap` 3.603-4.497 s, and several startup chunks around
+  3.1-5.1 s. The next target is public-path API response time and startup chunk
+  transfer/caching through Cloudflare, while preserving the local sub-500 ms
+  route behavior.
 
 ## 1. Scope
 

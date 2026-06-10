@@ -8,9 +8,8 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 893, keep slow-load watchdogs from finishing
-  real page loads and remove public-portal startup dependency on the admin auth
-  chunk.
+- Latest completed move: Move 895, align Inventory/Returns/Users route
+  surfaces and frontend/backend preload hints with first-paint dependencies.
 
 ## Current Baseline
 
@@ -18,9 +17,9 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `f1e735074a86dda8`
+  `0dcd7c3e85311dd1`
 - latest verified source hash from the most recent Docker-served live check:
-  `e5d243e151a194e4`
+  `797c2adf20649e81`
 
 Latest verified reports:
 
@@ -58,16 +57,14 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-10T12-06-57-495Z.json`
 - latest focused public-host LCP trace:
   `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`
-- latest Move 893 local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T13-33-38-974Z.json`
-- latest Move 893 local LCP trace:
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-33-38-825Z.json`
-- latest Move 893 public portal LCP trace:
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-34-15-883Z.json`
-- latest Move 893 public admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T13-34-19-457Z.json`
-- latest Move 893 public admin LCP trace:
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T13-35-09-532Z.json`
+- latest Move 895 local route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
+- latest Move 895 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-10-860Z.json`
+- latest Move 895 public admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T15-13-33-634Z.json`
+- latest Move 895 public admin LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-36-800Z.json`
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:

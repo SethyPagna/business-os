@@ -25,11 +25,11 @@ import {
   getReturn as fetchReturnDetail,
   getReturns as fetchReturns,
 } from '../../api/returnsReadTransport.ts'
+import ReturnsListSurface from './ReturnsListSurface'
 const ReturnDetailModal = lazy(() => import('./ReturnDetailModal'))
 const EditReturnModal = lazy(() => import('./EditReturnModal'))
 const NewReturnModal = lazy(() => import('./NewReturnModal'))
 const NewSupplierReturnModal = lazy(() => import('./NewSupplierReturnModal'))
-const ReturnsListSurface = lazy(() => import('./ReturnsListSurface'))
 
 type ActionHistoryBarHistory = ComponentProps<typeof ActionHistoryBar>['history']
 type ReturnsListSurfaceProps = ComponentProps<typeof ReturnsListSurface>
@@ -977,33 +977,31 @@ export default function Returns() {
           setReturnPage(1)
         }}
       />
-      <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white/90 px-4 py-8 text-center text-sm text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">{tr('loading_returns_surface', 'Loading returns...', 'Loading returns...')}</div>}>
-        <ReturnsListSurface
-          collapsedReturnSections={collapsedReturnSections}
-          CUSTOMER_SCOPE={CUSTOMER_SCOPE}
-          filtered={filtered as ReturnsListSurfaceProps['filtered']}
-          fmtTime={fmtTime}
-          isSelectionScopeFullySelected={isSelectionScopeFullySelected}
-          isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
-          loading={loading}
-          normalizeScope={normalizeScope}
-          renderAmount={renderAmount as ReturnsListSurfaceProps['renderAmount']}
-          returnSections={returnSections as ReturnsListSurfaceProps['returnSections']}
-          scope={scope}
-          selectAllRef={selectAllRef as ReturnsListSurfaceProps['selectAllRef']}
-          selectedIds={selectedIds}
-          setDetailRet={(ret) => setDetailRet(ret as ReturnRow)}
-          showReturnActionGroups={showReturnActionGroups}
-          SUPPLIER_SCOPE={SUPPLIER_SCOPE}
-          t={t}
-          toggleReturnSection={toggleReturnSection}
-          toggleSelected={toggleSelected}
-          toggleSelectAll={toggleSelectAll}
-          toggleSelectionScope={toggleSelectionScope}
-          tr={tr}
-          visibleIds={visibleIds}
-        />
-      </Suspense>
+      <ReturnsListSurface
+        collapsedReturnSections={collapsedReturnSections}
+        CUSTOMER_SCOPE={CUSTOMER_SCOPE}
+        filtered={filtered as ReturnsListSurfaceProps['filtered']}
+        fmtTime={fmtTime}
+        isSelectionScopeFullySelected={isSelectionScopeFullySelected}
+        isSelectionScopePartiallySelected={isSelectionScopePartiallySelected}
+        loading={loading}
+        normalizeScope={normalizeScope}
+        renderAmount={renderAmount as ReturnsListSurfaceProps['renderAmount']}
+        returnSections={returnSections as ReturnsListSurfaceProps['returnSections']}
+        scope={scope}
+        selectAllRef={selectAllRef as ReturnsListSurfaceProps['selectAllRef']}
+        selectedIds={selectedIds}
+        setDetailRet={(ret) => setDetailRet(ret as ReturnRow)}
+        showReturnActionGroups={showReturnActionGroups}
+        SUPPLIER_SCOPE={SUPPLIER_SCOPE}
+        t={t}
+        toggleReturnSection={toggleReturnSection}
+        toggleSelected={toggleSelected}
+        toggleSelectAll={toggleSelectAll}
+        toggleSelectionScope={toggleSelectionScope}
+        tr={tr}
+        visibleIds={visibleIds}
+      />
 
       {detailRet ? (
         <Suspense fallback={null}>

@@ -117,9 +117,9 @@ const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
   { match: (routePath) => routePath === '/' || routePath === '/index.html' || routePath.startsWith('/dashboard'), chunks: ['Dashboard', 'dashboard-api', 'dashboard-charts', 'app-shared', 'shared-formatters'] },
   { match: (routePath) => routePath.startsWith('/pos'), chunks: ['POS', 'product-read-api', 'product-shared', 'productDisplayHelpers', 'route-sync-utils', 'settings-refresh', 'app-api', 'shared-lazy-portal-menu', 'shared-ui'] },
   { match: (routePath) => routePath.startsWith('/products'), chunks: ['Products', 'product-read-api', 'product-shared', 'productDisplayHelpers', 'shared-action-history', 'route-sync-utils', 'settings-refresh', 'app-api', 'shared-lazy-portal-menu', 'shared-ui'] },
-  { match: (routePath) => routePath.startsWith('/inventory'), chunks: ['Inventory', 'InventoryProductsSurface', 'inventory-api', 'product-shared', 'shared-action-history', 'shared-formatters', 'route-sync-utils', 'settings-refresh', 'app-api', 'shared-lazy-portal-menu', 'shared-ui'] },
+  { match: (routePath) => routePath.startsWith('/inventory'), chunks: ['Inventory', 'inventory-api', 'product-shared', 'shared-ui'] },
   { match: (routePath) => routePath.startsWith('/sales'), chunks: ['Sales'] },
-  { match: (routePath) => routePath.startsWith('/returns'), chunks: ['Returns'] },
+  { match: (routePath) => routePath.startsWith('/returns'), chunks: ['Returns', 'returns-read-api'] },
   { match: (routePath) => routePath.startsWith('/contacts'), chunks: ['Contacts'] },
   { match: (routePath) => routePath.startsWith('/branches'), chunks: ['Branches', 'branch-api', 'product-shared', 'shared-action-history', 'shared-page-header', 'route-sync-utils', 'settings-refresh', 'app-api', 'api-local-cache', 'shared-lazy-portal-menu', 'shared-ui'] },
   { match: (routePath) => routePath.startsWith('/audit-log'), chunks: ['AuditLog', 'audit-log-api', 'refresh-cw', 'monitor-smartphone', 'route-sync-utils', 'settings-refresh', 'shared-ui', 'shared-lazy-portal-menu', 'app-shared'] },
@@ -129,7 +129,7 @@ const SPA_ROUTE_MODULE_PRELOAD_CHUNKS = [
   { match: (routePath) => routePath.startsWith('/files'), chunks: ['FilesPage', 'file-api', 'ai-api', 'multipart-headers-api', 'route-sync-utils', 'settings-refresh', 'shared-ui', 'shared-action-history', 'shared-page-header', 'app-shared'] },
   { match: (routePath) => routePath.startsWith('/server'), chunks: ['ServerPage'] },
   { match: (routePath) => routePath.startsWith('/loyalty-points'), chunks: ['LoyaltyPointsPage'] },
-  { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users', 'user-admin-api', 'user-read-api', 'user-permission-definitions', 'route-sync-utils', 'shared-action-history', 'shared-formatters', 'shared-ui', 'shared-modal', 'shared-portal-menu', 'shared-lazy-portal-menu', 'app-shared', 'product-shared'] },
+  { match: (routePath) => routePath.startsWith('/users'), chunks: ['Users', 'user-admin-api', 'user-permission-definitions'] },
   {
     match: (routePath) => routePath.startsWith('/public') || routePath.startsWith('/customer-portal'),
     chunks: [

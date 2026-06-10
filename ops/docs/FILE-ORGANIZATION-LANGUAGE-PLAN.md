@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 894 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 895 in this file.
 
 ## Goal
 
@@ -9769,6 +9769,49 @@ Decision rule:
 - Current plan position after Move 894: Phase 8.4 remains active for live
   browser checks and measured startup/interaction reductions; Phase 26 stays at
   51 completed organization moves; Phase 28 remains active with R2/access
+  follow-up open; Phase 29 remains active as the repeated whole-codebase,
+  schema, cleanup, TypeScript, runtime, and performance guardrail.
+
+### Move 895: Align route preloads with first-paint route surfaces
+
+- Ownership slice: Phase 8.4/Phase 29 public-admin LCP cleanup for Inventory,
+  Returns, and Users.
+- Code-flow slice: Inventory and Returns now render their primary route
+  surfaces from the route chunk instead of suspending behind a first-paint
+  component subchunk. Inventory's fixed 140 ms mobile full-list reveal delay was
+  removed so real data is not held behind a visual timer.
+- Preload slice: Vite route-aware preload hints and backend SPA `Link`
+  modulepreload hints now agree on focused first-window dependencies:
+  Inventory = `Inventory`, `inventory-api`, `product-shared`, `shared-ui`;
+  Returns = `Returns`, `returns-read-api`; Users = `Users`, `user-admin-api`,
+  `user-permission-definitions`.
+- Guardrail slice: `frontend/tests/performanceLoadingUx.test.ts` and
+  `backend/test/routeContracts.test.ts` now prove the frontend and backend
+  route preload maps stay aligned and avoid reintroducing the removed eager
+  Inventory/Users chunks.
+- Live proof: Docker image `business-os:v6.0.0-202606102309` served frontend
+  hash `0dcd7c3e85311dd1` and source hash `797c2adf20649e81`. Local route-load
+  report `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
+  measured Inventory 300 ms, Returns 294 ms, Users 287 ms, zero failed
+  requests/errors. Local LCP report
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-10-860Z.json`
+  measured Inventory 332 ms, Returns 352 ms, Users 284 ms, zero failed
+  requests/errors.
+- Public proof: public Cloudflare route-load report
+  `ops/runtime/reports/route-load-trace-2026-06-10T15-13-33-634Z.json` and LCP
+  report `ops/runtime/reports/lcp-route-trace-2026-06-10T15-13-36-800Z.json`
+  passed with zero failed requests/errors, but Inventory/Returns/Users remained
+  over the 2.5 s public LCP target due real transfer/API latency. Slowest final
+  requests included `/api/inventory/bootstrap` 5.712 s,
+  `/api/returns?scope=customer` 4.473 s, `/api/users` 4.480 s, and
+  `/api/auth/bootstrap` 3.603-4.497 s.
+- Verification proof: focused performance guard, frontend typecheck,
+  JSX/source check, frontend production build, backend utility suite, Docker
+  release build/start/health, local Playwright route-load/LCP traces, and
+  public Cloudflare route-load/LCP traces passed.
+- Current plan position after Move 895: Phase 8.4 remains active for public
+  Cloudflare API/chunk transfer latency reduction; Phase 26 stays at 51
+  completed organization moves; Phase 28 remains active with R2/access
   follow-up open; Phase 29 remains active as the repeated whole-codebase,
   schema, cleanup, TypeScript, runtime, and performance guardrail.
 
