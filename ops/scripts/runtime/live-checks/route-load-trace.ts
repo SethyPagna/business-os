@@ -45,6 +45,7 @@ const REPORT_PATH = path.join(ROOT_DIR, 'ops/runtime/reports', `route-load-trace
 const LATEST_REPORT_PATH = path.join(ROOT_DIR, 'ops/runtime/reports/route-load-trace-latest.json')
 const TRACE_WINDOW_MS = Number(process.env.BOS_ROUTE_LOAD_TRACE_WINDOW_MS || 600)
 const READY_TIMEOUT_MS = Number(process.env.BOS_ROUTE_LOAD_READY_TIMEOUT_MS || 20_000)
+const NAV_TIMEOUT_MS = Number(process.env.BOS_ROUTE_LOAD_NAV_TIMEOUT_MS || 30_000)
 const DEFAULT_ROUTES = ['dashboard', 'sales', 'audit_log', 'inventory']
 const EXTERNAL_NOISE_RE = /chrome-extension:|No Listener: tabs:outgoing|Grammarly|Statsig|ERR_BLOCKED_BY_CLIENT|webextension\.js|unsafe-eval.*content\.js/i
 
@@ -136,7 +137,7 @@ async function traceRoute(route: AuditRoute, storageState: BrowserStorageState, 
 
   await hydratePlaywrightPage(page, storageState)
   const domStartedAt = performance.now()
-  await page.goto(absoluteUrl(route.path), { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.goto(absoluteUrl(route.path), { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS })
   const domMs = Math.round(performance.now() - domStartedAt)
   await waitForRouteReady(page, route)
   const readyTextMs = Math.round(performance.now() - domStartedAt)

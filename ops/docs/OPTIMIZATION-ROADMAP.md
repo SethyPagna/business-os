@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 883.
+- Latest completed implementation move in this roadmap: Move 884.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,41 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 884 current state:
+- Docker release `business-os:v6.0.0-202606101340-move884` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `75e0fcde4f49af12`.
+- Auth bootstrap no longer performs organization filesystem ensure/write work
+  on every protected route load. `backend/src/routes/auth.ts` now uses
+  `getOrganizationFilesystemLayout(organization)` for the bootstrap storage
+  payload, while explicit organization bootstrap/current routes keep
+  `ensureOrganizationFilesystemLayout(...)` for setup and support checks.
+- `backend/test/offlineSecurity.test.ts` now guards this contract so
+  `/api/auth/bootstrap` cannot silently reintroduce per-navigation metadata
+  writes. `ops/scripts/runtime/live-checks/route-load-trace.ts` also now uses
+  `BOS_ROUTE_LOAD_NAV_TIMEOUT_MS` for `page.goto(...)`, which lets remote
+  Cloudflare audits distinguish tunnel navigation variance from route-ready
+  failures.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-03-17-577Z.json`
+  measured Products 275 ms, Inventory 247 ms, POS 289 ms, and Branches 224 ms
+  with zero failed requests/errors. Local `/api/auth/bootstrap` timings were
+  135 ms, 104 ms, 103 ms, and 102 ms respectively.
+- Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-04-33-853Z.json`
+  measured Products 2.337 s, Inventory 3.000 s, POS 2.714 s, and Branches
+  3.111 s with zero failures/errors. Repeat trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json`, using
+  a 60 second navigation budget, measured Products 3.203 s, Inventory 3.553 s,
+  POS 3.325 s, and Branches 2.828 s with zero failures/errors.
+- Verification passed: focused auth/offline security guard, backend server
+  entry verification, backend route contracts, full backend `test:utils`,
+  Docker release build/start/health with completed Cloudflare startup warmup,
+  local Playwright route-load trace, and repeated Cloudflare route-load traces.
+- Next executable slice: reduce settings snapshot sanitization/object-storage
+  existence work in auth bootstrap while preserving correct image/settings
+  data and no stale or fake startup state.
 
 Move 883 current state:
 - Docker release `business-os:v6.0.0-202606101302-move883` is running healthy

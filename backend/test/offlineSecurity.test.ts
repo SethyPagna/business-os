@@ -48,6 +48,12 @@ runTest('auth session last-seen writes are throttled during route startup', () =
   assert.match(sessionSource, /touchSessionIfDue\(row, req\)/)
 })
 
+runTest('auth bootstrap does not rewrite organization filesystem metadata on every route load', () => {
+  assert.match(authSource, /getOrganizationFilesystemLayout/)
+  assert.doesNotMatch(authSource, /ensureOrganizationFilesystemLayout/)
+  assert.match(authSource, /storage: organization \? getOrganizationFilesystemLayout\(organization\) : null/)
+})
+
 runTest('generic sync outbox endpoint is mounted and only accepts allowlisted operation ids', () => {
   assert.match(serverSource, /target\.use\('\/api\/sync', require\('\.\/src\/routes\/sync\.ts'\)\)/)
   assert.match(syncSource, /const OUTBOX_OPERATION_MAP =/)

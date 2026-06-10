@@ -8,6 +8,34 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove auth-bootstrap filesystem writes
+  - area: backend auth bootstrap performance, organization storage payload,
+    Cloudflare route-load diagnostics
+  - result: kept
+  - note: `/api/auth/bootstrap` now returns the organization storage layout
+    without calling the filesystem ensure helper on every protected route
+    load. Explicit organization routes still keep setup/current storage ensure
+    behavior. The route-load trace runner also accepts
+    `BOS_ROUTE_LOAD_NAV_TIMEOUT_MS` so long Cloudflare navigation variance is
+    measured separately from route readiness.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101340-move884` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `75e0fcde4f49af12`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T06-03-17-577Z.json`
+    measured Products 275 ms, Inventory 247 ms, POS 289 ms, and Branches
+    224 ms with zero failures/errors. Local `/api/auth/bootstrap` timings were
+    135 ms, 104 ms, 103 ms, and 102 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T06-04-33-853Z.json`
+    measured Products 2.337 s, Inventory 3.000 s, POS 2.714 s, and Branches
+    3.111 s; repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json`
+    measured Products 3.203 s, Inventory 3.553 s, POS 3.325 s, and Branches
+    2.828 s. Both had zero failures/errors.
+  - next target: reduce settings/media sanitization and object-storage
+    existence checks in auth bootstrap without returning incomplete settings.
+
 - Throttle auth session last-seen writes
   - area: backend auth bootstrap performance, protected-route startup,
     Docker/Cloudflare verification

@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 883, throttle authenticated session last-seen
-  writes so route startup keeps validating sessions without writing
-  `user_sessions` on every protected request.
+- Latest completed move: Move 884, remove auth-bootstrap filesystem metadata
+  rewrites and make remote route-load navigation timeout configurable for
+  Cloudflare variance checks.
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `72b9ecdfda6fdef1`
 - latest verified source hash from the most recent Docker-served live check:
-  `6a168caab1837c73`
+  `75e0fcde4f49af12`
 
 Latest verified reports:
 
@@ -49,11 +49,11 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T05-06-54-839Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-03-17-577Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T05-09-11-736Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
 - latest focused public-host LCP trace:
@@ -138,6 +138,11 @@ Latest verified reports:
 - latest Move 883 Cloudflare affected-route traces:
   `ops/runtime/reports/route-load-trace-2026-06-10T05-08-01-552Z.json`
   and `ops/runtime/reports/route-load-trace-2026-06-10T05-09-11-736Z.json`
+- latest Move 884 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-03-17-577Z.json`
+- latest Move 884 Cloudflare affected-route traces:
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-04-33-853Z.json`
+  and `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -160,6 +165,41 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 884 removes a filesystem side effect from authenticated bootstrap.
+  `/api/auth/bootstrap` now returns the organization storage layout with
+  `getOrganizationFilesystemLayout(organization)` instead of calling
+  `ensureOrganizationFilesystemLayout(organization)` and rewriting
+  organization metadata/readme files during every protected route startup.
+  Explicit organization routes still keep the ensure path for setup/current
+  storage checks.
+- The route-load trace runner now honors `BOS_ROUTE_LOAD_NAV_TIMEOUT_MS` for
+  `page.goto(...)` while keeping `BOS_ROUTE_LOAD_READY_TIMEOUT_MS` for route
+  readiness. This keeps long Cloudflare tunnel navigation variance visible
+  without confusing it with app-ready failures.
+- Docker image `business-os:v6.0.0-202606101340-move884` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `75e0fcde4f49af12`.
+  Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-03-17-577Z.json`
+  measured Products 275 ms, Inventory 247 ms, POS 289 ms, and Branches 224 ms
+  with zero failed requests and zero page/console errors. Local
+  `/api/auth/bootstrap` timings were 135 ms, 104 ms, 103 ms, and 102 ms.
+- Public Cloudflare was measured after release and startup warmup. Trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-04-33-853Z.json`
+  measured Products 2.337 s, Inventory 3.000 s, POS 2.714 s, and Branches
+  3.111 s with zero failures/errors. A repeat using
+  `BOS_ROUTE_LOAD_NAV_TIMEOUT_MS=60000`,
+  `ops/runtime/reports/route-load-trace-2026-06-10T06-11-30-848Z.json`,
+  measured Products 3.203 s, Inventory 3.553 s, POS 3.325 s, and Branches
+  2.828 s with zero failures/errors. Remote route timing is still dominated
+  by real `/api/auth/bootstrap` tunnel/query latency, but no longer includes
+  per-route organization filesystem metadata rewrites.
+- Current plan position after Move 884: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: reduce
+  settings/media sanitization and object-storage existence checks in auth
+  bootstrap without returning broken image paths or incomplete settings.
 
 - Move 883 throttles authenticated session last-seen writes during protected
   route startup. `backend/src/sessionAuth.ts` now updates

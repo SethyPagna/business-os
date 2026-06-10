@@ -59,7 +59,7 @@ const {
   findOrganizationByLookup,
   getDefaultOrganization,
   getOrganizationContextForUser,
-  ensureOrganizationFilesystemLayout,
+  getOrganizationFilesystemLayout,
 } = require('../organizationContext/index.ts')
 const { sanitizeSettingsSnapshotAsync } = require('../settingsSnapshot.ts')
 const { classifyRequestAccess } = require('../accessControl.ts')
@@ -444,7 +444,7 @@ async function buildAuthenticatedBootstrap(req, userId) {
     organizationCreationEnabled: false,
     organization,
     group,
-    storage: organization ? ensureOrganizationFilesystemLayout(organization) : null,
+    storage: organization ? getOrganizationFilesystemLayout(organization) : null,
     system: getBootstrapSystemSnapshot(req, organization?.public_id || ''),
   }
 }
