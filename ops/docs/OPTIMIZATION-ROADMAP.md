@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 881.
+- Latest completed implementation move in this roadmap: Move 882.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,34 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 882 current state:
+- Docker release `business-os:v6.0.0-202606101205-move882` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `74234e58f3024aaa`.
+- Stored-session startup no longer waits a fixed 1.8 seconds before starting
+  `/api/auth/bootstrap`. `frontend/src/AppContext.tsx` now starts the real
+  bootstrap request immediately, so the loader no longer adds synthetic time
+  ahead of the network/database work.
+- `frontend/tests/performanceLoadingUx.test.ts` now guards the current no-fake
+  loader policy: the removed stored-session delay must stay removed, POS
+  secondary reads keep real network timeouts, and POS contact/filter/category
+  readiness is gated by settled catalog state rather than post-route timers.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-11-18-198Z.json`
+  measured Products 312 ms, Inventory 247 ms, POS 317 ms, and Branches 218 ms
+  with zero failed requests/errors. Local `/api/auth/bootstrap` timings were
+  130 ms, 92 ms, 111 ms, and 78 ms respectively.
+- Cloudflare route-load traces
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-12-31-262Z.json` and
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-13-44-768Z.json` had zero
+  failures/errors. The repeat measured Products 3.055 s, Inventory 6.113 s,
+  POS 2.820 s, and Branches 3.834 s. The remaining remote bottleneck is real
+  `/api/auth/bootstrap` latency through Cloudflare/tunnel, not a client-side
+  artificial wait.
+- Verification passed: frontend typecheck, JSX/source syntax check, frontend
+  performance guard, production frontend build, Docker release build/start/
+  health, local Playwright trace, and Cloudflare Playwright traces.
 
 Move 881 current state:
 - Docker release `business-os:v6.0.0-202606101036-move881` is running healthy

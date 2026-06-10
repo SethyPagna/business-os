@@ -48,7 +48,6 @@ const APP_LOGOUT_TIMEOUT_MS = 10000
 const APP_GOOGLE_OAUTH_COMPLETE_TIMEOUT_MS = 20000
 const APP_SETTINGS_SAVE_TIMEOUT_MS = 15000
 const APP_SESSION_DURATION_TIMEOUT_MS = 12000
-const APP_STORED_SESSION_BOOTSTRAP_DELAY_MS = 1800
 const INITIAL_SYNC_URL_PERSIST_DELAY_MS = 1500
 const INITIAL_SYNC_URL_PERSIST_IDLE_TIMEOUT_MS = 8000
 
@@ -1227,10 +1226,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
               setAuthReady(true)
               loadSettings().catch(() => {})
             }, 10_000)
-            const startBootstrap = hasStoredSession
-              ? new Promise<void>((resolve) => window.setTimeout(resolve, APP_STORED_SESSION_BOOTSTRAP_DELAY_MS))
-              : Promise.resolve()
-            startBootstrap
+            Promise.resolve()
               .then(() => readAppBootstrap('App bootstrap'))
               .then(async (bootstrap) => {
                 if (!bootstrap) {

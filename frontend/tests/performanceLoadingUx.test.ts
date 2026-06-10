@@ -122,7 +122,8 @@ assert.doesNotMatch(appContext, /import en from '\.\/lang\/en\.json'/, 'app cont
 assert.match(appContext, /const CORE_ENGLISH_PACK: TranslationPack = \{[\s\S]*sync_server_title: 'Sync Server'[\s\S]*\}/, 'app context should keep a tiny synchronous English fallback for first paint labels')
 assert.match(appContext, /const \{ default: en \} = await import\('\.\/lang\/en\.json'\)/, 'app context should load the full English language pack dynamically after first paint')
 assert.match(appContext, /CORE_LANGUAGE_CODES\.has\(nextLang\)[\s\S]*scheduleDeferredLanguagePack\(\)/, 'core language packs should be deferred instead of requested in the first script window')
-assert.match(appContext, /window\.requestIdleCallback\(loadLanguagePack, \{ timeout: 7000 \}\)/, 'deferred full language pack loading should prefer idle time with a bounded timeout')
+assert.match(appContext, /const CORE_LANGUAGE_PACK_DEFER_MS = 9000[\s\S]*const CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS = 20000/, 'deferred full language pack policy should stay explicit and outside the route startup window')
+assert.match(appContext, /window\.requestIdleCallback\(loadLanguagePack, \{ timeout: CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS \}\)[\s\S]*window\.setTimeout\(runWhenIdle, CORE_LANGUAGE_PACK_DEFER_MS\)/, 'deferred full language pack loading should prefer idle time after a bounded post-load delay')
 assert.match(appContext, /useEffect\(\(\) => \{\s*if \(publicMode\) return undefined[\s\S]*CORE_LANGUAGE_CODES\.has\(nextLang\)[\s\S]*\}, \[language, publicMode\]\)/, 'public portal startup should not schedule the full admin language pack after first paint')
 assert.match(publicCatalogRoot, /import \{ PublicCatalogAppProvider \} from '\.\/app\/PublicCatalogAppProvider\.tsx'/, 'public catalog root should use the public-only provider instead of the full admin AppProvider')
 assert.doesNotMatch(publicCatalogRoot, /import \{ AppProvider \}|AppContext\.tsx/, 'public catalog root should not import the admin AppContext provider')
@@ -138,6 +139,7 @@ assert.match(appContext, /function getInitialAdminPage\(publicMode: boolean\): s
 assert.match(appContext, /const \[page,\s+setPage\]\s+= useState\(\(\) => getInitialAdminPage\(publicMode\)\)/, 'initial active page state should come from the current URL')
 assert.match(appContext, /const \[authReady, setAuthReady\] = useState\(\(\) => \{[\s\S]*if \(hasStoredSession && canProbeServerSession\) return false[\s\S]*if \(canProbeServerSession\) return false[\s\S]*\}\)/, 'cookie-only authenticated startup should wait for bootstrap instead of briefly mounting the login route')
 assert.doesNotMatch(appContext, /if \(canProbeServerSession\) return true/, 'server-session probing should not mark auth ready before bootstrap has confirmed or rejected the cookie session')
+assert.doesNotMatch(appContext, /APP_STORED_SESSION_BOOTSTRAP_DELAY_MS|setTimeout\(resolve,\s*APP_STORED_SESSION_BOOTSTRAP_DELAY_MS\)/, 'stored-session bootstrap should start immediately instead of adding a fixed startup delay before /api/auth/bootstrap')
 assert.match(app, /const NARROW_PAGE_ENTRY_WARMUP_IDS[\s\S]*'sales',[\s\S]*'returns',/, 'Sales and Returns should use narrow delayed page-entry warmup instead of pulling the later admin stack immediately')
 assert.match(app, /Page bundle is still loading/, 'page loader should explain stalled chunk loads')
 assert.match(app, /console\.warn\('\[PageLoader\]/, 'page loader should expose diagnostic breadcrumbs')
@@ -321,7 +323,7 @@ assert.match(apiMethods, /function loadBrowserDialogsModule\(\)[\s\S]*import\('\
 assert.doesNotMatch(contactsTransport, /import \{ buildCSVTemplate \} from '\.\.\/utils\/csvTemplate\.ts'/, 'contacts transport should not load CSV template helpers for normal contact reads')
 assert.match(contactsTransport, /function getCsvTemplateModule\(\): Promise<CsvTemplateModule>[\s\S]*import\('\.\.\/utils\/csvTemplate\.ts'\)[\s\S]*async function buildContactCsvTemplate/, 'contact templates should lazy-load CSV helpers only from template download intent')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/appBootstrapTransport\.ts'\)\) return 'app-bootstrap'/, 'Vite should keep unauthenticated bootstrap out of the full app-api-methods registry chunk')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\)\) return 'app-auth'/, 'Vite should keep sign-in auth helpers out of the full app-api-methods registry chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/AppContext\.tsx'\)[\s\S]*return 'app-auth'/, 'Vite should keep sign-in auth helpers out of the full app-api-methods registry chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/systemRuntime\.ts'\)\) return 'app-system'/, 'Vite should keep Server page diagnostics transport out of app-api-methods and local DB chunks')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/portalPublicTransport\.ts'\)\) return 'app-portal'/, 'Vite should keep public-only portal transport out of app-api-methods and local DB chunks')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/portalTransport\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/api\/portalHttp\.ts'\)[\s\S]*return 'portal-admin-api'/, 'Vite should keep admin portal review transport and shared portal HTTP helpers out of the public startup app-portal chunk')
@@ -362,7 +364,7 @@ assert.match(viteConfig, /const publicCatalogIconNames = new Set\(\[[\s\S]*'arro
 assert.doesNotMatch(viteConfig.match(/const publicCatalogIconNames = new Set\(\[[\s\S]*?\]\)/)?.[0] || '', /'facebook'|'instagram'|'mail'|'map-pin'|'phone'|'send'/, 'secondary contact and social icons should not ride the public catalog first-viewport icon chunk')
 assert.match(viteConfig, /const routeSharedIconNames = new Set\(\[[\s\S]*'check-circle-2'[\s\S]*'info'[\s\S]*'mail'[\s\S]*'phone'[\s\S]*'settings-2'[\s\S]*'shield-alert'[\s\S]*'trash-2'[\s\S]*'upload'[\s\S]*\]\)/, 'cross-route notification, reset, and catalog-adjacent icons should stay in a shared icon chunk')
 assert.doesNotMatch(viteConfig, /const authLoginIconNames = new Set\(\[[^\]]*'(chevron-down|chevron-up|mail)'/, 'shared catalog icons should not be pinned to the auth-login chunk')
-assert.match(viteConfig, /if \(authLoginIconNames\.has\(iconName\)\) return 'auth-login'[\s\S]*if \(publicCatalogIconNames\.has\(iconName\)\) return 'catalog-icons'[\s\S]*if \(routeSharedIconNames\.has\(iconName\) \|\| appShellIconNames\.has\(iconName\)\) return 'shared-ui'/, 'direct Lucide icon modules should keep auth, public catalog, shared route, and shell icons out of feature chunks')
+assert.match(viteConfig, /if \(routeSharedIconNames\.has\(iconName\) \|\| appShellIconNames\.has\(iconName\)\) return 'shared-ui'[\s\S]*if \(authLoginIconNames\.has\(iconName\)\) return 'auth-login'[\s\S]*if \(publicCatalogIconNames\.has\(iconName\)\) return 'catalog-icons'/, 'direct Lucide icon modules should keep auth, public catalog, shared route, and shell icons out of feature chunks')
 assert.match(viteConfig, /'assets\/dashboard-charts-',[\s\S]*'assets\/dashboard-export-',/, 'Dashboard chart/report chunks should be excluded from eager modulepreload on non-dashboard routes')
 assert.match(viteConfig, /'assets\/catalog-',[\s\S]*'assets\/portal-language-packs-',[\s\S]*'assets\/portal-content-i18n-'/, 'catalog and public portal intent chunks should be excluded from eager modulepreload')
 assert.match(viteConfig, /'assets\/shared-action-history-',[\s\S]*'assets\/system-jobs-api-'/, 'secondary admin chunks should not be modulepreloaded during the public product first viewport')
@@ -403,11 +405,14 @@ assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/requestIds\.ts'\)\)
   assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/searchTerms\.ts'\)\) return 'route-sync-utils'/, 'tiny search-term normalization should share the small synchronous route helper chunk instead of costing its own startup request')
   assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/recordFilters\.ts'\)\) return 'route-sync-utils'/, 'tiny record date and selection helpers should share the small synchronous route helper chunk instead of costing their own startup request')
   assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/loaders\.ts'\)\) return 'route-sync-utils'/, 'shared page loader guards should not be owned by the public catalog chunk and pulled into admin routes')
-  assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*productBatches\.ts[\s\S]*pricing\.ts[\s\S]*productGrouping\.ts[\s\S]*color\.ts[\s\S]*return 'product-shared'/, 'shared product pricing math should not be owned by the public catalog chunk and pulled into admin routes')
+  assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/pricing\.ts'\)\) \{[\s\S]*return 'pricing-utils'/, 'shared product pricing math should use a tiny focused chunk instead of the public catalog or broad product shared chunk')
+  assert.match(viteConfig, /components\/products\/shared\/'[\s\S]*productGalleryHelpers\.ts'[\s\S]*productBatches\.ts[\s\S]*productGrouping\.ts[\s\S]*color\.ts[\s\S]*return 'product-shared'/, 'shared product helpers should not be owned by the public catalog chunk and pulled into admin routes')
   assert.doesNotMatch(products, /from '\.\.\/\.\.\/utils\/groupedRecords\.ts'/, 'Products startup should not load grouped history section builders just for date filters or selection toggles')
   assert.doesNotMatch(productFilterHelpers, /utils\/groupedRecords\.ts/, 'Products live filtering should use the light record filter helpers instead of the grouped section builder chunk')
   assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/browserDialogs\.ts'\)\) return 'browser-dialogs'/, 'browser file-picker dialogs should stay in an intent-only chunk instead of app-api-methods')
-assert.match(viteConfig, /productReadTransport\.ts'[\s\S]*lookupTransport\.ts'[\s\S]*expectedUpdatedAt\.ts'[\s\S]*localMirrors\.ts'[\s\S]*lazyLocalDb\.ts'[\s\S]*queryCache\.ts'[\s\S]*return 'product-read-api'/, 'POS product and lookup reads should have a narrow product-read API chunk instead of landing in app-api-methods')
+assert.match(viteConfig, /localMirrors\.ts'[\s\S]*lazyLocalDb\.ts'[\s\S]*queryCache\.ts'[\s\S]*expectedUpdatedAt\.ts'[\s\S]*return 'api-local-cache'/, 'product cache helpers should stay in the focused local cache chunk instead of landing in app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/lookupTransport\.ts'\)\) \{[\s\S]*return 'lookup-api'/, 'POS lookup reads should have a narrow lookup API chunk instead of landing in app-api-methods')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/productReadTransport\.ts'\)[\s\S]*return 'product-read-api'/, 'POS product reads should have a narrow product-read API chunk instead of landing in app-api-methods')
 assert.doesNotMatch(viteConfig, /CatalogPreviewSurface\.tsx'\)\) \{[\s\S]*return 'catalog-preview'/, 'public catalog preview shell should stay in the route chunk to avoid a first-viewport lazy waterfall')
 assert.match(viteConfig, /CatalogProductsSection\.tsx'\)[\s\S]*return 'catalog-products'/, 'public catalog products should have a named preloaded chunk so the lighter shell can parse before the product grid')
 assert.match(viteConfig, /PublicCatalogPage\.tsx'[\s\S]*CatalogPreviewSurface\.tsx'[\s\S]*return 'catalog-public'/, 'customer portal should own a dedicated public catalog shell chunk instead of importing the admin catalog controller')
@@ -565,8 +570,8 @@ assert.doesNotMatch(pos, /import \{ parseStoredContactOptions \} from '\.\.\/con
 assert.match(pos, /function loadContactOptionUtilsModule\(\): Promise<ContactOptionUtilsModule>[\s\S]*import\('\.\.\/contacts\/contactOptionUtils'\)[\s\S]*async function parseContactOptions\(raw: unknown\): Promise<ContactOption\[\]>/, 'POS should lazy-load contact option parsing only after customer selection intent')
 assert.doesNotMatch(pos, /import FilterPanel from '\.\/FilterPanel'/, 'POS should not load the filter panel before the Filters button is opened')
 assert.match(pos, /const FilterPanel = lazy\(\(\) => import\('\.\/FilterPanel'\)\)/, 'POS filter panel should load only on filter-button intent')
-assert.match(pos, /getProductBootstrap as getPosProductBootstrap[\s\S]*getProductFilters as getPosProductFilters[\s\S]*searchProducts as searchPosProducts[\s\S]*from '\.\.\/\.\.\/api\/productReadTransport\.ts'/, 'POS product reads should use the narrow product transport instead of the full window.api registry')
-assert.match(pos, /getCategories as getPosCategories[\s\S]*from '\.\.\/\.\.\/api\/lookupTransport\.ts'/, 'POS category options should use the narrow lookup transport instead of the full window.api registry')
+assert.match(pos, /function getProductReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)> \{[\s\S]*import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)[\s\S]*const \{ getProductBootstrap \} = await getProductReadTransport\(\)[\s\S]*const \{ searchProducts \} = await getProductReadTransport\(\)[\s\S]*const \{ getProductFilters \} = await getProductReadTransport\(\)/, 'POS product reads should use the narrow product transport instead of the full window.api registry')
+assert.match(pos, /function getLookupTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)> \{[\s\S]*import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)[\s\S]*const \{ getCategories \} = await getLookupTransport\(\)/, 'POS category options should use the narrow lookup transport instead of the full window.api registry')
 assert.match(pos, /let contactReadTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \| null = null[\s\S]*function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)>/, 'POS contact reads should lazy-load the narrow contact read transport after the delayed option gate')
 assert.match(pos, /let contactWriteTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)> \| null = null[\s\S]*function getContactWriteTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactWriteTransport\.ts'\)>/, 'POS quick contact creates should lazy-load the narrow contact write transport on add intent')
 assert.match(pos, /let portalTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)> \| null = null[\s\S]*function getPortalTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/portalTransport\.ts'\)>/, 'POS membership lookup should lazy-load the narrow portal transport on membership intent')
@@ -656,7 +661,7 @@ assert.doesNotMatch(apiMethods, /from '\.\/authTransport\.ts'/, 'legacy API regi
 assert.match(apiMethods, /export const login = async \(payload\) => \{[\s\S]*loadAuthTransport\(\)[\s\S]*loginRequest\(payload\)/, 'legacy login should delegate through lazy auth transport')
 assert.match(apiMethods, /export const getOrganizationBootstrap = async \(\) => \{[\s\S]*loadAuthTransport\(\)[\s\S]*getOrganizationBootstrapRequest\(\)/, 'legacy organization bootstrap should delegate through lazy auth transport')
 assert.match(viteConfig, /'assets\/app-auth-',/, 'auth transport should be excluded from eager modulepreload')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\)\) return 'app-auth'/, 'auth transport should keep its named intent chunk')
+assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/authTransport\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/AppContext\.tsx'\)[\s\S]*return 'app-auth'/, 'auth transport should keep its named intent chunk')
 assert.match(apiMethods, /function loadLookupTransport\(\) \{[\s\S]*import\('\.\/lookupTransport\.ts'\)/, 'legacy API registry should lazy-load category and unit lookup APIs')
 assert.doesNotMatch(apiMethods, /from '\.\/lookupTransport\.ts'/, 'legacy API registry should not statically import category and unit lookup APIs')
 assert.doesNotMatch(apiMethods, /from '\.\.\/platform\/runtime\/clientRuntime\.ts'/, 'legacy API registry should not statically import runtime reset helpers')
@@ -3153,20 +3158,10 @@ assert.match(
   /const POS_CATEGORY_OPTIONS_TIMEOUT_MS = 8000/,
   'POS category option reads should use an explicit timeout',
 )
-assert.match(
+assert.doesNotMatch(
   pos,
-  /const POS_CONTACT_OPTIONS_READY_DELAY_MS = 250/,
-  'POS customer and delivery option reads should wait until after first catalog route-ready work',
-)
-assert.match(
-  pos,
-  /const POS_FILTER_META_READY_DELAY_MS = 250/,
-  'POS full product filter metadata should wait until after first catalog route-ready work',
-)
-assert.match(
-  pos,
-  /const POS_CATEGORY_OPTIONS_READY_DELAY_MS = 250/,
-  'POS category option reads should wait until after first catalog route-ready work',
+  /POS_CONTACT_OPTIONS_READY_DELAY_MS|POS_FILTER_META_READY_DELAY_MS|POS_CATEGORY_OPTIONS_READY_DELAY_MS/,
+  'POS secondary reads should not add fixed post-route-ready delays on top of real network work',
 )
 assert.match(
   pos,
@@ -3240,8 +3235,8 @@ assert.match(
 )
 assert.match(
   pos,
-  /if \(!catalogLoadedOnceRef\.current \|\| catalogRefreshing\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setContactOptionsReady\(true\)[\s\S]*POS_CONTACT_OPTIONS_READY_DELAY_MS/,
-  'POS should enable contact option reads only after the first catalog load settles',
+  /if \(!catalogLoadedOnceRef\.current \|\| catalogRefreshing\) return undefined[\s\S]*setContactOptionsReady\(true\)/,
+  'POS should enable contact option reads immediately after the first catalog load settles',
 )
 assert.match(
   pos,
@@ -3250,8 +3245,8 @@ assert.match(
 )
 assert.match(
   pos,
-  /if \(!catalogLoadedOnceRef\.current \|\| catalogRefreshing \|\| filterMetaLoadedRef\.current\) return undefined[\s\S]*window\.setTimeout\(\(\) => \{[\s\S]*setFilterMetaReady\(true\)[\s\S]*POS_FILTER_META_READY_DELAY_MS/,
-  'POS should enable full filter metadata only after the first catalog load settles',
+  /if \(!catalogLoadedOnceRef\.current \|\| catalogRefreshing \|\| filterMetaLoadedRef\.current\) return undefined[\s\S]*setFilterMetaReady\(true\)/,
+  'POS should enable full filter metadata immediately after the first catalog load settles',
 )
 assert.match(
   pos,

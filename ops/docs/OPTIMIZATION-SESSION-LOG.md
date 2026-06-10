@@ -8,6 +8,33 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove stored-session bootstrap delay
+  - area: frontend startup performance, auth bootstrap, POS secondary-read
+    guards, Docker/Cloudflare verification
+  - result: kept
+  - note: `AppContext` no longer waits a fixed 1.8 seconds before starting the
+    stored-session `/api/auth/bootstrap` request. The performance guard now
+    rejects that fixed delay and protects POS secondary-read sequencing without
+    requiring artificial post-route timers.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101205-move882` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `74234e58f3024aaa`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T04-11-18-198Z.json`
+    measured Products 312 ms, Inventory 247 ms, POS 317 ms, and Branches
+    218 ms with zero failures/errors.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T04-12-31-262Z.json`
+    measured Products 4.665 s, Inventory 2.645 s, POS 3.872 s, and Branches
+    2.993 s; repeat
+    `ops/runtime/reports/route-load-trace-2026-06-10T04-13-44-768Z.json`
+    measured Products 3.055 s, Inventory 6.113 s, POS 2.820 s, and Branches
+    3.834 s. Both had zero failures/errors. The remaining remote bottleneck is
+    real `/api/auth/bootstrap` latency through the tunnel, not a synthetic
+    loader delay.
+  - next target: reduce the real authenticated bootstrap response path and
+    remaining Cloudflare variance without hiding incomplete data.
+
 - Defer full language packs from admin route startup
   - area: frontend startup performance, route preloads, backend SPA headers,
     Cloudflare warmup

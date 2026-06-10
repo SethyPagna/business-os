@@ -8,8 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 881, defer full language packs out of admin
-  first-window route startup while keeping critical English labels available.
+- Latest completed move: Move 882, remove the fixed stored-session auth
+  bootstrap delay and keep POS secondary-read guards aligned with the no-fake
+  loader policy.
 
 ## Current Baseline
 
@@ -17,7 +18,7 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `03f42ffd0c8ed880`
+  `72b9ecdfda6fdef1`
 - latest verified source hash from the most recent Docker-served live check:
   `74234e58f3024aaa`
 
@@ -48,11 +49,11 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T09-09-18-084Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-11-18-198Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T09-37-18-029Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-13-44-768Z.json`
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
 - latest focused public-host LCP trace:

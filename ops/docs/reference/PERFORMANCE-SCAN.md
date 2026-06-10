@@ -4,30 +4,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 881 release `business-os:v6.0.0-202606101036-move881` is live with
-  frontend hash `03f42ffd0c8ed880` and source hash `74234e58f3024aaa`.
-- Full language packs are no longer admin first-window dependencies. The
-  compact `AppContext` English core pack now covers critical route labels, and
-  the full `lang-en`/`lang-km` chunks load only after the page has had a chance
-  to become usable. Vite route-aware modulepreloads, backend SPA `Link`
-  headers, generated `backend/server.js`, and Cloudflare startup warmup all
-  share the same policy.
+- Move 882 release `business-os:v6.0.0-202606101205-move882` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `74234e58f3024aaa`.
+- Stored-session startup no longer waits on a fixed 1.8 second client delay
+  before `/api/auth/bootstrap`. The real bootstrap request now starts
+  immediately, and the loading UX guard rejects reintroducing that synthetic
+  wait.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-01-788Z.json`:
-  Products 206 ms, Inventory 240 ms, POS 267 ms, Branches 239 ms, zero failed
-  requests/errors, zero language-pack startup requests, and no raw critical
-  translation keys.
-- Public Cloudflare route-load traces:
-  `ops/runtime/reports/route-load-trace-2026-06-10T02-40-23-396Z.json`
-  measured Products 7.699 s, Inventory 6.624 s, POS 4.434 s, Branches 6.108 s;
-  repeat `ops/runtime/reports/route-load-trace-2026-06-10T02-41-08-933Z.json`
-  measured Products 4.609 s, Inventory 5.502 s, POS 2.823 s, Branches 4.190 s.
-  Both traces had zero failed requests/errors and zero `lang-en`/`lang-km`
-  startup requests. The remaining remote regression is dominated by
-  Cloudflare/tunnel transfer plus `/api/auth/bootstrap` variance, not full
-  language-pack preload or synthetic loader delay.
-- Next target: reduce Cloudflare/tunnel and authenticated bootstrap variance
-  while preserving correct, complete data and the no-fake-loader policy.
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-11-18-198Z.json`:
+  Products 312 ms, Inventory 247 ms, POS 317 ms, Branches 218 ms, zero failed
+  requests/errors. Local `/api/auth/bootstrap` timings were 130 ms, 92 ms,
+  111 ms, and 78 ms.
+- Public Cloudflare route-load traces
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-12-31-262Z.json` and
+  `ops/runtime/reports/route-load-trace-2026-06-10T04-13-44-768Z.json` had zero
+  failed requests/errors. The repeat measured Products 3.055 s, Inventory
+  6.113 s, POS 2.820 s, and Branches 3.834 s; remote timing is now dominated
+  by real `/api/auth/bootstrap` tunnel latency rather than synthetic loader
+  delay.
+- Next target: optimize the authenticated bootstrap response path and
+  Cloudflare variance while preserving correct, complete data.
 
 ## 1. Scope
 
