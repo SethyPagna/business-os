@@ -4824,6 +4824,80 @@ Recent route-level win:
   Phase 29 active for repeated whole-codebase schema, cleanup, TypeScript,
   runtime, and performance sweeps.
 
+## Current Move 897
+
+- Move 897 targets the real Cloudflare startup bottleneck after the fake
+  loading-delay pass: late discovery of required startup chunks across the
+  tunnel. The route-aware Vite preload manifest now walks selected chunk static
+  imports recursively, so route chunks, React/vendor, router, shell, and shared
+  dependencies are requested together instead of waiting on module graph
+  discovery. Backend direct-route preload headers now also include
+  `vendor-react`, `vendor`, and `app-routing` in the admin first-window set.
+- The early admin auth bootstrap remains in the HTML parse path and is reused
+  by `appBootstrapTransport`, so `/api/auth/bootstrap` is no longer discovered
+  after the React shell finishes importing. The corrected LCP tracer now
+  records both completion time and true request duration, preventing late
+  completions from being mistaken for slow transfers.
+- Service-worker startup caching was tightened for hashed build assets:
+  `/assets/*` now uses cache-first with background refresh, while HTML,
+  API, uploads, and mutable runtime files keep their safer network-first or
+  no-store behavior.
+- Verification proof: focused performance guard, backend route contract,
+  frontend typecheck, JSX/source check, production build, Docker release build,
+  Docker release start, local route-load trace, local LCP trace, public
+  route-load trace, and public LCP trace passed. Docker image
+  `business-os:v6.0.0-202606110014` is healthy with frontend hash
+  `87e32b8ccfc24b52` and source hash `fd8c6d2a9196231e`.
+- Live local proof: route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T16-16-53-719Z.json`
+  passed with zero failures/errors: Products 345 ms, Inventory 239 ms,
+  Returns 359 ms, Files 199 ms, Branches 274 ms, Users 259 ms. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-16-54-363Z.json`
+  stayed at 92-352 ms across the same routes.
+- Live public proof: the first public LCP pass
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-17-21-923Z.json`
+  passed with zero failures/errors and measured Products 1.264 s, Returns
+  2.264 s, Files 1.292 s, Branches 1.304 s, Users 2.428 s, with one
+  higher-variance Inventory pass at 4.376 s. The targeted public rerun
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-18-06-740Z.json`
+  measured Products 1.372 s and Inventory 2.332 s. Public route-load rerun
+  `ops/runtime/reports/route-load-trace-2026-06-10T16-18-06-118Z.json`
+  passed with Inventory 2.468 s, Returns 2.268 s, Files 2.358 s, Branches
+  2.326 s, and Users 2.455 s.
+- Current plan position after Move 897: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail. Next honest targets are reducing the 159 kB CSS file, splitting
+  Inventory's first route surface further, and continuing public-tunnel
+  variance checks.
+
+## Previous Move 896
+
+- Admin route first paint is leaner. `frontend/vite.config.ts` no longer
+  manually splits `historyHelpers.ts`, `bulkOps.ts`, `actionHistory.ts`, or
+  `ActionHistoryBar.tsx` into a separate `shared-action-history` startup
+  asset. The real action-history transport remains isolated as the tiny lazy
+  `action-history-api` chunk, so undo/redo writes and server-history reads
+  still load only when the action-history feature needs the API.
+- Backend SPA modulepreload hints in `backend/server.ts` and
+  `backend/server.js` no longer ask Products, Branches, or Files direct visits
+  to preload the retired `shared-action-history` chunk.
+- Guardrails updated in `frontend/tests/performanceLoadingUx.test.ts` and
+  `backend/test/routeContracts.test.ts` so future route/chunk rewires do not
+  reintroduce the extra first-route history request.
+- Build proof: production build emits `action-history-api-Br9sTi76.js` at
+  0.98 kB / 0.42 kB gzip and no `shared-action-history-*` asset.
+- Verification in progress: focused performance guard, backend route contract,
+  frontend typecheck, JSX/source check, and production build passed. Next proof
+  is full frontend/backend utility suites plus local/public route-load and LCP
+  traces.
+- Current plan position after Move 896: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
 ## Current Move 846
 
 - Product-driven route startup is leaner. `productGrouping.ts` now belongs to

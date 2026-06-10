@@ -15149,3 +15149,67 @@ Move 866 status:
 - Current plan position after Move 866: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active.
+
+Move 896 status:
+- Move 896 removes the dedicated `shared-action-history` first-route chunk
+  from the admin startup path. The route-owned history helper code and
+  `ActionHistoryBar` now stay with their route consumers instead of adding a
+  separate public-tunnel script request. The server action-history transport is
+  still split as `action-history-api`, a tiny lazy API chunk loaded only from
+  real history reads/writes.
+- Route preload hints were updated in both backend entrypoints so Products,
+  Branches, and Files no longer request the retired `shared-action-history`
+  asset on direct visits.
+- Guardrails now require `actionHistoryTransport.ts` to stay in
+  `action-history-api`, reject manual `shared-action-history` ownership for the
+  history helpers/bar, and keep the backend preload contracts aligned with the
+  emitted Vite graph.
+- Verification proof so far: frontend performance loading guard, backend route
+  contract, frontend typecheck, JSX/source check, and production build passed.
+  The build emitted `action-history-api-Br9sTi76.js` at 0.98 kB / 0.42 kB gzip
+  and no `shared-action-history-*` asset.
+- Current plan position after Move 896: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active as the repeated
+  whole-codebase, schema, cleanup, TypeScript, runtime, and performance
+  guardrail.
+
+Move 897 status:
+- Move 897 continues the real-load admin performance pass. The Vite
+  route-aware preload manifest now recursively includes the static imports of
+  selected route chunks, and admin direct-route startup explicitly preloads the
+  required `vendor-react`, `vendor`, `app-routing`, `app-shell`, `Sidebar`,
+  `shared-ui`, `api-http-core`, `api-http-state`, and `app-api` chunks instead
+  of discovering them one network turn later. Backend preload headers were
+  aligned by adding `vendor-react`, `vendor`, and `app-routing` to the admin
+  first-window set.
+- The HTML parse path also starts `/api/auth/bootstrap` early and reuses that
+  promise in `appBootstrapTransport`; hashed `/assets/*` service-worker
+  handling is cache-first with background refresh; and the LCP trace now ranks
+  slow requests by true duration instead of completion time.
+- Verification proof: focused performance guard, backend route contract,
+  frontend typecheck, JSX/source check, production build, Docker release build
+  and start, local route-load/LCP traces, and public Cloudflare route-load/LCP
+  traces passed. Docker image `business-os:v6.0.0-202606110014` is healthy
+  with frontend hash `87e32b8ccfc24b52`.
+- Local Playwright proof: route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T16-16-53-719Z.json`
+  passed with Products 345 ms, Inventory 239 ms, Returns 359 ms, Files
+  199 ms, Branches 274 ms, and Users 259 ms; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-16-54-363Z.json`
+  stayed between 92 ms and 352 ms with zero failures/errors.
+- Public Cloudflare proof: LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-17-21-923Z.json`
+  passed with Products 1.264 s, Returns 2.264 s, Files 1.292 s, Branches
+  1.304 s, Users 2.428 s, and one high-variance Inventory pass at 4.376 s.
+  Targeted rerun
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-18-06-740Z.json`
+  measured Products 1.372 s and Inventory 2.332 s. Public route-load rerun
+  `ops/runtime/reports/route-load-trace-2026-06-10T16-18-06-118Z.json`
+  passed with Inventory 2.468 s, Returns 2.268 s, Files 2.358 s, Branches
+  2.326 s, and Users 2.455 s.
+- Current plan position after Move 897: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Next executable slices:
+  reduce `index-C5SmvlgI.css`, split Inventory's first-viewport route work,
+  and keep public-tunnel variance checks in the live test loop.

@@ -2585,4 +2585,37 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   error-free; Products, Sales, Contacts, Branches, and Audit Log were near
   one-second LCP, while Inventory, Returns, and Users remain the next
   Cloudflare/tunnel latency hotspots.
+
+- Move 896 records the follow-up admin route chunk trim. Vite no longer emits
+  or preloads a `shared-action-history-*` first-route chunk for route-owned
+  history helpers and `ActionHistoryBar`; the actual server transport stays as
+  a lazy `action-history-api` chunk. Backend direct-visit preload hints for
+  Products, Branches, and Files were aligned with that emitted graph. Focused
+  guardrails, backend route contracts, frontend typecheck, JSX/source check,
+  and production build passed. Build proof emitted
+  `action-history-api-Br9sTi76.js` at 0.98 kB / 0.42 kB gzip and no
+  `shared-action-history-*` asset.
+- Move 897 records the direct-route preload and asset-cache follow-up. The
+  Vite route-aware preload manifest now recursively includes selected chunk
+  static imports, admin startup includes the required vendor/router/shell
+  chunks, backend preload headers include `vendor-react`, `vendor`, and
+  `app-routing`, hashed `/assets/*` service-worker reads are cache-first with
+  background refresh, and `/api/auth/bootstrap` starts during HTML parse and is
+  reused by the React bootstrap transport. The LCP tracer now reports true
+  request duration separately from completion time. Docker image
+  `business-os:v6.0.0-202606110014` served frontend hash
+  `87e32b8ccfc24b52`. Local route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T16-16-53-719Z.json`
+  passed at 199-359 ms ready across Products, Inventory, Returns, Files,
+  Branches, and Users; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-16-54-363Z.json`
+  stayed at 92-352 ms. Public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-17-21-923Z.json`
+  passed with Products 1.264 s, Returns 2.264 s, Files 1.292 s, Branches
+  1.304 s, Users 2.428 s, and one high-variance Inventory pass at 4.376 s;
+  targeted rerun
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T16-18-06-740Z.json`
+  put Inventory at 2.332 s. Public route-load rerun
+  `ops/runtime/reports/route-load-trace-2026-06-10T16-18-06-118Z.json`
+  passed with all measured routes at 2.268-2.468 s and zero failures/errors.
 <!-- phase29-manual-notes:end -->
