@@ -918,6 +918,7 @@ function Test-ReleaseHealth {
         }
         $warmup = Invoke-ProcessWithTimeout $node @(
           $CloudflareStartupWarmupScript,
+          '--include-api',
           '--public-url', $publicUrl,
           '--admin-url', $adminUrl,
           '--output', $CloudflareStartupWarmupReport

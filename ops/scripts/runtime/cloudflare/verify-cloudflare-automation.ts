@@ -227,7 +227,7 @@ async function applyCloudflareAutomation({ token, zone, accountId, adminHost, pu
     rules: [
       {
         action: 'set_cache_settings',
-        expression: `(http.host eq "${publicHost}" and (http.request.uri.path in {"/public" "/customer-portal"} or starts_with(http.request.uri.path, "/public/") or starts_with(http.request.uri.path, "/customer-portal/")))`,
+        expression: `(http.host eq "${publicHost}" and (http.request.uri.path in {"/public" "/customer-portal" "/api/portal/bootstrap" "/api/portal/catalog/meta"} or starts_with(http.request.uri.path, "/public/") or starts_with(http.request.uri.path, "/customer-portal/") or starts_with(http.request.uri.path, "/api/portal/catalog/products")))`,
         description: 'Business OS public portal cache eligibility',
         enabled: true,
         action_parameters: {

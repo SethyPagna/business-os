@@ -8,6 +8,42 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Stabilize auth settings cache key and warm public portal APIs
+  - area: backend auth bootstrap cache stability, release startup warmup,
+    Cloudflare public portal cache-rule automation
+  - result: kept
+  - note: auth settings snapshot versioning no longer falls back to
+    `CURRENT_TIMESTAMP` for blank legacy `updated_at` values, so sanitized
+    settings snapshots can remain reusable across route loads. Release startup
+    now warms public portal APIs with `--include-api`, and the Cloudflare cache
+    rule source includes safe public read APIs while keeping admin/private APIs
+    bypassed.
+  - runtime proof: Docker release
+    `business-os:v6.0.0-202606101930-move891` is running with frontend hash
+    `72b9ecdfda6fdef1` and source hash `e5d243e151a194e4`.
+  - local Playwright proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`
+    measured Products 450 ms, Inventory 234 ms, POS 366 ms, and Branches
+    238 ms with zero failures/errors. Actual local `/api/auth/bootstrap`
+    request durations were 18 ms, 11 ms, 12 ms, and 11 ms.
+  - Cloudflare proof:
+    `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json`
+    measured Products 6.253 s, Inventory 4.086 s, POS 5.419 s, and Branches
+    5.202 s with zero failures/errors. Public `/api/auth/bootstrap` request
+    durations were 1.901 s, 792 ms, 2.115 s, and 1.786 s; document requests
+    remained 2.053-2.686 s.
+  - public portal proof:
+    `ops/runtime/reports/cloudflare-startup-warmup-move891-include-api.json`
+    warmed 283 targets with 282 cache HIT results, one DYNAMIC result, and
+    zero failures. Public LCP improved from 7.016 s to 2.908 s on the warmed
+    repeat, still above the 2.5 s target.
+  - blocker: applying the public portal cache rule returned Cloudflare HTTP
+    403 because the token lacks `Zone.Cache Rules: Edit`; the automation source
+    and tests are ready once that permission is available.
+  - next target: apply the public portal cache rule with the stronger token or
+    manual Cloudflare rule, then continue reducing admin document/auth tunnel
+    variance without fake loading states.
+
 - Preload admin auth chunk and separate request timing in route traces
   - area: backend admin HTML startup hints, route-load diagnostics,
     Cloudflare/tunnel variance measurement

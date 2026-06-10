@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 890.
+- Latest completed implementation move in this roadmap: Move 891.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -72,6 +72,55 @@ What remains:
 - Treat Rust/Go/Python/WASM rewrites as candidates only after benchmark,
   packaging, backup/restore, and rollback proof; TypeScript, SQL/DuckDB, and
   Web Workers remain the preferred near-term conversion targets.
+
+Move 891 current state:
+- Docker release `business-os:v6.0.0-202606101930-move891` is running healthy
+  with frontend hash `72b9ecdfda6fdef1` and source hash
+  `e5d243e151a194e4`.
+- Authenticated startup settings cache keys are now stable for legacy rows.
+  `backend/src/routes/auth.ts` no longer substitutes `CURRENT_TIMESTAMP` for
+  blank settings `updated_at` values, so `/api/auth/bootstrap` can reuse the
+  sanitized settings snapshot instead of invalidating it on every request.
+- Release startup now warms public portal APIs as well as public documents and
+  assets. `ops/scripts/powershell/docker-release.ps1` calls the startup warmer
+  with `--include-api`, and
+  `ops/scripts/verification/verify-docker-release.ts` plus
+  `ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json` guard that coverage.
+- Cloudflare automation source now includes safe public read APIs in the
+  public portal cache-rule expression: `/api/portal/bootstrap`,
+  `/api/portal/catalog/meta`, and `/api/portal/catalog/products...`. Admin and
+  private API paths remain bypassed from cache. Applying the rule did not
+  complete because Cloudflare returned HTTP 403 for Cache Rules; the active
+  token needs `Zone.Cache Rules: Edit`.
+- Local Playwright route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`
+  measured Products 450 ms, Inventory 234 ms, POS 366 ms, and Branches 238 ms
+  with zero failed requests and zero page/console errors. Actual local
+  `/api/auth/bootstrap` request durations were 18 ms, 11 ms, 12 ms, and 11 ms.
+- Public admin Cloudflare route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json`
+  measured Products 6.253 s, Inventory 4.086 s, POS 5.419 s, and Branches
+  5.202 s with zero failed requests and zero page/console errors. Public
+  `/api/auth/bootstrap` durations were 1.901 s, 792 ms, 2.115 s, and 1.786 s,
+  while document requests ranged from 2.053 s to 2.686 s.
+- Public portal startup warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-move891-include-api.json`
+  covered 283 targets with 282 cache HIT results, one DYNAMIC result, and zero
+  failures. Public portal LCP improved from 7.016 s in
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T12-05-36-963Z.json` to
+  2.908 s in the warmed repeat
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`, still
+  above the 2.5 s target.
+- Verification passed: focused auth guard, full backend `test:utils`, Docker
+  release build/start/health, local Playwright route-load trace, public admin
+  Cloudflare route-load trace, public portal route/LCP traces, Cloudflare
+  startup warmup with `--include-api`, Docker release guardrail verification,
+  and Cloudflare automation verification with the cache-rule permission
+  blocker recorded.
+- Next executable slice: apply the public portal cache rule with a token that
+  has `Zone.Cache Rules: Edit` or add the equivalent manual Cloudflare rule,
+  then keep reducing admin document/auth tunnel variance without fake loading
+  delays or incomplete first data.
 
 Move 890 current state:
 - Docker release `business-os:v6.0.0-202606101845-move890` is running healthy

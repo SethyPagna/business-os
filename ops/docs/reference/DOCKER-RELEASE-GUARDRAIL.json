@@ -32,6 +32,7 @@
   "cloudflareStartupWarmupCoverage": {
     "scriptPresent": true,
     "releaseStartCallsWarmup": true,
+    "releaseStartWarmsPublicApi": true,
     "waitsForTunnelBeforeWarmup": true,
     "documentRetryConfigurable": true,
     "assetRetryConfigurable": true,

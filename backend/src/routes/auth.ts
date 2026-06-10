@@ -402,7 +402,7 @@ function getSettingsSnapshotVersion() {
   try {
     const row = db.prepare(`
       SELECT COUNT(*) AS count,
-             MAX(COALESCE(updated_at::text, CURRENT_TIMESTAMP::text)) AS updated_at
+             MAX(COALESCE(NULLIF(updated_at::text, ''), '')) AS updated_at
       FROM settings
     `).get()
     return `${Number(row?.count || 0)}:${String(row?.updated_at || '')}`

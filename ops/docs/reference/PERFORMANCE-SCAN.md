@@ -4,27 +4,33 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 
 ## Latest Manual Note
 
-- Move 890 release `business-os:v6.0.0-202606101845-move890` is live with
-  frontend hash `72b9ecdfda6fdef1` and source hash `faefeba603477308`.
-- Admin HTML now includes the tiny `app-auth` chunk beside `app-bootstrap` in
-  server-side modulepreload Link headers for authenticated admin routes.
-  `route-load-trace.ts` now records `requestMs`, so performance reports
-  separate true request duration from elapsed time since page navigation.
+- Move 891 release `business-os:v6.0.0-202606101930-move891` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `e5d243e151a194e4`.
+- Auth settings snapshot versioning no longer uses `CURRENT_TIMESTAMP` as a
+  fallback for blank legacy settings `updated_at` values, preventing
+  `/api/auth/bootstrap` from invalidating the sanitized settings cache on every
+  request. Release startup now warms public portal APIs with `--include-api`.
 - Local Playwright route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`:
-  Products 254 ms, Inventory 306 ms, POS 400 ms, Branches 252 ms, zero failed
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`:
+  Products 450 ms, Inventory 234 ms, POS 366 ms, Branches 238 ms, zero failed
   requests/errors. Actual local `/api/auth/bootstrap` request durations were
-  14 ms, 11 ms, 20 ms, and 10 ms.
+  18 ms, 11 ms, 12 ms, and 11 ms.
 - Public Cloudflare route-load trace
-  `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json` had
-  zero failed requests/errors and measured Products 5.799 s, Inventory
-  6.790 s, POS 3.943 s, and Branches 6.212 s. Actual public
-  `/api/auth/bootstrap` request durations were 2.059 s, 2.660 s, 1.132 s,
-  and 1.041 s, while document requests ranged from 1.468 s to 3.798 s.
-- Direct public auth-bootstrap probes after login usually returned in
-  638-671 ms, with occasional 1.4-1.7 s tunnel spikes; the next target is
-  Cloudflare document/auth variance or a safe same-origin startup snapshot
-  that keeps first paint real without fake loading delays.
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json` had
+  zero failed requests/errors and measured Products 6.253 s, Inventory
+  4.086 s, POS 5.419 s, and Branches 5.202 s. Actual public
+  `/api/auth/bootstrap` request durations were 1.901 s, 792 ms, 2.115 s, and
+  1.786 s, while document requests ranged from 2.053 s to 2.686 s.
+- Public portal startup warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-move891-include-api.json`
+  warmed 283 targets with 282 cache HIT results, one DYNAMIC result, and zero
+  failures. Public portal LCP improved from 7.016 s to 2.908 s on the warmed
+  repeat, still above the 2.5 s target.
+- Cloudflare cache-rule automation now includes safe public portal read APIs,
+  but applying the rule returned HTTP 403 because the active token lacks
+  `Zone.Cache Rules: Edit`. The next target is to apply that cache rule with a
+  stronger token or equivalent manual rule, then continue reducing admin
+  document/auth tunnel variance.
 
 ## 1. Scope
 

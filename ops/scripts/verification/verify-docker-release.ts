@@ -612,6 +612,9 @@ function main() {
     releaseStartCallsWarmup: automation.includes('warm-cloudflare-startup-assets.ts') &&
       automation.includes('CloudflareStartupWarmupReport') &&
       automation.includes('CloudflareStartupWarmupLog'),
+    releaseStartWarmsPublicApi: automation.includes("'--include-api'") &&
+      cloudflareStartupWarmup.includes("args.includeApi && name === 'public'") &&
+      cloudflareStartupWarmup.includes("'/api/portal/bootstrap'"),
     waitsForTunnelBeforeWarmup: automation.includes('function Wait-CloudflareStartupTunnel') &&
       automation.includes('Cloudflare tunnel answered before startup warmup') &&
       automation.includes('warmup will still try its own retries'),

@@ -8,9 +8,9 @@ Last updated: 2026-06-10
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 890, add the admin `app-auth` chunk to
-  server-side modulepreload hints and improve route-load traces so reports
-  separate page-start timing from actual request duration.
+- Latest completed move: Move 891, stabilize the auth settings snapshot cache
+  key, warm public portal APIs during release startup, and prepare Cloudflare
+  cache-rule automation for safe public portal read APIs.
 
 ## Current Baseline
 
@@ -20,7 +20,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `72b9ecdfda6fdef1`
 - latest verified source hash from the most recent Docker-served live check:
-  `faefeba603477308`
+  `e5d243e151a194e4`
 
 Latest verified reports:
 
@@ -49,15 +49,15 @@ Latest verified reports:
 - latest public Cloudflare portal check:
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T10-51-46-378Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json`
 - latest focused public-host route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-09T16-49-09-779Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-06-57-495Z.json`
 - latest focused public-host LCP trace:
-  `ops/runtime/reports/lcp-route-trace-2026-06-09T16-52-41-462Z.json`
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:
@@ -171,6 +171,17 @@ Latest verified reports:
 - latest Move 890 Cloudflare affected-route traces:
   `ops/runtime/reports/route-load-trace-2026-06-10T10-46-57-880Z.json`
   and `ops/runtime/reports/route-load-trace-2026-06-10T10-53-56-119Z.json`
+- latest Move 891 local affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`
+- latest Move 891 Cloudflare affected-route trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json`
+- latest Move 891 public portal route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-06-57-495Z.json`
+- latest Move 891 public portal LCP traces:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T12-05-36-963Z.json`
+  and `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`
+- latest Move 891 Cloudflare startup warmup:
+  `ops/runtime/reports/cloudflare-startup-warmup-move891-include-api.json`
 - latest focused Products write live check:
   `ops/runtime/reports/move766-product-write-live-check-2026-06-03T21-25-13-480Z/report.json`
 - latest initial-filter timing proof:
@@ -193,6 +204,51 @@ Latest verified reports:
   `ops/docs/reference/PHASE29-AUDIT.md`
 
 Latest cleanup run:
+
+- Move 891 stabilizes the authenticated startup cache key and warms public
+  portal read APIs during release startup. `backend/src/routes/auth.ts` no
+  longer lets legacy settings rows with blank `updated_at` values fall back to
+  `CURRENT_TIMESTAMP`, so the sanitized settings snapshot cache does not churn
+  on every `/api/auth/bootstrap` request. `docker-release.ps1` now calls the
+  Cloudflare startup warmer with `--include-api`, and the Docker guardrail
+  verifies that public `/api/portal/bootstrap` warmup remains wired.
+- Docker image `business-os:v6.0.0-202606101930-move891` is live with
+  frontend hash `72b9ecdfda6fdef1` and source hash `e5d243e151a194e4`.
+  Local Playwright route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-793Z.json`
+  measured Products 450 ms, Inventory 234 ms, POS 366 ms, and Branches
+  238 ms with zero failed requests and zero page/console errors. Actual local
+  `/api/auth/bootstrap` request durations were 18 ms, 11 ms, 12 ms, and 11 ms.
+- Public admin Cloudflare route trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-00-25-950Z.json`
+  measured Products 6.253 s, Inventory 4.086 s, POS 5.419 s, and Branches
+  5.202 s with zero failed requests and zero page/console errors. Actual
+  public `/api/auth/bootstrap` durations were 1.901 s, 792 ms, 2.115 s, and
+  1.786 s, while document requests ranged from 2.053 s to 2.686 s.
+- Public portal warmup
+  `ops/runtime/reports/cloudflare-startup-warmup-move891-include-api.json`
+  covered 283 startup targets with 282 cache HIT results, one DYNAMIC result,
+  and zero failures. Public portal route-load trace
+  `ops/runtime/reports/route-load-trace-2026-06-10T12-06-57-495Z.json`
+  measured ready at 3.342 s with a 2.219 s document request. Public portal LCP
+  improved from 7.016 s in
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T12-05-36-963Z.json` to
+  2.908 s in the warmed repeat
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`, still
+  above the 2.5 s target.
+- Cloudflare automation source now includes safe public read APIs in the
+  public portal cache-rule expression: `/api/portal/bootstrap`,
+  `/api/portal/catalog/meta`, and `/api/portal/catalog/products...`. Applying
+  the rule did not complete because Cloudflare returned HTTP 403 for Cache
+  Rules; the active token needs `Zone.Cache Rules: Edit`. Admin and private
+  API paths remain bypassed from Cloudflare caching.
+- Current plan position after Move 891: Phase 8.4 remains active; Phase 26
+  remains at 51 completed moves; Phase 28 remains active with the R2 prune
+  follow-up; Phase 29 remains active for repeated schema, cleanup,
+  TypeScript/runtime, and performance sweeps. Next executable slice: apply the
+  public portal cache rule with a stronger Cloudflare token or equivalent
+  manual cache rule, then keep reducing admin document/auth tunnel variance
+  without fake loading states.
 
 - Move 890 starts the admin auth/context chunk earlier and makes the route
   trace more precise. `backend/server.ts` now includes `app-auth` beside

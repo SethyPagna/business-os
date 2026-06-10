@@ -121,21 +121,31 @@ Bypass cache:
 
 ```text
 hostname eq "admin.leangcosmetics.dpdns.org"
-or starts_with(http.request.uri.path, "/api/")
+or (
+  starts_with(http.request.uri.path, "/api/")
+  and http.request.uri.path ne "/api/portal/bootstrap"
+  and http.request.uri.path ne "/api/portal/catalog/meta"
+  and not starts_with(http.request.uri.path, "/api/portal/catalog/products")
+)
 or http.request.uri.path eq "/"
-or http.request.uri.path eq "/public"
 or ends_with(http.request.uri.path, ".html")
 ```
 
-Cache static assets:
+Cache public portal reads and static assets:
 
 ```text
-starts_with(http.request.uri.path, "/assets/")
+http.request.uri.path in {"/public" "/customer-portal" "/api/portal/bootstrap" "/api/portal/catalog/meta"}
+or starts_with(http.request.uri.path, "/public/")
+or starts_with(http.request.uri.path, "/customer-portal/")
+or starts_with(http.request.uri.path, "/api/portal/catalog/products")
+or starts_with(http.request.uri.path, "/assets/")
 or starts_with(http.request.uri.path, "/uploads/")
 or http.request.uri.path matches "(?i)\\.(js|css|woff2|png|jpg|jpeg|webp|svg|ico|wasm)$"
 ```
 
-Use a long edge/browser TTL only for hashed assets. The app already sends strict `Cache-Control` headers for built assets and no-store headers for HTML.
+Use a long edge/browser TTL only for hashed assets. Public portal HTML/API reads
+should respect the app's short origin TTLs; admin HTML and private APIs must
+stay uncached.
 
 ## Performance
 
