@@ -8,9 +8,8 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 902, short-cache the public portal bootstrap API
-  payload and dedupe concurrent builders while Cloudflare HTML/API edge cache
-  remains blocked by token permissions.
+- Latest completed move: Move 903, cache the authenticated admin SPA template
+  at origin while still injecting fresh per-request auth bootstrap data.
 
 ## Current Baseline
 
@@ -20,7 +19,7 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `0fbf2d5bae2d7bc4`
 - latest verified source hash from the most recent Docker-served live check:
-  `f8ff6e32f4ace3d5`
+  `30b0c319937c0ba8`
 
 Latest verified reports:
 
@@ -124,6 +123,27 @@ Latest verified reports:
   deleted ignored/generated `release/` kit after Docker proof; 380,975,799
   bytes removed; uploads, secrets, database, node_modules, and the running
   Docker image were preserved.
+- latest Move 903 local admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T23-56-31-673Z.json`
+- latest Move 903 local admin LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T23-56-32-270Z.json`
+- latest Move 903 public admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-10T23-56-32-832Z.json`
+- latest Move 903 public admin LCP traces:
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T23-57-38-754Z.json`
+  and `ops/runtime/reports/lcp-route-trace-2026-06-10T23-58-33-009Z.json`
+- latest Move 903 admin shell cache proof:
+  local authenticated document reads returned `X-Business-OS-Admin-Shell-Cache:
+  miss` then `hit`; public authenticated document reads returned `hit` while
+  preserving `Cache-Control: no-cache, no-store, must-revalidate` and
+  `CF-Cache-Status: DYNAMIC`.
+- latest Move 903 cleanup result:
+  deleted ignored/generated `release/` kit after Docker proof; 380,976,311
+  bytes removed; uploads, secrets, database, node_modules, and the running
+  Docker image were preserved. `npm --prefix ops run prune-storage` then
+  preserved protected volumes/backups, pruned old runtime report files, reduced
+  Docker build cache from 26.02 GB to 4.85 GB, and removed two old
+  `business-os:v*` image tags while keeping `business-os:v6.0.0-202606110751`.
 - latest Move 866 local affected-page route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-09T17-30-19-560Z.json`
 - latest Move 866 local multi-route LCP trace:

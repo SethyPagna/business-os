@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 902.
+- Latest completed implementation move in this roadmap: Move 903.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15406,6 +15406,49 @@ Move 902 status:
   reproducible from `run\docker\release.bat`; uploads, secrets, database,
   node_modules, and the running Docker image were preserved.
 - Current plan position after Move 902: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 903 status:
+- Move 903 caches the authenticated admin SPA `index.html` template at origin
+  by file `mtimeMs`. The cached value is only the static template; the backend
+  still injects the per-request auth bootstrap payload after the cache read, so
+  user/session data is not shared across requests.
+- Runtime proof: Docker image `business-os:v6.0.0-202606110751` is healthy
+  with frontend hash `0fbf2d5bae2d7bc4` and source hash
+  `30b0c319937c0ba8`.
+- Header proof: local authenticated `/inventory` returned
+  `X-Business-OS-Admin-Shell-Cache: miss` in 222 ms, then `/products` and
+  `/inventory` returned `hit` in 100 ms and 89 ms. Public authenticated admin
+  documents returned `hit` through Cloudflare while preserving
+  `Cache-Control: no-cache, no-store, must-revalidate` and
+  `CF-Cache-Status: DYNAMIC`.
+- Playwright proof: local admin route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T23-56-31-673Z.json`
+  measured Products 300 ms, Inventory 251 ms, and Branches 192 ms with zero
+  failures/errors. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T23-56-32-270Z.json`
+  measured Products 104 ms, Inventory 264 ms, and Branches 104 ms. Public
+  route-load `ops/runtime/reports/route-load-trace-2026-06-10T23-56-32-832Z.json`
+  passed with zero failures/errors; warmed public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T23-58-33-009Z.json`
+  measured Products 2.024 s, Inventory 1.128 s, and Branches 1.808 s.
+- Verification proof: backend route contract, backend server-entry build,
+  Docker release/start, local/public Playwright route-load and LCP traces,
+  direct authenticated header probes, full backend utility suite, generated
+  reference sweeps, schema audit, organization audit, Phase 29 audit, and
+  `git diff --check` passed.
+- Cleanup proof: after Docker image/start/live proof, the ignored/generated
+  `release/` kit was deleted, removing 380,976,311 bytes. The kit is
+  reproducible from `run\docker\release.bat`; uploads, secrets, database,
+  node_modules, and the running Docker image were preserved. The guarded
+  storage prune then preserved protected volumes/backups, pruned old runtime
+  report files, reduced Docker build cache from 26.02 GB to 4.85 GB, and
+  removed only two old `business-os:v*` image tags while keeping the active
+  image `business-os:v6.0.0-202606110751`.
+- Current plan position after Move 903: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active. Remaining external
   blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run

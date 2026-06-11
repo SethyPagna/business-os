@@ -424,5 +424,5 @@
   "sourceReadConcurrency": 24,
   "chunkStatConcurrency": 32,
   "manualNotesPreserved": true,
-  "manualNotesLines": 2566
+  "manualNotesLines": 2583
 }

@@ -8,6 +8,43 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Cache authenticated admin SPA template shell
+  - area: authenticated admin document startup, backend SPA template delivery,
+    Cloudflare dynamic HTML fallback
+  - result: kept
+  - note: `backend/server.ts` now caches only the admin SPA `index.html`
+    template by file `mtimeMs`; per-request auth bootstrap data is still
+    injected after the cache read, so user/session payloads remain fresh and
+    uncached.
+  - verification: backend route contract, backend server-entry build, Docker
+    release/start, direct authenticated local/public header probes, local and
+    public Playwright route-load/LCP traces, full backend utility suite,
+    generated reference sweeps, schema audit, organization audit, Phase 29
+    audit, and `git diff --check` passed.
+  - live proof: Docker image `business-os:v6.0.0-202606110751` is healthy with
+    source hash `30b0c319937c0ba8`. Local authenticated documents returned
+    `X-Business-OS-Admin-Shell-Cache: miss` in 222 ms, then `hit` in 100 ms
+    and 89 ms. Public authenticated documents returned `hit` while preserving
+    `Cache-Control: no-cache, no-store, must-revalidate`.
+  - Playwright proof: local route-load
+    `ops/runtime/reports/route-load-trace-2026-06-10T23-56-31-673Z.json`
+    measured Products 300 ms, Inventory 251 ms, and Branches 192 ms. Warm
+    public LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-10T23-58-33-009Z.json`
+    measured Products 2.024 s, Inventory 1.128 s, and Branches 1.808 s with
+    zero failed requests/errors.
+  - remaining: Cloudflare still reports dynamic HTML until the token has
+    `Zone Cache Rules Edit` and `npm --prefix ops run cloudflare:apply-cache`
+    succeeds.
+  - cleanup: deleted the ignored/generated `release/` kit after Docker health
+    and live proof, removing 380,976,311 bytes. It is reproducible from
+    `run\docker\release.bat`; uploads, secrets, database, node_modules, and the
+    running Docker image were preserved. `npm --prefix ops run prune-storage`
+    then preserved protected volumes/backups, pruned old runtime reports,
+    reduced Docker build cache from 26.02 GB to 4.85 GB, and removed two old
+    `business-os:v*` image tags while keeping
+    `business-os:v6.0.0-202606110751`.
+
 - Cache public portal bootstrap API payload
   - area: public portal bootstrap API, backend route startup, Cloudflare
     dynamic API fallback

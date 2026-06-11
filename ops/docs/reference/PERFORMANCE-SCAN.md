@@ -2672,4 +2672,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/cloudflare-startup-warmup-move902.json` passed with zero
   failed requests and 86 cached static targets; the remaining dynamic targets
   are HTML documents awaiting the Cloudflare Cache Rules permission.
+- Move 903 records the authenticated admin SPA template cache. The backend now
+  caches only the admin `index.html` template by file `mtimeMs`, then injects
+  fresh per-request auth bootstrap data into the cached template. Local
+  authenticated document proof showed `/inventory` 222 ms `miss`, `/products`
+  100 ms `hit`, and `/inventory` 89 ms `hit`; public authenticated document
+  proof showed `X-Business-OS-Admin-Shell-Cache: hit` through Cloudflare while
+  preserving `Cache-Control: no-cache, no-store, must-revalidate` and
+  `CF-Cache-Status: DYNAMIC`. Docker image
+  `business-os:v6.0.0-202606110751` served source hash `30b0c319937c0ba8`.
+  Local route-load `ops/runtime/reports/route-load-trace-2026-06-10T23-56-31-673Z.json`
+  measured Products 300 ms, Inventory 251 ms, and Branches 192 ms. Warm public
+  LCP `ops/runtime/reports/lcp-route-trace-2026-06-10T23-58-33-009Z.json`
+  measured Products 2.024 s, Inventory 1.128 s, and Branches 1.808 s with
+  zero failures/errors. The generated `release/` kit was deleted after proof,
+  removing 380,976,311 bytes. Guarded storage prune then reduced Docker build
+  cache from 26.02 GB to 4.85 GB and removed two old `business-os:v*` tags
+  while preserving the active image and protected data volumes.
 <!-- phase29-manual-notes:end -->

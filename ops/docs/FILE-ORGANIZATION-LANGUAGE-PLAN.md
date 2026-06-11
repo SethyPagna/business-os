@@ -1,6 +1,6 @@
 # File Organization And Language Conversion Plan
 
-> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 902 in this file.
+> Current whole-plan position: Phase 6 schema audit green; Phase 8.4 loader/action stability sweep active; Phase 26 preserved at 51 completed moves; Phase 28 active with R2 prune follow-up; Phase 29 active as the recurring whole-codebase/schema/cleanup guardrail. Latest recorded cleanup/optimization move: Move 903 in this file.
 
 ## Goal
 
@@ -9898,3 +9898,37 @@ Decision rule:
 - No framework-specific config rename unless the framework's production build
   proves it. In particular, keep `next.config.mjs` as `.mjs` for any future
   Next.js surface unless a separate production-build proof replaces this rule.
+
+### Move 903: Cache the authenticated admin SPA template shell
+
+- Ownership slice: Phase 8.4/Phase 29 authenticated admin document startup
+  while Cloudflare HTML edge caching remains blocked by token permissions.
+- Code-flow slice: `backend/server.ts` now caches only the admin SPA
+  `index.html` template by file `mtimeMs`, then injects the fresh per-request
+  auth bootstrap payload into that cached template. This removes repeated disk
+  reads for `/inventory`, `/products`, `/branches`, and other admin SPA
+  documents without caching private user/session payloads.
+- Verification slice: `backend/test/routeContracts.test.ts` guards the
+  template cache object, `fs.promises.stat` invalidation, `miss`/`hit`
+  statuses, the proof header, and the fresh `injectAdminAuthBootstrap(html,
+  payload)` step. `backend/server.js` mirrors the server entry.
+- Live proof: Docker image `business-os:v6.0.0-202606110751` is healthy with
+  source hash `30b0c319937c0ba8`. Local authenticated document probes measured
+  `/inventory` 222 ms `miss`, `/products` 100 ms `hit`, and `/inventory` 89 ms
+  `hit`; public authenticated document probes returned `hit` with
+  `Cache-Control: no-cache, no-store, must-revalidate`.
+- Playwright proof: local route-load
+  `ops/runtime/reports/route-load-trace-2026-06-10T23-56-31-673Z.json`
+  passed Products, Inventory, and Branches in 192-300 ms. Warm public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T23-58-33-009Z.json`
+  measured Products 2.024 s, Inventory 1.128 s, and Branches 1.808 s with zero
+  failed requests/errors.
+- Cleanup proof: the ignored/generated `release/` kit created by the Docker
+  proof was deleted afterward, removing 380,976,311 bytes while preserving
+  uploads, secrets, database, node_modules, and the running Docker image. The
+  guarded storage prune also reduced Docker build cache from 26.02 GB to
+  4.85 GB and removed only old protected-policy release tags, leaving the
+  active image `business-os:v6.0.0-202606110751` intact.
+- Keeper boundary: this is a backend route/template optimization, not a folder
+  move or language conversion. The external blocker remains Cloudflare Cache
+  Rules permission for true edge HTML/API caching.

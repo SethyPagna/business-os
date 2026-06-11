@@ -8,7 +8,7 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 902, public portal bootstrap API cache.
+- Latest completed move: Move 903, authenticated admin SPA template cache.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -16,9 +16,12 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest public portal proof: public-host Playwright LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T22-51-52-282Z.json`
-  measured 1.860 s with zero failed requests/errors.
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606110751`
+  is healthy with frontend hash `0fbf2d5bae2d7bc4` and source hash
+  `30b0c319937c0ba8`. Public-host warm LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-10T23-58-33-009Z.json`
+  measured Products 2.024 s, Inventory 1.128 s, and Branches 1.808 s with
+  zero failed requests/errors.
 
 ## Program Goals
 

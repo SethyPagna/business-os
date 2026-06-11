@@ -14,7 +14,7 @@ Total files documented: **278**
 | 2 | `frontend/src/api/actionHistoryTransport.ts` | 1 |
 | 3 | `frontend/src/api/actorQuery.ts` | 0 |
 | 4 | `frontend/src/api/aiTransport.ts` | 0 |
-| 5 | `frontend/src/api/appBootstrapTransport.ts` | 5 |
+| 5 | `frontend/src/api/appBootstrapTransport.ts` | 7 |
 | 6 | `frontend/src/api/auditLogTransport.ts` | 4 |
 | 7 | `frontend/src/api/authTransport.ts` | 0 |
 | 8 | `frontend/src/api/branchTransport.ts` | 2 |
@@ -237,7 +237,7 @@ Total files documented: **278**
 | 225 | `frontend/src/platform/runtime/clientRuntime.ts` | 9 |
 | 226 | `frontend/src/platform/storage/storagePolicy.ts` | 0 |
 | 227 | `frontend/src/public-runtime/runtime-noise-guard.ts` | 8 |
-| 228 | `frontend/src/public-runtime/service-worker.ts` | 24 |
+| 228 | `frontend/src/public-runtime/service-worker.ts` | 26 |
 | 229 | `frontend/src/public-runtime/theme-bootstrap.ts` | 15 |
 | 230 | `frontend/src/public-web-api.ts` | 2 |
 | 231 | `frontend/src/PublicCatalogRoot.tsx` | 2 |
@@ -286,7 +286,7 @@ Total files documented: **278**
 | 274 | `ops/scripts/frontend/verify-i18n.ts` | 6 |
 | 275 | `ops/scripts/frontend/verify-performance.ts` | 4 |
 | 276 | `ops/scripts/frontend/verify-ui.ts` | 11 |
-| 277 | `frontend/vite.config.ts` | 18 |
+| 277 | `frontend/vite.config.ts` | 19 |
 | 278 | `frontend/tailwind.config.ts` | 0 |
 
 ## 3. Detailed Function Commentary
@@ -315,11 +315,13 @@ Total files documented: **278**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `emptyBootstrap` | function | 25 |
-| 2 | `readStoredUser` | function | 37 |
-| 3 | `readErrorField` | function | 47 |
-| 4 | `ensureBootstrapServerUrl` | function | 52 |
-| 5 | `buildLocalBootstrap` | function | 63 |
+| 1 | `emptyBootstrap` | function | 31 |
+| 2 | `readStoredUser` | function | 43 |
+| 3 | `readErrorField` | function | 53 |
+| 4 | `ensureBootstrapServerUrl` | function | 58 |
+| 5 | `buildLocalBootstrap` | function | 69 |
+| 6 | `takeEarlyAuthBootstrapPromise` | function | 81 |
+| 7 | `takeEmbeddedAuthBootstrapPayload` | function | 90 |
 
 ### 3.6 `frontend/src/api/auditLogTransport.ts`
 
@@ -1307,8 +1309,8 @@ Total files documented: **278**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `CatalogPreviewSurface` | component/function | 113 |
-| 2 | `handlePortalTabClick` | const arrow | 151 |
+| 1 | `CatalogPreviewSurface` | component/function | 114 |
+| 2 | `handlePortalTabClick` | const arrow | 152 |
 
 ### 3.76 `frontend/src/components/catalog/CatalogProductsSection.tsx`
 
@@ -1789,38 +1791,38 @@ Total files documented: **278**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `scheduleInventoryMetadataRead` | function | 212 |
-| 2 | `loadBranchTransport` | function | 230 |
-| 3 | `loadDashboardTransport` | function | 235 |
-| 4 | `loadInventoryTransport` | function | 240 |
-| 5 | `loadInventoryWriteTransport` | function | 245 |
-| 6 | `loadProductReadTransport` | function | 250 |
-| 7 | `loadReturnsReadTransport` | function | 255 |
-| 8 | `loadRfidTransport` | function | 260 |
-| 9 | `loadUserReadTransport` | function | 265 |
-| 10 | `loadInventoryExportModule` | function | 270 |
-| 11 | `getInventoryApi` | function | 275 |
-| 12 | `normalizeFiniteIds` | function | 327 |
-| 13 | `countActiveFlags` | function | 331 |
-| 14 | `countSelectedIds` | function | 339 |
-| 15 | `buildDestinationProductOptions` | function | 347 |
-| 16 | `limitInventorySectionsForMobile` | function | 360 |
-| 17 | `parseInventoryTimestamp` | function | 387 |
-| 18 | `InventoryDiscountBadge` | function | 401 |
-| 19 | `InventoryBatchPreview` | function | 412 |
-| 20 | `label` | const arrow | 424 |
-| 21 | `Inventory` | component/function | 477 |
-| 22 | `promise` | const arrow | 727 |
-| 23 | `loadInventoryBootstrap` | const arrow | 765 |
-| 24 | `handleAdjust` | const arrow | 1208 |
-| 25 | `openAdjust` | const arrow | 1290 |
-| 26 | `openMove` | const arrow | 1297 |
-| 27 | `openTransfer` | const arrow | 1320 |
-| 28 | `handleMoveStock` | const arrow | 1375 |
-| 29 | `handleTransferStock` | const arrow | 1448 |
-| 30 | `syncViewport` | const arrow | 1612 |
-| 31 | `statsValue` | const arrow | 2219 |
-| 32 | `selectInventorySection` | const arrow | 2945 |
+| 1 | `scheduleInventoryMetadataRead` | function | 213 |
+| 2 | `loadBranchTransport` | function | 231 |
+| 3 | `loadDashboardTransport` | function | 236 |
+| 4 | `loadInventoryTransport` | function | 241 |
+| 5 | `loadInventoryWriteTransport` | function | 246 |
+| 6 | `loadProductReadTransport` | function | 251 |
+| 7 | `loadReturnsReadTransport` | function | 256 |
+| 8 | `loadRfidTransport` | function | 261 |
+| 9 | `loadUserReadTransport` | function | 266 |
+| 10 | `loadInventoryExportModule` | function | 271 |
+| 11 | `getInventoryApi` | function | 276 |
+| 12 | `normalizeFiniteIds` | function | 328 |
+| 13 | `countActiveFlags` | function | 332 |
+| 14 | `countSelectedIds` | function | 340 |
+| 15 | `buildDestinationProductOptions` | function | 348 |
+| 16 | `limitInventorySectionsForMobile` | function | 361 |
+| 17 | `parseInventoryTimestamp` | function | 388 |
+| 18 | `InventoryDiscountBadge` | function | 402 |
+| 19 | `InventoryBatchPreview` | function | 413 |
+| 20 | `label` | const arrow | 425 |
+| 21 | `Inventory` | component/function | 478 |
+| 22 | `promise` | const arrow | 728 |
+| 23 | `loadInventoryBootstrap` | const arrow | 766 |
+| 24 | `handleAdjust` | const arrow | 1209 |
+| 25 | `openAdjust` | const arrow | 1291 |
+| 26 | `openMove` | const arrow | 1298 |
+| 27 | `openTransfer` | const arrow | 1321 |
+| 28 | `handleMoveStock` | const arrow | 1376 |
+| 29 | `handleTransferStock` | const arrow | 1449 |
+| 30 | `syncViewport` | const arrow | 1613 |
+| 31 | `statsValue` | const arrow | 2220 |
+| 32 | `selectInventorySection` | const arrow | 2946 |
 
 ### 3.112 `frontend/src/components/inventory/InventoryBatchModal.tsx`
 
@@ -3175,8 +3177,10 @@ Total files documented: **278**
 | 20 | `isSameOrigin` | function | 347 |
 | 21 | `isNeverCachedPath` | function | 355 |
 | 22 | `isCacheableStaticPath` | function | 363 |
-| 23 | `appShellFallback` | function | 370 |
-| 24 | `networkFirstStatic` | function | 389 |
+| 23 | `isHashedBuildAsset` | function | 370 |
+| 24 | `appShellFallback` | function | 374 |
+| 25 | `networkFirstStatic` | function | 393 |
+| 26 | `cacheFirstStatic` | function | 412 |
 
 ### 3.229 `frontend/src/public-runtime/theme-bootstrap.ts`
 
@@ -3625,19 +3629,20 @@ Total files documented: **278**
 | 3 | `inlinePublicRuntimeScripts` | function | 60 |
 | 4 | `fixCrossorigin` | function | 85 |
 | 5 | `emitBuildManifest` | function | 110 |
-| 6 | `isBundleChunk` | function | 217 |
-| 7 | `toRoutePreloadFiles` | function | 221 |
-| 8 | `buildRoutePreloadScript` | function | 231 |
-| 9 | `normalizePath` | function | 234 |
-| 10 | `isAdminAppPath` | function | 242 |
-| 11 | `isLoginPath` | function | 275 |
-| 12 | `isPublicCatalogPath` | function | 278 |
-| 13 | `routePreloadKey` | function | 284 |
-| 14 | `injectRouteAwareModulePreloads` | function | 310 |
-| 15 | `deferRenderBlockingStylesheets` | function | 331 |
-| 16 | `activate` | function | 354 |
-| 17 | `shouldDeferModulePreload` | function | 554 |
-| 18 | `manualChunks` | function | 558 |
+| 6 | `isBundleChunk` | function | 226 |
+| 7 | `toRoutePreloadFiles` | function | 230 |
+| 8 | `buildRoutePreloadScript` | function | 242 |
+| 9 | `normalizePath` | function | 245 |
+| 10 | `isAdminAppPath` | function | 253 |
+| 11 | `isLoginPath` | function | 286 |
+| 12 | `isPublicCatalogPath` | function | 289 |
+| 13 | `hasEmbeddedAuthBootstrap` | function | 295 |
+| 14 | `routePreloadKey` | function | 298 |
+| 15 | `injectRouteAwareModulePreloads` | function | 352 |
+| 16 | `deferRenderBlockingStylesheets` | function | 373 |
+| 17 | `activate` | function | 396 |
+| 18 | `shouldDeferModulePreload` | function | 595 |
+| 19 | `manualChunks` | function | 599 |
 
 ### 3.278 `frontend/tailwind.config.ts`
 

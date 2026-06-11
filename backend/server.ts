@@ -90,6 +90,10 @@ const publicSpaHtmlCache = {
   expiresAt: 0,
   ttlSeconds: 20,
 }
+const adminSpaTemplateCache = {
+  html: '',
+  mtimeMs: 0,
+}
 
 const LEGACY_FRONTEND_ASSET_PREFIXES = [
   'index-',
@@ -359,6 +363,17 @@ function injectAdminAuthBootstrap(html, payload) {
     : `${html}\n${script}`
 }
 
+async function readAdminSpaTemplate(htmlPath) {
+  const stat = await fs.promises.stat(htmlPath)
+  if (adminSpaTemplateCache.html && adminSpaTemplateCache.mtimeMs === stat.mtimeMs) {
+    return { html: adminSpaTemplateCache.html, cacheStatus: 'hit' }
+  }
+  const html = await fs.promises.readFile(htmlPath, 'utf8')
+  adminSpaTemplateCache.html = html
+  adminSpaTemplateCache.mtimeMs = stat.mtimeMs
+  return { html, cacheStatus: 'miss' }
+}
+
 async function sendPublicSpaIndex(_req, res) {
   const htmlPath = path.join(FRONTEND_DIST, 'index.html')
   const now = Date.now()
@@ -399,7 +414,8 @@ async function sendAdminSpaIndex(req, res) {
     if (typeof buildPayload !== 'function') return res.sendFile(htmlPath)
     const payload = await buildPayload(req, sessionUser.id)
     if (!payload) return res.sendFile(htmlPath)
-    const html = await fs.promises.readFile(htmlPath, 'utf8')
+    const { html, cacheStatus } = await readAdminSpaTemplate(htmlPath)
+    res.setHeader('X-Business-OS-Admin-Shell-Cache', cacheStatus)
     res.type('html')
     return res.send(injectAdminAuthBootstrap(html, payload))
   } catch (error) {
