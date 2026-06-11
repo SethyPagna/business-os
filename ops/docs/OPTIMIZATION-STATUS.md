@@ -8,9 +8,11 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 908, invalidate Dashboard summary/analytics
-  caches immediately after sales and returns writes so fresh real data is
-  visible without waiting for the short TTL window.
+- Latest completed move: Move 909, fold the tiny LazyPortalMenu wrapper into
+  the existing shared UI chunk while keeping the heavier PortalMenu
+  implementation lazy on user intent, removing the old standalone
+  `shared-lazy-portal-menu` first-window request and fixing the intermediate
+  app-shared/shared-ui circular chunk.
 
 ## Current Baseline
 
@@ -18,11 +20,11 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `1ac687c3d37e1837`
+  `81a54a52e3091858`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 908 source state; Docker image `business-os:v6.0.0-202606111334`
-  serves frontend hash `1ac687c3d37e1837` and source hash
-  `08bd63648c56ece6`
+  this Move 909 source state; Docker image `business-os:v6.0.0-202606111728`
+  serves frontend hash `81a54a52e3091858` and source hash
+  `23b9745c64a0714f`
 
 Latest verified reports:
 
@@ -109,6 +111,26 @@ Latest verified reports:
   protected backups/volumes, pruned 75,500 bytes of old runtime reports,
   reclaimed about 2.963 GB of Docker build cache, and removed only older
   `business-os:v*` tags while keeping active `business-os:v6.0.0-202606111334`.
+- latest Move 909 local targeted LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-29-44-020Z.json`
+- latest Move 909 local targeted route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T09-29-44-235Z.json`
+- latest Move 909 public targeted LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-29-44-227Z.json`
+- latest Move 909 local full LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-34-27-513Z.json`
+- latest Move 909 public full LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-34-27-577Z.json`
+- latest Move 909 all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T09-30-13-536Z/summary.json`
+- latest Move 909 cleanup result:
+  guarded `prune-storage` preserved protected backups, volumes, uploads,
+  secrets, database, and node_modules; removed 21,728,407 bytes of old runtime
+  reports, reclaimed about 1.845 GB of Docker builder cache, and removed only
+  old `business-os:v*` image tags while keeping active
+  `business-os:v6.0.0-202606111728` plus rollback tags. The temporary
+  `move909-products-debug.png` probe artifact was deleted after the fixed image
+  passed live traces.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

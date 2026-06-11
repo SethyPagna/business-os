@@ -180,7 +180,6 @@ const routePreloadChunkNames = {
     'route-sync-utils',
     'settings-refresh',
     'app-api',
-    'shared-lazy-portal-menu',
     'shared-ui',
   ],
   pos: [
@@ -191,7 +190,6 @@ const routePreloadChunkNames = {
     'route-sync-utils',
     'settings-refresh',
     'app-api',
-    'shared-lazy-portal-menu',
     'shared-ui',
   ],
   inventory: [
@@ -419,7 +417,6 @@ const deferredModulePreloadPrefixes = [
   'assets/browser-dialogs-',
   'assets/product-detail-',
   'assets/shared-portal-menu-',
-  'assets/shared-lazy-portal-menu-',
   'assets/auth-login-',
   'assets/app-bootstrap-',
   'assets/app-auth-',
@@ -802,7 +799,7 @@ function manualChunks(id: string): string | undefined {
       return 'image-lightbox'
     }
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
-    if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-lazy-portal-menu'
+    if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'
     if (normalized.includes('/src/components/shared/PortalMenu.tsx')) return 'shared-portal-menu'
     if (normalized.includes('/src/components/files/FilePickerModal')) {

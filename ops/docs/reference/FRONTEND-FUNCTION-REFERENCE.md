@@ -3632,20 +3632,20 @@ Total files documented: **278**
 | 3 | `inlinePublicRuntimeScripts` | function | 60 |
 | 4 | `fixCrossorigin` | function | 85 |
 | 5 | `emitBuildManifest` | function | 110 |
-| 6 | `isBundleChunk` | function | 223 |
-| 7 | `toRoutePreloadFiles` | function | 227 |
-| 8 | `buildRoutePreloadScript` | function | 239 |
-| 9 | `normalizePath` | function | 242 |
-| 10 | `isAdminAppPath` | function | 250 |
-| 11 | `isLoginPath` | function | 283 |
-| 12 | `isPublicCatalogPath` | function | 286 |
-| 13 | `hasEmbeddedAuthBootstrap` | function | 292 |
-| 14 | `routePreloadKey` | function | 295 |
-| 15 | `injectRouteAwareModulePreloads` | function | 349 |
-| 16 | `deferRenderBlockingStylesheets` | function | 370 |
-| 17 | `activate` | function | 393 |
-| 18 | `shouldDeferModulePreload` | function | 592 |
-| 19 | `manualChunks` | function | 596 |
+| 6 | `isBundleChunk` | function | 221 |
+| 7 | `toRoutePreloadFiles` | function | 225 |
+| 8 | `buildRoutePreloadScript` | function | 237 |
+| 9 | `normalizePath` | function | 240 |
+| 10 | `isAdminAppPath` | function | 248 |
+| 11 | `isLoginPath` | function | 281 |
+| 12 | `isPublicCatalogPath` | function | 284 |
+| 13 | `hasEmbeddedAuthBootstrap` | function | 290 |
+| 14 | `routePreloadKey` | function | 293 |
+| 15 | `injectRouteAwareModulePreloads` | function | 347 |
+| 16 | `deferRenderBlockingStylesheets` | function | 368 |
+| 17 | `activate` | function | 391 |
+| 18 | `shouldDeferModulePreload` | function | 589 |
+| 19 | `manualChunks` | function | 593 |
 
 ### 3.278 `frontend/tailwind.config.ts`
 

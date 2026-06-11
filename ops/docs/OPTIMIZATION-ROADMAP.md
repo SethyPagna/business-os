@@ -15567,3 +15567,43 @@ Move 908 status:
   R2/access follow-up open; Phase 29 remains active. Remaining external
   blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
   `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 909 status:
+- Move 909 removes the standalone `shared-lazy-portal-menu` startup chunk
+  without pulling the heavy menu implementation into first render. The tiny
+  `LazyPortalMenu` wrapper now rides the already-loaded `shared-ui` chunk, and
+  `PortalMenu` stays in `shared-portal-menu` for hover/click intent loading.
+- A Docker live trace caught an intermediate app-shared/shared-ui circular
+  chunk (`Cannot access 'v' before initialization`) that blanked Products. The
+  final keeper fixes that cycle by keeping the wrapper out of `app-shared`;
+  the local production build no longer emits the circular chunk warning.
+- Runtime proof: Docker image `business-os:v6.0.0-202606111728` is healthy
+  with frontend hash `81a54a52e3091858` and source hash
+  `23b9745c64a0714f`.
+- Playwright proof: targeted local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-29-44-020Z.json`
+  measured Products 760 ms, POS 280 ms, Branches 304 ms, and Audit Log
+  296 ms. Targeted public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-29-44-227Z.json`
+  measured Products 720 ms, POS 376 ms, Branches 336 ms, and Audit Log
+  280 ms. Full local/public LCP traces kept all 9 checked routes under
+  584 ms with zero failed requests and zero app console errors. Broad
+  all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T09-30-13-536Z/summary.json`
+  passed 34 desktop/mobile routes, 404 tested controls, 0 failed controls,
+  and 0 findings.
+- Verification proof: backend utility suite, frontend utility suite,
+  frontend `check:jsx`, frontend production build, Docker image/start health,
+  direct Products render probe, local/public targeted LCP traces, local
+  targeted route-load trace, local/public full LCP traces, broad all-pages
+  control audit, guarded storage prune, and `git diff --check` passed.
+- Cleanup proof: guarded `prune-storage` preserved protected backups,
+  volumes, uploads, secrets, database, and node_modules; removed 21,728,407
+  bytes of old runtime reports, reclaimed about 1.845 GB of Docker builder
+  cache, and removed only old `business-os:v*` tags while keeping active
+  `business-os:v6.0.0-202606111728` plus rollback tags.
+- Current plan position after Move 909: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`.

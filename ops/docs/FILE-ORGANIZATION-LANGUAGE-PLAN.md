@@ -10045,3 +10045,24 @@ Decision rule:
 - Current plan position after Move 908: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active.
+
+### Move 909: Keep lazy menu wrapper in shared UI, not a standalone chunk
+
+- Ownership slice: frontend shared menu trigger chunking. No folder move was
+  made because `LazyPortalMenu` and `PortalMenu` already live in the correct
+  `frontend/src/components/shared` ownership area.
+- Organization decision: the tiny wrapper now belongs to the already-loaded
+  `shared-ui` chunk. This avoids a separate `shared-lazy-portal-menu` startup
+  request and avoids assigning the wrapper to generic `app-shared`, which a
+  live Docker trace proved can create an app-shared/shared-ui circular chunk.
+- Language/runtime decision: no TypeScript, Rust, Go, Python, or WASM rewrite
+  is justified. The bottleneck was Rollup chunk ownership and modulepreload
+  policy, not CPU-bound work or language expressiveness.
+- Verification slice: backend utility suite, frontend utility suite, frontend
+  `check:jsx`, frontend production build, Docker image/start health, direct
+  Products render probe, local/public targeted LCP traces, local targeted
+  route-load trace, local/public full LCP traces, broad all-pages control
+  audit, guarded storage prune, and `git diff --check` passed.
+- Current plan position after Move 909: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active.

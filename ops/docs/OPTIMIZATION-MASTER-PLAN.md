@@ -8,9 +8,11 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 908, invalidate Dashboard caches on sales and
-  returns writes so fresh real data reaches Dashboard readers without waiting
-  for the short local TTL window.
+- Latest completed move: Move 909, fold the tiny LazyPortalMenu wrapper into
+  `shared-ui` while keeping the heavier PortalMenu implementation
+  interaction-lazy in `shared-portal-menu`. This removes the old standalone
+  `shared-lazy-portal-menu` first-window request and avoids the
+  app-shared/shared-ui cycle that was caught during live Docker tracing.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -18,21 +20,22 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111334`
-  is healthy with frontend hash `1ac687c3d37e1837` and source hash
-  `08bd63648c56ece6`. Local LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-207Z.json`
-  measured Dashboard 516 ms and every tested route under 0.6 s. Public admin
-  LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-709Z.json`
-  measured Dashboard 316 ms and every tested route under 0.4 s, with zero
-  failed requests/errors. The broad all-pages control audit
-  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-52-14-291Z/summary.json`
-  passed 34 desktop/mobile routes, 410 tested controls, 0 failed controls, and
-  0 findings. The regenerated `release/` kit was deleted after proof,
-  removing 380,978,311 bytes. Guarded storage prune then removed 75,500 bytes
-  of old runtime reports, reclaimed about 2.963 GB of Docker build cache,
-  removed only old rollback image tags, and kept active
-  `business-os:v6.0.0-202606111334`.
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111728`
+  is healthy with frontend hash `81a54a52e3091858` and source hash
+  `23b9745c64a0714f`. Targeted local traces measured Products 760 ms LCP,
+  POS 280 ms, Branches 304 ms, and Audit Log 296 ms with zero failed requests
+  or app errors. Targeted public admin traces measured Products 720 ms LCP,
+  POS 376 ms, Branches 336 ms, and Audit Log 280 ms with zero failed requests
+  or app errors. Full local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-34-27-513Z.json`
+  kept all 9 checked routes under 504 ms; full public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-34-27-577Z.json`
+  kept all 9 checked routes under 584 ms. Broad all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T09-30-13-536Z/summary.json`
+  passed 34 desktop/mobile routes, 404 tested controls, 0 failed controls, and
+  0 findings. Guarded storage prune removed 21,728,407 bytes of old runtime
+  reports, reclaimed about 1.845 GB of Docker builder cache, removed only old
+  `business-os:v*` tags, and kept active `business-os:v6.0.0-202606111728`.
 
 ## Program Goals
 

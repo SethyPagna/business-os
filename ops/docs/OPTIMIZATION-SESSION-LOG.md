@@ -8,6 +8,46 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Fold lazy portal-menu wrapper into existing shared UI chunk
+  - area: first-window route chunking for Products, POS, Branches, Audit Log,
+    and shared menu triggers
+  - result: kept
+  - note: the old standalone `shared-lazy-portal-menu` chunk is gone. The tiny
+    `LazyPortalMenu` wrapper now rides `shared-ui`, while the actual
+    `PortalMenu` implementation remains in `shared-portal-menu` and loads on
+    hover/click intent.
+  - caught during live proof: an intermediate Docker image put the wrapper in
+    `app-shared` and produced an app-shared/shared-ui circular chunk that
+    blanked Products with `Cannot access 'v' before initialization`. The final
+    keeper removed that cycle; local production build no longer emits the
+    circular chunk warning.
+  - verification: backend utility suite, frontend utility suite, frontend
+    `check:jsx`, frontend production build, Docker image/start health, direct
+    Products Playwright render probe, local/public targeted LCP traces, local
+    targeted route-load trace, local/public full LCP traces, broad all-pages
+    control audit, guarded storage prune, and `git diff --check` passed.
+  - live proof: Docker image `business-os:v6.0.0-202606111728` is healthy with
+    frontend hash `81a54a52e3091858` and source hash `23b9745c64a0714f`.
+    Targeted local LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T09-29-44-020Z.json`
+    measured Products 760 ms, POS 280 ms, Branches 304 ms, and Audit Log
+    296 ms. Targeted public LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T09-29-44-227Z.json`
+    measured Products 720 ms, POS 376 ms, Branches 336 ms, and Audit Log
+    280 ms. Full local/public LCP traces kept all 9 checked routes under
+    584 ms with zero failed requests and zero app console errors.
+  - control proof: broad all-pages audit
+    `ops/runtime/reports/all-pages-control-audit-2026-06-11T09-30-13-536Z/summary.json`
+    passed 34 desktop/mobile routes, 404 tested controls, 0 failed controls,
+    and 0 findings.
+  - cleanup: guarded `prune-storage` removed 21,728,407 bytes of old runtime
+    reports, reclaimed about 1.845 GB of Docker builder cache, and removed
+    only old `business-os:v*` image tags while preserving active
+    `business-os:v6.0.0-202606111728`, rollback tags, protected backups,
+    volumes, uploads, secrets, database, and node_modules.
+  - remaining: Cloudflare Cache Rules permission is still needed for true edge
+    cache-rule deployment; Phase 8.4, Phase 28, and Phase 29 remain active.
+
 - Compact Inventory first-load placeholder
   - area: Inventory public LCP, first-load placeholder weight, generated
     release-kit cleanup
