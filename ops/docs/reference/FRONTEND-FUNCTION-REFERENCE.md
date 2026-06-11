@@ -66,7 +66,7 @@ Total files documented: **278**
 | 54 | `frontend/src/api/userAdminTransport.ts` | 1 |
 | 55 | `frontend/src/api/userReadTransport.ts` | 0 |
 | 56 | `frontend/src/api/websocket.ts` | 8 |
-| 57 | `frontend/src/App.tsx` | 89 |
+| 57 | `frontend/src/App.tsx` | 75 |
 | 58 | `frontend/src/app/AppContextCore.tsx` | 1 |
 | 59 | `frontend/src/app/appShellUtils.ts` | 0 |
 | 60 | `frontend/src/app/pathRouting.ts` | 0 |
@@ -895,95 +895,81 @@ Total files documented: **278**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `asPageModule` | function | 187 |
-| 2 | `getAppShellApi` | function | 191 |
-| 3 | `readStorageValue` | function | 195 |
-| 4 | `hasUsableStoredAuthSession` | function | 203 |
-| 5 | `getConnection` | function | 221 |
-| 6 | `isPageId` | function | 227 |
-| 7 | `normalizePageId` | function | 231 |
-| 8 | `getErrorMessage` | function | 235 |
-| 9 | `getChunkErrorMessage` | function | 336 |
-| 10 | `isChunkLoadError` | function | 341 |
-| 11 | `createChunkTimeoutError` | function | 350 |
-| 12 | `isRetryableImportError` | function | 356 |
-| 13 | `importWithTimeout` | function | 364 |
-| 14 | `clearRetryMarker` | function | 380 |
-| 15 | `buildChunkRecoveryUrl` | function | 387 |
-| 16 | `deleteStaleShellCaches` | function | 398 |
-| 17 | `clearStaleShellCaches` | function | 411 |
-| 18 | `triggerChunkRecoveryReload` | function | 421 |
-| 19 | `reload` | const arrow | 428 |
-| 20 | `createChunkReloadStallError` | function | 438 |
-| 21 | `shouldRetryChunk` | function | 444 |
-| 22 | `lazyWithRetry` | function | 454 |
-| 23 | `getWarmupImporters` | function | 532 |
-| 24 | `shouldSkipBackgroundWarmup` | function | 543 |
-| 25 | `shouldSkipIntentWarmup` | function | 552 |
-| 26 | `getIntentPageId` | function | 561 |
-| 27 | `scheduleIntentChunkLoad` | function | 567 |
-| 28 | `run` | const arrow | 574 |
-| 29 | `scheduleInitialPendingSyncRefresh` | function | 598 |
-| 30 | `run` | const arrow | 604 |
-| 31 | `scheduleDeferredPendingSyncPolling` | function | 626 |
-| 32 | `isImportTrackerWakeEvent` | function | 640 |
-| 33 | `isNotificationCenterWakeEvent` | function | 655 |
-| 34 | `getDataWarmupLoaders` | function | 673 |
-| 35 | `createWarmupLoader` | function | 682 |
-| 36 | `runWarmupBatches` | function | 687 |
-| 37 | `scheduleWarmupAfterLoad` | function | 696 |
-| 38 | `run` | const arrow | 701 |
-| 39 | `getPageEntryWarmupLoaders` | function | 719 |
-| 40 | `useMountedPages` | function | 726 |
-| 41 | `syncProfile` | const arrow | 740 |
-| 42 | `useSyncErrorBanner` | function | 769 |
-| 43 | `refreshPendingSync` | const arrow | 789 |
-| 44 | `onSyncError` | const arrow | 794 |
-| 45 | `onTransientOutage` | const arrow | 800 |
-| 46 | `onSyncRecovered` | const arrow | 808 |
-| 47 | `onQueueChanged` | const arrow | 816 |
-| 48 | `onVaultLocked` | const arrow | 817 |
-| 49 | `onAppUpdate` | const arrow | 818 |
-| 50 | `onConflictReview` | const arrow | 819 |
-| 51 | `useDeferredImportTrackerMount` | function | 867 |
-| 52 | `enable` | const arrow | 880 |
-| 53 | `enableWhenVisible` | const arrow | 884 |
-| 54 | `onImportJobActivity` | const arrow | 889 |
-| 55 | `useDeferredQuickPreferencesMount` | function | 914 |
-| 56 | `enable` | const arrow | 927 |
-| 57 | `useDeferredNotificationCenterMount` | function | 951 |
-| 58 | `enable` | const arrow | 970 |
-| 59 | `enableWhenVisible` | const arrow | 974 |
-| 60 | `onSyncUpdate` | const arrow | 978 |
-| 61 | `onNotificationActivity` | const arrow | 981 |
-| 62 | `useVisibilityRecovery` | function | 1016 |
-| 63 | `onVisible` | const arrow | 1021 |
-| 64 | `onFocus` | const arrow | 1031 |
-| 65 | `useChunkWarmup` | function | 1049 |
-| 66 | `runWarmup` | const arrow | 1060 |
-| 67 | `useIntentChunkWarmup` | function | 1102 |
-| 68 | `warmIntentPage` | const arrow | 1109 |
-| 69 | `useDataWarmup` | function | 1129 |
-| 70 | `runWarmup` | const arrow | 1141 |
-| 71 | `usePageEntryWarmup` | function | 1166 |
-| 72 | `run` | const arrow | 1196 |
-| 73 | `PageErrorBoundary` | class | 1225 |
-| 74 | `Notification` | function | 1278 |
-| 75 | `SyncErrorBanner` | function | 1291 |
-| 76 | `GlobalScrollControls` | function | 1313 |
-| 77 | `scrollTo` | const arrow | 1314 |
-| 78 | `formatSyncTimestamp` | function | 1351 |
-| 79 | `OfflineModeBanner` | function | 1366 |
-| 80 | `PageLoader` | function | 1515 |
-| 81 | `NotificationCenterFallback` | function | 1576 |
-| 82 | `PageSlot` | function | 1591 |
-| 83 | `PublicCatalogView` | function | 1617 |
-| 84 | `App` | component/function | 1627 |
-| 85 | `cleanupRecoveryStorageMarkers` | const arrow | 1705 |
-| 86 | `onQueued` | const arrow | 1734 |
-| 87 | `onSynced` | const arrow | 1747 |
-| 88 | `handleLocationChange` | const arrow | 1772 |
-| 89 | `processFavicon` | function | 1820 |
+| 1 | `asPageModule` | function | 186 |
+| 2 | `getAppShellApi` | function | 190 |
+| 3 | `readStorageValue` | function | 194 |
+| 4 | `hasUsableStoredAuthSession` | function | 202 |
+| 5 | `getConnection` | function | 220 |
+| 6 | `isPageId` | function | 226 |
+| 7 | `normalizePageId` | function | 230 |
+| 8 | `getErrorMessage` | function | 234 |
+| 9 | `getChunkErrorMessage` | function | 292 |
+| 10 | `isChunkLoadError` | function | 297 |
+| 11 | `createChunkTimeoutError` | function | 306 |
+| 12 | `isRetryableImportError` | function | 312 |
+| 13 | `importWithTimeout` | function | 320 |
+| 14 | `clearRetryMarker` | function | 336 |
+| 15 | `buildChunkRecoveryUrl` | function | 343 |
+| 16 | `deleteStaleShellCaches` | function | 354 |
+| 17 | `clearStaleShellCaches` | function | 367 |
+| 18 | `triggerChunkRecoveryReload` | function | 377 |
+| 19 | `reload` | const arrow | 384 |
+| 20 | `createChunkReloadStallError` | function | 394 |
+| 21 | `shouldRetryChunk` | function | 400 |
+| 22 | `lazyWithRetry` | function | 410 |
+| 23 | `shouldSkipIntentWarmup` | function | 488 |
+| 24 | `getIntentPageId` | function | 497 |
+| 25 | `scheduleIntentChunkLoad` | function | 503 |
+| 26 | `run` | const arrow | 510 |
+| 27 | `scheduleInitialPendingSyncRefresh` | function | 534 |
+| 28 | `run` | const arrow | 540 |
+| 29 | `scheduleDeferredPendingSyncPolling` | function | 562 |
+| 30 | `isImportTrackerWakeEvent` | function | 576 |
+| 31 | `isNotificationCenterWakeEvent` | function | 591 |
+| 32 | `useMountedPages` | function | 609 |
+| 33 | `syncProfile` | const arrow | 623 |
+| 34 | `useSyncErrorBanner` | function | 652 |
+| 35 | `refreshPendingSync` | const arrow | 672 |
+| 36 | `onSyncError` | const arrow | 677 |
+| 37 | `onTransientOutage` | const arrow | 683 |
+| 38 | `onSyncRecovered` | const arrow | 691 |
+| 39 | `onQueueChanged` | const arrow | 699 |
+| 40 | `onVaultLocked` | const arrow | 700 |
+| 41 | `onAppUpdate` | const arrow | 701 |
+| 42 | `onConflictReview` | const arrow | 702 |
+| 43 | `useDeferredImportTrackerMount` | function | 750 |
+| 44 | `enable` | const arrow | 763 |
+| 45 | `enableWhenVisible` | const arrow | 767 |
+| 46 | `onImportJobActivity` | const arrow | 772 |
+| 47 | `useDeferredQuickPreferencesMount` | function | 797 |
+| 48 | `enable` | const arrow | 810 |
+| 49 | `useDeferredNotificationCenterMount` | function | 834 |
+| 50 | `enable` | const arrow | 853 |
+| 51 | `enableWhenVisible` | const arrow | 857 |
+| 52 | `onSyncUpdate` | const arrow | 861 |
+| 53 | `onNotificationActivity` | const arrow | 864 |
+| 54 | `useVisibilityRecovery` | function | 899 |
+| 55 | `onVisible` | const arrow | 904 |
+| 56 | `onFocus` | const arrow | 914 |
+| 57 | `useIntentChunkWarmup` | function | 932 |
+| 58 | `warmIntentPage` | const arrow | 939 |
+| 59 | `PageErrorBoundary` | class | 959 |
+| 60 | `Notification` | function | 1012 |
+| 61 | `SyncErrorBanner` | function | 1025 |
+| 62 | `GlobalScrollControls` | function | 1047 |
+| 63 | `scrollTo` | const arrow | 1048 |
+| 64 | `formatSyncTimestamp` | function | 1085 |
+| 65 | `OfflineModeBanner` | function | 1100 |
+| 66 | `PageLoader` | function | 1249 |
+| 67 | `NotificationCenterFallback` | function | 1310 |
+| 68 | `PageSlot` | function | 1325 |
+| 69 | `PublicCatalogView` | function | 1351 |
+| 70 | `App` | component/function | 1361 |
+| 71 | `cleanupRecoveryStorageMarkers` | const arrow | 1436 |
+| 72 | `onQueued` | const arrow | 1465 |
+| 73 | `onSynced` | const arrow | 1478 |
+| 74 | `handleLocationChange` | const arrow | 1503 |
+| 75 | `processFavicon` | function | 1551 |
 
 ### 3.58 `frontend/src/app/AppContextCore.tsx`
 

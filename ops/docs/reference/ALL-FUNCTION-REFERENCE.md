@@ -146,7 +146,7 @@ Code files scanned: **662**
 | 134 | `backend/src/routes/products.ts` | 75 |
 | 135 | `backend/src/routes/returns.ts` | 16 |
 | 136 | `backend/src/routes/runtime.ts` | 6 |
-| 137 | `backend/src/routes/sales.ts` | 26 |
+| 137 | `backend/src/routes/sales.ts` | 27 |
 | 138 | `backend/src/routes/settings.ts` | 10 |
 | 139 | `backend/src/routes/sync.ts` | 12 |
 | 140 | `backend/src/routes/system/index.ts` | 46 |
@@ -297,9 +297,9 @@ Code files scanned: **662**
 | 285 | `frontend/src/api/userAdminTransport.ts` | 14 |
 | 286 | `frontend/src/api/userReadTransport.ts` | 1 |
 | 287 | `frontend/src/api/websocket.ts` | 15 |
-| 288 | `frontend/src/App.tsx` | 89 |
+| 288 | `frontend/src/App.tsx` | 75 |
 | 289 | `frontend/src/app/AppContextCore.tsx` | 2 |
-| 290 | `frontend/src/app/appShellUtils.ts` | 5 |
+| 290 | `frontend/src/app/appShellUtils.ts` | 4 |
 | 291 | `frontend/src/app/pathRouting.ts` | 5 |
 | 292 | `frontend/src/app/PublicCatalogAppProvider.tsx` | 1 |
 | 293 | `frontend/src/app/publicErrorRecovery.ts` | 4 |
@@ -343,7 +343,7 @@ Code files scanned: **662**
 | 331 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
 | 332 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
 | 333 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
-| 334 | `frontend/src/components/dashboard/Dashboard.tsx` | 17 |
+| 334 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
 | 335 | `frontend/src/components/dashboard/dashboardExport.ts` | 25 |
 | 336 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
 | 337 | `frontend/src/components/files/FilePickerModal.tsx` | 9 |
@@ -455,7 +455,7 @@ Code files scanned: **662**
 | 443 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
 | 444 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
 | 445 | `frontend/src/components/users/Users.tsx` | 19 |
-| 446 | `frontend/src/components/utils-settings/AuditLog.tsx` | 20 |
+| 446 | `frontend/src/components/utils-settings/AuditLog.tsx` | 22 |
 | 447 | `frontend/src/components/utils-settings/Backup.tsx` | 34 |
 | 448 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
 | 449 | `frontend/src/components/utils-settings/index.ts` | 0 |
@@ -613,7 +613,7 @@ Code files scanned: **662**
 | 601 | `ops/scripts/runtime/audits/audit-report-html.ts` | 11 |
 | 602 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 42 |
 | 603 | `ops/scripts/runtime/audits/full-app-audit.ts` | 22 |
-| 604 | `ops/scripts/runtime/browser-action-smoke.ts` | 32 |
+| 604 | `ops/scripts/runtime/browser-action-smoke.ts` | 34 |
 | 605 | `ops/scripts/runtime/build-ecosystem-config.ts` | 5 |
 | 606 | `ops/scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts` | 12 |
 | 607 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 16 |
@@ -2572,94 +2572,94 @@ Code files scanned: **662**
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `startRequestedWorkerRole` | function | 6 |
-| 2 | `listFrontendAssetFiles` | function | 157 |
-| 3 | `resolveFrontendAssetPath` | function | 168 |
-| 4 | `resolveFrontendChunkAssetName` | function | 192 |
-| 5 | `getSpaModulePreloadChunks` | function | 222 |
-| 6 | `appendLinkHeader` | function | 233 |
-| 7 | `appendSpaModulePreloadHeaders` | function | 242 |
-| 8 | `resolveFrontendStyleAssetNames` | function | 251 |
-| 9 | `appendSpaStylePreloadHeaders` | function | 271 |
-| 10 | `resolveFrontendPublicFontPreloadAssetNames` | function | 278 |
-| 11 | `appendPublicFontPreloadHeaders` | function | 289 |
-| 12 | `normalizePublicSpaHtmlTtl` | function | 294 |
-| 13 | `setPublicSpaHtmlCacheHeaders` | function | 297 |
-| 14 | `isPublicSpaRoutePath` | function | 305 |
-| 15 | `escapeInlineJson` | function | 309 |
-| 16 | `injectPublicPortalBootstrap` | function | 317 |
-| 17 | `injectAdminAuthBootstrap` | function | 325 |
-| 18 | `readAdminSpaTemplate` | function | 336 |
-| 19 | `sendPublicSpaIndex` | function | 346 |
-| 20 | `sendAdminSpaIndex` | function | 372 |
-| 21 | `sendSpaIndex` | function | 396 |
-| 22 | `loadCompressionMiddleware` | function | 411 |
-| 23 | `applySecurityHeaders` | function | 420 |
-| 24 | `applyRequestPolicy` | function | 425 |
-| 25 | `applyCoreMiddleware` | function | 434 |
-| 26 | `normalizeUploadFileName` | function | 448 |
-| 27 | `getSafeActiveUploadPath` | function | 455 |
-| 28 | `findBackupUploadFallback` | function | 465 |
-| 29 | `inferUploadContentType` | function | 519 |
-| 30 | `serveLocalUpload` | function | 535 |
-| 31 | `getObjectStreamWithTimeout` | function | 552 |
-| 32 | `mountStaticAssets` | function | 567 |
-| 33 | `mountHealthRoute` | function | 646 |
-| 34 | `mountApiRoutes` | function | 674 |
-| 35 | `mountTransfersAlias` | function | 709 |
-| 36 | `mountSpaFallback` | function | 723 |
-| 37 | `mountErrorHandler` | function | 740 |
-| 38 | `getStartupBanner` | function | 753 |
-| 39 | `closeDatabase` | function | 776 |
-| 40 | `startDatabaseMaintenanceTimer` | function | 787 |
-| 41 | `registerShutdownHandlers` | function | 795 |
-| 42 | `bootstrapServer` | function | 809 |
+| 2 | `listFrontendAssetFiles` | function | 156 |
+| 3 | `resolveFrontendAssetPath` | function | 167 |
+| 4 | `resolveFrontendChunkAssetName` | function | 191 |
+| 5 | `getSpaModulePreloadChunks` | function | 221 |
+| 6 | `appendLinkHeader` | function | 232 |
+| 7 | `appendSpaModulePreloadHeaders` | function | 241 |
+| 8 | `resolveFrontendStyleAssetNames` | function | 250 |
+| 9 | `appendSpaStylePreloadHeaders` | function | 270 |
+| 10 | `resolveFrontendPublicFontPreloadAssetNames` | function | 277 |
+| 11 | `appendPublicFontPreloadHeaders` | function | 288 |
+| 12 | `normalizePublicSpaHtmlTtl` | function | 293 |
+| 13 | `setPublicSpaHtmlCacheHeaders` | function | 296 |
+| 14 | `isPublicSpaRoutePath` | function | 304 |
+| 15 | `escapeInlineJson` | function | 308 |
+| 16 | `injectPublicPortalBootstrap` | function | 316 |
+| 17 | `injectAdminAuthBootstrap` | function | 324 |
+| 18 | `readAdminSpaTemplate` | function | 335 |
+| 19 | `sendPublicSpaIndex` | function | 345 |
+| 20 | `sendAdminSpaIndex` | function | 371 |
+| 21 | `sendSpaIndex` | function | 395 |
+| 22 | `loadCompressionMiddleware` | function | 410 |
+| 23 | `applySecurityHeaders` | function | 419 |
+| 24 | `applyRequestPolicy` | function | 424 |
+| 25 | `applyCoreMiddleware` | function | 433 |
+| 26 | `normalizeUploadFileName` | function | 447 |
+| 27 | `getSafeActiveUploadPath` | function | 454 |
+| 28 | `findBackupUploadFallback` | function | 464 |
+| 29 | `inferUploadContentType` | function | 518 |
+| 30 | `serveLocalUpload` | function | 534 |
+| 31 | `getObjectStreamWithTimeout` | function | 551 |
+| 32 | `mountStaticAssets` | function | 566 |
+| 33 | `mountHealthRoute` | function | 645 |
+| 34 | `mountApiRoutes` | function | 673 |
+| 35 | `mountTransfersAlias` | function | 708 |
+| 36 | `mountSpaFallback` | function | 722 |
+| 37 | `mountErrorHandler` | function | 739 |
+| 38 | `getStartupBanner` | function | 752 |
+| 39 | `closeDatabase` | function | 775 |
+| 40 | `startDatabaseMaintenanceTimer` | function | 786 |
+| 41 | `registerShutdownHandlers` | function | 794 |
+| 42 | `bootstrapServer` | function | 808 |
 
 ### 3.86 `backend/server.ts`
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
 | 1 | `startRequestedWorkerRole` | function | 3 |
-| 2 | `listFrontendAssetFiles` | function | 188 |
-| 3 | `resolveFrontendAssetPath` | function | 198 |
-| 4 | `resolveFrontendChunkAssetName` | function | 219 |
-| 5 | `getSpaModulePreloadChunks` | function | 248 |
-| 6 | `appendLinkHeader` | function | 260 |
-| 7 | `appendSpaModulePreloadHeaders` | function | 270 |
-| 8 | `resolveFrontendStyleAssetNames` | function | 279 |
-| 9 | `appendSpaStylePreloadHeaders` | function | 297 |
-| 10 | `resolveFrontendPublicFontPreloadAssetNames` | function | 304 |
-| 11 | `appendPublicFontPreloadHeaders` | function | 314 |
-| 12 | `normalizePublicSpaHtmlTtl` | function | 320 |
-| 13 | `setPublicSpaHtmlCacheHeaders` | function | 324 |
-| 14 | `isPublicSpaRoutePath` | function | 333 |
-| 15 | `escapeInlineJson` | function | 338 |
-| 16 | `injectPublicPortalBootstrap` | function | 347 |
-| 17 | `injectAdminAuthBootstrap` | function | 355 |
-| 18 | `readAdminSpaTemplate` | function | 366 |
-| 19 | `sendPublicSpaIndex` | function | 377 |
-| 20 | `sendAdminSpaIndex` | function | 405 |
-| 21 | `sendSpaIndex` | function | 427 |
-| 22 | `loadCompressionMiddleware` | function | 443 |
-| 23 | `applySecurityHeaders` | function | 452 |
-| 24 | `applyRequestPolicy` | function | 458 |
-| 25 | `applyCoreMiddleware` | function | 468 |
-| 26 | `normalizeUploadFileName` | function | 482 |
-| 27 | `getSafeActiveUploadPath` | function | 490 |
-| 28 | `findBackupUploadFallback` | function | 499 |
-| 29 | `inferUploadContentType` | function | 545 |
-| 30 | `serveLocalUpload` | function | 556 |
-| 31 | `getObjectStreamWithTimeout` | function | 573 |
-| 32 | `mountStaticAssets` | function | 587 |
-| 33 | `mountHealthRoute` | function | 654 |
-| 34 | `mountApiRoutes` | function | 683 |
-| 35 | `mountTransfersAlias` | function | 721 |
-| 36 | `mountSpaFallback` | function | 736 |
-| 37 | `mountErrorHandler` | function | 754 |
-| 38 | `getStartupBanner` | function | 768 |
-| 39 | `closeDatabase` | function | 793 |
-| 40 | `startDatabaseMaintenanceTimer` | function | 803 |
-| 41 | `registerShutdownHandlers` | function | 811 |
-| 42 | `bootstrapServer` | function | 828 |
+| 2 | `listFrontendAssetFiles` | function | 187 |
+| 3 | `resolveFrontendAssetPath` | function | 197 |
+| 4 | `resolveFrontendChunkAssetName` | function | 218 |
+| 5 | `getSpaModulePreloadChunks` | function | 247 |
+| 6 | `appendLinkHeader` | function | 259 |
+| 7 | `appendSpaModulePreloadHeaders` | function | 269 |
+| 8 | `resolveFrontendStyleAssetNames` | function | 278 |
+| 9 | `appendSpaStylePreloadHeaders` | function | 296 |
+| 10 | `resolveFrontendPublicFontPreloadAssetNames` | function | 303 |
+| 11 | `appendPublicFontPreloadHeaders` | function | 313 |
+| 12 | `normalizePublicSpaHtmlTtl` | function | 319 |
+| 13 | `setPublicSpaHtmlCacheHeaders` | function | 323 |
+| 14 | `isPublicSpaRoutePath` | function | 332 |
+| 15 | `escapeInlineJson` | function | 337 |
+| 16 | `injectPublicPortalBootstrap` | function | 346 |
+| 17 | `injectAdminAuthBootstrap` | function | 354 |
+| 18 | `readAdminSpaTemplate` | function | 365 |
+| 19 | `sendPublicSpaIndex` | function | 376 |
+| 20 | `sendAdminSpaIndex` | function | 404 |
+| 21 | `sendSpaIndex` | function | 426 |
+| 22 | `loadCompressionMiddleware` | function | 442 |
+| 23 | `applySecurityHeaders` | function | 451 |
+| 24 | `applyRequestPolicy` | function | 457 |
+| 25 | `applyCoreMiddleware` | function | 467 |
+| 26 | `normalizeUploadFileName` | function | 481 |
+| 27 | `getSafeActiveUploadPath` | function | 489 |
+| 28 | `findBackupUploadFallback` | function | 498 |
+| 29 | `inferUploadContentType` | function | 544 |
+| 30 | `serveLocalUpload` | function | 555 |
+| 31 | `getObjectStreamWithTimeout` | function | 572 |
+| 32 | `mountStaticAssets` | function | 586 |
+| 33 | `mountHealthRoute` | function | 653 |
+| 34 | `mountApiRoutes` | function | 682 |
+| 35 | `mountTransfersAlias` | function | 720 |
+| 36 | `mountSpaFallback` | function | 735 |
+| 37 | `mountErrorHandler` | function | 753 |
+| 38 | `getStartupBanner` | function | 767 |
+| 39 | `closeDatabase` | function | 792 |
+| 40 | `startDatabaseMaintenanceTimer` | function | 802 |
+| 41 | `registerShutdownHandlers` | function | 810 |
+| 42 | `bootstrapServer` | function | 827 |
 
 ### 3.87 `backend/src/accessControl.ts`
 
@@ -3648,7 +3648,7 @@ Code files scanned: **662**
 | 13 | `toNumber` | function | 154 |
 | 14 | `findReturnByClientRequestId` | function | 159 |
 | 15 | `assertReturnableItems` | function | 169 |
-| 16 | `assertSupplierReturnableStock` | function | 623 |
+| 16 | `assertSupplierReturnableStock` | function | 624 |
 
 ### 3.136 `backend/src/routes/runtime.ts`
 
@@ -3672,25 +3672,26 @@ Code files scanned: **662**
 | 5 | `writeCachedDashboardSummary` | function | 58 |
 | 6 | `readCachedDashboardAnalytics` | function | 66 |
 | 7 | `writeCachedDashboardAnalytics` | function | 73 |
-| 8 | `normalizeImportedTimestamp` | function | 81 |
-| 9 | `getSaleItemCosts` | function | 89 |
-| 10 | `assertSaleStockAvailable` | function | 115 |
-| 11 | `findSaleItemForProduct` | function | 142 |
-| 12 | `findCustomerForSaleAssignment` | function | 149 |
-| 13 | `parseBranchId` | function | 170 |
-| 14 | `getActiveBranchContext` | function | 175 |
-| 15 | `requireActiveBranch` | function | 197 |
-| 16 | `resolveSaleItemBranchId` | function | 204 |
-| 17 | `normalizeSaleItems` | function | 215 |
-| 18 | `summarizeSaleBranch` | function | 249 |
-| 19 | `refreshProductStockQuantity` | function | 281 |
-| 20 | `refreshProductStockQuantities` | function | 285 |
-| 21 | `deductBranchStock` | function | 292 |
-| 22 | `restoreBranchStock` | function | 300 |
-| 23 | `fetchSaleItemsWithBranches` | function | 308 |
-| 24 | `findSaleByClientRequestId` | function | 317 |
-| 25 | `buildDashboardSummary` | function | 1105 |
-| 26 | `buildDashboardAnalytics` | function | 1232 |
+| 8 | `clearDashboardCaches` | function | 81 |
+| 9 | `normalizeImportedTimestamp` | function | 89 |
+| 10 | `getSaleItemCosts` | function | 97 |
+| 11 | `assertSaleStockAvailable` | function | 123 |
+| 12 | `findSaleItemForProduct` | function | 150 |
+| 13 | `findCustomerForSaleAssignment` | function | 157 |
+| 14 | `parseBranchId` | function | 178 |
+| 15 | `getActiveBranchContext` | function | 183 |
+| 16 | `requireActiveBranch` | function | 205 |
+| 17 | `resolveSaleItemBranchId` | function | 212 |
+| 18 | `normalizeSaleItems` | function | 223 |
+| 19 | `summarizeSaleBranch` | function | 257 |
+| 20 | `refreshProductStockQuantity` | function | 289 |
+| 21 | `refreshProductStockQuantities` | function | 293 |
+| 22 | `deductBranchStock` | function | 300 |
+| 23 | `restoreBranchStock` | function | 308 |
+| 24 | `fetchSaleItemsWithBranches` | function | 316 |
+| 25 | `findSaleByClientRequestId` | function | 325 |
+| 26 | `buildDashboardSummary` | function | 1119 |
+| 27 | `buildDashboardAnalytics` | function | 1246 |
 
 ### 3.138 `backend/src/routes/settings.ts`
 
@@ -6006,95 +6007,81 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `asPageModule` | function | 187 |
-| 2 | `getAppShellApi` | function | 191 |
-| 3 | `readStorageValue` | function | 195 |
-| 4 | `hasUsableStoredAuthSession` | function | 203 |
-| 5 | `getConnection` | function | 221 |
-| 6 | `isPageId` | function | 227 |
-| 7 | `normalizePageId` | function | 231 |
-| 8 | `getErrorMessage` | function | 235 |
-| 9 | `getChunkErrorMessage` | function | 336 |
-| 10 | `isChunkLoadError` | function | 341 |
-| 11 | `createChunkTimeoutError` | function | 350 |
-| 12 | `isRetryableImportError` | function | 356 |
-| 13 | `importWithTimeout` | function | 364 |
-| 14 | `clearRetryMarker` | function | 380 |
-| 15 | `buildChunkRecoveryUrl` | function | 387 |
-| 16 | `deleteStaleShellCaches` | function | 398 |
-| 17 | `clearStaleShellCaches` | function | 411 |
-| 18 | `triggerChunkRecoveryReload` | function | 421 |
-| 19 | `reload` | const arrow | 428 |
-| 20 | `createChunkReloadStallError` | function | 438 |
-| 21 | `shouldRetryChunk` | function | 444 |
-| 22 | `lazyWithRetry` | function | 454 |
-| 23 | `getWarmupImporters` | function | 532 |
-| 24 | `shouldSkipBackgroundWarmup` | function | 543 |
-| 25 | `shouldSkipIntentWarmup` | function | 552 |
-| 26 | `getIntentPageId` | function | 561 |
-| 27 | `scheduleIntentChunkLoad` | function | 567 |
-| 28 | `run` | const arrow | 574 |
-| 29 | `scheduleInitialPendingSyncRefresh` | function | 598 |
-| 30 | `run` | const arrow | 604 |
-| 31 | `scheduleDeferredPendingSyncPolling` | function | 626 |
-| 32 | `isImportTrackerWakeEvent` | function | 640 |
-| 33 | `isNotificationCenterWakeEvent` | function | 655 |
-| 34 | `getDataWarmupLoaders` | function | 673 |
-| 35 | `createWarmupLoader` | function | 682 |
-| 36 | `runWarmupBatches` | function | 687 |
-| 37 | `scheduleWarmupAfterLoad` | function | 696 |
-| 38 | `run` | const arrow | 701 |
-| 39 | `getPageEntryWarmupLoaders` | function | 719 |
-| 40 | `useMountedPages` | function | 726 |
-| 41 | `syncProfile` | const arrow | 740 |
-| 42 | `useSyncErrorBanner` | function | 769 |
-| 43 | `refreshPendingSync` | const arrow | 789 |
-| 44 | `onSyncError` | const arrow | 794 |
-| 45 | `onTransientOutage` | const arrow | 800 |
-| 46 | `onSyncRecovered` | const arrow | 808 |
-| 47 | `onQueueChanged` | const arrow | 816 |
-| 48 | `onVaultLocked` | const arrow | 817 |
-| 49 | `onAppUpdate` | const arrow | 818 |
-| 50 | `onConflictReview` | const arrow | 819 |
-| 51 | `useDeferredImportTrackerMount` | function | 867 |
-| 52 | `enable` | const arrow | 880 |
-| 53 | `enableWhenVisible` | const arrow | 884 |
-| 54 | `onImportJobActivity` | const arrow | 889 |
-| 55 | `useDeferredQuickPreferencesMount` | function | 914 |
-| 56 | `enable` | const arrow | 927 |
-| 57 | `useDeferredNotificationCenterMount` | function | 951 |
-| 58 | `enable` | const arrow | 970 |
-| 59 | `enableWhenVisible` | const arrow | 974 |
-| 60 | `onSyncUpdate` | const arrow | 978 |
-| 61 | `onNotificationActivity` | const arrow | 981 |
-| 62 | `useVisibilityRecovery` | function | 1016 |
-| 63 | `onVisible` | const arrow | 1021 |
-| 64 | `onFocus` | const arrow | 1031 |
-| 65 | `useChunkWarmup` | function | 1049 |
-| 66 | `runWarmup` | const arrow | 1060 |
-| 67 | `useIntentChunkWarmup` | function | 1102 |
-| 68 | `warmIntentPage` | const arrow | 1109 |
-| 69 | `useDataWarmup` | function | 1129 |
-| 70 | `runWarmup` | const arrow | 1141 |
-| 71 | `usePageEntryWarmup` | function | 1166 |
-| 72 | `run` | const arrow | 1196 |
-| 73 | `PageErrorBoundary` | class | 1225 |
-| 74 | `Notification` | function | 1278 |
-| 75 | `SyncErrorBanner` | function | 1291 |
-| 76 | `GlobalScrollControls` | function | 1313 |
-| 77 | `scrollTo` | const arrow | 1314 |
-| 78 | `formatSyncTimestamp` | function | 1351 |
-| 79 | `OfflineModeBanner` | function | 1366 |
-| 80 | `PageLoader` | function | 1515 |
-| 81 | `NotificationCenterFallback` | function | 1576 |
-| 82 | `PageSlot` | function | 1591 |
-| 83 | `PublicCatalogView` | function | 1617 |
-| 84 | `App` | export default function | 1627 |
-| 85 | `cleanupRecoveryStorageMarkers` | const arrow | 1705 |
-| 86 | `onQueued` | const arrow | 1734 |
-| 87 | `onSynced` | const arrow | 1747 |
-| 88 | `handleLocationChange` | const arrow | 1772 |
-| 89 | `processFavicon` | function | 1820 |
+| 1 | `asPageModule` | function | 186 |
+| 2 | `getAppShellApi` | function | 190 |
+| 3 | `readStorageValue` | function | 194 |
+| 4 | `hasUsableStoredAuthSession` | function | 202 |
+| 5 | `getConnection` | function | 220 |
+| 6 | `isPageId` | function | 226 |
+| 7 | `normalizePageId` | function | 230 |
+| 8 | `getErrorMessage` | function | 234 |
+| 9 | `getChunkErrorMessage` | function | 292 |
+| 10 | `isChunkLoadError` | function | 297 |
+| 11 | `createChunkTimeoutError` | function | 306 |
+| 12 | `isRetryableImportError` | function | 312 |
+| 13 | `importWithTimeout` | function | 320 |
+| 14 | `clearRetryMarker` | function | 336 |
+| 15 | `buildChunkRecoveryUrl` | function | 343 |
+| 16 | `deleteStaleShellCaches` | function | 354 |
+| 17 | `clearStaleShellCaches` | function | 367 |
+| 18 | `triggerChunkRecoveryReload` | function | 377 |
+| 19 | `reload` | const arrow | 384 |
+| 20 | `createChunkReloadStallError` | function | 394 |
+| 21 | `shouldRetryChunk` | function | 400 |
+| 22 | `lazyWithRetry` | function | 410 |
+| 23 | `shouldSkipIntentWarmup` | function | 488 |
+| 24 | `getIntentPageId` | function | 497 |
+| 25 | `scheduleIntentChunkLoad` | function | 503 |
+| 26 | `run` | const arrow | 510 |
+| 27 | `scheduleInitialPendingSyncRefresh` | function | 534 |
+| 28 | `run` | const arrow | 540 |
+| 29 | `scheduleDeferredPendingSyncPolling` | function | 562 |
+| 30 | `isImportTrackerWakeEvent` | function | 576 |
+| 31 | `isNotificationCenterWakeEvent` | function | 591 |
+| 32 | `useMountedPages` | function | 609 |
+| 33 | `syncProfile` | const arrow | 623 |
+| 34 | `useSyncErrorBanner` | function | 652 |
+| 35 | `refreshPendingSync` | const arrow | 672 |
+| 36 | `onSyncError` | const arrow | 677 |
+| 37 | `onTransientOutage` | const arrow | 683 |
+| 38 | `onSyncRecovered` | const arrow | 691 |
+| 39 | `onQueueChanged` | const arrow | 699 |
+| 40 | `onVaultLocked` | const arrow | 700 |
+| 41 | `onAppUpdate` | const arrow | 701 |
+| 42 | `onConflictReview` | const arrow | 702 |
+| 43 | `useDeferredImportTrackerMount` | function | 750 |
+| 44 | `enable` | const arrow | 763 |
+| 45 | `enableWhenVisible` | const arrow | 767 |
+| 46 | `onImportJobActivity` | const arrow | 772 |
+| 47 | `useDeferredQuickPreferencesMount` | function | 797 |
+| 48 | `enable` | const arrow | 810 |
+| 49 | `useDeferredNotificationCenterMount` | function | 834 |
+| 50 | `enable` | const arrow | 853 |
+| 51 | `enableWhenVisible` | const arrow | 857 |
+| 52 | `onSyncUpdate` | const arrow | 861 |
+| 53 | `onNotificationActivity` | const arrow | 864 |
+| 54 | `useVisibilityRecovery` | function | 899 |
+| 55 | `onVisible` | const arrow | 904 |
+| 56 | `onFocus` | const arrow | 914 |
+| 57 | `useIntentChunkWarmup` | function | 932 |
+| 58 | `warmIntentPage` | const arrow | 939 |
+| 59 | `PageErrorBoundary` | class | 959 |
+| 60 | `Notification` | function | 1012 |
+| 61 | `SyncErrorBanner` | function | 1025 |
+| 62 | `GlobalScrollControls` | function | 1047 |
+| 63 | `scrollTo` | const arrow | 1048 |
+| 64 | `formatSyncTimestamp` | function | 1085 |
+| 65 | `OfflineModeBanner` | function | 1100 |
+| 66 | `PageLoader` | function | 1249 |
+| 67 | `NotificationCenterFallback` | function | 1310 |
+| 68 | `PageSlot` | function | 1325 |
+| 69 | `PublicCatalogView` | function | 1351 |
+| 70 | `App` | export default function | 1361 |
+| 71 | `cleanupRecoveryStorageMarkers` | const arrow | 1436 |
+| 72 | `onQueued` | const arrow | 1465 |
+| 73 | `onSynced` | const arrow | 1478 |
+| 74 | `handleLocationChange` | const arrow | 1503 |
+| 75 | `processFavicon` | function | 1551 |
 
 ### 3.289 `frontend/src/app/AppContextCore.tsx`
 
@@ -6107,11 +6094,10 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `updateMountedPages` | export function | 18 |
-| 2 | `getMountedPageLimit` | export function | 38 |
-| 3 | `shouldWarmPageEntries` | export function | 56 |
-| 4 | `getNotificationPrefix` | export function | 63 |
-| 5 | `getNotificationColor` | export function | 70 |
+| 1 | `updateMountedPages` | export function | 17 |
+| 2 | `getMountedPageLimit` | export function | 37 |
+| 3 | `getNotificationPrefix` | export function | 50 |
+| 4 | `getNotificationColor` | export function | 57 |
 
 ### 3.291 `frontend/src/app/pathRouting.ts`
 
@@ -6871,23 +6857,24 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getDashboardApi` | function | 233 |
-| 2 | `getErrorMessage` | function | 237 |
-| 3 | `getDashboardFilterStorageKey` | function | 286 |
-| 4 | `readDashboardFilterPrefs` | function | 291 |
-| 5 | `downsampleChartRows` | function | 314 |
-| 6 | `normalizeDashboardRangeId` | function | 325 |
-| 7 | `compactDashboardMetaParts` | function | 332 |
-| 8 | `formatDashboardHourLabel` | function | 338 |
-| 9 | `getSaleStatusTone` | function | 345 |
-| 10 | `isDashboardSummaryPayload` | function | 352 |
-| 11 | `isDashboardAnalyticsPayload` | function | 364 |
-| 12 | `normalizeDashboardSummaryPayload` | function | 377 |
-| 13 | `normalizeDashboardAnalyticsPayload` | function | 390 |
-| 14 | `Dashboard` | export default function | 410 |
-| 15 | `calcTrend` | const arrow | 716 |
-| 16 | `rangeLabel` | const arrow | 760 |
-| 17 | `periodShort` | const arrow | 766 |
+| 1 | `getDashboardApi` | function | 232 |
+| 2 | `getErrorMessage` | function | 236 |
+| 3 | `getDashboardFilterStorageKey` | function | 285 |
+| 4 | `readDashboardFilterPrefs` | function | 290 |
+| 5 | `downsampleChartRows` | function | 313 |
+| 6 | `normalizeDashboardRangeId` | function | 324 |
+| 7 | `compactDashboardMetaParts` | function | 331 |
+| 8 | `ChartFallback` | function | 337 |
+| 9 | `formatDashboardHourLabel` | function | 343 |
+| 10 | `getSaleStatusTone` | function | 350 |
+| 11 | `isDashboardSummaryPayload` | function | 357 |
+| 12 | `isDashboardAnalyticsPayload` | function | 369 |
+| 13 | `normalizeDashboardSummaryPayload` | function | 382 |
+| 14 | `normalizeDashboardAnalyticsPayload` | function | 395 |
+| 15 | `Dashboard` | export default function | 415 |
+| 16 | `calcTrend` | const arrow | 721 |
+| 17 | `rangeLabel` | const arrow | 765 |
+| 18 | `periodShort` | const arrow | 771 |
 
 ### 3.335 `frontend/src/components/dashboard/dashboardExport.ts`
 
@@ -7426,13 +7413,13 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `buildVisibleProductIds` | export function | 51 |
-| 2 | `buildParentProductIdSet` | export function | 69 |
-| 3 | `buildSelectedVisibleIds` | export function | 78 |
-| 4 | `buildProductPaginationState` | export function | 83 |
-| 5 | `buildJumpTargetIdsByLetter` | export function | 115 |
-| 6 | `isSelectionScopeFullySelected` | export function | 132 |
-| 7 | `isSelectionScopePartiallySelected` | export function | 136 |
+| 1 | `buildVisibleProductIds` | export function | 54 |
+| 2 | `buildParentProductIdSet` | export function | 72 |
+| 3 | `buildSelectedVisibleIds` | export function | 81 |
+| 4 | `buildProductPaginationState` | export function | 86 |
+| 5 | `buildJumpTargetIdsByLetter` | export function | 121 |
+| 6 | `isSelectionScopeFullySelected` | export function | 138 |
+| 7 | `isSelectionScopePartiallySelected` | export function | 142 |
 
 ### 3.378 `frontend/src/components/products/helpers/productSupplierOptions.ts`
 
@@ -7736,9 +7723,9 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `ProductsListSurface` | export default function | 62 |
-| 2 | `renderDesktopTableHead` | const arrow | 105 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 134 |
+| 1 | `ProductsListSurface` | export default function | 63 |
+| 2 | `renderDesktopTableHead` | const arrow | 107 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 136 |
 
 ### 3.399 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 
@@ -8232,20 +8219,20 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `getProfileApi` | function | 155 |
-| 2 | `getErrorMessage` | function | 160 |
-| 3 | `parseStoredOrganization` | function | 164 |
-| 4 | `AvatarPreview` | function | 181 |
-| 5 | `ProfileSectionButton` | function | 199 |
-| 6 | `clamp` | function | 309 |
-| 7 | `loadImageElement` | function | 313 |
-| 8 | `renderAvatarCropBlob` | function | 328 |
-| 9 | `AvatarEditorModal` | function | 354 |
-| 10 | `UserProfileModal` | export default function | 415 |
-| 11 | `handleProfileSave` | const arrow | 583 |
-| 12 | `handlePasswordSave` | const arrow | 647 |
-| 13 | `handleSessionSave` | const arrow | 686 |
-| 14 | `refreshOtpState` | const arrow | 706 |
+| 1 | `getProfileApi` | function | 167 |
+| 2 | `getErrorMessage` | function | 172 |
+| 3 | `parseStoredOrganization` | function | 176 |
+| 4 | `AvatarPreview` | function | 193 |
+| 5 | `ProfileSectionButton` | function | 211 |
+| 6 | `clamp` | function | 321 |
+| 7 | `loadImageElement` | function | 325 |
+| 8 | `renderAvatarCropBlob` | function | 340 |
+| 9 | `AvatarEditorModal` | function | 366 |
+| 10 | `UserProfileModal` | export default function | 427 |
+| 11 | `handleProfileSave` | const arrow | 595 |
+| 12 | `handlePasswordSave` | const arrow | 659 |
+| 13 | `handleSessionSave` | const arrow | 698 |
+| 14 | `refreshOtpState` | const arrow | 718 |
 
 ### 3.445 `frontend/src/components/users/Users.tsx`
 
@@ -8279,22 +8266,24 @@ Code files scanned: **662**
 | 2 | `isRecord` | function | 108 |
 | 3 | `getErrorMessage` | function | 112 |
 | 4 | `toIso` | function | 144 |
-| 5 | `formatDateTime` | function | 151 |
-| 6 | `formatLogTime` | function | 172 |
-| 7 | `auditDeviceLabel` | function | 176 |
-| 8 | `auditTimezoneLabel` | function | 184 |
-| 9 | `getLogEpoch` | function | 192 |
-| 10 | `formatJsonPretty` | function | 199 |
-| 11 | `parseLogJson` | function | 207 |
-| 12 | `flattenSummaryValue` | function | 215 |
-| 13 | `formatEntityName` | function | 234 |
-| 14 | `readableSummary` | function | 240 |
-| 15 | `normalizeFiniteIds` | function | 268 |
-| 16 | `countSelectedIds` | function | 272 |
-| 17 | `countActiveFlags` | function | 280 |
-| 18 | `DetailRow` | function | 288 |
-| 19 | `AuditLog` | export default function | 300 |
-| 20 | `sessionEntryLabel` | function | 665 |
+| 5 | `formatDateTime` | function | 156 |
+| 6 | `formatCompactDateTime` | function | 177 |
+| 7 | `formatLogTime` | function | 195 |
+| 8 | `formatLogTableTime` | function | 199 |
+| 9 | `auditDeviceLabel` | function | 203 |
+| 10 | `auditTimezoneLabel` | function | 211 |
+| 11 | `getLogEpoch` | function | 219 |
+| 12 | `formatJsonPretty` | function | 226 |
+| 13 | `parseLogJson` | function | 234 |
+| 14 | `flattenSummaryValue` | function | 242 |
+| 15 | `formatEntityName` | function | 261 |
+| 16 | `readableSummary` | function | 267 |
+| 17 | `normalizeFiniteIds` | function | 295 |
+| 18 | `countSelectedIds` | function | 299 |
+| 19 | `countActiveFlags` | function | 307 |
+| 20 | `DetailRow` | function | 315 |
+| 21 | `AuditLog` | export default function | 327 |
+| 22 | `sessionEntryLabel` | function | 692 |
 
 ### 3.447 `frontend/src/components/utils-settings/Backup.tsx`
 
@@ -9461,20 +9450,20 @@ Code files scanned: **662**
 | 3 | `inlinePublicRuntimeScripts` | function | 60 |
 | 4 | `fixCrossorigin` | function | 85 |
 | 5 | `emitBuildManifest` | function | 110 |
-| 6 | `isBundleChunk` | function | 226 |
-| 7 | `toRoutePreloadFiles` | function | 230 |
-| 8 | `buildRoutePreloadScript` | function | 242 |
-| 9 | `normalizePath` | function | 245 |
-| 10 | `isAdminAppPath` | function | 253 |
-| 11 | `isLoginPath` | function | 286 |
-| 12 | `isPublicCatalogPath` | function | 289 |
-| 13 | `hasEmbeddedAuthBootstrap` | function | 295 |
-| 14 | `routePreloadKey` | function | 298 |
-| 15 | `injectRouteAwareModulePreloads` | function | 352 |
-| 16 | `deferRenderBlockingStylesheets` | function | 373 |
-| 17 | `activate` | function | 396 |
-| 18 | `shouldDeferModulePreload` | function | 595 |
-| 19 | `manualChunks` | function | 599 |
+| 6 | `isBundleChunk` | function | 221 |
+| 7 | `toRoutePreloadFiles` | function | 225 |
+| 8 | `buildRoutePreloadScript` | function | 237 |
+| 9 | `normalizePath` | function | 240 |
+| 10 | `isAdminAppPath` | function | 248 |
+| 11 | `isLoginPath` | function | 281 |
+| 12 | `isPublicCatalogPath` | function | 284 |
+| 13 | `hasEmbeddedAuthBootstrap` | function | 290 |
+| 14 | `routePreloadKey` | function | 293 |
+| 15 | `injectRouteAwareModulePreloads` | function | 347 |
+| 16 | `deferRenderBlockingStylesheets` | function | 368 |
+| 17 | `activate` | function | 391 |
+| 18 | `shouldDeferModulePreload` | function | 589 |
+| 19 | `manualChunks` | function | 593 |
 
 ### 3.582 `ops/scripts/architecture/generated-bulk-audit.ts`
 
@@ -9867,38 +9856,40 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `readArg` | function | 131 |
-| 2 | `readArgs` | function | 138 |
-| 3 | `safeName` | function | 154 |
-| 4 | `escapeRegExp` | function | 158 |
-| 5 | `addFinding` | function | 162 |
-| 6 | `isExternalConsoleNoise` | function | 171 |
-| 7 | `isAppConsoleIssue` | function | 175 |
-| 8 | `requestJson` | function | 181 |
-| 9 | `captureHealth` | function | 193 |
-| 10 | `buildContextOptions` | function | 206 |
-| 11 | `attachConsoleCapture` | function | 215 |
-| 12 | `saveScreenshot` | function | 236 |
-| 13 | `waitForRouteReady` | function | 243 |
-| 14 | `getActiveRouteRoot` | function | 264 |
-| 15 | `dismissTransientUi` | function | 268 |
-| 16 | `clickWithFallback` | function | 286 |
-| 17 | `countVisibleDialogs` | function | 296 |
-| 18 | `countVisibleNamedButtons` | function | 312 |
-| 19 | `countVisiblePortalLayers` | function | 324 |
-| 20 | `clickVisibleButton` | function | 337 |
-| 21 | `findButtonInLocator` | function | 356 |
-| 22 | `openMobileMoreDrawer` | function | 377 |
-| 23 | `navigateViaUi` | function | 386 |
-| 24 | `verifyExpectation` | function | 501 |
-| 25 | `clickNamedButton` | function | 568 |
-| 26 | `clickTestIdButton` | function | 620 |
-| 27 | `performSearchInteraction` | function | 670 |
-| 28 | `findSearchInput` | function | 673 |
-| 29 | `runRouteInteractions` | function | 741 |
-| 30 | `bootstrapProfile` | function | 755 |
-| 31 | `runProfile` | function | 772 |
-| 32 | `main` | function | 840 |
+| 1 | `readArg` | function | 145 |
+| 2 | `readArgs` | function | 152 |
+| 3 | `safeName` | function | 168 |
+| 4 | `escapeRegExp` | function | 172 |
+| 5 | `addFinding` | function | 176 |
+| 6 | `isExternalConsoleNoise` | function | 185 |
+| 7 | `isAppConsoleIssue` | function | 189 |
+| 8 | `loadRuntimeModules` | function | 195 |
+| 9 | `requestJson` | function | 210 |
+| 10 | `captureHealth` | function | 222 |
+| 11 | `buildContextOptions` | function | 235 |
+| 12 | `attachConsoleCapture` | function | 244 |
+| 13 | `saveScreenshot` | function | 265 |
+| 14 | `waitForRouteReady` | function | 272 |
+| 15 | `getActiveRouteRoot` | function | 293 |
+| 16 | `dismissTransientUi` | function | 297 |
+| 17 | `clickWithFallback` | function | 315 |
+| 18 | `countVisibleDialogs` | function | 325 |
+| 19 | `countVisibleNamedButtons` | function | 341 |
+| 20 | `countVisiblePortalLayers` | function | 353 |
+| 21 | `clickVisibleButton` | function | 366 |
+| 22 | `findButtonInLocator` | function | 385 |
+| 23 | `findNavButtonInLocator` | function | 406 |
+| 24 | `openMobileMoreDrawer` | function | 427 |
+| 25 | `navigateViaUi` | function | 439 |
+| 26 | `verifyExpectation` | function | 554 |
+| 27 | `clickNamedButton` | function | 621 |
+| 28 | `clickTestIdButton` | function | 673 |
+| 29 | `performSearchInteraction` | function | 723 |
+| 30 | `findSearchInput` | function | 726 |
+| 31 | `runRouteInteractions` | function | 794 |
+| 32 | `bootstrapProfile` | function | 808 |
+| 33 | `runProfile` | function | 825 |
+| 34 | `main` | function | 893 |
 
 ### 3.605 `ops/scripts/runtime/build-ecosystem-config.ts`
 
@@ -10058,22 +10049,22 @@ Code files scanned: **662**
 | 29 | `renderSeededRollbackMarkdown` | function | 488 |
 | 30 | `renderCoverageMarkdown` | function | 521 |
 | 31 | `addCoverageGateFindings` | function | 581 |
-| 32 | `persistSummary` | function | 641 |
-| 33 | `saveScreenshot` | function | 672 |
-| 34 | `dismissTransientUi` | function | 679 |
-| 35 | `waitForRouteReady` | function | 697 |
-| 36 | `navigateRoute` | function | 713 |
-| 37 | `countVisible` | function | 730 |
-| 38 | `activeButtonCandidates` | function | 739 |
-| 39 | `clickButtonCandidate` | function | 775 |
-| 40 | `exerciseSearchInputs` | function | 865 |
-| 41 | `exerciseSelects` | function | 909 |
-| 42 | `collectLayoutIssues` | function | 966 |
-| 43 | `hasScrollableAncestor` | const arrow | 1002 |
-| 44 | `runRoute` | function | 1041 |
-| 45 | `createAuthedPage` | function | 1111 |
-| 46 | `runProfile` | function | 1130 |
-| 47 | `main` | function | 1175 |
+| 32 | `persistSummary` | function | 642 |
+| 33 | `saveScreenshot` | function | 673 |
+| 34 | `dismissTransientUi` | function | 680 |
+| 35 | `waitForRouteReady` | function | 698 |
+| 36 | `navigateRoute` | function | 714 |
+| 37 | `countVisible` | function | 731 |
+| 38 | `activeButtonCandidates` | function | 740 |
+| 39 | `clickButtonCandidate` | function | 776 |
+| 40 | `exerciseSearchInputs` | function | 866 |
+| 41 | `exerciseSelects` | function | 910 |
+| 42 | `collectLayoutIssues` | function | 967 |
+| 43 | `hasScrollableAncestor` | const arrow | 1003 |
+| 44 | `runRoute` | function | 1042 |
+| 45 | `createAuthedPage` | function | 1112 |
+| 46 | `runProfile` | function | 1131 |
+| 47 | `main` | function | 1176 |
 
 ### 3.613 `ops/scripts/runtime/live-checks/filter-burst-check.ts`
 

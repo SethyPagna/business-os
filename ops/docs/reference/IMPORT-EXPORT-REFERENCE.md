@@ -299,7 +299,7 @@ Code files documented: **662**
 | 287 | `frontend/src/api/websocket.ts` | 2 | 7 | 2 | 2 |
 | 288 | `frontend/src/App.tsx` | 35 | 1 | 30 | 1 |
 | 289 | `frontend/src/app/AppContextCore.tsx` | 1 | 8 | 0 | 6 |
-| 290 | `frontend/src/app/appShellUtils.ts` | 0 | 9 | 0 | 3 |
+| 290 | `frontend/src/app/appShellUtils.ts` | 0 | 7 | 0 | 3 |
 | 291 | `frontend/src/app/pathRouting.ts` | 0 | 7 | 0 | 2 |
 | 292 | `frontend/src/app/PublicCatalogAppProvider.tsx` | 1 | 1 | 0 | 1 |
 | 293 | `frontend/src/app/publicErrorRecovery.ts` | 0 | 3 | 0 | 1 |
@@ -343,7 +343,7 @@ Code files documented: **662**
 | 331 | `frontend/src/components/dashboard/charts/index.ts` | 0 | 0 | 0 | 1 |
 | 332 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 3 | 1 | 2 | 1 |
 | 333 | `frontend/src/components/dashboard/charts/NoData.tsx` | 0 | 1 | 0 | 3 |
-| 334 | `frontend/src/components/dashboard/Dashboard.tsx` | 17 | 1 | 14 | 1 |
+| 334 | `frontend/src/components/dashboard/Dashboard.tsx` | 16 | 1 | 13 | 1 |
 | 335 | `frontend/src/components/dashboard/dashboardExport.ts` | 4 | 9 | 4 | 1 |
 | 336 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 | 1 | 0 | 1 |
 | 337 | `frontend/src/components/files/FilePickerModal.tsx` | 4 | 1 | 3 | 5 |
@@ -439,7 +439,7 @@ Code files documented: **662**
 | 427 | `frontend/src/components/shared/globalScroll.ts` | 0 | 2 | 0 | 2 |
 | 428 | `frontend/src/components/shared/ImageGalleryLightbox.tsx` | 4 | 1 | 0 | 3 |
 | 429 | `frontend/src/components/shared/LazyPortalMenu.tsx` | 2 | 1 | 1 | 5 |
-| 430 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 6 |
+| 430 | `frontend/src/components/shared/LoadingWatchdog.tsx` | 1 | 1 | 0 | 5 |
 | 431 | `frontend/src/components/shared/Modal.tsx` | 1 | 1 | 0 | 22 |
 | 432 | `frontend/src/components/shared/navigationConfig.ts` | 0 | 4 | 0 | 3 |
 | 433 | `frontend/src/components/shared/NotificationCenter.tsx` | 16 | 1 | 3 | 1 |
@@ -613,7 +613,7 @@ Code files documented: **662**
 | 601 | `ops/scripts/runtime/audits/audit-report-html.ts` | 4 | 3 | 1 | 3 |
 | 602 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 9 | 0 | 3 | 0 |
 | 603 | `ops/scripts/runtime/audits/full-app-audit.ts` | 9 | 0 | 3 | 0 |
-| 604 | `ops/scripts/runtime/browser-action-smoke.ts` | 8 | 0 | 3 | 0 |
+| 604 | `ops/scripts/runtime/browser-action-smoke.ts` | 7 | 0 | 3 | 0 |
 | 605 | `ops/scripts/runtime/build-ecosystem-config.ts` | 3 | 0 | 0 | 0 |
 | 606 | `ops/scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts` | 3 | 0 | 0 | 0 |
 | 607 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | 4 | 0 | 0 | 0 |
@@ -6113,7 +6113,7 @@ Code files documented: **662**
 
 ### 3.290 `frontend/src/app/appShellUtils.ts`
 
-- Declared exports: `DESKTOP_WARMUP_BREAKPOINT`, `MAX_MOUNTED_PAGES`, `MOBILE_MAX_MOUNTED_PAGES`, `MOBILE_SHELL_BREAKPOINT`, `getMountedPageLimit`, `getNotificationColor`, `getNotificationPrefix`, `shouldWarmPageEntries`, `updateMountedPages`
+- Declared exports: `MAX_MOUNTED_PAGES`, `MOBILE_MAX_MOUNTED_PAGES`, `MOBILE_SHELL_BREAKPOINT`, `getMountedPageLimit`, `getNotificationColor`, `getNotificationPrefix`, `updateMountedPages`
 - Imports (0)
   - none
 - Internal dependencies (0)
@@ -7046,7 +7046,7 @@ Code files documented: **662**
 ### 3.334 `frontend/src/components/dashboard/Dashboard.tsx`
 
 - Declared exports: `function`
-- Imports (17)
+- Imports (16)
   - `../../AppContext.tsx`
   - `../../api/dashboardTransport.ts`
   - `../../api/http.ts`
@@ -7054,7 +7054,6 @@ Code files documented: **662**
   - `../../utils/formatters`
   - `../../utils/loaders.ts`
   - `../shared/ExportMenu`
-  - `../shared/LoadingWatchdog`
   - `../shared/pageActivity`
   - `./MiniStat`
   - `./charts/BarChart`
@@ -7064,7 +7063,7 @@ Code files documented: **662**
   - `lucide-react/dist/esm/icons/layout-dashboard.js`
   - `lucide-react/dist/esm/icons/refresh-cw.js`
   - `react`
-- Internal dependencies (14)
+- Internal dependencies (13)
   - `frontend/src/AppContext.tsx`
   - `frontend/src/api/dashboardTransport.ts`
   - `frontend/src/api/http.ts`
@@ -7074,7 +7073,6 @@ Code files documented: **662**
   - `frontend/src/components/dashboard/charts/LineChart.tsx`
   - `frontend/src/components/dashboard/dashboardExport.ts`
   - `frontend/src/components/shared/ExportMenu.tsx`
-  - `frontend/src/components/shared/LoadingWatchdog.tsx`
   - `frontend/src/components/shared/pageActivity.ts`
   - `frontend/src/utils/dateHelpers.ts`
   - `frontend/src/utils/formatters.ts`
@@ -8907,9 +8905,8 @@ Code files documented: **662**
   - `react`
 - Internal dependencies (0)
   - none
-- Referenced by (6)
+- Referenced by (5)
   - `frontend/src/components/contacts/shared.tsx`
-  - `frontend/src/components/dashboard/Dashboard.tsx`
   - `frontend/src/components/inventory/Inventory.tsx`
   - `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx`
   - `frontend/src/components/utils-settings/Backup.tsx`
@@ -11452,14 +11449,13 @@ Code files documented: **662**
 ### 3.604 `ops/scripts/runtime/browser-action-smoke.ts`
 
 - Declared exports: none detected
-- Imports (8)
+- Imports (7)
   - `./audits/audit-auth.ts`
   - `./audits/audit-manifest.ts`
   - `./audits/audit-report-html.ts`
   - `node:fs/promises`
   - `node:path`
   - `node:perf_hooks`
-  - `node:url`
   - `playwright`
 - Internal dependencies (3)
   - `ops/scripts/runtime/audits/audit-auth.ts`

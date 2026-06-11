@@ -8,9 +8,9 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 916, remove broad admin page-entry chunk warmup
-  so route chunks preload from explicit navigation intent instead of background
-  page-entry sweeps.
+- Latest completed move: Move 917, remove the remaining empty shell warmup
+  scaffolding so no no-op timers, load listeners, or background warmup loops
+  remain after the Move 916 route-warmup cleanup.
 
 ## Current Baseline
 
@@ -18,28 +18,32 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `d28e11425b540cf1`
+  `d1b4010fc17587c2`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 916 source state; Docker image `business-os:v6.0.0-202606112011`
-  serves frontend hash `d28e11425b540cf1` and source hash
+  this Move 917 source state; Docker image `business-os:v6.0.0-202606112037`
+  serves frontend hash `d1b4010fc17587c2` and source hash
   `3b68f7362c866cc6`
 
 Latest verified reports:
 
-- latest Move 916 local LCP trace:
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-13-59-671Z.json`
-- latest Move 916 public-host LCP trace:
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-14-51-147Z.json`
-- latest Move 916 browser action smoke:
-  `ops/runtime/reports/browser-action-smoke-2026-06-11T12-14-02-039Z/summary.json`
-- latest Move 916 all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-11T12-14-52-194Z/summary.json`
-- latest Move 916 cleanup result:
-  deleted ignored/regenerable `release/` (380,982,112 bytes) and
-  `frontend/dist/` (31,863,098 bytes) after Docker/live proof, reclaiming
-  412,845,210 bytes; uploads, secrets, database, node_modules, backups, and
-  the running Docker image were preserved. Phase 29 audit passed afterward
-  with 9 checks and 0 failures.
+- latest Move 917 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-39-11-540Z.json`
+- latest Move 917 admin Cloudflare LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-44-02-665Z.json`
+- latest Move 917 direct public-host LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-44-32-924Z.json`
+- latest Move 917 browser action smoke:
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T12-39-39-097Z/summary.json`
+- latest Move 917 all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T12-40-23-750Z/summary.json`
+- latest Move 917 cleanup result:
+  deleted ignored/regenerable `release/` (380,980,576 bytes) and
+  `frontend/dist/` (31,861,007 bytes) after Docker/live proof, reclaiming
+  412,841,583 bytes; guarded storage prune removed 10,760,267 bytes of old
+  reports, pruned Docker builder cache, and removed only old `business-os:v*`
+  image tags while preserving uploads, secrets, database, node_modules,
+  backups, volumes, and active Docker image `business-os:v6.0.0-202606112037`.
+  Phase 29 audit passed afterward with 9 checks and 0 failures.
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest passing all-pages control audit:

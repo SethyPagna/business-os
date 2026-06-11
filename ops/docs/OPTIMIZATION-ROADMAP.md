@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 915.
+- Latest completed implementation move in this roadmap: Move 917.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15634,3 +15634,11 @@ Move 916 status:
 - Verification proof: frontend utility suite, frontend typecheck, frontend production build, Docker release build/start health, local/public LCP route traces, browser action smoke, broad all-pages control audit, storage prune, Phase 29 audit, and `git diff --check` passed.
 - Cleanup proof: after Docker image/start/live proof, ignored/regenerable `release/` (380,982,112 bytes) and `frontend/dist/` (31,863,098 bytes) were deleted, reclaiming 412,845,210 bytes. Guarded `prune-storage` preserved protected uploads, secrets, database, backups, volumes, node_modules, and the running Docker image. Phase 29 audit passed afterward with 9 checks and 0 failures.
 - Current plan position after Move 916: Phase 8.4 remains active; Phase 26 stays at 51 completed organization moves; Phase 28 remains active with R2/access follow-up open; Phase 29 remains active. Remaining external blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 917 status:
+- Move 917 deletes the empty shell warmup scaffolding left after broad route/data warmups were disabled. `useChunkWarmup`, `useDataWarmup`, empty warmup page lists, delayed load scheduling, and the no-op data warmup helpers are gone from `frontend/src/App.tsx`; explicit navigation-intent chunk preloading remains as the only shell route warmup.
+- Runtime proof: Docker image `business-os:v6.0.0-202606112037` is healthy with frontend hash `d1b4010fc17587c2` and source hash `3b68f7362c866cc6`.
+- Playwright proof: local LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T12-39-11-540Z.json` measured Dashboard 292 ms, Products 268 ms, Inventory 252 ms, POS 212 ms, Files 228 ms, Branches 212 ms, Audit Log 336 ms, Settings 260 ms, and Public Catalog 236 ms with zero failed requests/errors. Admin Cloudflare LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T12-44-02-665Z.json` and direct public-host LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T12-44-32-924Z.json` both kept all 9 checked routes at or below 320 ms. Browser action smoke `ops/runtime/reports/browser-action-smoke-2026-06-11T12-39-39-097Z/summary.json` passed 34 routes and 28 actions with 0 findings. Broad all-pages control audit `ops/runtime/reports/all-pages-control-audit-2026-06-11T12-40-23-750Z/summary.json` passed 34 routes, 460 controls, 404 tested controls, 0 failed controls, and 0 findings.
+- Verification proof: frontend utility suite, frontend production build, Docker release build/start health, local/admin/public LCP route traces, browser action smoke, broad all-pages control audit, guarded storage prune, Phase 29 audit, and `git diff --check` passed.
+- Cleanup proof: after Docker image/start/live proof, ignored/regenerable `release/` (380,980,576 bytes) and `frontend/dist/` (31,861,007 bytes) were deleted, reclaiming 412,841,583 bytes. Guarded `prune-storage` removed 10,760,267 bytes of old reports, reclaimed Docker builder cache, and removed only old `business-os:v*` image tags while preserving protected uploads, secrets, database, backups, volumes, node_modules, and active Docker image `business-os:v6.0.0-202606112037`. Phase 29 audit passed afterward with 9 checks and 0 failures.
+- Current plan position after Move 917: Phase 8.4 remains active; Phase 26 stays at 51 completed organization moves; Phase 28 remains active with R2/access follow-up open; Phase 29 remains active. Remaining external blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run `npm --prefix ops run cloudflare:apply-cache`.

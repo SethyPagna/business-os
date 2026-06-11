@@ -105,8 +105,8 @@ Total files documented: **735**
 | 93 | `backend/package-lock.json` | backend-root | 6225 | 224.7 | Configuration/data manifest |
 | 94 | `backend/package.json` | backend-root | 69 | 4.0 | Configuration/data manifest |
 | 95 | `backend/README.md` | backend-root | 14 | 0.7 | Documentation |
-| 96 | `backend/server.js` | backend-root | 869 | 39.3 | Backend server entrypoint |
-| 97 | `backend/server.ts` | backend-root | 888 | 33.1 | Project source/support file |
+| 96 | `backend/server.js` | backend-root | 868 | 39.1 | Backend server entrypoint |
+| 97 | `backend/server.ts` | backend-root | 887 | 33.0 | Project source/support file |
 | 98 | `backend/src/accessControl.ts` | backend-core | 218 | 6.2 | Project source/support file |
 | 99 | `backend/src/analytics/duckdbRuntime.ts` | backend-core | 109 | 3.0 | Project source/support file |
 | 100 | `backend/src/authOtpGuards.ts` | backend-core | 34 | 1.2 | Project source/support file |
@@ -158,9 +158,9 @@ Total files documented: **735**
 | 146 | `backend/src/routes/portal.ts` | backend-routes | 1478 | 54.0 | API route handler |
 | 147 | `backend/src/routes/products.ts` | backend-routes | 2310 | 102.4 | API route handler |
 | 148 | `backend/src/routes/README.md` | backend-routes | 37 | 1.5 | API route handler |
-| 149 | `backend/src/routes/returns.ts` | backend-routes | 1150 | 44.2 | API route handler |
+| 149 | `backend/src/routes/returns.ts` | backend-routes | 1153 | 44.3 | API route handler |
 | 150 | `backend/src/routes/runtime.ts` | backend-routes | 157 | 4.7 | API route handler |
-| 151 | `backend/src/routes/sales.ts` | backend-routes | 1591 | 65.2 | API route handler |
+| 151 | `backend/src/routes/sales.ts` | backend-routes | 1605 | 65.5 | API route handler |
 | 152 | `backend/src/routes/settings.ts` | backend-routes | 249 | 8.9 | API route handler |
 | 153 | `backend/src/routes/sync.ts` | backend-routes | 301 | 13.3 | API route handler |
 | 154 | `backend/src/routes/system/index.ts` | backend-routes | 1674 | 65.6 | API route handler |
@@ -171,7 +171,7 @@ Total files documented: **735**
 | 159 | `backend/src/runtimeVersion.ts` | backend-core | 176 | 4.4 | Project source/support file |
 | 160 | `backend/src/schemaMetadata.ts` | backend-core | 155 | 3.7 | Project source/support file |
 | 161 | `backend/src/security.ts` | backend-core | 253 | 7.1 | Project source/support file |
-| 162 | `backend/src/serverUtils.ts` | backend-core | 459 | 16.6 | Project source/support file |
+| 162 | `backend/src/serverUtils.ts` | backend-core | 459 | 16.7 | Project source/support file |
 | 163 | `backend/src/services/aiGateway.ts` | backend-services | 364 | 13.6 | Integration/service layer |
 | 164 | `backend/src/services/backupPackages.ts` | backend-services | 1060 | 36.3 | Integration/service layer |
 | 165 | `backend/src/services/firebaseAuth.ts` | backend-services | 384 | 14.3 | Integration/service layer |
@@ -237,7 +237,7 @@ Total files documented: **735**
 | 225 | `backend/test/productSearchPagination.test.ts` | backend-root | 30 | 3.3 | Project source/support file |
 | 226 | `backend/test/returnsListCache.test.ts` | backend-root | 85 | 2.9 | Project source/support file |
 | 227 | `backend/test/rfidRoutes.test.ts` | backend-root | 59 | 3.0 | Project source/support file |
-| 228 | `backend/test/routeContracts.test.ts` | backend-root | 378 | 24.8 | Project source/support file |
+| 228 | `backend/test/routeContracts.test.ts` | backend-root | 383 | 25.1 | Project source/support file |
 | 229 | `backend/test/runtimeCache.test.ts` | backend-root | 65 | 2.0 | Project source/support file |
 | 230 | `backend/test/runtimeVersion.test.ts` | backend-root | 61 | 2.1 | Project source/support file |
 | 231 | `backend/test/schemaMetadata.test.ts` | backend-root | 117 | 3.9 | Project source/support file |
@@ -248,7 +248,7 @@ Total files documented: **735**
 | 236 | `backend/test/uploadSecurity.test.ts` | backend-root | 59 | 2.0 | Project source/support file |
 | 237 | `backend/test/websocket.test.ts` | backend-root | 9 | 0.3 | Project source/support file |
 | 238 | `frontend/.npmrc` | frontend-root | 14 | 0.4 | Project source/support file |
-| 239 | `frontend/index.html` | frontend-root | 249 | 8.2 | Project source/support file |
+| 239 | `frontend/index.html` | frontend-root | 231 | 7.5 | Project source/support file |
 | 240 | `frontend/package-lock.json` | frontend-root | 3833 | 131.7 | Configuration/data manifest |
 | 241 | `frontend/package.json` | frontend-root | 47 | 4.4 | Configuration/data manifest |
 | 242 | `frontend/public/favicon.ico` | frontend-root | 0 | 11.4 | Project source/support file |
@@ -325,9 +325,9 @@ Total files documented: **735**
 | 313 | `frontend/src/api/userAdminTransport.ts` | frontend-api | 129 | 3.6 | Frontend API/sync helper |
 | 314 | `frontend/src/api/userReadTransport.ts` | frontend-api | 16 | 0.4 | Frontend API/sync helper |
 | 315 | `frontend/src/api/websocket.ts` | frontend-api | 247 | 8.1 | Frontend API/sync helper |
-| 316 | `frontend/src/App.tsx` | frontend-core | 2009 | 75.8 | Main app shell and page mounting |
+| 316 | `frontend/src/App.tsx` | frontend-core | 1740 | 66.3 | Main app shell and page mounting |
 | 317 | `frontend/src/app/AppContextCore.tsx` | frontend-core | 147 | 5.2 | Project source/support file |
-| 318 | `frontend/src/app/appShellUtils.ts` | frontend-core | 77 | 2.4 | Project source/support file |
+| 318 | `frontend/src/app/appShellUtils.ts` | frontend-core | 64 | 2.0 | Project source/support file |
 | 319 | `frontend/src/app/pathRouting.ts` | frontend-core | 93 | 2.9 | Project source/support file |
 | 320 | `frontend/src/app/PublicCatalogAppProvider.tsx` | frontend-core | 39 | 1.1 | Project source/support file |
 | 321 | `frontend/src/app/publicErrorRecovery.ts` | frontend-core | 35 | 1.3 | Project source/support file |
@@ -371,7 +371,7 @@ Total files documented: **735**
 | 359 | `frontend/src/components/dashboard/charts/index.ts` | frontend-ui | 5 | 0.2 | UI component/page |
 | 360 | `frontend/src/components/dashboard/charts/LineChart.tsx` | frontend-ui | 245 | 9.6 | UI component/page |
 | 361 | `frontend/src/components/dashboard/charts/NoData.tsx` | frontend-ui | 8 | 0.2 | UI component/page |
-| 362 | `frontend/src/components/dashboard/Dashboard.tsx` | frontend-ui | 1958 | 100.4 | UI component/page |
+| 362 | `frontend/src/components/dashboard/Dashboard.tsx` | frontend-ui | 1950 | 100.3 | UI component/page |
 | 363 | `frontend/src/components/dashboard/dashboardExport.ts` | frontend-ui | 486 | 19.6 | UI component/page |
 | 364 | `frontend/src/components/dashboard/MiniStat.tsx` | frontend-ui | 53 | 2.0 | UI component/page |
 | 365 | `frontend/src/components/files/FilePickerModal.tsx` | frontend-ui | 346 | 14.2 | UI component/page |
@@ -379,13 +379,13 @@ Total files documented: **735**
 | 367 | `frontend/src/components/files/FilesProvidersTab.tsx` | frontend-ui | 348 | 20.3 | UI component/page |
 | 368 | `frontend/src/components/files/FilesResponsesTab.tsx` | frontend-ui | 195 | 11.3 | UI component/page |
 | 369 | `frontend/src/components/inventory/DualMoney.tsx` | frontend-ui | 16 | 0.4 | UI component/page |
-| 370 | `frontend/src/components/inventory/Inventory.tsx` | frontend-ui | 3489 | 160.8 | UI component/page |
+| 370 | `frontend/src/components/inventory/Inventory.tsx` | frontend-ui | 3488 | 160.9 | UI component/page |
 | 371 | `frontend/src/components/inventory/InventoryBatchModal.tsx` | frontend-ui | 330 | 16.8 | UI component/page |
 | 372 | `frontend/src/components/inventory/inventoryExport.ts` | frontend-ui | 496 | 24.8 | UI component/page |
 | 373 | `frontend/src/components/inventory/InventoryImportModal.tsx` | frontend-ui | 299 | 13.0 | UI component/page |
 | 374 | `frontend/src/components/inventory/inventoryImportWorker.ts` | frontend-ui | 39 | 1.0 | UI component/page |
 | 375 | `frontend/src/components/inventory/InventoryMovementsSurface.tsx` | frontend-ui | 678 | 38.9 | UI component/page |
-| 376 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | frontend-ui | 566 | 34.5 | UI component/page |
+| 376 | `frontend/src/components/inventory/InventoryProductsSurface.tsx` | frontend-ui | 549 | 33.5 | UI component/page |
 | 377 | `frontend/src/components/inventory/InventoryReasonManagerModal.tsx` | frontend-ui | 109 | 4.9 | UI component/page |
 | 378 | `frontend/src/components/inventory/InventoryRfidSurface.tsx` | frontend-ui | 180 | 9.6 | UI component/page |
 | 379 | `frontend/src/components/inventory/InventoryStatDetailModal.tsx` | frontend-ui | 64 | 3.3 | UI component/page |
@@ -393,7 +393,7 @@ Total files documented: **735**
 | 381 | `frontend/src/components/inventory/movementGroups.ts` | frontend-ui | 287 | 12.9 | UI component/page |
 | 382 | `frontend/src/components/inventory/ProductDetailModal.tsx` | frontend-ui | 267 | 15.0 | UI component/page |
 | 383 | `frontend/src/components/loyalty-points/LoyaltyPointsPage.tsx` | frontend-ui | 731 | 40.2 | UI component/page |
-| 384 | `frontend/src/components/navigation/Sidebar.tsx` | frontend-ui | 399 | 18.4 | UI component/page |
+| 384 | `frontend/src/components/navigation/Sidebar.tsx` | frontend-ui | 410 | 18.7 | UI component/page |
 | 385 | `frontend/src/components/pos/CartItem.tsx` | frontend-ui | 160 | 6.5 | UI component/page |
 | 386 | `frontend/src/components/pos/FilterPanel.tsx` | frontend-ui | 305 | 12.4 | UI component/page |
 | 387 | `frontend/src/components/pos/POS.tsx` | frontend-ui | 2362 | 115.0 | UI component/page |
@@ -414,7 +414,7 @@ Total files documented: **735**
 | 402 | `frontend/src/components/products/helpers/productGroupViewHelpers.ts` | frontend-ui | 46 | 1.6 | UI component/page |
 | 403 | `frontend/src/components/products/helpers/productMenuHelpers.ts` | frontend-ui | 300 | 11.3 | UI component/page |
 | 404 | `frontend/src/components/products/helpers/productPageHelpers.ts` | frontend-ui | 25 | 0.8 | UI component/page |
-| 405 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | frontend-ui | 139 | 4.2 | UI component/page |
+| 405 | `frontend/src/components/products/helpers/productSelectionHelpers.ts` | frontend-ui | 145 | 4.3 | UI component/page |
 | 406 | `frontend/src/components/products/helpers/productSupplierOptions.ts` | frontend-ui | 4 | 0.2 | UI component/page |
 | 407 | `frontend/src/components/products/helpers/productWriteHelpers.ts` | frontend-ui | 372 | 12.7 | UI component/page |
 | 408 | `frontend/src/components/products/history/productHistoryHelpers.ts` | frontend-ui | 46 | 1.4 | UI component/page |
@@ -425,7 +425,7 @@ Total files documented: **735**
 | 413 | `frontend/src/components/products/lookups/ManageCategoriesModal.tsx` | frontend-ui | 610 | 25.2 | UI component/page |
 | 414 | `frontend/src/components/products/lookups/ManageUnitsModal.tsx` | frontend-ui | 610 | 24.1 | UI component/page |
 | 415 | `frontend/src/components/products/lookups/productLookupSnapshots.ts` | frontend-ui | 229 | 7.3 | UI component/page |
-| 416 | `frontend/src/components/products/Products.tsx` | frontend-ui | 2580 | 119.2 | UI component/page |
+| 416 | `frontend/src/components/products/Products.tsx` | frontend-ui | 2585 | 119.4 | UI component/page |
 | 417 | `frontend/src/components/products/scanning/barcodeImageScanner.ts` | frontend-ui | 125 | 4.1 | UI component/page |
 | 418 | `frontend/src/components/products/scanning/BarcodeScannerModal.tsx` | frontend-ui | 648 | 30.3 | UI component/page |
 | 419 | `frontend/src/components/products/scanning/barcodeScannerState.ts` | frontend-ui | 82 | 2.5 | UI component/page |
@@ -435,7 +435,7 @@ Total files documented: **735**
 | 423 | `frontend/src/components/products/surfaces/HeaderActions.tsx` | frontend-ui | 157 | 6.0 | UI component/page |
 | 424 | `frontend/src/components/products/surfaces/ProductDetailModal.tsx` | frontend-ui | 327 | 14.6 | UI component/page |
 | 425 | `frontend/src/components/products/surfaces/ProductRowParts.tsx` | frontend-ui | 198 | 6.8 | UI component/page |
-| 426 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | frontend-ui | 392 | 20.5 | UI component/page |
+| 426 | `frontend/src/components/products/surfaces/ProductsListSurface.tsx` | frontend-ui | 396 | 20.7 | UI component/page |
 | 427 | `frontend/src/components/README.md` | frontend-ui | 37 | 1.9 | UI component/page |
 | 428 | `frontend/src/components/receipt-settings/AllFieldsPanel.tsx` | frontend-ui | 121 | 4.5 | UI component/page |
 | 429 | `frontend/src/components/receipt-settings/constants.ts` | frontend-ui | 156 | 7.9 | UI component/page |
@@ -482,9 +482,9 @@ Total files documented: **735**
 | 470 | `frontend/src/components/users/permissionDefinitions.ts` | frontend-ui | 66 | 3.0 | UI component/page |
 | 471 | `frontend/src/components/users/PermissionEditor.tsx` | frontend-ui | 128 | 5.4 | UI component/page |
 | 472 | `frontend/src/components/users/UserDetailSheet.tsx` | frontend-ui | 145 | 6.1 | UI component/page |
-| 473 | `frontend/src/components/users/UserProfileModal.tsx` | frontend-ui | 1326 | 68.2 | UI component/page |
+| 473 | `frontend/src/components/users/UserProfileModal.tsx` | frontend-ui | 1344 | 68.9 | UI component/page |
 | 474 | `frontend/src/components/users/Users.tsx` | frontend-ui | 1280 | 58.7 | UI component/page |
-| 475 | `frontend/src/components/utils-settings/AuditLog.tsx` | frontend-ui | 1293 | 59.6 | UI component/page |
+| 475 | `frontend/src/components/utils-settings/AuditLog.tsx` | frontend-ui | 1322 | 60.5 | UI component/page |
 | 476 | `frontend/src/components/utils-settings/Backup.tsx` | frontend-ui | 1779 | 80.1 | UI component/page |
 | 477 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | frontend-ui | 74 | 3.1 | UI component/page |
 | 478 | `frontend/src/components/utils-settings/index.ts` | frontend-ui | 7 | 0.3 | UI component/page |
@@ -493,7 +493,7 @@ Total files documented: **735**
 | 481 | `frontend/src/components/utils-settings/Settings.tsx` | frontend-ui | 1911 | 88.1 | UI component/page |
 | 482 | `frontend/src/components/utils-settings/settingsConflict.ts` | frontend-ui | 64 | 1.8 | UI component/page |
 | 483 | `frontend/src/constants.ts` | frontend-core | 185 | 4.6 | Project source/support file |
-| 484 | `frontend/src/index.tsx` | frontend-core | 245 | 8.6 | Project source/support file |
+| 484 | `frontend/src/index.tsx` | frontend-core | 244 | 8.5 | Project source/support file |
 | 485 | `frontend/src/lang/en.json` | frontend-i18n | 2721 | 134.5 | Localization dictionary |
 | 486 | `frontend/src/lang/km.json` | frontend-i18n | 2730 | 246.7 | Localization dictionary |
 | 487 | `frontend/src/platform/runtime/clientRuntime.ts` | frontend-core | 249 | 9.1 | Project source/support file |
@@ -554,7 +554,7 @@ Total files documented: **735**
 | 542 | `frontend/tests/adminShellMediaGuards.test.ts` | frontend-root | 147 | 5.5 | Project source/support file |
 | 543 | `frontend/tests/apiHttp.test.ts` | frontend-root | 1258 | 76.5 | Project source/support file |
 | 544 | `frontend/tests/appRefresh.test.ts` | frontend-root | 55 | 1.5 | Project source/support file |
-| 545 | `frontend/tests/appShellUtils.test.ts` | frontend-root | 127 | 6.5 | Project source/support file |
+| 545 | `frontend/tests/appShellUtils.test.ts` | frontend-root | 120 | 6.1 | Project source/support file |
 | 546 | `frontend/tests/assetCompression.test.ts` | frontend-root | 36 | 1.5 | Project source/support file |
 | 547 | `frontend/tests/backupJobs.test.ts` | frontend-root | 137 | 9.1 | Project source/support file |
 | 548 | `frontend/tests/barcodeImageScanner.test.ts` | frontend-root | 119 | 3.2 | Project source/support file |
@@ -585,7 +585,7 @@ Total files documented: **735**
 | 573 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 574 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 100 | 5.1 | Project source/support file |
 | 575 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 576 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3684 | 275.1 | Project source/support file |
+| 576 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3698 | 276.0 | Project source/support file |
 | 577 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 39 | 1.5 | Project source/support file |
 | 578 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 579 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 140 | 6.5 | Project source/support file |
@@ -608,8 +608,8 @@ Total files documented: **735**
 | 596 | `frontend/tests/productImportWorkerFallback.test.ts` | frontend-root | 43 | 2.0 | Project source/support file |
 | 597 | `frontend/tests/productMenuHelpers.test.ts` | frontend-root | 188 | 6.0 | Project source/support file |
 | 598 | `frontend/tests/productPageHelpers.test.ts` | frontend-root | 20 | 0.7 | Project source/support file |
-| 599 | `frontend/tests/productSearchPagination.test.ts` | frontend-root | 157 | 6.3 | Project source/support file |
-| 600 | `frontend/tests/productSelectionHelpers.test.ts` | frontend-root | 73 | 2.8 | Project source/support file |
+| 599 | `frontend/tests/productSearchPagination.test.ts` | frontend-root | 167 | 6.7 | Project source/support file |
+| 600 | `frontend/tests/productSelectionHelpers.test.ts` | frontend-root | 77 | 2.9 | Project source/support file |
 | 601 | `frontend/tests/productWriteHelpers.test.ts` | frontend-root | 517 | 13.0 | Project source/support file |
 | 602 | `frontend/tests/publicErrorRecovery.test.ts` | frontend-root | 37 | 1.4 | Project source/support file |
 | 603 | `frontend/tests/receiptSettingsSync.test.ts` | frontend-root | 43 | 3.1 | Project source/support file |
@@ -628,7 +628,7 @@ Total files documented: **735**
 | 616 | `frontend/tsconfig.json` | frontend-root | 47 | 1.3 | Configuration/data manifest |
 | 617 | `frontend/vite-date-range-check.err.log` | frontend-root | 0 | 0.0 | Project source/support file |
 | 618 | `frontend/vite-date-range-check.out.log` | frontend-root | 9 | 0.2 | Project source/support file |
-| 619 | `frontend/vite.config.ts` | frontend-root | 903 | 31.9 | Project source/support file |
+| 619 | `frontend/vite.config.ts` | frontend-root | 900 | 32.0 | Project source/support file |
 | 620 | `ops/scripts/architecture/generated-bulk-audit.ts` | project-scripts | 603 | 22.8 | Project source/support file |
 | 621 | `ops/scripts/architecture/language-runtime-audit.ts` | project-scripts | 1666 | 71.6 | Project source/support file |
 | 622 | `ops/scripts/architecture/organization-audit.ts` | project-scripts | 446 | 18.9 | Project source/support file |
@@ -661,7 +661,7 @@ Total files documented: **735**
 | 649 | `ops/scripts/runtime/audits/deep-live-audit.ts` | project-scripts | 1463 | 55.3 | Project source/support file |
 | 650 | `ops/scripts/runtime/audits/full-app-audit.ts` | project-scripts | 652 | 28.6 | Project source/support file |
 | 651 | `ops/scripts/runtime/audits/package.json` | project-scripts | 5 | 0.0 | Configuration/data manifest |
-| 652 | `ops/scripts/runtime/browser-action-smoke.ts` | project-scripts | 869 | 31.2 | Project source/support file |
+| 652 | `ops/scripts/runtime/browser-action-smoke.ts` | project-scripts | 923 | 33.4 | Project source/support file |
 | 653 | `ops/scripts/runtime/build-ecosystem-config.ts` | project-scripts | 86 | 2.8 | Project source/support file |
 | 654 | `ops/scripts/runtime/cloudflare/cloudflare-tunnel-watchdog.ts` | project-scripts | 254 | 9.1 | Project source/support file |
 | 655 | `ops/scripts/runtime/cloudflare/rotate-cloudflare-tunnel-token.ts` | project-scripts | 244 | 10.8 | Project source/support file |
@@ -669,7 +669,7 @@ Total files documented: **735**
 | 657 | `ops/scripts/runtime/cloudflare/verify-cloudflare-automation.ts` | project-scripts | 328 | 14.4 | Project source/support file |
 | 658 | `ops/scripts/runtime/cloudflare/verify-r2-object-store.ts` | project-scripts | 155 | 6.0 | Project source/support file |
 | 659 | `ops/scripts/runtime/cloudflare/warm-cloudflare-startup-assets.ts` | project-scripts | 465 | 17.3 | Project source/support file |
-| 660 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | project-scripts | 1233 | 46.6 | Project source/support file |
+| 660 | `ops/scripts/runtime/live-checks/all-pages-control-audit.ts` | project-scripts | 1234 | 46.7 | Project source/support file |
 | 661 | `ops/scripts/runtime/live-checks/filter-burst-check.ts` | project-scripts | 134 | 5.1 | Project source/support file |
 | 662 | `ops/scripts/runtime/live-checks/lcp-route-trace.ts` | project-scripts | 328 | 11.3 | Project source/support file |
 | 663 | `ops/scripts/runtime/live-checks/live-check-utils.ts` | project-scripts | 123 | 3.6 | Project source/support file |
@@ -694,14 +694,14 @@ Total files documented: **735**
 | 682 | `ops/scripts/runtime/live-checks/phase84-product-units-actions-live-check.ts` | project-scripts | 129 | 6.0 | Project source/support file |
 | 683 | `ops/scripts/runtime/live-checks/phase84-product-variant-actions-live-check.ts` | project-scripts | 152 | 6.7 | Project source/support file |
 | 684 | `ops/scripts/runtime/live-checks/phase84-public-assistant-select-live-check.ts` | project-scripts | 128 | 5.5 | Project source/support file |
-| 685 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | project-scripts | 223 | 10.3 | Project source/support file |
+| 685 | `ops/scripts/runtime/live-checks/phase84-public-portal-cloudflare-check.ts` | project-scripts | 226 | 10.4 | Project source/support file |
 | 686 | `ops/scripts/runtime/live-checks/phase84-receipt-export-layout-check.ts` | project-scripts | 208 | 10.4 | Project source/support file |
 | 687 | `ops/scripts/runtime/live-checks/phase84-receipt-settings-rollback-check.ts` | project-scripts | 204 | 8.2 | Project source/support file |
 | 688 | `ops/scripts/runtime/live-checks/phase84-sales-actions-live-check.ts` | project-scripts | 137 | 6.1 | Project source/support file |
 | 689 | `ops/scripts/runtime/live-checks/phase84-settings-save-rollback-check.ts` | project-scripts | 166 | 6.7 | Project source/support file |
 | 690 | `ops/scripts/runtime/live-checks/phase84-settings-select-live-check.ts` | project-scripts | 167 | 7.2 | Project source/support file |
 | 691 | `ops/scripts/runtime/live-checks/phase84-shared-select-live-check.ts` | project-scripts | 154 | 7.2 | Project source/support file |
-| 692 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | project-scripts | 847 | 55.6 | Project source/support file |
+| 692 | `ops/scripts/runtime/live-checks/phase84-ui-live-check.ts` | project-scripts | 852 | 56.4 | Project source/support file |
 | 693 | `ops/scripts/runtime/live-checks/phase84-users-actions-live-check.ts` | project-scripts | 164 | 7.9 | Project source/support file |
 | 694 | `ops/scripts/runtime/live-checks/route-load-trace.ts` | project-scripts | 219 | 8.1 | Project source/support file |
 | 695 | `ops/scripts/runtime/smoke/check-public-url.ts` | project-scripts | 239 | 8.2 | Project source/support file |

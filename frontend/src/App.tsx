@@ -34,7 +34,6 @@ type PageId =
 
 type AdminPageId = PageId
 type ChunkImporter = () => Promise<{ default: ComponentType<Record<string, unknown>> }>
-type WarmupLoader = () => Promise<unknown>
 type CancelWarmup = () => void
 type ScrollDirection = 'top' | 'bottom'
 type TranslateFn = (key: string) => string
@@ -270,22 +269,6 @@ const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
 const APP_FAVICON_PROCESSING_DELAY_MS = 1800
 const APP_FAVICON_IDLE_TIMEOUT_MS = 7000
 
-// Keep route chunks cold until the user asks for them. Hover/touch intent still
-// preloads the exact target route, but Dashboard startup should not download
-// Products, POS, Inventory, catalog, scanner, or local DB bundles by itself.
-const WARMUP_PAGE_IDS: readonly PageId[] = [] satisfies PageId[]
-
-const DELAYED_CHUNK_WARMUP_PAGE_IDS: ReadonlySet<PageId> = new Set([
-  'contacts',
-  'users',
-  'audit_log',
-  'receipt_settings',
-  'settings',
-  'files',
-  'server',
-  'backup',
-] satisfies PageId[])
-
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
 const INTENT_CHUNK_WARMUP_DELAY_MS = 80
@@ -502,26 +485,6 @@ const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   loyalty_points: LoyaltyPointsPage,
 }
 
-function getWarmupImporters(): WarmupLoader[] {
-  // Keep the initial warmup focused on the primary day-to-day flow. The admin
-  // stack warms separately when a user actually enters it.
-  const loaders: WarmupLoader[] = []
-  for (const pageId of WARMUP_PAGE_IDS) {
-    const importer = PAGE_IMPORTERS[pageId]
-    loaders.push(() => importWithTimeout(importer, pageId).catch(() => null))
-  }
-  return loaders
-}
-
-function shouldSkipBackgroundWarmup(): boolean {
-  if (typeof window === 'undefined') return true
-  if (document.visibilityState === 'hidden') return true
-  const connection = getConnection()
-  if (!connection) return false
-  if (connection.saveData) return true
-  return ['slow-2g', '2g', '3g'].includes(String(connection.effectiveType || '').toLowerCase())
-}
-
 function shouldSkipIntentWarmup(): boolean {
   if (typeof window === 'undefined') return true
   if (document.visibilityState === 'hidden') return true
@@ -641,52 +604,6 @@ function isNotificationCenterWakeEvent(event: Event): boolean {
     || !!notificationType
     || reason.includes('notification')
     || source.includes('notification')
-}
-
-function getDataWarmupLoaders(_canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
-  // Data warmups used to prefetch many page reads in the background. In
-  // practice that created first-visit contention: the real page load would
-  // inherit a half-stuck warmup request and sit on "Loading..." until the
-  // older request timed out. Keep shell warmup focused on code chunks; pages
-  // now own their own data fetch lifecycle.
-  return []
-}
-
-function createWarmupLoader(label: string, fn?: () => Promise<unknown>): WarmupLoader | null {
-  if (typeof fn !== 'function') return null
-  return () => withLoaderTimeout(() => fn(), label, 9000).catch(() => null)
-}
-
-function runWarmupBatches(loaders: WarmupLoader[], batchSize = 3): Promise<void> {
-  return (async () => {
-    for (let index = 0; index < loaders.length; index += batchSize) {
-      const batch = loaders.slice(index, index + batchSize)
-      await Promise.allSettled(batch.map((load) => load()))
-    }
-  })()
-}
-
-function scheduleWarmupAfterLoad(start: () => CancelWarmup | void): CancelWarmup {
-  if (typeof window === 'undefined') return () => {}
-
-  let cancelled = false
-  let cancelStartedWarmup: CancelWarmup | null = null
-  const run = () => {
-    if (cancelled) return
-    cancelStartedWarmup = start() || null
-  }
-
-  if (document.readyState === 'complete') {
-    run()
-  } else {
-    window.addEventListener('load', run, { once: true })
-  }
-
-  return () => {
-    cancelled = true
-    window.removeEventListener('load', run)
-    cancelStartedWarmup?.()
-  }
 }
 
 function useMountedPages(activePage: AdminPageId): AdminPageId[] {
@@ -1012,59 +929,6 @@ function useVisibilityRecovery(enabled: boolean) {
   }, [enabled])
 }
 
-function useChunkWarmup(user: AppUser | null, activePageId: AdminPageId): void {
-  // Only warm chunks after a user exists so public routes stay lightweight.
-  useEffect(() => {
-    if (!user || typeof window === 'undefined') return undefined
-    if (shouldSkipBackgroundWarmup()) return undefined
-
-    let cancelled = false
-    let started = false
-    const importers = getWarmupImporters()
-    if (!importers.length) return undefined
-
-    const runWarmup = async () => {
-      if (cancelled || started || shouldSkipBackgroundWarmup()) return
-      started = true
-      await runWarmupBatches(importers, 1)
-    }
-
-    const cancelAfterLoad = scheduleWarmupAfterLoad(() => {
-      if (cancelled || shouldSkipBackgroundWarmup()) return undefined
-      let idleId: number | null = null
-      let timeoutId: number | null = null
-      let followupId: number | null = null
-      const isSmallOrTouch = Number(window.innerWidth || 0) < 768
-        || (typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches)
-      const shouldDelayWarmup = DELAYED_CHUNK_WARMUP_PAGE_IDS.has(activePageId)
-      timeoutId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 6000 : 4500) : (isSmallOrTouch ? 9000 : 6500))
-
-      if (!shouldDelayWarmup && typeof window.requestIdleCallback === 'function') {
-        idleId = window.requestIdleCallback(runWarmup, { timeout: isSmallOrTouch ? 12000 : 8500 })
-      } else {
-        followupId = window.setTimeout(runWarmup, shouldDelayWarmup ? (isSmallOrTouch ? 7000 : 5500) : (isSmallOrTouch ? 11000 : 8000))
-      }
-
-      return () => {
-        if (idleId != null && typeof window.cancelIdleCallback === 'function') {
-          window.cancelIdleCallback(idleId)
-        }
-        if (timeoutId != null) {
-          window.clearTimeout(timeoutId)
-        }
-        if (followupId != null) {
-          window.clearTimeout(followupId)
-        }
-      }
-    })
-
-    return () => {
-      cancelled = true
-      cancelAfterLoad()
-    }
-  }, [activePageId, user])
-}
-
 function useIntentChunkWarmup(user: AppUser | null, activePageId: AdminPageId, canAccessPage: (pageId: string) => boolean): void {
   useEffect(() => {
     if (!user || typeof window === 'undefined') return undefined
@@ -1090,43 +954,6 @@ function useIntentChunkWarmup(user: AppUser | null, activePageId: AdminPageId, c
       cancelCurrentWarmup?.()
     }
   }, [activePageId, canAccessPage, user])
-}
-
-function useDataWarmup(user: AppUser | null, canAccessPage: (pageId: string) => boolean): void {
-  useEffect(() => {
-    if (!user || typeof window === 'undefined') return undefined
-
-    let cancelled = false
-    let idleId: number | null = null
-    let timeoutId: number | null = null
-    let followupId: number | null = null
-    let started = false
-    const loaders = getDataWarmupLoaders(canAccessPage)
-    if (!loaders.length) return undefined
-
-    const runWarmup = async () => {
-      if (cancelled || started) return
-      started = true
-      await runWarmupBatches(loaders, 1)
-    }
-
-    timeoutId = window.setTimeout(runWarmup, 1200)
-
-    if (typeof window.requestIdleCallback === 'function') {
-      idleId = window.requestIdleCallback(runWarmup, { timeout: 2800 })
-    } else {
-      followupId = window.setTimeout(runWarmup, 2400)
-    }
-
-    return () => {
-      cancelled = true
-      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleId)
-      }
-      if (timeoutId != null) window.clearTimeout(timeoutId)
-      if (followupId != null) window.clearTimeout(followupId)
-    }
-  }, [canAccessPage, user])
 }
 
 class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBoundaryState> {
@@ -1588,9 +1415,7 @@ export default function App() {
   )
 
   useVisibilityRecovery(authReady && !!user)
-  useChunkWarmup(authReady ? user : null, page)
   useIntentChunkWarmup(authReady ? user : null, page, canAccessPage)
-  useDataWarmup(authReady ? user : null, canAccessPage)
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

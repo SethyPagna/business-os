@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 462,
   "distAssets": 0,
-  "totalSourceBytes": 7142036,
-  "totalSourceLines": 164700,
+  "totalSourceBytes": 7135771,
+  "totalSourceLines": 164525,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "backend/src/services/importJobs.ts",
@@ -111,11 +111,6 @@
       "lines": 1947
     },
     {
-      "file": "frontend/src/App.tsx",
-      "size": 74118,
-      "lines": 1915
-    },
-    {
       "file": "ops/scripts/architecture/language-runtime-audit.ts",
       "size": 73288,
       "lines": 1666
@@ -124,6 +119,11 @@
       "file": "frontend/src/components/users/UserProfileModal.tsx",
       "size": 70518,
       "lines": 1344
+    },
+    {
+      "file": "frontend/src/App.tsx",
+      "size": 67853,
+      "lines": 1740
     },
     {
       "file": "backend/src/routes/system/index.ts",
@@ -223,11 +223,6 @@
       "lines": 1947
     },
     {
-      "file": "frontend/src/App.tsx",
-      "size": 74118,
-      "lines": 1915
-    },
-    {
       "file": "frontend/src/components/utils-settings/Settings.tsx",
       "size": 90232,
       "lines": 1911
@@ -236,6 +231,11 @@
       "file": "frontend/src/components/utils-settings/Backup.tsx",
       "size": 82056,
       "lines": 1779
+    },
+    {
+      "file": "frontend/src/App.tsx",
+      "size": 67853,
+      "lines": 1740
     },
     {
       "file": "backend/src/routes/system/index.ts",

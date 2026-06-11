@@ -8,9 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 916, remove broad admin page-entry chunk warmup
-  so route chunks preload only from explicit navigation intent instead of
-  competing with first-route data and rendering work.
+- Latest completed move: Move 917, delete the empty shell warmup scaffolding
+  left behind after broad route/data warmups were disabled. Explicit
+  navigation-intent chunk preloading remains the only shell route warmup path.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -18,25 +18,30 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606112011`
-  is healthy with frontend hash `d28e11425b540cf1` and source hash
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606112037`
+  is healthy with frontend hash `d1b4010fc17587c2` and source hash
   `3b68f7362c866cc6`. Local LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-13-59-671Z.json`
-  measured Dashboard 300 ms, Products 384 ms, Inventory 332 ms, POS 236 ms,
-  Files 216 ms, Branches 272 ms, Audit Log 244 ms, Settings 272 ms, and Public
-  Catalog 260 ms with zero failed requests/errors. Public-host LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-14-51-147Z.json`
-  measured all 9 checked routes at or below 340 ms. Browser action smoke
-  `ops/runtime/reports/browser-action-smoke-2026-06-11T12-14-02-039Z/summary.json`
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-39-11-540Z.json`
+  measured Dashboard 292 ms, Products 268 ms, Inventory 252 ms, POS 212 ms,
+  Files 228 ms, Branches 212 ms, Audit Log 336 ms, Settings 260 ms, and Public
+  Catalog 236 ms with zero failed requests/errors. Admin Cloudflare LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-44-02-665Z.json`
+  measured all 9 checked routes at or below 320 ms, and direct public-host LCP
+  trace `ops/runtime/reports/lcp-route-trace-2026-06-11T12-44-32-924Z.json`
+  also stayed at or below 320 ms. Browser action smoke
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T12-39-39-097Z/summary.json`
   passed 34 routes and 28 actions with 0 findings. Broad all-pages control
   audit
-  `ops/runtime/reports/all-pages-control-audit-2026-06-11T12-14-52-194Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T12-40-23-750Z/summary.json`
   passed 34 desktop/mobile routes, 460 controls, 404 tested controls, 0 failed
   controls, and 0 findings.
 - Latest cleanup proof: ignored regenerable `release/` and `frontend/dist/`
-  were deleted after Docker/live proof, reclaiming 412,845,210 bytes. Phase 29
-  audit `ops/docs/reference/PHASE29-AUDIT.md` then passed 9 checks with 0
-  failures; generated-bulk cleanup candidates are below the 512 MB threshold.
+  were deleted after Docker/live proof, reclaiming 412,841,583 bytes. Guarded
+  storage prune removed 10,760,267 bytes of old reports, reclaimed Docker
+  builder cache, and removed only old `business-os:v*` tags while keeping the
+  running image and newest rollback tags. Phase 29 audit
+  `ops/docs/reference/PHASE29-AUDIT.md` then passed 9 checks with 0 failures;
+  generated-bulk cleanup candidates are below the 512 MB threshold.
 
 ## Program Goals
 

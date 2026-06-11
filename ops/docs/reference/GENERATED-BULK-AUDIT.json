@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-11T12:22:18.671Z",
+  "generatedAt": "2026-06-11T12:51:25.234Z",
   "report": "ops/docs/reference/GENERATED-BULK-AUDIT.md",
   "summary": "ops/docs/reference/GENERATED-BULK-AUDIT.json",
   "measurementMode": "bounded-parallel-targets",
@@ -9,8 +9,8 @@
   "fileStatConcurrency": 32,
   "targets": 15,
   "existingTargets": 7,
-  "totalBytes": 570742283,
-  "protectedBytes": 281452347,
+  "totalBytes": 570699982,
+  "protectedBytes": 281410046,
   "cleanupCandidateBytes": 289289936,
   "nestedTargetOverlaps": [
     {
@@ -31,8 +31,8 @@
     }
   ],
   "nestedOverlapBytes": 15496556,
-  "adjustedTotalBytes": 555245727,
-  "adjustedProtectedBytes": 265955791,
+  "adjustedTotalBytes": 555203426,
+  "adjustedProtectedBytes": 265913490,
   "adjustedCleanupCandidateBytes": 289289936,
   "largestProtectedTargets": [
     {
@@ -45,9 +45,9 @@
     },
     {
       "path": "ops/runtime",
-      "bytes": 102648421,
-      "files": 1032,
-      "folders": 64,
+      "bytes": 102606120,
+      "files": 1030,
+      "folders": 60,
       "category": "runtime state",
       "disposition": "retention"
     },
@@ -97,7 +97,7 @@
   "slowestTargetMeasurements": [
     {
       "path": "backend/node_modules",
-      "measureMs": 1035,
+      "measureMs": 943,
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
@@ -106,7 +106,7 @@
     },
     {
       "path": "frontend/node_modules",
-      "measureMs": 685,
+      "measureMs": 587,
       "bytes": 154922166,
       "files": 11514,
       "folders": 986,
@@ -115,7 +115,7 @@
     },
     {
       "path": "ops/node_modules",
-      "measureMs": 81,
+      "measureMs": 71,
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
@@ -124,10 +124,10 @@
     },
     {
       "path": "ops/runtime",
-      "measureMs": 72,
-      "bytes": 102648421,
-      "files": 1032,
-      "folders": 64,
+      "measureMs": 66,
+      "bytes": 102606120,
+      "files": 1030,
+      "folders": 60,
       "category": "runtime state",
       "protected": true
     },
@@ -151,7 +151,7 @@
     },
     {
       "path": "ops/runtime/secrets",
-      "measureMs": 3,
+      "measureMs": 2,
       "bytes": 713,
       "files": 4,
       "folders": 1,
@@ -167,9 +167,9 @@
       "targets": 3
     },
     "retention": {
-      "bytes": 102648421,
-      "files": 1032,
-      "folders": 64,
+      "bytes": 102606120,
+      "files": 1030,
+      "folders": 60,
       "targets": 1
     },
     "reinstallable": {
@@ -241,7 +241,7 @@
       "bytes": 154922166,
       "files": 11514,
       "folders": 986,
-      "measureMs": 685,
+      "measureMs": 587,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -255,7 +255,7 @@
       "bytes": 120569968,
       "files": 8618,
       "folders": 1654,
-      "measureMs": 1035,
+      "measureMs": 943,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,
@@ -266,10 +266,10 @@
     {
       "path": "ops/runtime",
       "exists": true,
-      "bytes": 102648421,
-      "files": 1032,
-      "folders": 64,
-      "measureMs": 72,
+      "bytes": 102606120,
+      "files": 1030,
+      "folders": 60,
+      "measureMs": 66,
       "category": "runtime state",
       "disposition": "retention",
       "protected": true,
@@ -297,7 +297,7 @@
       "bytes": 13797802,
       "files": 605,
       "folders": 71,
-      "measureMs": 81,
+      "measureMs": 71,
       "category": "dependencies",
       "disposition": "safe cleanup",
       "protected": false,
@@ -311,7 +311,7 @@
       "bytes": 713,
       "files": 4,
       "folders": 1,
-      "measureMs": 3,
+      "measureMs": 2,
       "category": "secrets",
       "disposition": "preserve",
       "protected": true,
@@ -339,7 +339,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 1,
+      "measureMs": 0,
       "category": "build output",
       "disposition": "regenerable",
       "protected": false,
@@ -353,7 +353,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "build output",
       "disposition": "regenerable",
       "protected": false,
@@ -367,7 +367,7 @@
       "bytes": 0,
       "files": 0,
       "folders": 0,
-      "measureMs": 0,
+      "measureMs": 1,
       "category": "dependencies",
       "disposition": "reinstallable",
       "protected": false,

@@ -154,7 +154,7 @@ assert.doesNotMatch(
   'Inventory should not add a fixed 1200ms watchdog reveal delay on top of real data loading',
 )
 
-assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
+assert.doesNotMatch(app, /WARMUP_PAGE_IDS|useChunkWarmup|getWarmupImporters|DELAYED_CHUNK_WARMUP_PAGE_IDS/, 'dashboard startup should not keep broad background route chunk warmup scaffolding')
 assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/pathRouting\.ts'/, 'app context should derive the initial route page without importing the heavier admin shell utility chunk')
 assert.doesNotMatch(appContext, /import en from '\.\/lang\/en\.json'/, 'app context should not statically load the full English language pack during startup')
 assert.match(appContext, /const CORE_ENGLISH_PACK: TranslationPack = \{[\s\S]*sync_server_title: 'Sync Server'[\s\S]*\}/, 'app context should keep a tiny synchronous English fallback for first paint labels')
@@ -264,9 +264,7 @@ assert.doesNotMatch(app, /<Suspense fallback=\{null\}>\s*<WriteConflictModal[\s\
 assert.match(app, /window\.addEventListener\(APP_PAGE_INTENT_EVENT, warmIntentPage\)/, 'app shell should warm the exact route chunk on navigation intent')
 assert.match(app, /scheduleIntentChunkLoad/, 'navigation intent should use a bounded chunk warmup helper')
 assert.match(app, /shouldSkipIntentWarmup/, 'navigation intent warmup should respect visibility and slow-network signals')
-assert.match(app, /function scheduleWarmupAfterLoad\(start: \(\) => CancelWarmup \| void\): CancelWarmup \{[\s\S]*document\.readyState === 'complete'[\s\S]*window\.addEventListener\('load', run, \{ once: true \}\)/, 'remaining background warmups should wait until the current page has finished loading')
-assert.match(app, /const importers = getWarmupImporters\(\)\s*\n\s*if \(!importers\.length\) return undefined[\s\S]*const cancelAfterLoad = scheduleWarmupAfterLoad/, 'primary route chunk warmup should skip empty work and schedule only after load')
-assert.match(app, /const loaders = getDataWarmupLoaders\(canAccessPage\)\s*\n\s*if \(!loaders\.length\) return undefined/, 'empty data warmup plans should not allocate timers')
+assert.doesNotMatch(app, /scheduleWarmupAfterLoad|useDataWarmup|getDataWarmupLoaders|runWarmupBatches|createWarmupLoader|shouldSkipBackgroundWarmup/, 'empty shell-level data and chunk warmup plans should be deleted instead of allocating no-op hooks')
 assert.match(app, /window\.addEventListener\(APP_PAGE_INTENT_EVENT, warmIntentPage\)/, 'route chunk preloading should stay tied to explicit navigation intent')
 assert.match(appShellUtils, /APP_PAGE_INTENT_EVENT,[\s\S]*from '\.\/pathRouting\.ts'/, 'navigation intent event should be re-exported from shell utils while living in the lightweight path routing module')
 assert.match(sidebar, /APP_PAGE_INTENT_EVENT/, 'sidebar should publish navigation intent before route clicks')
