@@ -8,6 +8,34 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove browser action smoke module warning
+  - area: Playwright-backed browser action smoke harness and Phase 29
+    reference verification
+  - result: kept
+  - note: Move 915 starts `ops/scripts/runtime/browser-action-smoke.ts` in
+    CommonJS mode and dynamically imports the TypeScript audit helpers at
+    runtime. This removes Node's `MODULE_TYPELESS_PACKAGE_JSON` reparsing
+    warning from live smoke output without changing route or action coverage.
+  - affected files: `ops/scripts/runtime/browser-action-smoke.ts`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-ROADMAP.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+    `ops/docs/reference/PHASE29-AUDIT.md`
+  - verification: traced fast smoke, exhaustive browser action smoke, Phase 29
+    audit, and `git diff --check` passed.
+  - live proof: `node --trace-warnings
+    ops\scripts\runtime\browser-action-smoke.ts --profile fast --route
+    dashboard` passed with 1 route, 0 actions, 0 findings, and no module-type
+    warning. Exhaustive smoke
+    `ops/runtime/reports/browser-action-smoke-2026-06-11T11-57-12-163Z/summary.json`
+    passed 34 routes and 28 actions with 0 findings.
+  - current plan position after Move 915: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Harden nav route targets and browser action smoke coverage
   - area: authenticated desktop/mobile navigation verification, POS, Library,
     and broad live control coverage

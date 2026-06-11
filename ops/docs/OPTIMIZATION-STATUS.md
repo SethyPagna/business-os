@@ -8,9 +8,8 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 914, harden authenticated navigation targets and
-  browser action verification so POS and Library/Files are covered reliably
-  across desktop/mobile.
+- Latest completed move: Move 915, remove browser action smoke module-type
+  warning noise while preserving full 34-route / 28-action Playwright coverage.
 
 ## Current Baseline
 
@@ -209,6 +208,8 @@ Latest verified reports:
   `ops/runtime/reports/route-load-trace-2026-06-11T11-40-20-190Z.json`
 - latest Move 914 browser action smoke:
   `ops/runtime/reports/browser-action-smoke-2026-06-11T11-40-20-988Z/summary.json`
+- latest Move 915 browser action smoke:
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T11-57-12-163Z/summary.json`
 - latest Move 914 all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-11T11-41-07-762Z/summary.json`
 - latest Move 914 result:
@@ -231,6 +232,13 @@ Latest verified reports:
   `business-os:v6.0.0-202606111750` image tag while keeping active
   `business-os:v6.0.0-202606111935`. Phase 29 audit passed afterward with
   9 checks and 0 failures.
+- latest Move 915 result:
+  `ops/scripts/runtime/browser-action-smoke.ts` now starts as CommonJS and
+  lazily imports the TypeScript audit helpers at runtime, eliminating Node's
+  `MODULE_TYPELESS_PACKAGE_JSON` reparse warning from the live browser smoke
+  output. A traced fast route run and the exhaustive smoke both passed without
+  the warning; exhaustive proof passed 34 routes and 28 actions with 0
+  findings. Phase 29 audit passed afterward with 9 checks and 0 failures.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 913.
+- Latest completed implementation move in this roadmap: Move 915.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15620,3 +15620,9 @@ Move 914 status:
 - Verification proof: frontend typecheck, frontend utility suite, frontend production build, Docker release build/update health, browser action smoke, route-load trace, LCP trace, exhaustive all-pages control audit, and `git diff --check` passed.
 - Cleanup proof: after Docker image/update/live proof, the ignored/generated `release/` kit was deleted, removing 380,980,854 bytes. Guarded `prune-storage` preserved protected uploads, secrets, database, volumes, active image, and newest backup packages; removed 8,584,110 bytes of old runtime reports, 5,360,807 bytes of old Docker-release backup, reclaimed 38.68 MB of Docker builder cache, and removed only the old `business-os:v6.0.0-202606111750` tag while keeping active `business-os:v6.0.0-202606111935`. Phase 29 audit passed afterward with 9 checks and 0 failures.
 - Current plan position after Move 914: Phase 8.4 remains active; Phase 26 stays at 51 completed organization moves; Phase 28 remains active with R2/access follow-up open; Phase 29 remains active. Remaining external blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 915 status:
+- Move 915 removes live-test harness noise from `ops/scripts/runtime/browser-action-smoke.ts`. The runner now starts in CommonJS mode and lazily imports the TypeScript audit helper modules after startup, so Node no longer emits `MODULE_TYPELESS_PACKAGE_JSON` reparsing warnings while the Playwright-backed smoke is running.
+- Playwright proof: traced fast smoke `node --trace-warnings ops\scripts\runtime\browser-action-smoke.ts --profile fast --route dashboard` passed with 1 route, 0 actions, 0 findings, and no module-type warning. Exhaustive smoke `ops/runtime/reports/browser-action-smoke-2026-06-11T11-57-12-163Z/summary.json` passed 34 routes and 28 actions with 0 findings.
+- Verification proof: Phase 29 audit passed with 9 checks and 0 failures after the runner change, refreshing `ops/docs/reference/PHASE29-AUDIT.md` and related generated references.
+- Current plan position after Move 915: Phase 8.4 remains active; Phase 26 stays at 51 completed organization moves; Phase 28 remains active with R2/access follow-up open; Phase 29 remains active. Remaining external blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run `npm --prefix ops run cloudflare:apply-cache`.

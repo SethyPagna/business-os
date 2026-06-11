@@ -8,9 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 914, harden authenticated navigation targets and
-  browser action verification so POS and Library/Files are tested through
-  stable route ids, visible labels, and text fallbacks across desktop/mobile.
+- Latest completed move: Move 915, remove the browser action smoke
+  `MODULE_TYPELESS_PACKAGE_JSON` warning so live Playwright verification output
+  stays focused on real app findings.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -31,6 +31,11 @@ only in chat.
   `ops/runtime/reports/all-pages-control-audit-2026-06-11T11-41-07-762Z/summary.json`
   passed 34 desktop/mobile routes, 463 controls, 407 tested controls, 0 failed
   controls, and 0 findings.
+- Latest harness proof: browser action smoke
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T11-57-12-163Z/summary.json`
+  passed 34 routes and 28 actions with 0 findings after the runner stopped
+  emitting Node module-type warnings. Phase 29 audit
+  `ops/docs/reference/PHASE29-AUDIT.md` passed 9 checks with 0 failures.
 
 ## Program Goals
 

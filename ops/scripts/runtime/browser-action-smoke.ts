@@ -1,12 +1,15 @@
 /* eslint-disable no-console */
-import fs from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { performance } from 'node:perf_hooks'
-import { chromium } from 'playwright'
-import { ADMIN_ROUTES, PUBLIC_ROUTES, getAuditProfiles, resolveAuditRoutes, type AuditProfile, type AuditRoute } from './audits/audit-manifest.ts'
-import { loginWithFetch, applySessionToPlaywrightContext, hydratePlaywrightPage } from './audits/audit-auth.ts'
-import { writeBrowserActionHtmlReport } from './audits/audit-report-html.ts'
+const fs = require('node:fs/promises')
+const path = require('node:path')
+const { performance } = require('node:perf_hooks')
+const { chromium } = require('playwright')
+
+type AuditProfile = import('./audits/audit-manifest.ts').AuditProfile
+type AuditRoute = import('./audits/audit-manifest.ts').AuditRoute
+type LoginWithFetch = typeof import('./audits/audit-auth.ts').loginWithFetch
+type ApplySessionToPlaywrightContext = typeof import('./audits/audit-auth.ts').applySessionToPlaywrightContext
+type HydratePlaywrightPage = typeof import('./audits/audit-auth.ts').hydratePlaywrightPage
+type WriteBrowserActionHtmlReport = typeof import('./audits/audit-report-html.ts').writeBrowserActionHtmlReport
 
 type ConsoleEntry = {
   type: string
@@ -97,7 +100,18 @@ type PageLike = any
 type BrowserLike = any
 type ContextLike = any
 
-const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+let getAuditProfiles: (profileName?: string) => AuditProfile[] = () => []
+let resolveAuditRoutes: (routeNames?: string[] | string) => {
+  adminRoutes: AuditRoute[]
+  publicRoutes: AuditRoute[]
+  unknownRoutes: string[]
+} = () => ({ adminRoutes: [], publicRoutes: [], unknownRoutes: [] })
+let loginWithFetch: LoginWithFetch
+let applySessionToPlaywrightContext: ApplySessionToPlaywrightContext
+let hydratePlaywrightPage: HydratePlaywrightPage
+let writeBrowserActionHtmlReport: WriteBrowserActionHtmlReport
+
+const ROOT_DIR = path.resolve(__dirname, '../../..')
 const BASE_URL = process.env.BOS_BASE_URL || 'http://127.0.0.1:4000'
 const USERNAME = process.env.BOS_USERNAME || 'admin'
 const PASSWORD = process.env.BOS_PASSWORD || 'Admin123456!'
@@ -107,7 +121,7 @@ const REPORT_DIR = process.env.BOS_BROWSER_ACTION_REPORT_DIR
   ? path.resolve(process.env.BOS_BROWSER_ACTION_REPORT_DIR)
   : path.join(ROOT_DIR, 'ops/runtime/reports', `browser-action-smoke-${TIMESTAMP}`)
 const SCREENSHOT_DIR = path.join(REPORT_DIR, 'screenshots')
-const PROFILES = getAuditProfiles(PROFILE)
+let PROFILES: AuditProfile[] = []
 const ROUTE_READY_TIMEOUT_MS = 15_000
 const ACTION_TIMEOUT_MS = 2_500
 const SETTLE_WAIT_MS = 200
@@ -176,6 +190,21 @@ function isAppConsoleIssue(entry: ConsoleEntry): boolean {
   const type = String(entry.type || '').toLowerCase()
   if (!['error', 'warning', 'warn', 'pageerror'].includes(type)) return false
   return !isExternalConsoleNoise(entry.text)
+}
+
+async function loadRuntimeModules(): Promise<void> {
+  const [manifest, auth, reportHtml] = await Promise.all([
+    import('./audits/audit-manifest.ts'),
+    import('./audits/audit-auth.ts'),
+    import('./audits/audit-report-html.ts'),
+  ])
+  getAuditProfiles = manifest.getAuditProfiles
+  resolveAuditRoutes = manifest.resolveAuditRoutes
+  loginWithFetch = auth.loginWithFetch
+  applySessionToPlaywrightContext = auth.applySessionToPlaywrightContext
+  hydratePlaywrightPage = auth.hydratePlaywrightPage
+  writeBrowserActionHtmlReport = reportHtml.writeBrowserActionHtmlReport
+  PROFILES = getAuditProfiles(PROFILE)
 }
 
 async function requestJson(url: string): Promise<JsonProbe> {
@@ -862,6 +891,7 @@ async function runProfile(profile: AuditProfile): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  await loadRuntimeModules()
   await fs.mkdir(REPORT_DIR, { recursive: true })
   await fs.mkdir(SCREENSHOT_DIR, { recursive: true })
   await captureHealth('before')
