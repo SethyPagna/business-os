@@ -9963,3 +9963,31 @@ Decision rule:
 - Keeper boundary: this is a frontend/runtime performance and verification
   harness move, not a folder move or language conversion. No source deletion
   is included; generated `release/` cleanup remains a post-proof hygiene step.
+
+### Move 905: Compact Inventory first-load placeholder
+
+- Ownership slice: Phase 8.4 public Inventory LCP and Phase 29 generated-bulk
+  cleanup after Docker release proof.
+- Code-flow slice: `InventoryProductsSurface` now uses a compact, non-animated
+  first-load desktop placeholder instead of a large animated
+  `min-h-[26rem]` table overlay. Data loading, filtering, grouping,
+  selection, and adjustment behavior are unchanged.
+- Verification slice: frontend utility suite, frontend production build,
+  Docker release/start, local/public route-load and LCP traces, broad Phase
+  8.4 live suite, public Cloudflare portal check, receipt rollback, loyalty
+  rollback, settings rollback, post-live hygiene, and Phase 29 audit passed.
+- Live proof: Docker image `business-os:v6.0.0-202606111119` is healthy with
+  frontend hash `ac1abdc3028f0b9a`. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-46-815Z.json`
+  measured Inventory 416 ms. Public admin LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-47-055Z.json`
+  measured Inventory 480 ms, Products 472 ms, Branches 224 ms, and public
+  catalog 272 ms with zero failures/errors.
+- Cleanup proof: the ignored/generated `release/` kit created by the Docker
+  proof was deleted afterward, removing 380,976,224 bytes while preserving
+  uploads, secrets, database, node_modules, backups, and the running Docker
+  image.
+- Keeper boundary: this is a frontend render-weight optimization, not a folder
+  move or language conversion. The external Cloudflare Cache Rules permission
+  blocker remains for true edge caching, but Move 905 no longer depends on it
+  for the measured Inventory target.

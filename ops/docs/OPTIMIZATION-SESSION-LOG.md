@@ -8,6 +8,40 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Compact Inventory first-load placeholder
+  - area: Inventory public LCP, first-load placeholder weight, generated
+    release-kit cleanup
+  - result: kept
+  - note: `InventoryProductsSurface` no longer paints a large animated
+    `min-h-[26rem]` desktop skeleton overlay while the first product rows load.
+    The placeholder is now compact, non-animated, and no longer covers the
+    full table body, reducing the chance that loading chrome becomes the LCP
+    candidate.
+  - verification: frontend utility suite, frontend production build, Docker
+    release/start, local/public Playwright route-load and LCP traces, broad
+    Phase 8.4 live suite, public Cloudflare portal check, receipt rollback,
+    loyalty rollback, settings rollback, post-live hygiene, and Phase 29 audit
+    passed.
+  - live proof: Docker image `business-os:v6.0.0-202606111119` is healthy with
+    frontend hash `ac1abdc3028f0b9a`. Local LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-46-815Z.json`
+    measured Inventory 416 ms with zero failed requests/errors. Public admin
+    LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-47-055Z.json`
+    measured Inventory 480 ms, Products 472 ms, Branches 224 ms, and public
+    catalog 272 ms with zero failed requests/errors.
+  - suite proof: `npm.cmd --prefix ops run phase84:live-suite` passed with
+    broad UI report
+    `ops/runtime/reports/phase84-ui-live-check-2026-06-11T03-43-18-256Z/report.json`
+    checking 66 signals and zero relevant console messages; public portal
+    report
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-11T03-45-14-821Z/report.json`
+    rendered 20 products with zero failed responses, console messages, or page
+    errors.
+  - cleanup: deleted the ignored/generated `release/` kit after Docker health
+    and live proof, removing 380,976,224 bytes. The running image, uploads,
+    secrets, database, node_modules, and backups were preserved. Phase 29
+    passed afterward.
+
 - Compact startup shell and trim hot-route preload work
   - area: perceived startup/LCP, route-aware preloads, profile modal intent
     chunks, live-check harness behavior after embedded/cached bootstrap wins

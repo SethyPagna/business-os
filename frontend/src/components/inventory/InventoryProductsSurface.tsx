@@ -162,38 +162,21 @@ export default function InventoryProductsSurface({
   )
 
   const renderDesktopLoadingShell = () => (
-    <div className="min-h-[26rem] animate-pulse bg-white/95 px-4 py-4 dark:bg-slate-950/80">
-      <div className="rounded-xl border border-slate-200/90 bg-slate-50/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/70">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
-            <div className="h-4 w-36 rounded bg-slate-200 dark:bg-slate-700" />
+    <div className="bg-white/92 px-3 py-3 dark:bg-slate-950/80">
+      <div className="rounded-xl border border-slate-200/90 bg-slate-50/90 p-3 shadow-sm dark:border-slate-700/80 dark:bg-slate-900/80">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="h-3.5 w-36 rounded bg-slate-200 dark:bg-slate-700" />
+            <div className="mt-2 h-2.5 w-56 max-w-[70vw] rounded bg-slate-100 dark:bg-slate-800" />
           </div>
-          <div className="h-7 w-24 rounded-lg bg-slate-200 dark:bg-slate-700" />
+          <div className="h-6 w-20 rounded-lg bg-slate-200 dark:bg-slate-700" />
         </div>
-      </div>
-      <div className="mt-4 space-y-4">
-        {Array.from({ length: 3 }, (_, index) => (
-          <div key={`inventory-shell-${index}`} className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-slate-700/70 dark:bg-slate-900/70">
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 flex-1 space-y-2">
-                  <div className="h-4 w-48 max-w-[55%] rounded bg-slate-200 dark:bg-slate-700" />
-                  <div className="h-3 w-72 max-w-[78%] rounded bg-slate-100 dark:bg-slate-800" />
-                </div>
-                <div className="h-5 w-16 rounded-full bg-slate-100 dark:bg-slate-800" />
-              </div>
-              <div className="grid grid-cols-6 gap-3">
-                <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-              </div>
-            </div>
-          </div>
-        ))}
+        <div className="mt-3 grid grid-cols-4 gap-2">
+          <div className="h-7 rounded-lg bg-slate-100 dark:bg-slate-800" />
+          <div className="h-7 rounded-lg bg-slate-100 dark:bg-slate-800" />
+          <div className="h-7 rounded-lg bg-slate-100 dark:bg-slate-800" />
+          <div className="h-7 rounded-lg bg-slate-100 dark:bg-slate-800" />
+        </div>
       </div>
     </div>
   )
@@ -554,7 +537,7 @@ export default function InventoryProductsSurface({
             </tbody>
           </table>
           {showDesktopLoadingOverlay ? (
-            <div className="pointer-events-none absolute inset-x-0 top-[2.0625rem] bottom-0 z-20 overflow-hidden border-t border-slate-200/80 bg-white/80 backdrop-blur-[1px] dark:border-slate-700/80 dark:bg-slate-950/78">
+            <div className="pointer-events-none absolute inset-x-0 top-[2.0625rem] z-20 overflow-hidden border-t border-slate-200/80 bg-white/82 dark:border-slate-700/80 dark:bg-slate-950/78">
               {renderDesktopLoadingShell()}
             </div>
           ) : null}

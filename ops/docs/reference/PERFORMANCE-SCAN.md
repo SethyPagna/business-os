@@ -78,27 +78,27 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
-| `frontend/dist/assets/index-DWpS7S0Y.css` | 147.6 |
-| `frontend/dist/assets/Inventory-2mdRN6QP.js` | 102.3 |
-| `frontend/dist/assets/Products-JS0zhylA.js` | 84.4 |
-| `frontend/dist/assets/catalog-BHeokBca.js` | 79.5 |
-| `frontend/dist/assets/catalog-editor-Cy9rzXet.js` | 74.1 |
+| `frontend/dist/assets/index-BGOjvr1I.css` | 147.5 |
+| `frontend/dist/assets/Inventory-BkSAIbWy.js` | 101.5 |
+| `frontend/dist/assets/Products-DL1Jxk4I.js` | 84.4 |
+| `frontend/dist/assets/catalog-4_D2efnI.js` | 79.5 |
+| `frontend/dist/assets/catalog-editor-l17M6wqI.js` | 74.1 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-KWXjs6WF.js` | 67.9 |
-| `frontend/dist/assets/POS-BA9LmstN.js` | 64.3 |
-| `frontend/dist/assets/AdminRoot-DciDgFff.js` | 62.8 |
-| `frontend/dist/assets/Dashboard-BAXPjoYJ.js` | 62.0 |
-| `frontend/dist/assets/Settings-k-JhczLo.js` | 54.6 |
+| `frontend/dist/assets/BulkImportModal-Duq6IqTz.js` | 67.9 |
+| `frontend/dist/assets/POS-zAWOegau.js` | 64.3 |
+| `frontend/dist/assets/AdminRoot-PJ2xOArO.js` | 62.8 |
+| `frontend/dist/assets/Dashboard-MF4MVgRp.js` | 62.0 |
+| `frontend/dist/assets/Settings-43y5asCp.js` | 54.6 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-Dok2Cr_T.js` | 50.8 |
-| `frontend/dist/assets/shared-ui-ChVfoBVc.js` | 48.7 |
-| `frontend/dist/assets/user-profile-modal-bkqKX91R.js` | 44.2 |
-| `frontend/dist/assets/app-auth-BDuzWBG6.js` | 40.4 |
-| `frontend/dist/assets/ReceiptSettings-DLkno97x.js` | 40.0 |
+| `frontend/dist/assets/Backup-UbgIkcBr.js` | 50.8 |
+| `frontend/dist/assets/shared-ui-BOhX8GN1.js` | 48.7 |
+| `frontend/dist/assets/user-profile-modal-DgRwvdXv.js` | 44.2 |
+| `frontend/dist/assets/app-auth-7gyiZGfs.js` | 40.4 |
+| `frontend/dist/assets/ReceiptSettings-ChMQRGzO.js` | 40.0 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-tuhndZpY.js` | 37.2 |
-| `frontend/dist/assets/Sales-UbOASXfv.js` | 35.7 |
-| `frontend/dist/assets/ProductForm-BD7A9dlZ.js` | 35.3 |
+| `frontend/dist/assets/catalog-secondary-tabs-D3WFJnaB.js` | 37.2 |
+| `frontend/dist/assets/Sales-R9ViQR0h.js` | 35.7 |
+| `frontend/dist/assets/ProductForm-XVGqXmY5.js` | 35.3 |
 
 ## 5. Notes
 
@@ -2708,4 +2708,21 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   `ops/runtime/reports/phase84-ui-live-check-2026-06-11T02-42-41-699Z/report.json`
   and public portal report
   `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-11T02-44-38-856Z/report.json`.
+- Move 905 records the compact Inventory first-load placeholder. The desktop
+  Inventory product surface no longer paints a large animated `min-h-[26rem]`
+  skeleton overlay before real product rows arrive; it now uses a compact,
+  non-animated placeholder that avoids turning loading chrome into the LCP
+  candidate. Docker image `business-os:v6.0.0-202606111119` served frontend
+  hash `ac1abdc3028f0b9a`. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-46-815Z.json`
+  measured Inventory 416 ms. Public admin LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-47-055Z.json`
+  measured Inventory 480 ms, Products 472 ms, Branches 224 ms, and public
+  catalog 272 ms with zero failed requests/errors. The full Phase 8.4 live
+  suite passed with broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-11T03-43-18-256Z/report.json`
+  and public portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-11T03-45-14-821Z/report.json`.
+  The regenerated ignored `release/` kit was deleted after proof, removing
+  380,976,224 bytes, and Phase 29 passed afterward.
 <!-- phase29-manual-notes:end -->

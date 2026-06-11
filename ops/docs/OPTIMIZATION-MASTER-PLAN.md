@@ -8,8 +8,8 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 904, compact startup shell and hot-route preload
-  trim.
+- Latest completed move: Move 905, compact Inventory first-load placeholder
+  after the hot-route preload trim.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -17,17 +17,15 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111009`
-  is healthy with frontend hash `68476001eb95ba69`. Local LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-14-49-548Z.json`
-  measured Products 464 ms, Inventory 360 ms, and Branches 224 ms with zero
-  failed requests/errors. Warm public LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-17-56-170Z.json`
-  measured Products 2.436 s and Branches 2.088 s; public catalog LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-19-35-072Z.json`
-  measured 2.432 s. Inventory public LCP remained tunnel-variable at
-  2.552-2.728 s, with zero failed requests/errors and no backend API
-  bottleneck.
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111119`
+  is healthy with frontend hash `ac1abdc3028f0b9a`. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-46-815Z.json`
+  measured Inventory 416 ms with zero failed requests/errors. Public admin LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-47-055Z.json`
+  measured Inventory 480 ms, Products 472 ms, Branches 224 ms, and public
+  catalog 272 ms with zero failed requests/errors. The broad Phase 8.4 live
+  suite passed on the same frontend hash, and the regenerated `release/` kit
+  was deleted after proof, removing 380,976,224 bytes.
 
 ## Program Goals
 
