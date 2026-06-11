@@ -4509,6 +4509,39 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+### Move 907: Lazy-load Dashboard chart modules
+
+- Ownership slice: Phase 8.4 Dashboard first paint and Phase 29 generated-bulk
+  cleanup after Docker release proof.
+- Code-flow slice: Dashboard no longer statically imports `LineChart` and
+  `DonutChart`. Line, bar, and donut charts now load behind local Suspense
+  boundaries with a compact non-animated `ChartFallback`, so stat tiles,
+  headings, and range controls can paint without waiting for chart code.
+- Verification slice: frontend utility suite and frontend production build
+  passed. The performance-loading guard now requires lazy Dashboard line/donut
+  chart imports and a local lightweight fallback.
+- Live proof: Docker image `business-os:v6.0.0-202606111239` is healthy with
+  frontend hash `b81323a818b8e09a`. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-02-55-542Z.json`
+  measured Dashboard 556 ms and every tested route under 0.6 s. Public admin
+  LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T05-03-24-006Z.json`
+  measured Dashboard 380 ms and every tested route under 0.5 s with zero
+  failed requests/errors. Broad all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-05-01-694Z/summary.json`
+  passed 34 desktop/mobile routes, 404 tested controls, 56 intentional skips,
+  0 failed controls, and 0 findings.
+- Cleanup proof: the ignored/generated `release/` kit created by the Docker
+  proof was deleted afterward, removing 380,978,311 bytes while preserving
+  uploads, secrets, database, node_modules, backups, and the running Docker
+  image. Guarded `npm --prefix ops run prune-storage` preserved protected
+  backups and volumes, removed 11,528 bytes of old runtime reports, reclaimed
+  about 4.155 GB of Docker build cache, and removed one old `business-os:v*`
+  image tag while keeping the active image.
+- Keeper boundary: this is a frontend code-splitting/render-path
+  optimization, not a folder move or language conversion. The external
+  Cloudflare Cache Rules permission blocker remains for true edge HTML/API
+  caching.
+
 ### Move 906: Normalize Audit Log timestamps and clean audit coverage math
 
 - Ownership slice: Phase 8.4 live UI correctness plus Phase 29 audit harness

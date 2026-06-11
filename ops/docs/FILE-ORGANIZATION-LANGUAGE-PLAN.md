@@ -10008,3 +10008,21 @@ Decision rule:
   move or language conversion. The external Cloudflare Cache Rules permission
   blocker remains for true edge caching, but Move 905 no longer depends on it
   for the measured Inventory target.
+
+### Move 907: Lazy-load Dashboard chart modules
+
+- Ownership slice: frontend Dashboard route performance, not folder movement.
+- Organization decision: no files or folders were moved in this slice. The
+  chart modules already live in the correct `frontend/src/components/dashboard`
+  ownership area; changing import timing is safer than reorganizing those
+  files.
+- Language/runtime decision: no language conversion was attempted. The current
+  TypeScript/React route can express the optimization with typed lazy imports
+  and a small local fallback; Rust/Go/Python/WASM would add packaging risk
+  without measurable value for this UI render path.
+- Verification slice: frontend utility suite, frontend production build,
+  Docker release/start, local/public LCP traces, broad all-pages control audit,
+  Phase 29 audit, storage prune, and `git diff --check` passed.
+- Current plan position after Move 907: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active.

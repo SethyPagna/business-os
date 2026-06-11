@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 905.
+- Latest completed implementation move in this roadmap: Move 907.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -67,10 +67,10 @@ What remains:
   time, with backend/frontend tests plus Playwright checks after each visible
   or runtime-facing change.
 - Keep reducing public Cloudflare startup latency from measured document/chunk
-  transfer bottlenecks. Move 905 keeps local Inventory LCP at 416 ms and
-  warmed public Inventory LCP at 480 ms on image
-  `business-os:v6.0.0-202606111119`; continue watching for tunnel variance,
-  but the last measured Inventory hotspot is below target.
+  transfer bottlenecks. Move 907 keeps local Dashboard LCP at 556 ms and
+  public Dashboard LCP at 380 ms on image
+  `business-os:v6.0.0-202606111239`; continue watching for tunnel variance,
+  but the last measured Dashboard hotspot is below target.
 - Use the all-pages control audit as the broad Phase 8.4 live QA gate before
   claiming UI-wide stability: `npm.cmd --prefix ops run
   phase84:all-pages-control-audit -- --profile exhaustive`.
@@ -15489,6 +15489,41 @@ Move 906 status:
   2.482 GB of Docker build cache, and removed only older `business-os:v*`
   release tags while keeping active `business-os:v6.0.0-202606111205`.
 - Current plan position after Move 906: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 907 status:
+- Move 907 lazy-loads the Dashboard line and donut chart modules inside their
+  chart panels instead of keeping them as route-blocking static imports. The
+  lightweight local Suspense fallback is non-animated and sized to the final
+  chart panel, so the Dashboard can paint stat tiles and headings without an
+  extra artificial loading penalty.
+- Runtime proof: Docker image `business-os:v6.0.0-202606111239` is healthy
+  with frontend hash `b81323a818b8e09a` and source hash
+  `30b0c319937c0ba8`.
+- Playwright proof: local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-02-55-542Z.json`
+  measured Dashboard 556 ms and every tested route under 0.6 s. Public admin
+  LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T05-03-24-006Z.json`
+  measured Dashboard 380 ms and every tested route under 0.5 s with zero
+  failed requests/errors. Broad all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-05-01-694Z/summary.json`
+  passed 34 desktop/mobile routes, 404 tested controls, 56 intentional skips,
+  0 failed controls, and 0 findings.
+- Verification proof: frontend utility suite, frontend production build,
+  Docker release/start, local/public LCP route traces, broad all-pages control
+  audit, Phase 29 audit, guarded storage prune, and `git diff --check` passed.
+- Cleanup proof: after Docker image/start/live proof, the ignored/generated
+  `release/` kit was deleted, removing 380,978,311 bytes. The kit is
+  reproducible from `run\docker\release.bat`; uploads, secrets, database,
+  node_modules, backups, and the running Docker image were preserved. Guarded
+  `npm --prefix ops run prune-storage` preserved protected backups and
+  volumes, removed 11,528 bytes of old runtime reports, reclaimed about
+  4.155 GB of Docker build cache, and removed only one older `business-os:v*`
+  release tag while keeping active `business-os:v6.0.0-202606111239`.
+- Current plan position after Move 907: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active. Remaining external
   blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run

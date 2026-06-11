@@ -8,8 +8,8 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 906, normalize Audit Log timestamp rendering and
-  fix the all-pages audit zero-control coverage false positive.
+- Latest completed move: Move 907, lazy-load Dashboard chart modules so first
+  paint no longer waits for line/donut chart code.
 
 ## Current Baseline
 
@@ -17,17 +17,17 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `3c745270701650cc`
+  `b81323a818b8e09a`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 906 source state; Docker image `business-os:v6.0.0-202606111205`
-  serves frontend hash `3c745270701650cc`
+  this Move 907 source state; Docker image `business-os:v6.0.0-202606111239`
+  serves frontend hash `b81323a818b8e09a`
 
 Latest verified reports:
 
 - latest retained all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-latest.json`
 - latest passing all-pages control audit:
-  `ops/runtime/reports/all-pages-control-audit-2026-06-11T04-16-27-454Z/summary.json`
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-05-01-694Z/summary.json`
 - latest fast all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-04T00-01-16-941Z/summary.json`
 - latest exhaustive desktop/mobile all-pages control audit:
@@ -80,6 +80,20 @@ Latest verified reports:
   3,115,990 bytes of old runtime reports, reduced Docker build cache by about
   2.482 GB, and removed only old `business-os:v*` tags while keeping active
   `business-os:v6.0.0-202606111205`.
+- latest Move 907 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-02-55-542Z.json`
+- latest Move 907 public admin LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-03-24-006Z.json`
+- latest Move 907 all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-05-01-694Z/summary.json`
+- latest Move 907 cleanup result:
+  deleted ignored/generated `release/` kit after Docker proof; 380,978,311
+  bytes removed; uploads, secrets, database, node_modules, backups, and the
+  running Docker image were preserved. Phase 29 audit passed after cleanup.
+  Guarded `prune-storage` preserved protected backups/volumes, pruned 11,528
+  bytes of old runtime reports, reclaimed about 4.155 GB of Docker build
+  cache, and removed only one old `business-os:v*` tag while keeping active
+  `business-os:v6.0.0-202606111239`.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

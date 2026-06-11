@@ -5,8 +5,6 @@ import { useMemo } from 'react'
 import { useRef } from 'react'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import LineChart from './charts/LineChart'
-import DonutChart from './charts/DonutChart'
 import MiniStat from './MiniStat'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
@@ -19,6 +17,8 @@ import { getAnalytics, getDashboard, getDashboardStartup } from '../../api/dashb
 import { isInvalidSessionError } from '../../api/http.ts'
 
 const BarChart = lazy(() => import('./charts/BarChart'))
+const LineChart = lazy(() => import('./charts/LineChart'))
+const DonutChart = lazy(() => import('./charts/DonutChart'))
 
 type TranslateFn = (key: string) => string
 type FormatMoneyFn = (value: unknown) => string
@@ -333,6 +333,12 @@ function compactDashboardMetaParts(parts: unknown[] = []): string[] {
   return parts
     .map((part) => (typeof part === 'string' ? part.trim() : ''))
     .filter((part) => part && part !== '-' && part !== '--')
+}
+
+function ChartFallback({ className = 'h-52' }: { className?: string }) {
+  return (
+    <div className={`${className} rounded-2xl border border-slate-200 bg-slate-50/70 dark:border-slate-700 dark:bg-slate-800/50`} />
+  )
 }
 
 function formatDashboardHourLabel(hourValue: unknown): string {
@@ -1269,11 +1275,13 @@ export default function Dashboard() {
           : chartRenderData.length === 0 ? <div className="flex h-52 items-center justify-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</div>
           : activeChart === 'revenue' ? (
             <>
-              <LineChart data={chartRenderData} lines={[
-                { key:'gross_sales_usd', color:'#0891b2', label: grossSalesLabel },
-                { key:'refund_usd', color:'#f97316', label: refundsLabel },
-                { key:'revenue_usd', color:'#2563eb', label: netRevenueLabel },
-              ]} />
+              <Suspense fallback={<ChartFallback />}>
+                <LineChart data={chartRenderData} lines={[
+                  { key:'gross_sales_usd', color:'#0891b2', label: grossSalesLabel },
+                  { key:'refund_usd', color:'#f97316', label: refundsLabel },
+                  { key:'revenue_usd', color:'#2563eb', label: netRevenueLabel },
+                ]} />
+              </Suspense>
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
                 <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-cyan-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{grossSalesLabel}</span></div>
                 <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-orange-500"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{refundsLabel}</span></div>
@@ -1282,7 +1290,9 @@ export default function Dashboard() {
             </>
           ) : activeChart === 'profit' ? (
             <>
-              <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb' },{ key:'cost_usd', color:'#dc2626' },{ key:'profit_usd', color:'#16a34a' }]} />
+              <Suspense fallback={<ChartFallback />}>
+                <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb' },{ key:'cost_usd', color:'#dc2626' },{ key:'profit_usd', color:'#16a34a' }]} />
+              </Suspense>
               <div className="mt-1.5 flex flex-wrap items-center gap-3">
                 <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-blue-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('revenue')}</span></div>
                 <div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-2 w-4 rounded-full bg-red-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{t('cogs')}</span></div>
@@ -1291,7 +1301,7 @@ export default function Dashboard() {
             </>
           ) : (
             <>
-              <Suspense fallback={<div className="h-48 animate-pulse rounded-2xl bg-gray-100 dark:bg-gray-700" />}>
+              <Suspense fallback={<ChartFallback className="h-48" />}>
                 <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
               </Suspense>
               <div className="mt-1.5 flex items-center gap-1.5"><div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-3.5 w-3.5 rounded bg-purple-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{salesCountLabel}</span></div></div>
@@ -1305,7 +1315,9 @@ export default function Dashboard() {
             <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
           ) : (
             <>
-              <DonutChart data={analytics?.byPayment||[]} valueKey="revenue_usd" />
+              <Suspense fallback={<ChartFallback className="h-28" />}>
+                <DonutChart data={analytics?.byPayment||[]} valueKey="revenue_usd" />
+              </Suspense>
               <div className="mt-2 space-y-1 max-h-32 overflow-auto">
                 {(analytics?.byPayment||[]).map((p, i) => {
                   const COLORS = ['#2563eb','#16a34a','#ea580c','#7c3aed','#dc2626','#0891b2']

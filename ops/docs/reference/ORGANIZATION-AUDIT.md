@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T04:23:35.946Z
+Generated: 2026-06-11T05:09:08.173Z
 
 ## Summary
 
@@ -63,14 +63,14 @@ Generated: 2026-06-11T04:23:35.946Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 15492 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 15496 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12322 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10654 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 10011 | ops/docs |
-| ops/docs/OPTIMIZATION-STATUS.md | 5250 | ops/docs |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4936 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 5254 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4940 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| frontend/tests/performanceLoadingUx.test.ts | 3684 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 3688 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3651 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3498 | frontend/components/catalog |
 | frontend/src/components/inventory/Inventory.tsx | 3489 | frontend/components/inventory |
@@ -86,8 +86,8 @@ Generated: 2026-06-11T04:23:35.946Z
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | frontend/src/App.tsx | 2009 | frontend/src/App.tsx |
+| frontend/src/components/dashboard/Dashboard.tsx | 1970 | frontend/components/dashboard |
 | backend/src/routes/inventory.ts | 1962 | backend/routes |
-| frontend/src/components/dashboard/Dashboard.tsx | 1958 | frontend/components/dashboard |
 | frontend/src/AppContext.tsx | 1947 | frontend/src/AppContext.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1911 | frontend/components/utils-settings |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
