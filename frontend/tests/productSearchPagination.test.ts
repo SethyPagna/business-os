@@ -43,6 +43,16 @@ assert.match(
   'Products page should show refreshing state instead of a false no-data search result while data is in flight',
 )
 assert.match(
+  productsSurface,
+  /initialDesktopRevealReady[\s\S]*productTotalLabel[\s\S]*t\('loading'\)/,
+  'Products desktop footer should show a pending label instead of 0 / 0 Products during first load',
+)
+assert.match(
+  productsPage,
+  /const productSelectAllLabel = loadedOnceRef\.current \|\| !loading[\s\S]*Select all/,
+  'Products mobile select-all label should not show a false zero count during first load',
+)
+assert.match(
   productFilterHelpers,
   /product\?\.unit/,
   'Products search should include unit names so unit review can jump into matching products',

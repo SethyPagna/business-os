@@ -8,6 +8,39 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove remaining Products first-load false-zero labels
+  - area: Products loading correctness and perceived performance
+  - result: kept
+  - note: Move 910 fixed the shared pagination helper and Inventory summary,
+    but the public Products trace still exposed table-local first-paint labels
+    `0 / 0 Products` and `Select all (0)`. Move 911 passes the pending
+    pagination label into `ProductsListSurface` and suppresses the mobile
+    select-all count until the first product load has settled, so first paint
+    shows neutral `Loading` / `Select all` instead of a false empty result.
+  - affected files: `frontend/src/components/products/Products.tsx`,
+    `frontend/src/components/products/surfaces/ProductsListSurface.tsx`,
+    `frontend/tests/productSearchPagination.test.ts`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-ROADMAP.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`
+  - verification: frontend utility suite, frontend production build,
+    `git diff --check`, Docker release build/start health, local Products
+    route-load and LCP traces, public admin Products route-load and LCP
+    traces, and Phase 29 audit passed.
+  - runtime proof: Docker image `business-os:v6.0.0-202606111821` is healthy
+    with frontend hash `b2c6359b55be09e5` and source hash
+    `23b9745c64a0714f`.
+  - live proof: local Products ready/LCP measured 454 ms / 532 ms with zero
+    failed requests/errors. Public admin Products ready/LCP measured 3.802 s /
+    2.672 s with zero failed requests/errors, and its trace body no longer
+    contains `0 / 0 Products` or `Select all (0)`.
+  - current plan position after Move 911: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Remove false first-load zero pagination and stacked Inventory watchdog
   - area: Products and Inventory perceived loading correctness
   - result: kept

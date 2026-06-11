@@ -45,6 +45,7 @@ type ProductsListSurfaceProps = {
   loading: boolean
   productSections: ProductSection[]
   productTotal?: number
+  productTotalLabel?: string
   refreshingProducts: boolean
   renderDesktopProductRow: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
   renderMobileProductCard: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
@@ -71,6 +72,7 @@ export default function ProductsListSurface({
   loading,
   productSections,
   productTotal,
+  productTotalLabel,
   refreshingProducts,
   renderDesktopProductRow,
   renderMobileProductCard,
@@ -285,7 +287,9 @@ export default function ProductsListSurface({
           ) : null}
         </div>
         <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          {visibleProducts.length} / {productTotal || allVisibleProducts.length} {t('products')}
+          {initialDesktopRevealReady
+            ? `${visibleProducts.length} / ${productTotal || allVisibleProducts.length} ${t('products')}`
+            : (productTotalLabel || t('loading') || 'Loading')}
         </div>
       </div>
 

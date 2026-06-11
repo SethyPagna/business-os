@@ -1266,7 +1266,9 @@ export default function Products() {
     pending: loading && !loadedOnceRef.current,
     pendingLabel: tr('loading', 'Loading'),
   }), [loading, productPage, productPageSize, productTotal, tr])
-  const productSelectAllLabel = `${t('select_all') || 'Select all'} (${visibleProducts.length})`
+  const productSelectAllLabel = loadedOnceRef.current || !loading
+    ? `${t('select_all') || 'Select all'} (${visibleProducts.length})`
+    : (t('select_all') || 'Select all')
   const productSelectedLabel = tr('products_selected_count', `${selectedVisibleCount} selected`)
   const productChipLabels = useMemo(() => ({
     info: tr('basic_info_short', 'Info'),
@@ -2415,6 +2417,7 @@ export default function Products() {
         loading={loading}
         productSections={productSections}
         productTotal={productTotal}
+        productTotalLabel={productSummaryLabel}
         refreshingProducts={refreshingProducts}
         renderDesktopProductRow={renderDesktopProductRow}
         renderMobileProductCard={renderMobileProductCard}

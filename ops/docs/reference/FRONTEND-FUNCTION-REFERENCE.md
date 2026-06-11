@@ -2440,9 +2440,9 @@ Total files documented: **278**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `ProductsListSurface` | component/function | 62 |
-| 2 | `renderDesktopTableHead` | const arrow | 105 |
-| 3 | `renderDesktopLoadingShell` | const arrow | 134 |
+| 1 | `ProductsListSurface` | component/function | 63 |
+| 2 | `renderDesktopTableHead` | const arrow | 107 |
+| 3 | `renderDesktopLoadingShell` | const arrow | 136 |
 
 ### 3.168 `frontend/src/components/receipt-settings/AllFieldsPanel.tsx`
 

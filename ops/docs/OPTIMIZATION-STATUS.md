@@ -8,9 +8,8 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 910, remove false first-load zero totals from
-  Products and Inventory pagination summaries and keep the Inventory slow-load
-  watchdog out of the first product/movement loading shell.
+- Latest completed move: Move 911, remove the remaining Products first-load
+  false-zero labels from the desktop table footer and mobile select-all row.
 
 ## Current Baseline
 
@@ -18,10 +17,10 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `2aa3efb8a092fe84`
+  `b2c6359b55be09e5`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 910 source state; Docker image `business-os:v6.0.0-202606111750`
-  serves frontend hash `2aa3efb8a092fe84` and source hash
+  this Move 911 source state; Docker image `business-os:v6.0.0-202606111821`
+  serves frontend hash `b2c6359b55be09e5` and source hash
   `23b9745c64a0714f`
 
 Latest verified reports:
@@ -152,6 +151,20 @@ Latest verified reports:
   current Cloudflare token lacks `Zone.Cache Rules: Edit`; public `/public`
   HTML remains `CF-Cache-Status: DYNAMIC` at the edge until that permission is
   granted.
+- latest Move 911 local Products route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T10-25-28-681Z.json`
+- latest Move 911 local Products LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T10-25-28-683Z.json`
+- latest Move 911 public admin Products route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T10-25-29-755Z.json`
+- latest Move 911 public admin Products LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T10-26-12-552Z.json`
+- latest Move 911 result:
+  Docker image `business-os:v6.0.0-202606111821` is healthy with frontend hash
+  `b2c6359b55be09e5`. Local Products ready/LCP measured 454 ms / 532 ms.
+  Public admin Products ready/LCP measured 3.802 s / 2.672 s with zero failed
+  requests/errors and without false `0 / 0 Products` or `Select all (0)` first
+  paint labels. Phase 29 audit passed with 9 checks and 0 failures.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

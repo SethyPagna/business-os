@@ -8,10 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 910, remove false first-load zero totals from
-  Products and Inventory pagination summaries and prevent the Inventory
-  slow-load watchdog card from stacking on top of the first product/movement
-  loading shell.
+- Latest completed move: Move 911, remove the remaining Products first-load
+  false-zero labels from the desktop table footer and mobile select-all row
+  while keeping real post-load counts unchanged.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -19,18 +18,16 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111750`
-  is healthy with frontend hash `2aa3efb8a092fe84` and source hash
-  `23b9745c64a0714f`. Local targeted traces measured Products ready in
-  348 ms with 400 ms LCP and Inventory ready in 252 ms with 264 ms LCP, zero
-  failed requests, and zero app errors. Direct Playwright first-render probes
-  for Products and Inventory found no false `0 / 0` label before or after
-  settle. Public admin traces still show tunnel/document latency: Products
-  7.164 s LCP and Inventory 4.488 s LCP, with hashed assets cached as
-  Cloudflare HITs and no failed requests/errors. Public portal LCP was
-  4.736 s because `/public` HTML remains `CF-Cache-Status: DYNAMIC` until the
-  Cloudflare token receives `Zone.Cache Rules: Edit`. Broad all-pages control
-  audit
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111821`
+  is healthy with frontend hash `b2c6359b55be09e5` and source hash
+  `23b9745c64a0714f`. Local Products trace measured ready in 454 ms with
+  532 ms LCP, zero failed requests, and zero app errors. Public admin Products
+  trace measured ready in 3.802 s and LCP in 2.672 s with zero failed
+  requests/errors; its first-render text now shows neutral `Loading` and
+  `Select all` labels instead of false `0 / 0 Products` or `Select all (0)`.
+  Public admin remains slightly above the 2.5 s LCP target because the document
+  and route chunks are still tunnel/edge-transfer bound, not because of an
+  extra artificial loading delay. Broad all-pages control audit
   `ops/runtime/reports/all-pages-control-audit-2026-06-11T10-01-00-315Z/summary.json`
   passed 34 desktop/mobile routes, 386 tested controls, 0 failed controls, and
   0 findings. Guarded storage prune removed 14,387,727 bytes of old runtime
