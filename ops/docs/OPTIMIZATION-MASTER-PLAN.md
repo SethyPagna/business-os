@@ -8,9 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 919, remove fixed Reset Data refresh delay so
-  reset/factory-reset completion refreshes app state immediately after the
-  server confirms success instead of waiting on an extra 200 ms UI timer.
+- Latest completed move: Move 920, speed up live-smoke import polling so the
+  verification harness waits on actual import-job state with a bounded 150 ms
+  poll interval instead of carrying fixed 500 ms sleeps.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -20,28 +20,28 @@ only in chat.
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
 - Latest admin/public proof: Docker image `business-os:v6.0.0-202606112120`
   is healthy with frontend hash `93869b501ace81b6` and source hash
-  `3b68f7362c866cc6`. Local LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-23-57-858Z.json`
-  measured Dashboard 280 ms, Files 312 ms, and all 9 checked routes at or
-  below 388 ms with zero failed requests/errors. Admin Cloudflare LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-24-44-954Z.json`
-  kept all 9 checked routes at or below 388 ms. Direct public-host LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-24-45-903Z.json`
-  kept all 9 checked routes at or below 388 ms. Browser action smoke
-  `ops/runtime/reports/browser-action-smoke-2026-06-11T13-23-58-999Z/summary.json`
+  `3b68f7362c866cc6`. Live-smoke verification completed against the Docker app
+  with seed `QA Smoke 1781185367810`, created/imported/cleaned its test data,
+  and used two review polls plus two completion polls at the new 150 ms
+  interval. Local LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-43-04-997Z.json`
+  kept all 9 checked routes at or below 1,444 ms with zero failed
+  requests/errors. Admin Cloudflare LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-46-53-106Z.json`
+  kept all 9 checked routes at or below 324 ms. Direct public-host LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-46-54-042Z.json`
+  kept all 9 checked routes at or below 332 ms. Browser action smoke
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T13-43-06-075Z/summary.json`
   passed 34 routes and 28 actions with 0 findings. Broad all-pages control
   audit
-  `ops/runtime/reports/all-pages-control-audit-2026-06-11T13-24-45-680Z/summary.json`
-  passed 34 desktop/mobile routes, 460 controls, 404 tested controls, 0 failed
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T13-43-06-568Z/summary.json`
+  passed 34 desktop/mobile routes, 471 controls, 410 tested controls, 0 failed
   controls, and 0 findings.
-- Latest cleanup proof: ignored regenerable `release/` and `frontend/dist/`
-  were deleted after Docker/live proof, reclaiming 412,840,325 bytes. Guarded
-  storage prune removed 14,053,717 bytes of old reports, reclaimed 614.1 MB of
-  Docker builder cache, and removed only the old
-  `business-os:v6.0.0-202606111935` tag while keeping the running image and
-  newest rollback tags. Phase 29 audit `ops/docs/reference/PHASE29-AUDIT.md`
-  then passed 9 checks with 0 failures; generated-bulk cleanup candidates are
-  below the 512 MB threshold.
+- Latest cleanup proof: guarded storage prune removed 10,872,801 bytes of old
+  reports, reclaimed 575.4 MB of Docker builder cache, and kept the running
+  image plus newest rollback tags. Phase 29 audit
+  `ops/docs/reference/PHASE29-AUDIT.md` then passed 9 checks with 0 failures;
+  generated-bulk cleanup candidates are below the 512 MB threshold.
 
 ## Program Goals
 

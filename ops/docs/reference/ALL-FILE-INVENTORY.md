@@ -209,7 +209,7 @@ Total files documented: **735**
 | 197 | `backend/test/fileAssetStorageReconcile.test.ts` | backend-root | 57 | 1.4 | Project source/support file |
 | 198 | `backend/test/fileAssetUsageCache.test.ts` | backend-root | 201 | 6.3 | Project source/support file |
 | 199 | `backend/test/fileRouteSecurityFlow.test.ts` | backend-root | 217 | 7.2 | Project source/support file |
-| 200 | `backend/test/fullAutomation.test.ts` | backend-root | 1001 | 39.3 | Project source/support file |
+| 200 | `backend/test/fullAutomation.test.ts` | backend-root | 1003 | 39.5 | Project source/support file |
 | 201 | `backend/test/googleDriveSyncVersioning.test.ts` | backend-root | 121 | 5.1 | Project source/support file |
 | 202 | `backend/test/idempotency.test.ts` | backend-root | 32 | 0.7 | Project source/support file |
 | 203 | `backend/test/importCsv.test.ts` | backend-root | 83 | 3.0 | Project source/support file |
@@ -706,7 +706,7 @@ Total files documented: **735**
 | 694 | `ops/scripts/runtime/live-checks/route-load-trace.ts` | project-scripts | 219 | 8.1 | Project source/support file |
 | 695 | `ops/scripts/runtime/smoke/check-public-url.ts` | project-scripts | 239 | 8.2 | Project source/support file |
 | 696 | `ops/scripts/runtime/smoke/check-route-contract.ts` | project-scripts | 86 | 3.9 | Project source/support file |
-| 697 | `ops/scripts/runtime/smoke/live-smoke.ts` | project-scripts | 318 | 13.4 | Project source/support file |
+| 697 | `ops/scripts/runtime/smoke/live-smoke.ts` | project-scripts | 323 | 13.5 | Project source/support file |
 | 698 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | project-scripts | 213 | 6.9 | Project source/support file |
 | 699 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | project-scripts | 230 | 9.6 | Project source/support file |
 | 700 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | project-scripts | 430 | 18.8 | Project source/support file |

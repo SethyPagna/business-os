@@ -10,10 +10,15 @@ const USERNAME = process.env.BOS_USERNAME || 'admin'
 const PASSWORD = process.env.BOS_PASSWORD || 'Admin123456!'
 const ROOT_DIR = path.resolve(__dirname, '../../../..')
 const CLEANUP_TEST_DATA = String(process.env.BOS_SMOKE_CLEANUP || '1').trim() !== '0'
+const IMPORT_JOB_POLL_INTERVAL_MS = 150
 let smokeSeed = ''
 
 function assert(condition, message) {
   if (!condition) throw new Error(message)
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function request(state, method, pathname, body = null, extraHeaders = {}) {
@@ -265,7 +270,7 @@ async function main() {
     jobState = record('poll import job', await request(state, 'GET', `/api/import-jobs/${importJobId}`))
     if (jobState.job?.status === 'awaiting_review') break
     if (['failed', 'completed', 'cancelled'].includes(String(jobState.job?.status || '').toLowerCase())) break
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await sleep(IMPORT_JOB_POLL_INTERVAL_MS)
   }
   if (jobState?.job?.status === 'awaiting_review') {
     const preflight = record('preflight import job', await request(state, 'POST', `/api/import-jobs/${importJobId}/preflight`, {}))
@@ -277,7 +282,7 @@ async function main() {
     jobState = record('poll import completion', await request(state, 'GET', `/api/import-jobs/${importJobId}`))
     if (String(jobState.job?.status || '').toLowerCase() === 'completed') break
     if (String(jobState.job?.status || '').toLowerCase() === 'failed') break
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    await sleep(IMPORT_JOB_POLL_INTERVAL_MS)
   }
   assert(String(jobState?.job?.status || '').toLowerCase() === 'completed', `Import job did not complete successfully (status=${jobState?.job?.status || 'unknown'})`)
   await fs.rm(tmpCsv, { force: true })

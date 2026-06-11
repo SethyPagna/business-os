@@ -657,7 +657,7 @@ Code files scanned: **662**
 | 645 | `ops/scripts/runtime/live-checks/route-load-trace.ts` | 8 |
 | 646 | `ops/scripts/runtime/smoke/check-public-url.ts` | 11 |
 | 647 | `ops/scripts/runtime/smoke/check-route-contract.ts` | 3 |
-| 648 | `ops/scripts/runtime/smoke/live-smoke.ts` | 6 |
+| 648 | `ops/scripts/runtime/smoke/live-smoke.ts` | 7 |
 | 649 | `ops/scripts/runtime/smoke/post-start-diagnostics.ts` | 7 |
 | 650 | `ops/scripts/runtime/storage/cleanup-integrity-backlog.ts` | 8 |
 | 651 | `ops/scripts/runtime/storage/cleanup-test-data.ts` | 21 |
@@ -10419,12 +10419,13 @@ Code files scanned: **662**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---|---:|
-| 1 | `assert` | function | 15 |
-| 2 | `request` | function | 19 |
-| 3 | `login` | function | 48 |
-| 4 | `cleanupLiveSmokeData` | function | 61 |
-| 5 | `main` | function | 86 |
-| 6 | `record` | const arrow | 91 |
+| 1 | `assert` | function | 16 |
+| 2 | `sleep` | function | 20 |
+| 3 | `request` | function | 24 |
+| 4 | `login` | function | 53 |
+| 5 | `cleanupLiveSmokeData` | function | 66 |
+| 6 | `main` | function | 91 |
+| 7 | `record` | const arrow | 96 |
 
 ### 3.649 `ops/scripts/runtime/smoke/post-start-diagnostics.ts`
 

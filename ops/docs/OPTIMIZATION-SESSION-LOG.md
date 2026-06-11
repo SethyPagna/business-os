@@ -8,6 +8,54 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Speed up live-smoke import polling
+  - area: runtime verification workflow, import-job polling loop, repeated
+    Playwright/live-test efficiency, and Phase 29 reference verification
+  - result: kept
+  - note: Move 920 replaces the live-smoke import-job fixed 500 ms sleeps with
+    a named 150 ms poll interval. The smoke still waits for real job states
+    and still verifies review, approval, completion, and imported product
+    search; it just avoids waiting longer than needed between polls.
+  - affected files: `ops/scripts/runtime/smoke/live-smoke.ts`,
+    `backend/test/fullAutomation.test.ts`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-ROADMAP.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+    generated references under `ops/docs/reference/`
+  - verification: backend utility suite, live-smoke against Docker runtime,
+    local/admin/public LCP traces, browser action smoke, broad all-pages
+    control audit, guarded storage prune, generated reference refresh, Phase
+    29 audit, and `git diff --check` passed.
+  - runtime proof: Docker image `business-os:v6.0.0-202606112120` remains
+    healthy with frontend hash `93869b501ace81b6` and source hash
+    `3b68f7362c866cc6`.
+  - live proof: `npm.cmd --prefix backend run verify:live-smoke` passed with
+    seed `QA Smoke 1781185367810`; import review and completion each settled
+    after two polls at the new 150 ms interval. Local LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T13-43-04-997Z.json` stayed
+    under the 2.5 s target with zero failed requests/errors. Admin Cloudflare
+    LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T13-46-53-106Z.json`
+    kept all routes at or below 324 ms. Direct public-host LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T13-46-54-042Z.json` kept
+    all routes at or below 332 ms. Browser action smoke
+    `ops/runtime/reports/browser-action-smoke-2026-06-11T13-43-06-075Z/summary.json`
+    passed 34 routes and 28 actions with 0 findings. Broad all-pages control
+    audit
+    `ops/runtime/reports/all-pages-control-audit-2026-06-11T13-43-06-568Z/summary.json`
+    passed 34 routes, 471 controls, 410 tested controls, 0 failed controls,
+    and 0 findings.
+  - cleanup proof: guarded `prune-storage` removed 10,872,801 bytes of old
+    reports and reclaimed 575.4 MB of Docker builder cache while preserving
+    protected uploads, secrets, database, backups, volumes, node_modules, and
+    active Docker image. Phase 29 audit passed afterward with 9 checks and 0
+    failures.
+  - current plan position after Move 920: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Remove fixed Reset Data refresh delay
   - area: Backup/Reset Data completion flow, artificial loading delay cleanup,
     and Phase 29 reference verification

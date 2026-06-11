@@ -181,6 +181,8 @@ runTest('docker release verification protects generated cleanup boundaries', () 
   assert.match(verifier, /require\('\.\.\/lib\/fs-utils\.ts'\)/)
   assert.match(verifier, /readUtf8/)
   assert.doesNotMatch(verifier, /fs\.readFileSync\(file, 'utf8'\)/)
+  assert.match(liveSmoke, /const IMPORT_JOB_POLL_INTERVAL_MS = 150/)
+  assert.doesNotMatch(liveSmoke, /setTimeout\(resolve, 500\)/)
   ;[
     '.dockerignore',
     '.gitignore',

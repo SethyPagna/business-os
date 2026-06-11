@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 919.
+- Latest completed implementation move in this roadmap: Move 920.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15689,6 +15689,48 @@ Move 919 status:
   image `business-os:v6.0.0-202606112120`. Phase 29 audit passed afterward
   with 9 checks and 0 failures.
 - Current plan position after Move 919: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 920 status:
+- Move 920 speeds up live-smoke import polling. The verification harness now
+  uses `IMPORT_JOB_POLL_INTERVAL_MS = 150` for import-job review/completion
+  loops instead of two fixed 500 ms sleeps, and the backend guard rejects the
+  old pattern. This improves the repeated live-test workflow without weakening
+  the import-job assertions or app runtime behavior.
+- Runtime proof: the existing Docker image `business-os:v6.0.0-202606112120`
+  remains healthy with frontend hash `93869b501ace81b6` and source hash
+  `3b68f7362c866cc6`.
+- Live-smoke proof: `npm.cmd --prefix backend run verify:live-smoke` passed
+  against `http://127.0.0.1:4000` with seed `QA Smoke 1781185367810`; the job
+  reached review after two polls and completion after two polls at the new
+  150 ms interval, then verified the imported product search.
+- Playwright proof: local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-43-04-997Z.json` kept all
+  9 checked routes under the 2.5 s target with zero failed requests/errors.
+  Admin Cloudflare LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-46-53-106Z.json` kept all
+  9 checked routes at or below 324 ms. Direct public-host LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-46-54-042Z.json` kept all
+  9 checked routes at or below 332 ms. Browser action smoke
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T13-43-06-075Z/summary.json`
+  passed 34 routes and 28 actions with 0 findings. Broad all-pages control
+  audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T13-43-06-568Z/summary.json`
+  passed 34 routes, 471 controls, 410 tested controls, 0 failed controls, and
+  0 findings.
+- Verification proof: backend utility suite, live-smoke, local/admin/public
+  LCP route traces, browser action smoke, broad all-pages control audit,
+  guarded storage prune, generated reference refresh, Phase 29 audit, and
+  `git diff --check` passed.
+- Cleanup proof: guarded `prune-storage` removed 10,872,801 bytes of old
+  reports, reclaimed 575.4 MB of Docker builder cache, and preserved protected
+  uploads, secrets, database, backups, volumes, node_modules, and active Docker
+  image `business-os:v6.0.0-202606112120`. Phase 29 audit passed afterward
+  with 9 checks and 0 failures.
+- Current plan position after Move 920: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active. Remaining external
   blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
