@@ -8,8 +8,9 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 907, lazy-load Dashboard chart modules so first
-  paint no longer waits for line/donut chart code.
+- Latest completed move: Move 908, invalidate Dashboard summary/analytics
+  caches immediately after sales and returns writes so fresh real data is
+  visible without waiting for the short TTL window.
 
 ## Current Baseline
 
@@ -17,10 +18,11 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `b81323a818b8e09a`
+  `1ac687c3d37e1837`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 907 source state; Docker image `business-os:v6.0.0-202606111239`
-  serves frontend hash `b81323a818b8e09a`
+  this Move 908 source state; Docker image `business-os:v6.0.0-202606111334`
+  serves frontend hash `1ac687c3d37e1837` and source hash
+  `08bd63648c56ece6`
 
 Latest verified reports:
 
@@ -94,6 +96,19 @@ Latest verified reports:
   bytes of old runtime reports, reclaimed about 4.155 GB of Docker build
   cache, and removed only one old `business-os:v*` tag while keeping active
   `business-os:v6.0.0-202606111239`.
+- latest Move 908 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-207Z.json`
+- latest Move 908 public admin LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-709Z.json`
+- latest Move 908 all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-52-14-291Z/summary.json`
+- latest Move 908 cleanup result:
+  deleted ignored/generated `release/` kit after Docker proof; 380,978,311
+  bytes removed; uploads, secrets, database, node_modules, backups, and the
+  running Docker image were preserved. Guarded `prune-storage` preserved
+  protected backups/volumes, pruned 75,500 bytes of old runtime reports,
+  reclaimed about 2.963 GB of Docker build cache, and removed only older
+  `business-os:v*` tags while keeping active `business-os:v6.0.0-202606111334`.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

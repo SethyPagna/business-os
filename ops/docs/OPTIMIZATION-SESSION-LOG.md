@@ -4509,6 +4509,56 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+## Move 908 - Dashboard cache invalidation after sales/returns writes
+
+- change: clear the in-process Dashboard summary/analytics caches on sale
+  create, sale status updates, and sale customer assignment; broadcast the
+  `dashboard` sync channel from those sales writes and from customer/supplier
+  return writes.
+- affected files:
+  `backend/src/routes/sales.ts`,
+  `backend/src/routes/returns.ts`,
+  `backend/test/routeContracts.test.ts`,
+  `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+  `ops/docs/OPTIMIZATION-ROADMAP.md`,
+  `ops/docs/OPTIMIZATION-STATUS.md`,
+  `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+  `ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md`,
+  generated reference reports under `ops/docs/reference/`.
+- route or API target: Dashboard startup/analytics freshness after POS sales,
+  sales status changes, customer assignment changes, and returns/refunds.
+- keeper or rollback: keeper; this closes a local memory-cache invalidation
+  gap while preserving the existing shared runtime cache and websocket
+  broadcast strategy.
+- runtime proof:
+  Docker image `business-os:v6.0.0-202606111334` is healthy with frontend hash
+  `1ac687c3d37e1837` and source hash `08bd63648c56ece6`.
+- Playwright proof:
+  local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-207Z.json`
+  measured Dashboard 516 ms and every route under 0.6 s; public admin LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-709Z.json`
+  measured Dashboard 316 ms and every route under 0.4 s; broad all-pages
+  audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-52-14-291Z/summary.json`
+  passed 34 desktop/mobile routes, 410 tested controls, 0 failures, and
+  0 findings.
+- verification:
+  backend utility suite, frontend production build, `git diff --check`,
+  Docker image/start health, local/public LCP route traces, broad all-pages
+  control audit, Phase 29 audit, and guarded storage prune passed.
+- cleanup:
+  deleted ignored/generated `release/` kit after Docker image/start proof,
+  removing 380,978,311 bytes. Guarded storage prune removed 75,500 bytes of
+  old runtime reports, reclaimed about 2.963 GB of Docker build cache, and
+  removed only old `business-os:v*` rollback image tags while preserving the
+  active image, protected backups, volumes, uploads, secrets, database, and
+  node_modules.
+- current plan position:
+  Phase 8.4 active; Phase 26 stays at 51 completed organization moves; Phase
+  28 active with R2/access follow-up open; Phase 29 active. External blocker
+  remains Cloudflare token permission `Zone Cache Rules Edit`.
+
 ### Move 907: Lazy-load Dashboard chart modules
 
 - Ownership slice: Phase 8.4 Dashboard first paint and Phase 29 generated-bulk

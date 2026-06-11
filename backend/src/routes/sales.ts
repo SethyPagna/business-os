@@ -78,6 +78,14 @@ function writeCachedDashboardAnalytics(key, payload) {
   return payload
 }
 
+function clearDashboardCaches() {
+  dashboardSummaryCache = {
+    expiresAt: 0,
+    payload: null,
+  }
+  dashboardAnalyticsCache.clear()
+}
+
 function normalizeImportedTimestamp(value) {
   const raw = String(value || '').trim()
   if (!raw) return null
@@ -545,9 +553,11 @@ router.post('/sales', authToken, requirePermission('sales'), (req, res) => {
   }
 
   logOp('sales:create', Date.now() - t0)
+  clearDashboardCaches()
   broadcast('sales')
   broadcast('products')
   broadcast('inventory')
+  broadcast('dashboard')
   ok(res, { id: saleId, receiptNumber })
 })
 
@@ -705,9 +715,11 @@ router.patch('/sales/:id/status', authToken, requirePermission('sales'), (req, r
     return err(res, e.message)
   }
 
+  clearDashboardCaches()
   broadcast('sales')
   broadcast('products')
   broadcast('inventory')
+  broadcast('dashboard')
   const updatedSale = db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get(id)
   ok(res, updatedSale || { id: parseInt(id), sale_status })
 })
@@ -791,8 +803,10 @@ router.patch('/sales/:id/customer', authToken, requirePermission('sales'), (req,
     return err(res, e.message)
   }
 
+  clearDashboardCaches()
   broadcast('sales')
   broadcast('returns')
+  broadcast('dashboard')
   const updatedSale = db.prepare('SELECT id, customer_id, customer_name, updated_at FROM sales WHERE id = ?').get(saleId)
   ok(res, {
     ...(updatedSale || { id: saleId }),

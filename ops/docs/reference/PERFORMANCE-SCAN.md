@@ -33,7 +33,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
 | `frontend/src/components/users/UserProfileModal.tsx` | 68.9 | 1344 |
 | `backend/src/routes/system/index.ts` | 65.6 | 1674 |
-| `backend/src/routes/sales.ts` | 65.2 | 1591 |
+| `backend/src/routes/sales.ts` | 65.5 | 1605 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
 | `frontend/src/components/utils-settings/AuditLog.tsx` | 60.5 | 1322 |
 | `frontend/src/components/catalog/CatalogSecondaryTabs.tsx` | 59.2 | 1116 |
@@ -61,7 +61,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/components/utils-settings/Backup.tsx` | 1779 | 80.1 |
 | `backend/src/routes/system/index.ts` | 1674 | 65.6 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 1666 | 71.6 |
-| `backend/src/routes/sales.ts` | 1591 | 65.2 |
+| `backend/src/routes/sales.ts` | 1605 | 65.5 |
 | `backend/src/services/googleDriveSync/index.ts` | 1564 | 57.8 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 1555 | 104.9 |
 | `backend/src/routes/portal.ts` | 1478 | 54.0 |
@@ -79,26 +79,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
 | `frontend/dist/assets/index-DzyUxVKK.css` | 147.6 |
-| `frontend/dist/assets/Inventory-Bk-D_83s.js` | 101.5 |
-| `frontend/dist/assets/Products-CBmLOHJv.js` | 84.4 |
-| `frontend/dist/assets/catalog-g3eebAis.js` | 79.5 |
-| `frontend/dist/assets/catalog-editor-Cpkf2KOF.js` | 74.1 |
+| `frontend/dist/assets/Inventory-fihG3pqi.js` | 101.5 |
+| `frontend/dist/assets/Products-B4Z1P4eL.js` | 84.4 |
+| `frontend/dist/assets/catalog-Dv1yqQRM.js` | 79.5 |
+| `frontend/dist/assets/catalog-editor-C6XtxUgw.js` | 74.1 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-BGzeZ5Da.js` | 67.9 |
-| `frontend/dist/assets/POS-CUMjoCWv.js` | 64.3 |
-| `frontend/dist/assets/AdminRoot-CIPaxow7.js` | 62.8 |
-| `frontend/dist/assets/Dashboard-D0Jc9OgG.js` | 62.4 |
-| `frontend/dist/assets/Settings-WX7sTsTF.js` | 54.6 |
+| `frontend/dist/assets/BulkImportModal-DDM8Gqqk.js` | 67.9 |
+| `frontend/dist/assets/POS-Cz8OoS3i.js` | 64.3 |
+| `frontend/dist/assets/AdminRoot--xEYh7on.js` | 62.8 |
+| `frontend/dist/assets/Dashboard-Ba5ku84J.js` | 62.4 |
+| `frontend/dist/assets/Settings-BE64MJcZ.js` | 54.6 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-D7FA5IfF.js` | 50.8 |
-| `frontend/dist/assets/shared-ui-B_vWt_HH.js` | 48.7 |
-| `frontend/dist/assets/user-profile-modal-DaV5iXsw.js` | 44.2 |
-| `frontend/dist/assets/app-auth-CBOk7Nzc.js` | 40.4 |
-| `frontend/dist/assets/ReceiptSettings-BBP51s12.js` | 40.0 |
+| `frontend/dist/assets/Backup-HYc-sg7N.js` | 50.8 |
+| `frontend/dist/assets/shared-ui-Ba2Xn7Sa.js` | 48.7 |
+| `frontend/dist/assets/user-profile-modal-BosJCyhm.js` | 44.2 |
+| `frontend/dist/assets/app-auth-DUDpaS9O.js` | 40.4 |
+| `frontend/dist/assets/ReceiptSettings-BrrG0_3E.js` | 40.0 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-KJBUt9QF.js` | 37.2 |
-| `frontend/dist/assets/Sales-DzHfooqH.js` | 35.7 |
-| `frontend/dist/assets/ProductForm-B5Ys6MKX.js` | 35.3 |
+| `frontend/dist/assets/catalog-secondary-tabs-CcdQIDMQ.js` | 37.2 |
+| `frontend/dist/assets/Sales-DA4SCaGF.js` | 35.7 |
+| `frontend/dist/assets/ProductForm--HuXQxQW.js` | 35.3 |
 
 ## 5. Notes
 

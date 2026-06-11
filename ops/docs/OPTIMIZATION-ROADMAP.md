@@ -15528,3 +15528,42 @@ Move 907 status:
   R2/access follow-up open; Phase 29 remains active. Remaining external
   blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
   `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 908 status:
+- Move 908 removes a stale-data wait from Dashboard refreshes after write
+  flows. Sales create/status/customer updates now clear the in-process
+  Dashboard summary and analytics caches before broadcasting, and sales plus
+  customer/supplier returns now publish the `dashboard` channel. The shared
+  runtime cache invalidator already maps sales/returns/products to
+  `dashboard:`, so this closes the local memory-cache gap without adding a new
+  cache system.
+- Runtime proof: Docker image `business-os:v6.0.0-202606111334` is healthy
+  with frontend hash `1ac687c3d37e1837` and source hash
+  `08bd63648c56ece6`. The release image build completed and the normal
+  `run\docker\start.bat` path started that image; the standalone release-kit
+  export step exceeded the shell timeout, so the generated kit was treated as
+  disposable and removed after image proof.
+- Playwright proof: local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-207Z.json`
+  measured Dashboard 516 ms and every tested route under 0.6 s. Public admin
+  LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T05-51-39-709Z.json`
+  measured Dashboard 316 ms and every tested route under 0.4 s with zero
+  failed requests/errors. Broad all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T05-52-14-291Z/summary.json`
+  passed 34 desktop/mobile routes, 410 tested controls, 56 intentional skips,
+  0 failed controls, and 0 findings.
+- Verification proof: backend utility suite, frontend production build,
+  Docker image/start health, local/public LCP route traces, broad all-pages
+  control audit, Phase 29 audit, guarded storage prune, and `git diff --check`
+  passed.
+- Cleanup proof: after Docker image/start/live proof, the ignored/generated
+  `release/` kit was deleted, removing 380,978,311 bytes. The guarded storage
+  prune removed 75,500 bytes of old runtime reports, reclaimed about 2.963 GB
+  of Docker build cache, and removed only older `business-os:v*` tags while
+  preserving active `business-os:v6.0.0-202606111334`, protected backups,
+  volumes, uploads, secrets, database, and node_modules.
+- Current plan position after Move 908: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`.

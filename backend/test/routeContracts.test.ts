@@ -116,8 +116,10 @@ runTest('sales router registers combined dashboard startup route', () => {
   assert.ok(paths.includes('/dashboard/startup'), 'missing /api/dashboard/startup route')
   assert.match(source, /function buildDashboardSummary\(\)/)
   assert.match(source, /function buildDashboardAnalytics\(startDate, endDate, granularity = 'day'\)/)
+  assert.match(source, /function clearDashboardCaches\(\)[\s\S]*dashboardAnalyticsCache\.clear\(\)/)
   assert.match(source, /summary: buildDashboardSummary\(\)/)
   assert.match(source, /analytics: buildDashboardAnalytics\(startDate, endDate, granularity\)/)
+  assert.match(source, /clearDashboardCaches\(\)[\s\S]*broadcast\('dashboard'\)/)
 })
 
 runTest('SPA shell sends route-owned modulepreload hints for direct visits', () => {

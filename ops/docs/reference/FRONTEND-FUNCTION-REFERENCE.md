@@ -112,7 +112,7 @@ Total files documented: **278**
 | 100 | `frontend/src/components/dashboard/charts/index.ts` | 0 |
 | 101 | `frontend/src/components/dashboard/charts/LineChart.tsx` | 7 |
 | 102 | `frontend/src/components/dashboard/charts/NoData.tsx` | 1 |
-| 103 | `frontend/src/components/dashboard/Dashboard.tsx` | 17 |
+| 103 | `frontend/src/components/dashboard/Dashboard.tsx` | 18 |
 | 104 | `frontend/src/components/dashboard/dashboardExport.ts` | 16 |
 | 105 | `frontend/src/components/dashboard/MiniStat.tsx` | 1 |
 | 106 | `frontend/src/components/files/FilePickerModal.tsx` | 9 |
@@ -224,7 +224,7 @@ Total files documented: **278**
 | 212 | `frontend/src/components/users/UserDetailSheet.tsx` | 4 |
 | 213 | `frontend/src/components/users/UserProfileModal.tsx` | 14 |
 | 214 | `frontend/src/components/users/Users.tsx` | 19 |
-| 215 | `frontend/src/components/utils-settings/AuditLog.tsx` | 20 |
+| 215 | `frontend/src/components/utils-settings/AuditLog.tsx` | 22 |
 | 216 | `frontend/src/components/utils-settings/Backup.tsx` | 34 |
 | 217 | `frontend/src/components/utils-settings/FontFamilyPicker.tsx` | 1 |
 | 218 | `frontend/src/components/utils-settings/index.ts` | 0 |
@@ -1682,16 +1682,17 @@ Total files documented: **278**
 | 5 | `downsampleChartRows` | function | 314 |
 | 6 | `normalizeDashboardRangeId` | function | 325 |
 | 7 | `compactDashboardMetaParts` | function | 332 |
-| 8 | `formatDashboardHourLabel` | function | 338 |
-| 9 | `getSaleStatusTone` | function | 345 |
-| 10 | `isDashboardSummaryPayload` | function | 352 |
-| 11 | `isDashboardAnalyticsPayload` | function | 364 |
-| 12 | `normalizeDashboardSummaryPayload` | function | 377 |
-| 13 | `normalizeDashboardAnalyticsPayload` | function | 390 |
-| 14 | `Dashboard` | component/function | 410 |
-| 15 | `calcTrend` | const arrow | 716 |
-| 16 | `rangeLabel` | const arrow | 760 |
-| 17 | `periodShort` | const arrow | 766 |
+| 8 | `ChartFallback` | function | 338 |
+| 9 | `formatDashboardHourLabel` | function | 344 |
+| 10 | `getSaleStatusTone` | function | 351 |
+| 11 | `isDashboardSummaryPayload` | function | 358 |
+| 12 | `isDashboardAnalyticsPayload` | function | 370 |
+| 13 | `normalizeDashboardSummaryPayload` | function | 383 |
+| 14 | `normalizeDashboardAnalyticsPayload` | function | 396 |
+| 15 | `Dashboard` | component/function | 416 |
+| 16 | `calcTrend` | const arrow | 722 |
+| 17 | `rangeLabel` | const arrow | 766 |
+| 18 | `periodShort` | const arrow | 772 |
 
 ### 3.104 `frontend/src/components/dashboard/dashboardExport.ts`
 
@@ -2970,22 +2971,24 @@ Total files documented: **278**
 | 2 | `isRecord` | function | 108 |
 | 3 | `getErrorMessage` | function | 112 |
 | 4 | `toIso` | function | 144 |
-| 5 | `formatDateTime` | function | 151 |
-| 6 | `formatLogTime` | function | 172 |
-| 7 | `auditDeviceLabel` | function | 176 |
-| 8 | `auditTimezoneLabel` | function | 184 |
-| 9 | `getLogEpoch` | function | 192 |
-| 10 | `formatJsonPretty` | function | 199 |
-| 11 | `parseLogJson` | function | 207 |
-| 12 | `flattenSummaryValue` | function | 215 |
-| 13 | `formatEntityName` | function | 234 |
-| 14 | `readableSummary` | function | 240 |
-| 15 | `normalizeFiniteIds` | function | 268 |
-| 16 | `countSelectedIds` | function | 272 |
-| 17 | `countActiveFlags` | function | 280 |
-| 18 | `DetailRow` | function | 288 |
-| 19 | `AuditLog` | component/function | 300 |
-| 20 | `sessionEntryLabel` | function | 665 |
+| 5 | `formatDateTime` | function | 156 |
+| 6 | `formatCompactDateTime` | function | 177 |
+| 7 | `formatLogTime` | function | 195 |
+| 8 | `formatLogTableTime` | function | 199 |
+| 9 | `auditDeviceLabel` | function | 203 |
+| 10 | `auditTimezoneLabel` | function | 211 |
+| 11 | `getLogEpoch` | function | 219 |
+| 12 | `formatJsonPretty` | function | 226 |
+| 13 | `parseLogJson` | function | 234 |
+| 14 | `flattenSummaryValue` | function | 242 |
+| 15 | `formatEntityName` | function | 261 |
+| 16 | `readableSummary` | function | 267 |
+| 17 | `normalizeFiniteIds` | function | 295 |
+| 18 | `countSelectedIds` | function | 299 |
+| 19 | `countActiveFlags` | function | 307 |
+| 20 | `DetailRow` | function | 315 |
+| 21 | `AuditLog` | component/function | 327 |
+| 22 | `sessionEntryLabel` | function | 692 |
 
 ### 3.216 `frontend/src/components/utils-settings/Backup.tsx`
 

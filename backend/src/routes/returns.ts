@@ -608,6 +608,7 @@ router.post('/returns', authToken, requirePermission('sales'), (req, res) => {
     broadcast('returns')
     broadcast('products')
     broadcast('sales')
+    broadcast('dashboard')
     ok(res, { id: returnId, returnNumber })
   } catch (e) {
     if (clientRequestId && /client_request_id/i.test(String(e?.message || ''))) {
@@ -865,6 +866,7 @@ router.post('/returns/supplier', authToken, requirePermission('sales'), (req, re
     broadcast('returns')
     broadcast('products')
     broadcast('inventory')
+    broadcast('dashboard')
     ok(res, { id: returnId, returnNumber })
   } catch (e) {
     if (clientRequestId && /client_request_id/i.test(String(e?.message || ''))) {
@@ -1132,6 +1134,7 @@ router.patch('/returns/:id', authToken, requirePermission('sales'), (req, res) =
   broadcast('products')
   broadcast('sales')
   broadcast('inventory')
+  broadcast('dashboard')
   const updatedReturn = db.prepare('SELECT id, updated_at FROM returns WHERE id = ?').get(id)
   ok(res, updatedReturn || { id: parseInt(id, 10) })
 })

@@ -10026,3 +10026,22 @@ Decision rule:
 - Current plan position after Move 907: Phase 8.4 remains active; Phase 26
   stays at 51 completed organization moves; Phase 28 remains active with
   R2/access follow-up open; Phase 29 remains active.
+
+### Move 908: Keep Dashboard cache invalidation in sales/returns ownership
+
+- Ownership slice: backend sales and returns write paths. No folder move was
+  made because the Dashboard cache lives inside `backend/src/routes/sales.ts`
+  beside the Dashboard summary/analytics builders it invalidates.
+- Organization decision: keep the small `clearDashboardCaches()` helper local
+  until another route needs direct access to the same in-process cache. Returns
+  already reaches the shared runtime cache through `broadcast()`, so only a
+  dashboard channel broadcast was needed there.
+- Language/runtime decision: no TypeScript, Rust, Go, Python, or WASM rewrite
+  is justified for this slice. The bottleneck was cache freshness and sync
+  signaling, not CPU-bound work or type-bound ambiguity.
+- Verification slice: backend utility suite, frontend production build,
+  Docker image/start health, local/public LCP traces, broad all-pages control
+  audit, Phase 29 audit, storage prune, and `git diff --check` passed.
+- Current plan position after Move 908: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active.

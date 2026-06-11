@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 462,
   "distAssets": 169,
-  "totalSourceBytes": 7142971,
-  "totalSourceLines": 164731,
+  "totalSourceBytes": 7143302,
+  "totalSourceLines": 164748,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "backend/src/services/importJobs.ts",
@@ -137,8 +137,8 @@
     },
     {
       "file": "backend/src/routes/sales.ts",
-      "size": 66765,
-      "lines": 1591
+      "size": 67027,
+      "lines": 1605
     },
     {
       "file": "frontend/src/components/catalog/portalLanguagePacks.ts",
@@ -254,8 +254,8 @@
     },
     {
       "file": "backend/src/routes/sales.ts",
-      "size": 66765,
-      "lines": 1591
+      "size": 67027,
+      "lines": 1605
     },
     {
       "file": "backend/src/services/googleDriveSync/index.ts",
@@ -320,22 +320,22 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Inventory-Bk-D_83s.js",
+      "file": "frontend/dist/assets/Inventory-fihG3pqi.js",
       "size": 103897,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Products-CBmLOHJv.js",
+      "file": "frontend/dist/assets/Products-B4Z1P4eL.js",
       "size": 86417,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-g3eebAis.js",
+      "file": "frontend/dist/assets/catalog-Dv1yqQRM.js",
       "size": 81438,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-editor-Cpkf2KOF.js",
+      "file": "frontend/dist/assets/catalog-editor-C6XtxUgw.js",
       "size": 75912,
       "lines": 0
     },
@@ -345,27 +345,27 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/BulkImportModal-BGzeZ5Da.js",
+      "file": "frontend/dist/assets/BulkImportModal-DDM8Gqqk.js",
       "size": 69573,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/POS-CUMjoCWv.js",
+      "file": "frontend/dist/assets/POS-Cz8OoS3i.js",
       "size": 65878,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/AdminRoot-CIPaxow7.js",
+      "file": "frontend/dist/assets/AdminRoot--xEYh7on.js",
       "size": 64275,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Dashboard-D0Jc9OgG.js",
+      "file": "frontend/dist/assets/Dashboard-Ba5ku84J.js",
       "size": 63891,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Settings-WX7sTsTF.js",
+      "file": "frontend/dist/assets/Settings-BE64MJcZ.js",
       "size": 55876,
       "lines": 0
     },
@@ -375,27 +375,27 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Backup-D7FA5IfF.js",
+      "file": "frontend/dist/assets/Backup-HYc-sg7N.js",
       "size": 52009,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/shared-ui-B_vWt_HH.js",
+      "file": "frontend/dist/assets/shared-ui-Ba2Xn7Sa.js",
       "size": 49828,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/user-profile-modal-DaV5iXsw.js",
+      "file": "frontend/dist/assets/user-profile-modal-BosJCyhm.js",
       "size": 45273,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-auth-CBOk7Nzc.js",
+      "file": "frontend/dist/assets/app-auth-DUDpaS9O.js",
       "size": 41346,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ReceiptSettings-BBP51s12.js",
+      "file": "frontend/dist/assets/ReceiptSettings-BrrG0_3E.js",
       "size": 40970,
       "lines": 0
     },
@@ -405,17 +405,17 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-secondary-tabs-KJBUt9QF.js",
+      "file": "frontend/dist/assets/catalog-secondary-tabs-CcdQIDMQ.js",
       "size": 38076,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Sales-DzHfooqH.js",
+      "file": "frontend/dist/assets/Sales-DA4SCaGF.js",
       "size": 36538,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ProductForm-B5Ys6MKX.js",
+      "file": "frontend/dist/assets/ProductForm--HuXQxQW.js",
       "size": 36193,
       "lines": 0
     }
