@@ -1717,9 +1717,9 @@ Total files documented: **278**
 | 4 | `deleteFileAssetRequest` | function | 72 |
 | 5 | `AssetPreview` | function | 76 |
 | 6 | `FilePickerModal` | component/function | 99 |
-| 7 | `toggleSelectedPath` | function | 176 |
-| 8 | `handleUpload` | function | 186 |
-| 9 | `handleDelete` | function | 228 |
+| 7 | `toggleSelectedPath` | function | 168 |
+| 8 | `handleUpload` | function | 178 |
+| 9 | `handleDelete` | function | 220 |
 
 ### 3.107 `frontend/src/components/files/FilesPage.tsx`
 

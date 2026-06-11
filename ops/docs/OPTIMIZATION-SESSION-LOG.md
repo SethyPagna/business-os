@@ -8,6 +8,64 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove fixed Library and file-picker load delays
+  - area: Library/Files startup, file picker refresh behavior, artificial
+    loading delay cleanup, and Phase 29 reference verification
+  - result: kept
+  - note: Move 918 removes the fixed 120 ms delay before the Library page file
+    read and deletes the file picker's second 180 ms delayed reload. The file
+    picker already loads immediately on open/search/filter changes, so the
+    delayed effect was a real duplicate-load penalty.
+  - affected files: `frontend/src/components/files/FilesPage.tsx`,
+    `frontend/src/components/files/FilePickerModal.tsx`,
+    `frontend/tests/performanceLoadingUx.test.ts`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-ROADMAP.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+    generated references under `ops/docs/reference/`
+  - verification: frontend utility suite, frontend production build, Docker
+    release build/start health, Files-specific live check, local/admin/public
+    LCP traces, browser action smoke, broad all-pages control audit, guarded
+    storage prune, Phase 29 audit, generated reference refresh, and
+    `git diff --check` passed.
+  - runtime proof: Docker image `business-os:v6.0.0-202606112058` is healthy
+    with frontend hash `17876a34773e3f46` and source hash
+    `3b68f7362c866cc6`.
+  - live proof: Files-specific live check
+    `ops/runtime/reports/phase84-files-providers-actions-live-check-2026-06-11T13-01-40-768Z`
+    opened Library, read `/api/files`, `/api/ai/providers`, and
+    `/api/ai/responses` with HTTP 200, rendered 12 providers with
+    edit/test/delete actions, and recorded zero relevant console messages.
+    Local LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T13-01-53-670Z.json`
+    measured Files 240 ms and all 9 checked routes at or below 404 ms with
+    zero failed requests/errors. Admin Cloudflare LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T13-06-20-574Z.json`
+    measured Files 220 ms and all routes at or below 320 ms. Direct
+    public-host LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T13-06-21-876Z.json`
+    measured Files 216 ms and all routes at or below 372 ms. Browser action
+    smoke
+    `ops/runtime/reports/browser-action-smoke-2026-06-11T13-01-55-215Z/summary.json`
+    passed 34 routes and 28 actions with 0 findings. Broad all-pages control
+    audit
+    `ops/runtime/reports/all-pages-control-audit-2026-06-11T13-02-40-117Z/summary.json`
+    passed 34 routes, 461 controls, 404 tested controls, 0 failed controls,
+    and 0 findings.
+  - cleanup proof: deleted ignored/regenerable `release/` (380,980,576 bytes)
+    and `frontend/dist/` (31,860,813 bytes) after Docker/live proof,
+    reclaiming 412,841,389 bytes. Guarded `prune-storage` removed 6,908,211
+    bytes of old reports, reclaimed Docker builder cache, and removed only old
+    `business-os:v*` tags while preserving protected uploads, secrets,
+    database, backups, volumes, node_modules, and active Docker image. Phase
+    29 audit passed afterward with 9 checks and 0 failures.
+  - current plan position after Move 918: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Remove empty shell warmup scaffolding
   - area: admin shell startup, no-op warmup hooks, first-route loading
     overhead, and Phase 29 cleanup/reference verification

@@ -2986,6 +2986,11 @@ assert.match(
   /withLoaderTimeout\(\(\) => fetchPickerFiles\(\{ search, mediaType \}\), 'Files library picker', FILE_PICKER_LOAD_TIMEOUT_MS\)/,
   'file picker library should timeout slow file reads',
 )
+assert.doesNotMatch(
+  filePickerModal,
+  /window\.setTimeout\(\(\) => \{\s*loadFiles\(\)\s*\},\s*180\)/,
+  'file picker should not add a delayed duplicate reload after the immediate open/search load',
+)
 assert.match(
   filePickerModal,
   /const FILE_PICKER_UPLOAD_TIMEOUT_MS = 30000/,
@@ -3075,6 +3080,11 @@ assert.match(
   filesPage,
   /withLoaderTimeout\(\(\) => filesApi\.getFiles\(\{[\s\S]{0,180}includeMeta: true,[\s\S]{0,80}\}\), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS\)/,
   'files page library should timeout slow file reads',
+)
+assert.doesNotMatch(
+  filesPage,
+  /window\.setTimeout\(\(\) => \{\s*void loadFiles\(\)\s*\},\s*120\)/,
+  'files page library should not add a fixed delay before the real file read',
 )
 assert.match(
   filesPage,

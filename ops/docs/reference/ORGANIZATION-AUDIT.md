@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T12:51:26.815Z
+Generated: 2026-06-11T13:08:08.058Z
 
 ## Summary
 
@@ -70,7 +70,7 @@ Generated: 2026-06-11T12:51:26.815Z
 | ops/docs/OPTIMIZATION-STATUS.md | 5432 | ops/docs |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 5376 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| frontend/tests/performanceLoadingUx.test.ts | 3698 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 3708 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3640 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3498 | frontend/components/catalog |
 | frontend/src/components/inventory/Inventory.tsx | 3488 | frontend/components/inventory |

@@ -154,14 +154,6 @@ export default function FilePickerModal({
     loadFiles()
   }, [normalizedInitialSelectedKey, loadFiles, open])
 
-  useEffect(() => {
-    if (!open) return undefined
-    const timer = window.setTimeout(() => { loadFiles() }, 180)
-    return () => {
-      window.clearTimeout(timer)
-    }
-  }, [loadFiles, open])
-
   useEffect(() => () => {
     invalidateTrackedRequest(loadRequestRef)
   }, [])

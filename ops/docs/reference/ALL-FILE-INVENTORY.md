@@ -374,8 +374,8 @@ Total files documented: **735**
 | 362 | `frontend/src/components/dashboard/Dashboard.tsx` | frontend-ui | 1950 | 100.3 | UI component/page |
 | 363 | `frontend/src/components/dashboard/dashboardExport.ts` | frontend-ui | 486 | 19.6 | UI component/page |
 | 364 | `frontend/src/components/dashboard/MiniStat.tsx` | frontend-ui | 53 | 2.0 | UI component/page |
-| 365 | `frontend/src/components/files/FilePickerModal.tsx` | frontend-ui | 346 | 14.2 | UI component/page |
-| 366 | `frontend/src/components/files/FilesPage.tsx` | frontend-ui | 1224 | 54.9 | UI component/page |
+| 365 | `frontend/src/components/files/FilePickerModal.tsx` | frontend-ui | 338 | 14.0 | UI component/page |
+| 366 | `frontend/src/components/files/FilesPage.tsx` | frontend-ui | 1224 | 54.8 | UI component/page |
 | 367 | `frontend/src/components/files/FilesProvidersTab.tsx` | frontend-ui | 348 | 20.3 | UI component/page |
 | 368 | `frontend/src/components/files/FilesResponsesTab.tsx` | frontend-ui | 195 | 11.3 | UI component/page |
 | 369 | `frontend/src/components/inventory/DualMoney.tsx` | frontend-ui | 16 | 0.4 | UI component/page |
@@ -585,7 +585,7 @@ Total files documented: **735**
 | 573 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 574 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 100 | 5.1 | Project source/support file |
 | 575 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 576 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3698 | 276.0 | Project source/support file |
+| 576 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3708 | 276.3 | Project source/support file |
 | 577 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 39 | 1.5 | Project source/support file |
 | 578 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 579 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 140 | 6.5 | Project source/support file |

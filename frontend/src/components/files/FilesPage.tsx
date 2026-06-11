@@ -619,8 +619,8 @@ export default function FilesPage() {
 
   useEffect(() => {
     if (!isActive) return undefined
-    const timer = window.setTimeout(() => { void loadFiles() }, 120)
-    return () => window.clearTimeout(timer)
+    void loadFiles()
+    return undefined
   }, [isActive, loadFiles])
 
   useEffect(() => {
