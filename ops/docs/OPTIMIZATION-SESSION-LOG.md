@@ -8,6 +8,37 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove Dashboard full-page startup loading gate
+  - area: Dashboard perceived performance, LCP, and loading correctness
+  - result: kept
+  - note: Move 913 removes the early `loading && !summaryReady` return from
+    Dashboard. The real Dashboard shell, title, range controls, and section
+    containers now paint immediately; KPI/chart/payment/branch/product sections
+    still use their own loading and unavailable states so the UI does not show
+    false zero data while verified summary and analytics are still in flight.
+  - affected files: `frontend/src/components/dashboard/Dashboard.tsx`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-ROADMAP.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`
+  - verification: frontend utility suite, frontend typecheck, frontend
+    production build, Docker release build/start health, local/public targeted
+    LCP traces, and local/public targeted route-load traces passed.
+  - runtime proof: Docker image `business-os:v6.0.0-202606111902` is healthy
+    with frontend hash `f673906b677b5d92` and source hash
+    `3b68f7362c866cc6`.
+  - live proof: local targeted LCP measured Dashboard 388 ms, Products 320 ms,
+    and POS 276 ms with zero failed requests/errors. Public targeted LCP
+    measured Dashboard 284 ms, Products 304 ms, and POS 296 ms with zero
+    failed requests/errors. Public Dashboard improved from the previous 2.820 s
+    trace because LCP no longer waits for the combined dashboard startup
+    response before any real page shell can paint.
+  - current plan position after Move 913: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Prioritize direct admin route chunks in modulepreload headers
   - area: Cloudflare direct-route startup and LCP
   - result: kept

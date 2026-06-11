@@ -1675,24 +1675,24 @@ Total files documented: **278**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getDashboardApi` | function | 233 |
-| 2 | `getErrorMessage` | function | 237 |
-| 3 | `getDashboardFilterStorageKey` | function | 286 |
-| 4 | `readDashboardFilterPrefs` | function | 291 |
-| 5 | `downsampleChartRows` | function | 314 |
-| 6 | `normalizeDashboardRangeId` | function | 325 |
-| 7 | `compactDashboardMetaParts` | function | 332 |
-| 8 | `ChartFallback` | function | 338 |
-| 9 | `formatDashboardHourLabel` | function | 344 |
-| 10 | `getSaleStatusTone` | function | 351 |
-| 11 | `isDashboardSummaryPayload` | function | 358 |
-| 12 | `isDashboardAnalyticsPayload` | function | 370 |
-| 13 | `normalizeDashboardSummaryPayload` | function | 383 |
-| 14 | `normalizeDashboardAnalyticsPayload` | function | 396 |
-| 15 | `Dashboard` | component/function | 416 |
-| 16 | `calcTrend` | const arrow | 722 |
-| 17 | `rangeLabel` | const arrow | 766 |
-| 18 | `periodShort` | const arrow | 772 |
+| 1 | `getDashboardApi` | function | 232 |
+| 2 | `getErrorMessage` | function | 236 |
+| 3 | `getDashboardFilterStorageKey` | function | 285 |
+| 4 | `readDashboardFilterPrefs` | function | 290 |
+| 5 | `downsampleChartRows` | function | 313 |
+| 6 | `normalizeDashboardRangeId` | function | 324 |
+| 7 | `compactDashboardMetaParts` | function | 331 |
+| 8 | `ChartFallback` | function | 337 |
+| 9 | `formatDashboardHourLabel` | function | 343 |
+| 10 | `getSaleStatusTone` | function | 350 |
+| 11 | `isDashboardSummaryPayload` | function | 357 |
+| 12 | `isDashboardAnalyticsPayload` | function | 369 |
+| 13 | `normalizeDashboardSummaryPayload` | function | 382 |
+| 14 | `normalizeDashboardAnalyticsPayload` | function | 395 |
+| 15 | `Dashboard` | component/function | 415 |
+| 16 | `calcTrend` | const arrow | 721 |
+| 17 | `rangeLabel` | const arrow | 765 |
+| 18 | `periodShort` | const arrow | 771 |
 
 ### 3.104 `frontend/src/components/dashboard/dashboardExport.ts`
 

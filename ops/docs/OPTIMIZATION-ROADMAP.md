@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 912.
+- Latest completed implementation move in this roadmap: Move 913.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -68,12 +68,12 @@ What remains:
   or runtime-facing change.
 - Keep reducing public Cloudflare startup latency from measured document/chunk
   transfer bottlenecks. Move 912 reorders direct-route admin modulepreload
-  headers so route-owned chunks load before generic first-window chunks. Public
-  Products and POS now measure below target at 1.976 s and 1.932 s LCP with
-  zero failures/errors. Dashboard remains above target at 2.820 s because the
-  startup API completes around 2.749 s; optimize `/api/dashboard/startup`
-  next. Hashed assets are Cloudflare cache HITs; `/public` HTML remains
-  `CF-Cache-Status: DYNAMIC` until the token has
+  headers so route-owned chunks load before generic first-window chunks. Move
+  913 removes the Dashboard full-page startup loading gate so the real shell
+  paints immediately while section-level loaders preserve data correctness.
+  Public targeted LCP now measures Dashboard 284 ms, Products 304 ms, and POS
+  296 ms with zero failures/errors. Hashed assets are Cloudflare cache HITs;
+  `/public` HTML remains `CF-Cache-Status: DYNAMIC` until the token has
   `Zone.Cache Rules: Edit` and `npm.cmd --prefix ops run cloudflare:apply-cache`
   succeeds.
 - Use the all-pages control audit as the broad Phase 8.4 live QA gate before

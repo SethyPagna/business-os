@@ -8,9 +8,9 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 912, prioritize direct-route admin modulepreload
-  headers so route-owned chunks for Products/POS load before generic admin
-  first-window chunks under Cloudflare.
+- Latest completed move: Move 913, remove the Dashboard full-page startup
+  loading gate so the real page shell paints immediately while verified
+  summary/analytics sections load in place.
 
 ## Current Baseline
 
@@ -18,10 +18,10 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `b2c6359b55be09e5`
+  `f673906b677b5d92`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 912 source state; Docker image `business-os:v6.0.0-202606111845`
-  serves frontend hash `b2c6359b55be09e5` and source hash
+  this Move 913 source state; Docker image `business-os:v6.0.0-202606111902`
+  serves frontend hash `f673906b677b5d92` and source hash
   `3b68f7362c866cc6`
 
 Latest verified reports:
@@ -178,6 +178,31 @@ Latest verified reports:
   POS 1.932 s with zero failed requests/errors. Public Dashboard stayed above
   target at 2.820 s because `/api/dashboard/startup` completed at about
   2.749 s; that startup query/API path is the next optimization target.
+- latest Move 913 local targeted LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T11-10-34-312Z.json`
+- latest Move 913 local targeted route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T11-10-34-544Z.json`
+- latest Move 913 public targeted LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T11-10-52-221Z.json`
+- latest Move 913 public targeted route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T11-10-53-133Z.json`
+- latest Move 913 result:
+  Docker image `business-os:v6.0.0-202606111902` is healthy with frontend hash
+  `f673906b677b5d92`. Removing the Dashboard full-page loading watchdog gate
+  lets the real shell/title/range controls paint immediately while KPI/chart
+  sections keep their own loading and unavailable states. Local LCP measured
+  Dashboard 388 ms, Products 320 ms, and POS 276 ms. Public LCP measured
+  Dashboard 284 ms, Products 304 ms, and POS 296 ms. All targeted traces had
+  zero failed requests and zero app errors.
+- latest Move 913 cleanup result:
+  deleted ignored/generated `release/` kit after Docker proof; 380,977,287
+  bytes removed. Guarded `prune-storage` preserved uploads, secrets, database,
+  volumes, active image, and newest backup packages; it removed 7,226,455
+  bytes of old runtime reports, 5,360,376 bytes of old Docker-release backup,
+  38.68 MB of Docker builder cache, and only the old
+  `business-os:v6.0.0-202606111728` image tag while keeping active
+  `business-os:v6.0.0-202606111902`. Phase 29 audit passed afterward with
+  9 checks and 0 failures.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

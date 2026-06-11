@@ -8,9 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 912, prioritize direct-route admin modulepreload
-  headers so route-owned chunks for Products/POS load before generic admin
-  first-window chunks under Cloudflare.
+- Latest completed move: Move 913, remove the Dashboard full-page startup
+  loading gate so the real shell, title, range controls, and section loaders
+  paint immediately while verified summary/analytics data continues to load.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -18,22 +18,24 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111845`
-  is healthy with frontend hash `b2c6359b55be09e5` and source hash
-  `3b68f7362c866cc6`. The `/products` response now sends `Products-*` before
-  `AdminRoot-*` in the `Link` modulepreload header. Local targeted LCP measured
-  Dashboard 404 ms, Products 288 ms, and POS 272 ms with zero failed requests
-  or app errors. Public admin targeted LCP measured Products 1.976 s and POS
-  1.932 s, both under the 2.5 s target with zero failed requests/errors.
-  Dashboard measured 2.820 s because `/api/dashboard/startup` completed at
-  about 2.749 s; Dashboard startup data remains the next real bottleneck.
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111902`
+  is healthy with frontend hash `f673906b677b5d92` and source hash
+  `3b68f7362c866cc6`. Local targeted LCP measured Dashboard 388 ms, Products
+  320 ms, and POS 276 ms with zero failed requests or app errors. Public admin
+  targeted LCP measured Dashboard 284 ms, Products 304 ms, and POS 296 ms with
+  zero failed requests/errors. Move 913 fixed the previous public Dashboard
+  2.820 s LCP by allowing the real Dashboard shell to render immediately
+  instead of returning a full-page loading watchdog until
+  `/api/dashboard/startup` finished.
   Broad all-pages control audit
   `ops/runtime/reports/all-pages-control-audit-2026-06-11T10-01-00-315Z/summary.json`
   passed 34 desktop/mobile routes, 386 tested controls, 0 failed controls, and
-  0 findings. Guarded storage prune removed 14,387,727 bytes of old runtime
-  reports, reclaimed about 3.037 GB of Docker builder cache, removed only the
-  old `business-os:v6.0.0-202606111328` tag, and kept active
-  `business-os:v6.0.0-202606111750`.
+  0 findings. Move 913 cleanup deleted the ignored/generated `release/` kit
+  after Docker proof for 380,977,287 bytes, then guarded `prune-storage`
+  removed 7,226,455 bytes of old runtime reports, 5,360,376 bytes of old
+  Docker-release backup, 38.68 MB of Docker builder cache, and only the old
+  `business-os:v6.0.0-202606111728` image tag while keeping active
+  `business-os:v6.0.0-202606111902`.
 
 ## Program Goals
 

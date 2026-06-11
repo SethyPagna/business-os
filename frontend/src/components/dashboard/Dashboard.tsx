@@ -10,7 +10,6 @@ import { fmtTime } from '../../utils/formatters'
 import { todayStr, offsetDate } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
 import { useIsPageActive } from '../shared/pageActivity'
-import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { getAnalytics, getDashboard, getDashboardStartup } from '../../api/dashboardTransport.ts'
@@ -1082,25 +1081,6 @@ export default function Dashboard() {
     loadDashboardExportModule,
     t,
   ])
-
-  if (loading && !summaryReady) {
-    return (
-      <div className="page-scroll p-3 sm:p-5">
-        <LoadingWatchdog
-          loading
-          timeoutMs={30_000}
-          label={t('loading')}
-          details="Dashboard summary and analytics are loading."
-          onRetry={() => {
-            void Promise.allSettled([
-              loadSummary({ label: 'Dashboard summary retry', markLoading: true }),
-              loadAnalytics(),
-            ])
-          }}
-        />
-      </div>
-    )
-  }
 
   if (summaryUnavailable) {
     return (

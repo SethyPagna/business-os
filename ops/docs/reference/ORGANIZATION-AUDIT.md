@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T10:52:13.641Z
+Generated: 2026-06-11T11:15:11.478Z
 
 ## Summary
 
@@ -67,8 +67,8 @@ Generated: 2026-06-11T10:52:13.641Z
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12322 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10654 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 10069 | ops/docs |
-| ops/docs/OPTIMIZATION-STATUS.md | 5352 | ops/docs |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 5169 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 5377 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 5200 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/tests/performanceLoadingUx.test.ts | 3700 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3654 | ops/docs/reference |
@@ -86,8 +86,8 @@ Generated: 2026-06-11T10:52:13.641Z
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
 | frontend/src/App.tsx | 2009 | frontend/src/App.tsx |
-| frontend/src/components/dashboard/Dashboard.tsx | 1970 | frontend/components/dashboard |
 | backend/src/routes/inventory.ts | 1962 | backend/routes |
+| frontend/src/components/dashboard/Dashboard.tsx | 1950 | frontend/components/dashboard |
 | frontend/src/AppContext.tsx | 1947 | frontend/src/AppContext.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1911 | frontend/components/utils-settings |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
@@ -114,9 +114,9 @@ Generated: 2026-06-11T10:52:13.641Z
 | backend/src/routes/products.ts | 18 | backend/routes |
 | frontend/src/components/utils-settings/Settings.tsx | 17 | frontend/components/utils-settings |
 | backend/test/routeContracts.test.ts | 16 | backend/test/routeContracts.test.ts |
-| frontend/src/components/dashboard/Dashboard.tsx | 16 | frontend/components/dashboard |
 | frontend/src/components/users/Users.tsx | 16 | frontend/components/users |
 | frontend/src/AppContext.tsx | 15 | frontend/src/AppContext.tsx |
+| frontend/src/components/dashboard/Dashboard.tsx | 15 | frontend/components/dashboard |
 | frontend/tests/apiHttp.test.ts | 15 | frontend/tests/apiHttp.test.ts |
 | backend/src/routes/auth.ts | 14 | backend/routes |
 | backend/src/services/importJobs.ts | 14 | backend/services |
