@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T12:01:33.933Z
+Generated: 2026-06-11T12:22:20.207Z
 
 ## Summary
 
@@ -74,10 +74,10 @@ Generated: 2026-06-11T12:01:33.933Z
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3654 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3498 | frontend/components/catalog |
 | frontend/src/components/inventory/Inventory.tsx | 3488 | frontend/components/inventory |
-| ops/docs/reference/PHASE29-AUDIT.json | 3432 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3442 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
-| ops/docs/reference/PERFORMANCE-SCAN.md | 2729 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
+| ops/docs/reference/PERFORMANCE-SCAN.md | 2705 | ops/docs/reference |
 | frontend/src/components/products/Products.tsx | 2585 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2362 | frontend/components/pos |
 | backend/src/routes/products.ts | 2310 | backend/routes |
@@ -85,10 +85,10 @@ Generated: 2026-06-11T12:01:33.933Z
 | ops/docs/reference/FOLDER-COVERAGE.md | 2184 | ops/docs/reference |
 | frontend/src/components/products/import/BulkImportModal.tsx | 2170 | frontend/components/products |
 | ops/docs/reference/TRANSLATION-SECTION-REFERENCE.md | 2150 | ops/docs/reference |
-| frontend/src/App.tsx | 2009 | frontend/src/App.tsx |
 | backend/src/routes/inventory.ts | 1962 | backend/routes |
 | frontend/src/components/dashboard/Dashboard.tsx | 1950 | frontend/components/dashboard |
 | frontend/src/AppContext.tsx | 1947 | frontend/src/AppContext.tsx |
+| frontend/src/App.tsx | 1915 | frontend/src/App.tsx |
 | frontend/src/components/utils-settings/Settings.tsx | 1911 | frontend/components/utils-settings |
 | ops/docs/reference/LANGUAGE-RUNTIME-AUDIT.json | 1886 | ops/docs/reference |
 | frontend/src/components/utils-settings/Backup.tsx | 1779 | frontend/components/utils-settings |

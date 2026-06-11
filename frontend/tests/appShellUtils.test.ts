@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { getAdminPageFromPath, getMountedPageLimit, isAdminAppPath, isPublicCatalogPath, shouldWarmPageEntries, updateMountedPages } from '../src/app/appShellUtils.ts'
+import { getAdminPageFromPath, getMountedPageLimit, isAdminAppPath, isPublicCatalogPath, updateMountedPages } from '../src/app/appShellUtils.ts'
 
 let failed = 0
 const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
@@ -61,13 +61,6 @@ runTest('mobile shells keep fewer hidden pages mounted', () => {
   assert.equal(getMountedPageLimit({ viewportWidth: 390, maxPages: 5 }), 3)
   assert.equal(getMountedPageLimit({ viewportWidth: 1280 }), 8)
   assert.equal(getMountedPageLimit({ viewportWidth: 1280, coarsePointer: true }), 3)
-})
-
-runTest('page-entry warmup stays desktop-only to reduce mobile churn', () => {
-  assert.equal(shouldWarmPageEntries({ viewportWidth: 390 }), false)
-  assert.equal(shouldWarmPageEntries({ viewportWidth: 900 }), false)
-  assert.equal(shouldWarmPageEntries({ viewportWidth: 1280 }), true)
-  assert.equal(shouldWarmPageEntries({ viewportWidth: 1400, coarsePointer: true }), false)
 })
 
 runTest('app shell does not render floating page info help', () => {

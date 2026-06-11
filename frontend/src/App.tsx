@@ -5,7 +5,7 @@ import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import Bell from 'lucide-react/dist/esm/icons/bell.js'
 import { useApp as useAppHook } from './AppContext.tsx'
-import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, shouldWarmPageEntries, updateMountedPages } from './app/appShellUtils.ts'
+import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
 import { STORAGE_KEYS } from './constants.ts'
@@ -274,33 +274,6 @@ const APP_FAVICON_IDLE_TIMEOUT_MS = 7000
 // preloads the exact target route, but Dashboard startup should not download
 // Products, POS, Inventory, catalog, scanner, or local DB bundles by itself.
 const WARMUP_PAGE_IDS: readonly PageId[] = [] satisfies PageId[]
-
-const ADMIN_PAGE_SEQUENCE: readonly PageId[] = [
-  'sales',
-  'returns',
-  'contacts',
-  'users',
-  'audit_log',
-  'receipt_settings',
-  'settings',
-  'files',
-  'server',
-  'backup',
-] satisfies AdminPageId[]
-
-const PAGE_ENTRY_WARMUP_AHEAD_COUNT = 0
-const NARROW_PAGE_ENTRY_WARMUP_IDS: ReadonlySet<PageId> = new Set([
-  'sales',
-  'returns',
-  'contacts',
-  'users',
-  'audit_log',
-  'receipt_settings',
-  'settings',
-  'files',
-  'server',
-  'backup',
-] satisfies PageId[])
 
 const DELAYED_CHUNK_WARMUP_PAGE_IDS: ReadonlySet<PageId> = new Set([
   'contacts',
@@ -714,13 +687,6 @@ function scheduleWarmupAfterLoad(start: () => CancelWarmup | void): CancelWarmup
     window.removeEventListener('load', run)
     cancelStartedWarmup?.()
   }
-}
-
-function getPageEntryWarmupLoaders(_pageId: PageId, _canAccessPage: (pageId: string) => boolean): WarmupLoader[] {
-  // See getDataWarmupLoaders(): route-entry data warmups were duplicating the
-  // fetches that the pages themselves already perform, which made first visits
-  // less reliable instead of more reliable.
-  return []
 }
 
 function useMountedPages(activePage: AdminPageId): AdminPageId[] {
@@ -1161,65 +1127,6 @@ function useDataWarmup(user: AppUser | null, canAccessPage: (pageId: string) => 
       if (followupId != null) window.clearTimeout(followupId)
     }
   }, [canAccessPage, user])
-}
-
-function usePageEntryWarmup(user: AppUser | null, activePageId: AdminPageId, canAccessPage: (pageId: string) => boolean): void {
-  // When the user enters the later admin stack, narrow the warmup only for the
-  // heavier late-stack pages. Warming the whole remaining admin sequence was
-  // pulling a lot of unrelated route code into the same first visit on pages
-  // like Contacts, but the earlier pages can still benefit from broader
-  // warmup without paying that specific penalty.
-  useEffect(() => {
-    if (!user || !ADMIN_PAGE_SEQUENCE.includes(activePageId) || typeof window === 'undefined') return undefined
-    if (!shouldWarmPageEntries({
-      viewportWidth: Number(window.innerWidth || 0),
-      coarsePointer: typeof window.matchMedia === 'function' ? !!window.matchMedia('(pointer: coarse)').matches : false,
-    })) {
-      return undefined
-    }
-
-    let cancelled = false
-    let idleId: number | null = null
-    let timerId: number | null = null
-    const currentIndex = ADMIN_PAGE_SEQUENCE.indexOf(activePageId)
-    const shouldNarrowWarmup = NARROW_PAGE_ENTRY_WARMUP_IDS.has(activePageId)
-    const upcomingPageIds = shouldNarrowWarmup
-      ? ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1, currentIndex + 1 + PAGE_ENTRY_WARMUP_AHEAD_COUNT)
-      : ADMIN_PAGE_SEQUENCE.slice(currentIndex + 1)
-    if (!upcomingPageIds.length) return undefined
-    const importerLoaders: WarmupLoader[] = upcomingPageIds.map((pageId) => {
-      const importer = PAGE_IMPORTERS[pageId]
-      return () => importWithTimeout(importer, pageId).catch(() => null)
-    })
-    const dataLoaders = upcomingPageIds.flatMap((pageId) => getPageEntryWarmupLoaders(pageId, canAccessPage))
-
-    const run = async () => {
-      if (cancelled) return
-      await Promise.allSettled([
-        runWarmupBatches(importerLoaders, 1),
-        runWarmupBatches(dataLoaders, 1),
-      ])
-    }
-
-    const cancelAfterLoad = scheduleWarmupAfterLoad(() => {
-      if (cancelled) return undefined
-      if (shouldNarrowWarmup) {
-        timerId = window.setTimeout(run, 3600)
-      } else if (typeof window.requestIdleCallback === 'function') {
-        idleId = window.requestIdleCallback(run, { timeout: 2500 })
-      } else {
-        timerId = window.setTimeout(run, 1800)
-      }
-      return () => {
-        if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
-        if (timerId != null) window.clearTimeout(timerId)
-      }
-    })
-    return () => {
-      cancelled = true
-      cancelAfterLoad()
-    }
-  }, [activePageId, canAccessPage, user])
 }
 
 class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBoundaryState> {
@@ -1684,7 +1591,6 @@ export default function App() {
   useChunkWarmup(authReady ? user : null, page)
   useIntentChunkWarmup(authReady ? user : null, page, canAccessPage)
   useDataWarmup(authReady ? user : null, canAccessPage)
-  usePageEntryWarmup(authReady ? user : null, page, canAccessPage)
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined

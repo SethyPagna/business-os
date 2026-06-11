@@ -8,9 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 915, remove the browser action smoke
-  `MODULE_TYPELESS_PACKAGE_JSON` warning so live Playwright verification output
-  stays focused on real app findings.
+- Latest completed move: Move 916, remove broad admin page-entry chunk warmup
+  so route chunks preload only from explicit navigation intent instead of
+  competing with first-route data and rendering work.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -18,24 +18,25 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111935`
-  is healthy with frontend hash `735ab36e46b9bd07` and source hash
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606112011`
+  is healthy with frontend hash `d28e11425b540cf1` and source hash
   `3b68f7362c866cc6`. Local LCP trace
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T11-40-20-182Z.json`
-  measured Dashboard 668 ms, Products 360 ms, Inventory 264 ms, POS 220 ms,
-  Files 208 ms, Branches 276 ms, Audit Log 348 ms, Settings 248 ms, and Public
-  Catalog 284 ms with zero failed requests/errors. Browser action smoke
-  `ops/runtime/reports/browser-action-smoke-2026-06-11T11-40-20-988Z/summary.json`
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-13-59-671Z.json`
+  measured Dashboard 300 ms, Products 384 ms, Inventory 332 ms, POS 236 ms,
+  Files 216 ms, Branches 272 ms, Audit Log 244 ms, Settings 272 ms, and Public
+  Catalog 260 ms with zero failed requests/errors. Public-host LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T12-14-51-147Z.json`
+  measured all 9 checked routes at or below 340 ms. Browser action smoke
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T12-14-02-039Z/summary.json`
   passed 34 routes and 28 actions with 0 findings. Broad all-pages control
   audit
-  `ops/runtime/reports/all-pages-control-audit-2026-06-11T11-41-07-762Z/summary.json`
-  passed 34 desktop/mobile routes, 463 controls, 407 tested controls, 0 failed
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T12-14-52-194Z/summary.json`
+  passed 34 desktop/mobile routes, 460 controls, 404 tested controls, 0 failed
   controls, and 0 findings.
-- Latest harness proof: browser action smoke
-  `ops/runtime/reports/browser-action-smoke-2026-06-11T11-57-12-163Z/summary.json`
-  passed 34 routes and 28 actions with 0 findings after the runner stopped
-  emitting Node module-type warnings. Phase 29 audit
-  `ops/docs/reference/PHASE29-AUDIT.md` passed 9 checks with 0 failures.
+- Latest cleanup proof: ignored regenerable `release/` and `frontend/dist/`
+  were deleted after Docker/live proof, reclaiming 412,845,210 bytes. Phase 29
+  audit `ops/docs/reference/PHASE29-AUDIT.md` then passed 9 checks with 0
+  failures; generated-bulk cleanup candidates are below the 512 MB threshold.
 
 ## Program Goals
 

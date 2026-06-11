@@ -8,6 +8,56 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove broad page-entry route chunk warmup
+  - area: admin shell route preloading, first-route contention, and Phase 29
+    cleanup/reference verification
+  - result: kept
+  - note: Move 916 removes the unsolicited admin page-entry warmup loop from
+    `frontend/src/App.tsx` and deletes the now-unused
+    `shouldWarmPageEntries` helper. Route chunks still preload from explicit
+    navigation intent, but the app no longer sweeps nearby route entry chunks
+    in the background while the current page is trying to load real data.
+  - affected files: `frontend/src/App.tsx`,
+    `frontend/src/app/appShellUtils.ts`,
+    `frontend/tests/appShellUtils.test.ts`,
+    `frontend/tests/performanceLoadingUx.test.ts`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-ROADMAP.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`,
+    `ops/docs/reference/PHASE29-AUDIT.md`
+  - verification: frontend utility suite, frontend typecheck, frontend
+    production build, Docker release build/start health, local/public LCP
+    traces, browser action smoke, broad all-pages control audit, storage prune,
+    Phase 29 audit, and `git diff --check` passed.
+  - runtime proof: Docker image `business-os:v6.0.0-202606112011` is healthy
+    with frontend hash `d28e11425b540cf1` and source hash
+    `3b68f7362c866cc6`.
+  - live proof: local LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T12-13-59-671Z.json`
+    measured Dashboard 300 ms, Products 384 ms, Inventory 332 ms, POS 236 ms,
+    Files 216 ms, Branches 272 ms, Audit Log 244 ms, Settings 272 ms, and
+    Public Catalog 260 ms with zero failed requests/errors. Public-host LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T12-14-51-147Z.json`
+    kept all 9 checked routes at or below 340 ms. Browser action smoke
+    `ops/runtime/reports/browser-action-smoke-2026-06-11T12-14-02-039Z/summary.json`
+    passed 34 routes and 28 actions with 0 findings. Broad all-pages control
+    audit
+    `ops/runtime/reports/all-pages-control-audit-2026-06-11T12-14-52-194Z/summary.json`
+    passed 34 routes, 460 controls, 404 tested controls, 0 failed controls,
+    and 0 findings.
+  - cleanup proof: deleted ignored/regenerable `release/` (380,982,112 bytes)
+    and `frontend/dist/` (31,863,098 bytes) after Docker/live proof,
+    reclaiming 412,845,210 bytes. Guarded `prune-storage` preserved protected
+    uploads, secrets, database, backups, volumes, node_modules, and active
+    Docker image. Phase 29 audit passed afterward with 9 checks and 0
+    failures.
+  - current plan position after Move 916: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Remove browser action smoke module warning
   - area: Playwright-backed browser action smoke harness and Phase 29
     reference verification

@@ -13,7 +13,6 @@ export {
 export const MAX_MOUNTED_PAGES = 8
 export const MOBILE_MAX_MOUNTED_PAGES = 3
 export const MOBILE_SHELL_BREAKPOINT = 768
-export const DESKTOP_WARMUP_BREAKPOINT = 1024
 
 export function updateMountedPages(
   previousPages: unknown = [],
@@ -46,18 +45,6 @@ export function getMountedPageLimit({
     return Math.min(maxPages, MOBILE_MAX_MOUNTED_PAGES)
   }
   return maxPages
-}
-
-interface PageWarmupOptions {
-  viewportWidth?: unknown
-  coarsePointer?: boolean
-}
-
-export function shouldWarmPageEntries({ viewportWidth = 0, coarsePointer = false }: PageWarmupOptions = {}): boolean {
-  const width = Number(viewportWidth || 0)
-  if (coarsePointer) return false
-  if (Number.isFinite(width) && width > 0 && width < DESKTOP_WARMUP_BREAKPOINT) return false
-  return true
 }
 
 export function getNotificationPrefix(type: unknown): string {
