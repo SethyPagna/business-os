@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T11:15:11.478Z
+Generated: 2026-06-11T11:47:22.055Z
 
 ## Summary
 
@@ -63,18 +63,18 @@ Generated: 2026-06-11T11:15:11.478Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 15615 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 15622 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12322 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10654 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 10069 | ops/docs |
-| ops/docs/OPTIMIZATION-STATUS.md | 5377 | ops/docs |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 5200 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 5396 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 5238 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/tests/performanceLoadingUx.test.ts | 3700 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3654 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3498 | frontend/components/catalog |
 | frontend/src/components/inventory/Inventory.tsx | 3488 | frontend/components/inventory |
-| ops/docs/reference/PHASE29-AUDIT.json | 3432 | ops/docs/reference |
+| ops/docs/reference/PHASE29-AUDIT.json | 3442 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | ops/docs/reference/PERFORMANCE-SCAN.md | 2729 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |

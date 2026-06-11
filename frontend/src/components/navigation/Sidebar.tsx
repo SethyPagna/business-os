@@ -231,9 +231,12 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
             {visibleItems.map((item) => {
               const Icon = item.icon
               const isActiveItem = page === item.id
+              const label = getNavLabel(item, t, language)
               return (
                 <button
                   key={item.id}
+                  aria-label={label}
+                  data-bos-nav-id={item.id}
                   onFocus={() => announcePageIntent(item.id, 'focus')}
                   onClick={() => navigateTo(item.id)}
                   onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
@@ -243,7 +246,7 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
                   <span className="flex min-w-[20px] justify-center">
                     <Icon className="h-4 w-4" />
                   </span>
-                  <span className="truncate">{getNavLabel(item, t, language)}</span>
+                  <span className="truncate">{label}</span>
                   {item.id === 'server' && syncUrl ? (
                     <span className={`ml-auto h-2 w-2 flex-shrink-0 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
                   ) : null}
@@ -327,9 +330,12 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
         {pinnedItems.map((item) => {
           const Icon = item.icon
           const isActiveItem = page === item.id
+          const label = getNavLabel(item, t, language)
           return (
             <button
               key={item.id}
+              aria-label={label}
+              data-bos-nav-id={item.id}
               onFocus={() => announcePageIntent(item.id, 'focus')}
               onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
               onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
@@ -339,12 +345,14 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
             >
               <Icon className="h-4 w-4 shrink-0" />
               <span className="block max-w-[68px] truncate whitespace-nowrap text-center text-[9.5px] font-medium leading-3">
-                {getNavLabel(item, t, language)}
+                {label}
               </span>
             </button>
           )
         })}
         <button
+          aria-label={t('more') || 'More'}
+          data-bos-nav-id="more"
           onClick={() => setMoreOpen((open) => !open)}
           className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${!sidebarTextColor ? (moreOpen ? 'text-blue-600 dark:text-blue-400' : 'text-gray-500 dark:text-gray-400') : ''}`}
           style={moreOpen ? mobileActiveStyle : mobileInactiveStyle}
@@ -365,9 +373,12 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
               {drawerItems.map((item) => {
                 const Icon = item.icon
                 const isActiveItem = page === item.id
+                const label = getNavLabel(item, t, language)
                 return (
                   <button
                     key={item.id}
+                    aria-label={label}
+                    data-bos-nav-id={item.id}
                     onFocus={() => announcePageIntent(item.id, 'focus')}
                     onClick={() => { navigateTo(item.id); setMoreOpen(false) }}
                     onPointerEnter={() => announcePageIntent(item.id, 'pointer')}
@@ -376,7 +387,7 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
                     style={isActiveItem ? mobileActiveStyle : mobileInactiveStyle}
                   >
                     <Icon className="h-4 w-4" />
-                    <span className="text-center leading-tight">{getNavLabel(item, t, language)}</span>
+                    <span className="text-center leading-tight">{label}</span>
                     {item.id === 'server' && syncUrl ? (
                       <span className={`absolute right-1.5 top-1.5 h-2 w-2 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
                     ) : null}

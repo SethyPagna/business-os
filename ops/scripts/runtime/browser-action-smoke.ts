@@ -374,9 +374,33 @@ async function findButtonInLocator(locator: LocatorLike, label: string): Promise
   return locator.getByRole('button', { name: exact }).first()
 }
 
+async function findNavButtonInLocator(locator: LocatorLike, route: AuditRoute): Promise<LocatorLike> {
+  const idButton = locator.locator(`[data-bos-nav-id="${route.name}"]`).first()
+  if (await idButton.count().catch(() => 0) && await idButton.isVisible().catch(() => false)) return idButton
+
+  const aliases = [
+    route.navLabel,
+    route.name.replace(/_/g, ' '),
+    route.path.replace(/^\//, '').replace(/-/g, ' '),
+  ].filter((value): value is string => !!String(value || '').trim())
+
+  for (const label of aliases) {
+    const button = await findButtonInLocator(locator, label)
+    if (await button.count().catch(() => 0) && await button.isVisible().catch(() => false)) return button
+
+    const textMatch = locator.locator('button', { hasText: new RegExp(escapeRegExp(label), 'i') }).first()
+    if (await textMatch.count().catch(() => 0) && await textMatch.isVisible().catch(() => false)) return textMatch
+  }
+
+  return idButton
+}
+
 async function openMobileMoreDrawer(page: PageLike): Promise<boolean> {
   const nav = page.locator('nav').filter({ has: page.getByRole('button', { name: /^More$/i }) }).first()
-  const moreButton = await findButtonInLocator(nav, 'More')
+  let moreButton = nav.locator('[data-bos-nav-id="more"]').first()
+  if (!(await moreButton.count().catch(() => 0))) {
+    moreButton = await findButtonInLocator(nav, 'More')
+  }
   if (!(await moreButton.count().catch(() => 0))) return false
   await clickWithFallback(moreButton, ACTION_TIMEOUT_MS).catch(() => {})
   await page.waitForTimeout(160)
@@ -414,23 +438,23 @@ async function navigateViaUi(page: PageLike, route: AuditRoute, profileName: str
   let button = null
   if (profileName === 'mobile') {
     const mobileNav = page.locator('nav').filter({ has: page.getByRole('button', { name: /^More$/i }) }).first()
-    button = await findButtonInLocator(mobileNav, route.navLabel)
+    button = await findNavButtonInLocator(mobileNav, route)
     if (!(await button.count().catch(() => 0))) {
       const opened = await openMobileMoreDrawer(page)
       if (opened) {
         const drawer = page.locator('div.fixed.bottom-16').first()
-        button = await findButtonInLocator(drawer, route.navLabel)
+        button = await findNavButtonInLocator(drawer, route)
       }
     }
   } else {
     const sidebar = page.locator('aside').first()
-    button = await findButtonInLocator(sidebar, route.navLabel)
+    button = await findNavButtonInLocator(sidebar, route)
   }
   if (!(await button.count().catch(() => 0)) && profileName === 'mobile') {
     const opened = await openMobileMoreDrawer(page)
     if (opened) {
       const drawer = page.locator('div.fixed.bottom-16').first()
-      button = await findButtonInLocator(drawer, route.navLabel)
+      button = await findNavButtonInLocator(drawer, route)
     }
   }
   if (!(await button.count().catch(() => 0))) {

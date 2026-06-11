@@ -8,9 +8,9 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 913, remove the Dashboard full-page startup
-  loading gate so the real page shell paints immediately while verified
-  summary/analytics sections load in place.
+- Latest completed move: Move 914, harden authenticated navigation targets and
+  browser action verification so POS and Library/Files are covered reliably
+  across desktop/mobile.
 
 ## Current Baseline
 
@@ -18,10 +18,10 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `f673906b677b5d92`
+  `735ab36e46b9bd07`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 913 source state; Docker image `business-os:v6.0.0-202606111902`
-  serves frontend hash `f673906b677b5d92` and source hash
+  this Move 914 source state; Docker image `business-os:v6.0.0-202606111935`
+  serves frontend hash `735ab36e46b9bd07` and source hash
   `3b68f7362c866cc6`
 
 Latest verified reports:
@@ -202,6 +202,34 @@ Latest verified reports:
   38.68 MB of Docker builder cache, and only the old
   `business-os:v6.0.0-202606111728` image tag while keeping active
   `business-os:v6.0.0-202606111902`. Phase 29 audit passed afterward with
+  9 checks and 0 failures.
+- latest Move 914 local LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T11-40-20-182Z.json`
+- latest Move 914 local route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T11-40-20-190Z.json`
+- latest Move 914 browser action smoke:
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T11-40-20-988Z/summary.json`
+- latest Move 914 all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T11-41-07-762Z/summary.json`
+- latest Move 914 result:
+  Docker image `business-os:v6.0.0-202606111935` is healthy with frontend hash
+  `735ab36e46b9bd07`. Navigation buttons now expose stable
+  `data-bos-nav-id` and explicit `aria-label`s, and the browser action smoke
+  resolves navigation by route id plus label/text fallbacks. Browser action
+  smoke passed 34 routes and 28 actions with 0 findings; broad all-pages
+  control audit passed 34 routes, 463 controls, 407 tested controls, and
+  0 failures/findings. Local LCP measured Dashboard 668 ms, Products 360 ms,
+  Inventory 264 ms, POS 220 ms, Files 208 ms, Branches 276 ms, Audit Log
+  348 ms, Settings 248 ms, and Public Catalog 284 ms with zero failed
+  requests/errors.
+- latest Move 914 cleanup result:
+  deleted ignored/generated `release/` kit after Docker proof; 380,980,854
+  bytes removed. Guarded `prune-storage` preserved uploads, secrets, database,
+  volumes, active image, and newest backup packages; it removed 8,584,110
+  bytes of old runtime reports, 5,360,807 bytes of old Docker-release backup,
+  38.68 MB of Docker builder cache, and only the old
+  `business-os:v6.0.0-202606111750` image tag while keeping active
+  `business-os:v6.0.0-202606111935`. Phase 29 audit passed afterward with
   9 checks and 0 failures.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`

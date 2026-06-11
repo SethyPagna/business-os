@@ -8,9 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 913, remove the Dashboard full-page startup
-  loading gate so the real shell, title, range controls, and section loaders
-  paint immediately while verified summary/analytics data continues to load.
+- Latest completed move: Move 914, harden authenticated navigation targets and
+  browser action verification so POS and Library/Files are tested through
+  stable route ids, visible labels, and text fallbacks across desktop/mobile.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -18,24 +18,19 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111902`
-  is healthy with frontend hash `f673906b677b5d92` and source hash
-  `3b68f7362c866cc6`. Local targeted LCP measured Dashboard 388 ms, Products
-  320 ms, and POS 276 ms with zero failed requests or app errors. Public admin
-  targeted LCP measured Dashboard 284 ms, Products 304 ms, and POS 296 ms with
-  zero failed requests/errors. Move 913 fixed the previous public Dashboard
-  2.820 s LCP by allowing the real Dashboard shell to render immediately
-  instead of returning a full-page loading watchdog until
-  `/api/dashboard/startup` finished.
-  Broad all-pages control audit
-  `ops/runtime/reports/all-pages-control-audit-2026-06-11T10-01-00-315Z/summary.json`
-  passed 34 desktop/mobile routes, 386 tested controls, 0 failed controls, and
-  0 findings. Move 913 cleanup deleted the ignored/generated `release/` kit
-  after Docker proof for 380,977,287 bytes, then guarded `prune-storage`
-  removed 7,226,455 bytes of old runtime reports, 5,360,376 bytes of old
-  Docker-release backup, 38.68 MB of Docker builder cache, and only the old
-  `business-os:v6.0.0-202606111728` image tag while keeping active
-  `business-os:v6.0.0-202606111902`.
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111935`
+  is healthy with frontend hash `735ab36e46b9bd07` and source hash
+  `3b68f7362c866cc6`. Local LCP trace
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T11-40-20-182Z.json`
+  measured Dashboard 668 ms, Products 360 ms, Inventory 264 ms, POS 220 ms,
+  Files 208 ms, Branches 276 ms, Audit Log 348 ms, Settings 248 ms, and Public
+  Catalog 284 ms with zero failed requests/errors. Browser action smoke
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T11-40-20-988Z/summary.json`
+  passed 34 routes and 28 actions with 0 findings. Broad all-pages control
+  audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T11-41-07-762Z/summary.json`
+  passed 34 desktop/mobile routes, 463 controls, 407 tested controls, 0 failed
+  controls, and 0 findings.
 
 ## Program Goals
 

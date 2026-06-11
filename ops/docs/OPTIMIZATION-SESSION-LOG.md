@@ -8,6 +8,52 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Harden nav route targets and browser action smoke coverage
+  - area: authenticated desktop/mobile navigation verification, POS, Library,
+    and broad live control coverage
+  - result: kept
+  - note: Move 914 adds stable `data-bos-nav-id` markers and explicit
+    `aria-label`s to sidebar, mobile pinned, mobile drawer, and More
+    navigation buttons. The browser action smoke now resolves navigation by
+    route id first, then visible label/text fallbacks, so label changes like
+    POS/Point of Sale and Files/Library do not create false navigation
+    findings.
+  - affected files: `frontend/src/components/navigation/Sidebar.tsx`,
+    `ops/scripts/runtime/browser-action-smoke.ts`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`
+  - verification: frontend typecheck, frontend utility suite, frontend
+    production build, Docker release build/update health, browser action smoke,
+    route-load trace, LCP trace, and exhaustive all-pages control audit passed.
+  - runtime proof: Docker image `business-os:v6.0.0-202606111935` is healthy
+    with frontend hash `735ab36e46b9bd07` and source hash
+    `3b68f7362c866cc6`.
+  - live proof: browser action smoke
+    `ops/runtime/reports/browser-action-smoke-2026-06-11T11-40-20-988Z/summary.json`
+    passed 34 routes and 28 actions with 0 findings. LCP trace
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T11-40-20-182Z.json`
+    measured Dashboard 668 ms, Products 360 ms, Inventory 264 ms, POS 220 ms,
+    Files 208 ms, Branches 276 ms, Audit Log 348 ms, Settings 248 ms, and
+    Public Catalog 284 ms with zero failed requests/errors. Exhaustive
+    all-pages control audit
+    `ops/runtime/reports/all-pages-control-audit-2026-06-11T11-41-07-762Z/summary.json`
+    passed 34 routes, 463 controls, 407 tested controls, 0 failed controls,
+    and 0 findings.
+  - cleanup proof: deleted ignored/generated `release/` kit after Docker
+    proof for 380,980,854 bytes. Guarded `prune-storage` preserved uploads,
+    secrets, database, volumes, active image, and newest backup packages; it
+    removed 8,584,110 bytes of old runtime reports, 5,360,807 bytes of old
+    Docker-release backup, 38.68 MB of Docker builder cache, and only the old
+    `business-os:v6.0.0-202606111750` image tag while keeping active
+    `business-os:v6.0.0-202606111935`. Phase 29 audit passed afterward with
+    9 checks and 0 failures.
+  - current plan position after Move 914: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Remove Dashboard full-page startup loading gate
   - area: Dashboard perceived performance, LCP, and loading correctness
   - result: kept
