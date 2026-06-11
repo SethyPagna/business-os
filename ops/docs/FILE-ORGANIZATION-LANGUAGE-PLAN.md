@@ -9899,6 +9899,23 @@ Decision rule:
   proves it. In particular, keep `next.config.mjs` as `.mjs` for any future
   Next.js surface unless a separate production-build proof replaces this rule.
 
+### Move 906: Keep audit harness coverage and Audit Log time formatting clean
+
+- Organization slice: no folder move or language conversion. This move keeps
+  the Phase 8.4/29 verification harness accurate before further file
+  consolidation work.
+- Code-flow slice: `frontend/src/components/utils-settings/AuditLog.tsx`
+  normalizes database timestamp shapes locally and renders compact table times
+  so raw Postgres values no longer leak into narrow cells.
+- Harness slice: `ops/scripts/runtime/live-checks/all-pages-control-audit.ts`
+  treats routes with zero candidate controls as neutral coverage rows. Future
+  file moves should keep this behavior so empty helper-only routes do not mask
+  real findings.
+- Verification slice: broad all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T04-16-27-454Z/summary.json`
+  passed with 34 routes, 407 tested controls, 0 failed controls, and 0
+  findings. Phase 29 passed after generated `release/` cleanup.
+
 ### Move 903: Cache the authenticated admin SPA template shell
 
 - Ownership slice: Phase 8.4/Phase 29 authenticated admin document startup

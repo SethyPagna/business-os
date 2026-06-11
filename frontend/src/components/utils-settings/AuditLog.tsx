@@ -143,9 +143,14 @@ const ACTION_COLOR_CLASS: Record<string, string> = {
 
 function toIso(raw: unknown): string | null {
   if (!raw) return null
-  const value = String(raw)
-  if (value.includes('T') || value.endsWith('Z')) return value
-  return `${value.replace(' ', 'T')}Z`
+  const rawValue = String(raw).trim()
+  if (!rawValue) return null
+  let value = rawValue.replace(' ', 'T')
+  value = value.replace(/(\.\d{3})\d+/, '$1')
+  if (/[+-]\d{4}$/.test(value)) return value.replace(/([+-]\d{2})(\d{2})$/, '$1:$2')
+  if (/[+-]\d{2}$/.test(value)) return `${value}:00`
+  if (value.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(value)) return value
+  return `${value}Z`
 }
 
 function formatDateTime(raw: unknown): string {
@@ -169,8 +174,30 @@ function formatDateTime(raw: unknown): string {
   }
 }
 
+function formatCompactDateTime(raw: unknown): string {
+  const iso = toIso(raw)
+  if (!iso) return '--'
+  try {
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return String(raw)
+    return date.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+  } catch {
+    return String(raw || '--')
+  }
+}
+
 function formatLogTime(log: AuditLogRow): string {
   return formatDateTime(log.client_time || log.created_at)
+}
+
+function formatLogTableTime(log: AuditLogRow): string {
+  return formatCompactDateTime(log.client_time || log.created_at)
 }
 
 function auditDeviceLabel(log: AuditLogRow | null | undefined): string {
@@ -1045,7 +1072,9 @@ export default function AuditLog() {
                           <td className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400 truncate">
                             {readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}
                           </td>
-                          <td className="whitespace-nowrap px-3 py-2 text-xs text-gray-400">{formatLogTime(log)}</td>
+                          <td className="px-3 py-2 text-xs leading-snug text-gray-400" title={formatLogTime(log)}>
+                            <span className="block max-w-[7.5rem] break-words font-medium text-gray-500 dark:text-gray-400">{formatLogTableTime(log)}</span>
+                          </td>
                         </tr>
                       ))}
                     </Fragment>

@@ -415,7 +415,7 @@ function routeCoverageRows(): Array<{ route: string; total: number; tested: numb
       tested: coverage.tested,
       failed: coverage.failed,
       skipped: coverage.skipped,
-      skippedRatio: coverage.total > 0 ? Number((coverage.skipped / coverage.total).toFixed(3)) : 1,
+      skippedRatio: coverage.total > 0 ? Number((coverage.skipped / coverage.total).toFixed(3)) : 0,
     }))
 }
 
@@ -604,7 +604,7 @@ function addCoverageGateFindings(): void {
         return { route: routeKey, ...coverage }
       })
     const weakRoutes = routeCoverage
-      .filter((route) => route.tested < MIN_TESTED_CONTROLS_PER_ROUTE)
+      .filter((route) => route.total > 0 && route.tested < MIN_TESTED_CONTROLS_PER_ROUTE)
     if (weakRoutes.length) {
       addFinding(0, 'coverage', 'all-pages audit has routes with too few tested controls', {
         minTestedControlsPerRoute: MIN_TESTED_CONTROLS_PER_ROUTE,
@@ -612,9 +612,10 @@ function addCoverageGateFindings(): void {
       })
     }
     const highSkippedRoutes = routeCoverage
+      .filter((route) => route.total > 0)
       .map((route) => ({
         ...route,
-        skippedRatio: route.total > 0 ? Number((route.skipped / route.total).toFixed(3)) : 1,
+        skippedRatio: Number((route.skipped / route.total).toFixed(3)),
       }))
       .filter((route) => route.skippedRatio > MAX_ROUTE_SKIPPED_CONTROL_RATIO)
     if (highSkippedRoutes.length) {
@@ -626,7 +627,7 @@ function addCoverageGateFindings(): void {
   }
   const skippedRatio = summary.coverage.total > 0
     ? summary.coverage.skipped / summary.coverage.total
-    : 1
+    : 0
   if (skippedRatio > MAX_SKIPPED_CONTROL_RATIO) {
     addFinding(0, 'coverage', 'all-pages audit skipped too many controls', {
       totalControls: summary.coverage.total,

@@ -4509,6 +4509,41 @@ Use this shape for future entries:
   zero generated integrity matches, and relationship orphan checks passing for
   49 FK candidates.
 
+### Move 906: Normalize Audit Log timestamps and clean audit coverage math
+
+- Ownership slice: Phase 8.4 live UI correctness plus Phase 29 audit harness
+  reliability after the broad control sweep found Audit Log timestamp clipping.
+- Code-flow slice: `AuditLog.tsx` now normalizes Postgres timestamp shapes with
+  microseconds and `+00` offsets before formatting. The desktop table renders a
+  compact local timestamp in the narrow Time column and keeps the fuller
+  timestamp available through the cell title/detail drawer.
+- Harness slice: `all-pages-control-audit.ts` now treats zero-control routes as
+  neutral coverage rows instead of assigning a 100% skipped ratio. The per-route
+  minimum-control gate now applies only to routes with candidate controls.
+- Verification slice: frontend utility suite, frontend production build,
+  Docker release/start, local/public LCP route traces, broad all-pages control
+  audit, Phase 29 audit, and `git diff --check` passed.
+- Live proof: Docker image `business-os:v6.0.0-202606111205` is healthy with
+  frontend hash `3c745270701650cc`. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T04-09-16-161Z.json`
+  measured Audit Log 376 ms and every tested route under 1 s. Public admin LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T04-09-16-710Z.json`
+  measured Audit Log 488 ms and every tested route under 1 s with zero failed
+  requests/errors. Broad all-pages control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T04-16-27-454Z/summary.json`
+  passed 34 desktop/mobile routes, 407 tested controls, 57 intentional skips,
+  0 failed controls, and 0 findings.
+- Cleanup proof: the ignored/generated `release/` kit created by the Docker
+  proof was deleted afterward, removing 380,976,736 bytes while preserving
+  uploads, secrets, database, node_modules, backups, and the running Docker
+  image. Phase 29 passed afterward with zero failures. Guarded
+  `npm --prefix ops run prune-storage` then preserved protected backups and
+  volumes, removed 3,115,990 bytes of old runtime reports, reclaimed about
+  2.482 GB of Docker build cache, and removed only older `business-os:v*`
+  release tags while keeping active `business-os:v6.0.0-202606111205`.
+- Keeper boundary: this is a focused UI formatting and verification-harness
+  correction. It is not a folder move or language conversion.
+
 - change: lazy-load Contacts tab CSV export helpers
 - affected files:
   `frontend/src/components/contacts/CustomersTab.tsx`,

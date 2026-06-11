@@ -3,8 +3,8 @@
   "summary": "ops/docs/reference/PERFORMANCE-SCAN.json",
   "sourceFiles": 462,
   "distAssets": 169,
-  "totalSourceBytes": 7141485,
-  "totalSourceLines": 164689,
+  "totalSourceBytes": 7142505,
+  "totalSourceLines": 164719,
   "largestSourceFile": "frontend/src/lang/km.json",
   "largestSourceFileBytes": 252664,
   "largestSourceLinesFile": "backend/src/services/importJobs.ts",
@@ -147,8 +147,8 @@
     },
     {
       "file": "frontend/src/components/utils-settings/AuditLog.tsx",
-      "size": 61014,
-      "lines": 1293
+      "size": 61995,
+      "lines": 1322
     },
     {
       "file": "frontend/src/components/catalog/CatalogSecondaryTabs.tsx",
@@ -320,22 +320,22 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Inventory-BkSAIbWy.js",
+      "file": "frontend/dist/assets/Inventory-BkaChZ1O.js",
       "size": 103897,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Products-DL1Jxk4I.js",
+      "file": "frontend/dist/assets/Products-2RULDr9Z.js",
       "size": 86417,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-4_D2efnI.js",
+      "file": "frontend/dist/assets/catalog-f93mwatC.js",
       "size": 81438,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-editor-l17M6wqI.js",
+      "file": "frontend/dist/assets/catalog-editor-PTPlgGOy.js",
       "size": 75912,
       "lines": 0
     },
@@ -345,27 +345,27 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/BulkImportModal-Duq6IqTz.js",
+      "file": "frontend/dist/assets/BulkImportModal-fi84rH0w.js",
       "size": 69573,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/POS-zAWOegau.js",
+      "file": "frontend/dist/assets/POS-BwO2K2YZ.js",
       "size": 65878,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/AdminRoot-PJ2xOArO.js",
+      "file": "frontend/dist/assets/AdminRoot-zzGul6Tp.js",
       "size": 64275,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Dashboard-MF4MVgRp.js",
+      "file": "frontend/dist/assets/Dashboard-BFSB_ii6.js",
       "size": 63513,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Settings-43y5asCp.js",
+      "file": "frontend/dist/assets/Settings-DEjgaFhm.js",
       "size": 55876,
       "lines": 0
     },
@@ -375,27 +375,27 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Backup-UbgIkcBr.js",
+      "file": "frontend/dist/assets/Backup-SOm-oLbg.js",
       "size": 52009,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/shared-ui-BOhX8GN1.js",
+      "file": "frontend/dist/assets/shared-ui-DybvwPyY.js",
       "size": 49828,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/user-profile-modal-DgRwvdXv.js",
+      "file": "frontend/dist/assets/user-profile-modal-D_u-zFM9.js",
       "size": 45273,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/app-auth-7gyiZGfs.js",
+      "file": "frontend/dist/assets/app-auth-ZpskQ_lD.js",
       "size": 41346,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ReceiptSettings-ChMQRGzO.js",
+      "file": "frontend/dist/assets/ReceiptSettings-Blfr6O-F.js",
       "size": 40970,
       "lines": 0
     },
@@ -405,17 +405,17 @@
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/catalog-secondary-tabs-D3WFJnaB.js",
+      "file": "frontend/dist/assets/catalog-secondary-tabs-EkReoqpb.js",
       "size": 38076,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/Sales-R9ViQR0h.js",
+      "file": "frontend/dist/assets/Sales-CdR0Bi2n.js",
       "size": 36538,
       "lines": 0
     },
     {
-      "file": "frontend/dist/assets/ProductForm-XVGqXmY5.js",
+      "file": "frontend/dist/assets/ProductForm-Byn7b7bt.js",
       "size": 36193,
       "lines": 0
     }
@@ -424,5 +424,5 @@
   "sourceReadConcurrency": 24,
   "chunkStatConcurrency": 32,
   "manualNotesPreserved": true,
-  "manualNotesLines": 2602
+  "manualNotesLines": 2619
 }

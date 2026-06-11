@@ -8,8 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 905, compact Inventory first-load placeholder
-  after the hot-route preload trim.
+- Latest completed move: Move 906, normalize Audit Log timestamp rendering and
+  keep the all-pages control audit coverage gate accurate for zero-control
+  routes.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -17,15 +18,21 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111119`
-  is healthy with frontend hash `ac1abdc3028f0b9a`. Local LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-46-815Z.json`
-  measured Inventory 416 ms with zero failed requests/errors. Public admin LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-11T03-42-47-055Z.json`
-  measured Inventory 480 ms, Products 472 ms, Branches 224 ms, and public
-  catalog 272 ms with zero failed requests/errors. The broad Phase 8.4 live
-  suite passed on the same frontend hash, and the regenerated `release/` kit
-  was deleted after proof, removing 380,976,224 bytes.
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111205`
+  is healthy with frontend hash `3c745270701650cc`. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T04-09-16-161Z.json`
+  measured all tested routes under 1 s, including Audit Log 376 ms. Public
+  admin LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T04-09-16-710Z.json`
+  measured all tested routes under 1 s, including Audit Log 488 ms and public
+  catalog 284 ms, with zero failed requests/errors. The broad all-pages
+  control audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T04-16-27-454Z/summary.json`
+  passed 34 desktop/mobile routes, 407 tested controls, 0 failed controls, and
+  0 findings. The regenerated `release/` kit was deleted after proof,
+  removing 380,976,736 bytes. Guarded storage prune then removed 3,115,990
+  bytes of old runtime reports, reclaimed about 2.482 GB of Docker build
+  cache, and kept the active `business-os:v6.0.0-202606111205` image.
 
 ## Program Goals
 
