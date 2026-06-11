@@ -209,7 +209,7 @@ function ResetData({ actionHistory = null }: ResetPanelProps) {
           undo_payload: { mode },
         })
         notify(result.message || T('reset_complete', 'Reset complete'), 'success')
-        setTimeout(() => refreshAppData(), 200)
+        refreshAppData()
       } else {
         notify(`${T('error', 'Error')}: ${result?.error || 'unknown'}`, 'error')
       }
@@ -287,7 +287,7 @@ function FactoryReset({ actionHistory = null }: ResetPanelProps) {
           label: T('factory_reset_complete', 'Factory reset complete. Restarting...'),
         })
         notify(T('factory_reset_complete', 'Factory reset complete. Restarting...'), 'success')
-        setTimeout(() => refreshAppData(), 200)
+        refreshAppData()
       } else {
         notify(`${T('factory_reset_label', 'Factory Reset')} ${T('failed', 'failed')}: ${result?.error || 'unknown error'}`, 'error')
         setStep(0)

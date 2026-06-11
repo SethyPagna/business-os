@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 918.
+- Latest completed implementation move in this roadmap: Move 919.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -15650,3 +15650,46 @@ Move 918 status:
 - Verification proof: frontend utility suite, frontend production build, Docker release build/start health, Files-specific live check, local/admin/public LCP route traces, browser action smoke, broad all-pages control audit, guarded storage prune, generated reference refresh, Phase 29 audit, and `git diff --check` passed.
 - Cleanup proof: after Docker image/start/live proof, ignored/regenerable `release/` (380,980,576 bytes) and `frontend/dist/` (31,860,813 bytes) were deleted, reclaiming 412,841,389 bytes. Guarded `prune-storage` removed 6,908,211 bytes of old reports, reclaimed Docker builder cache, and removed only old `business-os:v*` tags while preserving protected uploads, secrets, database, backups, volumes, node_modules, and active Docker image `business-os:v6.0.0-202606112058`. Phase 29 audit passed afterward with 9 checks and 0 failures.
 - Current plan position after Move 918: Phase 8.4 remains active; Phase 26 stays at 51 completed organization moves; Phase 28 remains active with R2/access follow-up open; Phase 29 remains active. Remaining external blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run `npm --prefix ops run cloudflare:apply-cache`.
+
+Move 919 status:
+- Move 919 removes the fixed Reset Data refresh delay. `ResetData` now calls
+  `refreshAppData()` immediately after a successful reset/factory-reset server
+  response instead of waiting on an extra 200 ms UI timer. The performance
+  guard now rejects the old delayed pattern. Destructive reset buttons were not
+  clicked during live checks; verification stays on source guardrails, build,
+  route loads, and broad non-mutating UI audits.
+- Runtime proof: Docker image `business-os:v6.0.0-202606112120` is healthy
+  with frontend hash `93869b501ace81b6` and source hash
+  `3b68f7362c866cc6`.
+- Playwright proof: local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-23-57-858Z.json`
+  measured Dashboard 280 ms, Products 356 ms, Inventory 372 ms, POS 216 ms,
+  Files 312 ms, Branches 244 ms, Audit Log 388 ms, Settings 268 ms, and Public
+  Catalog 308 ms with zero failed requests/errors. Admin Cloudflare LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-24-44-954Z.json` and
+  direct public-host LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T13-24-45-903Z.json` kept all
+  9 checked routes at or below 388 ms. Browser action smoke
+  `ops/runtime/reports/browser-action-smoke-2026-06-11T13-23-58-999Z/summary.json`
+  passed 34 routes and 28 actions with 0 findings. Broad all-pages control
+  audit
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T13-24-45-680Z/summary.json`
+  passed 34 routes, 460 controls, 404 tested controls, 0 failed controls, and
+  0 findings.
+- Verification proof: frontend utility suite, frontend production build,
+  Docker release build/start health, local/admin/public LCP route traces,
+  browser action smoke, broad all-pages control audit, guarded storage prune,
+  generated reference refresh, Phase 29 audit, and `git diff --check` passed.
+- Cleanup proof: after Docker image/start/live proof, ignored/regenerable
+  `release/` (380,979,552 bytes) and `frontend/dist/` (31,860,773 bytes) were
+  deleted, reclaiming 412,840,325 bytes. Guarded `prune-storage` removed
+  14,053,717 bytes of old reports, reclaimed 614.1 MB of Docker builder cache,
+  and removed only old `business-os:v*` tags while preserving protected
+  uploads, secrets, database, backups, volumes, node_modules, and active Docker
+  image `business-os:v6.0.0-202606112120`. Phase 29 audit passed afterward
+  with 9 checks and 0 failures.
+- Current plan position after Move 919: Phase 8.4 remains active; Phase 26
+  stays at 51 completed organization moves; Phase 28 remains active with
+  R2/access follow-up open; Phase 29 remains active. Remaining external
+  blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+  `npm --prefix ops run cloudflare:apply-cache`.

@@ -2679,6 +2679,11 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/,
   'reset data should timeout slow destructive reset actions',
 )
+assert.doesNotMatch(
+  resetData,
+  /setTimeout\(\(\) => refreshAppData\(\),\s*200\)/,
+  'reset data and factory reset should refresh app state immediately after the server confirms success',
+)
 assert.match(
   resetData,
   /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/,

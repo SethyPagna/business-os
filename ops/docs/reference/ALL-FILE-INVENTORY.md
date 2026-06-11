@@ -585,7 +585,7 @@ Total files documented: **735**
 | 573 | `frontend/tests/offlineSecurityHardening.test.ts` | frontend-root | 95 | 4.2 | Project source/support file |
 | 574 | `frontend/tests/offlineSyncArchitecture.test.ts` | frontend-root | 100 | 5.1 | Project source/support file |
 | 575 | `frontend/tests/ownedGoogleAuth.test.ts` | frontend-root | 58 | 2.6 | Project source/support file |
-| 576 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3708 | 276.3 | Project source/support file |
+| 576 | `frontend/tests/performanceLoadingUx.test.ts` | frontend-root | 3713 | 276.5 | Project source/support file |
 | 577 | `frontend/tests/permissionEditor.test.ts` | frontend-root | 39 | 1.5 | Project source/support file |
 | 578 | `frontend/tests/permissions.test.ts` | frontend-root | 18 | 0.6 | Project source/support file |
 | 579 | `frontend/tests/portalCatalogDisplay.test.ts` | frontend-root | 140 | 6.5 | Project source/support file |
