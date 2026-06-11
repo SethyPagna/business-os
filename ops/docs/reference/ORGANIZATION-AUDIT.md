@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T10:29:44.774Z
+Generated: 2026-06-11T10:52:13.641Z
 
 ## Summary
 
@@ -63,12 +63,12 @@ Generated: 2026-06-11T10:29:44.774Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 15614 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 15615 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12322 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10654 | ops/docs/reference |
 | ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 10069 | ops/docs |
-| ops/docs/OPTIMIZATION-STATUS.md | 5339 | ops/docs |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 5133 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 5352 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 5169 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/tests/performanceLoadingUx.test.ts | 3700 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3654 | ops/docs/reference |

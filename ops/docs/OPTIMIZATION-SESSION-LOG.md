@@ -8,6 +8,42 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Prioritize direct admin route chunks in modulepreload headers
+  - area: Cloudflare direct-route startup and LCP
+  - result: kept
+  - note: direct admin HTML already emitted modulepreload `Link` headers, but
+    generic admin first-window chunks were listed before route-owned chunks.
+    Move 912 keeps the small auth/bootstrap chunks first, then lists the
+    current route chunks, then the remaining shared admin first-window chunks.
+    This lets `/products` and `/pos` advertise their route bundles earlier
+    under constrained remote transfer without changing API data flow.
+  - affected files: `backend/server.ts`, `backend/server.js`,
+    `backend/test/routeContracts.test.ts`,
+    `ops/docs/OPTIMIZATION-MASTER-PLAN.md`,
+    `ops/docs/OPTIMIZATION-ROADMAP.md`,
+    `ops/docs/OPTIMIZATION-STATUS.md`,
+    `ops/docs/OPTIMIZATION-SESSION-LOG.md`
+  - verification: backend utility suite, frontend utility suite, frontend
+    production build, `git diff --check`, Docker release build/start health,
+    direct local/public header checks, local/public targeted LCP traces, and
+    Phase 29 audit passed.
+  - runtime proof: Docker image `business-os:v6.0.0-202606111845` is healthy
+    with frontend hash `b2c6359b55be09e5` and source hash
+    `3b68f7362c866cc6`.
+  - live proof: `/products` now sends `Products-*` before `AdminRoot-*` in the
+    response `Link` header. Local targeted LCP measured Dashboard 404 ms,
+    Products 288 ms, and POS 272 ms. Public targeted LCP measured Products
+    1.976 s and POS 1.932 s with zero failed requests/errors.
+  - follow-up: public Dashboard measured 2.820 s because
+    `/api/dashboard/startup` completed at about 2.749 s. The next performance
+    slice should optimize dashboard startup query/API latency rather than add
+    another loading effect.
+  - current plan position after Move 912: Phase 8.4 remains active; Phase 26
+    stays at 51 completed organization moves; Phase 28 remains active with
+    R2/access follow-up open; Phase 29 remains active. Remaining external
+    blocker: update the Cloudflare token with `Zone Cache Rules Edit`, then run
+    `npm --prefix ops run cloudflare:apply-cache`.
+
 - Remove remaining Products first-load false-zero labels
   - area: Products loading correctness and perceived performance
   - result: kept

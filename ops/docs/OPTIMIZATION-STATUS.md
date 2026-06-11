@@ -8,8 +8,9 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 911, remove the remaining Products first-load
-  false-zero labels from the desktop table footer and mobile select-all row.
+- Latest completed move: Move 912, prioritize direct-route admin modulepreload
+  headers so route-owned chunks for Products/POS load before generic admin
+  first-window chunks under Cloudflare.
 
 ## Current Baseline
 
@@ -19,9 +20,9 @@ Latest verified runtime health:
 - latest verified frontend hash from the most recent Docker-served live check:
   `b2c6359b55be09e5`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 911 source state; Docker image `business-os:v6.0.0-202606111821`
+  this Move 912 source state; Docker image `business-os:v6.0.0-202606111845`
   serves frontend hash `b2c6359b55be09e5` and source hash
-  `23b9745c64a0714f`
+  `3b68f7362c866cc6`
 
 Latest verified reports:
 
@@ -165,6 +166,18 @@ Latest verified reports:
   Public admin Products ready/LCP measured 3.802 s / 2.672 s with zero failed
   requests/errors and without false `0 / 0 Products` or `Select all (0)` first
   paint labels. Phase 29 audit passed with 9 checks and 0 failures.
+- latest Move 912 local targeted LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T10-49-55-401Z.json`
+- latest Move 912 public targeted LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T10-49-55-935Z.json`
+- latest Move 912 result:
+  Docker image `business-os:v6.0.0-202606111845` is healthy with frontend hash
+  `b2c6359b55be09e5`. The `/products` response `Link` header now places
+  `Products-*` before `AdminRoot-*`. Local LCP measured Dashboard 404 ms,
+  Products 288 ms, and POS 272 ms. Public LCP measured Products 1.976 s and
+  POS 1.932 s with zero failed requests/errors. Public Dashboard stayed above
+  target at 2.820 s because `/api/dashboard/startup` completed at about
+  2.749 s; that startup query/API path is the next optimization target.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

@@ -8,9 +8,9 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 911, remove the remaining Products first-load
-  false-zero labels from the desktop table footer and mobile select-all row
-  while keeping real post-load counts unchanged.
+- Latest completed move: Move 912, prioritize direct-route admin modulepreload
+  headers so route-owned chunks for Products/POS load before generic admin
+  first-window chunks under Cloudflare.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -18,16 +18,16 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111821`
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111845`
   is healthy with frontend hash `b2c6359b55be09e5` and source hash
-  `23b9745c64a0714f`. Local Products trace measured ready in 454 ms with
-  532 ms LCP, zero failed requests, and zero app errors. Public admin Products
-  trace measured ready in 3.802 s and LCP in 2.672 s with zero failed
-  requests/errors; its first-render text now shows neutral `Loading` and
-  `Select all` labels instead of false `0 / 0 Products` or `Select all (0)`.
-  Public admin remains slightly above the 2.5 s LCP target because the document
-  and route chunks are still tunnel/edge-transfer bound, not because of an
-  extra artificial loading delay. Broad all-pages control audit
+  `3b68f7362c866cc6`. The `/products` response now sends `Products-*` before
+  `AdminRoot-*` in the `Link` modulepreload header. Local targeted LCP measured
+  Dashboard 404 ms, Products 288 ms, and POS 272 ms with zero failed requests
+  or app errors. Public admin targeted LCP measured Products 1.976 s and POS
+  1.932 s, both under the 2.5 s target with zero failed requests/errors.
+  Dashboard measured 2.820 s because `/api/dashboard/startup` completed at
+  about 2.749 s; Dashboard startup data remains the next real bottleneck.
+  Broad all-pages control audit
   `ops/runtime/reports/all-pages-control-audit-2026-06-11T10-01-00-315Z/summary.json`
   passed 34 desktop/mobile routes, 386 tested controls, 0 failed controls, and
   0 findings. Guarded storage prune removed 14,387,727 bytes of old runtime

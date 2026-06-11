@@ -252,7 +252,7 @@ function getSpaModulePreloadChunks(routePath = '/') {
     .flatMap((entry) => entry.chunks)
   const baseChunks = isPublicPortalRoute
     ? SPA_PUBLIC_MODULE_PRELOAD_CHUNKS
-    : [...SPA_ADMIN_MODULE_PRELOAD_CHUNKS, ...SPA_ADMIN_FIRST_WINDOW_CHUNKS]
+    : [...SPA_ADMIN_MODULE_PRELOAD_CHUNKS, ...routeChunks, ...SPA_ADMIN_FIRST_WINDOW_CHUNKS]
   return [...new Set([...baseChunks, ...routeChunks])]
 }
 
