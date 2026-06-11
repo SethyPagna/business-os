@@ -51,6 +51,10 @@ assert.deepEqual(
   },
 )
 assert.equal(buildProductPaginationState({ page: 99, total: 0, pageSize: 0 }).summaryLabel, '0 / 0')
+assert.equal(
+  buildProductPaginationState({ page: 99, total: 0, pageSize: 0, pending: true, pendingLabel: 'Loading' }).summaryLabel,
+  'Loading',
+)
 assert.equal(buildProductPaginationState({ page: 99, total: 10, pageSize: 20 }).safePage, 1)
 
 const jumpTargets = buildJumpTargetIdsByLetter([

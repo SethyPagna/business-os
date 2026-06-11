@@ -143,6 +143,17 @@ for (const [name, source] of [
   assertLoadWatchdogKeepsLoading(source, name)
 }
 
+assert.match(
+  inventory,
+  /<LoadingWatchdog\s+loading=\{loading && !isProductsFirstLoad && !isMovementsFirstLoad\}[\s\S]*timeoutMs=\{8000\}/,
+  'Inventory should not show a delayed watchdog card on top of the first product or movement loading shell',
+)
+assert.doesNotMatch(
+  inventory,
+  /<LoadingWatchdog[\s\S]{0,240}showAfterMs=\{1200\}/,
+  'Inventory should not add a fixed 1200ms watchdog reveal delay on top of real data loading',
+)
+
 assert.match(app, /const WARMUP_PAGE_IDS[^=]*= \[\] satisfies PageId\[\]/, 'dashboard startup should not background-load route chunks before user intent')
 assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/pathRouting\.ts'/, 'app context should derive the initial route page without importing the heavier admin shell utility chunk')
 assert.doesNotMatch(appContext, /import en from '\.\/lang\/en\.json'/, 'app context should not statically load the full English language pack during startup')

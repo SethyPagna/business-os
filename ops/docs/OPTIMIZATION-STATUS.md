@@ -8,11 +8,9 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 909, fold the tiny LazyPortalMenu wrapper into
-  the existing shared UI chunk while keeping the heavier PortalMenu
-  implementation lazy on user intent, removing the old standalone
-  `shared-lazy-portal-menu` first-window request and fixing the intermediate
-  app-shared/shared-ui circular chunk.
+- Latest completed move: Move 910, remove false first-load zero totals from
+  Products and Inventory pagination summaries and keep the Inventory slow-load
+  watchdog out of the first product/movement loading shell.
 
 ## Current Baseline
 
@@ -20,10 +18,10 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `81a54a52e3091858`
+  `2aa3efb8a092fe84`
 - latest verified source state from the most recent Docker-served live check:
-  this Move 909 source state; Docker image `business-os:v6.0.0-202606111728`
-  serves frontend hash `81a54a52e3091858` and source hash
+  this Move 910 source state; Docker image `business-os:v6.0.0-202606111750`
+  serves frontend hash `2aa3efb8a092fe84` and source hash
   `23b9745c64a0714f`
 
 Latest verified reports:
@@ -131,6 +129,29 @@ Latest verified reports:
   `business-os:v6.0.0-202606111728` plus rollback tags. The temporary
   `move909-products-debug.png` probe artifact was deleted after the fixed image
   passed live traces.
+- latest Move 910 local targeted route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T09-56-50-970Z.json`
+- latest Move 910 local targeted LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-56-55-852Z.json`
+- latest Move 910 public admin route-load trace:
+  `ops/runtime/reports/route-load-trace-2026-06-11T09-58-25-708Z.json`
+- latest Move 910 public admin LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-58-25-705Z.json`
+- latest Move 910 public portal LCP trace:
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T09-58-30-947Z.json`
+- latest Move 910 all-pages control audit:
+  `ops/runtime/reports/all-pages-control-audit-2026-06-11T10-01-00-315Z/summary.json`
+- latest Move 910 cleanup result:
+  guarded `prune-storage` preserved protected backups, volumes, uploads,
+  secrets, database, and node_modules; removed 14,387,727 bytes of old runtime
+  reports, reclaimed about 3.037 GB of Docker builder cache, and removed only
+  the old `business-os:v6.0.0-202606111328` tag while keeping active
+  `business-os:v6.0.0-202606111750` plus rollback tags.
+- latest Move 910 external blocker:
+  `npm.cmd --prefix ops run cloudflare:apply-cache` still fails because the
+  current Cloudflare token lacks `Zone.Cache Rules: Edit`; public `/public`
+  HTML remains `CF-Cache-Status: DYNAMIC` at the edge until that permission is
+  granted.
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

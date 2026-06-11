@@ -8,6 +8,43 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Remove false first-load zero pagination and stacked Inventory watchdog
+  - area: Products and Inventory perceived loading correctness
+  - result: kept
+  - note: `buildProductPaginationState` now distinguishes a pending first
+    load from a true empty result, so Products can show a neutral loading
+    summary instead of `0 / 0` while the first request is still in flight.
+    Inventory uses the same pending behavior for product pagination and no
+    longer stacks a delayed `LoadingWatchdog` card on top of the first product
+    or movement loading shell.
+  - verification: frontend utility suite, frontend production build,
+    `git diff --check`, Docker release build/start, direct Playwright
+    first-render probe, local/public route-load and LCP traces, broad
+    all-pages control audit, Phase 29 audit, Cloudflare cache apply attempt,
+    and guarded storage prune ran.
+  - local proof: Docker image `business-os:v6.0.0-202606111750` is healthy
+    with frontend hash `2aa3efb8a092fe84`. Products loaded in 348 ms with
+    400 ms LCP; Inventory loaded in 252 ms with 264 ms LCP; both traces had
+    zero failed requests and zero app errors. Direct Playwright probes found
+    no false `0 / 0` label in Products or Inventory snapshots.
+  - live public proof: public admin traces had zero failed requests and zero
+    app errors, but measured Products 7.164 s LCP and Inventory 4.488 s LCP.
+    Reports show the document request is the main bottleneck while hashed
+    assets are Cloudflare cache HITs. Public portal LCP measured 4.736 s and
+    `/public` HTML remains `CF-Cache-Status: DYNAMIC`.
+  - control proof: broad all-pages audit
+    `ops/runtime/reports/all-pages-control-audit-2026-06-11T10-01-00-315Z/summary.json`
+    passed 34 desktop/mobile routes, 386 tested controls, 0 failed controls,
+    and 0 findings.
+  - cleanup: guarded `prune-storage` removed 14,387,727 bytes of old runtime
+    reports, reclaimed about 3.037 GB of Docker builder cache, and removed
+    only the old `business-os:v6.0.0-202606111328` image tag while preserving
+    active `business-os:v6.0.0-202606111750`, rollback tags, protected
+    backups, volumes, uploads, secrets, database, and node_modules.
+  - remaining: Cloudflare cache-rule application is still blocked by missing
+    `Zone.Cache Rules: Edit` on the API token; rerun
+    `npm.cmd --prefix ops run cloudflare:apply-cache` after granting it.
+
 - Fold lazy portal-menu wrapper into existing shared UI chunk
   - area: first-window route chunking for Products, POS, Branches, Audit Log,
     and shared menu triggers

@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T09:38:36.032Z
+Generated: 2026-06-11T10:05:27.336Z
 
 ## Summary
 
@@ -70,15 +70,15 @@ Generated: 2026-06-11T09:38:36.032Z
 | ops/docs/OPTIMIZATION-STATUS.md | 5305 | ops/docs |
 | ops/docs/OPTIMIZATION-SESSION-LOG.md | 5063 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
-| frontend/tests/performanceLoadingUx.test.ts | 3689 | frontend/tests/performanceLoadingUx.test.ts |
+| frontend/tests/performanceLoadingUx.test.ts | 3700 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3654 | ops/docs/reference |
 | frontend/src/components/catalog/CatalogPage.tsx | 3498 | frontend/components/catalog |
-| frontend/src/components/inventory/Inventory.tsx | 3489 | frontend/components/inventory |
+| frontend/src/components/inventory/Inventory.tsx | 3488 | frontend/components/inventory |
 | ops/docs/reference/PHASE29-AUDIT.json | 3432 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | ops/docs/reference/PERFORMANCE-SCAN.md | 2729 | ops/docs/reference |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| frontend/src/components/products/Products.tsx | 2580 | frontend/components/products |
+| frontend/src/components/products/Products.tsx | 2582 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2362 | frontend/components/pos |
 | backend/src/routes/products.ts | 2310 | backend/routes |
 | backend/src/db/postgresSchema.sql | 2190 | backend/db |

@@ -2124,7 +2124,7 @@ export default function Inventory() {
   const inventoryProductEnd = totalProducts ? Math.min(totalProducts, inventoryProductSafePage * inventoryProductSafePageSize) : 0
   const inventoryProductSummaryLabel = totalProducts
     ? `${inventoryProductStart.toLocaleString()}-${inventoryProductEnd.toLocaleString()} / ${Number(totalProducts || 0).toLocaleString()}`
-    : '0 / 0'
+    : (loading && needsProductSummary && !inventoryProductsLoaded ? tr('loading', 'Loading') : '0 / 0')
   const getInventoryGroupPriceLabel = useCallback((group: LegacyInventoryRecord) => {
     const min = Number(group?.minSellingPriceUsd || 0)
     const max = Number(group?.maxSellingPriceUsd || 0)
@@ -3001,9 +3001,8 @@ export default function Inventory() {
       />
 
       <LoadingWatchdog
-        loading={loading}
+        loading={loading && !isProductsFirstLoad && !isMovementsFirstLoad}
         timeoutMs={8000}
-        showAfterMs={1200}
         label={t('loading') || 'Loading...'}
         details={tab === 'rfid' ? 'Checking RFID status, tag mappings, and inventory data.' : 'Loading products, stock, and movement summaries.'}
         onRetry={() => load(false)}

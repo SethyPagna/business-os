@@ -1263,7 +1263,9 @@ export default function Products() {
     total: productTotal,
     pageSize: productPageSize,
     fallbackPageSize: PAGE_SIZE_OPTIONS[0],
-  }), [productPage, productPageSize, productTotal])
+    pending: loading && !loadedOnceRef.current,
+    pendingLabel: tr('loading', 'Loading'),
+  }), [loading, productPage, productPageSize, productTotal, tr])
   const productSelectAllLabel = `${t('select_all') || 'Select all'} (${visibleProducts.length})`
   const productSelectedLabel = tr('products_selected_count', `${selectedVisibleCount} selected`)
   const productChipLabels = useMemo(() => ({

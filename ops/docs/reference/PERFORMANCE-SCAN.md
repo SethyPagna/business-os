@@ -15,11 +15,11 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | File | Size (KB) | Lines |
 |---|---:|---:|
 | `frontend/src/lang/km.json` | 246.7 | 2730 |
-| `frontend/src/components/inventory/Inventory.tsx` | 160.8 | 3489 |
+| `frontend/src/components/inventory/Inventory.tsx` | 160.9 | 3488 |
 | `backend/src/services/importJobs.ts` | 157.1 | 3880 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 152.5 | 3498 |
 | `frontend/src/lang/en.json` | 134.5 | 2721 |
-| `frontend/src/components/products/Products.tsx` | 119.2 | 2580 |
+| `frontend/src/components/products/Products.tsx` | 119.3 | 2582 |
 | `frontend/src/components/pos/POS.tsx` | 115.0 | 2362 |
 | `frontend/src/components/catalog/CatalogEditorSurface.tsx` | 104.9 | 1555 |
 | `backend/src/routes/products.ts` | 102.4 | 2310 |
@@ -46,10 +46,10 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 |---|---:|---:|
 | `backend/src/services/importJobs.ts` | 3880 | 157.1 |
 | `frontend/src/components/catalog/CatalogPage.tsx` | 3498 | 152.5 |
-| `frontend/src/components/inventory/Inventory.tsx` | 3489 | 160.8 |
+| `frontend/src/components/inventory/Inventory.tsx` | 3488 | 160.9 |
 | `frontend/src/lang/km.json` | 2730 | 246.7 |
 | `frontend/src/lang/en.json` | 2721 | 134.5 |
-| `frontend/src/components/products/Products.tsx` | 2580 | 119.2 |
+| `frontend/src/components/products/Products.tsx` | 2582 | 119.3 |
 | `frontend/src/components/pos/POS.tsx` | 2362 | 115.0 |
 | `backend/src/routes/products.ts` | 2310 | 102.4 |
 | `frontend/src/components/products/import/BulkImportModal.tsx` | 2170 | 101.2 |
@@ -79,26 +79,26 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
 | `frontend/dist/assets/index-DzyUxVKK.css` | 147.6 |
-| `frontend/dist/assets/Inventory-CLnt2fYe.js` | 101.4 |
-| `frontend/dist/assets/Products-CkvjzOs7.js` | 84.3 |
-| `frontend/dist/assets/catalog-BdIJRchC.js` | 79.5 |
-| `frontend/dist/assets/catalog-editor-DZobYlHk.js` | 74.1 |
+| `frontend/dist/assets/Inventory-CS9EtPvI.js` | 101.4 |
+| `frontend/dist/assets/Products-DnIVjwW1.js` | 84.5 |
+| `frontend/dist/assets/catalog-By2e69IO.js` | 79.5 |
+| `frontend/dist/assets/catalog-editor-oabdSN9h.js` | 74.1 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-HXFuPJ5a.js` | 67.9 |
-| `frontend/dist/assets/POS-O94bAAYF.js` | 64.3 |
-| `frontend/dist/assets/AdminRoot-wKkBIBX_.js` | 62.7 |
-| `frontend/dist/assets/Dashboard-CfAqm25A.js` | 62.3 |
-| `frontend/dist/assets/Settings-DaqLycH_.js` | 54.5 |
+| `frontend/dist/assets/BulkImportModal-COq43KMI.js` | 67.9 |
+| `frontend/dist/assets/POS-WWBwXv5d.js` | 64.3 |
+| `frontend/dist/assets/AdminRoot-IUIZVG8b.js` | 62.7 |
+| `frontend/dist/assets/Dashboard-Dj9iIoVf.js` | 62.3 |
+| `frontend/dist/assets/Settings-zfXQUPWW.js` | 54.5 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-Dx4iJbYW.js` | 50.7 |
-| `frontend/dist/assets/shared-ui-Cah4AFwi.js` | 49.4 |
-| `frontend/dist/assets/user-profile-modal-BQI9YA8j.js` | 44.2 |
-| `frontend/dist/assets/app-auth-B6oawexs.js` | 40.4 |
-| `frontend/dist/assets/ReceiptSettings-CR2folW0.js` | 40.0 |
+| `frontend/dist/assets/Backup-9z91V-Wf.js` | 50.7 |
+| `frontend/dist/assets/shared-ui-B9zl5yb7.js` | 49.4 |
+| `frontend/dist/assets/user-profile-modal-CT3Q2VrB.js` | 44.2 |
+| `frontend/dist/assets/app-auth-44G-f0UC.js` | 40.4 |
+| `frontend/dist/assets/ReceiptSettings-CchQ5QBs.js` | 40.0 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-AeU6uShF.js` | 37.1 |
-| `frontend/dist/assets/Sales-ClhUyoTh.js` | 35.7 |
-| `frontend/dist/assets/ProductForm-CuMplHG7.js` | 35.3 |
+| `frontend/dist/assets/catalog-secondary-tabs-B2ajjjlB.js` | 37.1 |
+| `frontend/dist/assets/Sales-B83Lf9d-.js` | 35.7 |
+| `frontend/dist/assets/ProductForm-ChqC7Pdo.js` | 35.3 |
 
 ## 5. Notes
 

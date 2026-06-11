@@ -9,6 +9,9 @@ interface ProductPaginationOptions {
   total?: unknown
   pageSize?: unknown
   fallbackPageSize?: unknown
+  pending?: boolean
+  pendingLabel?: string
+  emptyLabel?: string
 }
 
 interface ProductPaginationState {
@@ -85,6 +88,9 @@ export function buildProductPaginationState({
   total = 0,
   pageSize = 20,
   fallbackPageSize = 20,
+  pending = false,
+  pendingLabel = 'Loading',
+  emptyLabel = '0 / 0',
 }: ProductPaginationOptions = {}): ProductPaginationState {
   const safePageSize = Math.max(1, Number(pageSize || fallbackPageSize))
   const safeTotal = Math.max(0, Number(total || 0))
@@ -94,7 +100,7 @@ export function buildProductPaginationState({
   const end = safeTotal ? Math.min(safeTotal, safePage * safePageSize) : 0
   const summaryLabel = safeTotal
     ? `${start.toLocaleString()}-${end.toLocaleString()} / ${safeTotal.toLocaleString()}`
-    : '0 / 0'
+    : (pending ? pendingLabel : emptyLabel)
   return {
     safePage,
     safePageSize,
