@@ -215,10 +215,7 @@ const routePreloadChunkNames = {
     'product-shared',
     'shared-page-header',
     'route-sync-utils',
-    'settings-refresh',
-    'app-api',
     'api-local-cache',
-    'shared-lazy-portal-menu',
     'shared-ui',
   ],
 } satisfies Record<string, readonly string[]>
@@ -624,6 +621,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/searchTerms.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/recordFilters.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/loaders.ts')) return 'route-sync-utils'
+    if (normalized.endsWith('/src/utils/actionHistory.ts')) return 'route-sync-utils'
+    if (normalized.endsWith('/src/utils/historyHelpers.ts')) return 'route-sync-utils'
+    if (normalized.endsWith('/src/utils/bulkOps.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/groupedRecords.ts')) return 'shared-ui'
     if (normalized.endsWith('/src/api/methods.ts')) return 'app-api-methods'
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'

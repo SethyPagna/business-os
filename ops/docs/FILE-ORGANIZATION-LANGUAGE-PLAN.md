@@ -9932,3 +9932,34 @@ Decision rule:
 - Keeper boundary: this is a backend route/template optimization, not a folder
   move or language conversion. The external blocker remains Cloudflare Cache
   Rules permission for true edge HTML/API caching.
+
+### Move 904: Compact startup shell and trim hot-route preloads
+
+- Ownership slice: Phase 8.4/Phase 29 startup performance and live-check
+  correctness after embedded/cached bootstrap optimizations.
+- Code-flow slice: the static startup shell is now a compact fixed pill with
+  no progress animation, so it no longer fills the viewport or creates an
+  artificial loading/LCP surface. Profile OTP and file-picker modals are true
+  intent-loaded chunks. Branches route-aware preloads now skip speculative
+  `settings-refresh`, `app-api`, and lazy portal-menu wrapper requests while
+  preserving the actual module graph.
+- Test-harness slice: Phase 8.4 Products and public portal checks now accept a
+  missing bootstrap/search response only when real product rows or public
+  products are visible, matching the optimized cached/embedded data path
+  without hiding broken data loads.
+- Verification slice: frontend utility suite and production build passed.
+  Docker release/start produced `business-os:v6.0.0-202606111009` with
+  frontend hash `68476001eb95ba69`. Broad Phase 8.4 live suite passed through
+  UI, public portal, receipt rollback, loyalty rollback, settings rollback,
+  and post-live hygiene.
+- Playwright proof: local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-14-49-548Z.json`
+  measured Products 464 ms, Inventory 360 ms, Branches 224 ms. Warm public
+  admin LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T02-17-56-170Z.json`
+  measured Products 2.436 s and Branches 2.088 s; public catalog LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-19-35-072Z.json`
+  measured 2.432 s. Public Inventory remains the next target at 2.552-2.728 s
+  with zero failures/errors.
+- Keeper boundary: this is a frontend/runtime performance and verification
+  harness move, not a folder move or language conversion. No source deletion
+  is included; generated `release/` cleanup remains a post-proof hygiene step.

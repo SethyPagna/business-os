@@ -218,11 +218,10 @@ function InitialShellFallback({ publicMode }: { publicMode: boolean }) {
           <div>
             <h1 className="business-os-initial-title">{publicMode ? 'Leang Cosmetic' : 'Business OS'}</h1>
             <p className="business-os-initial-copy">
-              {publicMode ? 'Loading the customer portal...' : 'Loading the workspace securely...'}
+              {publicMode ? 'Opening catalog' : 'Opening workspace'}
             </p>
           </div>
         </div>
-        <div className="business-os-initial-bar" aria-hidden="true" />
       </div>
     </div>
   )

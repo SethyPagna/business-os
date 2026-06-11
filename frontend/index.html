@@ -75,35 +75,41 @@
         background: #f5f7fb;
       }
       .business-os-initial-shell {
-        min-height: 100vh;
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        z-index: 1;
         display: flex;
         align-items: center;
-        justify-content: center;
-        padding: 24px;
         box-sizing: border-box;
+        pointer-events: none;
       }
       .business-os-initial-panel {
-        width: min(100%, 420px);
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        max-width: calc(100vw - 24px);
         border: 1px solid rgba(148, 163, 184, 0.28);
-        border-radius: 18px;
-        background: rgba(255, 255, 255, 0.9);
-        box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08);
-        padding: 22px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.86);
+        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+        padding: 6px 10px 6px 6px;
+        backdrop-filter: blur(10px);
       }
       .business-os-initial-brand {
         display: flex;
         align-items: center;
-        gap: 12px;
-        margin-bottom: 14px;
+        gap: 8px;
       }
       .business-os-initial-mark {
-        width: 44px;
-        height: 44px;
-        border-radius: 14px;
+        width: 28px;
+        height: 28px;
+        border-radius: 999px;
         display: grid;
         place-items: center;
         background: #2563eb;
         color: #fff;
+        font-size: 11px;
         font-weight: 800;
         letter-spacing: 0;
       }
@@ -113,35 +119,15 @@
       }
       .business-os-initial-title {
         margin: 0;
-        font-size: 22px;
+        font-size: 13px;
         line-height: 1.1;
         font-weight: 800;
       }
       .business-os-initial-copy {
-        margin: 4px 0 0;
+        margin: 1px 0 0;
         color: #64748b;
-        font-size: 14px;
-        line-height: 1.45;
-      }
-      .business-os-initial-bar {
-        position: relative;
-        overflow: hidden;
-        height: 8px;
-        border-radius: 999px;
-        background: #e2e8f0;
-      }
-      .business-os-initial-bar::after {
-        content: "";
-        position: absolute;
-        inset: 0 auto 0 0;
-        width: 42%;
-        border-radius: inherit;
-        background: #2563eb;
-        animation: business-os-initial-progress 1.1s ease-in-out infinite alternate;
-      }
-      @keyframes business-os-initial-progress {
-        from { transform: translateX(-18%); }
-        to { transform: translateX(158%); }
+        font-size: 11px;
+        line-height: 1.2;
       }
       @media (prefers-color-scheme: dark) {
         :root,
@@ -156,9 +142,6 @@
         }
         .business-os-initial-copy {
           color: #a7b4c6;
-        }
-        .business-os-initial-bar {
-          background: #253147;
         }
       }
     </style>
@@ -178,12 +161,11 @@
                 <span data-business-os-public>Leang Cosmetic</span>
               </h1>
               <p class="business-os-initial-copy">
-                <span data-business-os-admin>Loading the workspace securely...</span>
-                <span data-business-os-public>Loading the customer portal...</span>
+                <span data-business-os-admin>Opening workspace</span>
+                <span data-business-os-public>Opening catalog</span>
               </p>
             </div>
           </div>
-          <div class="business-os-initial-bar" aria-hidden="true"></div>
         </div>
       </div>
     </div>
@@ -238,7 +220,7 @@
         var copy = document.querySelector('.business-os-initial-copy')
         if (mark) mark.textContent = 'LE'
         if (title) title.textContent = 'Leang Cosmetic'
-        if (copy) copy.textContent = 'Loading the customer portal...'
+        if (copy) copy.textContent = 'Opening catalog'
       }())
     </script>
     <script src="/runtime-noise-guard.js"></script>

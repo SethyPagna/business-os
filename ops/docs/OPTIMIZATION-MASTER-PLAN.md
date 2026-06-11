@@ -8,7 +8,8 @@ only in chat.
 
 ## Current Execution Position
 
-- Latest completed move: Move 903, authenticated admin SPA template cache.
+- Latest completed move: Move 904, compact startup shell and hot-route preload
+  trim.
 - Active plan position: Phase 8.4 live verification/performance remains
   active; Phase 26 stays at 51 completed organization moves; Phase 28 remains
   active with the R2/access follow-up open; Phase 29 remains active as the
@@ -16,12 +17,17 @@ only in chat.
 - Current external blocker: Cloudflare `/public` HTML still returns
   `CF-Cache-Status: DYNAMIC` until the API token has `Zone Cache Rules Edit`
   and `npm --prefix ops run cloudflare:apply-cache` succeeds.
-- Latest admin/public proof: Docker image `business-os:v6.0.0-202606110751`
-  is healthy with frontend hash `0fbf2d5bae2d7bc4` and source hash
-  `30b0c319937c0ba8`. Public-host warm LCP
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T23-58-33-009Z.json`
-  measured Products 2.024 s, Inventory 1.128 s, and Branches 1.808 s with
-  zero failed requests/errors.
+- Latest admin/public proof: Docker image `business-os:v6.0.0-202606111009`
+  is healthy with frontend hash `68476001eb95ba69`. Local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-14-49-548Z.json`
+  measured Products 464 ms, Inventory 360 ms, and Branches 224 ms with zero
+  failed requests/errors. Warm public LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-17-56-170Z.json`
+  measured Products 2.436 s and Branches 2.088 s; public catalog LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-19-35-072Z.json`
+  measured 2.432 s. Inventory public LCP remained tunnel-variable at
+  2.552-2.728 s, with zero failed requests/errors and no backend API
+  bottleneck.
 
 ## Program Goals
 

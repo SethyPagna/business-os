@@ -8,6 +8,49 @@ This is a concise running log of what actually happened in recent sessions.
 
 ### Accepted
 
+- Compact startup shell and trim hot-route preload work
+  - area: perceived startup/LCP, route-aware preloads, profile modal intent
+    chunks, live-check harness behavior after embedded/cached bootstrap wins
+  - result: kept
+  - note: `frontend/index.html` and `frontend/src/index.tsx` now paint a
+    compact fixed startup pill with no animated progress bar, so the loading
+    placeholder no longer creates a full-page LCP candidate or artificial
+    motion delay. `UserProfileModal` now lazy-loads OTP and file-picker modals
+    only when opened. Branches route-aware preloads no longer explicitly pull
+    `settings-refresh`, `app-api`, or the lazy portal-menu wrapper on first
+    paint. The Phase 8.4 live checks now accept embedded/cached bootstrap fast
+    paths only when real product/portal content is rendered.
+  - verification: frontend utility suite, frontend production build, Docker
+    release/start, local/public Playwright route-load/LCP traces, broad Phase
+    8.4 live suite, public Cloudflare portal check, receipt rollback, loyalty
+    rollback, settings rollback, and post-live hygiene passed.
+  - live proof: Docker image `business-os:v6.0.0-202606111009` is healthy with
+    frontend hash `68476001eb95ba69`. Local LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T02-14-49-548Z.json`
+    measured Products 464 ms, Inventory 360 ms, and Branches 224 ms with zero
+    failed requests/errors.
+  - public proof: warmed public admin LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T02-17-56-170Z.json`
+    measured Products 2.436 s and Branches 2.088 s. Public catalog LCP
+    `ops/runtime/reports/lcp-route-trace-2026-06-11T02-19-35-072Z.json`
+    measured 2.432 s. Public Inventory remained slightly above target at
+    2.552-2.728 s in repeated samples, with zero failed requests/errors and no
+    API bottleneck; the slow path is authenticated document/module transfer
+    through Cloudflare Tunnel.
+  - suite proof: `npm.cmd --prefix ops run phase84:live-suite` passed with
+    broad UI report
+    `ops/runtime/reports/phase84-ui-live-check-2026-06-11T02-42-41-699Z/report.json`
+    checking 66 signals and zero relevant console messages; public portal
+    report
+    `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-11T02-44-38-856Z/report.json`
+    rendered 20 products with zero failed responses, console messages, or page
+    errors.
+  - remaining: Cloudflare Cache Rules permission is still needed for true edge
+    caching. Authenticated admin HTML remains intentionally `no-store` to avoid
+    caching private session/user context; further public Inventory LCP gains
+    should come from reducing first-window module count or fixing tunnel/edge
+    variance, not unsafe HTML caching.
+
 - Cache authenticated admin SPA template shell
   - area: authenticated admin document startup, backend SPA template delivery,
     Cloudflare dynamic HTML fallback

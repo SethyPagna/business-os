@@ -31,7 +31,7 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/src/AppContext.tsx` | 76.9 | 1947 |
 | `frontend/src/App.tsx` | 75.8 | 2009 |
 | `ops/scripts/architecture/language-runtime-audit.ts` | 71.6 | 1666 |
-| `frontend/src/components/users/UserProfileModal.tsx` | 68.2 | 1326 |
+| `frontend/src/components/users/UserProfileModal.tsx` | 68.9 | 1344 |
 | `backend/src/routes/system/index.ts` | 65.6 | 1674 |
 | `backend/src/routes/sales.ts` | 65.2 | 1591 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 62.5 | 1349 |
@@ -67,8 +67,8 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `backend/src/routes/portal.ts` | 1478 | 54.0 |
 | `ops/scripts/runtime/audits/deep-live-audit.ts` | 1463 | 55.3 |
 | `frontend/src/components/catalog/portalLanguagePacks.ts` | 1349 | 62.5 |
+| `frontend/src/components/users/UserProfileModal.tsx` | 1344 | 68.9 |
 | `backend/src/fileAssets.ts` | 1336 | 46.3 |
-| `frontend/src/web-api.ts` | 1328 | 52.2 |
 
 ## 4. Largest Built Chunks
 
@@ -78,27 +78,27 @@ Auto-generated performance scan for source size/complexity and built frontend ch
 | `frontend/dist/assets/lang-km-c87vG7oG.js` | 282.5 |
 | `frontend/dist/assets/vendor-react-DKmwvaIJ.js` | 207.2 |
 | `frontend/dist/assets/lang-en-DND0-37b.js` | 169.8 |
-| `frontend/dist/assets/index-BY99XyCv.css` | 147.7 |
-| `frontend/dist/assets/Inventory-DS5lEb4Y.js` | 102.6 |
-| `frontend/dist/assets/Products-Bp6IFZTd.js` | 84.7 |
-| `frontend/dist/assets/catalog-W_ElBY_P.js` | 79.5 |
-| `frontend/dist/assets/catalog-editor-DqnvDO9A.js` | 74.1 |
+| `frontend/dist/assets/index-DWpS7S0Y.css` | 147.6 |
+| `frontend/dist/assets/Inventory-2mdRN6QP.js` | 102.3 |
+| `frontend/dist/assets/Products-JS0zhylA.js` | 84.4 |
+| `frontend/dist/assets/catalog-BHeokBca.js` | 79.5 |
+| `frontend/dist/assets/catalog-editor-Cy9rzXet.js` | 74.1 |
 | `frontend/dist/assets/vendor-dexie-2jmnBxhj.js` | 72.5 |
-| `frontend/dist/assets/BulkImportModal-CTg4fHb2.js` | 67.9 |
-| `frontend/dist/assets/POS-CKkMc4Aa.js` | 64.3 |
-| `frontend/dist/assets/AdminRoot-JgALFG0c.js` | 62.8 |
-| `frontend/dist/assets/Dashboard-DCt6gEdG.js` | 62.0 |
-| `frontend/dist/assets/Settings-Dt5Z4Akw.js` | 54.6 |
+| `frontend/dist/assets/BulkImportModal-KWXjs6WF.js` | 67.9 |
+| `frontend/dist/assets/POS-BA9LmstN.js` | 64.3 |
+| `frontend/dist/assets/AdminRoot-DciDgFff.js` | 62.8 |
+| `frontend/dist/assets/Dashboard-BAXPjoYJ.js` | 62.0 |
+| `frontend/dist/assets/Settings-k-JhczLo.js` | 54.6 |
 | `frontend/dist/assets/portal-language-packs-DGxmKkW_.js` | 52.1 |
-| `frontend/dist/assets/Backup-nRRIC7cX.js` | 50.9 |
-| `frontend/dist/assets/shared-ui-DQ6XLwcn.js` | 48.7 |
-| `frontend/dist/assets/user-profile-modal-CYNsYHB0.js` | 47.9 |
-| `frontend/dist/assets/app-auth-C8sNahSz.js` | 40.4 |
-| `frontend/dist/assets/ReceiptSettings-CjVmSdo-.js` | 40.0 |
+| `frontend/dist/assets/Backup-Dok2Cr_T.js` | 50.8 |
+| `frontend/dist/assets/shared-ui-ChVfoBVc.js` | 48.7 |
+| `frontend/dist/assets/user-profile-modal-bkqKX91R.js` | 44.2 |
+| `frontend/dist/assets/app-auth-BDuzWBG6.js` | 40.4 |
+| `frontend/dist/assets/ReceiptSettings-DLkno97x.js` | 40.0 |
 | `frontend/dist/assets/portal-content-i18n-BJnSIXBN.js` | 38.5 |
-| `frontend/dist/assets/catalog-secondary-tabs-BtF4ha4t.js` | 37.2 |
-| `frontend/dist/assets/Sales-NmQDoLlQ.js` | 35.8 |
-| `frontend/dist/assets/ProductForm-BEJLh5_G.js` | 35.3 |
+| `frontend/dist/assets/catalog-secondary-tabs-tuhndZpY.js` | 37.2 |
+| `frontend/dist/assets/Sales-UbOASXfv.js` | 35.7 |
+| `frontend/dist/assets/ProductForm-BD7A9dlZ.js` | 35.3 |
 
 ## 5. Notes
 
@@ -2689,4 +2689,23 @@ Auto-generated performance scan for source size/complexity and built frontend ch
   removing 380,976,311 bytes. Guarded storage prune then reduced Docker build
   cache from 26.02 GB to 4.85 GB and removed two old `business-os:v*` tags
   while preserving the active image and protected data volumes.
+- Move 904 records the compact startup shell and hot-route preload trim. The
+  initial HTML/React fallback now paints a compact fixed pill with no animated
+  progress bar, profile OTP and file-picker modals load only on intent, and
+  Branches route-aware preloads no longer explicitly request
+  `settings-refresh`, `app-api`, or the lazy portal-menu wrapper in the first
+  window. Docker image `business-os:v6.0.0-202606111009` served frontend hash
+  `68476001eb95ba69`. Local route-load
+  `ops/runtime/reports/route-load-trace-2026-06-11T02-14-49-546Z.json`
+  measured Products 508 ms, Inventory 230 ms, Branches 226 ms; local LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-14-49-548Z.json`
+  measured Products 464 ms, Inventory 360 ms, Branches 224 ms. Warm public
+  LCP `ops/runtime/reports/lcp-route-trace-2026-06-11T02-17-56-170Z.json`
+  measured Products 2.436 s, Inventory 3.276 s, Branches 2.088 s; focused
+  follow-up Inventory samples measured 2.552-2.728 s, and public catalog LCP
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-19-35-072Z.json`
+  measured 2.432 s. The full Phase 8.4 live suite passed with broad UI report
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-11T02-42-41-699Z/report.json`
+  and public portal report
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-11T02-44-38-856Z/report.json`.
 <!-- phase29-manual-notes:end -->

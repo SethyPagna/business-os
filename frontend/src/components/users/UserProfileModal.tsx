@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ChangeEvent, ReactNode } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import type { ChangeEvent, ComponentType, ReactNode } from 'react'
 import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
@@ -7,8 +7,7 @@ import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import Modal from '../shared/Modal'
-import OtpModal from '../utils-settings/OtpModal'
-import FilePickerModal from '../files/FilePickerModal'
+import type { OtpModalProps } from '../utils-settings/OtpModal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { STORAGE_KEYS } from '../../constants'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
@@ -31,6 +30,13 @@ type ProfileSection = 'personal' | 'login_methods' | 'security' | 'organization'
 type OtpMode = 'setup' | 'disable' | null
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
+type ProfileFilePickerModalProps = {
+  open: boolean
+  onClose: () => void
+  onSelect?: (publicPath: string) => void
+  mediaType?: 'image'
+  title?: ReactNode
+}
 
 interface UserProfileModalProps {
   onClose: () => void
@@ -151,6 +157,12 @@ interface StoredOrganization {
 
 const useApp = useAppHook as () => AppContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
+const LazyOtpModal = lazy(async () => ({
+  default: (await import('../utils-settings/OtpModal')).default as ComponentType<OtpModalProps>,
+}))
+const LazyFilePickerModal = lazy(async () => ({
+  default: (await import('../files/FilePickerModal')).default as ComponentType<ProfileFilePickerModalProps>,
+}))
 
 function getProfileApi(): ProfileApi {
   if (typeof window === 'undefined' || !window.api) throw new Error('Profile API is not available.')
@@ -1288,13 +1300,15 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
       </Modal>
 
       {otpMode ? (
-        <OtpModal
-          mode={otpMode}
-          userId={user?.id}
-          onClose={() => setOtpMode(null)}
-          onDone={refreshOtpState}
-          t={t}
-        />
+        <Suspense fallback={null}>
+          <LazyOtpModal
+            mode={otpMode}
+            userId={user?.id}
+            onClose={() => setOtpMode(null)}
+            onDone={refreshOtpState}
+            t={t}
+          />
+        </Suspense>
       ) : null}
       <AvatarEditorModal
         open={avatarEditorOpen}
@@ -1310,16 +1324,20 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         saving={uploadingAvatar}
         tr={tr}
       />
-      <FilePickerModal
-        open={filePickerOpen}
-        mediaType="image"
-        title={tr('avatar_image', 'Avatar image')}
-        onClose={() => setFilePickerOpen(false)}
-        onSelect={(publicPath) => {
-          setFilePickerOpen(false)
-          openAvatarEditor(publicPath)
-        }}
-      />
+      {filePickerOpen ? (
+        <Suspense fallback={null}>
+          <LazyFilePickerModal
+            open={filePickerOpen}
+            mediaType="image"
+            title={tr('avatar_image', 'Avatar image')}
+            onClose={() => setFilePickerOpen(false)}
+            onSelect={(publicPath) => {
+              setFilePickerOpen(false)
+              openAvatarEditor(publicPath)
+            }}
+          />
+        </Suspense>
+      ) : null}
     </>
   )
 }

@@ -2923,20 +2923,20 @@ Total files documented: **278**
 
 | No. | Symbol | Kind | Line |
 |---:|---|---:|---:|
-| 1 | `getProfileApi` | function | 155 |
-| 2 | `getErrorMessage` | function | 160 |
-| 3 | `parseStoredOrganization` | function | 164 |
-| 4 | `AvatarPreview` | function | 181 |
-| 5 | `ProfileSectionButton` | function | 199 |
-| 6 | `clamp` | function | 309 |
-| 7 | `loadImageElement` | function | 313 |
-| 8 | `renderAvatarCropBlob` | function | 328 |
-| 9 | `AvatarEditorModal` | function | 354 |
-| 10 | `UserProfileModal` | component/function | 415 |
-| 11 | `handleProfileSave` | const arrow | 583 |
-| 12 | `handlePasswordSave` | const arrow | 647 |
-| 13 | `handleSessionSave` | const arrow | 686 |
-| 14 | `refreshOtpState` | const arrow | 706 |
+| 1 | `getProfileApi` | function | 167 |
+| 2 | `getErrorMessage` | function | 172 |
+| 3 | `parseStoredOrganization` | function | 176 |
+| 4 | `AvatarPreview` | function | 193 |
+| 5 | `ProfileSectionButton` | function | 211 |
+| 6 | `clamp` | function | 321 |
+| 7 | `loadImageElement` | function | 325 |
+| 8 | `renderAvatarCropBlob` | function | 340 |
+| 9 | `AvatarEditorModal` | function | 366 |
+| 10 | `UserProfileModal` | component/function | 427 |
+| 11 | `handleProfileSave` | const arrow | 595 |
+| 12 | `handlePasswordSave` | const arrow | 659 |
+| 13 | `handleSessionSave` | const arrow | 698 |
+| 14 | `refreshOtpState` | const arrow | 718 |
 
 ### 3.214 `frontend/src/components/users/Users.tsx`
 
@@ -3629,20 +3629,20 @@ Total files documented: **278**
 | 3 | `inlinePublicRuntimeScripts` | function | 60 |
 | 4 | `fixCrossorigin` | function | 85 |
 | 5 | `emitBuildManifest` | function | 110 |
-| 6 | `isBundleChunk` | function | 226 |
-| 7 | `toRoutePreloadFiles` | function | 230 |
-| 8 | `buildRoutePreloadScript` | function | 242 |
-| 9 | `normalizePath` | function | 245 |
-| 10 | `isAdminAppPath` | function | 253 |
-| 11 | `isLoginPath` | function | 286 |
-| 12 | `isPublicCatalogPath` | function | 289 |
-| 13 | `hasEmbeddedAuthBootstrap` | function | 295 |
-| 14 | `routePreloadKey` | function | 298 |
-| 15 | `injectRouteAwareModulePreloads` | function | 352 |
-| 16 | `deferRenderBlockingStylesheets` | function | 373 |
-| 17 | `activate` | function | 396 |
-| 18 | `shouldDeferModulePreload` | function | 595 |
-| 19 | `manualChunks` | function | 599 |
+| 6 | `isBundleChunk` | function | 223 |
+| 7 | `toRoutePreloadFiles` | function | 227 |
+| 8 | `buildRoutePreloadScript` | function | 239 |
+| 9 | `normalizePath` | function | 242 |
+| 10 | `isAdminAppPath` | function | 250 |
+| 11 | `isLoginPath` | function | 283 |
+| 12 | `isPublicCatalogPath` | function | 286 |
+| 13 | `hasEmbeddedAuthBootstrap` | function | 292 |
+| 14 | `routePreloadKey` | function | 295 |
+| 15 | `injectRouteAwareModulePreloads` | function | 349 |
+| 16 | `deferRenderBlockingStylesheets` | function | 370 |
+| 17 | `activate` | function | 393 |
+| 18 | `shouldDeferModulePreload` | function | 592 |
+| 19 | `manualChunks` | function | 596 |
 
 ### 3.278 `frontend/tailwind.config.ts`
 

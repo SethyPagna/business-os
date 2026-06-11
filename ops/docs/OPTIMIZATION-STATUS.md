@@ -8,8 +8,9 @@ Last updated: 2026-06-11
 - Phase 26: 51 completed organization moves; future folder moves must cite Phase 29 evidence
 - Phase 28: active, with R2 prune follow-up still open
 - Phase 29: active whole-codebase schema, cleanup, TypeScript, runtime, and performance sweeps
-- Latest completed move: Move 903, cache the authenticated admin SPA template
-  at origin while still injecting fresh per-request auth bootstrap data.
+- Latest completed move: Move 904, compact the startup shell, defer profile
+  modal intent chunks, trim Branches route preloads, and update live checks for
+  embedded/cached bootstrap fast paths.
 
 ## Current Baseline
 
@@ -17,9 +18,10 @@ Latest verified runtime health:
 
 - local health: `http://127.0.0.1:4000/health`
 - latest verified frontend hash from the most recent Docker-served live check:
-  `0fbf2d5bae2d7bc4`
-- latest verified source hash from the most recent Docker-served live check:
-  `30b0c319937c0ba8`
+  `68476001eb95ba69`
+- latest verified source state from the most recent Docker-served live check:
+  this Move 904 source commit; Docker image `business-os:v6.0.0-202606111009`
+  serves frontend hash `68476001eb95ba69`
 
 Latest verified reports:
 
@@ -32,7 +34,7 @@ Latest verified reports:
 - latest exhaustive desktop/mobile all-pages control audit:
   `ops/runtime/reports/all-pages-control-audit-2026-06-03T16-31-07-897Z/summary.json`
 - latest broad Phase 8.4 UI live check:
-  `ops/runtime/reports/phase84-ui-live-check-2026-06-08T20-39-18-526Z/report.json`
+  `ops/runtime/reports/phase84-ui-live-check-2026-06-11T02-42-41-699Z/report.json`
 - latest Phase 8.4 live suite:
   `ops/runtime/reports/phase84-live-suite-latest.json`
 - latest Loyalty Points rollback check:
@@ -46,9 +48,9 @@ Latest verified reports:
 - latest focused receipt export layout check:
   `ops/runtime/reports/phase84-receipt-export-layout-check-2026-06-06T22-52-27-772Z/report.json`
 - latest public Cloudflare portal check:
-  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-08T20-39-57-851Z/report.json`
+  `ops/runtime/reports/phase84-public-portal-cloudflare-check-2026-06-11T02-44-38-856Z/report.json`
 - latest focused local route-load trace:
-  `ops/runtime/reports/route-load-trace-2026-06-10T12-44-09-458Z.json`
+  `ops/runtime/reports/route-load-trace-2026-06-11T02-14-49-546Z.json`
 - latest Inventory persisted-section live check:
   `ops/runtime/reports/phase84-inventory-section-restore-live-check-2026-06-04T23-48-31-869Z/report.json`
 - latest focused remote admin route-load trace:
@@ -56,7 +58,7 @@ Latest verified reports:
 - latest focused public-host route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T12-06-57-495Z.json`
 - latest focused public-host LCP trace:
-  `ops/runtime/reports/lcp-route-trace-2026-06-10T12-07-44-852Z.json`
+  `ops/runtime/reports/lcp-route-trace-2026-06-11T02-19-35-072Z.json`
 - latest Move 895 local route-load trace:
   `ops/runtime/reports/route-load-trace-2026-06-10T15-13-07-693Z.json`
 - latest Move 895 local LCP trace:

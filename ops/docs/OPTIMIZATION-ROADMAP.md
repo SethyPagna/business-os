@@ -53,7 +53,7 @@ Current position:
   pruning, and access-friction follow-up.
 - Phase 29 completed its first baseline at Move 207 and remains active as the
   recurring whole-codebase/schema/cleanup guardrail.
-- Latest completed implementation move in this roadmap: Move 903.
+- Latest completed implementation move in this roadmap: Move 904.
 
 What remains:
 - Continue Phase 8.4 live stability sweeps across the admin app, POS, product,
@@ -66,10 +66,11 @@ What remains:
 - Keep optimizing hot loops and duplicated helper paths one focused slice at a
   time, with backend/frontend tests plus Playwright checks after each visible
   or runtime-facing change.
-- Keep reducing public Cloudflare startup latency from measured API and chunk
-  transfer bottlenecks. Move 895 met the local sub-2.5 s LCP target for
-  Inventory, Returns, and Users, but public traces still showed 3.992-5.184 s
-  LCP with zero failed requests/errors.
+- Keep reducing public Cloudflare startup latency from measured document/chunk
+  transfer bottlenecks. Move 904 keeps local Products/Inventory/Branches LCP
+  under 500 ms and warmed public Products/Branches/public catalog under 2.5 s;
+  public Inventory still fluctuates around 2.55-2.73 s because the
+  authenticated no-store document and module transfers remain tunnel-bound.
 - Use the all-pages control audit as the broad Phase 8.4 live QA gate before
   claiming UI-wide stability: `npm.cmd --prefix ops run
   phase84:all-pages-control-audit -- --profile exhaustive`.

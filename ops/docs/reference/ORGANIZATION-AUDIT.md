@@ -1,6 +1,6 @@
 # Organization Audit
 
-Generated: 2026-06-11T00:09:25.269Z
+Generated: 2026-06-11T02:56:45.807Z
 
 ## Summary
 
@@ -63,12 +63,12 @@ Generated: 2026-06-11T00:09:25.269Z
 
 | File | Lines | Area |
 | --- | --- | --- |
-| ops/docs/OPTIMIZATION-ROADMAP.md | 15456 | ops/docs |
+| ops/docs/OPTIMIZATION-ROADMAP.md | 15457 | ops/docs |
 | ops/docs/reference/IMPORT-EXPORT-REFERENCE.md | 12322 | ops/docs/reference |
 | ops/docs/reference/ALL-FUNCTION-REFERENCE.md | 10654 | ops/docs/reference |
-| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9935 | ops/docs |
-| ops/docs/OPTIMIZATION-STATUS.md | 5231 | ops/docs |
-| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4828 | ops/docs |
+| ops/docs/FILE-ORGANIZATION-LANGUAGE-PLAN.md | 9966 | ops/docs |
+| ops/docs/OPTIMIZATION-STATUS.md | 5232 | ops/docs |
+| ops/docs/OPTIMIZATION-SESSION-LOG.md | 4871 | ops/docs |
 | backend/src/services/importJobs.ts | 3880 | backend/services |
 | frontend/tests/performanceLoadingUx.test.ts | 3684 | frontend/tests/performanceLoadingUx.test.ts |
 | ops/docs/reference/FRONTEND-FUNCTION-REFERENCE.md | 3651 | ops/docs/reference |
@@ -77,7 +77,7 @@ Generated: 2026-06-11T00:09:25.269Z
 | ops/docs/reference/PHASE29-AUDIT.json | 3432 | ops/docs/reference |
 | frontend/src/lang/km.json | 2730 | frontend/src/lang |
 | frontend/src/lang/en.json | 2721 | frontend/src/lang |
-| ops/docs/reference/PERFORMANCE-SCAN.md | 2693 | ops/docs/reference |
+| ops/docs/reference/PERFORMANCE-SCAN.md | 2712 | ops/docs/reference |
 | frontend/src/components/products/Products.tsx | 2580 | frontend/components/products |
 | frontend/src/components/pos/POS.tsx | 2362 | frontend/components/pos |
 | backend/src/routes/products.ts | 2310 | backend/routes |
