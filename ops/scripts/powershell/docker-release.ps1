@@ -378,6 +378,19 @@ function Ensure-DockerReady {
   Write-Ok 'Docker engine is reachable.'
 }
 
+function Ensure-ExternalVolume {
+  # compose.release.yml declares business_os_runtime with external: true and a
+  # pinned name (business-os_business_os_runtime), so the app's uploaded data
+  # survives a compose project rename. Compose does not create external
+  # volumes for you -- on a machine where this volume has never existed,
+  # 'docker compose up' fails immediately with "volume ... declared as
+  # external, but could not be found". docker volume create is idempotent, so
+  # this is safe to call on every Install/Start, not just the first one.
+  $docker = Resolve-Docker
+  $env:DOCKER_CONFIG = $DockerConfig
+  Invoke-ProcessWithTimeout $docker @('volume', 'create', 'business-os_business_os_runtime') 15 | Out-Null
+}
+
 function Get-VersionTag {
   if ($Version) { return $Version }
   $pkg = Get-Content -Raw (Join-Path $Root 'backend\package.json') | ConvertFrom-Json
@@ -691,6 +704,7 @@ function Invoke-Release {
 
 function Invoke-Install {
   Ensure-DockerReady
+  Ensure-ExternalVolume
   $envMap = Ensure-Env
   Ensure-ReleaseImageAvailable $envMap.BUSINESS_OS_IMAGE
   Write-Step 'Pulling base service images when available...'
@@ -703,6 +717,7 @@ function Invoke-Install {
 
 function Invoke-Start {
   Ensure-DockerReady
+  Ensure-ExternalVolume
   Ensure-Env | Out-Null
   $envMap = Read-EnvFile
   Ensure-ReleaseImageAvailable $envMap.BUSINESS_OS_IMAGE
@@ -1044,6 +1059,7 @@ function Invoke-Restore {
   if (-not (Test-Path -LiteralPath $sql)) { Fail "Backup does not contain postgres.sql: $BackupPath" }
   if (-not (Test-Path -LiteralPath $objectsManifest)) { Fail "Backup does not contain objects-manifest.jsonl: $BackupPath" }
   Ensure-DockerReady
+  Ensure-ExternalVolume
   $envMap = Ensure-Env
   Assert-PostgresObjectStorageMode $envMap
   Write-Warn 'Restore will replace Docker Postgres data after validation. Object assets are validated from the configured object store.'
@@ -1068,6 +1084,7 @@ function Invoke-Doctor {
   $envMap = Ensure-Env
   Test-ReleaseContents
   Ensure-DockerReady
+  Ensure-ExternalVolume
   Invoke-Docker -DockerArgs @('compose', '--env-file', $EnvFile, '-f', $ComposeFile, 'config', '--quiet') | Out-Null
   Invoke-Compose -ComposeArgs @('ps') -AllowFailure | Out-Null
   if ([string]$envMap.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED -ne '1') {
