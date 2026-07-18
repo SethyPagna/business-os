@@ -39,6 +39,9 @@ $PostStartDiagnosticsLog = Join-Path $RuntimeDir 'post-start-diagnostics.log'
 $CloudflareStartupWarmupScript = Join-Path $Root 'ops\scripts\runtime\cloudflare\warm-cloudflare-startup-assets.ts'
 $CloudflareStartupWarmupReport = Join-Path $RuntimeDir 'cloudflare-startup-warmup.json'
 $CloudflareStartupWarmupLog = Join-Path $RuntimeDir 'cloudflare-startup-warmup.log'
+$CloudflareTunnelVerifyScript = Join-Path $Root 'ops\scripts\runtime\cloudflare\verify-cloudflare-tunnel.ts'
+$CloudflareTunnelVerifyReport = Join-Path $RuntimeDir 'cloudflare-tunnel-verify.json'
+$CloudflareTunnelVerifyLog = Join-Path $RuntimeDir 'cloudflare-tunnel-verify.log'
 
 function Ensure-Dir($path) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -925,7 +928,8 @@ function Test-ReleaseHealth {
         if (Wait-CloudflareStartupTunnel $publicUrl $adminUrl) {
           Write-Ok 'Cloudflare tunnel answered before startup warmup.'
         } else {
-          Write-Warn 'Cloudflare tunnel did not answer before startup warmup; warmup will still try its own retries.'
+          Write-Warn 'Cloudflare tunnel did not answer before startup warmup; running the Cloudflare Tunnel diagnostic now...'
+          Invoke-CloudflareTunnelDoctor
         }
         $warmup = Invoke-ProcessWithTimeout $node @(
           $CloudflareStartupWarmupScript,
@@ -1060,8 +1064,31 @@ function Invoke-Doctor {
     Write-Warn 'Postgres migration can run, but live app routes still need the Postgres repository/object-storage adapter cutover.'
     if ($summary) { Write-Host $summary }
   }
+  Invoke-CloudflareTunnelDoctor
   Write-Ok 'Docker release diagnostics completed.'
   Write-Ok 'Docker release uses local image bundles, Postgres data volumes, R2/offline object storage, Redis services, and no source bind mount.'
+}
+
+function Invoke-CloudflareTunnelDoctor {
+  $node = Find-Executable @('node.exe', 'node') @('C:\Program Files\nodejs\node.exe')
+  if (-not $node) {
+    Write-Warn 'Node.js was not found on the host, so the Cloudflare Tunnel diagnostic could not run.'
+    return
+  }
+  if (-not (Test-Path -LiteralPath $CloudflareTunnelVerifyScript)) {
+    Write-Warn "Cloudflare Tunnel diagnostic script missing: $CloudflareTunnelVerifyScript"
+    return
+  }
+  Write-Step 'Checking Cloudflare Tunnel (this is what Error 1033 / 530 reports on)...'
+  $result = Invoke-ProcessWithTimeout $node @($CloudflareTunnelVerifyScript, '--output', $CloudflareTunnelVerifyReport) 30
+  $combined = (($result.Stdout, $result.Stderr) -join [Environment]::NewLine)
+  Set-Content -LiteralPath $CloudflareTunnelVerifyLog -Encoding UTF8 -Value $combined
+  Write-Host $result.Stdout
+  if ($result.ExitCode -ne 0) {
+    Write-Warn "Cloudflare Tunnel diagnostic found a problem. Full log: $CloudflareTunnelVerifyLog"
+  } else {
+    Write-Ok 'Cloudflare Tunnel diagnostic passed: an active connector is registered and both hostnames are routed.'
+  }
 }
 
 Set-Location $Root
