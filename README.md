@@ -29,6 +29,17 @@ Do not open Docker Compose, Redis, Postgres, MinIO, workers, Node, npm, or Cloud
 
 For a laptop without source code, build the release with `run\build-release.bat` or `run\docker\release.bat`, copy the full `release\business-os\` folder, then double-click **`Start Business OS.bat`** inside that folder.
 
+### Starting From This Source Checkout (New Laptop, No Prebuilt Release Yet)
+
+If you were handed the source folder (this repo) instead of a prebuilt `release\business-os\` folder:
+
+1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and [Node.js 24 LTS](https://nodejs.org/), then restart if Windows asks.
+2. Put real credentials in `backend\.env` (Cloudflare account/tunnel IDs, Cloudflare API token, R2 access key/secret) and `ops\runtime\secrets\cloudflare-api-token.txt`. Both are gitignored — they never get committed.
+3. Run `run\docker\install.bat`. This generates `ops\runtime\docker-release\docker-release.env` from `backend\.env` (or fresh values) and loads the Docker image bundle.
+4. Run `run\docker\rotate-cloudflare.bat` once. This uses the Cloudflare API token to fetch a fresh Cloudflare **Tunnel connector token** — a different secret than the API token — and writes it to the tunnel token file. Skip this only if that file is already populated.
+5. Double-click `Start Business OS.bat`.
+6. If the public/admin URL shows a Cloudflare "Error 1033" or "Error 530" page, run `run\docker\verify-tunnel.bat` — it pinpoints exactly which of the above steps is incomplete.
+
 Normal URLs:
 
 - Server laptop: `http://localhost:4000`
@@ -156,3 +167,9 @@ The Backup page Integration Doctor is read-only and must not show a write-failed
 ## Cloudflare Safety
 
 Business OS uses Cloudflare for the public/admin links. If a Cloudflare tunnel token, origin private key, or API token was pasted into chat or sent to anyone, treat it as compromised and rotate it with `run\docker\rotate-cloudflare.bat --disconnect-old`.
+
+### "Error 1033" / "Error 530" (Cloudflare Tunnel error)
+
+This is Cloudflare's edge saying no `cloudflared` connector is currently registered for the tunnel — it is not an app or database problem. Run `run\docker\verify-tunnel.bat` (or `run\docker\doctor.bat`, which now runs the same check). It checks, in order: the account/tunnel IDs and API token are set, the tunnel connector token file is present and non-empty, Cloudflare's API reports an active connection, the ingress config actually routes your hostnames, and the `cloudflared` container is running. It reports exactly which of those failed.
+
+The most common cause is an empty or stale connector token file. Fix it with `run\docker\rotate-cloudflare.bat`, then `run\docker\start.bat`.
