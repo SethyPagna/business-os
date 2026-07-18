@@ -221,6 +221,25 @@ async function main() {
         note('cloudflared recent logs', 'warn', 'No clear success or failure signature found in the last 60 log lines.')
       }
     }
+
+    // cloudflared >= 2026.5.2 can test DNS resolution to Cloudflare's tunnel
+    // endpoints and outbound connectivity on port 7844 (the actual transport
+    // "could not connect" uses) from inside the container's own network path.
+    // This catches host/router/firewall-level blocks that the API-only checks
+    // above cannot see, since those only ask Cloudflare's control plane
+    // whether a connector *has* registered, not whether this machine *can*.
+    const diag = runCommand('docker', ['compose', '-f', COMPOSE_FILE, 'exec', '-T', 'cloudflared', 'cloudflared', 'tunnel', 'diag'])
+    if (diag.ok) {
+      const diagText = diag.output
+      if (/\u274c|fail/i.test(diagText)) {
+        note('cloudflared network connectivity (tunnel diag)', 'fail', 'cloudflared reports a blocked DNS/port-7844/management-API check from inside the container. Run: docker compose -f ops\\docker\\compose.release.yml exec cloudflared cloudflared tunnel diag')
+        hardFailure = true
+      } else {
+        note('cloudflared network connectivity (tunnel diag)', 'pass', 'DNS resolution, port 7844 transport, and the management API are all reachable from the container.')
+      }
+    } else if (diag.error && !/unknown command|unknown flag/i.test(diag.error)) {
+      note('cloudflared network connectivity (tunnel diag)', 'skip', 'Could not run "cloudflared tunnel diag" (older cloudflared image, or container not reachable yet).')
+    }
   } else {
     note('cloudflared container', 'skip', 'Docker CLI not available or compose project not running from this shell; skipped local container check.')
   }
