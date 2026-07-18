@@ -2,6 +2,15 @@
 chcp 65001 >nul 2>&1
 setlocal enabledelayedexpansion
 
+REM ==========================================================================
+REM  Runs the full local verification suite (backend + frontend build,
+REM  typecheck, lint, i18n/UI/performance verifiers) without Docker or a
+REM  live database -- the same checks CI would run, usable before pushing.
+REM  Usage: run\verify-local.bat [--skip-frontend-build]
+REM  Read-only with respect to runtime data; only writes build output under
+REM  frontend/dist and backend/frontend-dist.
+REM ==========================================================================
+
 if defined BUSINESS_OS_REPO_ROOT (
   set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (

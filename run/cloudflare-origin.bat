@@ -2,6 +2,18 @@
 chcp 65001 >nul 2>&1
 setlocal
 
+REM ==========================================================================
+REM  Publishes ingress routes (which hostname routes to which local origin)
+REM  to Cloudflare for the tunnel, via the Cloudflare API -- NOT a local
+REM  config file, since this is a remotely-managed tunnel (see
+REM  run\docker\README.md for why that matters).
+REM  Usage: run\cloudflare-origin.bat host|docker [--dry-run]
+REM    host   -- origin is this machine's own process (native/PM2 runtime)
+REM    docker -- origin is the "app" container (Docker release runtime)
+REM  Safe to re-run -- it replaces the previous ingress config outright, it
+REM  does not append to it.
+REM ==========================================================================
+
 if defined BUSINESS_OS_REPO_ROOT (
   set "ROOT=%BUSINESS_OS_REPO_ROOT%"
 ) else (
