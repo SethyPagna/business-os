@@ -22,7 +22,7 @@ The release folder is complete when it contains `images\business-os-image.tar`. 
 - `update.bat` backs up, loads the newest local image bundle, health-checks, and rolls back when possible.
 - `backup.bat` creates a Docker/Drive-compatible folder with `manifest.json`, `data.json`, `objects-manifest.jsonl`, `checksums.json`, restore metadata, and optional Parquet snapshots. Offline MinIO mode stores the same object keys through the emergency adapter.
 - `restore.bat` restores a verified local backup folder or Google Drive `datasync-N` folder after validation.
-- `doctor.bat` diagnoses Docker, services, Cloudflare, workers, and storage. It now also checks the Cloudflare Tunnel connector directly (token file, active connections, ingress routes) — this is the check that surfaces the cause of Error 1033 / 530.
+- `doctor.bat` diagnoses Docker, services, Cloudflare, workers, and storage. It now also checks the Cloudflare Tunnel connector directly (token file, active connections, ingress routes) — this is the check that surfaces the cause of Error 1033 / 530. It also self-heals a couple of safe gaps: creating the external Docker volume if it's missing (see below).
 - `verify-tunnel.bat` runs only the Cloudflare Tunnel check on its own, for a fast recheck after a fix.
 - `rotate-cloudflare.bat` rotates the Cloudflare Tunnel token after a secret leak, and is also how you fetch a first tunnel token on a brand-new machine.
 
@@ -59,8 +59,11 @@ It checks, in order, and tells you exactly which one is the problem:
 3. The Cloudflare API reports at least one active connection for the tunnel.
 4. The tunnel's ingress config actually routes your admin/public hostnames (not just the 404 fallback).
 5. The `cloudflared` container is running, and its recent logs don't show an auth/registration failure.
+6. `cloudflared`'s own connectivity pre-check (`cloudflared tunnel diag`, built into the binary since v2026.5.2) — confirms DNS resolution to Cloudflare's tunnel endpoints and outbound port 7844 (TCP/UDP) actually work from inside the container. This is the one that catches a router or firewall blocking the tunnel's connection, which is a different problem than 1-5 above (those all assume the connection *can* be made and check whether it *was*).
 
-The most common cause is #2: the connector token file is empty or stale. Fix it with:
+If check 6 fails specifically, the fix is on your network, not in this repo: outbound TCP/UDP 7844 to Cloudflare's edge is being blocked somewhere between this machine and the internet (a strict router, VPN, or corporate firewall). Confirm with your network administrator or try a different network.
+
+The most common cause overall is #2: the connector token file is empty or stale. Fix it with:
 
 ```
 run\docker\rotate-cloudflare.bat
