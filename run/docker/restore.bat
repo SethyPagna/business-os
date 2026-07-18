@@ -1,6 +1,14 @@
 @echo off
 chcp 65001 >nul 2>&1
 setlocal
+REM ==========================================================================
+REM  Restores Postgres + object storage from a backup folder created by
+REM  run\docker\backup.bat (must contain manifest.json, postgres.sql, and
+REM  objects-manifest.jsonl). Pass the folder path as an argument, or leave
+REM  it blank to be prompted.
+REM  DESTRUCTIVE: overwrites the current database with the backup's data.
+REM  Stop the app first if you want a clean restore.
+REM ==========================================================================
 for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
 if "%~1"=="" (
   echo.

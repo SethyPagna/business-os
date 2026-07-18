@@ -1,6 +1,14 @@
 @echo off
 chcp 65001 >nul 2>&1
 setlocal
+REM ==========================================================================
+REM  One-time setup: generates ops\runtime\docker-release\docker-release.env
+REM  (preserving any values already in it or in backend\.env), creates the
+REM  external Docker volume the app's uploaded data lives in, loads the local
+REM  image bundle, and starts Postgres/Redis/object storage only (not the
+REM  app itself -- run start.bat next).
+REM  Safe to re-run: existing secrets and settings are kept, never overwritten.
+REM ==========================================================================
 for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\docker-release.ps1" -Action Install %*
 set "EXIT_CODE=%ERRORLEVEL%"
