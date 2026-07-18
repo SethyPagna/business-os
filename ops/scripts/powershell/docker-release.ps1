@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('Release', 'Install', 'Start', 'Update', 'Backup', 'Restore', 'Doctor')]
+  [ValidateSet('Release', 'Install', 'Start', 'Stop', 'Update', 'Backup', 'Restore', 'Doctor')]
   [string]$Action = 'Doctor',
   [string]$Version = '',
   [string]$Image = '',
@@ -741,6 +741,18 @@ function Invoke-Start {
   Write-Ok 'Docker release runtime is healthy.'
 }
 
+function Invoke-Stop {
+  Ensure-DockerReady
+  if (-not (Test-Path -LiteralPath $EnvFile)) {
+    Write-Warn 'No Docker release env file found; nothing appears to be installed yet.'
+    return
+  }
+  Write-Step 'Stopping Business OS Docker release runtime (app, workers, cloudflared)...'
+  Invoke-Compose -ComposeArgs @('stop', 'cloudflared', 'import-worker', 'media-worker', 'app') -AllowFailure | Out-Null
+  Write-Ok 'App, workers, and Cloudflare Tunnel stopped. Data services (Postgres/Redis) were left running.'
+  Write-Ok 'Run run\docker\start.bat to start again. To also stop Postgres/Redis, run: docker compose --env-file "<env file>" -f "<compose file>" stop'
+}
+
 function Wait-CloudflareStartupTunnel($publicUrl, $adminUrl) {
   $urls = @($publicUrl, $adminUrl) | Where-Object { $_ -and ([string]$_).Trim() } | Select-Object -Unique
   if (-not $urls -or $urls.Count -eq 0) { return $false }
@@ -1096,6 +1108,7 @@ switch ($Action) {
   'Release' { Invoke-Release }
   'Install' { Invoke-Install }
   'Start' { Invoke-Start }
+  'Stop' { Invoke-Stop }
   'Update' { Invoke-Update }
   'Backup' { Invoke-Backup }
   'Restore' { Invoke-Restore }
