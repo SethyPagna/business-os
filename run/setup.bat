@@ -12,7 +12,6 @@ REM    3. create the default business-os-data folders
 REM    4. write backend/.env while preserving important existing secrets
 REM    5. install backend/frontend dependencies
 REM    6. build the frontend
-REM    7. install PM2 when available
 REM ========================================================================
 
 if defined BUSINESS_OS_REPO_ROOT (
@@ -319,18 +318,6 @@ if errorlevel 1 (
     exit /b 1
 )
 echo [OK] Shared local verification passed
-
-REM ---- PM2 (optional process manager) ------------------------------------
-REM Used by start-server.bat for auto-restart/background execution.
-echo.
-echo [INFO] Checking PM2...
-where pm2 >nul 2>&1
-if errorlevel 1 (
-    echo [INFO] PM2 is not installed. This is optional.
-    echo [INFO] start-server.bat will use background node mode unless you install PM2 manually.
-) else (
-    echo [OK] PM2 already installed
-)
 
 echo.
 echo ========================================================================
