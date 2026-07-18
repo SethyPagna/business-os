@@ -44,9 +44,38 @@ Live app data uses Postgres for business records and R2 for files/images/backups
 
 The retired standalone Windows EXE/NSIS release is no longer part of the supported release flow. Use `run\build-release.bat` or `run\docker\release.bat`; both produce the Docker release kit.
 
+## Troubleshooting: "portal catalog search" (or other public routes) return 500, but /health returns 200
+
+This is a Postgres password mismatch, not an application bug — confirmed by running
+the exact failing route directly against a real Postgres instance, where it returned
+200 with correct data. `docker-release.ps1`'s `Doctor` and `Start` now detect this
+automatically (`Test-PostgresPasswordMismatch`) and print the explanation below, but
+here's the short version:
+
+The `postgres` container only applies `POSTGRES_PASSWORD` the **very first time** it
+starts against an empty data volume. If `ops\runtime\docker-release\docker-release.env`
+ever gets regenerated with a new password after Postgres has already initialized once
+on this machine (for example, a fresh `docker-release.env` was copied in from
+somewhere), the running database keeps its *old* password — every connection using
+the new one fails with `password authentication failed for user "business_os"`, even
+though the app container reports "healthy" (its health check doesn't query the
+database, so only routes that actually touch Postgres fail).
+
+Fix — pick one:
+- No real data yet: `docker compose --env-file "ops\runtime\docker-release\docker-release.env" -f "ops\docker\compose.release.yml" down`, then `docker volume rm business-os_business_os_postgres`, then `run\docker\start.bat` to let Postgres re-initialize fresh.
+- Real data to keep: edit `POSTGRES_PASSWORD` in `docker-release.env` back to whatever Postgres was originally created with.
+
 ## Troubleshooting: Error 1033 / 530 ("Cloudflare Tunnel error")
 
-This means Cloudflare's edge has nobody to hand your request to — the `cloudflared` container isn't currently registered as a connector for the tunnel. Run:
+This means Cloudflare's edge has nobody to hand your request to — the `cloudflared` container isn't currently registered as a connector for the tunnel. If `docker compose logs cloudflared` shows:
+
+```
+"cloudflared tunnel run" requires the ID or name of the tunnel to run as the last command line argument or in the configuration file.
+```
+
+that is cloudflared's own error for an empty or unreadable token file (cloudflared can't extract a tunnel ID from nothing) — this is check #2 below, and the fix is the same `rotate-cloudflare.bat` command.
+
+Run:
 
 ```
 run\docker\verify-tunnel.bat
