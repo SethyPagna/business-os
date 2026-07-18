@@ -9,8 +9,8 @@ If someone is setting up a blank business laptop, give them the installer or por
 - `Start Business OS.bat` starts the app, Docker services, workers, and Cloudflare access.
 - `run\setup.bat` prepares a source checkout on a developer laptop.
 - `run\docker\start.bat` is the final Docker runtime launcher used by the root launcher.
-- `run\start-server.bat` is support-only for source troubleshooting.
-- `run\stop-server.bat` stops the app.
+- `run\start-server.bat` is support-only for source troubleshooting (it forwards to `run\docker\start.bat`).
+- `run\stop-server.bat` stops the app (forwards to `run\docker\stop.bat`).
 - `run\verify-local.bat` runs local verification checks.
 - `run\build-release.bat` builds the final Docker portable release in `release\business-os\`.
 
@@ -22,10 +22,12 @@ These are for the local Docker release or support:
 
 - `run\docker\install.bat` installs the local Docker image bundle.
 - `run\docker\start.bat` starts Docker release services.
+- `run\docker\stop.bat` stops app/workers/cloudflared while leaving Postgres/Redis running.
 - `run\docker\update.bat` backs up, reloads the local image bundle, checks health, and rolls back when possible.
 - `run\docker\backup.bat` backs up Docker release data from Postgres, R2 or emergency/offline MinIO, settings, users/roles, and runtime metadata.
 - `run\docker\restore.bat` restores a selected verified backup.
 - `run\docker\doctor.bat` diagnoses Docker, ports, local image bundles, Cloudflare, database, workers, and storage.
+- `run\docker\verify-tunnel.bat` checks only the Cloudflare Tunnel connector (fast recheck after a fix).
 - `run\docker\rotate-cloudflare.bat` rotates the Cloudflare Tunnel token.
 
 ## Release Verification
