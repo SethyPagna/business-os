@@ -4,7 +4,10 @@ const path = require('node:path')
 const https = require('node:https')
 
 const ROOT = path.resolve(__dirname, '..', '..', '..', '..')
-const ENV_FILE = path.join(ROOT, 'backend', '.env')
+const ENV_FILES = [
+  path.join(ROOT, 'backend', '.env'),
+  path.join(ROOT, 'ops', 'runtime', 'docker-release', 'docker-release.env'),
+]
 const DEFAULT_TOKEN_FILE = path.join(ROOT, 'ops', 'runtime', 'secrets', 'cloudflare-api-token.txt')
 
 function readEnvFile(file) {
@@ -20,6 +23,10 @@ function readEnvFile(file) {
     }
   } catch (_) {}
   return result
+}
+
+function readEnv() {
+  return ENV_FILES.reduce((acc, file) => ({ ...acc, ...readEnvFile(file) }), {})
 }
 
 function parseArgs(argv) {
@@ -56,7 +63,7 @@ function ensureIngress(config, hostname, service) {
 }
 
 async function main() {
-  const env = readEnvFile(ENV_FILE)
+  const env = readEnv()
   const args = parseArgs(process.argv.slice(2))
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || env.CLOUDFLARE_ACCOUNT_ID
   const tunnelId = process.env.CLOUDFLARE_TUNNEL_ID || env.CLOUDFLARE_TUNNEL_ID
