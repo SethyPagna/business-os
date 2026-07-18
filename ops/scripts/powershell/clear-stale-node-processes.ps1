@@ -5,7 +5,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $WorkspaceRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
-$LearnRoot = Join-Path (Split-Path $WorkspaceRoot -Parent) 'LEARN'
 
 function Get-CurrentProcessFamilyIds {
   $ids = New-Object 'System.Collections.Generic.HashSet[int]'
@@ -28,12 +27,6 @@ function Get-NodeCategory {
   }
   if ($CommandLine -like "*$WorkspaceRoot*") {
     return ''
-  }
-  if ($CommandLine -like "*$LearnRoot*node_modules*next* start -p *") {
-    return 'external-next-server'
-  }
-  if ($CommandLine -like '*\AppData\Local\Temp\learn-one-*.mjs*') {
-    return 'temporary-learn-runner'
   }
   if ($IncludeCodexHelpers -and $CommandLine -like '*xcodebuildmcp*') {
     return 'codex-xcodebuildmcp-helper'
