@@ -897,6 +897,40 @@ function Assert-PostgresObjectStorageMode($envMap) {
   }
 }
 
+function Test-PostgresPasswordMismatch {
+  $logs = Invoke-Compose -ComposeArgs @('logs', '--tail', '200', 'app', 'import-worker', 'media-worker') -AllowFailure
+  $logText = if ($logs -is [array]) { $logs -join [Environment]::NewLine } else { [string]$logs }
+  if ($logText -notmatch 'password authentication failed for user') { return }
+
+  Write-Host ''
+  Write-Warn 'Root cause found: Postgres password mismatch, not an application bug.'
+  Write-Host @'
+The "postgres" container only applies POSTGRES_PASSWORD the very first time
+it starts against an EMPTY data volume. If ops\runtime\docker-release\
+docker-release.env was regenerated (a new random password) after Postgres
+had already initialized once on this machine, the running database still
+has the OLD password baked into its data volume, and every connection
+using the new password fails with "password authentication failed" --
+even though the app container itself reports "healthy" (its health check
+does not query the database).
+
+This is almost always the actual reason a fresh install of the route
+contract fails on "portal catalog search" (or any other unauthenticated,
+database-touching route) with a 500 while /health still returns 200.
+
+Fix -- pick one option:
+  Option A. If there is no real data to keep yet (typical for a first install):
+       docker compose --env-file "ops\runtime\docker-release\docker-release.env" -f "ops\docker\compose.release.yml" down
+       docker volume rm business-os_business_os_postgres
+       run\docker\start.bat
+     This lets Postgres re-initialize fresh using the current password.
+
+  Option B. If there IS real data you need to keep, edit POSTGRES_PASSWORD in
+     ops\runtime\docker-release\docker-release.env back to whatever password
+     Postgres was originally created with, then run run\docker\start.bat again.
+'@
+}
+
 function Test-ReleaseHealth {
   $envMap = Read-EnvFile
   $port = if ($envMap.APP_PORT) { $envMap.APP_PORT } else { '4000' }
@@ -927,6 +961,7 @@ function Test-ReleaseHealth {
       Set-Content -LiteralPath $RouteContractLog -Encoding UTF8 -Value (($contract.Stdout, $contract.Stderr) -join [Environment]::NewLine)
       if ($contract.ExitCode -ne 0) {
         if (Test-Path -LiteralPath $RouteContractLog) { Get-Content -LiteralPath $RouteContractLog -Tail 80 }
+        Test-PostgresPasswordMismatch
         Fail "Docker release route contract failed. Log: $RouteContractLog"
       }
       Write-Ok 'Docker release API route contract passed.'
@@ -1087,6 +1122,7 @@ function Invoke-Doctor {
   Ensure-ExternalVolume
   Invoke-Docker -DockerArgs @('compose', '--env-file', $EnvFile, '-f', $ComposeFile, 'config', '--quiet') | Out-Null
   Invoke-Compose -ComposeArgs @('ps') -AllowFailure | Out-Null
+  Test-PostgresPasswordMismatch
   if ([string]$envMap.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED -ne '1') {
     $summary = Get-PostgresCutoverBlockerSummary
     Write-Warn 'Docker infrastructure is ready, but the Business OS app is not startable in Postgres-only mode yet.'
