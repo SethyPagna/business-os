@@ -142,9 +142,13 @@ function New-Secret([int]$bytes = 32) {
 }
 
 function Read-EnvFile {
+  return Read-EnvFileAt $EnvFile
+}
+
+function Read-EnvFileAt($path) {
   $map = @{}
-  if (-not (Test-Path -LiteralPath $EnvFile)) { return $map }
-  foreach ($line in Get-Content -LiteralPath $EnvFile) {
+  if (-not (Test-Path -LiteralPath $path)) { return $map }
+  foreach ($line in Get-Content -LiteralPath $path) {
     if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
     $parts = $line.Split('=', 2)
     $map[$parts[0]] = $parts[1]
@@ -187,6 +191,8 @@ function Write-EnvFile($values) {
     "S3_BUCKET=$($values.S3_BUCKET)",
     "R2_PUBLIC_BASE_URL=$($values.R2_PUBLIC_BASE_URL)",
     "CLOUDFLARE_API_TOKEN=$($values.CLOUDFLARE_API_TOKEN)",
+    "CLOUDFLARE_ACCOUNT_ID=$($values.CLOUDFLARE_ACCOUNT_ID)",
+    "CLOUDFLARE_TUNNEL_ID=$($values.CLOUDFLARE_TUNNEL_ID)",
     "CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE=$($values.CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE)",
     'APP_BIND_HOST=127.0.0.1',
     'APP_PORT=4000',
@@ -222,6 +228,7 @@ function Ensure-Env {
   Ensure-Dir $DockerConfig
 
   $existing = Read-EnvFile
+  $backendEnv = Read-EnvFileAt (Join-Path $Root 'backend\.env')
   $imageHasTag = $Image -and ([string]$Image -match ':[^/:]+$')
   $tag = if ($Version) {
     $Version
@@ -272,6 +279,8 @@ function Ensure-Env {
     S3_SECRET_ACCESS_KEY = if ($existing.S3_SECRET_ACCESS_KEY) { $existing.S3_SECRET_ACCESS_KEY } else { '' }
     R2_PUBLIC_BASE_URL = if ($existing.R2_PUBLIC_BASE_URL) { $existing.R2_PUBLIC_BASE_URL } else { '' }
     CLOUDFLARE_API_TOKEN = if ($existing.CLOUDFLARE_API_TOKEN) { $existing.CLOUDFLARE_API_TOKEN } elseif (Test-Path -LiteralPath $sourceApiTokenFile) { (Get-Content -LiteralPath $sourceApiTokenFile -Raw).Trim() } else { '' }
+    CLOUDFLARE_ACCOUNT_ID = if ($existing.CLOUDFLARE_ACCOUNT_ID) { $existing.CLOUDFLARE_ACCOUNT_ID } elseif ($backendEnv.CLOUDFLARE_ACCOUNT_ID) { $backendEnv.CLOUDFLARE_ACCOUNT_ID } else { '743e5b727d139e85ed11679097f6f99e' }
+    CLOUDFLARE_TUNNEL_ID = if ($existing.CLOUDFLARE_TUNNEL_ID) { $existing.CLOUDFLARE_TUNNEL_ID } elseif ($backendEnv.CLOUDFLARE_TUNNEL_ID) { $backendEnv.CLOUDFLARE_TUNNEL_ID } else { 'b6d18448-a7eb-45ae-8a45-e19a3647130d' }
     DATABASE_URL = $databaseUrl
     BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED = if ((Get-PostgresCutoverBlockerSummary) -match '"blockerCount"\s*:\s*0') { '1' } else { if ($existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED) { $existing.BUSINESS_OS_POSTGRES_CUTOVER_VERIFIED } else { '0' } }
     ANALYTICS_ENGINE = if ($existing.ANALYTICS_ENGINE) { $existing.ANALYTICS_ENGINE } else { 'duckdb' }
@@ -576,6 +585,8 @@ function Write-DockerReleaseKit($imageName) {
     S3_BUCKET = Get-EnvValue $kitExisting $sourceExisting 'S3_BUCKET' 'business-os-assets'
     R2_PUBLIC_BASE_URL = Get-EnvValue $kitExisting $sourceExisting 'R2_PUBLIC_BASE_URL'
     CLOUDFLARE_API_TOKEN = Get-EnvValue $kitExisting $sourceExisting 'CLOUDFLARE_API_TOKEN'
+    CLOUDFLARE_ACCOUNT_ID = Get-EnvValue $kitExisting $sourceExisting 'CLOUDFLARE_ACCOUNT_ID' '743e5b727d139e85ed11679097f6f99e'
+    CLOUDFLARE_TUNNEL_ID = Get-EnvValue $kitExisting $sourceExisting 'CLOUDFLARE_TUNNEL_ID' 'b6d18448-a7eb-45ae-8a45-e19a3647130d'
     CLOUDFLARE_TUNNEL_TOKEN_HOST_FILE = $kitToken
     DATABASE_DRIVER = 'postgres'
     OBJECT_STORAGE_DRIVER = Get-EnvValue $kitExisting $sourceExisting 'OBJECT_STORAGE_DRIVER' 'r2'
