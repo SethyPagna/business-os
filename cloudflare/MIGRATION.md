@@ -51,6 +51,30 @@ with real HTTP requests via `wrangler dev` — not written and assumed correct.
                                                   under the Docker/Postgres password
                                                   mismatch — 200 here, correct data
   ```
+- **`src/routes/sales.ts` (POS checkout)** — the highest-stakes route in the
+  app (money + inventory correctness), so it got the most scrutiny. Real,
+  tested atomicity, not a hand-wave:
+  - `POST /api/sales` validates stock as a plain read *before* building any
+    writes (D1's `batch()` can't branch mid-batch — see `lib/db.ts`), then
+    writes the sale header, then atomically writes sale_items + branch_stock
+    deduction + inventory_movements as one `db.batch()` call.
+  - **Tested the success path**: 3 units sold, subtotal/total/change
+    calculated correctly (USD + KHR), stock correctly deducted (40 → 37).
+  - **Tested the failure path directly** (not assumed): requested 100 units
+    against 5 in stock → rejected with 409, then verified — not assumed —
+    that `sales`, `sale_items`, and `inventory_movements` all show **zero**
+    rows and `branch_stock` is **unchanged**. No partial writes.
+  - Found and fixed a real dialect bug while porting: the original
+    `deductBranchStock` uses `GREATEST(0, ...)`, which is Postgres syntax —
+    SQLite/D1 has no `GREATEST()` function at all (it would be a hard
+    syntax error, not a subtle bug). SQLite's `MAX()` accepts multiple
+    scalar arguments and does the same job; used that instead.
+  - `GET /api/sales/:id` (receipt display) tested with both a real sale and
+    a 404 case.
+  - **Scoped deliberately**: the original also supports product batch/lot
+    FIFO allocation, membership point redemption, and delivery tracking.
+    Not ported this pass — noted honestly below, not silently dropped.
+
 - **`src/queue.ts`** — Cloudflare Queues consumer pattern for import/media
   jobs, replacing BullMQ. The dispatch/ack/retry plumbing is real; the actual
   row-by-row import logic and the ffmpeg Container hand-off are sketched
@@ -102,13 +126,19 @@ conversation) paste into a chat by accident.
 
 ## What's not done (the honest remainder)
 
-- **~19 of 22 route files** not yet ported: `auth.ts`, `sales.ts`,
-  `inventory.ts`, `returns.ts`, `branches.ts`, `customTables.ts`,
-  `importJobs.ts`, `notifications.ts`, `users.ts`, `organizations.ts`, etc.
-  Same technique as `products.ts`/`settings.ts` throughout — this is real
-  work, not a fundamentally different problem, but it's dozens of route
-  handlers and it would be dishonest to claim it's done without actually
-  doing and testing each one the way the three above were tested.
+- **~18 of 22 route files** not yet ported: `auth.ts`, `inventory.ts`,
+  `returns.ts`, `branches.ts`, `customTables.ts`, `importJobs.ts`,
+  `notifications.ts`, `users.ts`, `organizations.ts`, etc. Same technique as
+  `products.ts`/`settings.ts`/`sales.ts` throughout — this is real work, not
+  a fundamentally different problem, but it's dozens of route handlers and
+  it would be dishonest to claim it's done without actually doing and
+  testing each one the way the four above were tested.
+- **Within `sales.ts` itself**: product batch/lot FIFO allocation
+  (`backend/src/productBatches.ts`'s `allocateProductBatches` — picks which
+  specific expiry-dated lot to sell from), membership point redemption, and
+  delivery-order tracking are not ported. The core checkout — pricing, tax,
+  discount, dual-currency totals, branch-scoped stock deduction, atomic
+  writes — is, and is tested (see above).
 - **Auth/sessions**: `backend/src/sessionAuth.ts` uses Node's `crypto`
   module directly. Workers' `nodejs_compat` flag (already on in
   `wrangler.toml`) supports much of `node:crypto`, but this needs its own
@@ -128,10 +158,63 @@ conversation) paste into a chat by accident.
   (`backend/src/fileAssets.ts` degrades gracefully to `"ffmpeg unavailable"`
   if the binary is missing) — so this can genuinely be a phase-2 item
   without blocking everything else.
-- **D1 transactions**: `D1Compat.transaction()` in `db.ts` is currently a
-  pass-through, not atomic. D1 supports atomic batches via `db.batch()` for
-  multi-statement writes; anywhere the Postgres code relies on real
-  transactional rollback needs that, not plain sequential awaits.
+
+## Performance, at each layer that changed
+
+- **D1 reads**: Cloudflare runs read-only replicas of D1 near where
+  requests come from and serves reads from the nearest one; writes still go
+  to one primary. This is a real, structural latency improvement over the
+  Docker path's single Postgres container the whole world (or at least
+  wherever your tunnel connects from) had to reach — but it means a read
+  immediately after a write from a *different* edge location can be
+  momentarily stale. Use D1's Sessions API (`withSession`) for
+  read-your-writes consistency on flows where that matters (e.g., showing a
+  receipt right after creating the sale); not wired up yet in
+  `cloudflare/src/lib/db.ts`.
+- **D1 writes / round trips**: `db.batch()` isn't just about atomicity —
+  batching statements into one call is a real latency win, since each
+  non-batched `await db.prepare(...).run()` is its own network round trip
+  to D1. `sales.ts`'s checkout deliberately batches every item's
+  sale_items + branch_stock + inventory_movements writes into a single
+  `batch()` call rather than looping with individual `await`s.
+  `products.ts`'s search still does two separate reads (count, then page) —
+  a reasonable target for a follow-up `batch()` pass once you have real
+  query volume to profile against, not a change to make blind.
+- **Caching**: `products.ts`'s search result is KV-cached for 20s the same
+  way the Redis version cached it for ~20-30s (see "Memory" above) — main
+  defense against repeat identical searches hammering D1, same as it was
+  against Postgres. The `versionedKey`/`bumpVersion` pattern does a KV read
+  before every cache read to resolve the current version — for very
+  high-traffic routes, consider caching the version number itself briefly
+  in-memory per Worker invocation rather than fetching it from KV every
+  request.
+- **Workers CPU/memory**: no per-container memory ceiling to size or
+  monitor anymore (the Docker path's Postgres/Redis/app containers each had
+  memory limits to reason about) — a Worker gets 128MB and a short CPU-time
+  budget *per request*, generous for typical API/CRUD work but a hard wall
+  for anything CPU-heavy in one request (bulk CSV parsing, image
+  transforms) — exactly why the import/media queue consumers in
+  `src/queue.ts` exist as separate, chunked invocations instead of doing
+  that work inline in a request handler.
+- **R2**: no performance change to call out beyond the credential
+  simplification already covered above — R2's read/write characteristics
+  are the same whether reached via S3-compat or a native binding; the
+  binding is simpler and safer, not faster.
+
+## Frontend compatibility
+
+`frontend/` is untouched (confirmed by diff), and none of the above
+requires frontend changes to keep working *once the ported routes have
+auth*. Checked `frontend/src/api/http.ts` (the central fetch client): plain
+JSON `fetch()` with `credentials: 'include'` for cookie-based sessions —
+this works against a Hono/Workers backend exactly as it does against
+Express, **once session auth is ported** (right now nothing in
+`cloudflare/` checks auth or sets a session cookie, so the frontend's login
+flow has nothing to talk to yet on this path — don't point it here before
+that exists). No CORS headers are configured in the Workers app yet — if
+the deployed Worker ends up on a different origin than the frontend, add
+Hono's CORS middleware; if it's mapped to the same domain (a Workers Route
+can do this), it's same-origin and none is needed.
 
 ## The bat files question — direct answer
 
