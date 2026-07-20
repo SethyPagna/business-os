@@ -29,6 +29,14 @@ export async function setJson(kv: KVNamespace, key: string, value: unknown, ttlS
   await kv.put(key, JSON.stringify(value), { expirationTtl: ttlSeconds })
 }
 
+// getOrSetJson (KV-backed) is for LOW-CARDINALITY, LOW-WRITE-FREQUENCY data
+// only: settings, a handful of dashboard summaries, feature flags -- things
+// with a small, fixed number of distinct keys. Cloudflare designed KV's free
+// tier (1,000 writes/day) explicitly around "infrequently written data that
+// may be frequently read" (their words). Do NOT use this for anything keyed
+// by user input (search queries, filters, pagination) -- see
+// cachedJsonResponse below for that shape instead, which has no comparable
+// daily write cap.
 export async function getOrSetJson<T>(kv: KVNamespace, key: string, ttlSeconds: number, producer: () => Promise<T> | T): Promise<T> {
   const cached = await getJson<T>(kv, key)
   if (cached != null) return cached
@@ -37,13 +45,62 @@ export async function getOrSetJson<T>(kv: KVNamespace, key: string, ttlSeconds: 
   return value
 }
 
+// cachedJsonResponse: for HIGH-CARDINALITY data keyed by request parameters
+// (product search with arbitrary query/filter/page combinations, catalog
+// listings, anything where a real customer's query string becomes the cache
+// key). Uses the Workers Cache API (`caches.default`), not KV -- it has no
+// meaningful daily write-count cap on the free tier the way KV does, because
+// it's not a separately metered storage product; it's the same HTTP cache
+// mechanism every Worker already has for free, keyed by request URL.
+//
+// The tradeoff for that: it's a *cache*, not guaranteed durable storage --
+// Cloudflare can evict an entry before its TTL under memory pressure, and it
+// isn't visible/listable the way KV is. Both fine for what this is used
+// for (a 20s read-through cache), and TTL is honored as a maximum, not a
+// guarantee, exactly like the Redis cache this replaces already behaved.
+//
+// `version` should come from versionedKey's bumpVersion mechanism (KV) --
+// bumping it changes every cache key at once without needing to enumerate
+// and delete old entries, the same trick versionedKey uses for KV itself.
+export async function cachedJsonResponse<T>(
+  request: Request,
+  ctx: { waitUntil(promise: Promise<unknown>): void },
+  version: string,
+  ttlSeconds: number,
+  producer: () => Promise<T> | T,
+): Promise<T> {
+  const cache = caches.default
+  const cacheUrl = new URL(request.url)
+  cacheUrl.searchParams.set('_v', version)
+  const cacheKey = new Request(cacheUrl.toString(), request)
+
+  const cached = await cache.match(cacheKey)
+  if (cached) {
+    return cached.json<T>()
+  }
+
+  const value = await producer()
+  const response = new Response(JSON.stringify(value), {
+    headers: { 'content-type': 'application/json', 'cache-control': `public, max-age=${ttlSeconds}` },
+  })
+  // Don't make the caller wait for the cache write -- same non-blocking
+  // shape as the KV path's fire-and-forget put, but explicit here since
+  // Workers requires ctx.waitUntil() to guarantee a background write
+  // actually completes after the response is already sent.
+  ctx.waitUntil(cache.put(cacheKey, response))
+  return value
+}
+
 // Namespace-versioned key builder. Call bumpVersion(kv, 'products') after any
 // write that should invalidate product-search caches; every read key
 // automatically becomes a new, uncached key once that happens, and the old
 // entries just expire on their own TTL.
+export async function getVersion(kv: KVNamespace, namespace: string): Promise<string> {
+  return (await kv.get(`v:${namespace}`)) || '0'
+}
+
 export async function versionedKey(kv: KVNamespace, namespace: string, suffix: string): Promise<string> {
-  const versionKey = `v:${namespace}`
-  const version = (await kv.get(versionKey)) || '0'
+  const version = await getVersion(kv, namespace)
   return `${namespace}:${version}:${suffix}`
 }
 

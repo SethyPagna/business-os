@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
-import { getOrSetJson, versionedKey } from '../lib/cache'
+import { cachedJsonResponse, getVersion } from '../lib/cache'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env }>()
@@ -68,8 +68,8 @@ app.get('/search', async (c) => {
     : sort === 'created_asc' ? 'p.created_at ASC, p.id ASC'
     : 'lower(p.name) ASC, p.id ASC' // D1/SQLite: lower(p.name) instead of COLLATE NOCASE -- same effect, and works whether or not the column has a NOCASE collation
 
-  const cacheKey = await versionedKey(c.env.CACHE, 'products', `search:${JSON.stringify(query)}`)
-  const payload = await getOrSetJson(c.env.CACHE, cacheKey, 20, async () => {
+  const version = await getVersion(c.env.CACHE, 'products')
+  const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
     const db = getDb(c.env)
     const { where, params } = buildSearchFilters(query)
     const whereSql = `WHERE ${where.join(' AND ')}`
