@@ -1,0 +1,23 @@
+{
+  "name": "business-os-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Business OS on Cloudflare Workers + D1 + R2 + Queues (Docker-free runtime)",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "typecheck": "tsc --noEmit",
+    "migrate:local": "wrangler d1 migrations apply business-os --local",
+    "migrate:remote": "wrangler d1 migrations apply business-os --remote",
+    "deploy": "wrangler deploy",
+    "d1:shell:local": "wrangler d1 execute business-os --local --command",
+    "d1:shell:remote": "wrangler d1 execute business-os --remote --command"
+  },
+  "dependencies": {
+    "hono": "^4.12.31"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260719.1",
+    "typescript": "^5.6.3",
+    "wrangler": "^4.112.0"
+  }
+}

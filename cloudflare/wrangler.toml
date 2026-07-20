@@ -1,0 +1,40 @@
+name = "business-os"
+main = "src/index.ts"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "business-os"
+database_id = "REPLACE_WITH_REAL_D1_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "business-os-assets"
+
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_REAL_KV_ID"
+
+[[queues.producers]]
+binding = "IMPORT_QUEUE"
+queue = "business-os-import"
+
+[[queues.producers]]
+binding = "MEDIA_QUEUE"
+queue = "business-os-media"
+
+[[queues.consumers]]
+queue = "business-os-import"
+max_batch_size = 5
+max_batch_timeout = 30
+
+[[queues.consumers]]
+queue = "business-os-media"
+max_batch_size = 5
+max_batch_timeout = 30
+
+[vars]
+BUSINESS_OS_PUBLIC_URL = "https://leangcosmetics.dpdns.org"
+BUSINESS_OS_ADMIN_URL = "https://admin.leangcosmetics.dpdns.org"
