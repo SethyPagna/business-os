@@ -51,6 +51,25 @@ with real HTTP requests via `wrangler dev` — not written and assumed correct.
                                                   under the Docker/Postgres password
                                                   mismatch — 200 here, correct data
   ```
+- **`src/lib/auth.ts` + `src/routes/auth.ts` (session auth)** — ported from
+  `backend/src/sessionAuth.ts` / `routes/auth.ts`'s login flow: bcrypt
+  password check, signed session cookie, D1-backed session lookup. Tested
+  end-to-end, all six steps independently verified, not assumed:
+  1. Protected route without a cookie → 401
+  2. Login with the wrong password → 401 (same generic error either way,
+     so responses don't reveal which usernames exist — kept deliberately
+     from the original)
+  3. Login with the correct password → 200, session cookie set
+  4. `GET /api/auth/me` with that cookie → correct user returned
+  5. The now-protected `POST /api/sales` with that cookie → succeeds
+  6. `POST /api/auth/logout`, then the same protected route again → 401
+  Uses `crypto.subtle`/`crypto.getRandomValues` (native Web Crypto) instead
+  of `node:crypto`, so it doesn't depend on the `nodejs_compat` shim being
+  complete for this. `bcryptjs` (pure JS, no native bindings) was verified
+  working correctly inside the actual Workers runtime in an isolated test
+  before being relied on here, not assumed compatible.
+  `products.ts`'s and `settings.ts`'s write endpoint are now behind this;
+  reads stay public (portal/login need store branding pre-auth).
 - **`src/routes/sales.ts` (POS checkout)** — the highest-stakes route in the
   app (money + inventory correctness), so it got the most scrutiny. Real,
   tested atomicity, not a hand-wave:
@@ -104,16 +123,29 @@ kind), everything else kept.
 
 `backend/src/runtimeCache.ts` is a Redis-backed short-TTL (~20-30s)
 read-through cache with prefix-based invalidation (`deleteByPrefix` does a
-Redis `SCAN`+`DEL`). `cloudflare/src/lib/cache.ts` replaces it with KV, with
-one real behavioral difference worth understanding rather than papering
-over: **KV has no atomic "delete everything starting with X."** Redis's
-prefix-scan-delete pattern doesn't have a clean KV equivalent at the same
-cost. The fix isn't a workaround, it's a better-fit pattern for KV: a
-**version counter per cache namespace** (`versionedKey`/`bumpVersion` in
-`cache.ts`) — bump the version on any write that should invalidate reads,
-fold the version into every read's cache key, and stale entries just expire
-on their own TTL instead of needing to be found and deleted. Cheaper and
-avoids KV's list-then-delete eventual-consistency window entirely.
+Redis `SCAN`+`DEL`). This needed two different Cloudflare-native
+replacements depending on *what* is being cached, not one:
+
+- **Low-cardinality, low-write-frequency data** (settings, feature flags —
+  a small, fixed number of distinct keys): KV, via `getOrSetJson` in
+  `cache.ts`, using a **version counter per namespace**
+  (`versionedKey`/`bumpVersion`) instead of Redis's prefix-scan-delete
+  (which has no efficient KV equivalent) — bump the version on a write,
+  every read key changes at once, stale entries just expire on TTL.
+- **High-cardinality data keyed by request parameters** (product search —
+  every distinct query/filter/page combination a real customer types is a
+  different cache entry): **not KV**. Originally built with KV here too,
+  which turned out to be a real mistake worth explaining rather than
+  quietly fixing: Cloudflare's KV free tier caps writes at **1,000/day**,
+  by design ("infrequently written data," per their own docs) — a busy
+  product catalog would blow through that in hours, not days, since every
+  new search term a customer types is a cache write. Switched
+  `products.ts`'s search caching to the **Workers Cache API**
+  (`cachedJsonResponse` in `cache.ts`, using `caches.default`) instead —
+  the standard per-Worker HTTP cache, not a separately metered/capped
+  product the way KV is. Verified the fix works, not just plausible: a
+  repeated identical search went from 57ms (D1 query) to 5ms (cache hit)
+  in a real `wrangler dev` test, with zero KV writes either way.
 
 ### R2
 
@@ -124,15 +156,54 @@ no other way in. A Worker bound directly to the bucket (`[[r2_buckets]]` in
 credentials to generate, rotate, or (as happened earlier in this
 conversation) paste into a chat by accident.
 
+## Free tier vs. the Docker path — which is actually better
+
+Verified against Cloudflare's current published limits (checked live, not
+from memory, since these change): **D1** free tier is 5GB storage, 5 million
+row reads/day, 100,000 row writes/day, resetting at UTC midnight. **Workers**
+free tier is 100,000 requests/day. **R2** free tier is 10GB storage, 1M
+writes/month, **zero egress fees** either way (paid or free). **KV** free
+tier is 1GB storage, 100,000 reads/day, but only 1,000 writes/day — see
+above for why that mattered and how it's now avoided for the one place it
+would have actually bitten.
+
+For a single small shop, those request/row numbers are very unlikely to be
+the limiting factor — 100k requests/day is a lot of POS + portal traffic for
+one location. The real difference isn't capacity, it's what each path
+*costs you operationally*:
+
+| | Docker (existing path) | Cloudflare free tier |
+|---|---|---|
+| Uptime dependency | Your machine has to be on, Docker Desktop running, tunnel connected — this exact category of problem is most of what this conversation has been fixing | Nothing to keep running |
+| SQL power | Real Postgres: interactive transactions, foreign keys | D1/SQLite: no interactive transactions (worked around with `batch()`, tested this session), no FK enforcement |
+| Failure mode at scale | Your one machine runs out of capacity, degrades gradually | Free tier: requests fail outright once a daily cap is hit, until UTC midnight (or upgrade, which lifts caps "typically within minutes" per Cloudflare) |
+| Cost | Free (your hardware/electricity) | Free up to the caps above, $5/mo (Workers Paid) removes them — 25 billion D1 reads, 50 million writes included at that tier |
+
+Given that a large fraction of this entire conversation was diagnosing and
+fixing Docker/Tunnel fragility (Error 1033, a Postgres password mismatch
+from a stale volume, a `stop.bat` that stopped the wrong stack), the
+operational risk profile favors Cloudflare for a single small business more
+than the SQL feature gap favors Postgres — but that's a judgment call about
+priorities, not a settled fact, and the migration cost (everything in "What's
+not done" above) is real and shouldn't be minimized either.
+
 ## What's not done (the honest remainder)
 
-- **~18 of 22 route files** not yet ported: `auth.ts`, `inventory.ts`,
-  `returns.ts`, `branches.ts`, `customTables.ts`, `importJobs.ts`,
-  `notifications.ts`, `users.ts`, `organizations.ts`, etc. Same technique as
-  `products.ts`/`settings.ts`/`sales.ts` throughout — this is real work, not
-  a fundamentally different problem, but it's dozens of route handlers and
-  it would be dishonest to claim it's done without actually doing and
-  testing each one the way the four above were tested.
+- **~17 of 22 route files** not yet ported: `inventory.ts`, `returns.ts`,
+  `branches.ts`, `customTables.ts`, `importJobs.ts`, `notifications.ts`,
+  `users.ts`, `organizations.ts`, etc. Same technique as
+  `products.ts`/`settings.ts`/`sales.ts`/`auth.ts` throughout — this is real
+  work, not a fundamentally different problem, but it's dozens of route
+  handlers and it would be dishonest to claim it's done without actually
+  doing and testing each one the way the routes above were tested.
+- **Within `auth.ts` itself**: rate limiting, account lockout after failed
+  attempts, OTP/2FA, and audit logging are not ported. The core login flow —
+  password check, session creation, cookie, session validation, logout — is,
+  and is tested (see above). Rate limiting/lockout in particular need a
+  D1- or KV-backed counter to work correctly across Workers' distributed,
+  ephemeral-isolate model — an in-memory counter (which is what the Docker
+  path's `checkAbuseLock` effectively is) doesn't reliably work the same
+  way here, and porting it naively would be worse than not having it.
 - **Within `sales.ts` itself**: product batch/lot FIFO allocation
   (`backend/src/productBatches.ts`'s `allocateProductBatches` — picks which
   specific expiry-dated lot to sell from), membership point redemption, and
