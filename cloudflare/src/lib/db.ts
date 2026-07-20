@@ -70,12 +70,33 @@ export class D1Compat {
     return new D1CompatStatement(this.d1, sql)
   }
 
+  // Real atomic multi-statement write, using D1's actual db.batch() API.
+  // Confirmed behavior (Cloudflare docs + independent verification): batched
+  // statements execute as a single SQLite transaction -- if any statement
+  // throws, the whole batch rolls back, nothing is partially written.
+  //
+  // Real constraint to design around, not paper over: batch() only rolls
+  // back on a thrown exception (e.g. a constraint violation) -- NOT on
+  // "zero rows affected" or other application-level conditions, and you
+  // cannot branch on one statement's result before building the next
+  // statement in the same batch (no interleaving reads and writes
+  // atomically). This is exactly why callers like routes/sales.ts validate
+  // (e.g. check stock availability) as a separate read *before* building
+  // the batch, then send every write as one atomic unit -- same shape the
+  // original backend/src/routes/sales.ts already uses.
+  async batch(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
+    const prepared = statements.map(({ sql, params }) => {
+      const { sql: translatedSql, values } = translate(sql, params)
+      return this.d1.prepare(translatedSql).bind(...values)
+    })
+    return this.d1.batch(prepared)
+  }
+
   async transaction<T>(fn: (db: D1Compat) => Promise<T>): Promise<T> {
-    // D1 does not yet expose interactive multi-statement transactions to
-    // Workers bindings the way a direct Postgres/SQLite connection does.
-    // Batch writes via db.batch() where atomicity matters; for read-then-write
-    // sequences, this just runs them in order (D1 statements are individually
-    // atomic, which covers the large majority of this codebase's usage).
+    // See batch() above for the real atomic primitive. This pass-through
+    // exists only for read-only call sites that don't need atomicity;
+    // anywhere writes must be atomic, use batch() directly and design the
+    // validate-then-batch-write shape, not this method.
     return fn(this)
   }
 }
