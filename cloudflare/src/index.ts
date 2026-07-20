@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
 import portalRoute from './routes/portal'
+import salesRoute from './routes/sales'
 import { handleImportQueue, handleMediaQueue } from './queue'
 
 export type Env = {
@@ -21,6 +22,7 @@ app.get('/health', (c) => c.json({ status: 'ok', time: new Date().toISOString() 
 app.route('/api/settings', settingsRoute)
 app.route('/api/products', productsRoute)
 app.route('/api/portal', portalRoute)
+app.route('/api/sales', salesRoute)
 
 export default {
   fetch: app.fetch,
