@@ -3,6 +3,7 @@ import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
 import portalRoute from './routes/portal'
 import salesRoute from './routes/sales'
+import authRoute from './routes/auth'
 import { handleImportQueue, handleMediaQueue } from './queue'
 
 export type Env = {
@@ -23,6 +24,7 @@ app.route('/api/settings', settingsRoute)
 app.route('/api/products', productsRoute)
 app.route('/api/portal', portalRoute)
 app.route('/api/sales', salesRoute)
+app.route('/api/auth', authRoute)
 
 export default {
   fetch: app.fetch,

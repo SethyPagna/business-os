@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env }>()
@@ -12,7 +13,7 @@ app.get('/', async (c) => {
   return c.json(map)
 })
 
-app.put('/:key', async (c) => {
+app.put('/:key', requireAuth, async (c) => {
   const key = c.req.param('key')
   const body = await c.req.json<{ value: unknown }>()
   const value = typeof body.value === 'string' ? body.value : JSON.stringify(body.value)

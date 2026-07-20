@@ -1,8 +1,10 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env }>()
+app.use('*', requireAuth)
 
 type SaleItemInput = {
   product_id?: number

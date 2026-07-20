@@ -13,6 +13,7 @@
     "d1:shell:remote": "wrangler d1 execute business-os --remote --command"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "hono": "^4.12.31"
   },
   "devDependencies": {
