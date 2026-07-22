@@ -64,6 +64,8 @@ type PromotionItem = {
   body?: string
   mediaUrl?: string
   linkUrl?: string
+  linkProductId?: string | number
+  linkProductName?: string
   ctaLabel?: string
 }
 
@@ -367,7 +369,16 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                         {item.body ? <p className="text-sm leading-6 text-rose-50/90">{item.body}</p> : null}
                       </div>
                     </div>
-                    {item.linkUrl ? (
+                    {item.linkProductId && item.linkProductName ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearch(item.linkProductName || '')}
+                        className="mt-4 inline-flex w-fit items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50"
+                      >
+                        {item.ctaLabel || copy('viewProduct', 'View product')}
+                        <ArrowRight className="h-4 w-4" />
+                      </button>
+                    ) : item.linkUrl ? (
                       <a
                         href={item.linkUrl}
                         target="_blank"
