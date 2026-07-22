@@ -691,6 +691,7 @@ function mountApiRoutes(target) {
   target.use('/api/organizations', require('./src/routes/organizations.ts'))
   target.use('/api/settings', require('./src/routes/settings.ts'))
   target.use('/api/categories', require('./src/routes/categories.ts'))
+  target.use('/api/promotions', require('./src/routes/promotions.ts'))
   target.use('/api/units', unitsRouter)
   target.use('/api/branches', require('./src/routes/branches.ts'))
   target.use('/api/products', require('./src/routes/products.ts'))
