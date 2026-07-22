@@ -8,13 +8,15 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import type { Dispatch, RefObject, SetStateAction } from 'react'
+import { lazy, Suspense, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
 import { ProductImg } from '../products/shared/primitives'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
+
+const ManageAnnouncementStripModal = lazy(() => import('./ManagePromotionsModal'))
 
 type CatalogUploadState = ReturnType<typeof createInitialUploadState>
 type DraftPrimitive = string | number | boolean | null | undefined
@@ -88,6 +90,8 @@ type CatalogPromoItem = {
   ctaLabel?: string
   eyebrow?: string
   linkUrl?: string
+  linkProductId?: string
+  linkProductName?: string
   mediaUrl?: string | null
   subtitle?: string
   title?: string
@@ -288,6 +292,7 @@ function CatalogEditorSurfaceContent() {
     uploadDraftImage,
     uploadPromoItemMedia,
   } = useCatalogPageContext<CatalogEditorSurfaceContext>()
+  const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
 
   return (
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-5 overflow-x-hidden">
@@ -337,6 +342,19 @@ function CatalogEditorSurfaceContent() {
                 <span className="text-sm font-medium text-slate-700">{copy('showCatalog', 'Show product catalog')}</span>
                 <input id="portal-show-catalog" name="customer_portal_show_catalog" type="checkbox" checked={!!editorDraft.customer_portal_show_catalog} onChange={(event) => setDraft('customer_portal_show_catalog', event.target.checked)} />
               </label>
+              <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-700">{copy('announcementStrip', 'Announcement strip')}</div>
+                  <div className="text-xs text-slate-500">{copy('announcementStripHint', 'Small horizontally-scrolling cards at the very top of the page — separate from the Promotions and posts cards below')}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAnnouncementStripModal(true)}
+                  className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  {copy('manage', 'Manage')}
+                </button>
+              </div>
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">{copy('showMembership', 'Show membership lookup')}</span>
                 <input id="portal-show-membership" name="customer_portal_show_membership" type="checkbox" checked={!!editorDraft.customer_portal_show_membership} onChange={(event) => setDraft('customer_portal_show_membership', event.target.checked)} />
@@ -634,10 +652,63 @@ function CatalogEditorSurfaceContent() {
                               <input id={`portal-promo-cta-${item.id}`} className="input" value={item.ctaLabel || ''} onChange={(event) => updatePromoItem(item.id, 'ctaLabel', event.target.value)} />
                             </div>
                             <div>
-                              <label htmlFor={`portal-promo-link-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLink', 'Button link')}</label>
-                              <input id={`portal-promo-link-${item.id}`} className="input" value={item.linkUrl || ''} onChange={(event) => updatePromoItem(item.id, 'linkUrl', event.target.value)} placeholder="https://..." />
+                              <label htmlFor={`portal-promo-link-type-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLinksTo', 'Button links to')}</label>
+                              <AppSelect
+                                id={`portal-promo-link-type-${item.id}`}
+                                value={item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')}
+                                options={[
+                                  { value: 'none', label: copy('promotionLinkNone', 'No button') },
+                                  { value: 'product', label: copy('promotionLinkProduct', 'A product') },
+                                  { value: 'url', label: copy('promotionLinkUrl', 'A custom link') },
+                                ]}
+                                onChange={(nextType) => {
+                                  if (nextType === 'product') {
+                                    updatePromoItem(item.id, 'linkUrl', '')
+                                  } else if (nextType === 'url') {
+                                    updatePromoItem(item.id, 'linkProductId', '')
+                                    updatePromoItem(item.id, 'linkProductName', '')
+                                  } else {
+                                    updatePromoItem(item.id, 'linkUrl', '')
+                                    updatePromoItem(item.id, 'linkProductId', '')
+                                    updatePromoItem(item.id, 'linkProductName', '')
+                                  }
+                                }}
+                              />
                             </div>
                           </div>
+                          {(() => {
+                            const linkType = item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')
+                            if (linkType === 'product') {
+                              const productList = products as Array<{ id?: unknown; name?: unknown }>
+                              return (
+                                <div>
+                                  <label htmlFor={`portal-promo-product-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionProduct', 'Product')}</label>
+                                  <AppSelect
+                                    id={`portal-promo-product-${item.id}`}
+                                    value={item.linkProductId || ''}
+                                    options={[
+                                      { value: '', label: copy('promotionSelectProduct', 'Select a product…') },
+                                      ...productList.map((product) => ({ value: String(product.id), label: String(product.name || '') })),
+                                    ]}
+                                    onChange={(nextId) => {
+                                      const match = productList.find((product) => String(product.id) === nextId)
+                                      updatePromoItem(item.id, 'linkProductId', nextId)
+                                      updatePromoItem(item.id, 'linkProductName', match ? String(match.name || '') : '')
+                                    }}
+                                  />
+                                </div>
+                              )
+                            }
+                            if (linkType === 'url') {
+                              return (
+                                <div>
+                                  <label htmlFor={`portal-promo-link-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLink', 'Button link')}</label>
+                                  <input id={`portal-promo-link-${item.id}`} className="input" value={item.linkUrl || ''} onChange={(event) => updatePromoItem(item.id, 'linkUrl', event.target.value)} placeholder="https://..." />
+                                </div>
+                              )
+                            }
+                            return null
+                          })()}
                         </div>
                         <div className="space-y-3">
                           <ImageField
@@ -1549,6 +1620,16 @@ function CatalogEditorSurfaceContent() {
         </div>
       </SectionShell>
       </div>
+      {showAnnouncementStripModal && (
+        <Suspense fallback={null}>
+          <ManageAnnouncementStripModal
+            onClose={() => setShowAnnouncementStripModal(false)}
+            productOptions={(products as Array<{ id?: unknown; name?: unknown }>)
+              .filter((p) => p.id != null && p.name != null)
+              .map((p) => ({ id: Number(p.id), name: String(p.name) }))}
+          />
+        </Suspense>
+      )}
     </aside>
   )
 }
