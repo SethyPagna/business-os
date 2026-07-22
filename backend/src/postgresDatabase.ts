@@ -411,6 +411,24 @@ class PostgresCompatDatabase {
       'CREATE INDEX IF NOT EXISTS idx_action_history_scope_updated_pg ON action_history(scope, updated_at DESC, id DESC)',
       'CREATE INDEX IF NOT EXISTS idx_action_history_scope_user_updated_pg ON action_history(scope, created_by_id, updated_at DESC, id DESC)',
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_user_sessions_token_hash_unique_pg ON user_sessions(token_hash)',
+      `CREATE TABLE IF NOT EXISTS promotions (
+        id BIGSERIAL PRIMARY KEY,
+        title TEXT NOT NULL,
+        subtitle TEXT,
+        image_path TEXT,
+        link_type TEXT DEFAULT 'none',
+        link_product_id BIGINT,
+        link_url TEXT,
+        badge_text TEXT,
+        badge_color TEXT,
+        is_active BIGINT DEFAULT 1,
+        sort_order BIGINT DEFAULT 0,
+        starts_at TEXT,
+        ends_at TEXT,
+        created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_promotions_active_sort_pg ON promotions(is_active, sort_order, id)',
     ]
     for (const statement of statements) {
       try {
