@@ -93,6 +93,10 @@ export function getPortalCatalogProducts(): Promise<unknown> {
   return fetchPortalJson('/api/portal/catalog/products', 'Portal catalog products')
 }
 
+export function getPortalPromotions(): Promise<unknown> {
+  return fetchPortalJson('/api/portal/promotions', 'Portal promotions')
+}
+
 export async function searchPortalCatalogProducts(params: QueryParams = {}): Promise<unknown> {
   const base = getPortalBaseUrl()
   const query = buildQueryString(params)
