@@ -27,6 +27,8 @@ interface PromoItemInput {
   mediaUrl?: unknown
   ctaLabel?: unknown
   linkUrl?: unknown
+  linkProductId?: unknown
+  linkProductName?: unknown
 }
 
 interface PromoItem {
@@ -38,6 +40,8 @@ interface PromoItem {
   mediaUrl: string
   ctaLabel: string
   linkUrl: string
+  linkProductId: string
+  linkProductName: string
 }
 
 interface NormalizeCollectionOptions {
@@ -98,6 +102,7 @@ export function serializeAboutBlocks(value: unknown): string {
 
 export function createPromoItem(overrides: PromoItemInput = {}): PromoItem {
   const suffix = Math.random().toString(36).slice(2, 8)
+  const linkProductId = toTrimmedString(overrides.linkProductId)
   return {
     id: overrides.id || `promo-${Date.now()}-${suffix}`,
     eyebrow: toTrimmedString(overrides.eyebrow || 'Promotion'),
@@ -106,7 +111,14 @@ export function createPromoItem(overrides: PromoItemInput = {}): PromoItem {
     body: String(overrides.body || ''),
     mediaUrl: toTrimmedString(overrides.mediaUrl),
     ctaLabel: toTrimmedString(overrides.ctaLabel || 'Learn more'),
-    linkUrl: toTrimmedString(overrides.linkUrl),
+    // A card links to a product OR a custom URL, never both -- linking to a
+    // product takes precedence if somehow both were set on the same item.
+    linkUrl: linkProductId ? '' : toTrimmedString(overrides.linkUrl),
+    linkProductId,
+    // Denormalized at edit-time (when the admin picks a product), not looked
+    // up at render-time -- the public page only ever sees a filtered/paged
+    // slice of the catalog, which the linked product might not be in.
+    linkProductName: linkProductId ? toTrimmedString(overrides.linkProductName) : '',
   }
 }
 
@@ -130,8 +142,10 @@ export function normalizePromoItems(value: unknown, options: NormalizeCollection
       mediaUrl: isPlainObject(item) ? item.mediaUrl : '',
       ctaLabel: isPlainObject(item) ? item.ctaLabel : '',
       linkUrl: isPlainObject(item) ? item.linkUrl : '',
+      linkProductId: isPlainObject(item) ? item.linkProductId : '',
+      linkProductName: isPlainObject(item) ? item.linkProductName : '',
     }))
-    .filter((item) => keepEmpty || item.title || item.subtitle || item.body || item.mediaUrl || item.linkUrl)
+    .filter((item) => keepEmpty || item.title || item.subtitle || item.body || item.mediaUrl || item.linkUrl || item.linkProductId)
 }
 
 export function serializePromoItems(value: unknown): string {
