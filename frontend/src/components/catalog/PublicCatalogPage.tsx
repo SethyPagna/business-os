@@ -20,6 +20,7 @@ import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazy(loadCatalogProductsSection)
 const CatalogSecondaryTabs = lazy(() => import('./CatalogSecondaryTabs'))
+const PortalPromotionsBanner = lazy(() => import('./PortalPromotionsBanner'))
 
 const PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
 const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
@@ -827,6 +828,12 @@ export default function PublicCatalogPage() {
     </Suspense>
   ) : null
 
+  const promotionsSection = activeTab === 'products' ? (
+    <Suspense fallback={null}>
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} />
+    </Suspense>
+  ) : null
+
   const secondaryTabSection = activeTab !== 'products' ? (
     <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500">{copy('loadingPortal', 'Loading customer portal...')}</div>}>
       <CatalogSecondaryTabs
@@ -905,6 +912,7 @@ export default function PublicCatalogPage() {
       publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}
       catalogSection={catalogSection}
       secondaryTabSection={secondaryTabSection}
+      promotionsSection={promotionsSection}
       publicScrollButtonsVisible={false}
       scrollPublicPortal={scrollPublicPortal}
       productGalleryView={productGalleryView}

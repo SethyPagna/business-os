@@ -88,6 +88,7 @@ type CatalogPreviewSurfaceProps = {
   publicPortalNavMetrics: PortalNavMetrics
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
+  promotionsSection?: ReactNode
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
   productGalleryView: GalleryViewState
@@ -131,6 +132,7 @@ export default function CatalogPreviewSurface({
   publicPortalNavMetrics,
   catalogSection,
   secondaryTabSection,
+  promotionsSection,
   publicScrollButtonsVisible,
   scrollPublicPortal,
   productGalleryView,
@@ -372,6 +374,7 @@ export default function CatalogPreviewSurface({
               </div>
             </section>
 
+            {promotionsSection}
             {catalogSection}
             {secondaryTabSection}
           </div>
