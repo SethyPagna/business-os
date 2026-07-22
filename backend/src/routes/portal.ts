@@ -1112,6 +1112,25 @@ router.get('/catalog/products', asyncRoute(async (_req, res) => {
   res.json(await getCachedPortalProducts(config))
 }))
 
+// Public: active promotions for the portal's horizontal banner section.
+// Filters by is_active and the optional starts_at/ends_at scheduling window
+// server-side, so the portal never has to trust client-side date checks for
+// what's allowed to show.
+router.get('/promotions', asyncRoute(async (req, res) => {
+  const nowIso = new Date().toISOString()
+  const rows = db.prepare(`
+    SELECT p.id, p.title, p.subtitle, p.image_path, p.link_type, p.link_url, p.badge_text, p.badge_color,
+           p.link_product_id, pr.name AS link_product_name, pr.image_path AS link_product_image
+    FROM promotions p
+    LEFT JOIN products pr ON pr.id = p.link_product_id AND p.link_type = 'product'
+    WHERE p.is_active = 1
+      AND (p.starts_at IS NULL OR p.starts_at <= ?)
+      AND (p.ends_at IS NULL OR p.ends_at >= ?)
+    ORDER BY p.sort_order ASC, p.id ASC
+  `).all(nowIso, nowIso)
+  res.json({ items: rows })
+}))
+
 router.get('/catalog/products/search', asyncRoute(async (req, res) => {
   const config = await getCachedPortalConfig()
   setPublicPortalCacheHeaders(res, config?.refreshSeconds || 20)
