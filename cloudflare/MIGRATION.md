@@ -8,6 +8,11 @@ against actual D1, and three working routes proven end-to-end against it
 Postgres/Redis/BullMQ/ffmpeg backend in `backend/`. That backend is untouched
 and still works — this is an additive, parallel path you migrate into.
 
+**Is this production-ready? See [`PRODUCTION-READINESS.md`](./PRODUCTION-READINESS.md)
+for a direct, numbers-based answer.** Short version: no — 10 of 215 backend
+endpoints exist here so far — but everything that does exist is real and
+tested, not a stub.
+
 ## Why this is a big job, honestly
 
 Docker/Postgres path → Cloudflare path is not a lift-and-shift:
