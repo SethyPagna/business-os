@@ -9,7 +9,7 @@ Postgres/Redis/BullMQ/ffmpeg backend in `backend/`. That backend is untouched
 and still works — this is an additive, parallel path you migrate into.
 
 **Is this production-ready? See [`PRODUCTION-READINESS.md`](./PRODUCTION-READINESS.md)
-for a direct, numbers-based answer.** Short version: no — 10 of 215 backend
+for a direct, numbers-based answer.** Short version: no — 14 of 215 backend
 endpoints exist here so far — but everything that does exist is real and
 tested, not a stub.
 
@@ -99,6 +99,33 @@ with real HTTP requests via `wrangler dev` — not written and assumed correct.
     FIFO allocation, membership point redemption, and delivery tracking.
     Not ported this pass — noted honestly below, not silently dropped.
 
+- **`src/routes/files.ts` + `src/lib/fileAssets.ts` + `src/lib/uploadSecurity.ts`
+  (uploads)** — ported from `backend/src/routes/files.ts` +
+  `backend/src/fileAssets.ts` + `backend/src/uploadSecurity.ts`. Real R2
+  storage via the native binding, D1-recorded metadata, and a public
+  `/uploads/*` serve route wired into `index.ts` (mirroring
+  `backend/server.ts`'s public, unauthenticated GET route for the same
+  path — upload/delete require auth, reading an already-uploaded file
+  doesn't, matching the original).
+  - Ported the magic-byte content validation (`uploadSecurity.ts`) exactly
+    — it's pure buffer inspection with no native dependencies, so this is a
+    faithful port, not an approximation. **Tested the attack it defends
+    against**: uploaded plain text with a spoofed `.png` extension and
+    `image/png` content-type — correctly rejected with 400 before it ever
+    reached R2.
+  - **Tested the full lifecycle**: unauthenticated upload rejected (401),
+    authenticated upload of a real 1×1 PNG succeeds with correct metadata,
+    the file serves back from the public route **byte-identical** to what
+    was uploaded (diffed, not assumed), listing returns it, delete removes
+    it from both R2 and D1, and the public URL correctly 404s afterward.
+  - **One real, disclosed gap, not silently dropped**: the Docker path uses
+    `sharp` (native, can't run in a Workers isolate) to compress oversized
+    images down to a 40KB budget. This path can't compress at all, so it
+    hard-rejects any image over 40KB with a clear error instead of silently
+    accepting something the Docker path would have shrunk. Closing this for
+    real needs Cloudflare Images or a Container — same category of gap as
+    ffmpeg below, and cross-referenced from `PRODUCTION-READINESS.md`.
+
 - **`src/queue.ts`** — Cloudflare Queues consumer pattern for import/media
   jobs, replacing BullMQ. The dispatch/ack/retry plumbing is real; the actual
   row-by-row import logic and the ffmpeg Container hand-off are sketched
@@ -159,7 +186,9 @@ Already R2 in the Docker path, but reached through the S3-compatible API
 no other way in. A Worker bound directly to the bucket (`[[r2_buckets]]` in
 `wrangler.toml`) skips all of that — `env.ASSETS` *is* the bucket, no
 credentials to generate, rotate, or (as happened earlier in this
-conversation) paste into a chat by accident.
+conversation) paste into a chat by accident. This is no longer theoretical —
+`src/routes/files.ts` is a real, tested upload/list/serve/delete
+implementation against it; see that section above for the specifics.
 
 ## Free tier vs. the Docker path — which is actually better
 
@@ -194,13 +223,13 @@ not done" above) is real and shouldn't be minimized either.
 
 ## What's not done (the honest remainder)
 
-- **~17 of 22 route files** not yet ported: `inventory.ts`, `returns.ts`,
+- **~18 of 24 route files** not yet ported: `inventory.ts`, `returns.ts`,
   `branches.ts`, `customTables.ts`, `importJobs.ts`, `notifications.ts`,
   `users.ts`, `organizations.ts`, etc. Same technique as
-  `products.ts`/`settings.ts`/`sales.ts`/`auth.ts` throughout — this is real
-  work, not a fundamentally different problem, but it's dozens of route
-  handlers and it would be dishonest to claim it's done without actually
-  doing and testing each one the way the routes above were tested.
+  `products.ts`/`settings.ts`/`sales.ts`/`auth.ts`/`files.ts` throughout —
+  this is real work, not a fundamentally different problem, but it's dozens
+  of route handlers and it would be dishonest to claim it's done without
+  actually doing and testing each one the way the routes above were tested.
 - **Within `auth.ts` itself**: rate limiting, account lockout after failed
   attempts, OTP/2FA, and audit logging are not ported. The core login flow —
   password check, session creation, cookie, session validation, logout — is,

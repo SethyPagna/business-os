@@ -8,7 +8,7 @@ Docker Desktop, or Cloudflare Tunnel required at all.
 
 1. **[`PRODUCTION-READINESS.md`](./PRODUCTION-READINESS.md)** — is this
    ready to use for real? A direct, numbers-based answer (short version:
-   not yet — 10 of 215 backend endpoints exist here so far).
+   not yet — 14 of 215 backend endpoints exist here so far).
 2. **[`MIGRATION.md`](./MIGRATION.md)** — the full architecture writeup:
    what's built and tested, how D1/R2/KV/Queues map to what Docker/
    Postgres/Redis/BullMQ did, what a full migration would take, and

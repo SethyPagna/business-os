@@ -9,19 +9,21 @@ why, with numbers, and exactly what closing the gap looks like — not a vague
 
 ## The number that matters
 
-**10 of 215 backend API endpoints exist in `cloudflare/`.** Counted directly
+**14 of 215 backend API endpoints exist in `cloudflare/`.** Counted directly
 from both codebases (`router.get/post/put/delete` in `backend/src/routes/`
 vs `app.get/post/put/delete` in `cloudflare/src/`), not estimated. By code
-volume: **878 lines in `cloudflare/src/routes` + `lib`, versus 27,681 lines
-across `backend/server.ts` + `backend/src/routes/`** — about 3%.
+volume: **1,145 lines in `cloudflare/src/routes` + `lib`, versus 27,681 lines
+across `backend/server.ts` + `backend/src/routes/`** — about 4%.
 
-This isn't a criticism of the work done — every one of those 10 endpoints
-was built against a real local D1/KV instance and tested with actual HTTP
+This isn't a criticism of the work done — every one of those 14 endpoints
+was built against a real local D1/KV/R2 instance and tested with actual HTTP
 requests, not written blind (see `MIGRATION.md` for the specific test
 transcripts: the POS checkout's atomicity was verified by literally trying
-to oversell stock and confirming zero partial writes). The quality bar per
-endpoint has been high. The coverage is just genuinely small relative to
-what a 25-route, 215-endpoint application needs.
+to oversell stock and confirming zero partial writes; file uploads were
+tested with a real magic-byte validation bypass attempt, byte-identical
+public serving, and a delete-then-404 check). The quality bar per endpoint
+has been high. The coverage is just genuinely small relative to what a
+25-route, 215-endpoint application needs.
 
 ## What's solid, and why you can trust it
 
@@ -40,20 +42,24 @@ what a 25-route, 215-endpoint application needs.
 - **Product search + portal catalog** — tested, including the KV → Cache
   API fix that avoids a real free-tier trap (KV's 1,000 writes/day cap,
   which per-search-query caching would have exhausted in hours).
+- **File uploads** (`src/routes/files.ts`) — upload (with magic-byte content
+  validation, matching what the Docker path does), list, public serving via
+  R2, and delete. Tested including the security-relevant path: uploading
+  plain text disguised with a `.png` extension is correctly rejected before
+  it ever reaches storage. Public serving verified byte-identical to what
+  was uploaded. **One real, disclosed gap**: the Docker path uses `sharp`
+  (a native image library, cannot run in a Workers isolate) to compress
+  oversized images down to a 40KB budget; this path can't compress, so it
+  hard-rejects any image over 40KB instead. Same category of limitation as
+  ffmpeg below — needs Cloudflare Images or a Container to close for real.
 
 ## What's missing, and how much it matters
 
 **Blocking — nothing works at all without these:**
-- **204 of 215 endpoints.** Inventory, returns, branches, customers,
+- **201 of 215 endpoints.** Inventory, returns, branches, customers,
   contacts, custom tables, users/roles, organizations, notifications,
   action history, sync, analytics, dashboard, AI features, backups — all of
-  `backend/src/routes/` except the 5 files already ported.
-- **File/image storage is not wired to any route.** `src/lib/r2.ts` exists
-  (the native R2 binding helper) but zero routes in `cloudflare/` call it.
-  The promotions feature added this session literally cannot upload an
-  image against this backend today — `uploadFileAsset` has nothing to talk
-  to. This needs its own route (`backend/src/routes/files.ts` is the
-  132-line reference to port).
+  `backend/src/routes/` except the 6 files already ported.
 - **The frontend doesn't point here at all.** `frontend/` calls the Express
   backend exclusively (confirmed by the same diff check used all session:
   zero changes to `frontend/` outside the promotions feature). Nothing in
@@ -96,39 +102,38 @@ Express backend is:**
 
 `wrangler deploy` would succeed and the Worker would come up healthy.
 `/health`, `/api/settings`, `/api/products/search`,
-`/api/portal/catalog/products/search`, `/api/auth/login`, and
-`/api/sales` would all work correctly. Every other URL the actual frontend
-calls — `/api/inventory/*`, `/api/branches/*`, `/api/users/*`,
-`/api/files/*`, and 200 more — would return a 404 from Hono's default
-not-found handler, because nothing is mounted at those paths. No image
-uploads would work. No cross-device sync would happen. This is not a subtle
-gap you'd discover slowly; it would be immediately, completely obvious the
-moment anyone clicked past the product catalog.
+`/api/portal/catalog/products/search`, `/api/auth/login`, `/api/sales`,
+and `/api/files/*` (upload, list, delete, and public `/uploads/*` serving)
+would all work correctly. Every other URL the actual frontend calls —
+`/api/inventory/*`, `/api/branches/*`, `/api/users/*`, and 200 more — would
+return a 404 from Hono's default not-found handler, because nothing is
+mounted at those paths. No cross-device sync would happen. This is not a
+subtle gap you'd discover slowly; it would be immediately, completely
+obvious the moment anyone clicked past the product catalog.
 
 ## The path to actually getting there, if you want it
 
 Roughly in priority order, each phase independently useful and shippable:
 
-1. **File storage route** (`src/routes/files.ts`, wiring `lib/r2.ts` in) —
-   small, and unblocks the promotions feature plus every other
-   image-touching route (products, catalog, users).
-2. **The next-highest-traffic routes**: `inventory.ts`, `branches.ts`,
-   `users.ts`, `catalog.ts` — same proven technique as the 5 done routes
+1. **The next-highest-traffic routes**: `inventory.ts`, `branches.ts`,
+   `users.ts`, `catalog.ts` — same proven technique as the 6 done routes
    (port the SQL as-is where it's already SQLite-flavored, fix Postgres-only
    syntax like the `GREATEST()` bug found in `sales.ts`, test against real
    D1 before calling it done).
-3. **Auth hardening**: apply `requireAuth` to every newly-ported route,
+2. **Auth hardening**: apply `requireAuth` to every newly-ported route,
    port rate limiting onto a D1/KV counter.
-4. **Live sync redesign**: a Durable Object per organization — genuinely new
+3. **Live sync redesign**: a Durable Object per organization — genuinely new
    design work, not a port; worth scoping separately once the REST surface
    is otherwise complete.
-5. **Import jobs + ffmpeg Containers**: last, since both are already
-   flagged as lower-urgency in `MIGRATION.md` and the app degrades
-   gracefully without the latter.
+4. **Import jobs + ffmpeg/image-compression Containers**: last, since both
+   are already flagged as lower-urgency in `MIGRATION.md` and the app
+   degrades gracefully without either (files.ts hard-rejects oversized
+   images today rather than failing silently).
 
-Each of the 5 already-ported routes took real, careful, tested work — there's
-no shortcut through steps 1–3 that skips actually doing and testing each
-route. That said, the pattern is now proven and repeatable four times over
-(settings, products, portal, sales), which is most of the hard part: the D1
-adapter, the auth mechanism, the cache strategy, and the atomic-write
-pattern all already exist and don't need to be re-invented per route.
+Each of the 6 already-ported routes took real, careful, tested work — there's
+no shortcut through steps 1–2 that skips actually doing and testing each
+route. That said, the pattern is now proven and repeatable five times over
+(settings, products, portal, sales, files), which is most of the hard part:
+the D1 adapter, the auth mechanism, the cache strategy, the atomic-write
+pattern, and now the R2/upload-validation pattern all already exist and
+don't need to be re-invented per route.
