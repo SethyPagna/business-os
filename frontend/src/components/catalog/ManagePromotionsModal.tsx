@@ -1,4 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical.js'
+import ImageIcon from 'lucide-react/dist/esm/icons/image.js'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Modal from '../shared/Modal'
 import AppSelect from '../shared/AppSelect.tsx'
 import { useApp } from '../../AppContext.tsx'
@@ -270,9 +275,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
           <button
             type="button"
             onClick={startCreate}
-            className="self-start rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+            className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 hover:shadow"
           >
-            + New promotion
+            <Plus className="h-4 w-4" />
+            New promotion
           </button>
         )}
 
@@ -316,8 +322,9 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                       className="h-16 w-24 rounded-lg border border-gray-200 object-cover dark:border-gray-700"
                     />
                   ) : (
-                    <div className="flex h-16 w-24 items-center justify-center rounded-lg border border-dashed border-gray-300 text-[11px] text-gray-400 dark:border-gray-700">
-                      No image
+                    <div className="flex h-16 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
+                      <ImageIcon className="h-5 w-5 text-gray-300 dark:text-gray-600" />
+                      <span className="text-[10px] text-gray-400">No image</span>
                     </div>
                   )}
                   <input
@@ -462,10 +469,23 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
         )}
 
         {loading ? (
-          <div className="py-8 text-center text-sm text-gray-400">Loading…</div>
+          <div className="flex flex-col gap-2">
+            {[0, 1].map((key) => (
+              <div key={key} className="flex animate-pulse items-center gap-3 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                <div className="h-4 w-4 rounded bg-gray-200 dark:bg-gray-800" />
+                <div className="h-12 w-16 shrink-0 rounded-lg bg-gray-200 dark:bg-gray-800" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 w-1/3 rounded bg-gray-200 dark:bg-gray-800" />
+                  <div className="h-2.5 w-1/2 rounded bg-gray-200 dark:bg-gray-800" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : promotions.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-300 py-8 text-center text-sm text-gray-400 dark:border-gray-700">
-            No promotions yet. Click "New promotion" to add your first banner.
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-gray-300 py-10 text-center dark:border-gray-700">
+            <ImageIcon className="h-8 w-8 text-gray-300 dark:text-gray-600" />
+            <div className="text-sm text-gray-500 dark:text-gray-400">No promotions yet.</div>
+            <div className="text-xs text-gray-400 dark:text-gray-500">Click "New promotion" above to add your first banner.</div>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
@@ -477,15 +497,19 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 onDragOver={(e) => { e.preventDefault(); setDragOverId(promo.id) }}
                 onDragLeave={() => setDragOverId((id) => (id === promo.id ? null : id))}
                 onDrop={(e) => { e.preventDefault(); handleDrop(promo.id) }}
-                className={`flex items-center gap-3 rounded-xl border p-3 transition ${
-                  dragOverId === promo.id ? 'border-blue-400 bg-blue-50 dark:bg-blue-950/30' : 'border-gray-200 dark:border-gray-700'
-                } ${promo.is_active ? '' : 'opacity-50'}`}
+                className={`group flex items-center gap-3 rounded-xl border p-3 transition-all ${
+                  dragOverId === promo.id
+                    ? 'border-blue-400 bg-blue-50 shadow-sm dark:border-blue-700 dark:bg-blue-950/30'
+                    : 'border-gray-200 hover:border-gray-300 hover:shadow-sm dark:border-gray-700 dark:hover:border-gray-600'
+                } ${promo.is_active ? '' : 'opacity-60'}`}
               >
-                <span className="cursor-grab select-none text-gray-400" title="Drag to reorder">⠿⠿</span>
+                <GripVertical className="h-4 w-4 shrink-0 cursor-grab select-none text-gray-300 transition group-hover:text-gray-400" aria-label="Drag to reorder" />
                 {promo.image_path ? (
-                  <img src={resolvePublicAssetUrl(promo.image_path)} alt="" className="h-12 w-16 shrink-0 rounded-lg object-cover" />
+                  <img src={resolvePublicAssetUrl(promo.image_path)} alt="" className="h-12 w-16 shrink-0 rounded-lg border border-gray-100 object-cover dark:border-gray-800" />
                 ) : (
-                  <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-[10px] text-gray-400 dark:bg-gray-800">No image</div>
+                  <div className="flex h-12 w-16 shrink-0 items-center justify-center rounded-lg bg-gray-100 dark:bg-gray-800">
+                    <ImageIcon className="h-5 w-5 text-gray-300 dark:text-gray-600" />
+                  </div>
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -512,10 +536,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 <button
                   type="button"
                   onClick={() => handleToggleActive(promo)}
-                  className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
+                  className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium transition ${
                     promo.is_active
-                      ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300'
-                      : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                      ? 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60'
+                      : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700'
                   }`}
                 >
                   {promo.is_active ? 'Active' : 'Hidden'}
@@ -523,16 +547,20 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 <button
                   type="button"
                   onClick={() => startEdit(promo)}
-                  className="shrink-0 rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                  title="Edit"
+                  aria-label={`Edit ${promo.title}`}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                 >
-                  Edit
+                  <Pencil className="h-3.5 w-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => handleDelete(promo)}
-                  className="shrink-0 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
+                  title="Delete"
+                  aria-label={`Delete ${promo.title}`}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
                 >
-                  Delete
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             ))}
