@@ -1552,6 +1552,7 @@ router.delete('/:id', authToken, requirePermission('products'), (req, res) => {
       db.prepare('UPDATE sale_items SET product_id = NULL WHERE product_id = ?').run(req.params.id)
       db.prepare('DELETE FROM product_images WHERE product_id = ?').run(req.params.id)
       db.prepare('DELETE FROM branch_stock WHERE product_id = ?').run(req.params.id)
+      db.prepare("UPDATE promotions SET link_type = 'none', link_product_id = NULL WHERE link_product_id = ?").run(req.params.id)
       db.prepare('DELETE FROM products WHERE id = ?').run(req.params.id)
     })()
     audit(actor.userId, actor.userName, 'delete', 'product', req.params.id, p, {
