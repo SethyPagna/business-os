@@ -113,6 +113,15 @@ The customer portal uses first-party language packs for fast public switching. E
 
 Google Translate remains only a slower fallback for unsupported languages. Business name, portal intro, and short tagline stay in the original business text.
 
+## Portal Promotions And Announcements
+
+The public catalog page (Studio → Display settings in the admin editor) has two separate, complementary ways to promote things — pick whichever fits:
+
+- **Announcement Strip** — small cards that scroll horizontally at the very top of the page, for quick sale/announcement callouts. Manage from Display settings → Announcement strip → Manage. Each card can link to nothing, a specific product (pick from a dropdown, no need to know a URL), or a custom link, plus an optional badge, color, and a show-from/show-until date window.
+- **Promotions and posts** — larger two-column story cards further down the same editor, for longer campaign copy with a title, subtitle, body text, and a button. The button can link to a product (same dropdown-based picker) or a custom URL.
+
+Both are separate from each other on purpose — the editor UI explains which is which where you manage them, so it's clear at a glance you're not duplicating one with the other.
+
 ## Large Imports
 
 Large product, inventory, sales, customer, supplier, and delivery imports run as background jobs.
@@ -173,3 +182,9 @@ Business OS uses Cloudflare for the public/admin links. If a Cloudflare tunnel t
 This is Cloudflare's edge saying no `cloudflared` connector is currently registered for the tunnel — it is not an app or database problem. Run `run\docker\verify-tunnel.bat` (or `run\docker\doctor.bat`, which now runs the same check). It checks, in order: the account/tunnel IDs and API token are set, the tunnel connector token file is present and non-empty, Cloudflare's API reports an active connection, the ingress config actually routes your hostnames, and the `cloudflared` container is running. It reports exactly which of those failed.
 
 The most common cause is an empty or stale connector token file. Fix it with `run\docker\rotate-cloudflare.bat`, then `run\docker\start.bat`.
+
+## Cloudflare Workers Migration (Experimental — Not Production Ready)
+
+The `cloudflare\` folder holds a separate, in-progress path to run Business OS entirely on Cloudflare's platform (Workers + D1 + R2 + Queues + KV) instead of Docker — no local machine, no Docker Desktop, no Cloudflare Tunnel needed at all, since Workers serve your domain natively.
+
+**This is not a replacement yet.** The Docker path above is still the real, complete, working app — nothing about it changed. As of this writing, 10 of 215 backend API endpoints have been ported to `cloudflare\`, each one built and tested against a real local Cloudflare environment (not just written and assumed correct). See `cloudflare\PRODUCTION-READINESS.md` for the exact, numbers-based answer to "is it ready," and `cloudflare\MIGRATION.md` for the full architecture writeup, what's tested, and what a full migration would take.
