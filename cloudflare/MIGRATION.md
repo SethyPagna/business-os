@@ -9,7 +9,7 @@ Postgres/Redis/BullMQ/ffmpeg backend in `backend/`. That backend is untouched
 and still works — this is an additive, parallel path you migrate into.
 
 **Is this production-ready? See [`PRODUCTION-READINESS.md`](./PRODUCTION-READINESS.md)
-for a direct, numbers-based answer.** Short version: no — 14 of 215 backend
+for a direct, numbers-based answer.** Short version: no — 20 of 215 backend
 endpoints exist here so far — but everything that does exist is real and
 tested, not a stub.
 
@@ -221,15 +221,66 @@ than the SQL feature gap favors Postgres — but that's a judgment call about
 priorities, not a settled fact, and the migration cost (everything in "What's
 not done" above) is real and shouldn't be minimized either.
 
+- **`src/routes/branches.ts` + `src/lib/conflictControl.ts` + `src/lib/audit.ts`
+  (branch management)** — list/create/update/delete, ported from
+  `backend/src/routes/branches.ts`. Two pieces of shared infrastructure came
+  out of this port that every future route will reuse, not just this one:
+  - `conflictControl.ts`: the optimistic-concurrency ("write conflict")
+    check the Docker path uses everywhere a record can be edited from two
+    devices at once — the client sends back the `updated_at` it last saw;
+    if the row changed since, reject with 409 instead of silently
+    overwriting someone else's edit. Pure logic, ported unchanged.
+  - `audit.ts`: the audit-log write helper, deliberately swallowing its own
+    errors (matching the original's comment that an audit failure must
+    never crash the real request).
+  - **Tested, not assumed**: creating two branches both marked "default"
+    correctly leaves only the second one with `is_default = 1` (the
+    default-flag clear and the insert happen in the same `db.batch()`, so
+    a failure partway through can't leave two branches both default). The
+    default branch correctly refuses to delete. A branch holding stock
+    correctly refuses to delete, with the exact unit count in the error
+    message. A delete sent with a deliberately stale `updated_at`
+    correctly returns 409 with the same response shape
+    (`code: "write_conflict"`, `actualUpdatedAt`, etc.) the Docker path
+    uses, verified field-by-field against a real response, not assumed
+    from reading the code.
+  - **Scoped deliberately**: stock-integrity repair, branch-to-branch
+    transfers, and the summary/metrics endpoint (`businessMetrics.ts` is a
+    large separate module) are not ported this pass.
+
+- **`src/routes/catalog.ts` + `src/lib/media.ts`** — ported from
+  `backend/src/routes/catalog.ts`. `/meta` (categories + active branches)
+  and `/products` (active products with per-branch stock and an image
+  gallery). Found a real dialect issue while porting, not a subtle one: the
+  original's `/products` query aggregates per-branch stock with Postgres's
+  `json_agg(json_build_object(...)) FILTER (WHERE ...)` — `json_build_object`
+  doesn't exist in SQLite at all, so this would have been a hard syntax
+  error, not a silent bug. Checked whether the closest native SQLite
+  equivalent (`json_group_array(json_object(...)) FILTER (WHERE ...)`)
+  works in real D1 before deciding how to port it — it does — but rewrote
+  it as two plain queries plus an app-side group instead, matching the join
+  style already used throughout this migration (`products.ts`, `sales.ts`,
+  `portal.ts`) rather than introducing a different pattern for one route.
+  **Tested** with a product carrying different stock quantities at two
+  different branches and a multi-image gallery — verified the response
+  shows the correct quantity per branch and images in the correct sort
+  order, not just that the endpoint returned data.
+
 ## What's not done (the honest remainder)
 
-- **~18 of 24 route files** not yet ported: `inventory.ts`, `returns.ts`,
-  `branches.ts`, `customTables.ts`, `importJobs.ts`, `notifications.ts`,
-  `users.ts`, `organizations.ts`, etc. Same technique as
-  `products.ts`/`settings.ts`/`sales.ts`/`auth.ts`/`files.ts` throughout —
-  this is real work, not a fundamentally different problem, but it's dozens
-  of route handlers and it would be dishonest to claim it's done without
-  actually doing and testing each one the way the routes above were tested.
+- **~16 of 24 route files** not yet ported: `inventory.ts`, `returns.ts`,
+  `customTables.ts`, `importJobs.ts`, `notifications.ts`, `users.ts`,
+  `organizations.ts`, etc. Same technique as
+  `products.ts`/`settings.ts`/`sales.ts`/`auth.ts`/`files.ts`/`branches.ts`/`catalog.ts`
+  throughout — this is real work, not a fundamentally different problem, but
+  it's dozens of route handlers and it would be dishonest to claim it's done
+  without actually doing and testing each one the way the routes above were
+  tested.
+- **Within `branches.ts` itself**: stock-integrity repair, branch-to-branch
+  transfers, and the summary/metrics endpoint (depends on a large separate
+  `businessMetrics.ts` module) are not ported. List/create/update/delete —
+  including the write-conflict and business-rule checks — are, and are
+  tested (see above).
 - **Within `auth.ts` itself**: rate limiting, account lockout after failed
   attempts, OTP/2FA, and audit logging are not ported. The core login flow —
   password check, session creation, cookie, session validation, logout — is,
