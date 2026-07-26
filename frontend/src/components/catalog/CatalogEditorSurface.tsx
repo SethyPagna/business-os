@@ -656,6 +656,7 @@ function CatalogEditorSurfaceContent() {
                               <AppSelect
                                 id={`portal-promo-link-type-${item.id}`}
                                 value={item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')}
+                                buttonClassName="input h-auto w-full"
                                 options={[
                                   { value: 'none', label: copy('promotionLinkNone', 'No button') },
                                   { value: 'product', label: copy('promotionLinkProduct', 'A product') },
@@ -686,6 +687,7 @@ function CatalogEditorSurfaceContent() {
                                   <AppSelect
                                     id={`portal-promo-product-${item.id}`}
                                     value={item.linkProductId || ''}
+                                    buttonClassName="input h-auto w-full"
                                     options={[
                                       { value: '', label: copy('promotionSelectProduct', 'Select a product…') },
                                       ...productList.map((product) => ({ value: String(product.id), label: String(product.name || '') })),

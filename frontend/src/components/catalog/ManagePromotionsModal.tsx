@@ -381,6 +381,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 <span className="font-medium text-gray-700 dark:text-gray-300">Links to</span>
                 <AppSelect
                   value={form.link_type}
+                  buttonClassName="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal dark:border-gray-700 dark:bg-gray-900"
                   options={[
                     { value: 'none', label: 'Nothing (just a banner)' },
                     { value: 'product', label: 'A product' },
@@ -395,6 +396,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   <span className="font-medium text-gray-700 dark:text-gray-300">Product *</span>
                   <AppSelect
                     value={form.link_product_id}
+                    buttonClassName="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-normal dark:border-gray-700 dark:bg-gray-900"
                     options={[
                       { value: '', label: 'Select a product…' },
                       ...productOptions.map((p) => ({ value: p.id, label: p.name })),
