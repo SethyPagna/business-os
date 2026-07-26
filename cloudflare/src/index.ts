@@ -7,6 +7,7 @@ import authRoute from './routes/auth'
 import filesRoute from './routes/files'
 import branchesRoute from './routes/branches'
 import catalogRoute from './routes/catalog'
+import promotionsRoute from './routes/promotions'
 import { serveObject } from './lib/r2'
 import { handleImportQueue, handleMediaQueue } from './queue'
 
@@ -42,6 +43,7 @@ app.route('/api/auth', authRoute)
 app.route('/api/files', filesRoute)
 app.route('/api/branches', branchesRoute)
 app.route('/api/catalog', catalogRoute)
+app.route('/api/promotions', promotionsRoute)
 
 export default {
   fetch: app.fetch,
