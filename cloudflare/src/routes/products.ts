@@ -1,9 +1,15 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { cachedJsonResponse, getVersion } from '../lib/cache'
+import { requireAuth } from '../lib/auth'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env }>()
+// The real backend requires auth on GET /api/products/search (this is
+// internal admin/POS catalog search) -- a real, confirmed gap: an earlier
+// version of this port left it fully public. GET /api/portal/catalog/
+// products/search is the actually-public equivalent, in routes/portal.ts.
+app.use('*', requireAuth)
 
 function splitSearchTerms(raw: string): string[] {
   return String(raw || '')
