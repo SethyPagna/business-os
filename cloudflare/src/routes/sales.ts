@@ -1,9 +1,9 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
-import { requireAuth } from '../lib/auth'
+import { requireAuth, type SessionUser } from '../lib/auth'
 import type { Env } from '../index'
 
-const app = new Hono<{ Bindings: Env }>()
+const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 
 type SaleItemInput = {
@@ -226,13 +226,139 @@ app.post('/', async (c) => {
   })
 })
 
-app.get('/:id', async (c) => {
+type SaleRow = {
+  id: number
+  branch_id: number | null
+  customer_id: number | null
+  cashier_id: number | null
+  cashier_name: string | null
+  customer_name: string | null
+  customer_phone: string | null
+  branch_name: string | null
+  payment_method: string | null
+  notes: string | null
+  sale_status: string | null
+  created_at: string
+  discount_usd: number | null
+  discount_khr: number | null
+  membership_discount_usd: number | null
+  membership_discount_khr: number | null
+  total_usd: number | null
+  total_khr: number | null
+  [key: string]: unknown
+}
+
+// GET /api/sales -- the real list/history/receipt-lookup endpoint (there is
+// no separate GET /api/sales/:id in the actual app; a receipt is one row
+// out of this same list, matched by search). The original does this with a
+// single Postgres query using STRING_AGG / json_agg / json_build_object /
+// a ::json cast -- none of which exist in SQLite. Ported as: one filtered
+// query for the matching sales, then two follow-up queries (sale_items,
+// a refund rollup from returns) grouped in JS, matching the app-side-join
+// style already used throughout this migration.
+app.get('/', async (c) => {
+  const query = c.req.query()
+  const user = c.get('user')
   const db = getDb(c.env)
-  const id = Number(c.req.param('id'))
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get([id])
-  if (!sale) return c.json({ error: 'Sale not found' }, 404)
-  const items = await db.prepare('SELECT * FROM sale_items WHERE sale_id = ?').all([id])
-  return c.json({ ...sale, items })
+
+  const where: string[] = ['1=1']
+  const params: Record<string, unknown> = {}
+
+  if (query.startDate) { where.push('date(s.created_at) >= @startDate'); params.startDate = query.startDate }
+  if (query.endDate) { where.push('date(s.created_at) <= @endDate'); params.endDate = query.endDate }
+  if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
+  if (query.userId) {
+    // Matches the original's isAdminControlUser check -- simplified to
+    // username==='admin' or an explicit permissions.all flag, since role
+    // management (role_code lookups against the roles table) isn't ported
+    // yet. Disclosed simplification, not a silent behavior change: see
+    // MIGRATION.md.
+    const permissions = (() => { try { return JSON.parse(user?.permissions || '{}') } catch { return {} } })()
+    const isAdmin = user?.username === 'admin' || permissions?.all === true
+    if (!isAdmin) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
+    where.push('s.cashier_id = @userId')
+    params.userId = Number(query.userId) || query.userId
+  }
+  if (query.branchId) {
+    where.push('(s.branch_id = @branchId OR EXISTS (SELECT 1 FROM sale_items sif WHERE sif.sale_id = s.id AND sif.branch_id = @branchId))')
+    params.branchId = query.branchId
+  }
+  if (query.status) { where.push('s.sale_status = @status'); params.status = query.status }
+
+  const search = String(query.search || query.q || '').trim().toLowerCase()
+  const searchTerms = search.split(/\s+/).filter(Boolean)
+  searchTerms.forEach((term, index) => {
+    const key = `search${index}`
+    params[key] = `%${term}%`
+    where.push(`(
+      lower(COALESCE(s.receipt_number, '')) LIKE @${key}
+      OR lower(COALESCE(s.cashier_name, '')) LIKE @${key}
+      OR lower(COALESCE(s.customer_name, '')) LIKE @${key}
+      OR lower(COALESCE(s.customer_phone, '')) LIKE @${key}
+      OR lower(COALESCE(c.membership_number, '')) LIKE @${key}
+      OR lower(COALESCE(s.branch_name, '')) LIKE @${key}
+      OR lower(COALESCE(s.payment_method, '')) LIKE @${key}
+      OR lower(COALESCE(s.notes, '')) LIKE @${key}
+      OR EXISTS (SELECT 1 FROM sale_items sis WHERE sis.sale_id = s.id AND lower(COALESCE(sis.product_name, '')) LIKE @${key})
+    )`)
+  })
+
+  const limit = Math.min(Number.parseInt(String(query.limit || '100'), 10) || 100, 500)
+  params.limit = limit
+
+  const sales = await db.prepare(`
+    SELECT s.*, c.membership_number AS customer_membership_number
+    FROM sales s
+    LEFT JOIN customers c ON c.id = s.customer_id
+    WHERE ${where.join(' AND ')}
+    ORDER BY s.created_at DESC
+    LIMIT @limit
+  `).all<SaleRow>(params)
+
+  if (sales.length === 0) return c.json([])
+
+  const saleIds = sales.map((s) => s.id)
+  const placeholders = saleIds.map(() => '?').join(',')
+
+  const itemRows = await db.prepare(`
+    SELECT si.*, b.name AS branch_name
+    FROM sale_items si
+    LEFT JOIN branches b ON b.id = si.branch_id
+    WHERE si.sale_id IN (${placeholders})
+    ORDER BY si.id ASC
+  `).all<{ sale_id: number; [key: string]: unknown }>(saleIds)
+  const itemsBySale = new Map<number, unknown[]>()
+  for (const row of itemRows) {
+    if (!itemsBySale.has(row.sale_id)) itemsBySale.set(row.sale_id, [])
+    itemsBySale.get(row.sale_id)!.push(row)
+  }
+
+  const refundRows = await db.prepare(`
+    SELECT sale_id, COUNT(*) AS return_count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd, COALESCE(SUM(total_refund_khr), 0) AS refund_khr
+    FROM returns
+    WHERE sale_id IN (${placeholders}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+    GROUP BY sale_id
+  `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(saleIds)
+  const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
+
+  const payload = sales.map((sale) => {
+    const refund = refundsBySale.get(sale.id)
+    const refundUsd = refund?.refund_usd || 0
+    const refundKhr = refund?.refund_khr || 0
+    return {
+      ...sale,
+      items: itemsBySale.get(sale.id) || [],
+      refund_usd: refundUsd,
+      refund_khr: refundKhr,
+      return_count: refund?.return_count || 0,
+      total_discount_usd: (sale.discount_usd || 0) + (sale.membership_discount_usd || 0),
+      total_discount_khr: (sale.discount_khr || 0) + (sale.membership_discount_khr || 0),
+      net_total_usd: (sale.total_usd || 0) - refundUsd,
+      net_total_khr: (sale.total_khr || 0) - refundKhr,
+    }
+  })
+
+  return c.json(payload)
 })
 
 export default app
