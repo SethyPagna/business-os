@@ -9,20 +9,24 @@ why, with numbers, and exactly what closing the gap looks like — not a vague
 
 ## The number that matters
 
-**20 of 215 backend API endpoints exist in `cloudflare/`.** Counted directly
+**28 of 215 backend API endpoints exist in `cloudflare/`.** Counted directly
 from both codebases (`router.get/post/put/delete` in `backend/src/routes/`
 vs `app.get/post/put/delete` in `cloudflare/src/`), not estimated. By code
-volume: **1,534 lines in `cloudflare/src/routes` + `lib`, versus 27,681 lines
-across `backend/server.ts` + `backend/src/routes/`** — about 5.5%.
+volume: **1,983 lines in `cloudflare/src/routes` + `lib`, versus 27,681 lines
+across `backend/server.ts` + `backend/src/routes/`** — about 7%.
 
-This isn't a criticism of the work done — every one of those 20 endpoints
+This isn't a criticism of the work done — every one of those 28 endpoints
 was built against a real local D1/KV/R2 instance and tested with actual HTTP
 requests, not written blind (see `MIGRATION.md` for the specific test
 transcripts: the POS checkout's atomicity was verified by literally trying
 to oversell stock and confirming zero partial writes; file uploads were
 tested with a real magic-byte validation bypass attempt; the branches route's
 optimistic-concurrency conflict detection was tested with a deliberately
-stale `updated_at`, not just a happy-path save). The quality bar per
+stale `updated_at`, not just a happy-path save; a system-wide audit — see
+`MIGRATION.md`'s "A system-wide audit found and fixed five real bugs" —
+cross-checked every route's endpoint paths and auth requirements against
+the real backend contract and found and fixed five real bugs, including
+one that made the entire settings table publicly readable). The quality bar per
 endpoint has been high. The coverage is just genuinely small relative to
 what a 25-route, 215-endpoint application needs.
 
@@ -80,7 +84,7 @@ what a 25-route, 215-endpoint application needs.
 ## What's missing, and how much it matters
 
 **Blocking — nothing works at all without these:**
-- **195 of 215 endpoints.** Inventory (the rest of it — stock adjustments,
+- **187 of 215 endpoints.** Inventory (the rest of it — stock adjustments,
   movements, low-stock views), returns, customers, contacts, custom tables,
   users/roles, organizations, notifications, action history, sync,
   analytics, dashboard, AI features, backups, branch transfers/stock-
@@ -118,25 +122,37 @@ Express backend is:**
   counter to work correctly across Workers' distributed model; an in-memory
   counter, which is what the lockout in `backend/src/routes/auth.ts`
   effectively is, would not port correctly here).
-- No OTP/2FA, no audit logging on the ported routes (the Express backend's
-  `audit()` calls, used throughout `promotions.ts` this session, have no
-  equivalent yet in the Workers routes).
+- No OTP/2FA. Audit logging now exists (`src/lib/audit.ts`, used by
+  `branches.ts` and `settings.ts`) but isn't wired into every write endpoint
+  yet — only those two routes call it so far.
+- **No permission-level granularity — found during a system-wide audit,
+  disclosed rather than silently left.** The real backend gates specific
+  writes behind specific permissions (`requirePermission('settings')` on
+  file uploads/deletes, `requirePermission('inventory')` on branch writes).
+  This port's `requireAuth` only checks that a session exists, not what
+  it's allowed to do. Concretely: any authenticated user can currently
+  delete a branch or a file here, where the real app restricts that to
+  specific roles. Fine for a single-admin-account setup; needs closing
+  before this handles real multi-role staff.
 - No CORS configuration (only matters once the Worker and frontend are on
   different origins — noted in `MIGRATION.md`, still true).
 
 ## If you deployed this today, concretely
 
 `wrangler deploy` would succeed and the Worker would come up healthy.
-`/health`, `/api/settings`, `/api/products/search`,
-`/api/portal/catalog/products/search`, `/api/auth/login`, `/api/sales`,
-`/api/files/*` (upload, list, delete, and public `/uploads/*` serving),
-`/api/branches/*` (list, create, update, delete), and `/api/catalog/*`
-(meta, products with stock/gallery) would all work correctly. Every other
-URL the actual frontend calls — `/api/inventory/*`, `/api/users/*`,
-`/api/returns/*`, and 190 more — would return a 404 from Hono's default
-not-found handler, because nothing is mounted at those paths. No
-cross-device sync would happen. This is not a subtle gap you'd discover
-slowly; it would be immediately, completely obvious the moment anyone
+`/health`, `/api/settings` (now correctly requiring auth),
+`/api/products/search` (now correctly requiring auth),
+`/api/portal/config`, `/api/portal/promotions`,
+`/api/portal/catalog/products/search` (these three correctly public),
+`/api/auth/login`, `/api/sales`, `/api/files/*` (upload, list, delete, and
+public `/uploads/*` serving), `/api/branches/*` (list, create, update,
+delete), and `/api/catalog/*` (meta, products with stock/gallery) would all
+work correctly. Every other URL the actual frontend calls —
+`/api/inventory/*`, `/api/users/*`, `/api/returns/*`, and 187 more — would
+return a 404 from Hono's default not-found handler, because nothing is
+mounted at those paths. No cross-device sync would happen. This is not a
+subtle gap you'd discover slowly; it would be immediately, completely
+obvious the moment anyone
 clicked past the product catalog and branch settings.
 
 ## The path to actually getting there, if you want it

@@ -9,7 +9,7 @@ Postgres/Redis/BullMQ/ffmpeg backend in `backend/`. That backend is untouched
 and still works — this is an additive, parallel path you migrate into.
 
 **Is this production-ready? See [`PRODUCTION-READINESS.md`](./PRODUCTION-READINESS.md)
-for a direct, numbers-based answer.** Short version: no — 20 of 215 backend
+for a direct, numbers-based answer.** Short version: no — 28 of 215 backend
 endpoints exist here so far — but everything that does exist is real and
 tested, not a stub.
 
@@ -46,16 +46,20 @@ with real HTTP requests via `wrangler dev` — not written and assumed correct.
 - **`src/lib/r2.ts`** — R2 via the native Workers binding.
 - **`src/lib/cache.ts`** — KV-based replacement for `backend/src/runtimeCache.ts`.
 - **`src/routes/settings.ts`**, **`src/routes/products.ts`** (search),
-  **`src/routes/portal.ts`** (catalog search) — ported and verified:
+  **`src/routes/portal.ts`** (config, promotions, catalog search) — ported
+  and verified:
   ```
-  PUT  /api/settings/store_name  -> {"key":"store_name","value":"Leang Cosmetics"}
-  GET  /api/settings             -> {"store_name":"Leang Cosmetics"}
-  GET  /api/products/search?query=glow        -> correctly matched via brand column
-  GET  /api/products/search?category=Makeup   -> correctly matched via faceted filter
-  GET  /api/portal/catalog/products/search    -> the exact route that returned 500
+  GET  /api/settings              -> requires auth; full settings + updatedAt
+  POST /api/settings              -> bulk upsert {key: value, ...}, write-conflict checked
+  GET  /api/products/search?query=glow        -> requires auth; correctly matched via brand column
+  GET  /api/portal/config                     -> PUBLIC; curated branding subset only
+  GET  /api/portal/promotions                 -> PUBLIC; Announcement Strip feed
+  GET  /api/portal/catalog/products/search    -> PUBLIC; the exact route that returned 500
                                                   under the Docker/Postgres password
                                                   mismatch — 200 here, correct data
   ```
+  See "A system-wide audit found and fixed five real bugs" below for what
+  these shapes replaced.
 - **`src/lib/auth.ts` + `src/routes/auth.ts` (session auth)** — ported from
   `backend/src/sessionAuth.ts` / `routes/auth.ts`'s login flow: bcrypt
   password check, signed session cookie, D1-backed session lookup. Tested
@@ -93,8 +97,12 @@ with real HTTP requests via `wrangler dev` — not written and assumed correct.
     SQLite/D1 has no `GREATEST()` function at all (it would be a hard
     syntax error, not a subtle bug). SQLite's `MAX()` accepts multiple
     scalar arguments and does the same job; used that instead.
-  - `GET /api/sales/:id` (receipt display) tested with both a real sale and
-    a 404 case.
+  - `GET /api/sales` (the real list/history/receipt-lookup endpoint — see
+    the audit section below for why an earlier version of this port had a
+    `GET /api/sales/:id` that doesn't exist in the real app) tested with
+    multi-term search matching against an item's product name, a
+    zero-result search, a status filter, and the admin-only guard on the
+    `userId` filter correctly returning 403 for a non-admin session.
   - **Scoped deliberately**: the original also supports product batch/lot
     FIFO allocation, membership point redemption, and delivery tracking.
     Not ported this pass — noted honestly below, not silently dropped.
@@ -265,6 +273,81 @@ not done" above) is real and shouldn't be minimized either.
   different branches and a multi-image gallery — verified the response
   shows the correct quantity per branch and images in the correct sort
   order, not just that the endpoint returned data.
+
+## A system-wide audit found and fixed five real bugs
+
+Requested explicitly: check the whole system end-to-end, not just that each
+route works in isolation — is anything duplicated, missing, or actually
+wrong compared to the real backend contract the frontend expects? Cross-
+checked every ported route's endpoint paths and auth requirements against
+`backend/server.ts`'s mount table and each real route file, not assumed
+correct from having built it. Found three real, meaningful bugs:
+
+1. **`GET /api/settings` was fully public.** The real backend requires auth
+   on every settings endpoint, including plain reads, because the settings
+   table can hold anything an admin has configured, not just portal
+   branding. An earlier version of this port had no `requireAuth` on it at
+   all — the entire settings table was readable by anyone. **Fixed**: auth
+   required on all of `settings.ts` now. Portal branding is served through
+   a new, separate, deliberately curated `GET /api/portal/config` instead
+   (see below) — the correct place for it, matching how the real app
+   actually splits this.
+2. **`PUT /api/settings/:key` doesn't exist in the real app at all** — an
+   earlier version of this port invented single-key-update semantics that
+   don't match the real bulk-upsert shape (`POST /api/settings` with a flat
+   `{key: value, ...}` body, or the real frontend never calls it any other
+   way). **Fixed**: rebuilt as `POST /` with the real bulk shape, including
+   the write-conflict check the original has and this port's other routes
+   already use (`conflictControl.ts`).
+3. **`GET /api/sales/:id` doesn't exist in the real app either** — same
+   category of invented-endpoint bug. The real app has no per-sale lookup
+   route at all; receipt/sale-history lookup happens through `GET /api/sales`
+   with search/date/status/branch filters, returning a list with items and
+   a refund rollup already embedded. **Fixed**: replaced with the real
+   `GET /` list endpoint — another real dialect fix needed here too, since
+   the original uses Postgres's `STRING_AGG`/`json_agg`/`json_build_object`/
+   `::json` casts, none of which exist in SQLite; ported as a filtered query
+   plus two grouped follow-up queries instead, matching this migration's
+   established join style.
+4. **`GET /api/products/search` was missing auth** — the real backend
+   requires it (this is internal admin/POS catalog search, distinct from
+   the legitimately-public `GET /api/portal/catalog/products/search`).
+   **Fixed**: `requireAuth` added.
+5. **`src/routes/promotions.ts` existed, was fully built and correct, and
+   was never mounted.** A complete, working admin CRUD route (list, create
+   with product-existence validation, update, delete, drag-and-drop
+   reorder) sat in the routes folder but had no corresponding `app.route(...)`
+   line in `index.ts` — dead code, unreachable by any request, despite
+   being real and correct. This is exactly the kind of gap a
+   route-by-route review misses and a whole-system check catches: every
+   individual file looked done; the router wiring didn't match. **Fixed**:
+   mounted at `/api/promotions`, matching the real backend's mount point.
+
+All five fixes verified against real local D1, not just read and assumed
+correct: the settings fix was tested by confirming an unauthenticated
+request now gets 401 where it previously got 200; the new `/config`
+endpoint was confirmed to return only its curated field list, not the raw
+settings table; the sales list fix was tested with a multi-term search that
+must match through an embedded item's product name (not just the sale's
+own columns), a deliberately-unmatchable search term confirmed to return an
+empty array rather than everything, and the admin-only `userId` filter
+guard confirmed to reject a non-admin session with 403; the promotions
+route, once mounted, was exercised through its full lifecycle for the
+first time ever — auth rejection, create, a rejected invalid product link,
+reorder, update, and delete — and every case passed on the first real
+test.
+
+**One gap this audit surfaced but did not close, disclosed rather than
+fixed silently**: the real backend's `files.ts` and `branches.ts` write
+endpoints require specific permissions (`requirePermission('settings')`,
+`requirePermission('inventory')`), not just "any logged-in user." This
+port's `requireAuth` only checks that a session exists, not what it's
+allowed to do — permission-level granularity isn't ported yet at all (no
+route in `cloudflare/` checks anything beyond "is there a valid session").
+Concretely: in this port, any authenticated user can currently delete a
+branch or a file, where the real app would restrict that to specific
+roles. Worth closing before this path handles real multi-role staff, not
+just a single admin account.
 
 ## What's not done (the honest remainder)
 
