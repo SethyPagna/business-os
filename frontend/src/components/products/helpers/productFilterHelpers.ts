@@ -117,21 +117,18 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
     : String(issueFilter).split(',').map((v) => v.trim()).filter(Boolean)
 
   return products.filter((product) => {
-    // Search haystack mirrors the server's own /api/products/search LIKE
-    // match set (buildSearchFilters, cloudflare/src/routes/products.ts) --
-    // name, sku, barcode, brand, category, supplier, description, and unit.
-    // Used to only check `name` here: the server already returns rows that
-    // matched on e.g. unit/supplier/description, but this client-side
-    // re-filter (applied to that same page for instant typing feedback)
-    // would then silently drop them again because their name didn't
-    // contain the search text -- same "server's answer gets second-
-    // guessed by a narrower client check" bug already fixed for
-    // stock/category/groupFilter above, just for the search box instead.
-    // Concretely broke the unit-review handoff (handleLookupReviewSelection
-    // in Products.tsx): picking a unit from ManageUnitsModal sets `search`
-    // to that unit's name, the server correctly returns matching products,
-    // and this filter then emptied the page because none of their names
-    // happened to contain the unit text.
+    // Search haystack mirrors the server's own /api/products/search MATCH
+    // scope (PRODUCT_SEARCH_COLUMNS, cloudflare/src/lib/searchMatch.ts) --
+    // name, sku, barcode only. Narrowed from the old wider set (which also
+    // checked brand/category/supplier/description/unit) per an explicit
+    // request: product names already carry the brand in this catalog, and
+    // brand/category/supplier are already reachable via their own filter
+    // dropdowns rather than free-text search. The unit-review handoff
+    // (handleLookupReviewSelection in Products.tsx) no longer relies on the
+    // search box at all -- it now sets a dedicated unitFilter instead of
+    // stuffing the unit's name into `search` -- so dropping unit here no
+    // longer risks the "server matched, client re-filter silently emptied
+    // the page" bug this comment used to warn about for that flow.
     //
     // Routed through matchesSearchTermGroups (searchMatch.ts) instead of a
     // plain `haystack.includes(term)` check -- typo/joiner/word-order/
@@ -140,7 +137,7 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
     // narrow back down to a stricter match than the page it's re-filtering
     // just came from.
     const matchSearch = matchesSearchTermGroups(
-      [product?.name, product?.sku, product?.barcode, product?.brand, product?.category, product?.supplier, product?.description, product?.unit],
+      [product?.name, product?.sku, product?.barcode],
       searchTermList,
       searchMode as 'AND' | 'OR',
     )

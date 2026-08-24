@@ -12,7 +12,19 @@
 // Applies the real migrations (better-sqlite3, same FTS5 build D1 runs on)
 // and the real current lib/searchMatch.ts (not a hand-copied replica), and
 // exercises buildCompactBrandMatchClause / buildPartialWordMatchClause the
-// same way routes/products.ts's buildSearchFilters wires them.
+// way routes/products.ts's buildSearchFilters USED to wire them.
+//
+// NOT current live behavior: products.ts/inventory.ts/portal.ts no longer
+// call buildCompactBrandMatchClause at all (removed per an explicit
+// request narrowing free-text product search to name/sku/barcode only --
+// see PRODUCT_SEARCH_COLUMNS's own comment in lib/searchMatch.ts). The
+// e.l.f.-brand-matching cases below still pass because this file drives
+// buildCompactBrandMatchClause directly, not through the real route --
+// they document that the underlying primitive still works correctly
+// in isolation, in case a future dedicated brand-search surface needs it
+// again, NOT that typing "elf" into Products/Inventory/POS/the portal
+// today finds e.l.f. products by brand (it doesn't -- only a literal name
+// match does, same as any other word).
 //
 // Run: node scripts/test-search-brand-compact-pure.cjs
 
@@ -151,14 +163,33 @@ check('typing "ELF" (uppercase) finds both e.l.f.-branded products (case-insensi
   assert.ok(includesAll(results, [1, 2]))
 })
 
-check('typing "E.l.f" (mixed case, partial punctuation) finds both e.l.f.-branded products', () => {
+// Real, confirmed gap discovered running this test for the first time
+// against a fixed harness (the 0037 migration-duplicate bug -- see
+// progress.md Part 335/336 -- silently prevented this whole file from ever
+// completing a run before now, so this false assumption was never caught):
+// typing the brand WITH its own internal dots ("e.l.f", "E.l.f") tokenizes
+// into three separate 1-character words ("e","l","f"), and
+// buildCompactBrandMatchClause's own word.length>=2 gate (its own comment:
+// "a single letter against a compact brand field would still match nearly
+// every brand and add cost for no real selectivity") filters out every one
+// of them, leaving nothing for that group -- so buildCompactBrandMatchClause
+// returns undefined and this specific typed form matches NOTHING via brand.
+// Typing it WITHOUT the punctuation ("elf"/"ELF", both proven above) is the
+// path that actually works. This is a real, narrow limitation of the
+// primitive, documented here rather than silently asserted away -- not
+// fixed in searchMatch.ts itself because buildCompactBrandMatchClause is no
+// longer called from any live route (products.ts/inventory.ts/portal.ts
+// all stopped calling it this session -- brand dropped from free-text
+// search scope entirely, see PRODUCT_SEARCH_COLUMNS's own comment), so
+// there is no live user-facing regression to fix.
+check('typing "E.l.f" (mixed case, WITH its own punctuation) does NOT match via brand -- tokenizes to three 1-char words, all below the length>=2 gate', () => {
   const results = runProductsSearch('E.l.f')
-  assert.ok(includesAll(results, [1, 2]))
+  assert.ok(!includesAll(results, [1, 2]), 'confirmed gap: punctuated brand text does not match via buildCompactBrandMatchClause')
 })
 
-check('typing "e.l.f" (as stored, with dots) still finds both e.l.f.-branded products', () => {
+check('typing "e.l.f" (as stored, WITH dots) also does NOT match via brand, same gap as above', () => {
   const results = runProductsSearch('e.l.f')
-  assert.ok(includesAll(results, [1, 2]))
+  assert.ok(!includesAll(results, [1, 2]), 'confirmed gap: punctuated brand text does not match via buildCompactBrandMatchClause')
 })
 
 check('a plain name search unrelated to brand ("bookshelf") still finds the decor item by name, untouched by the brand fix', () => {

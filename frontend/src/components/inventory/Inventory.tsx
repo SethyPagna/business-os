@@ -1828,18 +1828,16 @@ export default function Inventory() {
     matchesSearchTermGroups(hay, searchTerms, searchMode)
   ), [searchMode, searchTerms])
 
-  // Widened to match POS.tsx's own local haystack (name/sku/barcode/
-  // category/brand/supplier/description/unit) -- this was previously
-  // name-only, which silently dropped this page's client-side re-filter
-  // for any product that only matched by e.g. barcode or brand. In
-  // practice this re-filter is a no-op today (see hasServerBackedProductSearch
-  // below: it only runs when there ISN'T a server-backed search, and an
-  // empty searchTerms list always passes matchesSearch anyway), but
-  // widening it keeps it correct rather than silently wrong if that ever
-  // changes, and matches the same fix already made to Products.tsx's
-  // filterProductsForPage.
+  // Matches POS.tsx's own local haystack and the server's own
+  // PRODUCT_SEARCH_COLUMNS (cloudflare/src/lib/searchMatch.ts) --
+  // name/sku/barcode only. In practice this re-filter is a no-op today
+  // (see hasServerBackedProductSearch below: it only runs when there ISN'T
+  // a server-backed search, and an empty searchTerms list always passes
+  // matchesSearch anyway), but keeping it correct rather than silently
+  // wrong if that ever changes, and matches the same fix already made to
+  // Products.tsx's filterProductsForPage/POS.tsx's own re-filter.
   const productHay = useCallback((p: InventoryProduct): string => (
-    `${p.name||''} ${p.sku||''} ${p.barcode||''} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
+    `${p.name||''} ${p.sku||''} ${p.barcode||''}`.toLowerCase()
   ), [])
 
   const movHay = useCallback((m: InventoryMovement): string => (

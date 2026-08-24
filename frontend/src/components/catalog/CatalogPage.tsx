@@ -2438,8 +2438,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // diacritic tolerant, same fix as productMatchesRecommendedSearch
       // above and Products/Inventory/POS's own re-filters. portalSearchTerms
       // has no AND/OR toggle in this editor preview, so mode stays 'AND'
-      // (unchanged behavior -- every term must match).
-      const haystack = [product.name, product.category, product.brand, product.description]
+      // (unchanged behavior -- every term must match). Narrowed to
+      // name/sku/barcode, matching PRODUCT_SEARCH_COLUMNS and
+      // routes/portal.ts's own ftsMatch column list (cloudflare/src/lib/
+      // searchMatch.ts) -- brand/category/description dropped: names
+      // already carry the brand in this catalog, and the storefront's own
+      // brand/category filter chips (categoryFilter/brandFilter below)
+      // already cover exact lookup.
+      const haystack = [product.name, product.sku, product.barcode]
 
       if (portalSearchTerms.length > 0 && !matchesSearchTermGroups(haystack, portalSearchTerms, 'AND')) return false
       if (categoryFilter.length && !categoryFilter.includes(product.category || '')) return false

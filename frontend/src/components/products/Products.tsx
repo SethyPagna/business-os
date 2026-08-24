@@ -631,6 +631,17 @@ function ProductsFullEditor() {
   const [catFilter,    setCatFilter]    = useState<Set<string>>(new Set())
   const [brandFilter,  setBrandFilter]  = useState<Set<string>>(new Set())
   const [supplierFilter, setSupplierFilter] = useState<Set<string>>(new Set())
+  // Exact-match unit filter -- not exposed as its own dropdown UI (no ask
+  // for one), only ever set programmatically by handleLookupReviewSelection
+  // ("which products use this unit", from ManageUnitsModal). Replaces the
+  // old behavior of stuffing the unit's name into the free-text `search`
+  // box: now that PRODUCT_SEARCH_COLUMNS (cloudflare/src/lib/searchMatch.ts)
+  // no longer includes 'unit' (search narrowed to name/sku/barcode per an
+  // explicit request), that old approach would have silently emptied the
+  // page. Sent to the server as the same `unit` query param
+  // buildSearchFilters' generic brand/category/unit/supplier exact-match
+  // loop (cloudflare/src/routes/products.ts) already reads.
+  const [unitFilter,   setUnitFilter]   = useState<string>('')
   const [modal,        setModal]        = useState<ProductModalMode>(null)
   const [selected,     setSelected]     = useState<ProductRecord | null>(null)
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
@@ -779,6 +790,11 @@ function ProductsFullEditor() {
           category: catFilter.size ? [...catFilter].join(',') : '',
           brand: brandFilter.size ? [...brandFilter].join(',') : '',
           supplier: supplierFilter.size ? [...supplierFilter].join(',') : '',
+          // Exact-match unit filter -- see unitFilter's own declaration
+          // comment for why this exists (the ManageUnitsModal "which
+          // products use this unit" review flow no longer piggybacks on
+          // free-text search).
+          unit: unitFilter || '',
           branchId: branchFilter === 'all' ? '' : branchFilter,
           // Was forcing 'positive' (in-stock + low-stock, excluding
           // out-of-stock) here whenever a branch was selected and the
@@ -923,7 +939,7 @@ function ProductsFullEditor() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, notify, productPage, productPageSize, productSortDirection, searchMode, supplierFilter, t, tr])
+  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, notify, productPage, productPageSize, productSortDirection, searchMode, supplierFilter, t, tr, unitFilter])
 
   useEffect(() => {
     latestLoadRef.current = load
@@ -2057,6 +2073,7 @@ function ProductsFullEditor() {
     setBrandFilter(new Set())
     setBranchFilter('all')
     setSupplierFilter(new Set())
+    setUnitFilter('')
     setStockFilter('all')
     setGroupFilter('all')
     setIssueFilter('all')
@@ -2098,7 +2115,13 @@ function ProductsFullEditor() {
       return
     }
     if (type === 'unit') {
-      setSearch(value)
+      // Was `setSearch(value)`, relying on 'unit' being in scope for the
+      // free-text search box -- broke silently once PRODUCT_SEARCH_COLUMNS
+      // (cloudflare/src/lib/searchMatch.ts) was narrowed to name/sku/
+      // barcode only. Now uses its own exact-match filter (see unitFilter's
+      // declaration comment), the same way the 'brand'/'category' branches
+      // above already use brandFilter/catFilter instead of search text.
+      setUnitFilter(value)
     }
   }, [clearAllFilters])
 

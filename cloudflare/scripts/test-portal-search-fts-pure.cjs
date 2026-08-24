@@ -1,38 +1,40 @@
 // Real-SQLite (not mocked) test of routes/portal.ts's public storefront
-// search path -- originally written for this session's first move from a
-// per-row REPLACE()-chain LIKE full-table-scan onto products_fts (FTS5
-// virtual table, via buildFtsMatchExpression's column-SET filter support),
-// updated again this session when portal.ts's column scope itself changed
-// from {name brand category} to {name sku barcode brand category} plus a
-// products_fts_code trigram fallback -- closing the "public portal search"
-// half of the "Products/POS/Inventory/public portal search accuracy"
-// progress.md item, which explicitly named barcode/sku as the
-// second-most-used search dimension after name for every one of those
-// surfaces, portal included. Applies migrations/0018_products_fts.sql and
-// 0019_products_fts_code.sql verbatim against an in-memory database
-// (better-sqlite3, same FTS5 build D1 runs on), same technique as
-// test-search-fts-pure.cjs.
+// search path -- originally written for the move from a per-row
+// REPLACE()-chain LIKE full-table-scan onto products_fts (FTS5 virtual
+// table, via buildFtsMatchExpression's column-SET filter support), then
+// widened to {name sku barcode brand category}, and now narrowed again to
+// {name sku barcode} ONLY -- per an explicit request that free-text product
+// search (Products/POS/Inventory/public portal, all four surfaces) should
+// only ever match name/barcode/sku: product names in this catalog already
+// carry the brand (including shorthand like "elf" for e.l.f.), and
+// brand/category are already reachable via their own filter chips, so a
+// brand/category text hit was noise, not signal, for someone typing into a
+// product search box. See PRODUCT_SEARCH_COLUMNS's own comment in
+// lib/searchMatch.ts for the full reasoning (that constant governs
+// products.ts/inventory.ts; portal.ts passes its own literal column list to
+// buildFtsMatchExpression, mirrored here). Applies migrations/
+// 0018_products_fts.sql and 0019_products_fts_code.sql verbatim against an
+// in-memory database (better-sqlite3, same FTS5 build D1 runs on), same
+// technique as test-search-fts-pure.cjs.
 //
 // What this exists to prove, not just assume from the source read:
-// 1. name/brand/category matching still works the same as the old LIKE
-//    version (no regression from the rewrite).
-// 2. sku/barcode now DO match (the real gap this session's second pass
-//    closed) -- both a word-prefix sku match via products_fts and a
-//    mid-string barcode-fragment match via the products_fts_code trigram
+// 1. name matching still works.
+// 2. sku/barcode still match (a word-prefix sku match via products_fts and
+//    a mid-string barcode-fragment match via the products_fts_code trigram
 //    fallback, mirroring products.ts's own ftsMatch/trigramMatch OR
-//    combination. supplier/description/unit must still NOT match --
-//    those were never in scope and this session didn't touch that part
-//    of the decision (see PRODUCT_SEARCH_COLUMNS's own comment in
-//    lib/searchMatch.ts for why unit is admin-only and portal has no
-//    equivalent use for it).
-// 3. Multi-word AND within one query still works (portal has no AND/OR
+//    combination).
+// 3. brand/category/supplier/description/unit must ALL now NOT match via
+//    free text -- brand/category dropped this session alongside the
+//    pre-existing supplier/description/unit exclusions.
+// 4. Multi-word AND within one query still works (portal has no AND/OR
 //    toggle -- always one AND group).
-// 4. Brand-shorthand aliases (RT/NYX/BH/OFRA) still resolve, via
-//    buildFtsMatchExpression's own alias expansion.
-// 5. bm25 relevance ranking works on a column-filtered MATCH (confirms
-//    the new ORDER BY -- match rank first, name tiebreaker -- is legal
-//    SQL and actually orders best-match-first, not just that it doesn't
-//    throw).
+// 5. Brand-shorthand aliases (RT/NYX/BH/OFRA) resolving against BRAND text
+//    no longer apply on the storefront now that brand is out of scope --
+//    typing "rt" must NOT find a product whose only "rt"-relevant text is
+//    its brand field, now that brand isn't searched at all.
+// 6. bm25 relevance ranking still works on the narrowed column-filtered
+//    MATCH (confirms the ORDER BY is still legal SQL and doesn't throw
+//    once the column-SET filter drops to a single-weight-tier set).
 //
 // Run: node scripts/test-portal-search-fts-pure.cjs
 // Requires better-sqlite3 (same test-only, --no-save install as
@@ -85,13 +87,13 @@ function insertProduct(db, row) {
 
 // Mirrors routes/portal.ts's buildPortalProductFilters search-clause
 // construction exactly: one flat AND-group of every typed word, scoped to
-// {name sku barcode brand category} via products_fts, OR'd against a
-// products_fts_code trigram match for mid-string barcode/sku fragments,
-// ranked by bm25 (ftsMatch only) when there's a FTS5 match.
+// {name sku barcode} via products_fts, OR'd against a products_fts_code
+// trigram match for mid-string barcode/sku fragments, ranked by bm25
+// (ftsMatch only) when there's a FTS5 match.
 function runPortalSearch(db, rawQuery) {
   const words = tokenizeSearchWords(rawQuery, 8)
   if (!words.length) return db.prepare('SELECT id, name FROM products ORDER BY id').all()
-  const ftsMatch = buildFtsMatchExpression([words], 'AND', ['name', 'sku', 'barcode', 'brand', 'category'])
+  const ftsMatch = buildFtsMatchExpression([words], 'AND', ['name', 'sku', 'barcode'])
   const trigramMatch = buildTrigramMatchExpression([words], 'AND')
   const matchClauses = []
   const params = {}
@@ -116,23 +118,28 @@ function runPortalSearch(db, rawQuery) {
   `).all(params)
 }
 
-// --- 1. name/brand/category matching, same as the old LIKE version -----
+// --- 1. name matching works; brand/category text no longer matches -----
 {
   const db = freshDb()
-  insertProduct(db, { id: 1, name: 'MAC Matte Lipstick 617 Rebel', brand: 'MAC', category: 'Lipstick', sku: 'SKU1', barcode: '6923644012345' })
-  insertProduct(db, { id: 2, name: 'Essence Lip Tint', brand: 'Essence', category: 'Tint', sku: 'SKU2', barcode: '1112223334445' })
+  // Brand/category deliberately do NOT restate "MAC"/"Tint" in the name
+  // here (unlike the old version of this test) -- the whole point of
+  // this check is that a brand/category word absent from the name must no
+  // longer match, and "MAC Matte Lipstick" would have made 'mac' match via
+  // NAME anyway, masking the very thing being tested.
+  insertProduct(db, { id: 1, name: 'Matte Lipstick 617 Rebel', brand: 'MAC', category: 'Lipstick', sku: 'SKU1', barcode: '6923644012345' })
+  insertProduct(db, { id: 2, name: 'Essence Lip Tint', brand: 'Essence', category: 'Beauty', sku: 'SKU2', barcode: '1112223334445' })
   const byName = runPortalSearch(db, 'lipstick')
   assert.deepStrictEqual(byName.map((r) => r.id), [1], 'a name-word search must still find the matching product via the storefront path')
   const byBrand = runPortalSearch(db, 'mac')
-  assert.deepStrictEqual(byBrand.map((r) => r.id), [1], 'a brand search must still work via the storefront path')
-  const byCategory = runPortalSearch(db, 'tint')
-  assert.deepStrictEqual(byCategory.map((r) => r.id), [2], 'a category search must still work via the storefront path')
-  check('portal search matches name/brand/category, same as the old LIKE-chain version', () => {})
+  assert.deepStrictEqual(byBrand.map((r) => r.id), [], 'a brand-only text search must NOT match via the storefront path now that brand is out of scope (use the brand filter chip instead)')
+  assert.deepStrictEqual(runPortalSearch(db, 'rebel').map((r) => r.id), [1], 'sanity: a real name word still matches')
+  const byCategory = runPortalSearch(db, 'beauty')
+  assert.deepStrictEqual(byCategory.map((r) => r.id), [], 'a category-only text search must NOT match via the storefront path now that category is out of scope (use the category filter chip instead)')
+  check('portal search matches name only, not brand/category text', () => {})
 }
 
-// --- 2. sku/barcode now match (the real gap this session's second pass
-// closed); supplier/description/unit must still NOT leak in -- those
-// were never in scope and this session didn't touch that boundary. ---
+// --- 2. sku/barcode match; brand/category/supplier/description/unit must
+// all NOT leak in -------------------------------------------------------
 {
   const db = freshDb()
   insertProduct(db, {
@@ -147,11 +154,13 @@ function runPortalSearch(db, rawQuery) {
     unit: 'peculiarunit',
   })
   assert.deepStrictEqual(runPortalSearch(db, '012').map((r) => r.id), [1], 'a barcode mid-string fragment search must match via the trigram fallback, same as products.ts/inventory.ts')
-  assert.deepStrictEqual(runPortalSearch(db, 'uniquesku').map((r) => r.id), [1], 'a sku search must match via the public storefront path now that sku is in scope')
+  assert.deepStrictEqual(runPortalSearch(db, 'uniquesku').map((r) => r.id), [1], 'a sku search must match via the public storefront path')
+  assert.deepStrictEqual(runPortalSearch(db, 'genericbrand').map((r) => r.id), [], 'a brand-name search must NOT match via the public storefront path')
+  assert.deepStrictEqual(runPortalSearch(db, 'genericcategory').map((r) => r.id), [], 'a category-name search must NOT match via the public storefront path')
   assert.deepStrictEqual(runPortalSearch(db, 'confidentialsupplier').map((r) => r.id), [], 'a supplier-name search must NOT match via the public storefront path')
   assert.deepStrictEqual(runPortalSearch(db, 'secretingredient').map((r) => r.id), [], 'a description-word search must NOT match via the public storefront path')
   assert.deepStrictEqual(runPortalSearch(db, 'peculiarunit').map((r) => r.id), [], 'a unit search must NOT match via the public storefront path (unit stays admin-only, see PRODUCT_SEARCH_COLUMNS)')
-  check('storefront search scope is name/sku/barcode/brand/category after widening -- supplier/description/unit still do not leak in', () => {})
+  check('storefront search scope is name/sku/barcode only -- brand/category/supplier/description/unit all stay out', () => {})
 }
 
 // --- 3. multi-word AND within one query (no AND/OR toggle on the
@@ -160,29 +169,36 @@ function runPortalSearch(db, rawQuery) {
   const db = freshDb()
   insertProduct(db, { id: 1, name: 'MAC Matte Lipstick', brand: 'MAC', category: 'Lipstick' })
   insertProduct(db, { id: 2, name: 'MAC Foundation', brand: 'MAC', category: 'Foundation' })
-  assert.deepStrictEqual(runPortalSearch(db, 'mac lipstick').map((r) => r.id), [1], 'a two-word storefront query must require both words (AND), matching only the lipstick, not the foundation')
-  check('storefront multi-word search is AND, same as before the FTS5 move', () => {})
+  assert.deepStrictEqual(runPortalSearch(db, 'matte lipstick').map((r) => r.id), [1], 'a two-word storefront query (both words in the NAME) must require both words (AND), matching only the lipstick, not the foundation')
+  check('storefront multi-word search is AND, same as before', () => {})
 }
 
-// --- 4. brand-shorthand aliases still resolve ---------------------------
+// --- 4. brand-shorthand aliases no longer resolve via BRAND text (brand
+// is out of scope); they still resolve normally when the alias word is
+// genuinely part of the NAME -------------------------------------------
 {
   const db = freshDb()
   insertProduct(db, { id: 1, name: 'Setting Spray', brand: 'Real Techniques', category: 'Tools' })
-  assert.deepStrictEqual(runPortalSearch(db, 'rt').map((r) => r.id), [1], "the 'rt' -> 'Real Techniques' alias must still resolve through the storefront's FTS5 path")
-  check('storefront brand-shorthand aliases (RT/NYX/BH/OFRA) still resolve after the FTS5 move', () => {})
+  assert.deepStrictEqual(runPortalSearch(db, 'rt').map((r) => r.id), [], "'rt' must NOT resolve to a product whose only 'Real Techniques' text is its brand field, now that brand is out of the storefront's search scope")
+  const db2 = freshDb()
+  insertProduct(db2, { id: 1, name: 'RT Precision Foundation Brush', brand: 'Real Techniques', category: 'Tools' })
+  assert.deepStrictEqual(runPortalSearch(db2, 'rt').map((r) => r.id), [1], "'rt' must still match a product whose NAME literally starts with 'RT' -- this is a plain name-prefix match, unrelated to brand-alias expansion")
+  check('storefront brand-shorthand alias resolution no longer applies to brand-only text', () => {})
 }
 
-// --- 5. bm25 relevance ranking works on the column-filtered MATCH and
-// actually orders the better match first -------------------------------
+// --- 5. bm25 relevance ranking still works on the narrowed column-
+// filtered MATCH (name/sku/barcode all carry equal weight in
+// PRODUCTS_FTS_BM25_SQL now that this is the only tier the storefront
+// queries -- this just confirms the ORDER BY stays legal SQL and both a
+// name match and a sku match come back, not a specific weight ordering) --
 {
   const db = freshDb()
-  // Product 1: "lipstick" only in category (weaker, single low-weight hit).
-  insertProduct(db, { id: 1, name: 'Rebel Red', brand: 'MAC', category: 'Lipstick' })
-  // Product 2: "lipstick" in the name itself (stronger, higher-weight column).
-  insertProduct(db, { id: 2, name: 'MAC Lipstick Classic', brand: 'MAC', category: 'Makeup' })
+  insertProduct(db, { id: 1, name: 'Rebel Red Lipstick', brand: 'MAC', category: 'Lipstick', sku: 'SKU-OTHER' })
+  insertProduct(db, { id: 2, name: 'Unrelated Product', brand: 'MAC', category: 'Makeup', sku: 'SKU-LIPSTICK' })
   const results = runPortalSearch(db, 'lipstick')
-  assert.deepStrictEqual(results.map((r) => r.id), [2, 1], 'bm25 ranking on the column-filtered MATCH must still rank a name hit above a category-only hit, matching PRODUCTS_FTS_BM25_SQL\'s column weights')
-  check('bm25 relevance ranking works correctly on the widened column-filtered MATCH', () => {})
+  assert.ok(results.some((r) => r.id === 1), 'the name match must be present')
+  assert.ok(results.some((r) => r.id === 2), 'the sku match must be present')
+  check('bm25 relevance ranking does not throw on the narrowed column-filtered MATCH', () => {})
 }
 
 console.log(`\n${passed} portal-search-FTS checks passed`)

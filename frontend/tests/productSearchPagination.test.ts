@@ -53,15 +53,24 @@ assert.match(
   /const productSelectAllLabel = loadedOnceRef\.current \|\| !loading[\s\S]*Select all/,
   'Products mobile select-all label should not show a false zero count during first load',
 )
-assert.match(
+// Free-text product search is scoped to name/sku/barcode only (see
+// PRODUCT_SEARCH_COLUMNS's own comment in cloudflare/src/lib/searchMatch.ts)
+// -- unit is no longer part of that haystack, on either the server or this
+// client-side re-filter.
+assert.doesNotMatch(
   productFilterHelpers,
-  /product\?\.unit/,
-  'Products search should include unit names so unit review can jump into matching products',
+  /product\?\.unit|product\?\.brand|product\?\.category|product\?\.supplier|product\?\.description/,
+  'Products client-side search re-filter must stay scoped to name/sku/barcode, matching the server\'s PRODUCT_SEARCH_COLUMNS',
 )
 assert.match(
   productsPage,
   /const handleLookupReviewSelection = useCallback/,
   'Products page should expose a lookup-review handoff for manage brand/category/unit flows',
+)
+assert.match(
+  productsPage,
+  /setUnitFilter\(value\)/,
+  'unit review handoff should use a dedicated exact-match unitFilter instead of piggybacking on free-text search (which no longer includes unit)',
 )
 assert.match(
   productsPage,

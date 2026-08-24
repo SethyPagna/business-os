@@ -657,40 +657,38 @@ export const PRODUCTS_FTS_BM25_SQL = 'bm25(products_fts, 10, 10, 10, 4, 3, 1, 1,
 
 // Column subset the typed free-text product search box (Products.tsx,
 // POS.tsx, Inventory.tsx's products tab, and the public portal storefront)
-// actually scopes its MATCH to, replacing the previous unscoped call (which
-// searched all 8 products_fts columns, including supplier/description/unit)
-// for the everyday "type a product name/code" case those four surfaces all
-// share. Real, reported gap this closes: supplier is an internal vendor
-// name a shopper/cashier never types looking for a PRODUCT, and a long
-// free-text description field can contain almost any word, so both were
-// silently widening result sets with matches nobody typing into a product
-// search box was looking for -- exactly the "search bar doesn't need
-// supplier, description, unit" scope progress.md's Part 106 item asked for,
-// and a smaller MATCH column set is also strictly cheaper for FTS5 to
+// actually scopes its MATCH to. Narrowed to name/sku/barcode ONLY per an
+// explicit request: product names in this catalog already carry the brand
+// (including shorthand/initials like "elf" for e.l.f., "RT" for Real
+// Techniques -- see the ALIAS_GROUPS table below, which still resolves
+// those shorthands against NAME text), and brand/category/supplier/
+// description/unit are all already reachable via their own dedicated
+// filter dropdowns (brandFilter/catFilter/supplierFilter on Products.tsx
+// and Inventory.tsx) -- a free-text hit inside a long description or an
+// internal supplier name a shopper/cashier never types was pure noise, not
+// signal, for the "type a product name/code" case these four surfaces all
+// share. A smaller MATCH column set is also strictly cheaper for FTS5 to
 // evaluate (fewer postings lists to intersect per query), which matters on
 // a CPU-metered Cloudflare Workers free-tier plan under concurrent
 // multi-user load.
 //
-// 'unit' is the one column deliberately KEPT in scope, not dropped along
-// with supplier/description -- traced a real, live dependency before
-// removing it: Products.tsx's handleLookupReviewSelection sets the visible
-// search box text to a unit's name when someone reviews "which products
-// use this unit" from ManageUnitsModal (no dedicated unit-filter chip/
-// state exists the way brandFilter/catFilter do for brand and category),
-// so a unit-scoped MATCH is exactly what that already-shipped feature
-// needs to keep working. Silently dropping 'unit' here would have broken
-// that workflow with no error, just an always-empty result page -- flagged
-// in progress.md as a real follow-up (give unit review its own exact-match
-// filter param instead of piggybacking on free-text search, the same way
-// brand/category already have one) rather than guessed at and shipped with
-// a regression.
+// 'unit' was previously kept in scope specifically to serve Products.tsx's
+// handleLookupReviewSelection ("which products use this unit", opened from
+// ManageUnitsModal) by stuffing the unit's name into the free-text search
+// box -- the one real dependency on unit being searchable. That workflow
+// now uses its own exact-match `unit` query param (already supported
+// server-side by the generic brand/category/unit/supplier structural-filter
+// loop below; Products.tsx now sends it via a dedicated unitFilter piece of
+// state instead of piggybacking on free-text search), so dropping 'unit'
+// from this list no longer breaks it -- closes the exact follow-up this
+// comment used to flag as still-needed.
 //
 // barcode/sku are NOT dropped -- explicitly named by the person as the
 // second-most-used search dimension after name, and already carry their
 // own trigram substring fallback (products_fts_code) for exactly this
 // scope, unaffected by this column list (that table only ever indexes
 // barcode+sku regardless of this constant).
-export const PRODUCT_SEARCH_COLUMNS = ['name', 'sku', 'barcode', 'brand', 'category', 'unit'] as const
+export const PRODUCT_SEARCH_COLUMNS = ['name', 'sku', 'barcode'] as const
 
 // --- barcode/SKU substring fallback (products_fts_code, trigram) --------
 //
