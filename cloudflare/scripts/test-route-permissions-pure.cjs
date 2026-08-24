@@ -121,7 +121,22 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   // applies directly under Review Required, edit is restricted to the
   // name field only, delete is blocked outright for that tier.
   const contactsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
-  assert.match(contactsSrc, /app\.use\('\*', async \(c, next\) => \{\s*const user = c\.get\('user'\)/, 'contacts.ts must have a router-wide contacts-permission gate')
+  // The gate is registered per owned path prefix rather than as a single
+  // `app.use('*', ...)`. It has to be: contacts.ts is mounted at the BARE
+  // `/api` prefix (index.ts), so a `'*'` middleware here registers as
+  // `/api/*` and runs for every other `/api/...` route mounted after it --
+  // which 401'd the deliberately-public `/api/organizations/*` endpoints the
+  // login screen calls, making login impossible on a fresh browser. Still a
+  // router-wide gate in effect, just scoped to the paths this router owns.
+  assert.match(contactsSrc, /for \(const prefix of CONTACT_PATH_PREFIXES\) \{\s*\n\s*app\.use\(prefix, requireContactsAccess\)/, 'contacts.ts must apply its contacts-permission gate across every owned path prefix')
+  assert.match(contactsSrc, /const requireContactsAccess = async \(c: Context<[^>]*>, next: Next\) => \{\s*\n\s*const user = c\.get\('user'\)/, 'contacts.ts must define its permission gate as a single shared handler so the per-prefix registrations cannot drift apart')
+  // Anchored to the start of a line so this checks real code, not the
+  // explanatory comments in that file which quote the old broken form.
+  assert.doesNotMatch(contactsSrc, /^app\.use\('\*',/m, "contacts.ts must not use a bare '*' middleware -- it is mounted at /api and would leak onto every later-mounted route (see the organizations/login regression)")
+  // Each prefix must be registered as BOTH the exact path and its subtree.
+  // Hono does not treat a bare trailing `*` (`/customers*`) as a wildcard --
+  // that form matches nothing and silently leaves the routes unauthenticated.
+  assert.match(contactsSrc, /app\.use\(`\$\{prefix\}\/\*`, requireAuth\)/, 'contacts.ts must guard each prefix subtree with the `${prefix}/*` form Hono actually matches')
   assert.match(contactsSrc, /getPermissionTier\(user, 'contacts'\) === 'none'/, "contacts.ts's router-wide gate must be tier-aware (getPermissionTier !== none), not the strict hasPermission() boolean")
   assert.match(contactsSrc, /tier === 'review' \? \['name'\] : config\.columns/, 'contacts.ts PUT /:id must restrict a Review Required edit to the name column only')
   assert.match(contactsSrc, /getPermissionTier\(user, 'contacts'\) === 'review'[\s\S]{0,120}?Deleting a \$\{config\.entity\}/, 'contacts.ts DELETE /:id must explicitly block Review Required rather than leave it reachable')
@@ -225,7 +240,15 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   const compatSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
   const dashboardChecks = compatSrc.match(/denyUnless\(c, 'dashboard'\)/g) || []
   assert.equal(dashboardChecks.length, 3, `expected exactly 3 denyUnless(c, 'dashboard') call sites (GET /dashboard, GET /analytics, GET /dashboard/startup), found ${dashboardChecks.length}`)
-  assert.match(compatSrc, /app\.use\('\/dashboard\*', requireAuth\)/, "compat.ts must still require a session on every /dashboard* route before the permission check runs")
+  // Was asserting the literal `app.use('/dashboard*', requireAuth)` form.
+  // That form is DEAD -- Hono does not treat a bare trailing `*` as a
+  // wildcard, so all thirteen of compat.ts's guards matched nothing (proved
+  // against the bundled Hono, and by an unauthenticated GET /api/transfers
+  // returning live rows). The guards are now registered as `${prefix}/*`,
+  // the form Hono actually matches, which also covers the bare `/prefix`.
+  assert.match(compatSrc, /for \(const prefix of \[[\s\S]*?'\/dashboard'[\s\S]*?\]\) \{\s*\n\s*app\.use\(`\$\{prefix\}\/\*`, requireAuth\)/, "compat.ts must require a session on the /dashboard subtree using the `${prefix}/*` form Hono actually matches")
+  assert.doesNotMatch(compatSrc, /^app\.use\('\/[a-z-]+\*',/m, "compat.ts must not use the bare-trailing-`*` middleware form -- it matches nothing in Hono and silently leaves routes unguarded")
+  assert.match(compatSrc, /app\.get\('\/transfers', async \(c\) => \{\s*\n\s*const denied = denyUnless\(c, 'inventory', 'branches'\)/, 'compat.ts GET /transfers must check a permission -- it was reachable completely unauthenticated')
   console.log("PASS routes/compat.ts's dashboard/analytics/dashboard-startup endpoints all check the 'dashboard' permission")
 }
 
