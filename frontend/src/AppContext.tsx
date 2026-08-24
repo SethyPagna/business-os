@@ -14,6 +14,7 @@ import { isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
+import { actionAllowed } from './utils/permissionActions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
@@ -172,6 +173,8 @@ type AppContextValue = {
   getPermissions: () => Record<string, boolean>
   getPermissionTier: (key: string) => PermissionTier
   hasPermission: (key: string) => boolean
+  /** Per-action gate -- see AppContext's own can() comment and utils/permissionActions.ts. */
+  can: (permissionKey: string, actionKey: string) => boolean
   khrSymbol: string
   khrToUsd: (value: unknown) => number
   language: string
@@ -1954,6 +1957,22 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return getPermissionTierFromMap(merged, key, merged.all === true)
   }, [getMergedPermissionsRaw])
 
+  // Per-ACTION gate: "may this role press this specific button?"
+  //
+  // getPermissionTier() answers at page granularity; this answers at button
+  // granularity, reading utils/permissionActions.ts -- the same table the
+  // admin permission editor renders, so a control's visibility and the
+  // description an admin was shown when granting the tier can never
+  // disagree. Returns true for 'queue' and 'limited' as well as 'allow':
+  // in both of those the person CAN still use the control, the outcome
+  // just differs (queued for approval / narrowed to the fields they may
+  // edit). Call outcomeAt() directly when a caller needs to tell those
+  // apart -- e.g. to label a button "Submit for approval" instead of "Save".
+  const can = useCallback((permissionKey: string, actionKey: string): boolean => {
+    if (!user) return false
+    return actionAllowed(permissionKey, actionKey, getPermissionTier(permissionKey), hasPermission)
+  }, [user, getPermissionTier, hasPermission])
+
   const canAccessPage = useCallback((pageId: string) => {
     if (!user) return false
     // `files` (Library) resolves to `null` in PAGE_PERMISSIONS below, same
@@ -2076,7 +2095,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     toggleTheme, toggleLanguage,
     notify, notification,
     writeConflict, dismissWriteConflict, reloadWriteConflict, dismissNotification,
-    hasPermission, canAccessPage, getPermissions, getPermissionTier,
+    hasPermission, canAccessPage, getPermissions, getPermissionTier, can,
     formatPrice, fmtUSD, fmtKHR,
     usdSymbol, khrSymbol, displayCurrency, exchangeRate,
     usdToKhr, khrToUsd,
