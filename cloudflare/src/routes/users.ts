@@ -41,7 +41,23 @@ import type { Env } from '../index'
 //   original's full organizationContext service.
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
-app.use('*', requireAuth)
+// Scoped to the two path prefixes this router actually owns, NOT '*'.
+// See index.ts: this router is mounted at the bare `/api` prefix, so a
+// `app.use('*', ...)` here registers as `/api/*` middleware that also runs
+// for every other `/api/...` route mounted after it. That is the same leak
+// that made the public `/api/organizations/*` login endpoints 401 (fixed in
+// lookups.ts/contacts.ts, and previously in compat.ts -- see their
+// comments). This router happens to be mounted after those endpoints today,
+// so it was not causing that symptom itself, but it is the identical latent
+// trap for anything registered below it -- closed here rather than left as
+// a hazard for the next route someone adds.
+// Exact path + subtree wildcard per prefix -- Hono does not treat a bare
+// trailing `*` (`/users*`) as a wildcard, which would silently match
+// nothing and leave these routes unauthenticated.
+for (const prefix of ['/users', '/roles']) {
+  app.use(prefix, requireAuth)
+  app.use(`${prefix}/*`, requireAuth)
+}
 
 type Ctx = Context<{ Bindings: Env; Variables: { user: SessionUser } }>
 

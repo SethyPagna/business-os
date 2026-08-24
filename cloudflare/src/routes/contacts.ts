@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context, type Next } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -104,7 +104,27 @@ const DELIVERY_CONTACTS: ContactConfig = {
 }
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
-app.use('*', requireAuth)
+// Scoped to the three path prefixes this router actually owns, NOT '*'.
+// See index.ts: this router is mounted at the bare `/api` prefix, so a
+// `app.use('*', ...)` here registers as `/api/*` middleware and runs for
+// every OTHER `/api/...` route mounted after it too. Confirmed live
+// against a local Worker: that leak made `/api/organizations/search` and
+// `/api/organizations/bootstrap` -- both deliberately public, both called
+// by the LOGIN screen before anyone has a session -- return
+// 401 invalid_session, so the organization picker could never load and
+// login was impossible on a fresh browser. routes/compat.ts already had
+// exactly this fix (see its own NOTE); it was never applied here.
+// Kept as a shared list so the permission gate below can't drift out of
+// sync with the auth gate above it.
+// Each prefix is registered as an exact path AND a subtree wildcard. Hono
+// does not treat a bare trailing `*` (`/customers*`) as a wildcard --
+// verified live: that form matched nothing and left these routes fully
+// UNAUTHENTICATED, worse than the leak it was meant to fix.
+const CONTACT_PATH_PREFIXES = ['/customers', '/suppliers', '/delivery-contacts'] as const
+for (const prefix of CONTACT_PATH_PREFIXES) {
+  app.use(prefix, requireAuth)
+  app.use(`${prefix}/*`, requireAuth)
+}
 // Legacy gates every customers/suppliers/delivery-contacts endpoint (reads
 // and writes alike) behind requirePermission('contacts') -- this Worker
 // only checked requireAuth (any logged-in user), a real gap.
@@ -117,11 +137,18 @@ app.use('*', requireAuth)
 // spec's own "Review Required can view + add directly" line for Contacts.
 // Switched to `getPermissionTier(...) !== 'none'`, same pattern as those
 // two files and products.ts.
-app.use('*', async (c, next) => {
+// Same path-scoping as the requireAuth registration above, and for the same
+// reason -- a `'*'` here would 403 every unrelated `/api/...` route mounted
+// after this router for anyone without the contacts permission.
+const requireContactsAccess = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: Next) => {
   const user = c.get('user')
   if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
-})
+}
+for (const prefix of CONTACT_PATH_PREFIXES) {
+  app.use(prefix, requireContactsAccess)
+  app.use(`${prefix}/*`, requireContactsAccess)
+}
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ''), 10)

@@ -20,7 +20,28 @@ import type { Env } from '../index'
 type LookupKind = 'category' | 'unit'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
-app.use('*', requireAuth)
+// Scoped to the two path prefixes this router actually owns, NOT '*'.
+// See index.ts: this router is mounted at the bare `/api` prefix, so a
+// `app.use('*', ...)` here registers as `/api/*` middleware and runs for
+// every OTHER `/api/...` route mounted after it too. Confirmed live
+// against a local Worker: that leak made `/api/organizations/search` and
+// `/api/organizations/bootstrap` -- both deliberately public, both called
+// by the LOGIN screen before anyone has a session -- return
+// 401 invalid_session, so the organization picker could never load and
+// login was impossible on a fresh browser.
+// routes/compat.ts already had exactly this fix (see its own NOTE about
+// the same 401-everything symptom); it was simply never applied to this
+// file, contacts.ts, or users.ts, which share the identical mount + `'*'`
+// shape.
+// Registered as an exact path AND a subtree wildcard per prefix. Hono does
+// not treat a bare trailing `*` (`/categories*`) as a wildcard -- verified
+// live: that form matched nothing at all and silently left these routes
+// completely UNAUTHENTICATED, which is worse than the leak it was meant to
+// fix. `/categories` + `/categories/*` is the form Hono actually matches.
+for (const prefix of ['/categories', '/units']) {
+  app.use(prefix, requireAuth)
+  app.use(`${prefix}/*`, requireAuth)
+}
 // Both backend/src/routes/units.ts and categories.ts gate every *write*
 // route behind requirePermission('products') (categories/units are catalog
 // metadata, same permission bucket as products) -- kept as a per-route
