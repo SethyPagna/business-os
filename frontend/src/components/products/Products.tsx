@@ -322,6 +322,10 @@ type ProductApi = {
 }
 
 type ProductsAppContext = {
+  // Per-action gate (utils/permissionActions.ts) -- the same table the
+  // admin permission editor renders, so a button's visibility here always
+  // matches what an admin was shown when they granted the tier.
+  can: (permissionKey: string, actionKey: string) => boolean
   exchangeRate: number
   fmtKHR: (value: unknown) => string
   fmtUSD: (value: unknown) => string
@@ -563,7 +567,17 @@ export default function Products() {
 }
 
 function ProductsFullEditor() {
-  const { t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useProductsApp()
+  const { can, t, user, settings, notify, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate } = useProductsApp()
+  // Per-action gates for this page's toolbar. Resolved once here rather
+  // than inline in the JSX so the header block below stays readable and
+  // every control's rule is visible in one place. See
+  // utils/permissionActions.ts for what each action maps to server-side.
+  const canAddProduct = can('products', 'add')
+  const canImportProducts = can('products', 'import')
+  const canExportProducts = can('products', 'export')
+  const canManageLookups = can('products', 'manage_lookups')
+  const canMergeDuplicates = can('products', 'merge_duplicates')
+  const canZeroQuantityCleanup = can('products', 'zero_qty_cleanup')
   const { syncChannel } = useProductsSync()
   const productApi = getProductApi()
   const isActive = useIsPageActive('products')
@@ -2976,12 +2990,24 @@ function ProductsFullEditor() {
           into this one row now, see HeaderActions.tsx. */}
       <div className="mb-3 flex min-w-0 flex-wrap items-center justify-end gap-2">
         <div className="w-full min-w-0 overflow-x-auto pb-1 sm:ml-auto sm:w-auto sm:flex-shrink-0 sm:pb-0">
+          {/* Each handler is passed only when this role's tier actually
+              permits the action -- HeaderActions drops any control whose
+              handler is undefined (see its own comment). `can()` reads
+              utils/permissionActions.ts, the same table the admin
+              permission editor renders, so what's visible here always
+              matches what an admin was shown when granting the tier.
+              Previously every one of these buttons rendered
+              unconditionally: Import/Merge/Cleanup/lookups all 403'd on
+              click for a Review Required user, and Export -- which is
+              built client-side and had no server route to check -- simply
+              worked, despite the Products permission description stating
+              it required Full Access. */}
           <ProductsHeaderActions
-            onManageCats={()=>setModal('cats')}
-            onManageBrands={()=>setModal('brands')}
-            onManageUnits={()=>setModal('units')}
-            onImport={()=>setModal('bulk')}
-            onExport={() => {
+            onManageCats={canManageLookups ? ()=>setModal('cats') : undefined}
+            onManageBrands={canManageLookups ? ()=>setModal('brands') : undefined}
+            onManageUnits={canManageLookups ? ()=>setModal('units') : undefined}
+            onImport={canImportProducts ? ()=>setModal('bulk') : undefined}
+            onExport={canExportProducts ? () => {
               // Default to the richest scope available each time the
               // panel opens: Selected (if anything's checked) beats
               // Filtered (if filters are narrowing the list) beats the
@@ -2989,10 +3015,10 @@ function ProductsFullEditor() {
               // was meant" ordering buildProductExportScopes returns.
               setExportScopeId(productExportScopes[0]?.id || 'visible')
               setExportFieldsOpen(true)
-            }}
-            onAdd={()=>{setSelected(null);setModal('form')}}
-            onMergeDuplicates={openMergeDuplicatesReview}
-            onZeroQuantityCleanup={openZeroQuantityCleanup}
+            } : undefined}
+            onAdd={canAddProduct ? ()=>{setSelected(null);setModal('form')} : undefined}
+            onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
+            onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             historySlot={historyReady ? (
               <Suspense fallback={<div className="h-9 min-w-0 flex-1 sm:flex-none sm:min-w-[6.5rem]" aria-hidden="true" />}>
                 <ActionHistoryBar history={actionHistory} className="min-w-0 flex-1 sm:flex-none sm:min-w-[6.5rem]" showLabel t={t} />

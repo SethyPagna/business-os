@@ -15,13 +15,22 @@ import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName, primaryToolbarButto
 
 type Translate = (key: string) => string | undefined
 
+// Every action handler here is optional, and an omitted handler removes
+// that control entirely rather than showing it disabled. Products.tsx
+// passes `undefined` for anything this role's permission tier can't do
+// (see its `can(...)` calls and utils/permissionActions.ts) -- so a
+// Review Required user simply never sees Import/Export/Merge/Cleanup
+// instead of seeing them and collecting a 403 on click. `onMergeDuplicates`
+// and `onZeroQuantityCleanup` already worked this way for a different
+// reason (embedders that don't wire them); this just applies the same,
+// already-proven pattern to the rest of the row.
 type ProductsHeaderActionsProps = {
-  onManageCats: () => void
-  onManageBrands: () => void
-  onManageUnits: () => void
-  onImport: () => void
-  onExport: () => void
-  onAdd: () => void
+  onManageCats?: () => void
+  onManageBrands?: () => void
+  onManageUnits?: () => void
+  onImport?: () => void
+  onExport?: () => void
+  onAdd?: () => void
   // Retroactive catalog cleanup: folds already-imported products that are
   // really the same item (differ only by which branch's stock landed on
   // which row) into one. Optional so pages embedding this header outside
@@ -99,16 +108,25 @@ export default function ProductsHeaderActions({
   const buttonGuideTitle = tr('button_guide_title', 'What these buttons do')
 
   const iconClass = 'h-4 w-4 shrink-0'
-  const manageItems: PortalMenuItem[] = [
-    { label: categoriesLabel, onClick: onManageCats, icon: <FolderTree className={iconClass} /> },
-    { label: brandLabel, onClick: onManageBrands, icon: <Award className={iconClass} /> },
-    { label: unitsLabel, onClick: onManageUnits, icon: <Ruler className={iconClass} /> },
-    'divider',
-    { label: importLabel, onClick: onImport, color: 'blue', icon: <Upload className={iconClass} /> },
-    { label: exportLabel, onClick: onExport, color: 'green', icon: <Download className={iconClass} /> },
-    ...(onMergeDuplicates ? ['divider' as const, { label: mergeDuplicatesLabel, onClick: onMergeDuplicates, icon: <Merge className={iconClass} /> }] : []),
+  // Built in groups so a divider is only emitted when the group after it
+  // actually has something in it -- otherwise hiding, say, both import and
+  // export would leave a stray separator line floating in the menu.
+  const lookupItems: PortalMenuItem[] = [
+    ...(onManageCats ? [{ label: categoriesLabel, onClick: onManageCats, icon: <FolderTree className={iconClass} /> }] : []),
+    ...(onManageBrands ? [{ label: brandLabel, onClick: onManageBrands, icon: <Award className={iconClass} /> }] : []),
+    ...(onManageUnits ? [{ label: unitsLabel, onClick: onManageUnits, icon: <Ruler className={iconClass} /> }] : []),
+  ]
+  const transferItems: PortalMenuItem[] = [
+    ...(onImport ? [{ label: importLabel, onClick: onImport, color: 'blue' as const, icon: <Upload className={iconClass} /> }] : []),
+    ...(onExport ? [{ label: exportLabel, onClick: onExport, color: 'green' as const, icon: <Download className={iconClass} /> }] : []),
+  ]
+  const cleanupItems: PortalMenuItem[] = [
+    ...(onMergeDuplicates ? [{ label: mergeDuplicatesLabel, onClick: onMergeDuplicates, icon: <Merge className={iconClass} /> }] : []),
     ...(onZeroQuantityCleanup ? [{ label: zeroQuantityCleanupLabel, onClick: onZeroQuantityCleanup, color: 'red' as const, icon: <Trash2 className={iconClass} /> }] : []),
   ]
+  const manageItems: PortalMenuItem[] = [lookupItems, transferItems, cleanupItems]
+    .filter((group) => group.length > 0)
+    .flatMap((group, index) => (index === 0 ? group : ['divider' as const, ...group]))
 
   // flex-1 at the narrowest widths (matches the old mobile grid's equal-
   // share sizing so three buttons stay easy to tap edge-to-edge); from sm
@@ -144,48 +162,57 @@ export default function ProductsHeaderActions({
       <ButtonGuidePopover
         title={buttonGuideTitle}
         triggerLabel={buttonGuideTitle}
+        // The guide lists only the buttons this role can actually see --
+        // explaining a control that isn't rendered is just confusing.
         entries={[
-          { icon: <Settings2 className={iconClass} />, label: manageLabel, description: manageHint },
-          { icon: <FolderTree className={iconClass} />, label: categoriesLabel, description: categoriesHint },
-          { icon: <Award className={iconClass} />, label: brandLabel, description: brandHint },
-          { icon: <Ruler className={iconClass} />, label: unitsLabel, description: unitsHint },
-          { icon: <Upload className={iconClass} />, label: importLabel, description: importHint },
-          { icon: <Download className={iconClass} />, label: exportLabel, description: exportHint },
+          ...(manageItems.length ? [{ icon: <Settings2 className={iconClass} />, label: manageLabel, description: manageHint }] : []),
+          ...(onManageCats ? [{ icon: <FolderTree className={iconClass} />, label: categoriesLabel, description: categoriesHint }] : []),
+          ...(onManageBrands ? [{ icon: <Award className={iconClass} />, label: brandLabel, description: brandHint }] : []),
+          ...(onManageUnits ? [{ icon: <Ruler className={iconClass} />, label: unitsLabel, description: unitsHint }] : []),
+          ...(onImport ? [{ icon: <Upload className={iconClass} />, label: importLabel, description: importHint }] : []),
+          ...(onExport ? [{ icon: <Download className={iconClass} />, label: exportLabel, description: exportHint }] : []),
           ...(onMergeDuplicates ? [{ icon: <Merge className={iconClass} />, label: mergeDuplicatesLabel, description: mergeDuplicatesHint }] : []),
           ...(onZeroQuantityCleanup ? [{ icon: <Trash2 className={iconClass} />, label: zeroQuantityCleanupLabel, description: zeroQuantityCleanupHint }] : []),
-          { icon: <PackagePlus className={iconClass} />, label: productLabel, description: productHint },
+          ...(onAdd ? [{ icon: <PackagePlus className={iconClass} />, label: productLabel, description: productHint }] : []),
           ...(historySlot ? [{ label: historyLabel, description: historyHint }] : []),
         ]}
       />
       {historySlot}
-      <LazyPortalMenu
-        align="auto"
-        triggerWrapperClassName={buttonSizing}
-        menuClassName="max-h-[70vh] overflow-auto"
-        trigger={(
-          <button
-            type="button"
-            className={`w-full ${manageToolbarButtonClassName}`}
-            aria-haspopup="true"
-            aria-label={manageLabel}
-            title={manageHint}
-          >
-            <Settings2 className="h-4 w-4 shrink-0" />
-            <span className="min-w-0 truncate">{manageLabel}</span>
-          </button>
-        )}
-        items={manageItems}
-      />
-      <button
-        type="button"
-        onClick={onAdd}
-        className={primaryToolbarButtonClassName}
-        aria-label={productLabel}
-        title={productHint}
-      >
-        <PackagePlus className="h-4 w-4 shrink-0" />
-        <span className="min-w-0 truncate">{productLabel}</span>
-      </button>
+      {/* Manage is a container for the items above -- with none of them
+          permitted there is nothing behind the button, so it goes too
+          rather than opening an empty menu. */}
+      {manageItems.length ? (
+        <LazyPortalMenu
+          align="auto"
+          triggerWrapperClassName={buttonSizing}
+          menuClassName="max-h-[70vh] overflow-auto"
+          trigger={(
+            <button
+              type="button"
+              className={`w-full ${manageToolbarButtonClassName}`}
+              aria-haspopup="true"
+              aria-label={manageLabel}
+              title={manageHint}
+            >
+              <Settings2 className="h-4 w-4 shrink-0" />
+              <span className="min-w-0 truncate">{manageLabel}</span>
+            </button>
+          )}
+          items={manageItems}
+        />
+      ) : null}
+      {onAdd ? (
+        <button
+          type="button"
+          onClick={onAdd}
+          className={primaryToolbarButtonClassName}
+          aria-label={productLabel}
+          title={productHint}
+        >
+          <PackagePlus className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 truncate">{productLabel}</span>
+        </button>
+      ) : null}
     </div>
   )
 }

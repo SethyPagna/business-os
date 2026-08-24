@@ -84,13 +84,21 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'import', tKey: 'perm_act_import', label: 'Import', review: 'block' },
     // importJobs.ts ~200 -> additionally requires destructive_delete
     { key: 'import_replace_all', tKey: 'perm_act_import_replace_all', label: 'Import: replace all', review: 'block', requiresKey: 'destructive_delete' },
-    // Export was, until this change, gated by NOTHING at all -- it is
-    // built client-side from already-loaded rows, so there was no server
-    // route to check and no frontend check either. The Products section's
-    // own reviewDescription has claimed "export requires Full Access"
-    // since the tier shipped, so the documented policy and the enforced
-    // behavior disagreed: a Review Required user could export the entire
-    // catalogue. Treated as the loophole it is and enforced from here.
+    // Export was, until this change, gated by NOTHING at all, despite the
+    // Products section's own reviewDescription claiming "export requires
+    // Full Access" ever since the tier shipped -- documented policy and
+    // enforced behavior simply disagreed.
+    //
+    // Honest scope of the fix: export is assembled client-side from rows
+    // ALREADY loaded into the page (buildProductExportScopes reads
+    // products/filtered/selectedProducts -- it never calls the server), and
+    // a review-tier user is legitimately allowed to view those rows. So
+    // hiding the button enforces the stated policy and stops the accidental
+    // path, but it is NOT a confidentiality boundary: the same rows remain
+    // readable through the products API that populated the page. Making
+    // export a genuine security boundary would mean moving it behind a
+    // server route that re-checks the tier and streams the file -- a real
+    // change, not a checkbox, and deliberately not attempted here.
     { key: 'export', tKey: 'perm_act_export', label: 'Export', review: 'block' },
     // POST /merge-duplicates -> strict hasPermission() (products.ts ~1277)
     { key: 'merge_duplicates', tKey: 'perm_act_merge_duplicates', label: 'Merge duplicates', review: 'block' },
