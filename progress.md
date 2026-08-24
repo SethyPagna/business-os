@@ -23,6 +23,7 @@ left to do":
 | [Decisions made](#decisions-made) | Settled questions — do not relitigate | Before proposing a design change |
 | [Environment notes](#environment-notes) | What can actually be run, and where | Before claiming anything is verified |
 | [Open](#open) | The live backlog | To pick up work |
+| [Request batch — Aug 25 2026](#request-batch--aug-25-2026-part-341) | Newest asks, with the import-data constraints that bound them | Before starting any of those items |
 | [Older completed work](#older-completed-work) | Condensed index of finished items | To check if something is already done |
 
 **Ending a session**, do all three:
@@ -2536,6 +2537,192 @@ that access exists).
   `frontend/src`. This note is kept only so a reader doesn't mistake the
   stale "not resolved" wording (written before Part 130 ran) for a
   still-open item.
+
+
+---
+
+## Request batch — Aug 25 2026 (Part 341)
+
+Added to the back of this list per explicit instruction. Each item records the
+**constraints found in the user's real import data**, because several of these asks are
+not buildable as literally stated against that data — see "Import data reality" first.
+
+### Import data reality (measured, not assumed)
+
+Both files the user will actually import were analysed directly. These numbers constrain
+several items below, especially public login.
+
+**`products-template (1).csv` — 8,727 products, 29 columns**
+
+| Column | Filled | Consequence |
+|---|---|---|
+| `name` | 100% | primary identifier |
+| `barcode` | 96.5% | secondary identifier; **2,687 barcodes are shared by 5,430 rows** |
+| `sku` | **0%** | SKU matching is unusable for this file — Replace-mode "match on SKU" would match nothing |
+| `selling_price_usd` | 95.8% | |
+| `special_price_usd` | 93.6% | significant — special pricing is in real use |
+| `cost_price_usd` | 94.9% | |
+| **all `*_khr` columns** | **0%** | prices are authored in USD only; KHR is derived — see the currency item |
+| `stock_quantity` | 52.4% | ~half the catalogue imports with no stock figure |
+| `batch_date` | 100% | format `M/D/YYYY`, e.g. `8/12/2026` |
+| `branch` | 100% | only two values: `shop` (5,888), `warehouse` (2,839) |
+| `expiry_date`, `supplier`, `parent_id`, `is_group`, all 6 image columns | **0%** | image-matching and variant columns are unused by this import |
+
+- **5,915 distinct names across 8,727 rows — 2,747 names duplicated, covering 5,559 rows.**
+  This is the shop/warehouse split of the same product. Product grouping is not an edge
+  case here, it is the majority shape of the catalogue.
+- 46 categories, 327 brands. **649 rows use the `||` multi-category separator**; zero use
+  it for brand.
+- Units are Khmer (`ដើម` 3,259, `ដប` 2,458, `ប្រអប់` 1,764, …) — confirms why the Khmer
+  normalization work in `searchMatch.ts` matters.
+- Descriptions are multi-line RFC4180-quoted with embedded `""` escapes. Any parser change
+  must keep handling that; both files also carry a UTF-8 BOM.
+- Data-quality rows to surface at review time, not silently accept: **17 rows where
+  `cost_price_usd` > `selling_price_usd`**, and **5 rows where `special_price_usd` >
+  `selling_price_usd`**.
+
+**`customers-template-final.csv` — 5,549 customers, 24 columns**
+
+| Column | Filled | Consequence |
+|---|---|---|
+| `name` | 100% | |
+| `phone` | 89.9% | **not unique** — see below |
+| `address` | 92.1% | |
+| `gender` | 97.9% | |
+| `created_date` | 100% | format `M/D/YYYY H:MM` |
+| **`email`** | **0%** | **no customer has an email address** |
+| **`membership_number`** | **0%** | every membership number must be generated |
+| `company` | **0%** | confirms Part 336's customer-`company` removal loses nothing here |
+| `contact_phone_1` | 0.7% (40 rows) | the other 14 contact_* columns are entirely empty |
+
+- **448 phone numbers are shared by 2–5 different customers, covering 978 rows (17.6%).**
+  Worst cases: one number on 5 customers named `Drl02357` / `On1012_` / `New Acc` /
+  `Prv (Ig)`; another on 5 rows named `Seavmean Seang` (the same person four times).
+- **559 customers (10.1%) have neither a phone nor an email** — they cannot self-identify
+  at all.
+- **451 duplicate names covering 1,078 rows.** Many are near-duplicates of one person
+  (`Linuo`/`Linnuo`, `Chh.Ing`/`Chh.Ingg`) and many are Instagram handles rather than
+  names.
+
+### Items
+
+### 1. 🔴 Currency conversion — POS/sales forward-only
+
+**Ask:** conversion applies to POS and sales going forward; it must not change past
+records. USD is the stats currency, but both currencies run concurrently.
+
+**Already correct — verified, do not "fix" it.** `sales` and `returns` each store *both*
+`*_usd` and `*_khr` for every money field (`subtotal`, `discount`, `tax`, `total`,
+`amount_paid`, `change`, `delivery_fee`, `membership_discount`) **plus their own
+`exchange_rate` column** (`migrations/0001_init.sql`). Dashboard/analytics aggregate the
+**stored** `total_usd`/`total_khr` columns (`routes/compat.ts`) — nothing recomputes a
+past total from the live rate. So changing `settings.exchange_rate` cannot retroactively
+alter a completed sale.
+
+The live rate is used in exactly one place: `AppContext`'s `formatPrice(usd, khr)` falls
+back to `usd * exchangeRate` **only when `khr` is absent**. That applies to *products*,
+whose KHR columns are empty in the import (see table above) — and deriving a current
+price list from the current rate is the correct behaviour there.
+
+**Still to do:** a regression test locking this in (past sales display and aggregate from
+stored values, never the live rate), and an explicit UI statement of the rule where the
+rate is edited, so nobody "fixes" it into retroactive behaviour later.
+
+### 2. 🔴 Public website accounts — signup, login, guest
+
+**Ask:** signup/login for `leangcosmetics.dpdns.org`; membership ID obtainable from an
+admin note; log in with email, Gmail, phone, or membership ID alone; strong passwords;
+OTP; browser save-password support; guest browsing by default with the user remembered;
+everything works as guest, login persists progress long-term; membership area is personal
+(cart, etc.); site must be secure.
+
+**Blocked as literally stated — the data does not support it.** From the measurements
+above:
+
+- **Email/Gmail login cannot work for existing customers** — 0 of 5,549 have an email. It
+  can only serve accounts created after signup.
+- **Phone alone cannot be a login identifier** — 448 numbers are shared across 978
+  customer rows. "Log in with phone" would authenticate into an ambiguous set.
+- **Membership ID is the only viable unique identifier**, and none exist yet — all 5,549
+  must be generated.
+- **559 customers (10.1%) have no phone and no email**, so they can never self-serve;
+  they need the admin-issued membership ID path.
+
+**Proposed shape, needs confirmation before building:** membership ID is the account key
+and is generated for every customer at import. Phone becomes a *lookup hint*, not a
+credential — entering a shared phone lists the matching memberships and requires the
+membership ID (or an OTP to that number plus a name choice) to disambiguate. Email is
+optional, added by the customer after first login, and only then becomes a login method.
+OTP over SMS is the natural second factor given phone coverage is 89.9%.
+
+Security requirements to design against, not bolt on: this is a *public, unauthenticated*
+surface on the same Worker as the admin app, so it needs its own rate limiting, its own
+session cookie scope (must not be usable against `admin.leangcosmetics.dpdns.org`),
+credential-stuffing protection given the shared-phone problem, and password rules
+(length/character classes) plus a real password hash — the admin side uses bcrypt via
+`routes/auth.ts` and should be reused rather than reinvented.
+
+**Guest mode:** browsing, cart and progress must work with no account, and the guest
+identity must persist across visits, with a merge path when that guest later logs in.
+Merging a guest cart into a membership cart is its own decision (union? replace? prompt?)
+and is not specified yet.
+
+### 3. 🟡 Stories and posts — admin-authored, customer-visible, commentable
+
+**Ask:** stories and posts creatable by admin only; customers can view and comment.
+
+Not started. Needs: a content table with author/publish state, a public read endpoint on
+the portal, a comment table with moderation (comments are user-generated content on a
+public site — they need rate limiting, length caps, and an admin hide/delete path), and
+permission wiring so authoring sits behind the admin `customer_portal` grant while reading
+stays public. Comment identity depends on item 2 — decide whether guests may comment or
+only logged-in members.
+
+### 4. 🟡 Discounts and promotions — complete and mature
+
+**Ask:** finish these to a mature state.
+
+`promotions` routes exist and were mounted in a prior session (an earlier fix records them
+having been built but left as dead code). Needs an audit of what is actually wired versus
+stubbed before any new work — the same "looks-wired-but-isn't" class this project keeps
+finding. Note the import data: 93.6% of products carry a `special_price_usd`, so
+special-price handling is already load-bearing and must not regress.
+
+### 5. 🟡 Per-action permission wiring — the remaining five pages
+
+Part 339 built the per-action table (`utils/permissionActions.ts`) and wired **Products
+only**. Inventory, Branches, Returns, Fees and Contacts have their action rows defined and
+tested but their toolbars do not yet read `can()`. Until they do, those pages still render
+controls that 403 on click.
+
+### 6. 🟡 Backup — Google Drive round-trip, auto-delete, free-tier safety
+
+**Ask:** backups actually work end to end; Drive round-trip with a fully compatible
+format; save and auto-delete on Drive; must not breach Cloudflare's free limits. Resets
+need a smart, safe UI that cannot do anything unintended.
+
+Not started this session. `lib/googleDrive.ts` and the `/api/system/drive-sync/*` routes
+exist. **Handle with care:** `/system/drive-sync/oauth/callback` must stay publicly
+reachable (it is Google's redirect) — Part 339 explicitly avoided "repairing" a dead guard
+that would have blocked it.
+
+### 7. 🟢 User-defined options instead of fixed ones
+
+**Ask:** the app is an inventory/product/POS system for a real business; users should be
+able to define their own options rather than choose from hardcoded lists.
+
+Broad and unscoped. Needs a concrete list of which fixed dropdowns should become
+user-defined before it is actionable — flagged rather than guessed at.
+
+### 8. 🟢 Admin and visitor icons are different
+
+**Ask:** the icon/logo for the admin app and for `leangcosmetics.dpdns.org` (visitors) are
+different assets and must not be shared.
+
+`wrangler.toml` already separates the domains (`BUSINESS_OS_PUBLIC_URL` /
+`BUSINESS_OS_ADMIN_URL`). The icon split itself is not done: `frontend/public/` currently
+carries both a generic `icon-*.png` set and a `leang-cosmetics-icon-*.png` set, and the
+manifest/favicon wiring needs checking to confirm which surface serves which.
 
 ## Older completed work
 
