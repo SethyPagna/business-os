@@ -159,6 +159,15 @@ new_sqlite_classes = ["BroadcastHub"]
 [vars]
 BUSINESS_OS_PUBLIC_URL = "https://leangcosmetics.dpdns.org"
 BUSINESS_OS_ADMIN_URL = "https://admin.leangcosmetics.dpdns.org"
+# The one organization this deployment serves. The login screen pins to it
+# and offers no way to create another (routes/organizations.ts has no write
+# endpoints, and /bootstrap reports organizationCreationEnabled: false);
+# the "Switch organization" button on the login screen is the intended
+# unlock. Matched against organizations.slug OR organizations.public_id,
+# case-insensitively. If it matches nothing, the Worker falls back to the
+# first organization row rather than failing -- a stale value here can
+# never lock anyone out. Change this if the organization is ever renamed.
+BUSINESS_OS_ORGANIZATION_SLUG = "leangcosmetics"
 # Password-reset emails (lib/verification.ts) are sent via Resend. This
 # must be a verified sender/domain on the Resend account, e.g.
 # "Leang Cosmetics <no-reply@leangcosmetics.dpdns.org>". The API key is a

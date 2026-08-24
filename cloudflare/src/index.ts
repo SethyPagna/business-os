@@ -55,6 +55,11 @@ export type Env = {
   BROADCAST_HUB: DurableObjectNamespace
   BUSINESS_OS_PUBLIC_URL: string
   BUSINESS_OS_ADMIN_URL: string
+  // Slug (or public_id) of the one organization this deployment serves --
+  // see routes/organizations.ts's getDefaultOrganization for why this is a
+  // preference with a fallback rather than a hard requirement. Optional:
+  // unset behaves exactly as before.
+  BUSINESS_OS_ORGANIZATION_SLUG?: string
   // Optional secret (wrangler secret put APP_ENCRYPTION_KEY) used to encrypt
   // AI provider API keys at rest. See cloudflare/src/lib/secretCrypto.ts --
   // without it, keys are stored in plaintext, matching how the Node backend

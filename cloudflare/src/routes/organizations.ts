@@ -40,10 +40,42 @@ type GroupRow = {
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
+const ORG_COLUMNS = 'id, name, slug, public_id, is_active, setup_enabled, created_at'
+
+// The organization this deployment is pinned to.
+//
+// This app is provisioned one Worker + one D1 per business (single-tenant),
+// so in practice `organizations` holds exactly one row and "first by id"
+// already resolved it. That is an accident of the data, though, not a
+// stated rule -- if a second row ever appeared (a bad import, a restored
+// backup from another business, a manual insert), the login screen would
+// silently start offering it and could auto-select the wrong one.
+//
+// `BUSINESS_OS_ORGANIZATION_SLUG` (wrangler.toml [vars]) makes the pin
+// explicit: this deployment is Leang Cosmetics and nothing else. It is
+// deliberately a PREFERENCE, not a hard requirement -- if the configured
+// slug matches no row (a rename, a fresh database, a local dev copy seeded
+// under a different name), this falls back to the old first-by-id
+// behaviour rather than returning null and making login impossible. A
+// wrong/stale config value can therefore never lock anyone out; it can
+// only fail to narrow a choice that is already a single row.
+//
+// Creating other organizations stays impossible regardless: this router
+// exposes no POST/PUT/DELETE at all, and /bootstrap reports
+// `organizationCreationEnabled: false`, which is what puts the login
+// screen into its locked state (Login.tsx's setOrganizationLocked). The
+// "Switch organization" button there remains the deliberate unlock.
 async function getDefaultOrganization(env: Env): Promise<OrgRow | null> {
   const db = getDb(env)
+  const pinnedSlug = String(env.BUSINESS_OS_ORGANIZATION_SLUG || '').trim().toLowerCase()
+  if (pinnedSlug) {
+    const pinned = await db
+      .prepare(`SELECT ${ORG_COLUMNS} FROM organizations WHERE lower(trim(slug)) = @slug OR lower(trim(public_id)) = @slug LIMIT 1`)
+      .get<OrgRow>({ slug: pinnedSlug })
+    if (pinned) return pinned
+  }
   return (await db
-    .prepare(`SELECT id, name, slug, public_id, is_active, setup_enabled, created_at FROM organizations ORDER BY id ASC LIMIT 1`)
+    .prepare(`SELECT ${ORG_COLUMNS} FROM organizations ORDER BY id ASC LIMIT 1`)
     .get<OrgRow>()) || null
 }
 
