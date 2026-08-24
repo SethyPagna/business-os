@@ -1,0 +1,298 @@
+import X from 'lucide-react/dist/esm/icons/x.js'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useApp as useAppFromContext } from '../../AppContext.tsx'
+import {
+  beginTrackedRequest,
+  invalidateTrackedRequest,
+  isTrackedRequestCurrent,
+  withLoaderTimeout,
+} from '../../utils/loaders.ts'
+import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+
+type OtpMode = 'setup' | 'disable'
+type OtpStep = 'loading' | 'confirm_disable' | 'scan' | 'error'
+type Translate = (key: string, fallback?: string) => string | undefined
+
+export type OtpModalProps = {
+  mode: OtpMode
+  userId?: string | number | null
+  onClose: () => void
+  onDone: (enabled: boolean) => void
+  t?: Translate
+}
+
+type AppContextValue = {
+  t?: Translate
+}
+
+type OtpApiResult = {
+  success?: boolean
+  qrDataUrl?: string | null
+  secret?: string | null
+  error?: string
+}
+
+type OtpApi = {
+  otpSetup?: (payload: { userId?: string | number | null }) => Promise<OtpApiResult>
+  otpConfirm?: (payload: { userId?: string | number | null; token: string }) => Promise<OtpApiResult>
+  otpDisable?: (payload: { userId?: string | number | null; password: string }) => Promise<OtpApiResult>
+}
+
+const useApp = useAppFromContext as () => AppContextValue
+const OTP_SETUP_TIMEOUT_MS = 12000
+const OTP_CONFIRM_TIMEOUT_MS = 12000
+const OTP_DISABLE_TIMEOUT_MS = 12000
+
+function getOtpApi(): OtpApi {
+  return typeof window === 'undefined' ? {} : (window as Window & { api?: OtpApi }).api || {}
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : String(error || fallback)
+}
+
+export default function OtpModal({ mode, userId, onClose, onDone, t }: OtpModalProps) {
+  const app = useApp()
+  const tr = t || app.t || ((key: string) => key)
+  const [step, setStep] = useState<OtpStep>(mode === 'setup' ? 'loading' : 'confirm_disable')
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [secret, setSecret] = useState<string | null>(null)
+  const [code, setCode] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [showSecret, setShowSecret] = useState(false)
+  const setupRequestRef = useRef(0)
+  const actionRequestRef = useRef(0)
+  const actionInFlightRef = useRef(false)
+  const aliveRef = useRef(true)
+
+  useEffect(() => () => {
+    aliveRef.current = false
+    invalidateTrackedRequest(setupRequestRef)
+    invalidateTrackedRequest(actionRequestRef)
+  }, [])
+
+  useEffect(() => {
+    if (mode !== 'setup') {
+      invalidateTrackedRequest(setupRequestRef)
+      setStep('confirm_disable')
+      return
+    }
+
+    setStep('loading')
+    setError('')
+    setQrDataUrl(null)
+    setSecret(null)
+    const requestId = beginTrackedRequest(setupRequestRef)
+
+    async function loadSetup() {
+      try {
+        const result = await withLoaderTimeout(
+          () => getOtpApi().otpSetup?.({ userId }) || Promise.resolve({ success: false, error: 'OTP setup is unavailable' }),
+          'OTP setup',
+          OTP_SETUP_TIMEOUT_MS,
+        )
+        if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
+        if (result?.success) {
+          setQrDataUrl(result.qrDataUrl || null)
+          setSecret(result.secret || null)
+          setStep('scan')
+          return
+        }
+        setError(result?.error || 'Setup failed')
+        setStep('error')
+      } catch (setupError: unknown) {
+        if (!aliveRef.current || !isTrackedRequestCurrent(setupRequestRef, requestId)) return
+        setError(getErrorMessage(setupError, 'Setup failed'))
+        setStep('error')
+      }
+    }
+
+    loadSetup()
+
+    return () => {
+      invalidateTrackedRequest(setupRequestRef)
+    }
+  }, [mode, userId])
+
+  const handleConfirm = useCallback(async () => {
+    if (!code || code.length !== 6) {
+      setError('Enter the 6-digit code')
+      return
+    }
+    if (!beginSingleAction(actionInFlightRef)) return
+
+    const requestId = beginTrackedRequest(actionRequestRef)
+    setLoading(true)
+    setError('')
+    try {
+      const result = await withLoaderTimeout(
+        () => getOtpApi().otpConfirm?.({ userId, token: code }) || Promise.resolve({ success: false, error: 'OTP confirmation is unavailable' }),
+        'OTP confirmation',
+        OTP_CONFIRM_TIMEOUT_MS,
+      )
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      if (result?.success) {
+        onDone(true)
+        return
+      }
+      setError(result?.error || 'Invalid code - check your app is synced')
+    } catch (confirmError: unknown) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      setError(getErrorMessage(confirmError, 'Failed to confirm code'))
+    } finally {
+      if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
+        finishSingleAction(actionInFlightRef)
+        setLoading(false)
+      }
+    }
+  }, [code, onDone, userId])
+
+  const handleDisable = useCallback(async () => {
+    if (!beginSingleAction(actionInFlightRef)) return
+
+    const requestId = beginTrackedRequest(actionRequestRef)
+    setLoading(true)
+    setError('')
+    try {
+      const result = await withLoaderTimeout(
+        () => getOtpApi().otpDisable?.({ userId, password }) || Promise.resolve({ success: false, error: 'OTP disable is unavailable' }),
+        'OTP disable',
+        OTP_DISABLE_TIMEOUT_MS,
+      )
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      if (result?.success) {
+        onDone(false)
+        return
+      }
+      setError(result?.error || 'Failed to disable')
+    } catch (disableError: unknown) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(actionRequestRef, requestId)) return
+      setError(getErrorMessage(disableError, 'Failed to disable'))
+    } finally {
+      if (aliveRef.current && isTrackedRequestCurrent(actionRequestRef, requestId)) {
+        finishSingleAction(actionInFlightRef)
+        setLoading(false)
+      }
+    }
+  }, [onDone, password, userId])
+
+  const handleClose = useCallback(() => {
+    if (actionInFlightRef.current) return
+    onClose()
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
+      <div className="flex max-h-modal-90 w-full max-w-md flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800 fade-in">
+      <div className="overflow-auto p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+            {mode === 'setup' ? (tr('otp_setup') || 'Set Up 2FA') : (tr('otp_disable') || 'Disable 2FA')}
+          </h2>
+          <button
+            type="button"
+            onClick={handleClose}
+            disabled={loading}
+            aria-label={tr('close') || 'Close'}
+            className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {step === 'loading' && <div className="text-center py-8 text-gray-400">{tr('loading') || 'Loading...'}</div>}
+
+        {step === 'error' && (
+          <div className="text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg p-3">{error}</div>
+        )}
+
+        {step === 'scan' && (
+          <div className="space-y-4">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              Scan this QR code with your authenticator app (Google Authenticator, Authy, Microsoft Authenticator, etc.)
+            </p>
+            {qrDataUrl ? (
+              <div className="flex justify-center">
+                <img src={qrDataUrl} alt="QR Code" className="w-48 h-48 rounded-xl border-4 border-white shadow-lg" />
+              </div>
+            ) : (
+              <div className="bg-gray-100 dark:bg-gray-700 rounded-xl p-4 text-center text-sm text-gray-500">
+                <p className="font-medium mb-1">Manual setup key:</p>
+                <code className="text-xs font-mono break-all">{secret}</code>
+              </div>
+            )}
+            <button className="text-xs text-blue-500 hover:underline w-full text-center" onClick={() => setShowSecret((value) => !value)}>
+              {showSecret ? 'Hide manual key' : 'Show manual entry key'}
+            </button>
+            {showSecret && secret && (
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+                <p className="text-xs text-gray-500 mb-1">Manual entry key:</p>
+                <code className="text-sm font-mono tracking-widest text-gray-800 dark:text-gray-200 break-all select-all">{secret}</code>
+              </div>
+            )}
+            <div>
+              <label htmlFor="otp-setup-code" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Enter the 6-digit code to confirm:</label>
+              <input
+                id="otp-setup-code"
+                name="otp_setup_code"
+                autoComplete="one-time-code"
+                className="input text-center text-xl font-mono tracking-widest"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                autoFocus
+              />
+            </div>
+            {error && <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 rounded-lg p-2">{error}</div>}
+            <div className="flex gap-3">
+              <button className="btn-primary flex-1" onClick={handleConfirm} disabled={loading || code.length !== 6}>
+                {loading ? (tr('verifying') || 'Verifying...') : (tr('confirm_enable') || 'Confirm & Enable')}
+              </button>
+              <button className="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" onClick={handleClose} disabled={loading}>
+                {tr('cancel')}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'confirm_disable' && (
+          <div className="space-y-4">
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 rounded-xl p-4">
+              <p className="text-sm text-yellow-800 dark:text-yellow-300 font-medium">Disabling 2FA reduces your account security.</p>
+              <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-1">Enter your password to confirm.</p>
+            </div>
+            <div>
+              <label htmlFor="otp-disable-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+              <input
+                id="otp-disable-password"
+                name="otp_disable_password"
+                autoComplete="current-password"
+                className="input"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Enter your password"
+                autoFocus
+              />
+            </div>
+            {error && <div className="text-red-600 text-sm bg-red-50 dark:bg-red-900/20 rounded-lg p-2">{error}</div>}
+            <div className="flex gap-3">
+              <button className="btn-danger flex-1" onClick={handleDisable} disabled={loading || !password}>
+                {loading ? (tr('disabling') || 'Disabling...') : (tr('disable_2fa') || 'Disable 2FA')}
+              </button>
+              <button className="btn-secondary disabled:cursor-not-allowed disabled:opacity-50" onClick={handleClose} disabled={loading}>
+                {tr('cancel')}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,6 @@
+[
+  {"_rowNumber": 2, "name": "Blue Widget", "sku": "SKU-001", "barcode": "1000000000001", "branch": "shop", "stock_quantity": "10", "cost_usd": "1.00", "price_usd": "2.00"},
+  {"_rowNumber": 3, "name": "Red Widget", "sku": "", "barcode": "1000000000002", "branch": "shop", "stock_quantity": "5", "cost_usd": "1.50", "price_usd": "3.00"},
+  {"_rowNumber": 4, "name": "Teal Widget", "sku": "", "barcode": "", "branch": "shop", "stock_quantity": "8", "cost_usd": "2.00", "price_usd": "4.00"},
+  {"_rowNumber": 5, "name": "Pink Widget", "sku": "", "barcode": "", "branch": "shop", "stock_quantity": "9", "cost_usd": "1.00", "price_usd": "5.00"}
+]

@@ -1,0 +1,282 @@
+import { Hono } from 'hono'
+import { getDb } from '../lib/db'
+import { requireAuth, type SessionUser } from '../lib/auth'
+import { audit } from '../lib/audit'
+import { hasPermission } from '../lib/permissions'
+import { broadcast } from '../durable-objects/broadcastHub'
+import { bumpVersion } from '../lib/cache'
+import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
+import { dateToBatchCode, normalizeToIsoDate } from '../lib/batchCode'
+import type { Env } from '../index'
+
+// Batch / expiry-date tracking -- schema notes and design rationale live in
+// lib/productBatches.ts. Gated behind the same 'inventory' permission as
+// routes/inventory.ts, since receiving/correcting batch stock is the same
+// class of action as any other stock adjustment.
+const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+app.use('*', requireAuth)
+app.use('*', async (c, next) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'inventory')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  return next()
+})
+
+// GET /api/batches/tracked-product-ids?branchId= -- POS fetches this once
+// (not per product tap) to know which products need the batch-picker
+// instead of a one-tap add. Kept as its own lightweight endpoint rather
+// than adding a column to the main product-search query, to avoid touching
+// that hot path for a feature most products won't use.
+app.get('/tracked-product-ids', async (c) => {
+  const db = getDb(c.env)
+  const branchId = Number(c.req.query('branchId')) || null
+  const productIds = await getTrackedProductIds(db, branchId)
+  return c.json({ productIds })
+})
+
+// GET /api/batches?productId=&branchId=&onlyAvailable=1
+app.get('/', async (c) => {
+  const db = getDb(c.env)
+  const productId = Number(c.req.query('productId'))
+  const branchId = Number(c.req.query('branchId'))
+  if (!productId || !branchId) return c.json({ error: 'productId and branchId are required' }, 400)
+  const onlyAvailable = c.req.query('onlyAvailable') === '1' || c.req.query('onlyAvailable') === 'true'
+  const batches = await listBatchesForProduct(db, productId, branchId, { onlyAvailable })
+  return c.json({ batches })
+})
+
+// POST /api/batches -- receive stock into a batch (creates a new batch, or
+// tops up an existing one if the received date's derived code matches one
+// already on this product -- see lib/batchCode.ts).
+app.post('/', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  const body = await c.req.json<{
+    product_id?: number
+    branch_id?: number
+    quantity?: number
+    expiry_date?: string | null
+    received_date?: string | null
+    notes?: string | null
+  }>().catch(() => ({} as {
+    product_id?: number
+    branch_id?: number
+    quantity?: number
+    expiry_date?: string | null
+    received_date?: string | null
+    notes?: string | null
+  }))
+
+  const productId = Number(body.product_id)
+  const branchId = Number(body.branch_id)
+  const quantity = Number(body.quantity)
+  if (!productId || !branchId) return c.json({ error: 'product_id and branch_id are required' }, 400)
+  if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'quantity must be a positive number' }, 400)
+
+  const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([productId])
+  if (!product) return c.json({ error: 'Product not found' }, 404)
+  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])
+
+  const { batchId, batchNumber, lotCode } = await receiveBatchStock(db, {
+    productId,
+    branchId,
+    quantity,
+    expiryDate: body.expiry_date || null,
+    receivedDate: body.received_date || null,
+    notes: body.notes || null,
+  })
+
+  // receiveBatchStock now also moves branch_stock/products.stock_quantity
+  // (see that function's own comment for why -- it used to only touch
+  // branch_batch_stock, silently leaving the aggregate stock unchanged).
+  // Log it as an ordinary inventory_movements 'add' row too, same as any
+  // other stock addition, so this doesn't become a receipt that's visible
+  // in the batch ledger and the audit log but invisible in Stock History.
+  await db.prepare(`
+    INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
+    VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)
+  `).run({
+    productId,
+    productName: product.name,
+    branchId,
+    branchName: branch?.name || null,
+    quantity,
+    reason: `Batch receipt (${lotCode})`,
+    userId: user?.id ?? null,
+    userName: user?.name ?? null,
+  })
+
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_receive', 'product_batch', batchId, {
+    product_id: productId,
+    product_name: product.name,
+    branch_id: branchId,
+    quantity,
+    expiry_date: body.expiry_date || null,
+    lot_code: lotCode,
+  })
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env.CACHE, 'products'),
+    broadcast(c.env, 'inventory', { type: 'batch_received', productId, branchId }),
+    broadcast(c.env, 'products', { action: 'update', id: productId }),
+  ]))
+
+  return c.json({ success: true, batchId, batchNumber, lotCode })
+})
+
+// PATCH /api/batches/:id -- edit a batch's own fields (expiry/lot/notes) or
+// deactivate it. Does NOT take a branch_id/quantity -- a batch can span
+// several branches (one branch_batch_stock row each), so quantity
+// corrections are scoped separately below.
+app.patch('/:id', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  const id = Number(c.req.param('id'))
+  const body = await c.req.json<{ expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }>()
+    .catch(() => ({} as { expiry_date?: string | null; notes?: string | null; is_active?: boolean; received_at?: string | null }))
+
+  const existing = await db.prepare('SELECT id FROM product_batches WHERE id = ?').get<{ id: number }>([id])
+  if (!existing) return c.json({ error: 'Batch not found' }, 404)
+
+  const updates: string[] = []
+  const params: Record<string, unknown> = { id }
+  if (body.expiry_date !== undefined) { updates.push('expiry_date = @expiry_date'); params.expiry_date = body.expiry_date || null }
+  if (body.notes !== undefined) { updates.push('notes = @notes'); params.notes = body.notes || null }
+  if (body.is_active !== undefined) { updates.push('is_active = @is_active'); params.is_active = body.is_active ? 1 : 0 }
+  // received_at (the "batch date" -- when this lot actually came in) is
+  // the ONLY thing that determines this batch's code now -- editing it
+  // recomputes both batch_key and lot_code from the corrected date (see
+  // lib/batchCode.ts's dateToBatchCode), instead of accepting a
+  // separately-typed lot_code that could drift out of sync with the date
+  // shown right next to it. If the corrected date now matches another
+  // active batch on this product, that collides on the unique index --
+  // surfaced as a normal 409/error rather than silently merging two
+  // distinct batch rows into one.
+  if (body.received_at !== undefined) {
+    const iso = normalizeToIsoDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
+    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date' }, 400)
+    const resolvedIso = iso || new Date().toISOString().slice(0, 10)
+    const code = dateToBatchCode(resolvedIso) as string
+    updates.push('received_at = @received_at', 'batch_key = @batch_key', 'lot_code = @lot_code')
+    params.received_at = resolvedIso
+    params.batch_key = code
+    params.lot_code = code
+  }
+  if (!updates.length) return c.json({ error: 'No fields to update' }, 400)
+  updates.push(`updated_at = datetime('now')`)
+
+  await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_update', 'product_batch', id, body)
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
+  return c.json({ success: true })
+})
+
+// PATCH /api/batches/:id/branches/:branchId -- correct the quantity sitting
+// in one branch for this batch (e.g. a stock-take found the real number is
+// different from what sales/receipts computed). A direct set, not an add --
+// distinct from POST / above, which always adds.
+app.patch('/:id/branches/:branchId', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  const batchId = Number(c.req.param('id'))
+  const branchId = Number(c.req.param('branchId'))
+  const body = await c.req.json<{ quantity?: number }>().catch(() => ({} as { quantity?: number }))
+  const quantity = Number(body.quantity)
+  if (!Number.isFinite(quantity) || quantity < 0) return c.json({ error: 'quantity must be a non-negative number' }, 400)
+
+  const batch = await db.prepare('SELECT id, variant_product_id AS productId FROM product_batches WHERE id = ?').get<{ id: number; productId: number }>([batchId])
+  if (!batch) return c.json({ error: 'Batch not found' }, 404)
+  const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([batch.productId])
+
+  // A direct SET (a stock-take correction, not a delta) -- read the
+  // previous quantity first so the aggregate (branch_stock/
+  // stock_quantity) can be adjusted by the same delta this batch's own
+  // figure is about to move by, keeping the two ledgers in agreement the
+  // same way receiveBatchStock/removeStockFromBatch do for their own
+  // add/remove paths. Without this, correcting a batch's quantity here
+  // moved the batch ledger but silently left the aggregate stale -- the
+  // same class of gap fixed on the receive side above.
+  const existingRow = await db.prepare(
+    'SELECT quantity FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId',
+  ).get<{ quantity: number }>({ batchId, branchId })
+  const previousQuantity = Number(existingRow?.quantity) || 0
+  const delta = quantity - previousQuantity
+
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
+    {
+      sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @quantity)
+            ON CONFLICT(batch_id, branch_id) DO UPDATE SET quantity = @quantity, updated_at = datetime('now')`,
+      params: { batchId, branchId, quantity },
+    },
+  ]
+  if (delta !== 0) {
+    statements.push({
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity + excluded.quantity)`,
+      params: { productId: batch.productId, branchId, delta },
+    })
+    statements.push({
+      sql: 'UPDATE products SET stock_quantity = MAX(0, COALESCE(stock_quantity, 0) + @delta), updated_at = CURRENT_TIMESTAMP WHERE id = @productId',
+      params: { productId: batch.productId, delta },
+    })
+  }
+  await db.batch(statements)
+
+  if (delta !== 0) {
+    await db.prepare(`
+      INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, user_id, user_name, created_at)
+      VALUES (@productId, @productName, @branchId, 'set', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)
+    `).run({
+      productId: batch.productId,
+      productName: product?.name || null,
+      branchId,
+      quantity: Math.abs(delta),
+      reason: `Batch quantity correction (Batch #${batchId})`,
+      userId: user?.id ?? null,
+      userName: user?.name ?? null,
+    })
+  }
+
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity })
+  c.executionCtx.waitUntil(Promise.all([
+    bumpVersion(c.env.CACHE, 'products'),
+    broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
+    broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
+  ]))
+  return c.json({ success: true })
+})
+
+// DELETE /api/batches/:id -- soft delete (is_active = 0). Never a hard
+// delete: sale_item_batch_allocations rows reference batch_id for
+// historical receipts/reports, so the row needs to keep existing even once
+// it's no longer offered in the POS picker.
+app.delete('/:id', async (c) => {
+  const db = getDb(c.env)
+  const user = c.get('user')
+  const id = Number(c.req.param('id'))
+  const existing = await db.prepare('SELECT id FROM product_batches WHERE id = ?').get<{ id: number }>([id])
+  if (!existing) return c.json({ error: 'Batch not found' }, 404)
+
+  // A deactivated batch drops out of every FIFO picker (listBatchesForProduct
+  // filters `is_active = 1`) -- POS's lot picker, Inventory's mandatory
+  // batch selection, everything. If it still holds stock anywhere,
+  // deactivating it here would leave that quantity permanently
+  // unreachable through any batch-aware path while the aggregate
+  // (branch_stock/stock_quantity) still counts it -- exactly the ledger-
+  // divergence bug fixed elsewhere in this file. Block instead of quietly
+  // stranding it; the admin corrects the quantity to zero first (PATCH
+  // .../branches/:branchId, which reconciles the aggregate down with it),
+  // then deactivates.
+  const remaining = await db.prepare(
+    'SELECT COALESCE(SUM(quantity), 0) AS total FROM branch_batch_stock WHERE batch_id = ?',
+  ).get<{ total: number }>([id])
+  const remainingQty = Number(remaining?.total) || 0
+  if (remainingQty > 0) {
+    return c.json({ error: `This batch still has ${remainingQty} unit(s) of stock. Correct the quantity to 0 before deactivating.` }, 400)
+  }
+
+  await db.prepare(`UPDATE product_batches SET is_active = 0, updated_at = datetime('now') WHERE id = ?`).run([id])
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_deactivate', 'product_batch', id, null)
+  c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { type: 'batch_updated', batchId: id }))
+  return c.json({ success: true })
+})
+
+export default app

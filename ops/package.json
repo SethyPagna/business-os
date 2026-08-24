@@ -1,0 +1,9 @@
+{
+  "name": "business-os-ops",
+  "version": "7.0.0",
+  "private": true,
+  "scripts": {
+    "cloudflare:verify-r2": "node scripts/runtime/cloudflare/verify-r2-object-store.ts"
+  },
+  "devDependencies": {}
+}

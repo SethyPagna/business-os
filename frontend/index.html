@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e3a8a" />
+    <meta name="description" content="Business OS - Offline-first POS, inventory and analytics" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Business OS" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico?v=business-os" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>Business OS</title>
+    <script>
+      (function setInitialBusinessOsRoute() {
+        var pathname = String(window.location && window.location.pathname || '/')
+          .split('?')[0]
+          .split('#')[0]
+          .replace(/\/{2,}/g, '/')
+          .replace(/\/+$/g, '')
+          .toLowerCase() || '/'
+        var adminRoutes = {
+          '/': true,
+          '/admin': true,
+          '/app': true,
+          '/login': true,
+          '/dashboard': true,
+          '/products': true,
+          '/product': true,
+          '/pos': true,
+          '/point-of-sale': true,
+          '/inventory': true,
+          '/sales': true,
+          '/returns': true,
+          '/branches': true,
+          '/contacts': true,
+          '/catalog': true,
+          '/loyalty-points': true,
+          '/loyalty': true,
+          '/users': true,
+          '/audit-log': true,
+          '/audit': true,
+          '/receipt-settings': true,
+          '/receipts': true,
+          '/backup': true,
+          '/backups': true,
+          '/settings': true,
+          '/files': true,
+          '/library': true,
+          '/server': true
+        }
+        var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
+        var publicRoute = pathname !== '/'
+          && pathname !== '/health'
+          && pathname.indexOf('/api/') !== 0
+          && pathname.indexOf('/uploads/') !== 0
+          && !/\.[a-z0-9]+$/i.test(pathname)
+          && !adminRoutes[segment]
+        document.documentElement.setAttribute('data-business-os-initial-route', publicRoute ? 'public' : 'admin')
+      }())
+    </script>
+    <style data-business-os-initial-shell>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f5f7fb;
+        color: #0f172a;
+      }
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        background: #f5f7fb;
+      }
+      .business-os-initial-shell {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        pointer-events: none;
+      }
+      .business-os-initial-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        max-width: calc(100vw - 32px);
+        text-align: center;
+      }
+      .business-os-initial-spinner {
+        width: 44px;
+        height: 44px;
+        border-radius: 999px;
+        border: 3px solid rgba(37, 99, 235, 0.18);
+        border-top-color: #2563eb;
+        animation: business-os-spin 0.8s linear infinite;
+      }
+      @keyframes business-os-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .business-os-initial-brand {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+      }
+      [data-business-os-initial-route="admin"] [data-business-os-public],
+      [data-business-os-initial-route="public"] [data-business-os-admin] {
+        display: none !important;
+      }
+      .business-os-initial-title {
+        margin: 0;
+        font-size: 14px;
+        line-height: 1.2;
+        font-weight: 800;
+      }
+      .business-os-initial-copy {
+        margin: 0;
+        color: #64748b;
+        font-size: 11px;
+        line-height: 1.3;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root,
+        body {
+          background: #101827;
+          color: #e5edf7;
+        }
+        .business-os-initial-copy {
+          color: #a7b4c6;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="business-os-initial-shell" role="status" aria-live="polite">
+        <div class="business-os-initial-panel">
+          <div class="business-os-initial-spinner" aria-hidden="true"></div>
+          <div class="business-os-initial-brand">
+            <h1 class="business-os-initial-title">
+              <span data-business-os-admin>Business OS</span>
+              <span data-business-os-public>Leang Cosmetics</span>
+            </h1>
+            <p class="business-os-initial-copy">
+              <span data-business-os-admin>Opening workspace</span>
+              <span data-business-os-public>Opening catalog</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      (function syncInitialShellWithRoute() {
+        var pathname = String(window.location && window.location.pathname || '/')
+          .split('?')[0]
+          .split('#')[0]
+          .replace(/\/{2,}/g, '/')
+          .replace(/\/+$/g, '')
+          .toLowerCase() || '/'
+        var adminRoutes = {
+          '/': true,
+          '/admin': true,
+          '/app': true,
+          '/login': true,
+          '/dashboard': true,
+          '/products': true,
+          '/product': true,
+          '/pos': true,
+          '/point-of-sale': true,
+          '/inventory': true,
+          '/sales': true,
+          '/returns': true,
+          '/branches': true,
+          '/contacts': true,
+          '/catalog': true,
+          '/loyalty-points': true,
+          '/loyalty': true,
+          '/users': true,
+          '/audit-log': true,
+          '/audit': true,
+          '/receipt-settings': true,
+          '/receipts': true,
+          '/backup': true,
+          '/backups': true,
+          '/settings': true,
+          '/files': true,
+          '/library': true,
+          '/server': true
+        }
+        var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
+        var publicRoute = pathname !== '/'
+          && pathname !== '/health'
+          && pathname.indexOf('/api/') !== 0
+          && pathname.indexOf('/uploads/') !== 0
+          && !/\.[a-z0-9]+$/i.test(pathname)
+          && !adminRoutes[segment]
+        if (!publicRoute) return
+        var title = document.querySelector('.business-os-initial-title')
+        var copy = document.querySelector('.business-os-initial-copy')
+        if (title) title.textContent = 'Leang Cosmetics'
+        if (copy) copy.textContent = 'Opening catalog'
+      }())
+    </script>
+    <script src="/runtime-noise-guard.js"></script>
+    <script src="/theme-bootstrap.js"></script>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,493 @@
+import { Fragment } from 'react'
+import type { ReactNode, RefObject } from 'react'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+
+type Translate = (key: string) => string | undefined
+type TranslateWithFallback = (key: string, fallback: string, khmerFallback?: string) => string
+type ProductId = string | number
+
+type ProductLike = {
+  id?: ProductId
+  [key: string]: unknown
+}
+
+type ProductGroup = {
+  key: string
+  name: string
+  anchorId?: ProductId
+  ids: ProductId[]
+  items: ProductLike[]
+  // Display rows: branch-only duplicates already collapsed into one row
+  // each (see mergeSameDetailRows in utils/productGrouping.ts). Render
+  // these, not `items` -- `items` stays around for bulk-selection scope.
+  rows: ProductLike[]
+  hasMultipleItems: boolean
+  leadProduct?: ProductLike
+}
+
+type ProductSection = {
+  id: string
+  label: string
+  ids: ProductId[]
+  items: ProductLike[]
+  groups: ProductGroup[]
+}
+
+type ProductRowRenderOptions = {
+  indented: boolean
+}
+
+type ProductsListSurfaceProps = {
+  allVisibleProducts: ProductLike[]
+  collapsedProductGroups: Set<string>
+  collapsedProductSections: Set<string>
+  desktopSelectAllRef: RefObject<HTMLInputElement | null>
+  getGroupSummaryParts: (group: ProductGroup, options?: { includeCount?: boolean }) => string[]
+  initialDesktopRevealReady: boolean
+  isSelectionScopeFullySelected: (ids: ProductId[]) => boolean
+  isSelectionScopePartiallySelected: (ids: ProductId[]) => boolean
+  loading: boolean
+  productSections: ProductSection[]
+  productTotal?: number
+  productTotalLabel?: string
+  refreshingProducts: boolean
+  renderDesktopProductRow: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
+  renderGroupActions?: (group: ProductGroup) => ReactNode
+  renderGroupThumbnail?: (group: ProductGroup) => ReactNode
+  renderMobileProductCard: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
+  // True once anything is selected -- see Products.tsx's selectionModeActive
+  // comment. Section/group select-all checkboxes only render while this is
+  // true, matching the per-row checkboxes (part 77: "remove per-child
+  // select bar from default view").
+  selectionModeActive: boolean
+  selectedVisibleCount: number
+  t: Translate
+  toggleProductGroup: (key: string) => void
+  toggleProductSection: (id: string) => void
+  toggleSelectAll: (checked: boolean) => void
+  toggleSelectionScope: (ids: ProductId[], checked: boolean) => void
+  tr: TranslateWithFallback
+  visibleIds: ProductId[]
+  visibleProducts: ProductLike[]
+}
+
+export default function ProductsListSurface({
+  allVisibleProducts,
+  collapsedProductGroups,
+  collapsedProductSections,
+  desktopSelectAllRef,
+  getGroupSummaryParts,
+  initialDesktopRevealReady,
+  isSelectionScopeFullySelected,
+  isSelectionScopePartiallySelected,
+  loading,
+  productSections,
+  productTotal,
+  productTotalLabel,
+  refreshingProducts,
+  renderDesktopProductRow,
+  renderGroupActions,
+  renderGroupThumbnail,
+  renderMobileProductCard,
+  selectionModeActive,
+  selectedVisibleCount,
+  t,
+  toggleProductGroup,
+  toggleProductSection,
+  toggleSelectAll,
+  toggleSelectionScope,
+  tr,
+  visibleIds,
+  visibleProducts,
+}: ProductsListSurfaceProps) {
+  const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
+  const showDesktopLoadingOverlay = !initialDesktopRevealReady
+
+  // A fixed responsive grid prevents long product metadata from widening
+  // the table beyond an ordinary laptop viewport. Details/Margin still
+  // hide at their existing breakpoints, while Stock remains inside the card.
+  const desktopColGroup = (
+    <colgroup>
+      <col className="w-10" />
+      <col className="w-[4.5rem]" />
+      <col className="w-[31%]" />
+      <col className="w-[20%]" />
+      <col className="w-[10%]" />
+      <col className="w-[11%]" />
+      <col className="w-[8%]" />
+      <col className="w-[10%]" />
+    </colgroup>
+  )
+
+  const renderDesktopTableHead = (showSelectionControl: boolean) => (
+    <thead className="sticky top-0 z-10">
+      <tr>
+        <th className="w-8 px-3 py-3">
+          {showSelectionControl ? (
+            <input
+              type="checkbox"
+              className="rounded"
+              checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
+              ref={desktopSelectAllRef}
+              onChange={(event) => toggleSelectAll(event.target.checked)}
+            />
+          ) : (
+            <span className="sr-only">loading</span>
+          )}
+        </th>
+        <th className="w-16 whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
+        <th className="min-w-[140px] px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('product_name')}</th>
+        <th className="hidden whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('details') || 'Details'}</th>
+        {/* Was t('cost_in_purchase') ("Cost In (Purchase)") -- too long for
+            this column at normal widths, overflowing/truncating to
+            "Costin...". Just "Cost" (same short key ProductForm's other
+            cost surfaces already use) fits and is unambiguous given the
+            red cost-column styling and the Selling/Margin columns beside
+            it. */}
+        <th className="col-highlight-red whitespace-nowrap px-3 py-3 text-right font-semibold text-red-600 dark:text-red-400">{t('cost')}</th>
+        <th className="col-highlight-green whitespace-nowrap px-3 py-3 text-right font-semibold text-green-600 dark:text-green-400">{t('selling_price_label')}</th>
+        <th className="hidden whitespace-nowrap px-3 py-3 text-right font-semibold text-blue-600 dark:text-blue-400 lg:table-cell">{t('margin')}</th>
+        <th className="whitespace-nowrap px-3 py-3 text-right font-semibold text-gray-600 dark:text-gray-400">{t('stock')}</th>
+      </tr>
+    </thead>
+  )
+
+  const renderDesktopLoadingShell = () => (
+    <div className="min-h-[26rem] animate-pulse bg-white/95 px-4 py-4 dark:bg-slate-950/80">
+      <div className="rounded-xl border border-slate-200/90 bg-slate-50/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/70">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+            <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
+          </div>
+          <div className="h-7 w-24 rounded-lg bg-slate-200 dark:bg-slate-700" />
+        </div>
+      </div>
+      <div className="mt-4 space-y-4">
+        {Array.from({ length: 3 }, (_, index) => (
+          <div
+            key={`products-shell-${index}`}
+            className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-slate-700/70 dark:bg-slate-900/70"
+          >
+            <div className="flex items-start gap-4">
+              <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-slate-700" />
+              <div className="min-w-0 flex-1 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-4 w-48 max-w-[60%] rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-3 w-72 max-w-[80%] rounded bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="h-5 w-16 rounded-full bg-slate-100 dark:bg-slate-800" />
+                    <div className="h-5 w-16 rounded-full bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-5 gap-3">
+                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                  <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
+                </div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+
+  return (
+    <>
+      {/* Desktop table: previously a fixed-height card (`sm:h-[calc(100vh-18rem)]
+          sm:overflow-hidden`) with its own inner `overflow-auto` scroll region --
+          a second, independent scrollbar nested inside the page's own
+          `.page-scroll` container. Per user request, the list now flows with
+          the page instead: no forced height, no inner scroll container. The
+          table head's `sticky top-0` (see renderDesktopTableHead above) still
+          works here -- it just sticks to `.page-scroll` (the nearest scrolling
+          ancestor now) instead of to this card, which is the same "header
+          stays visible while scrolling" behavior, just anchored one level up. */}
+      <div className="card hidden overflow-hidden sm:flex sm:flex-col">
+        <div className="relative overflow-hidden">
+          <table className="w-full table-fixed text-sm table-bordered">
+            {desktopColGroup}
+            {renderDesktopTableHead(initialDesktopRevealReady)}
+            <tbody className={showDesktopLoadingOverlay ? 'invisible' : ''}>
+              {visibleProducts.length === 0
+                ? (showDesktopLoadingOverlay
+                  ? null
+                  : (
+                    <tr>
+                      <td colSpan={8} className="py-10 text-center text-gray-400">
+                        {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+                      </td>
+                    </tr>
+                    ))
+                : productSections.map((section) => {
+                  const isCollapsed = collapsedProductSections.has(section.id)
+                  return (
+                    <Fragment key={section.id}>
+                      <tr className="bg-slate-100/90 dark:bg-slate-800/80">
+                        <td colSpan={8} className="px-4 py-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                              {selectionModeActive ? (
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded"
+                                  checked={isSelectionScopeFullySelected(section.ids)}
+                                  ref={(node) => {
+                                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                                  }}
+                                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                                  aria-label={`Select ${section.label}`}
+                                />
+                              ) : null}
+                              <span>{section.label}</span>
+                              <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                              onClick={() => toggleProductSection(section.id)}
+                            >
+                              {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                              {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {!isCollapsed ? section.groups.map((group) => {
+                        const groupCollapsed = collapsedProductGroups.has(group.key)
+                        // Wrapper card only shows when there's more than one
+                        // *display row* left after merging branch-only
+                        // duplicates -- a group whose rows fully merge down
+                        // to one just renders as that single row, same as
+                        // any other product (branch breakdown still shows
+                        // via its own Details cell).
+                        const showGroupRow = group.rows.length > 1
+                        return (
+                          <Fragment key={group.key}>
+                            {showGroupRow ? (
+                              <tr className="bg-white/80 dark:bg-slate-900/45" data-product-jump-id={group.anchorId}>
+                                <td colSpan={8} className="px-3 py-2.5">
+                                  <div className="grid grid-cols-[2.5rem_4.5rem_minmax(0,1fr)_auto] items-center gap-0">
+                                    <label className="flex h-8 items-center justify-center">
+                                      {selectionModeActive ? (
+                                        <input
+                                          type="checkbox"
+                                          className="h-4 w-4 rounded"
+                                          checked={isSelectionScopeFullySelected(group.ids)}
+                                          ref={(node) => {
+                                            if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                          }}
+                                          onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                          aria-label={`Select ${group.name}`}
+                                        />
+                                      ) : null}
+                                    </label>
+                                    <span className="flex h-8 items-center justify-center">{renderGroupThumbnail ? renderGroupThumbnail(group) : null}</span>
+                                    {/* Title has no leading chevron/icon anymore -- a
+                                        leading disclosure icon pushed this text ~24px
+                                        right of where every standalone/child row's own
+                                        title text starts (right after the shared
+                                        checkbox+thumbnail columns), making the group
+                                        title look "indented" relative to its own rows
+                                        instead of aligned with them. The expand/collapse
+                                        chevron moved to the trailing side (with the
+                                        summary pills/actions) so this column's text
+                                        lines up flush with every other row's title. */}
+                                    <button
+                                      type="button"
+                                      className="min-w-0 truncate px-3 text-left text-sm font-semibold text-slate-700 dark:text-slate-100"
+                                      onClick={() => toggleProductGroup(group.key)}
+                                    >
+                                      {group.name}
+                                    </button>
+                                    <div className="ml-3 flex min-w-0 items-center justify-end gap-2">
+                                    <div className="hidden xl:flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500 dark:text-slate-300">
+                                      {getGroupSummaryParts(group).map((part) => (
+                                        <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                                          {part}
+                                        </span>
+                                      ))}
+                                    </div>
+                                    {/* Group-title three-dot menu (add child
+                                        row / add image) -- per the Aug 19
+                                        2026 ask. Rendered by the caller
+                                        (Products.tsx) since it's the one
+                                        holding the add-variant/open-form-tab
+                                        handlers; this surface just gives it
+                                        a slot next to the summary pills. */}
+                                    {renderGroupActions ? renderGroupActions(group) : null}
+                                    <button
+                                      type="button"
+                                      className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                      onClick={() => toggleProductGroup(group.key)}
+                                      aria-label={groupCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                                    >
+                                      {groupCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                    </button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : null}
+                            {!groupCollapsed || !showGroupRow ? group.rows.map((product) => renderDesktopProductRow(product, { indented: showGroupRow })) : null}
+                          </Fragment>
+                        )
+                      }) : null}
+                    </Fragment>
+                  )
+                })}
+            </tbody>
+          </table>
+          {showDesktopLoadingOverlay ? (
+            <div className="pointer-events-none absolute inset-x-0 top-[3.125rem] bottom-0 z-20 overflow-hidden border-t border-slate-200/80 bg-white/80 backdrop-blur-[1px] dark:border-slate-700/80 dark:bg-slate-950/78">
+              {renderDesktopLoadingShell()}
+            </div>
+          ) : null}
+        </div>
+        <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
+          {initialDesktopRevealReady
+            ? `${visibleProducts.length} / ${productTotal || allVisibleProducts.length} ${t('products')}`
+            : (productTotalLabel || t('loading') || 'Loading')}
+        </div>
+      </div>
+
+      {/* Mobile card list: same fix as the desktop table above -- dropped
+          `min-h-[32rem] flex-1 overflow-auto` (its own independent scroll
+          region) so this flows with `.page-scroll` instead. */}
+      <div className="space-y-2 sm:hidden">
+        {loading ? (
+          <div className="space-y-2">
+            {skeletonRows.slice(0, 6).map((row) => (
+              <div key={`product-mobile-skeleton-${row}`} className="card animate-pulse p-3">
+                <div className="flex items-start gap-3">
+                  <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
+                    <div className="h-8 w-full rounded bg-slate-100 dark:bg-slate-800" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : visibleProducts.length === 0 ? (
+          <div className="py-10 text-center text-gray-400">
+            {refreshingProducts ? tr('products_refreshing', 'Refreshing products...', 'កំពុងធ្វើបច្ចុប្បន្នភាពផលិតផល...') : t('no_data')}
+          </div>
+        ) : productSections.map((section) => {
+          const isCollapsed = collapsedProductSections.has(section.id)
+          return (
+            <div key={section.id} className="space-y-2">
+              <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                    {selectionModeActive ? (
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded"
+                        checked={isSelectionScopeFullySelected(section.ids)}
+                        ref={(node) => {
+                          if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                        }}
+                        onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                        aria-label={`Select ${section.label}`}
+                      />
+                    ) : null}
+                    <span>{section.label}</span>
+                    <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                    onClick={() => toggleProductSection(section.id)}
+                  >
+                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                  </button>
+                </div>
+              </div>
+              {!isCollapsed ? section.groups.map((group) => {
+                const groupCollapsed = collapsedProductGroups.has(group.key)
+                const showGroupRow = group.rows.length > 1
+                // Grouped rows render inside ONE merged card (header + all
+                // rows share the same rounded border/background, rows
+                // separated by a thin top divider rendered by
+                // renderMobileProductCard) instead of a separate header card
+                // plus one boxed card per row -- matches Inventory's mobile
+                // grouped-row treatment (InventoryProductsSurface.tsx) so
+                // Products and Inventory look the same on mobile. Ungrouped
+                // single products are untouched, still their own free-
+                // standing card via the `space-y-2` wrapper below.
+                return (
+                  <div
+                    key={group.key}
+                    className={showGroupRow
+                      ? 'overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900/80'
+                      : 'space-y-2'}
+                  >
+                    {showGroupRow ? (
+                      <div className="px-3 py-2" data-product-jump-id={group.anchorId}>
+                        <div className="flex items-start justify-between gap-3">
+                          <label className="flex min-w-0 items-start gap-2">
+                            {selectionModeActive ? (
+                              <input
+                                type="checkbox"
+                                className="mt-1 h-4 w-4 rounded"
+                                checked={isSelectionScopeFullySelected(group.ids)}
+                                ref={(node) => {
+                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                }}
+                                onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                aria-label={`Select ${group.name}`}
+                              />
+                            ) : null}
+                            {renderGroupThumbnail ? <span className="mt-0.5 shrink-0">{renderGroupThumbnail(group)}</span> : null}
+                            <button type="button" className="min-w-0 text-left" onClick={() => toggleProductGroup(group.key)}>
+                              <div className="flex items-center gap-1.5">
+                                {groupCollapsed ? <ChevronRight className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                                <span className="truncate text-sm font-semibold text-slate-900 dark:text-white">{group.name}</span>
+                              </div>
+                              {/* Row count used to sit as its own badge next to the title (above)
+                                  on top of a *second* copy of it here excluded via
+                                  { includeCount: false }. Now it only ever renders once, folded
+                                  into this same summary row as "N options" -- same row as stock/
+                                  branches, same treatment as the desktop table. */}
+                              <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-500 dark:text-slate-300">
+                                {getGroupSummaryParts(group).map((part) => (
+                                  <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                                    {part}
+                                  </span>
+                                ))}
+                              </div>
+                            </button>
+                          </label>
+                          {/* Same three-dot menu (add child row / add image)
+                              as the desktop table's group header -- was
+                              missing here entirely, so phones/small screens
+                              had no way to add a variant or set the group
+                              image from the group row itself. Placed as a
+                              sibling of the label so the outer
+                              `justify-between` pins it to the top-right,
+                              matching the desktop layout's placement next
+                              to its summary pills. */}
+                          {renderGroupActions ? <span className="mt-0.5 shrink-0">{renderGroupActions(group)}</span> : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {!groupCollapsed || !showGroupRow ? group.rows.map((product) => renderMobileProductCard(product, { indented: showGroupRow })) : null}
+                  </div>
+                )
+              }) : null}
+            </div>
+          )
+        })}
+      </div>
+    </>
+  )
+}

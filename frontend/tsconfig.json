@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM"],
+    "types": ["node", "vite/client"]
+  },
+  "include": [
+    "*.ts",
+    "src/*.ts",
+    "src/**/*.tsx",
+    "src/app/**/*.ts",
+    "src/api/**/*.ts",
+    "src/runtime/**/*.ts",
+    "src/types/**/*.ts",
+    "src/components/catalog/**/*.ts",
+    "src/components/contacts/**/*.ts",
+    "src/components/dashboard/charts/**/*.ts",
+    "src/components/inventory/**/*.ts",
+    "src/components/pos/**/*.ts",
+    "src/components/sales/**/*.ts",
+    "src/components/receipt-settings/**/*.ts",
+    "src/components/shared/**/*.ts",
+    "src/components/utils-settings/**/*.ts",
+    "src/platform/runtime/**/*.ts",
+    "src/platform/storage/**/*.ts",
+    "src/utils/**/*.ts",
+    "src/components/products/helpers/**/*.ts",
+    "src/components/products/history/**/*.ts",
+    "src/components/products/import/**/*.ts",
+    "src/components/products/lookups/**/*.ts",
+    "src/components/products/scanning/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

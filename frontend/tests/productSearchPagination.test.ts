@@ -1,0 +1,184 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+
+const productsPage = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+const productFilterHelpers = readFileSync(new URL('../src/components/products/helpers/productFilterHelpers.ts', import.meta.url), 'utf8')
+const productMenuHelpers = readFileSync(new URL('../src/components/products/helpers/productMenuHelpers.ts', import.meta.url), 'utf8')
+const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
+const posPage = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
+const availabilityFilterOptions = readFileSync(new URL('../src/components/shared/AvailabilityFilterOptions.tsx', import.meta.url), 'utf8')
+const posQuickAddModals = readFileSync(new URL('../src/components/pos/POSQuickAddModals.tsx', import.meta.url), 'utf8')
+const apiMethods = readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+const productReadTransport = readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
+
+assert.ok(
+  /productApi\.getProductsByIds|window\.api\.getProductsByIds/.test(productsPage),
+  'Products page should fetch touched records by id for undo/redo and bulk actions',
+)
+assert.ok(
+  !productsPage.includes('window.api.getProducts('),
+  'Products page must not use full getProducts() during normal browsing or recovery actions',
+)
+assert.ok(
+  apiMethods.includes('export const getProductsByIds'),
+  'API layer should expose bounded product id lookup',
+)
+assert.ok(
+  productReadTransport.includes('/api/products/search'),
+  'bounded product id lookup should reuse the paginated search API',
+)
+assert.match(
+  posPage,
+  /const effectiveStockState = stockFilter === 'all' \? '' : stockFilter/,
+  'POS should request total product results by default instead of forcing sellable-only browsing',
+)
+assert.match(
+  posPage,
+  /totalItems=\{productTotal\}/,
+  'POS pagination should be driven by the total product result count',
+)
+assert.match(
+  productsSurface,
+  /visibleProducts\.length === 0[\s\S]*refreshingProducts[\s\S]*Refreshing products/,
+  'Products page should show refreshing state instead of a false no-data search result while data is in flight',
+)
+assert.match(
+  productsSurface,
+  /initialDesktopRevealReady[\s\S]*productTotalLabel[\s\S]*t\('loading'\)/,
+  'Products desktop footer should show a pending label instead of 0 / 0 Products during first load',
+)
+assert.match(
+  productsPage,
+  /const productSelectAllLabel = loadedOnceRef\.current \|\| !loading[\s\S]*Select all/,
+  'Products mobile select-all label should not show a false zero count during first load',
+)
+assert.match(
+  productFilterHelpers,
+  /product\?\.unit/,
+  'Products search should include unit names so unit review can jump into matching products',
+)
+assert.match(
+  productsPage,
+  /const handleLookupReviewSelection = useCallback/,
+  'Products page should expose a lookup-review handoff for manage brand/category/unit flows',
+)
+assert.match(
+  productsPage,
+  /onReviewSelection=\{handleLookupReviewSelection\}/,
+  'Products page should wire lookup-review handoff into the manage brand/category/unit modals',
+)
+assert.match(
+  productsPage,
+  /product_brand_color_map/,
+  'Products page should read brand color settings for product rows and details',
+)
+assert.match(
+  productsPage,
+  /renderMetaPill/,
+  'Products page should render colored metadata pills for SKU, barcode, unit, category, brand, and branches',
+)
+assert.match(
+  productsPage,
+  /const filterMetaQuery = \{[\s\S]*productApi\.getProductFilters\(filterMetaQuery\)/,
+  'Products page should scope product filter options (brand/category/supplier lists) to the currently active filters instead of always requesting the unscoped global set',
+)
+assert.doesNotMatch(
+  productsPage,
+  /compactBrandOptions|slice\(0,\s*40\)/,
+  'Products page should not cap the visible brand filter list',
+)
+assert.match(
+  productsPage,
+  /(?:p\.brand|brandName)[\s\S]*getBrandColor\((?:p\.brand|brandName)\)[\s\S]*pl-\[5\.35rem\]/,
+  'Mobile product cards should show brand and let the lower metadata row span under the action button',
+)
+assert.match(
+  posPage,
+  /visibleProductCards\.length === 0[\s\S]*catalogRefreshing[\s\S]*Refreshing/,
+  'POS product grid should show refreshing state instead of a false no-data result while data is in flight',
+)
+assert.match(
+  posPage,
+  /include: 'branch_stock,images,family'/,
+  'POS should request product families so one card can show parent, variants, and options together',
+)
+assert.match(
+  posPage,
+  /const POS_CATALOG_LOAD_TIMEOUT_MS = 15000/,
+  'POS catalog bootstrap should have a named timeout budget',
+)
+assert.match(
+  posPage,
+  /withLoaderTimeout\(\s*\(\) => shouldLoadMetadata[\s\S]*loadPosProductBootstrap\(productQuery\)[\s\S]*searchPosCatalogProducts\(productQuery\)[\s\S]*label,\s*POS_CATALOG_LOAD_TIMEOUT_MS,\s*\)/,
+  'POS catalog bootstrap should apply the named timeout to the combined first-window product and branch read',
+)
+assert.doesNotMatch(
+  posPage,
+  /getCategories(?:\?\.)?\(\)[\s\S]{0,260}POS_CATALOG_LOAD_TIMEOUT_MS/,
+  'POS catalog bootstrap should keep category options out of the first route-load batch',
+)
+assert.doesNotMatch(
+  posPage,
+  /getProductFilters(?:\?\.)?\(\{\}\)[\s\S]{0,260}POS_CATALOG_LOAD_TIMEOUT_MS/,
+  'POS catalog bootstrap should keep full product filters out of the first route-load batch',
+)
+assert.match(
+  posPage,
+  /const scopedQuery = \{[\s\S]*withLoaderTimeout\(\(\) => loadPosProductFilters\(scopedQuery\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)/,
+  'POS filter panel should receive delayed filter metadata scoped to the currently active filters',
+)
+assert.match(
+  posPage,
+  /withLoaderTimeout\(\(\) => loadPosCategories\(\), label, POS_CATEGORY_OPTIONS_TIMEOUT_MS\)/,
+  'POS filter panel should receive delayed category metadata',
+)
+// Stock/Groups/Branch now render via the shared AvailabilityFilterOptions.tsx
+// (see that file's own comment) rather than inline in FilterPanel.tsx --
+// checking there instead of posFilterPanel for the same guarantee.
+assert.match(
+  availabilityFilterOptions,
+  /T\('groups', 'Groups'\)/,
+  'POS filter panel should name the grouping filter Groups',
+)
+assert.match(
+  productMenuHelpers,
+  /label:\s*t\('groups'\) \|\| 'Groups'/,
+  'Products filter menu should name the grouping filter Groups',
+)
+// POS used to re-check groupFilter client-side (isParentGroup/isVariantGroup)
+// against `products`, which is only ever the current search-result page. The
+// server (/api/products/search, see buildSearchFilters in
+// cloudflare/src/routes/products.ts) already filters groupState
+// authoritatively across the whole catalog, so a client-side recheck over a
+// single page could see a "group of one" and filter an already-confirmed
+// grouped product back out -- sometimes emptying the grid. Fixed by sending
+// groupState to the server (scopedQuery/productQuery below) and trusting its
+// answer instead of re-filtering client-side.
+assert.match(
+  posPage,
+  /groupState: groupFilter === 'all' \? '' : groupFilter/,
+  'POS should send the active group filter to the server-authoritative product search/filter-meta queries',
+)
+assert.doesNotMatch(
+  posPage,
+  /isParentGroup \|\| isVariantGroup/,
+  'POS should not reintroduce the removed single-page client-side group recheck that could empty the grid for genuinely grouped products',
+)
+assert.doesNotMatch(
+  posPage,
+  new RegExp(`Tap to view ${'choices'}|Tap to add ${'instantly'}`),
+  'POS product cards should not show instructional tap copy',
+)
+assert.doesNotMatch(
+  posPage,
+  /quickFilters|pos_quick_filters|setQuickFilter/,
+  'POS should not keep the removed quick-filter controls wired',
+)
+assert.match(
+  posQuickAddModals,
+  /membership_number[\s\S]*Auto-generated if blank/,
+  'POS quick-add customer form should expose optional membership id and allow generated memberships',
+)
+
+console.log('productSearchPagination tests passed')

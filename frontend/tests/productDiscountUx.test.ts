@@ -1,0 +1,59 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+
+let failed = 0
+
+type TestCallback = () => void | Promise<void>
+
+async function runTest(name: string, fn: TestCallback): Promise<void> {
+  try {
+    await fn()
+    console.log(`PASS ${name}`)
+  } catch (error) {
+    failed += 1
+    console.error(`FAIL ${name}`)
+    console.error(error)
+  }
+}
+
+await runTest('products table separates product identity from operational details', () => {
+  const source = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
+  const surface = fs.readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
+  assert.match(source, /ProductDiscountBadge/)
+  assert.match(source, /ProductDetailsCell/)
+  assert.match(surface, /t\('details'\)\s*\|\|\s*'Details'/)
+  assert.match(source, /renderDesktopProductRow[\s\S]*<ProductDetailsCell/)
+  assert.match(source, /renderMobileProductCard[\s\S]*<ProductDiscountBadge[\s\S]*overlay/)
+  const desktopRowStart = source.indexOf('const renderDesktopProductRow')
+  const desktopRowEnd = source.indexOf('const renderMobileProductCard', desktopRowStart)
+  const desktopRowSource = source.slice(desktopRowStart, desktopRowEnd)
+  assert.doesNotMatch(desktopRowSource, /renderUnitChip\(product\.unit\)/)
+})
+
+await runTest('POS product cards expose discount badges before opening details', () => {
+  const source = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
+  const detailSheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
+  assert.match(source, /ProductDiscountBadge/)
+  assert.match(source, /calculateProductDiscount\(product,\s*exchangeRate\)/)
+  assert.match(source, /pagedProductCards\.map[\s\S]*<ProductDiscountBadge/)
+  // Component uses the "effective" naming convention for whichever variant
+  // the branch+barcode pickers currently resolve to (effectiveVariant,
+  // effectiveVariantStock, effectiveVariantInStock, effectiveVariantPromotion)
+  // -- match that, not a bare "variant"/"variantPromotion" that was never
+  // the actual identifier here.
+  assert.match(detailSheet, /effectiveVariantPromotion\.active/)
+  assert.match(detailSheet, /closeAfterAdd\(effectiveVariant,\s*'promotion'\)/)
+})
+
+await runTest('inventory keeps previous stats during partial refresh failures', () => {
+  const source = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+  assert.match(source, /const\s+\[stockStatsLoaded,\s*setStockStatsLoaded\]/)
+  assert.match(source, /setStatsRefreshError/)
+  assert.match(source, /if\s*\(needsStatsData\s*&&\s*statsResult\?\.item\)/)
+  assert.match(source, /else\s+if\s*\(needsStatsData\s*&&\s*loadedOnceRef\.current/)
+  assert.doesNotMatch(source, /setStockStats\(\{\s*total_products:\s*0/)
+})
+
+if (failed > 0) {
+  process.exitCode = 1
+}

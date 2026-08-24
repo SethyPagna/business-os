@@ -1,0 +1,7 @@
+[
+  {"_rowNumber": 2, "name": "Green Widget", "sku": "", "barcode": "1000000000002", "branch": "shop", "stock_quantity": "7", "cost_usd": "1.50", "price_usd": "3.00", "_case": "same barcode, different name -> should FLAG and create separate product"},
+  {"_rowNumber": 3, "name": "Teal Widget", "sku": "", "barcode": "", "branch": "warehouse", "stock_quantity": "3", "cost_usd": "2.00", "price_usd": "4.00", "_case": "same name/cost/price, no barcode, different branch -> should UPDATE the existing product (adds a warehouse branch_stock row instead of forking a duplicate product)"},
+  {"_rowNumber": 4, "name": "Pink Widget", "sku": "", "barcode": "", "branch": "shop", "stock_quantity": "2", "cost_usd": "1.00", "price_usd": "6.00", "_case": "same name/branch, no barcode, different price -> should create separate row"},
+  {"_rowNumber": 5, "name": "Renamed Widget", "sku": "SKU-001", "barcode": "1000000000099", "branch": "shop", "stock_quantity": "11", "cost_usd": "1.00", "price_usd": "2.00", "_case": "SKU matches existing (Blue Widget) but name differs -> SKU match no longer trusted blindly, should FLAG and create separate product (see importEngine.ts's sku_collision guard)"},
+  {"_rowNumber": 6, "name": "Orange Widget", "sku": "", "barcode": "1000000000005", "branch": "shop", "stock_quantity": "-4", "cost_usd": "1.00", "price_usd": "2.00", "_case": "negative stock -> should clamp to 0 with a visible warning"}
+]

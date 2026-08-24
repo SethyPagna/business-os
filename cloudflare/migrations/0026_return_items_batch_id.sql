@@ -1,0 +1,13 @@
+-- Records which product_batches row a return item's stock actually went
+-- back into, so routes/returns.ts's PATCH /:id (edit a return) can reverse
+-- the *same* batch it originally restocked instead of only ever touching
+-- the generic branch_stock aggregate. NULL for: a return item with no
+-- resolvable batch (the originating sale predates the batch/lot system, or
+-- this return isn't tied to a sale_item_id at all -- a manual/no-sale
+-- return), matching how sale_items.batch_id (migration 0014) is already
+-- nullable for the exact same reason on the sale side.
+--
+-- No FOREIGN KEY, same reasoning as pending_actions.entity_id and
+-- fees.sale_id: a return_items row must stay readable even if the batch it
+-- targeted is later deactivated/removed by an unrelated action.
+ALTER TABLE return_items ADD COLUMN batch_id INTEGER;
