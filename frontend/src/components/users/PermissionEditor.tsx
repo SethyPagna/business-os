@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
 import { REVIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
+import { actionsForKey, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
 type Tier = 'full' | 'review' | 'none'
@@ -77,6 +78,23 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
     if (value === 'critical') return translate('permission_sensitive_critical', 'Sensitive')
     if (value === 'high') return translate('permission_sensitive_high', 'Review')
     return translate('permission_sensitive_normal', 'Standard')
+  }
+  // One short word per action outcome, plus the colour it renders in.
+  // Deliberately terse: the point of the per-action matrix is that an
+  // admin can scan a column of buttons and see at a glance which ones this
+  // tier can press -- a sentence per row would defeat that. The longer
+  // prose stays in the section's own (i) tooltip.
+  const outcomeMeta = (outcome: ActionOutcome): { label: string; className: string } => {
+    if (outcome === 'allow') {
+      return { label: translate('perm_outcome_allow', 'Allowed'), className: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-200' }
+    }
+    if (outcome === 'queue') {
+      return { label: translate('perm_outcome_queue', 'Needs approval'), className: 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-200' }
+    }
+    if (outcome === 'limited') {
+      return { label: translate('perm_outcome_limited', 'Name only'), className: 'bg-sky-100 text-sky-700 dark:bg-sky-950/40 dark:text-sky-200' }
+    }
+    return { label: translate('perm_outcome_block', 'Hidden'), className: 'bg-gray-200 text-gray-600 dark:bg-zinc-700 dark:text-gray-300' }
   }
   const perms = parsePermissionState(permissions)
 
@@ -374,6 +392,46 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                         <p className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
                           {reviewDescriptionFor(permission)}
                         </p>
+                      ) : null}
+                      {/* Per-action breakdown -- "show the selected
+                          permissions for buttons/actions like edit,
+                          adjust, stock, discounts, import, export,
+                          delete". Reads utils/permissionActions.ts, the
+                          same table that gates the real buttons at
+                          runtime, so what an admin is shown here and what
+                          the page actually does cannot drift apart. Only
+                          the CURRENTLY selected tier's column is shown
+                          (one badge per row, not a 3-column grid) to keep
+                          it scannable rather than a wall of text. */}
+                      {actionsForKey(permission.key).length ? (
+                        <div className="mt-2 rounded-lg border border-gray-200 bg-white/70 p-1.5 dark:border-zinc-700 dark:bg-zinc-900/40">
+                          <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                            {translate('perm_actions_heading', 'Buttons and actions on this page')}
+                          </div>
+                          <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
+                            {actionsForKey(permission.key).map((action) => {
+                              const meta = outcomeMeta(outcomeAt(action, tier))
+                              return (
+                                <li key={action.key} className="flex items-center justify-between gap-2 px-1 py-0.5">
+                                  <span className="min-w-0 truncate text-xs text-gray-600 dark:text-gray-300">
+                                    {translate(action.tKey, action.label)}
+                                  </span>
+                                  <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${meta.className}`}>
+                                    {meta.label}
+                                  </span>
+                                </li>
+                              )
+                            })}
+                          </ul>
+                          {/* The one action that needs a second grant even
+                              at Full Access -- called out rather than left
+                              to look like a plain "Allowed" row. */}
+                          {actionsForKey(permission.key).some((action) => action.requiresKey && outcomeAt(action, tier) !== 'block') ? (
+                            <p className="mt-1 px-1 text-[10px] text-gray-400 dark:text-gray-500">
+                              {translate('perm_actions_requires_extra', 'Some actions above also need their own separate permission, listed in this section.')}
+                            </p>
+                          ) : null}
+                        </div>
                       ) : null}
                     </div>
                   )
