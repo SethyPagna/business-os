@@ -102,10 +102,91 @@ function describeMovementType(type: unknown): string {
   return key.replace(/_/g, ' ')
 }
 
+// Translation-aware sibling of describeMovementType above. That function
+// (kept as-is, still used wherever no `t()` is in scope) only ever
+// space-formats the raw DB value in English -- fine for the Movements
+// tab's own group rows (which build their label through
+// canonicalMovementType + the Activity filter's own translated chips
+// alongside it), but ProductHistoryPreviewModal's compact per-movement
+// list rendered `movement.movement_type` completely raw ("row_move_in",
+// "csv_import", underscores and all, in every language) since it never
+// went through either path. This maps every value the backend actually
+// writes (see routes/inventory.ts, routes/sales.ts, routes/returns.ts,
+// lib/importEngine.ts) onto the SAME translation keys the Movements tab's
+// own Activity filter already uses (sale/purchase/adjustment/transfer/
+// returns/return_type_writeoff) plus the existing top-level `import` key
+// for csv_import, so a Khmer-language user sees the same words in both
+// places. row_move_in/row_move_out have no equivalent anywhere else in
+// the app (they're only ever emitted by the same-product multi-row-merge
+// write path) so those two get their own small dedicated keys instead.
+export function translateMovementType(type: unknown, t?: (key: string) => string | undefined): string {
+  const key = String(type || '').toLowerCase()
+  const T = (k: string, fallback: string): string => (typeof t === 'function' ? t(k) : undefined) || fallback
+  const canonicalKey: Record<string, [string, string]> = {
+    sale: ['sale', 'Sale'],
+    purchase: ['purchase', 'Purchase'],
+    adjustment: ['adjustment', 'Adjustment'],
+    transfer: ['transfer', 'Transfer'],
+    transfer_in: ['transfer', 'Transfer'],
+    transfer_out: ['transfer', 'Transfer'],
+    return: ['returns', 'Return'],
+    supplier_return: ['returns', 'Return'],
+    return_reversal: ['return_type_writeoff', 'Write-off'],
+    write_off: ['return_type_writeoff', 'Write-off'],
+    csv_import: ['import', 'Import'],
+    row_move_in: ['movement_type_row_move_in', 'Row move in'],
+    row_move_out: ['movement_type_row_move_out', 'Row move out'],
+  }
+  const mapped = canonicalKey[key]
+  if (mapped) return T(mapped[0], mapped[1])
+  if (!key) return T('other', 'Other')
+  // Unknown/future movement_type value -- still better than a raw
+  // underscored string: space it out and title-case each word.
+  return key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
 function movementSign(type: unknown): -1 | 1 {
   const key = String(type || '').toLowerCase()
   if (['remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out', 'row_move_out', 'write_off'].includes(key)) return -1
   return 1
+}
+
+// Semantic stock-movement color map, replacing the old scheme of 13
+// unrelated hand-picked colors (one per raw movement_type, no shared
+// logic between them -- add/remove/sale/purchase/return/supplier_return/
+// return_reversal/adjust/adjustment/set/writeoff/transfer/row_move_in/
+// row_move_out each had their own independent Tailwind color). The rule
+// now: red when a movement nets stock down, green when it nets stock up,
+// yellow specifically for return-type movements (return/supplier_return
+// -- regardless of which direction that particular return happens to
+// move stock, since a customer return and a supplier return move
+// opposite directions but both read as "a return" to the person looking
+// at the list), neutral/gray when the quantity delta is 0 (e.g. a
+// set/correction that didn't actually change anything -- the backend
+// writes exactly this case as `movementType: 'set', quantity: 0`).
+// Precedence: return-type check first (overrides direction), then the
+// zero-delta check, then the sign-based red/green split.
+const MOVEMENT_COLOR_RETURN = 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+const MOVEMENT_COLOR_UP = 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300'
+const MOVEMENT_COLOR_DOWN = 'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300'
+const MOVEMENT_COLOR_NEUTRAL = 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+
+// `signedQuantity` should already carry the movement's direction (positive
+// = stock went up, negative = stock went down, 0 = no net change) --
+// callers pass `group.signedQuantity` for a grouped row, or
+// `movementSignedValue(movement, 'quantity')` for a single raw movement.
+export function movementColorClass(movementType: unknown, signedQuantity: number): string {
+  const canonical = canonicalMovementType(movementType)
+  if (canonical === 'return' || canonical === 'supplier_return') return MOVEMENT_COLOR_RETURN
+  if (!Number.isFinite(signedQuantity) || signedQuantity === 0) return MOVEMENT_COLOR_NEUTRAL
+  return signedQuantity > 0 ? MOVEMENT_COLOR_UP : MOVEMENT_COLOR_DOWN
+}
+
+// Convenience wrapper for a single raw movement record (not a group) --
+// used by ProductHistoryPreviewModal, which renders individual
+// `inventory_movements` rows rather than grouped ones.
+export function movementColorClassForRecord(movement: MovementRecord): string {
+  return movementColorClass(movement?.movement_type, movementSignedValue(movement, 'quantity'))
 }
 
 function movementSignedValue(movement: MovementRecord, field: string): number {

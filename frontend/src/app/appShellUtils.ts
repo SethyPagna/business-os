@@ -6,6 +6,7 @@ export {
   isAdminAppPath,
   isPublicCatalogPath,
   normalizeAppPath,
+  resolveAdminLandingPage,
 } from './pathRouting.ts'
 
 // Keep a small working set of pages mounted so tab switches still feel quick

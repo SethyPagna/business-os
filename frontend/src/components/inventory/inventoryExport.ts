@@ -49,6 +49,7 @@ type InventoryExportTools = {
   buildReportPackageFiles: (options: AnyRecord) => AnyRecord[]
   buildStandaloneReportHtml: (options: AnyRecord) => string
   downloadCSV: (filename: string, rows: unknown[]) => void
+  downloadXLSX: (filename: string, rows: unknown[]) => void
   downloadZipFilesAsync: (filename: string, files: AnyRecord[]) => Promise<void>
 }
 
@@ -58,10 +59,12 @@ async function loadInventoryExportTools(): Promise<InventoryExportTools> {
   if (!inventoryExportToolsPromise) {
     inventoryExportToolsPromise = Promise.all([
       import('../../utils/csv'),
+      import('../../utils/xlsxExport'),
       import('../../utils/exportReports'),
       import('../../utils/exportPackage'),
-    ]).then(([csvUtils, reportUtils, packageUtils]) => ({
+    ]).then(([csvUtils, xlsxUtils, reportUtils, packageUtils]) => ({
       ...csvUtils,
+      ...xlsxUtils,
       ...reportUtils,
       ...packageUtils,
     }) as unknown as InventoryExportTools)
@@ -325,17 +328,17 @@ function buildInventoryProductRows(productsToExport: AnyRecord[], getStockQty: S
 }
 
 export async function exportInventoryMovementGroups(scope: InventoryExportScope, groups: AnyRecord[], filePrefix = 'inventory-movements'): Promise<void> {
-  const { downloadCSV } = await loadInventoryExportTools()
-  downloadCSV(`${filePrefix}-${scope.exportStamp}.csv`, buildMovementRows(groups))
+  const { downloadXLSX } = await loadInventoryExportTools()
+  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, buildMovementRows(groups))
 }
 
 export async function exportInventorySummary(scope: InventoryExportScope, productsToExport: AnyRecord[] = scope.filteredSummary, filePrefix = 'inventory'): Promise<void> {
-  const { downloadCSV } = await loadInventoryExportTools()
-  downloadCSV(`${filePrefix}-${scope.exportStamp}.csv`, buildInventoryProductRows(productsToExport, scope.getStockQty))
+  const { downloadXLSX } = await loadInventoryExportTools()
+  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, buildInventoryProductRows(productsToExport, scope.getStockQty))
 }
 
 export async function exportInventoryStats(scope: InventoryExportScope, filePrefix = 'inventory-stats'): Promise<void> {
-  const { downloadCSV } = await loadInventoryExportTools()
+  const { downloadXLSX } = await loadInventoryExportTools()
   const stockStatusRows = getStockStatusRows(scope)
   const rows = [
     ...buildInventoryExportContextRows(scope).map((row) => ({
@@ -360,7 +363,7 @@ export async function exportInventoryStats(scope: InventoryExportScope, filePref
       Example: row.Example,
     })),
   ]
-  downloadCSV(`${filePrefix}-${scope.exportStamp}.csv`, rows)
+  downloadXLSX(`${filePrefix}-${scope.exportStamp}.xlsx`, rows)
 }
 
 export async function exportInventoryPackage(scope: InventoryExportScope, mode = scope.tab): Promise<void> {

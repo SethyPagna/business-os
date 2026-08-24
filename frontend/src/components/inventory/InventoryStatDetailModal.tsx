@@ -25,13 +25,13 @@ export default function InventoryStatDetailModal({ onClose, statDetail, t }: Inv
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="flex max-h-modal-85 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div>
             <h2 className="font-bold text-gray-900 dark:text-white">{statDetail.label}</h2>
             <p className="mt-1 text-xs text-gray-400">{t('inventory') || 'Inventory'}</p>
           </div>
-          <button onClick={onClose} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
+          <button type="button" onClick={onClose} aria-label={t('close') || 'Close'} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600">
             <X className="h-4 w-4" />
           </button>
         </div>

@@ -1,28 +1,16 @@
 import assert from 'node:assert/strict'
 import {
-  buildProductExportItems,
+  buildProductExportScopes,
   buildProductFilterSections,
   countActiveProductFilters,
 } from '../src/components/products/helpers/productMenuHelpers.ts'
 import { buildProductSupplierOptions } from '../src/components/products/helpers/productSupplierOptions.ts'
 
 type ProductRow = Record<string, unknown>
-type ExportCall = { rows: ProductRow[]; prefix: string }
 type ActionLogEntry = [name: string, value: string]
-type MenuActionItem = { onClick: () => void }
 type FilterSection = ReturnType<typeof buildProductFilterSections>[number]
 
-const calls: ExportCall[] = []
-const exportProductsCsv = (rows: ProductRow[], prefix: string) => {
-  calls.push({ rows, prefix })
-}
 const tr = (key: string, fallback?: string) => `${fallback} (${key})`
-
-function asActionItem(item: unknown): MenuActionItem {
-  assert.notEqual(item, 'divider')
-  assert.equal(typeof (item as MenuActionItem | null)?.onClick, 'function')
-  return item as MenuActionItem
-}
 
 function requireSection(sections: FilterSection[], id: string): FilterSection {
   const section = sections.find((item) => item.id === id)
@@ -30,53 +18,62 @@ function requireSection(sections: FilterSection[], id: string): FilterSection {
   return section
 }
 
+// `FilterSection` is a union of this file's own plain-options sections and
+// the shared FilterMenu.tsx section shape (whose `options` type also
+// admits `null`/`undefined`/`false` entries, for callers that inline
+// conditional pills) -- see productMenuHelpers.ts's own `FilterSection`
+// comment. None of the sections built in this test ever take that
+// `availabilitySection` branch, so every entry here is always a real
+// option at runtime; this just filters/narrows the type to match so the
+// assertions below don't have to null-check every access.
+function sectionOptions(section: FilterSection): Array<{ id: string | number; active?: boolean; onClick: () => void }> {
+  return (section.options || []).filter(Boolean) as Array<{ id: string | number; active?: boolean; onClick: () => void }>
+}
+
 const filtered = [{ id: 1 }]
 const selectedProducts = [{ id: 2 }]
 const products = [{ id: 1 }, { id: 2 }]
 
-const exportItems = buildProductExportItems({
-  brandFilter: 'Acme',
+// buildProductExportScopes replaced the old buildProductExportItems (Aug
+// 2026 export-panel redesign): instead of one flat menu row per active
+// filter type -- up to 9 rows that all exported the identical `filtered`
+// array under different filenames -- callers now get at most 3 genuinely
+// distinct scopes (selected / current view / full list) for a single
+// export panel to render as one choice.
+const scopesWithFiltersActive = buildProductExportScopes({
+  brandFilter: new Set(['Acme']),
   branchFilter: '3',
-  catFilter: 'Skin',
-  createdMonthFilter: '05',
-  createdYearFilter: '2026',
-  exportProductsCsv,
+  catFilter: new Set(['Skin']),
+  createdDateFrom: '2026-05-01',
+  createdDateTo: '2026-05-31',
   filtered,
   products,
   selectedProducts,
   stockFilter: 'low',
-  supplierFilter: 'Supplier A',
+  supplierFilter: new Set(['Supplier A']),
   tr,
 })
 
 assert.deepEqual(
-  exportItems.map((item) => (item === 'divider' ? item : item.label)),
+  scopesWithFiltersActive.map((scope) => ({ id: scope.id, label: scope.label, count: scope.count, filePrefix: scope.filePrefix })),
   [
-    'Export visible products (export_visible_products)',
-    'Export selected products (export_selected_products)',
-    'Export filtered stock state (export_filtered_stock_state)',
-    'Export filtered category (export_filtered_category)',
-    'Export filtered brand (export_filtered_brand)',
-    'Export filtered supplier (export_filtered_supplier)',
-    'Export filtered branch (export_filtered_branch)',
-    'Export filtered created-time range (export_filtered_created_time)',
-    'divider',
-    'Export full product list (export_full_product_list)',
+    { id: 'selected', label: 'Selected products (export_scope_selected)', count: 1, filePrefix: 'products-selected' },
+    { id: 'visible', label: 'Current filtered results (export_scope_filtered)', count: 1, filePrefix: 'products-filtered' },
+    { id: 'full', label: 'Full product list (ignore filters) (export_scope_full)', count: 2, filePrefix: 'products-all' },
   ],
-  'export menu includes active filter choices in stable order',
+  'export scopes collapse per-filter-type rows into one filtered scope, plus selected/full when they differ',
 )
+assert.deepEqual(scopesWithFiltersActive[0].rows, selectedProducts, 'selected scope carries the selected rows')
+assert.deepEqual(scopesWithFiltersActive[1].rows, filtered, 'visible scope carries the filtered rows')
+assert.deepEqual(scopesWithFiltersActive[2].rows, products, 'full scope carries every product')
 
-asActionItem(exportItems[1]).onClick()
-asActionItem(exportItems[2]).onClick()
-asActionItem(exportItems.at(-1)).onClick()
+// No filters active and nothing selected: visible === full, so the "full"
+// scope is correctly omitted rather than duplicating an identical row.
+const scopesNoFilters = buildProductExportScopes({ filtered: products, products, tr })
 assert.deepEqual(
-  calls,
-  [
-    { rows: selectedProducts, prefix: 'products-selected' },
-    { rows: filtered, prefix: 'products-low' },
-    { rows: products, prefix: 'products-all' },
-  ],
-  'export menu callbacks preserve row sets and file prefixes',
+  scopesNoFilters.map((scope) => scope.id),
+  ['visible'],
+  'unfiltered/no-selection case collapses to a single scope, not a duplicate visible+full pair',
 )
 
 assert.deepEqual(
@@ -87,16 +84,16 @@ assert.deepEqual(
 
 assert.equal(
   countActiveProductFilters({
-    brandFilter: 'Acme',
+    brandFilter: new Set(['Acme']),
     branchFilter: 'all',
-    catFilter: 'Skin',
-    createdMonthFilter: 'all',
-    createdYearFilter: '2026',
+    catFilter: new Set(['Skin']),
+    createdDateFrom: '2026-05-01',
+    createdDateTo: '',
     groupFilter: 'group',
     initialFilter: 'A',
     productSortDirection: 'asc',
     stockFilter: 'low',
-    supplierFilter: 'all',
+    supplierFilter: new Set(),
   }),
   7,
   'active filter count matches the Products header badge contract',
@@ -106,32 +103,35 @@ assert.equal(countActiveProductFilters(), 0, 'default filters count as inactive'
 
 const actionLog: ActionLogEntry[] = []
 const action = (name: string) => (value: string) => actionLog.push([name, value])
+const multiAction = (name: string) => (value: Set<string>) => actionLog.push([name, value.size ? [...value].join(',') : 'all'])
+// Plain object matching FilterMenu.tsx's shared FilterSection shape --
+// the real CreatedDateFilterOptions.tsx builder returns JSX (a .tsx file,
+// same reason AvailabilityFilterOptions.tsx isn't exercised by this
+// plain-node harness either), so this mock just verifies
+// buildProductFilterSections slots a supplied createdSection into the
+// right position rather than re-testing the JSX builder itself.
+const mockCreatedSection = { id: 'created', label: 'Created', options: [] }
 const sections = buildProductFilterSections({
-  availableCreatedYears: [2025, 2026],
+  createdSection: mockCreatedSection,
   branches: [{ id: 1, name: 'Main' }, { id: 2, name: 'Mall' }],
   brandOptions: ['Acme'],
   categories: [{ id: 5, name: 'Skin' }],
   filters: {
-    brandFilter: 'Acme',
+    brandFilter: new Set(['Acme']),
     branchFilter: '2',
-    catFilter: 'Skin',
-    createdMonthFilter: '05',
-    createdYearFilter: '2026',
+    catFilter: new Set(['Skin']),
     groupFilter: 'group',
     productSortDirection: 'asc',
     stockFilter: 'low',
-    supplierFilter: 'Supplier A',
+    supplierFilter: new Set(['Supplier A']),
   },
-  monthOptions: [['05', 'May']],
-  setBrandFilter: action('brand'),
+  setBrandFilter: multiAction('brand'),
   setBranchFilter: action('branch'),
-  setCatFilter: action('category'),
-  setCreatedMonthFilter: action('month'),
-  setCreatedYearFilter: action('year'),
+  setCatFilter: multiAction('category'),
   setGroupFilter: action('group'),
   setProductSortDirection: action('sort'),
   setStockFilter: action('stock'),
-  setSupplierFilter: action('supplier'),
+  setSupplierFilter: multiAction('supplier'),
   suppliers: ['Supplier A'],
   t: (key) => ({
     all: 'All',
@@ -156,30 +156,36 @@ const sections = buildProductFilterSections({
   }[key] || key),
 })
 
+// The Products filter menu shows only Availability (merged Branch+Group+
+// Stock), Created, Category, and Brand -- 'sort' and 'supplier' sections
+// were removed (the list itself stays locked to alphabetical rather than
+// offering a manual sort toggle; supplierFilter/setSupplierFilter/suppliers
+// stay in this function's params for countActiveProductFilters and the
+// export menu, just no longer render a section here). 'created' only
+// appears when a caller supplies a pre-built createdSection (see
+// CreatedDateFilterOptions.tsx, a JSX builder this plain-node test can't
+// construct itself -- mockCreatedSection above stands in for it).
 assert.deepEqual(
   sections.map((section) => section.id),
-  ['sort', 'created-year', 'created-month', 'branch', 'group', 'stock', 'category', 'brand', 'supplier'],
+  ['created', 'branch', 'group', 'stock', 'category', 'brand'],
   'filter sections preserve Products menu ordering',
 )
-assert.equal(requireSection(sections, 'branch').options[2]?.active, true)
-assert.equal(requireSection(sections, 'brand').options[1]?.active, true)
-requireSection(sections, 'created-year').options[0]?.onClick()
-requireSection(sections, 'created-year').options[2]?.onClick()
-requireSection(sections, 'created-month').options[1]?.onClick()
-requireSection(sections, 'branch').options[2]?.onClick()
-requireSection(sections, 'stock').options[3]?.onClick()
+assert.equal(sectionOptions(requireSection(sections, 'branch'))[2]?.active, true)
+assert.equal(sectionOptions(requireSection(sections, 'brand'))[1]?.active, true)
+assert.equal(requireSection(sections, 'created'), mockCreatedSection, 'createdSection is passed through unchanged')
+
+sectionOptions(requireSection(sections, 'branch'))[2]?.onClick()
+// stock section is now [all, in_stock, healthy, low, out] -- index 4 is
+// 'out' (was index 3 before the 'healthy' pill was added between
+// in_stock and low).
+sectionOptions(requireSection(sections, 'stock'))[4]?.onClick()
 assert.deepEqual(
   actionLog,
   [
-    ['year', 'all'],
-    ['month', 'all'],
-    ['year', 'all'],
-    ['month', 'all'],
-    ['month', 'all'],
     ['branch', 'all'],
     ['stock', 'out'],
   ],
-  'filter section actions preserve toggles and linked year/month reset behavior',
+  'filter section actions support multi-select toggling',
 )
 
 assert.deepEqual(buildProductFilterSections({ isOpen: false }), [], 'closed filter menu avoids section construction')

@@ -1,4 +1,5 @@
 import { useMemo, useState, type MouseEvent } from 'react'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtTime } from '../../utils/formatters.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import StatusBadge, { ALL_STATUSES, getStatusLabel } from './StatusBadge.tsx'
@@ -169,7 +170,7 @@ export default function SaleDetailModal({
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div
-        className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
+        className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800"
         onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}
       >
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -194,10 +195,10 @@ export default function SaleDetailModal({
             <button
               type="button"
               onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center text-2xl leading-none text-gray-400 hover:text-gray-600"
+              className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"
               aria-label={t('close') || 'Close'}
             >
-              x
+              <X className="h-4 w-4" />
             </button>
           </div>
         </div>

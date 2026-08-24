@@ -1,22 +1,31 @@
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
+import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
+import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Images from 'lucide-react/dist/esm/icons/images.js'
+import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
+import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
+import Smartphone from 'lucide-react/dist/esm/icons/smartphone.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Save from 'lucide-react/dist/esm/icons/save.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
+import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import { lazy, Suspense, useState, type Dispatch, type RefObject, type SetStateAction } from 'react'
+import { Suspense, useState, type RefObject } from 'react'
 import { ProductImg } from '../products/shared/primitives'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import { MessengerIcon } from '../shared/BrandIcons.tsx'
+import ButtonGuidePopover from '../shared/ButtonGuidePopover'
 import { CatalogPageProvider, useCatalogPageContext } from './CatalogPageContext'
 import ImageField from './CatalogImageField'
 import { SectionShell } from './catalogUi'
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 
-const ManageAnnouncementStripModal = lazy(() => import('./ManagePromotionsModal'))
+const ManageAnnouncementStripModal = lazyRetry(() => import('./ManagePromotionsModal'), 'catalog-editor-announcement-strip-modal')
 
 type CatalogUploadState = ReturnType<typeof createInitialUploadState>
 type DraftPrimitive = string | number | boolean | null | undefined
@@ -31,6 +40,8 @@ type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   business_phone?: string
   customer_portal_about_content?: string
   customer_portal_about_title?: string
+  customer_portal_product_caution_default?: string
+  customer_portal_product_need_more_details_default?: string
   customer_portal_address_link?: string
   customer_portal_ai_disclaimer?: string
   customer_portal_ai_intro?: string
@@ -38,6 +49,17 @@ type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   customer_portal_ai_provider_id?: string | number
   customer_portal_ai_title?: string
   customer_portal_business_tagline?: string
+  customer_portal_contact_messenger?: string
+  customer_portal_contact_messenger_label?: string
+  customer_portal_contact_telegram?: string
+  customer_portal_contact_telegram_label?: string
+  customer_portal_contact_instagram?: string
+  customer_portal_contact_instagram_label?: string
+  customer_portal_show_contact_instagram?: boolean
+  customer_portal_contact_phone?: string
+  customer_portal_contact_phone_label?: string
+  customer_portal_contact_whatsapp?: string
+  customer_portal_contact_whatsapp_label?: string
   customer_portal_cover_image?: string | null
   customer_portal_facebook?: string
   customer_portal_facebook_label?: string
@@ -133,24 +155,12 @@ function toAiProviderOptions(
   ]
 }
 
-type CatalogReviewItem = {
-  id: string | number
-  created_at?: string | null
-  customer_name?: string | null
-  membership_number?: string | null
-  note?: string | null
-  platform?: string | null
-  review_note?: string
-  reward_points?: string | number
-  screenshots?: string[]
-}
+
 
 type CatalogPreviewConfig = {
   businessName?: string
   businessTagline?: string
 }
-
-type ReviewStatus = 'approved' | 'pending' | 'rejected'
 
 type CatalogEditorSurfaceContext = {
   aboutBlocks: CatalogAboutBlock[]
@@ -172,11 +182,9 @@ type CatalogEditorSurfaceContext = {
   editorSaving: boolean
   editorSections: EditorSection[]
   faqItems: CatalogFaqItem[]
-  formatDateTime: (value?: string | null) => string
   generatedPublicUrl: string
   getAboutBlockLabel: (type?: string) => string
   getMediaUploadState: (target: string) => CatalogUploadState
-  handleReviewSubmission: (item: CatalogReviewItem, status: ReviewStatus) => void
   moveAboutBlockBefore: (dragId: string | null, targetId: string) => void
   movePromoItemBefore: (dragId: string | null, targetId: string) => void
   navigateTo: (page: string) => void
@@ -195,8 +203,6 @@ type CatalogEditorSurfaceContext = {
   removeAboutBlock: (id: string) => void
   removeFaqItem: (id: string) => void
   removePromoItem: (id: string) => void
-  reviewItems: CatalogReviewItem[]
-  reviewSavingId: string | number | null
   savePortalDraft: () => void
   selectedRecommendedProductOptions: CatalogProductOption[]
   setActiveEditorSection: (section: EditorSectionKey) => void
@@ -205,7 +211,6 @@ type CatalogEditorSurfaceContext = {
   setDragPromoItemId: (id: string | null) => void
   setRecommendedProductSearchInput: (value: string) => void
   setRecommendedProductSearchTerm: (value: string) => void
-  setReviewItems: Dispatch<SetStateAction<CatalogReviewItem[]>>
   toNumber: (value: DraftPrimitive, fallback?: number) => number
   toggleRecommendedProduct: (id: number) => void
   updateAboutBlock: (id: string, key: keyof CatalogAboutBlock, value: string) => void
@@ -249,11 +254,9 @@ function CatalogEditorSurfaceContent() {
     editorSaving,
     editorSections,
     faqItems,
-    formatDateTime,
     generatedPublicUrl,
     getAboutBlockLabel,
     getMediaUploadState,
-    handleReviewSubmission,
     moveAboutBlockBefore,
     movePromoItemBefore,
     navigateTo,
@@ -272,8 +275,6 @@ function CatalogEditorSurfaceContent() {
     removeAboutBlock,
     removeFaqItem,
     removePromoItem,
-    reviewItems,
-    reviewSavingId,
     savePortalDraft,
     selectedRecommendedProductOptions,
     setActiveEditorSection,
@@ -282,7 +283,6 @@ function CatalogEditorSurfaceContent() {
     setDragPromoItemId,
     setRecommendedProductSearchInput,
     setRecommendedProductSearchTerm,
-    setReviewItems,
     toNumber,
     toggleRecommendedProduct,
     updateAboutBlock,
@@ -298,7 +298,7 @@ function CatalogEditorSurfaceContent() {
     <aside id="portal-editor-top" className="min-h-0 max-w-full space-y-5 overflow-x-hidden">
       <div className="sticky top-0 z-30 -mx-4 rounded-none border-y border-slate-200 bg-white/95 px-3 py-2 shadow-md backdrop-blur dark:border-slate-700 dark:bg-slate-950/95 sm:top-2 sm:mx-0 sm:rounded-2xl sm:border">
         <div className="flex min-w-0 flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1 xl:flex-wrap xl:overflow-visible xl:pb-0">
+          <div className="flex min-w-0 flex-1 flex-nowrap gap-1 overflow-x-auto pb-1 xl:pb-0">
             {editorSections.map(([sectionId, sectionKey, label]) => (
               <button
                 key={sectionId}
@@ -337,6 +337,7 @@ function CatalogEditorSurfaceContent() {
         <div className="space-y-5 dark:[&_.border-slate-200]:border-slate-700 dark:[&_.border-slate-300]:border-slate-700 dark:[&_.bg-white]:bg-slate-950/80 dark:[&_.bg-slate-50]:bg-slate-900/60 dark:[&_.bg-slate-100]:bg-slate-800 dark:[&_.text-slate-900]:text-slate-100 dark:[&_.text-slate-700]:text-slate-200 dark:[&_.text-slate-600]:text-slate-300 dark:[&_.text-slate-500]:text-slate-400 dark:[&_.text-slate-400]:text-slate-500 dark:[&_.input]:border-slate-700 dark:[&_.input]:bg-slate-950 dark:[&_.input]:text-slate-100 dark:[&_.input]:placeholder:text-slate-500 dark:[&_video]:bg-slate-950">
           <div id="portal-section-display" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'display' ? '' : 'hidden'}`}>
             <div className="mb-2 text-sm font-semibold text-slate-900">{copy('display', 'Display settings')}</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{copy('displayVisibilityGroup', 'Catalog & page visibility')}</div>
             <div className="grid gap-3">
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">{copy('showCatalog', 'Show product catalog')}</span>
@@ -372,6 +373,13 @@ function CatalogEditorSurfaceContent() {
                 <input id="portal-show-out-of-stock-products" name="customer_portal_show_out_of_stock_products" type="checkbox" checked={editorDraft.customer_portal_show_out_of_stock_products !== false} onChange={(event) => setDraft('customer_portal_show_out_of_stock_products', event.target.checked)} />
               </label>
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <div>
+                  <span className="text-sm font-medium text-slate-700">{copy('showStockStatus', 'Show stock status')}</span>
+                  <div className="text-xs text-slate-500">{copy('showStockStatusHint', 'The In Stock / Low Stock / Out of Stock badge on each product, and the matching filter above the catalog. Turning this off hides both.')}</div>
+                </div>
+                <input id="portal-show-stock-status" name="customer_portal_show_stock_status" type="checkbox" checked={editorDraft.customer_portal_show_stock_status !== false} onChange={(event) => setDraft('customer_portal_show_stock_status', event.target.checked)} />
+              </label>
+              <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3">
                 <span className="text-sm font-medium text-slate-700">{copy('showProductBrand', 'Show brand tags')}</span>
                 <input id="portal-show-product-brand" name="customer_portal_show_product_brand" type="checkbox" checked={editorDraft.customer_portal_show_product_brand !== false} onChange={(event) => setDraft('customer_portal_show_product_brand', event.target.checked)} />
               </label>
@@ -388,7 +396,8 @@ function CatalogEditorSurfaceContent() {
                 <input id="portal-show-product-discount" name="customer_portal_show_product_discount" type="checkbox" checked={editorDraft.customer_portal_show_product_discount !== false} onChange={(event) => setDraft('customer_portal_show_product_discount', event.target.checked)} />
               </label>
             </div>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div className="mt-4 mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{copy('displayLayoutGroup', 'Layout & pricing')}</div>
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="portal-price-display" className="block text-sm font-medium text-slate-700">{copy('priceDisplay', 'Price display')}</label>
                 <AppSelect
@@ -519,7 +528,7 @@ function CatalogEditorSurfaceContent() {
                       className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-100"
                       value={recommendedProductSearchInput}
                       onChange={(event) => setRecommendedProductSearchInput(event.target.value)}
-                      placeholder={copy('searchPlaceholder', 'Search by product name, description, category, or brand')}
+                      placeholder={copy('searchPlaceholder', 'Search by name, barcode/sku, brand, or category')}
                       autoComplete="off"
                     />
                   </div>
@@ -748,7 +757,7 @@ function CatalogEditorSurfaceContent() {
             <p className="mt-2 text-xs text-slate-500">{copy('syncSpeedHint', 'Lower values refresh faster but create more requests. Internal preview still reacts to sync events immediately.')}</p>
           </div>
 
-          <div id="portal-section-theme" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'about' ? '' : 'hidden'}`}>
+          <div id="portal-section-about" className={`rounded-2xl border border-slate-200 bg-slate-50 p-4 ${activeEditorSection === 'about' ? '' : 'hidden'}`}>
             <div className="mb-2 text-sm font-semibold text-slate-900">{copy('portalTheme', 'Portal theme')}</div>
             <div className="grid gap-4 sm:grid-cols-3">
               <div>
@@ -808,11 +817,40 @@ function CatalogEditorSurfaceContent() {
               <p className="mt-2 text-xs text-slate-500">{copy('aboutContentHint', 'Tell customers about your story, hours, policies, or services.')}</p>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="text-sm font-semibold text-slate-900">{copy('productDefaultsTitle', 'Product detail defaults')}</div>
+              <p className="mt-1 text-xs text-slate-500">{copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')}</p>
+              <div className="mt-3">
+                <label htmlFor="portal-product-caution-default" className="block text-sm font-medium text-slate-700">{copy('productCaution', 'Caution')}</label>
+                <textarea
+                  id="portal-product-caution-default"
+                  name="customer_portal_product_caution_default"
+                  className="input resize-none"
+                  rows={4}
+                  placeholder="Follow the instructions on the product packaging and use the product only as directed. Stop use if unexpected irritation, discomfort, or another adverse reaction occurs. Contact us if you need help confirming the exact variant or usage details before purchase. For external use only. Avoid contact with eyes."
+                  value={editorDraft.customer_portal_product_caution_default || ''}
+                  onChange={(event) => setDraft('customer_portal_product_caution_default', event.target.value)}
+                />
+              </div>
+              <div className="mt-4">
+                <label htmlFor="portal-product-need-more-details-default" className="block text-sm font-medium text-slate-700">{copy('productNeedMoreDetails', 'Need More Details')}</label>
+                <textarea
+                  id="portal-product-need-more-details-default"
+                  name="customer_portal_product_need_more_details_default"
+                  className="input resize-none"
+                  rows={4}
+                  placeholder="Contact us if you need additional product details, variant confirmation, usage guidance, or help comparing suitable options. Consider how the product fits into your existing routine and what finish, function, or application style you want. For products where ingredients, shade compatibility, or personal suitability matter, check the exact packaging details before use."
+                  value={editorDraft.customer_portal_product_need_more_details_default || ''}
+                  onChange={(event) => setDraft('customer_portal_product_need_more_details_default', event.target.value)}
+                />
+              </div>
+            </div>
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="text-sm font-semibold text-slate-900">{copy('aboutBlocks', 'About blocks')}</div>
                   <p className="mt-1 text-xs text-slate-500">{copy('aboutBlocksHint', 'Add text, image, and video sections, then move them into the order you want customers to see.')}</p>
                 </div>
+
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('text')}>
                     <Plus className="h-4 w-4" />
@@ -1223,22 +1261,22 @@ function CatalogEditorSurfaceContent() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <label htmlFor="portal-website" className="block text-sm font-medium text-slate-700">{copy('website', 'Website')}</label>
+                    <label htmlFor="portal-website" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Globe className="h-3.5 w-3.5 text-slate-500" />{copy('website', 'Website')}</label>
                     <input id="portal-website" name="customer_portal_website" autoComplete="url" className="input" value={editorDraft.customer_portal_website || ''} onChange={(event) => setDraft('customer_portal_website', event.target.value)} />
                     <input id="portal-website-label" name="customer_portal_website_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_website_label || ''} onChange={(event) => setDraft('customer_portal_website_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-facebook" className="block text-sm font-medium text-slate-700">{copy('facebook', 'Facebook')}</label>
+                    <label htmlFor="portal-facebook" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Facebook className="h-3.5 w-3.5 text-[#1877F2]" />{copy('facebook', 'Facebook')}</label>
                     <input id="portal-facebook" name="customer_portal_facebook" autoComplete="url" className="input" value={editorDraft.customer_portal_facebook || ''} onChange={(event) => setDraft('customer_portal_facebook', event.target.value)} />
                     <input id="portal-facebook-label" name="customer_portal_facebook_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_facebook_label || ''} onChange={(event) => setDraft('customer_portal_facebook_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-instagram" className="block text-sm font-medium text-slate-700">{copy('instagram', 'Instagram')}</label>
+                    <label htmlFor="portal-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{copy('instagram', 'Instagram')}</label>
                     <input id="portal-instagram" name="customer_portal_instagram" autoComplete="url" className="input" value={editorDraft.customer_portal_instagram || ''} onChange={(event) => setDraft('customer_portal_instagram', event.target.value)} />
                     <input id="portal-instagram-label" name="customer_portal_instagram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_instagram_label || ''} onChange={(event) => setDraft('customer_portal_instagram_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-telegram" className="block text-sm font-medium text-slate-700">{copy('telegram', 'Telegram')}</label>
+                    <label htmlFor="portal-telegram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Send className="h-3.5 w-3.5 text-[#26A5E4]" />{copy('telegram', 'Telegram')}</label>
                     <input id="portal-telegram" name="customer_portal_telegram" autoComplete="url" className="input" value={editorDraft.customer_portal_telegram || ''} onChange={(event) => setDraft('customer_portal_telegram', event.target.value)} />
                     <input id="portal-telegram-label" name="customer_portal_telegram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_telegram_label || ''} onChange={(event) => setDraft('customer_portal_telegram_label', event.target.value)} />
                   </div>
@@ -1262,6 +1300,77 @@ function CatalogEditorSurfaceContent() {
                     <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-telegram">
                       <span className="text-sm text-slate-700">{copy('showTelegram', 'Show Telegram')}</span>
                       <input id="portal-show-telegram" name="customer_portal_show_telegram" type="checkbox" checked={!!editorDraft.customer_portal_show_telegram} onChange={(event) => setDraft('customer_portal_show_telegram', event.target.checked)} />
+                    </label>
+                  </div>
+                </div>
+
+                {/* "Contact us" floating button config -- the draft/save mapping and the
+                    FAB itself (PublicCatalogPage.tsx) already existed and are fully wired;
+                    this editor section was simply never built, so there was no way to
+                    populate customer_portal_contact_* / turn the show-contact-* toggles on,
+                    which is why the FAB never appeared even though the code path is correct. */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-1 flex items-center gap-2">
+                    <div className="text-sm font-semibold text-slate-900">{copy('contactChannels', 'Contact us button')}</div>
+                    <ButtonGuidePopover
+                      title={copy('contactChannelsGuideTitle', 'Contact us channels')}
+                      triggerLabel={copy('contactChannelsGuideTitle', 'Contact us channels')}
+                      entries={[
+                        { icon: <MessengerIcon className="h-4 w-4" />, label: copy('messenger', 'Messenger'), description: copy('contactGuideMessenger', 'Type a bare username (mystore) or @username -- a full m.me or facebook.com link also works. Falls back to your Facebook link above if left blank.') },
+                        { icon: <Send className="h-4 w-4" />, label: copy('telegram', 'Telegram'), description: copy('contactGuideTelegram', 'Type a bare username (mystore) or @username -- a full t.me link (including group/channel invite links) also works. Falls back to your Telegram link above if left blank.') },
+                        { icon: <Instagram className="h-4 w-4" />, label: copy('instagram', 'Instagram'), description: copy('contactGuideInstagram', 'Type a bare username (mystore) or @username -- a full instagram.com or ig.me link also works. Opens a direct message, not the profile. Falls back to your Instagram link above if left blank.') },
+                        { icon: <PhoneCall className="h-4 w-4" />, label: copy('call', 'Call'), description: copy('contactGuideCall', 'Type the phone number customers should call. Opens the device dialer -- defaults to your business phone number if left blank.') },
+                      ]}
+                    />
+                  </div>
+                  <p className="mb-3 text-xs text-slate-500">{copy('contactChannelsHint', 'A direct-message floating button shown on the storefront, separate from the social links above. Messenger/Telegram fall back to your Facebook/Telegram links above if left blank.')}</p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label htmlFor="portal-contact-messenger" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><MessengerIcon className="h-3.5 w-3.5 text-amber-600" />{copy('messenger', 'Messenger')}</label>
+                      <input id="portal-contact-messenger" name="customer_portal_contact_messenger" autoComplete="off" className="input" placeholder="username or m.me/username" value={editorDraft.customer_portal_contact_messenger || ''} onChange={(event) => setDraft('customer_portal_contact_messenger', event.target.value)} />
+                      <input id="portal-contact-messenger-label" name="customer_portal_contact_messenger_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_messenger_label || ''} onChange={(event) => setDraft('customer_portal_contact_messenger_label', event.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="portal-contact-telegram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Send className="h-3.5 w-3.5 text-[#26A5E4]" />{copy('telegram', 'Telegram')}</label>
+                      <input id="portal-contact-telegram" name="customer_portal_contact_telegram" autoComplete="off" className="input" placeholder="username or t.me/username" value={editorDraft.customer_portal_contact_telegram || ''} onChange={(event) => setDraft('customer_portal_contact_telegram', event.target.value)} />
+                      <input id="portal-contact-telegram-label" name="customer_portal_contact_telegram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_telegram_label || ''} onChange={(event) => setDraft('customer_portal_contact_telegram_label', event.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="portal-contact-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{copy('instagram', 'Instagram')}</label>
+                      <input id="portal-contact-instagram" name="customer_portal_contact_instagram" autoComplete="off" className="input" placeholder="username or instagram.com/username" value={editorDraft.customer_portal_contact_instagram || ''} onChange={(event) => setDraft('customer_portal_contact_instagram', event.target.value)} />
+                      <input id="portal-contact-instagram-label" name="customer_portal_contact_instagram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_instagram_label || ''} onChange={(event) => setDraft('customer_portal_contact_instagram_label', event.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="portal-contact-whatsapp" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><PhoneCall className="h-3.5 w-3.5 text-[#25D366]" />{copy('whatsapp', 'WhatsApp')}</label>
+                      <input id="portal-contact-whatsapp" name="customer_portal_contact_whatsapp" autoComplete="off" className="input" placeholder="phone number or wa.me link" value={editorDraft.customer_portal_contact_whatsapp || ''} onChange={(event) => setDraft('customer_portal_contact_whatsapp', event.target.value)} />
+                      <input id="portal-contact-whatsapp-label" name="customer_portal_contact_whatsapp_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_whatsapp_label || ''} onChange={(event) => setDraft('customer_portal_contact_whatsapp_label', event.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="portal-contact-phone" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><PhoneCall className="h-3.5 w-3.5 text-emerald-600" />{copy('call', 'Call')}</label>
+                      <input id="portal-contact-phone" name="customer_portal_contact_phone" autoComplete="off" className="input" placeholder="phone number" value={editorDraft.customer_portal_contact_phone || editorDraft.business_phone || ''} onChange={(event) => setDraft('customer_portal_contact_phone', event.target.value)} />
+                      <input id="portal-contact-phone-label" name="customer_portal_contact_phone_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_phone_label || ''} onChange={(event) => setDraft('customer_portal_contact_phone_label', event.target.value)} />
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-messenger">
+                      <span className="text-sm text-slate-700">{copy('showContactMessenger', 'Show Messenger button')}</span>
+                      <input id="portal-show-contact-messenger" name="customer_portal_show_contact_messenger" type="checkbox" checked={editorDraft.customer_portal_show_contact_messenger !== false} onChange={(event) => setDraft('customer_portal_show_contact_messenger', event.target.checked)} />
+                    </label>
+                    <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-telegram">
+                      <span className="text-sm text-slate-700">{copy('showContactTelegram', 'Show Telegram button')}</span>
+                      <input id="portal-show-contact-telegram" name="customer_portal_show_contact_telegram" type="checkbox" checked={editorDraft.customer_portal_show_contact_telegram !== false} onChange={(event) => setDraft('customer_portal_show_contact_telegram', event.target.checked)} />
+                    </label>
+                    <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-instagram">
+                      <span className="text-sm text-slate-700">{copy('showContactInstagram', 'Show Instagram button')}</span>
+                      <input id="portal-show-contact-instagram" name="customer_portal_show_contact_instagram" type="checkbox" checked={!!editorDraft.customer_portal_show_contact_instagram} onChange={(event) => setDraft('customer_portal_show_contact_instagram', event.target.checked)} />
+                    </label>
+                    <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-whatsapp">
+                      <span className="text-sm text-slate-700">{copy('showContactWhatsapp', 'Show WhatsApp button')}</span>
+                      <input id="portal-show-contact-whatsapp" name="customer_portal_show_contact_whatsapp" type="checkbox" checked={!!editorDraft.customer_portal_show_contact_whatsapp} onChange={(event) => setDraft('customer_portal_show_contact_whatsapp', event.target.checked)} />
+                    </label>
+                    <label className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-3 py-2" htmlFor="portal-show-contact-phone">
+                      <span className="text-sm text-slate-700">{copy('showContactPhone', 'Show Call button')}</span>
+                      <input id="portal-show-contact-phone" name="customer_portal_show_contact_phone" type="checkbox" checked={!!editorDraft.customer_portal_show_contact_phone} onChange={(event) => setDraft('customer_portal_show_contact_phone', event.target.checked)} />
                     </label>
                   </div>
                 </div>
@@ -1483,6 +1592,28 @@ function CatalogEditorSurfaceContent() {
               uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
               uploadState={getMediaUploadState('customer_portal_cover_image')}
             />
+            {editorDraft.customer_portal_cover_image ? (
+              <div className="xl:col-span-2 min-w-0 rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('coverPreview', 'Cover preview')}</div>
+                {/* Mirrors the same gradient-overlay-over-cover-image compositing the
+                    live hero banner uses (CatalogSecondaryTabs.tsx's bannerBackground),
+                    so this card shows what the person will actually see on save instead
+                    of only the raw uploaded file the ImageField's own preview/gallery
+                    modal shows -- same gap the logo section already closed with its own
+                    dedicated preview card above. */}
+                <div
+                  className="mt-3 flex h-32 items-end overflow-hidden rounded-[28px] bg-cover bg-center p-4 text-white"
+                  style={{
+                    backgroundImage: `linear-gradient(135deg, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a')}cc 0%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_mid, '#14532d')}b3 55%, ${normalizeHexColor(editorDraft.customer_portal_hero_gradient_end, '#ea580c')}cc 100%), url(${editorDraft.customer_portal_cover_image})`,
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
+                    <div className="mt-1 truncate text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the hero banner on the live header.'}</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <label className="xl:col-span-2 mt-1 flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-cover">
               <span className="text-sm font-medium text-slate-700">{copy('showCover', 'Show cover image')}</span>
               <input id="portal-show-cover" name="customer_portal_show_cover" type="checkbox" checked={!!editorDraft.customer_portal_show_cover} onChange={(event) => setDraft('customer_portal_show_cover', event.target.checked)} />
@@ -1546,82 +1677,19 @@ function CatalogEditorSurfaceContent() {
                 </div>
               </div>
             </div>
+
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+              <div className="text-sm font-semibold text-sky-900">{copy('reviewQueue', 'Review queue')}</div>
+              <p className="mt-2 text-sm text-sky-800">
+                {copy('reviewQueueMovedHint', 'Approving, rejecting, and awarding points for customer share submissions now happens in Loyalty Points, alongside the rest of the points rules.')}
+              </p>
+              <button type="button" className="btn-secondary mt-3 text-sm" onClick={() => navigateTo('loyalty_points')}>
+                {copy('openPointsPage', 'Open Loyalty Points', 'បើកទំព័រពិន្ទុស្មោះត្រង់')}
+              </button>
+            </div>
           </div>
         </div>
       </SectionShell>
-
-      <div className={activeEditorSection === 'submissions' ? '' : 'hidden'}>
-      <SectionShell title={copy('reviewQueue', 'Review queue')} subtitle={copy('reviewQueueHint', 'Approve, reject, and award points for customer share submissions.')}>
-        <div className="space-y-4">
-          {reviewItems.length ? reviewItems.map((item) => (
-            <article key={item.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-semibold text-slate-900">{item.customer_name || item.membership_number || `#${item.id}`}</div>
-                  <div className="mt-1 text-xs text-slate-500">{item.membership_number || '-'}{item.platform ? ` • ${item.platform}` : ''}</div>
-                </div>
-                <div className="text-xs font-semibold text-slate-500">{formatDateTime(item.created_at)}</div>
-              </div>
-              {item.note ? <p className="mt-3 text-sm text-slate-700">{item.note}</p> : null}
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                {(item.screenshots || []).map((image, index) => (
-                  <button
-                    key={`${item.id}-${index}`}
-                    type="button"
-                    className="overflow-hidden rounded-xl border border-slate-200 bg-white"
-                    onClick={() => openPortalImage(item.customer_name || item.membership_number || `#${item.id}`, item.screenshots || [], index)}
-                  >
-                    <img src={image} alt={`review-${item.id}-${index + 1}`} className="h-28 w-full object-cover" />
-                  </button>
-                ))}
-              </div>
-              <div className="mt-3 grid gap-3">
-                <div>
-                  <label htmlFor={`portal-review-reward-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('rewardPoints', 'Reward points')}</label>
-                  <input
-                    id={`portal-review-reward-${item.id}`}
-                    name={`portal_review_reward_${item.id}`}
-                    className="input"
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={item.reward_points || 0}
-                    onChange={(event) => setReviewItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, reward_points: event.target.value } : entry))}
-                  />
-                </div>
-                <div>
-                  <label htmlFor={`portal-review-note-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('shareReviewNote', 'Review note')}</label>
-                  <textarea
-                    id={`portal-review-note-${item.id}`}
-                    name={`portal_review_note_${item.id}`}
-                    className="input resize-none"
-                    rows={3}
-                    value={item.review_note || ''}
-                    placeholder={copy('reviewNotePlaceholder', 'Internal review note')}
-                    onChange={(event) => setReviewItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, review_note: event.target.value } : entry))}
-                  />
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  <button className="btn-primary text-sm" disabled={reviewSavingId === item.id} onClick={() => handleReviewSubmission(item, 'approved')}>
-                    {copy('approve', 'Approve')}
-                  </button>
-                  <button className="btn-secondary text-sm" disabled={reviewSavingId === item.id} onClick={() => handleReviewSubmission(item, 'rejected')}>
-                    {copy('reject', 'Reject')}
-                  </button>
-                  <button className="btn-secondary text-sm" disabled={reviewSavingId === item.id} onClick={() => handleReviewSubmission(item, 'pending')}>
-                    {copy('pending', 'Pending')}
-                  </button>
-                </div>
-              </div>
-            </article>
-          )) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-              {copy('noSubmissions', 'No share submissions yet.')}
-            </div>
-          )}
-        </div>
-      </SectionShell>
-      </div>
       {showAnnouncementStripModal && (
         <Suspense fallback={null}>
           <ManageAnnouncementStripModal

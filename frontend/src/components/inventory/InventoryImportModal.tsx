@@ -9,6 +9,23 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
+import { parseImportFile } from '../../utils/spreadsheetImport.ts'
+import CsvImportPreview from '../shared/CsvImportPreview.tsx'
+
+type InventoryImportAction = 'add' | 'remove' | 'set'
+
+// One template per action instead of one combined template with a
+// free-text 'action' column mixed row-to-row -- each action only needs
+// (and only shows) the columns it actually uses.
+// `date` (optional on all three) backdates the recorded movement to that
+// date -- e.g. "this stock actually arrived last Tuesday" -- and falls
+// back to today/now when left blank, same as a manual stock action with
+// no date typed in.
+const INVENTORY_ACTION_COLUMNS: Record<InventoryImportAction, string> = {
+  add: 'date, branch, name, sku, barcode, quantity, unit_cost_usd, unit_cost_khr, reason',
+  remove: 'date, branch, name, sku, barcode, quantity, reason',
+  set: 'date, branch, name, sku, barcode, quantity, reason',
+}
 
 const INVENTORY_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
 const INVENTORY_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000
@@ -50,8 +67,8 @@ interface ImportResult {
 
 interface ImportApi {
   openCSVDialog?: () => Promise<CsvDialogResult | null | undefined>
-  downloadImportTemplate: (type: 'inventory') => void
-  createImportJob: (payload: { type: 'inventory'; policy: { source: string } }) => Promise<ImportJobResponse>
+  downloadImportTemplate: (type: 'inventory' | 'inventoryAdd' | 'inventoryRemove' | 'inventorySet') => void
+  createImportJob: (payload: { type: 'inventory'; policy: { source: string; inventory_action: InventoryImportAction } }) => Promise<ImportJobResponse>
   uploadImportJobCsv: (payload: { jobId: string | number; text: string; fileName: string }) => Promise<unknown>
   startImportJob: (jobId: string | number) => Promise<unknown>
 }
@@ -120,6 +137,7 @@ function countInventoryCsvRowsInWorker(text: string): Promise<number> {
 
 export default function InventoryImportModal({ onClose, onDone }: ImportModalProps) {
   const { notify, t } = useApp()
+  const [inventoryAction, setInventoryAction] = useState<InventoryImportAction>('add')
   const [csvText, setCsvText] = useState('')
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -178,8 +196,32 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
     setInventoryCsvText(picked.content, picked.name || 'inventory.csv')
   }
 
+  const handleDropFile = async (file: File) => {
+    try {
+      const parsed = await parseImportFile(file)
+      if (!parsed?.content) return
+      setInventoryCsvText(parsed.content, parsed.name || file.name || 'inventory.csv')
+    } catch (error) {
+      notify(getErrorMessage(error, tr('inventory_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
+    }
+  }
+
   const handleDownloadTemplate = () => {
-    getImportApi().downloadImportTemplate('inventory')
+    const type = inventoryAction === 'add' ? 'inventoryAdd' : inventoryAction === 'remove' ? 'inventoryRemove' : 'inventorySet'
+    getImportApi().downloadImportTemplate(type)
+  }
+
+  const handleSelectAction = (nextAction: InventoryImportAction) => {
+    if (nextAction === inventoryAction) return
+    setInventoryAction(nextAction)
+    // Columns (and what a positive quantity means) differ per action --
+    // a file picked for one action isn't valid input for another, so
+    // switching clears whatever was already loaded rather than letting a
+    // stale file get imported under the wrong action.
+    setCsvText('')
+    setFileName('')
+    setPreviewRowCount(0)
+    setResult(null)
   }
 
   const handleImport = async () => {
@@ -200,7 +242,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
     setLoading(true)
     try {
       const created = await withLoaderTimeout(
-        () => getImportApi().createImportJob({ type: 'inventory', policy: { source: 'inventory_modal' } }),
+        () => getImportApi().createImportJob({ type: 'inventory', policy: { source: 'inventory_modal', inventory_action: inventoryAction } }),
         'Inventory import job',
         INVENTORY_IMPORT_JOB_CREATE_TIMEOUT_MS,
       )
@@ -238,40 +280,60 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
   }
 
   return (
-    <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose}>
+    <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose} draggable>
       <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          {tr('inventory_import_help', 'Import stock adjustments from CSV rows. Supported actions are add, remove, and set.', 'នាំចូលការកែស្តុកពីជួរ CSV។ សកម្មភាពដែលគាំទ្រមាន add, remove និង set។')}
+          {tr('inventory_import_help', 'Pick one action, then download that action\'s template. Each action only imports what it says -- nothing is mixed together.', 'ជ្រើសសកម្មភាពមួយ រួចទាញយកគំរូរបស់សកម្មភាពនោះ។')}
         </p>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-secondary text-sm" onClick={handleDownloadTemplate}>
-            {t('download_template') || 'Download Template'}
-          </button>
-          <button type="button" className="btn-secondary text-sm" onClick={handlePickFile}>
-            {tr('choose_csv_file', 'Choose CSV', 'ជ្រើស CSV')}
-          </button>
+        <div className="grid grid-cols-3 gap-2">
+          {(['add', 'remove', 'set'] as InventoryImportAction[]).map((action) => {
+            const labels: Record<InventoryImportAction, { title: string; hint: string }> = {
+              add: {
+                title: tr('inventory_action_add_title', 'Add stock', 'បន្ថែមស្តុក'),
+                hint: tr('inventory_action_add_hint', 'Stock coming in -- new items or more of what you have.', 'ស្តុកចូល'),
+              },
+              remove: {
+                title: tr('inventory_action_remove_title', 'Remove stock', 'ដកស្តុក'),
+                hint: tr('inventory_action_remove_hint', 'Stock going out -- shrinkage, breakage, corrections.', 'ស្តុកចេញ'),
+              },
+              set: {
+                title: tr('inventory_action_set_title', 'Set exact count', 'កំណត់ចំនួនពិត'),
+                hint: tr('inventory_action_set_hint', 'Physical count -- sets stock to exactly this number.', 'រាប់ស្តុកជាក់ស្តែង'),
+              },
+            }
+            const isActive = inventoryAction === action
+            return (
+              <button
+                key={action}
+                type="button"
+                onClick={() => handleSelectAction(action)}
+                aria-pressed={isActive}
+                disabled={loading}
+                className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${isActive ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'}`}
+              >
+                <span className="block font-semibold">{labels[action].title}</span>
+                <span className={`block ${isActive ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>{labels[action].hint}</span>
+              </button>
+            )
+          })}
         </div>
-        {fileName ? (
-          <div className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-            {fileName}
-          </div>
-        ) : null}
-        <label htmlFor="inventory-import-csv" className="sr-only">
-          {tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')}
-        </label>
-        <textarea
-          id="inventory-import-csv"
-          name="inventory_import_csv"
-          className="input min-h-[180px] font-mono text-xs"
-          value={csvText}
-          onChange={(event) => setInventoryCsvText(event.target.value, fileName)}
-          placeholder={tr('csv_paste_placeholder', 'Paste CSV here if you do not want to pick a file.', 'បិទភ្ជាប់ CSV នៅទីនេះ ប្រសិនបើអ្នកមិនចង់ជ្រើសឯកសារ។')}
+        <CsvImportPreview
+          columnsLabel={t('csv_columns_header') || 'Columns'}
+          columnsText={INVENTORY_ACTION_COLUMNS[inventoryAction]}
+          fileName={fileName}
+          csvText={csvText}
+          rowCount={previewRowCount}
+          analyzing={analyzingCsv}
+          onDownloadTemplate={handleDownloadTemplate}
+          onPickFile={handlePickFile}
+          onDropFile={handleDropFile}
+          dragLabel={tr('inventory_import_drop_file', 'Drop file here to import', 'ទម្លាក់ឯកសារទីនេះដើម្បីនាំចូល')}
+          downloadLabel={t('download_template') || 'Download Template'}
+          pickLabel={tr('choose_csv_file', 'Choose CSV or Excel', 'ជ្រើស CSV')}
+          analyzingLabel={tr('inventory_import_checking_rows', 'Checking rows...', 'កំពុងពិនិត្យជួរ...')}
+          noFileLabel={tr('inventory_import_no_file', 'No CSV or Excel file selected yet.', 'មិនទាន់បានជ្រើសឯកសារ CSV ទេ។')}
+          previewHeadingLabel={tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(previewRowCount))}
         />
-        <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-          {analyzingCsv
-            ? tr('inventory_import_checking_rows', 'Checking rows...')
-            : tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(previewRowCount))}
-        </div>
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">

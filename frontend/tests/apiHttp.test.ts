@@ -300,6 +300,99 @@ await runTest('Cloudflare Access redirect classifier handles opaque browser redi
   assert.equal(isCloudflareAccessRedirectResponse(new Response('', { status: 200 })), false)
 })
 
+await runTest('a bare non-JSON 401 (edge interference, e.g. Cloudflare Access) does not force a logout', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const originalCustomEvent = globalThis.CustomEvent
+  const events: Event[] = []
+  if (typeof globalThis.CustomEvent === 'undefined') {
+    globalThis.CustomEvent = class TestCustomEvent extends Event {
+      detail: unknown
+
+      constructor(type: string, init: CustomEventInit = {}) {
+        super(type)
+        this.detail = init.detail
+      }
+    } as unknown as typeof CustomEvent
+  }
+  globalThis.window = {
+    setTimeout,
+    clearTimeout,
+    dispatchEvent: (event: Event) => events.push(event),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  } as unknown as Window & typeof globalThis
+  // No JSON body at all - this app always returns { success, error, code }
+  // JSON on failure, so a plain-text/HTML 401 like this can only have come
+  // from something in front of the app (edge auth wall, WAF, stale cache).
+  globalThis.fetch = (() => Promise.resolve(new Response('401 Not Found', { status: 401 }))) as typeof fetch
+
+  try {
+    let thrown: any = null
+    try {
+      await apiFetch('GET', '/api/organizations/bootstrap', undefined, 1000)
+    } catch (error) {
+      thrown = error
+    }
+    assert.ok(thrown, 'expected apiFetch to throw')
+    assert.equal(thrown.code, 'edge_interference')
+    assert.equal(events.some((event) => event.type === 'auth:unauthorized'), false, 'must not force a logout for edge interference')
+  } finally {
+    globalThis.fetch = originalFetch
+    globalThis.window = originalWindow
+    globalThis.CustomEvent = originalCustomEvent
+    resetApiState()
+  }
+})
+
+await runTest('a real invalid_session 401 (proper app JSON error) still forces a logout', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const originalWindow = globalThis.window
+  const originalCustomEvent = globalThis.CustomEvent
+  const events: Event[] = []
+  if (typeof globalThis.CustomEvent === 'undefined') {
+    globalThis.CustomEvent = class TestCustomEvent extends Event {
+      detail: unknown
+
+      constructor(type: string, init: CustomEventInit = {}) {
+        super(type)
+        this.detail = init.detail
+      }
+    } as unknown as typeof CustomEvent
+  }
+  globalThis.window = {
+    setTimeout,
+    clearTimeout,
+    dispatchEvent: (event: Event) => events.push(event),
+    addEventListener: () => {},
+    removeEventListener: () => {},
+  } as unknown as Window & typeof globalThis
+  globalThis.fetch = (() => Promise.resolve(new Response(
+    JSON.stringify({ success: false, error: 'Please sign in again to continue.', code: 'invalid_session' }),
+    { status: 401 },
+  ))) as typeof fetch
+
+  try {
+    let thrown: any = null
+    try {
+      await apiFetch('GET', '/api/organizations/current', undefined, 1000)
+    } catch (error) {
+      thrown = error
+    }
+    assert.ok(thrown, 'expected apiFetch to throw')
+    assert.equal(events.some((event) => event.type === 'auth:unauthorized'), true, 'a real invalid session should still force a logout')
+  } finally {
+    globalThis.fetch = originalFetch
+    globalThis.window = originalWindow
+    globalThis.CustomEvent = originalCustomEvent
+    resetApiState()
+  }
+})
+
 await runTest('read routes return fallback on transient gateway errors without sync:error', async () => {
   resetApiState()
   setSyncServerUrl('https://sync.example.test')
@@ -792,7 +885,6 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   const userReadTransportSource = fs.readFileSync(new URL('../src/api/userReadTransport.ts', import.meta.url), 'utf8')
   const userAdminTransportSource = fs.readFileSync(new URL('../src/api/userAdminTransport.ts', import.meta.url), 'utf8')
   const appBootstrapTransportSource = fs.readFileSync(new URL('../src/api/appBootstrapTransport.ts', import.meta.url), 'utf8')
-  const customTablesTransportSource = fs.readFileSync(new URL('../src/api/customTablesTransport.ts', import.meta.url), 'utf8')
   const auditLogTransportSource = fs.readFileSync(new URL('../src/api/auditLogTransport.ts', import.meta.url), 'utf8')
   const dashboardTransportSource = fs.readFileSync(new URL('../src/api/dashboardTransport.ts', import.meta.url), 'utf8')
   const salesTransportSource = fs.readFileSync(new URL('../src/api/salesTransport.ts', import.meta.url), 'utf8')
@@ -840,7 +932,6 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /await import\('\.\/appBootstrapTransport\.ts'\)/)
   assert.doesNotMatch(source, /from '\.\/customTablesTransport\.ts'/)
   assert.doesNotMatch(source, /customTablesTransport\.ts|loadCustomTablesTransport|export const getCustomTables|export const createCustomTable|export const getCustomTableData|export const insertCustomRow|export const updateCustomRow|export const deleteCustomRow/)
-  assert.doesNotMatch(source, /from '\.\/auditLogTransport\.ts'/)
   assert.doesNotMatch(source, /auditLogTransport\.ts|loadAuditLogTransport|export const getAuditLogs|export const deleteAuditLogsRetention/)
   assert.doesNotMatch(source, /dashboardTransport\.ts|loadDashboardTransport|export const getDashboard|export const getAnalytics/)
   assert.doesNotMatch(source, /from '\.\/salesTransport\.ts'/)
@@ -965,6 +1056,18 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(contactsTransportSource, /export function getCustomerPointSummaries/)
   assert.match(contactsTransportSource, /function getCsvTemplateModule\(\): Promise<CsvTemplateModule>[\s\S]*import\('\.\.\/utils\/csvTemplate\.ts'\)/)
   assert.match(contactsTransportSource, /export function downloadCustomerTemplate\(\): Promise<void>[\s\S]*buildContactCsvTemplate\(\[/)
+  assert.doesNotMatch(
+    contactsTransportSource,
+    /buildContactCsvTemplate\(\[\s*'_/,
+    'customer/supplier templates should start at a real data column, not an internal bookkeeping field like _conflict_mode',
+  )
+  assert.doesNotMatch(
+    source,
+    /buildImportCsvTemplate\(\[\s*'_/,
+    'delivery/sales/inventory templates should start at a real data column, not an internal bookkeeping field like _conflict_mode',
+  )
+  const productsTemplateBlock = source.match(/return buildImportCsvTemplate\(\[\s*\n([\s\S]*?)\], 'products-template\.csv'/)?.[1] || ''
+  assert.ok(productsTemplateBlock.trim().startsWith("'name'"), 'products template should start at name, not internal fields like _action')
   assert.match(source, /export const getUsers = async \(\) => \{[\s\S]*loadUserReadTransport\(\)[\s\S]*getUsersRequest\(\)/, 'legacy user list reads should lazy-load the narrow user-read transport')
   assert.match(source, /export const createUser = async d => \{[\s\S]*loadUserAdminTransport\(\)[\s\S]*createUserRequest\(d\)/, 'legacy user writes should lazy-load the user-admin transport')
   assert.match(source, /export const getUserProfile = async \(id\) => \{[\s\S]*loadUserAdminTransport\(\)[\s\S]*getUserProfileRequest\(id\)/, 'legacy user profile reads should lazy-load the user-admin transport')
@@ -988,13 +1091,6 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(appBootstrapTransportSource, /getSyncServerUrl\(\)/)
   assert.match(appBootstrapTransportSource, /hasStoredUserSession\(\)/)
   assert.match(appBootstrapTransportSource, /isTransientGatewayError\(status\)/)
-  assert.match(customTablesTransportSource, /export function getCustomTables/)
-  assert.match(customTablesTransportSource, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'/)
-  assert.match(customTablesTransportSource, /const db = await getLocalDb\(\)[\s\S]*db\.table\('custom_tables'\)\.toArray\(\)/)
-  assert.match(customTablesTransportSource, /encodeURIComponent\(String\(value\)\)/)
-  assert.match(customTablesTransportSource, /export function updateCustomRow/)
-  assert.match(customTablesTransportSource, /expectedUpdatedAt/)
-  assert.match(customTablesTransportSource, /export function deleteCustomRow/)
   assert.match(auditLogTransportSource, /export function getAuditLogs/)
   assert.match(auditLogTransportSource, /buildQueryString\(params\)/)
   assert.match(auditLogTransportSource, /const db = await getLocalDb\(\)[\s\S]*db\.table\('audit_logs'\)\.orderBy\('created_at'\)\.reverse\(\)\.limit\(pageSize\)\.toArray\(\)/)
@@ -1133,7 +1229,13 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(syncRuntimeSource, /export function dispatchSyncUpdates/)
   assert.match(syncRuntimeSource, /export function emitSyncQueueChanged/)
   assert.match(browserDialogsSource, /export function openCSVDialog/)
-  assert.match(browserDialogsSource, /decodeTextBuffer\(await file\.arrayBuffer\(\)\)/)
+  // openCSVDialog now delegates file-reading to parseImportFile (which
+  // itself supports both CSV/TSV text and real Excel workbooks) rather
+  // than calling decodeTextBuffer directly -- see spreadsheetImport.ts.
+  // This is what lets the same native file dialog accept .xlsx/.xls/.xlsm
+  // uploads, not just .csv/.tsv.
+  assert.match(browserDialogsSource, /import \{ parseImportFile \} from '\.\.\/utils\/spreadsheetImport\.ts'/)
+  assert.match(browserDialogsSource, /resolve\(await parseImportFile\(file\)\)/)
   assert.match(systemJobsSource, /export async function pollSystemJob/)
   assert.match(systemJobsSource, /await wait\(pollMs\)/)
   assert.match(systemJobsSource, /export async function queueBackupFolderExport/)
@@ -1149,6 +1251,23 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(source, /function loadHttpCoreModule\(\) \{[\s\S]*import\('\.\/http\.ts'\)/, 'legacy runtime cache clears should lazy-load the HTTP core only when needed')
   assert.doesNotMatch(source, /export async function resetData[\s\S]*?invalidateClientRuntimeState[\s\S]*?cacheClearAll\(\)[\s\S]*?return result/, 'legacy resetData should clear runtime cache once through invalidateClientRuntimeState')
   assert.doesNotMatch(source, /export async function factoryReset[\s\S]*?invalidateClientRuntimeState[\s\S]*?cacheClearAll\(\)[\s\S]*?return result/, 'legacy factoryReset should clear runtime cache once through invalidateClientRuntimeState')
+  // Regression guard for "Products Only Reset also emptied Inventory
+  // Movements and other pages": resetData() must scope the local IndexedDB
+  // mirror clear to only the tables the server actually touched for that
+  // mode, instead of always wiping the entire mirror via
+  // invalidateClientRuntimeState's no-args (full-wipe) call.
+  assert.match(source, /function resetDataMirrorTables\(mode, options = \{\}\) \{/, 'resetData should compute a mode-scoped list of local mirror tables to clear')
+  assert.match(source, /if \(mode === 'products'\) \{[\s\S]*const tables = \['products', 'branch_stock'\]/, 'products-mode mirror clear should be scoped to products/branch_stock, not the whole mirror')
+  {
+    const mirrorFnMatch = /function resetDataMirrorTables\(mode, options = \{\}\) \{[\s\S]*?\n\}/.exec(source)
+    const mirrorFnBody = mirrorFnMatch ? mirrorFnMatch[0] : ''
+    assert.ok(mirrorFnBody, 'resetDataMirrorTables function body should be present to check')
+    for (const forbidden of ['customers', 'suppliers', 'delivery_contacts', 'audit_logs']) {
+      assert.ok(!mirrorFnBody.includes(`'${forbidden}'`), `products/sales-mode mirror clear should never include the '${forbidden}' table`)
+    }
+  }
+  assert.match(source, /export async function resetData\(mode = 'sales', options = \{\}\) \{[\s\S]*resetDataMirrorTables\(mode, options\)/, 'resetData should pass the scoped mirror table list into invalidateClientRuntimeState')
+  assert.match(source, /async function invalidateClientRuntimeState\(reason = 'server-mutation', mirrorTables\?: string\[\]\)/, 'invalidateClientRuntimeState should accept an optional scoped mirror table list')
   assert.match(source, /function loadClientRuntimeModule\(\) \{[\s\S]*import\('\.\.\/platform\/runtime\/clientRuntime\.ts'\)/, 'legacy runtime invalidation should lazy-load runtime reset helpers')
   assert.match(source, /function loadAppRefreshModule\(\) \{[\s\S]*import\('\.\.\/utils\/appRefresh\.ts'\)/, 'legacy lookup mutations should lazy-load app refresh helpers')
   assert.match(source, /export const createCategory = async payload => \{[\s\S]*loadLookupTransport\(\)[\s\S]*createCategoryRequest\(payload\)[\s\S]*dispatchRefreshAppData\(CATEGORY_REFRESH_CHANNELS/, 'legacy category writes should lazy-load lookup transport and preserve refresh behavior')
@@ -1239,14 +1358,105 @@ await runTest('health payload exposes data, storage, queue, cache, and analytics
   assert.equal(payload.analytics.roles.includes('import_staging'), true)
 })
 
+await runTest('route() searchGroup aborts the previous in-flight search when a newer one starts', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  const calls: Array<{ url: string; signal?: AbortSignal | null }> = []
+  globalThis.fetch = ((url: string, init?: RequestInit) => {
+    const signal = init?.signal ?? null
+    calls.push({ url: String(url), signal })
+    return new Promise<Response>((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+        return
+      }
+      signal?.addEventListener('abort', () => {
+        reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+      })
+      // Real fetches for distinct queries resolve at different, unordered
+      // times -- resolving the SECOND call's response first is deliberate,
+      // so this test can't pass by accident just because promises happened
+      // to settle in call order.
+      setTimeout(() => resolve(new Response(JSON.stringify({ items: [], url }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })), calls.length === 1 ? 20 : 0)
+    })
+  }) as typeof fetch
+
+  try {
+    const firstPromise = route(
+      'products:search:ab',
+      (signal?: AbortSignal) => apiFetch('GET', '/api/products/search?q=ab', undefined, 5000, { signal }),
+      () => ({ items: [] }),
+      { raceLocalFallback: false, searchGroup: 'products:search' },
+    )
+    // Attach a handler immediately so Node doesn't flag this as an
+    // unhandled rejection in the tick where it actually rejects (below,
+    // once the second call aborts it) -- the real assertion on this same
+    // promise still happens later via assert.rejects.
+    firstPromise.catch(() => {})
+    // Give the first request's real fetch() call a chance to actually start
+    // (and register its abort listener) before the second one supersedes it.
+    await new Promise((r) => setTimeout(r, 0))
+    const secondPromise = route(
+      'products:search:abc',
+      (signal?: AbortSignal) => apiFetch('GET', '/api/products/search?q=abc', undefined, 5000, { signal }),
+      () => ({ items: [] }),
+      { raceLocalFallback: false, searchGroup: 'products:search' },
+    )
+
+    const second = await secondPromise
+    assert.deepEqual(second, { items: [], url: 'https://sync.example.test/api/products/search?q=abc' })
+
+    // The first request must have actually been cancelled (its fetch signal
+    // aborted) rather than merely having its result ignored client-side --
+    // that's the whole point of the searchGroup: stop wasting a real network/
+    // server request once a newer keystroke has already superseded it.
+    assert.equal(calls.length, 2)
+    assert.equal(calls[0].signal?.aborted, true)
+    // route()'s local-fallback branch treats a superseded (aborted) search
+    // as "nothing usable to fall back to" and rethrows -- so the first
+    // promise rejects rather than silently resolving to the local fallback,
+    // which would be a stale/misleading answer for a query the user already
+    // moved past.
+    await assert.rejects(firstPromise, (error: unknown) => (error as { name?: string })?.name === 'AbortError')
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
+await runTest('apiFetch propagates a caller-supplied AbortSignal as a real AbortError', async () => {
+  resetApiState()
+  setSyncServerUrl('https://sync.example.test')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = ((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => {
+      reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+    })
+  })) as typeof fetch
+
+  try {
+    const ctrl = new AbortController()
+    const pending = apiFetch('GET', '/api/products/search?q=x', undefined, 5000, { signal: ctrl.signal })
+    ctrl.abort()
+    await assert.rejects(pending, (error: unknown) => (error as { name?: string })?.name === 'AbortError')
+  } finally {
+    globalThis.fetch = originalFetch
+    resetApiState()
+  }
+})
+
 await runTest('large search methods do not use empty local fallbacks for required APIs', () => {
   const source = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
   const productReadTransportSource = fs.readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
   const inventoryTransportSource = fs.readFileSync(new URL('../src/api/inventoryTransport.ts', import.meta.url), 'utf8')
-  assert.match(productReadTransportSource, /function routeCachedProductQuery\(cacheKey: string, path: string\)[\s\S]*route\([\s\S]*\{ raceLocalFallback: false \}/)
-  assert.match(productReadTransportSource, /return routeCachedProductQuery\(cacheKey, appendQuery\('\/api\/products\/search', query\)\)/)
-  assert.match(inventoryTransportSource, /function routeCachedInventoryQuery\(cacheKey: string, path: string\)[\s\S]*route\([\s\S]*\{ raceLocalFallback: false \}/)
-  assert.match(inventoryTransportSource, /return routeCachedInventoryQuery\(cacheKey, appendQuery\('\/api\/inventory\/products\/search', query\)\)/)
+  assert.match(productReadTransportSource, /function routeCachedProductQuery\(cacheKey: string, path: string, searchGroup\?: string\)[\s\S]*route\([\s\S]*\{ raceLocalFallback: false, searchGroup \}/)
+  assert.match(productReadTransportSource, /return routeCachedProductQuery\(cacheKey, appendQuery\('\/api\/products\/search', query\), 'products:search'\)/)
+  assert.match(inventoryTransportSource, /function routeCachedInventoryQuery\(cacheKey: string, path: string, searchGroup\?: string\)[\s\S]*route\([\s\S]*\{ raceLocalFallback: false, searchGroup \}/)
+  assert.match(inventoryTransportSource, /return routeCachedInventoryQuery\(cacheKey, appendQuery\('\/api\/inventory\/products\/search', query\), 'inventory:search'\)/)
   assert.doesNotMatch(source, /products:search:\$\{q\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
   assert.doesNotMatch(productReadTransportSource, /products:search:\$\{query\}`,[\s\S]{0,240}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)
   assert.doesNotMatch(source, /inventory:products:search:\$\{q\}`,[\s\S]{0,260}\(\)\s*=>\s*\(\{\s*items:\s*\[\]/)

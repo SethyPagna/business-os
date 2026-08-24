@@ -1,4 +1,5 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -352,9 +353,18 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   const STEPS: ModalStep[] = ['search', 'items', 'confirm']
   const stepIdx = STEPS.indexOf(step)
 
+  // Backdrop/X close should not fire while a submit is in flight -- same
+  // guard ReceiveBatchModal.tsx/ManageBatchesModal.tsx/InventoryBatchModal.tsx
+  // already use for this exact reason (an outside click or the X button
+  // used to close the modal mid-request even though the Confirm button
+  // itself was correctly disabled during `submitting`).
+  const closeIfIdle = () => {
+    if (!submitting) onClose()
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[92vh] flex flex-col" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeIfIdle}>
+      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-modal-92 flex flex-col" onClick={e => e.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
@@ -369,7 +379,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 {i < STEPS.length - 1 && <span className="text-gray-300 dark:text-gray-600 text-xs">→</span>}
               </div>
             ))}
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none w-8 h-8 flex items-center justify-center ml-2">×</button>
+            <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center ml-2 disabled:opacity-50"><X className="h-4 w-4" /></button>
           </div>
         </div>
 

@@ -1,3 +1,4 @@
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -207,9 +208,18 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     }
   }
 
+  // Backdrop/X/Cancel close should not fire while a submit is in flight --
+  // same guard ReceiveBatchModal.tsx/ManageBatchesModal.tsx/
+  // InventoryBatchModal.tsx already use for this exact reason (only the
+  // Save button here was disabled during `submitting`; the other three
+  // close paths could still unmount the modal mid-request).
+  const closeIfIdle = () => {
+    if (!submitting) onClose()
+  }
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-[92vh] flex flex-col" onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeIfIdle}>
+      <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-modal-92 flex flex-col" onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
 
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
@@ -217,7 +227,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">✏️ {T('edit','')} {T('returns','Return')}</h2>
             <div className="text-xs text-gray-400 font-mono mt-0.5">{ret.return_number}</div>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl w-8 h-8 flex items-center justify-center">×</button>
+          <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center disabled:opacity-50"><X className="h-4 w-4" /></button>
         </div>
 
         <div className="modal-scroll p-4 space-y-4">
@@ -344,7 +354,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
 
           {/* Buttons */}
           <div className="flex gap-2 pt-1">
-            <button onClick={onClose} className="btn-secondary text-sm flex-1">
+            <button onClick={closeIfIdle} disabled={submitting} className="btn-secondary text-sm flex-1 disabled:opacity-50">
               {T('cancel','Cancel')}
             </button>
             <button onClick={handleSubmit}

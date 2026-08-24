@@ -1,11 +1,10 @@
-import type { ReactNode } from 'react'
-import type { LucideIcon } from 'lucide-react'
-import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
-import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
-import Package from 'lucide-react/dist/esm/icons/package.js'
-import Tags from 'lucide-react/dist/esm/icons/tags.js'
-import Truck from 'lucide-react/dist/esm/icons/truck.js'
-import X from 'lucide-react/dist/esm/icons/x.js'
+import { useMemo } from 'react'
+import FilterMenu from '../shared/FilterMenu'
+import { isMultiActive } from '../../utils/multiSelect'
+import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilterOptions.tsx'
+import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
+import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
+import type { SearchMode } from '../shared/SearchModeToggle'
 
 type Translate = (key: string) => string | undefined
 type FilterSetter = (value: string) => void
@@ -18,15 +17,21 @@ interface NamedOption {
 }
 
 interface POSFilterPanelProps {
-  open: boolean
   t?: Translate
-  onClose?: () => void
+  disabled?: boolean
+  onOpenChange?: (open: boolean) => void
   categories?: NamedOption[]
   brands?: string[]
   branches?: NamedOption[]
   suppliers?: string[]
   categoryFilter: string
   setCategoryFilter: FilterSetter
+  // Optional: batch-select a whole "Main - Sub" hierarchical category group
+  // in one tap (see utils/multiSelect.ts's toggleMultiValues). Falls back
+  // to a flat per-category list (each row toggled individually via
+  // setCategoryFilter) if not supplied, same fallback shape as
+  // productMenuHelpers.ts's categoryOptions.
+  setCategoryFilterBatch?: (values: string[], checked: boolean) => void
   brandFilter: string
   setBrandFilter: FilterSetter
   branchFilter: string
@@ -37,11 +42,12 @@ interface POSFilterPanelProps {
   setGroupFilter?: FilterSetter
   supplierFilter: string
   setSupplierFilter: FilterSetter
-}
-
-interface SectionLabelProps {
-  icon: LucideIcon
-  children: ReactNode
+  // Optional: only rendered when both are supplied (older/other callers of
+  // this component that haven't been updated yet just don't get the
+  // section, same "no crash on a missing optional prop" pattern as
+  // groupFilter/setGroupFilter above).
+  searchMode?: SearchMode
+  setSearchMode?: (mode: SearchMode) => void
 }
 
 function countActiveFlags(flags: boolean[] = []): number {
@@ -52,27 +58,21 @@ function countActiveFlags(flags: boolean[] = []): number {
   return count
 }
 
-function SectionLabel({ icon: Icon, children }: SectionLabelProps) {
-  return (
-    <div className="min-w-0 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5" />
-        <span className="truncate">{children}</span>
-      </span>
-    </div>
-  )
-}
-
+// Rebuilt on top of the shared FilterMenu (pill trigger + popover, with a
+// built-in search box for any section over its option-count threshold) so
+// POS no longer maintains its own bespoke portal/positioning/outside-click
+// logic -- that lived in POS.tsx and duplicated what FilterMenu already does.
 export default function POSFilterPanel({
-  open,
   t,
-  onClose,
+  disabled = false,
+  onOpenChange,
   categories = [],
   brands = [],
   branches = [],
   suppliers = [],
   categoryFilter,
   setCategoryFilter,
+  setCategoryFilterBatch,
   brandFilter,
   setBrandFilter,
   branchFilter,
@@ -83,8 +83,9 @@ export default function POSFilterPanel({
   setGroupFilter,
   supplierFilter,
   setSupplierFilter,
+  searchMode,
+  setSearchMode,
 }: POSFilterPanelProps) {
-  if (!open) return null
   const T = (key: string, fallback: string): string => t?.(key) || fallback
   const normalizedGroupFilter = ['grouped', 'parent', 'variant'].includes(groupFilter) ? 'group' : groupFilter
 
@@ -95,6 +96,7 @@ export default function POSFilterPanel({
     stockFilter !== 'all',
     normalizedGroupFilter !== 'all',
     supplierFilter !== 'all',
+    searchMode === 'OR',
   ])
 
   const clearAll = () => {
@@ -104,201 +106,104 @@ export default function POSFilterPanel({
     setStockFilter('all')
     setGroupFilter?.('all')
     setSupplierFilter('all')
+    setSearchMode?.('AND')
   }
 
-  const chip = (active: boolean) => (
-    active
-      ? 'border-blue-700 bg-blue-600 text-white shadow-sm'
-      : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300'
-  )
+  const sections = useMemo(() => {
+    // Stock Status, Groups, and Branch merged into one flyout (per the
+    // user's ask) instead of three separate top-level sections -- these
+    // three are commonly set together ("healthy stock, standalone items,
+    // at Branch X") and each was already collapsing to its own single
+    // summary row, so combining them saves taps without losing any of the
+    // underlying per-dimension state (still three separate filter
+    // values/setters, just one shared UI surface). Shared with
+    // Products/Inventory via components/shared/AvailabilityFilterOptions.tsx
+    // so all three pages render the exact same merged section.
+    const availabilitySection = buildAvailabilityFilterSection({
+      t,
+      branches,
+      stockFilter,
+      setStockFilter,
+      groupFilter,
+      setGroupFilter,
+      branchFilter,
+      setBranchFilter,
+    })
+
+    return [
+      availabilitySection,
+      searchMode && setSearchMode
+        ? buildSearchModeFilterSection({ t, searchMode, setSearchMode })
+        : null,
+      categories.length > 0 && {
+        id: 'category',
+        label: T('category', 'Category'),
+        searchable: true,
+        options: [
+          { id: 'all', label: T('all', 'All'), active: categoryFilter === 'all', onClick: () => setCategoryFilter('all') },
+          // Hierarchical "Main - Sub" rows when a batch setter was supplied
+          // (see setCategoryFilterBatch above), same behavior as
+          // Products/Inventory; otherwise the old flat per-category list.
+          ...(setCategoryFilterBatch
+            ? buildHierarchicalCategoryFilterOptions({
+                categoryNames: categories.map((category) => category.name),
+                isSelected: (value) => isMultiActive(categoryFilter, value),
+                onToggle: (values, checked) => setCategoryFilterBatch(values, checked),
+              })
+            : categories.map((category) => ({
+                id: category.id || category.name,
+                label: category.name,
+                active: isMultiActive(categoryFilter, category.name),
+                onClick: () => setCategoryFilter(category.name),
+              }))),
+        ],
+      },
+      brands.length > 0 && {
+        id: 'brand',
+        label: T('brand', 'Brand'),
+        searchable: true,
+        options: [
+          { id: 'all', label: T('all', 'All'), active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
+          ...brands.map((brand) => ({
+            id: brand,
+            label: brand,
+            active: isMultiActive(brandFilter, brand, true),
+            onClick: () => setBrandFilter(brand),
+          })),
+        ],
+      },
+      // Supplier intentionally NOT shown in the POS filter menu -- POS only
+      // ever exposes Availability (Branch+Group+Stock, merged), Category,
+      // and Brand, per the "keep POS to just these three" decision. The
+      // `suppliers`/`supplierFilter`/`setSupplierFilter` props stay on this
+      // component (still used by `activeCount`/`clearAll` so a value set
+      // some other way -- e.g. restored from sessionStorage -- still shows
+      // in the count and still clears via "Clear all") but no section
+      // renders it, so a person can no longer set it from this menu.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    ]
+  }, [
+    categories, brands, branches,
+    categoryFilter, brandFilter, branchFilter, stockFilter, groupFilter, normalizedGroupFilter,
+    searchMode, setSearchMode,
+  ])
 
   return (
-    <div className="pointer-events-auto card mb-2 max-h-[min(26rem,48vh)] space-y-2 overflow-y-auto overscroll-contain border border-blue-100 p-2.5 shadow-lg touch-pan-y dark:border-blue-800">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-semibold text-gray-900 dark:text-white">{T('filters', 'Filters')}</div>
-        <button
-          type="button"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 dark:border-slate-700 dark:text-slate-300 dark:hover:border-slate-600 dark:hover:bg-slate-800 dark:hover:text-white"
-          onClick={() => onClose?.()}
-          aria-label={T('close', 'Close')}
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="stock">
-        <SectionLabel icon={Boxes}>{T('stock_status', 'Stock Status')}</SectionLabel>
-        <div className="flex flex-wrap gap-1">
-          {[
-            ['all', T('all', 'All')],
-            ['in_stock', T('in_stock', 'In Stock')],
-            ['low', T('low_stock', 'Low')],
-            ['out', T('out_of_stock', 'Out')],
-          ].map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setStockFilter(value)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(stockFilter === value)}`}
-              data-pos-filter-chip={value}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="group">
-        <SectionLabel icon={Package}>{T('groups', 'Groups')}</SectionLabel>
-        <div className="flex flex-wrap gap-1">
-          {[
-            ['all', T('all', 'All')],
-            ['group', T('groups', 'Groups')],
-            ['standalone', T('standalone', 'Standalone')],
-          ].map(([value, label]) => (
-            <button
-              key={`group-${value}`}
-              type="button"
-              onClick={() => setGroupFilter?.(normalizedGroupFilter === value && value !== 'all' ? 'all' : value)}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(normalizedGroupFilter === value)}`}
-              data-pos-filter-chip={`group-${value}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {categories.length > 0 ? (
-        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="category">
-          <SectionLabel icon={Package}>{T('category', 'Category')}</SectionLabel>
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              onClick={() => setCategoryFilter('all')}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(categoryFilter === 'all')}`}
-              data-pos-filter-chip="category-all"
-            >
-              {T('all', 'All')}
-            </button>
-            {categories.map((category) => (
-              <button
-                key={category.id || category.name}
-                type="button"
-                onClick={() => setCategoryFilter(categoryFilter === category.name ? 'all' : category.name)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
-                  categoryFilter === category.name
-                    ? 'border-transparent text-white shadow-sm'
-                    : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200'
-                }`}
-                data-pos-filter-chip={`category-${category.id || category.name}`}
-                style={categoryFilter === category.name ? { background: category.color || '#2563eb' } : {}}
-              >
-                {category.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {branches.length > 1 ? (
-        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="branch">
-          <SectionLabel icon={Building2}>{T('branch', 'Branch')}</SectionLabel>
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              onClick={() => setBranchFilter('all')}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(branchFilter === 'all')}`}
-              data-pos-filter-chip="branch-all"
-            >
-              {T('all', 'All')}
-            </button>
-            {branches.map((branch) => (
-              <button
-                key={branch.id || branch.name}
-                type="button"
-                onClick={() => setBranchFilter(branchFilter === String(branch.id) ? 'all' : String(branch.id))}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(branchFilter === String(branch.id))}`}
-                data-pos-filter-chip={`branch-${branch.id || branch.name}`}
-              >
-                {branch.name}{branch.is_default ? ' (Default)' : ''}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {brands.length > 0 ? (
-        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="brand">
-          <SectionLabel icon={Tags}>{T('brand', 'Brand')}</SectionLabel>
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              onClick={() => setBrandFilter('all')}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(brandFilter === 'all')}`}
-              data-pos-filter-chip="brand-all"
-            >
-              {T('all', 'All')}
-            </button>
-            {brands.map((brand) => (
-              <button
-                key={brand}
-                type="button"
-                onClick={() => setBrandFilter(brandFilter === brand ? 'all' : brand)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
-                  brandFilter === brand
-                    ? 'border-cyan-700 bg-cyan-600 text-white shadow-sm'
-                    : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200'
-                }`}
-                data-pos-filter-chip={`brand-${brand}`}
-              >
-                {brand}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {suppliers.length > 0 ? (
-        <div className="grid grid-cols-[5.2rem_minmax(0,1fr)] items-start gap-2 rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-slate-800 dark:ring-slate-700" data-pos-filter-section="supplier">
-          <SectionLabel icon={Truck}>{T('supplier', 'Supplier')}</SectionLabel>
-          <div className="flex flex-wrap gap-1">
-            <button
-              type="button"
-              onClick={() => setSupplierFilter('all')}
-              className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${chip(supplierFilter === 'all')}`}
-              data-pos-filter-chip="supplier-all"
-            >
-              {T('suppliers', T('all', 'All'))}
-            </button>
-            {suppliers.map((supplier) => (
-              <button
-                key={supplier}
-                type="button"
-                onClick={() => setSupplierFilter(supplierFilter === supplier ? 'all' : supplier)}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
-                  supplierFilter === supplier
-                    ? 'border-indigo-700 bg-indigo-600 text-white shadow-sm'
-                    : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800/90 dark:text-slate-200'
-                }`}
-                data-pos-filter-chip={`supplier-${supplier}`}
-              >
-                {supplier}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      {activeCount > 0 ? (
-        <button
-          type="button"
-          onClick={clearAll}
-          className="text-left text-xs font-medium text-red-500 hover:text-red-700 dark:text-red-400"
-        >
-          {T('clear_filters', 'Clear all filters')}
-        </button>
-      ) : null}
+    <div className={disabled ? 'pointer-events-none opacity-60' : undefined}>
+      <FilterMenu
+        label={T('filters', 'Filters')}
+        activeCount={activeCount}
+        sections={sections}
+        onClear={activeCount > 0 ? clearAll : null}
+        // Icon-only + large: width now matches the AND/OR toggle next to it
+        // (was a wide "Filters (n)" label button, much wider than AND/OR)
+        // while staying a bigger/taller tap target than the default icon
+        // trigger -- this was the one control on the row meant to stay the
+        // easiest to hit, just narrower than before.
+        iconOnly
+        large
+        onOpenChange={onOpenChange}
+      />
     </div>
   )
 }

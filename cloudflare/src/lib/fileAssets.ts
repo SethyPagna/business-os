@@ -27,14 +27,21 @@ const MAX_ORIGINAL_FILE_NAME_LENGTH = 180
 // Strips path separators and control characters, matching the original's
 // sanitizeOriginalFileName -- this is the name shown to admins, not the
 // name used as the R2 object key (see buildUniqueStoredName below).
+//
+// Disallowed characters render as '-' (Part 242), same convention as
+// importImageMatch.ts's sanitizeBaseName -- see that function's comment
+// for the full rationale (visually obvious substitution, run-collapsing,
+// trimmed edges) and why this needed to be applied consistently across
+// every place a product/file name gets turned into a safe filename.
 export function sanitizeOriginalFileName(originalName: string): string {
   const normalized = String(originalName || '').trim().replace(/\\/g, '/')
   const lastSlash = normalized.lastIndexOf('/')
   const base = (lastSlash >= 0 ? normalized.slice(lastSlash + 1) : normalized)
     // eslint-disable-next-line no-control-regex
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '-')
     .replace(/\s+/g, ' ')
-    .trim()
+    .replace(/[\s-]*-[\s-]*/g, '-')
+    .replace(/^[\s-]+|[\s-]+$/g, '')
     .slice(0, MAX_ORIGINAL_FILE_NAME_LENGTH)
   return base || 'file'
 }

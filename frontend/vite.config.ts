@@ -431,7 +431,6 @@ const deferredModulePreloadPrefixes = [
   'assets/audit-log-api-',
   'assets/branch-api-',
   'assets/contacts-api-',
-  'assets/custom-tables-api-',
   'assets/csv-utils-',
   'assets/dashboard-api-',
   'assets/dashboard-charts-',
@@ -651,7 +650,6 @@ function manualChunks(id: string): string | undefined {
     ) return 'import-jobs-api'
     if (normalized.endsWith('/src/api/userAdminTransport.ts')) return 'user-admin-api'
     if (normalized.endsWith('/src/api/userReadTransport.ts')) return 'user-read-api'
-    if (normalized.endsWith('/src/api/customTablesTransport.ts')) return 'custom-tables-api'
     if (normalized.endsWith('/src/api/driveSync.ts')) return 'drive-sync-api'
     if (normalized.endsWith('/src/api/dashboardTransport.ts')) return 'dashboard-api'
     if (normalized.includes('/src/components/dashboard/charts/')) return 'dashboard-charts'
@@ -717,6 +715,22 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/utils/pricing.ts')) {
       return 'pricing-utils'
     }
+    // lazyImport.ts (lazyRetry) has no manual-chunk rule of its own and is
+    // imported by ~20 unrelated surfaces (catalog, sales, users, POS,
+    // dashboard, inventory, etc). Left to Rollup's default chunking it gets
+    // absorbed into whichever consumer Rollup bundles it with first rather
+    // than getting its own small shared chunk -- observed as landing inside
+    // 'catalog-public' (confirmed via a bundle-inspection build: app-shared's
+    // ScanSearchButton.tsx imports it, and it was a module of the
+    // catalog-public chunk), which creates an app-shared -> catalog-public
+    // back-edge with no corresponding forward edge (the remaining leg of the
+    // `catalog-public -> product-shared -> app-shared -> catalog-public`
+    // cycle noted elsewhere in this file). Same fix as every other case here:
+    // give the widely-shared module its own chunk so no single consumer's
+    // chunk absorbs it.
+    if (normalized.endsWith('/src/utils/lazyImport.ts')) {
+      return 'lazy-import-utils'
+    }
     if (normalized.includes('/src/components/auth/Login.tsx')) return 'auth-login'
     if (
       normalized.includes('/src/components/products/shared/')
@@ -743,12 +757,40 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/catalogAssetUrls.ts')
       || normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+      // BrandIcons.tsx lives under components/shared/ but is only ever imported by
+      // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
+      // PublicCatalogPage -> catalog-public). Left to the generic
+      // '/src/components/shared/' catch-all further down, it lands in 'app-shared' --
+      // and since PublicCatalogPage (catalog-public) statically imports it, that
+      // creates a catalog-public -> app-shared back-edge with no corresponding
+      // forward edge, which is exactly the class of cycle this file's other
+      // "keep it with its only consumers" comments already warn about (observed as
+      // `catalog-public -> app-shared -> catalog-public` in a real build). Since
+      // it's shared by two catalog chunks rather than one, put it in
+      // 'catalog-public-core' -- the chunk this file already uses for exactly that
+      // "shared by multiple catalog surfaces" case (catalogImages/catalogUi/etc.
+      // above) -- instead of either individual consumer's chunk.
+      || normalized.includes('/src/components/shared/BrandIcons.tsx')
     ) {
       return 'catalog-public-core'
     }
     if (
       normalized.includes('/src/components/catalog/PublicCatalogPage.tsx')
       || normalized.includes('/src/components/catalog/CatalogPreviewSurface.tsx')
+      // portalBucket is only ever imported by PublicCatalogPage above. Left to the
+      // generic '/src/components/catalog/' catch-all further down, it lands in the
+      // 'catalog' chunk instead -- and since the admin-only CatalogPage imports
+      // CatalogPreviewSurface (catalog-public, above), that creates the same class of
+      // circular chunk dependency (catalog -> catalog-public -> catalog) that caused
+      // the app-shared/shared-ui crash. Same fix: keep it with its only consumer.
+      || normalized.includes('/src/components/catalog/portalBucket.ts')
+      // portalProductGrouping is only ever imported by PublicCatalogPage above, same
+      // reasoning as portalBucket.ts directly above: left to the generic catalog/
+      // catch-all further down it creates the exact circular chunk dependency
+      // (catalog -> catalog-public -> catalog) this comment block already warns about,
+      // which is a TDZ ReferenceError ("Cannot access '<var>' before initialization")
+      // that blanks the whole public portal on load. Keep it with its only consumer.
+      || normalized.includes('/src/components/catalog/portalProductGrouping.ts')
     ) {
       return 'catalog-public'
     }
@@ -769,7 +811,21 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
       return 'portal-translate-controller'
     }
-    if (normalized.includes('/src/components/catalog/portalLanguagePacks.ts')) {
+    if (
+      normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
+      // portalLanguageOptions is a small option-list module imported by
+      // portalLanguagePacks.ts itself as well as by catalog-public and catalog
+      // consumers. Left to the generic catalog/ catch-all, it produced a 3-chunk
+      // cycle at runtime: catalog -> catalog-public (CatalogPreviewSurface) ->
+      // portal-language-packs (getPortalLanguageText) -> catalog
+      // (portalLanguageOptions). Rollup/Vite's TDZ-safe eval order breaks on chunk
+      // cycles, throwing "Cannot access '<var>' before initialization" the moment
+      // any of those three chunks loads -- this was the observed public-portal
+      // crash in portal-language-packs-*.js. Keeping the options module in the
+      // same chunk as portalLanguagePacks (its only same-cluster dependency)
+      // removes the back-edge into catalog and breaks the cycle.
+      || normalized.includes('/src/components/catalog/portalLanguageOptions.ts')
+    ) {
       return 'portal-language-packs'
     }
     if (normalized.includes('/src/components/catalog/portalContentI18n.ts')) {
@@ -800,6 +856,15 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-ui'
+    // PageSizeSelect is imported by PaginationControls (shared-ui, below). Left to the
+    // generic '/src/components/shared/' catch-all further down, it lands in 'app-shared'
+    // instead -- and since PageSizeSelect itself imports a lucide icon that IS routed to
+    // 'shared-ui', that produces a circular chunk dependency (shared-ui -> app-shared ->
+    // shared-ui). At runtime that circularity causes a TDZ crash the first time app-shared
+    // evaluates a module-level icon factory call before shared-ui has finished initializing
+    // ("Cannot access '<var>' before initialization"), which blanks the whole app. Keeping
+    // PageSizeSelect in the same chunk as its only consumer avoids the cycle.
+    if (normalized.includes('/src/components/shared/PageSizeSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'
     if (normalized.includes('/src/components/shared/PortalMenu.tsx')) return 'shared-portal-menu'
     if (normalized.includes('/src/components/files/FilePickerModal')) {
@@ -813,6 +878,20 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/shared/NotificationCenter.tsx')) return 'notification-center'
     if (normalized.includes('/src/components/shared/BackgroundImportTracker.tsx')) return 'background-import-tracker'
+    // ImportReportModal is imported by both BackgroundImportTracker (its own
+    // chunk, above) and Dashboard.tsx (the 'dashboard' route chunk) -- two
+    // consumers in two different chunks, so it can't just follow "its only
+    // consumer" the way PageSizeSelect/PortalMenu above do. Left to the
+    // generic '/src/components/shared/' catch-all further down, it lands in
+    // 'app-shared' -- and since it statically imports importJobsTransport.ts
+    // (routed to 'import-jobs-api', which itself imports publicAssetUrls.ts,
+    // explicitly routed back to 'app-shared'), that closes an
+    // `app-shared -> import-jobs-api -> app-shared` cycle (confirmed in a
+    // real build's circular-chunk warnings). Giving it its own chunk breaks
+    // the cycle the same way every other fix in this function does: keep the
+    // back-edge-causing file out of the chunk it would otherwise create a
+    // loop with.
+    if (normalized.includes('/src/components/shared/ImportReportModal.tsx')) return 'import-report-modal'
     if (normalized.includes('/src/components/shared/WriteConflictModal.tsx')) return 'write-conflict-modal'
     if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
@@ -884,10 +963,15 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api':     { target: 'http://localhost:4000', changeOrigin: true },
-      '/uploads': { target: 'http://localhost:4000', changeOrigin: true },
-      '/health':  { target: 'http://localhost:4000', changeOrigin: true },
-      '/ws':      { target: 'ws://localhost:4000',   changeOrigin: true, ws: true },
+      // Cloudflare-only now: `wrangler dev` (cloudflare/package.json "dev"
+      // script) serves the Worker locally on its default port 8787 -- there
+      // is no Node backend anymore. This used to point at localhost:4000
+      // (the retired Node server's port) and would silently fail to proxy
+      // anything in local dev, since nothing listens on 4000 now.
+      '/api':     { target: 'http://localhost:8787', changeOrigin: true },
+      '/uploads': { target: 'http://localhost:8787', changeOrigin: true },
+      '/health':  { target: 'http://localhost:8787', changeOrigin: true },
+      '/ws':      { target: 'ws://localhost:8787',   changeOrigin: true, ws: true },
     },
   },
 

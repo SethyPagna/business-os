@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Modal from '../shared/Modal'
+import AppSelect from '../shared/AppSelect.tsx'
 import {
   CONTACT_OPTION_LIMIT,
   createContactOption,
@@ -8,6 +9,8 @@ import {
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
 import { generateCustomerMembershipNumber } from './customerMembershipNumber'
+import { useContactDuplicateFlag } from './useContactDuplicateFlag'
+import DuplicateFlagBanner from './DuplicateFlagBanner'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -17,9 +20,10 @@ interface CustomerRecord {
   membership_number?: string | null
   phone?: string | null
   email?: string | null
-  company?: string | null
   address?: string | null
   notes?: string | null
+  gender?: string | null
+  created_at?: string | null
   [key: string]: unknown
 }
 
@@ -28,13 +32,13 @@ interface CustomerFormState extends CustomerRecord {
   membership_number: string
   phone: string
   email: string
-  company: string
   notes: string
+  gender: string
 }
 
 interface CustomerFormModalProps {
   customer?: CustomerRecord | null
-  onSave: (payload: CustomerFormState & { address: string | null }) => void | Promise<void>
+  onSave: (payload: CustomerFormState & { address: string | null; confirmDuplicate?: boolean }) => void | Promise<void>
   onClose: () => void
   t?: TranslateFn
 }
@@ -109,10 +113,10 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       membership_number: String(customer.membership_number || ''),
       phone: String(customer.phone || ''),
       email: String(customer.email || ''),
-      company: String(customer.company || ''),
       notes: String(customer.notes || ''),
+      gender: String(customer.gender || ''),
     }
-    : { name: '', membership_number: generateCustomerMembershipNumber(), phone: '', email: '', company: '', notes: '' }
+    : { name: '', membership_number: generateCustomerMembershipNumber(), phone: '', email: '', notes: '', gender: '' }
   const [form, setForm] = useState<CustomerFormState>(initial)
   const [options, setOptions] = useState(() => {
     const parsed = parseContactOptions(initial.address)
@@ -120,6 +124,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
   })
   const [saving, setSaving] = useState(false)
   const [localError, setLocalError] = useState('')
+  const duplicateMatches = useContactDuplicateFlag('customers', form.name, form.phone, customer?.id)
 
   const setField = <Key extends keyof CustomerFormState>(key: Key, value: CustomerFormState[Key]) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
@@ -140,6 +145,15 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
       setLocalError(tr(t, 'membership_number_required', 'Membership number is required'))
       return
     }
+    const phoneConflict = duplicateMatches.find((match) => match.severity === 'phone_conflict')
+    if (phoneConflict) {
+      setLocalError(`This phone number already belongs to "${phoneConflict.name}". Each phone number can only be used by one customer.`)
+      return
+    }
+    const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+    if (exactMatch && !window.confirm(`"${exactMatch.name}" already has this exact name and phone number. Create a separate customer record anyway?`)) {
+      return
+    }
     setLocalError('')
     setSaving(true)
     try {
@@ -148,6 +162,7 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
         name,
         membership_number: membershipNumber.toUpperCase(),
         address: serializeContactOptions(options),
+        confirmDuplicate: !!exactMatch,
       }))
     } finally {
       setSaving(false)
@@ -197,9 +212,26 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           </div>
         </div>
 
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="customer" />
+
         <div>
-          <label htmlFor="customer-form-company" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'company', 'Company')}</label>
-          <input id="customer-form-company" name="customer_company" autoComplete="organization" className="input" value={form.company || ''} onChange={(event) => setField('company', event.target.value)} />
+          <label htmlFor="customer-form-gender" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'gender', 'Gender')}</label>
+          <AppSelect
+            id="customer-form-gender"
+            name="customer_gender"
+            value={form.gender || ''}
+            onChange={(nextValue) => setField('gender', nextValue)}
+            ariaLabel={tr(t, 'gender', 'Gender')}
+            className="w-full sm:w-1/2"
+            buttonClassName="h-10 w-full"
+            menuClassName="min-w-[10rem]"
+            options={[
+              { value: '', label: tr(t, 'unspecified', 'Unspecified') },
+              { value: 'male', label: tr(t, 'male', 'Male') },
+              { value: 'female', label: tr(t, 'female', 'Female') },
+              { value: 'other', label: tr(t, 'other', 'Other') },
+            ]}
+          />
         </div>
 
         <div>
@@ -237,7 +269,11 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           </div>
         ) : null}
 
-        <div className="flex flex-col gap-3 pt-1 sm:flex-row">
+        {/* Sticky footer, same reasoning/pattern as ProductForm.tsx and
+            FeeForm.tsx's own fix (see their comments): pinned to the
+            bottom of Modal.tsx's scrollable area so Save/Cancel stay
+            reachable without scrolling to the end of a long form. */}
+        <div className="sticky bottom-0 -mx-5 -mb-5 flex flex-col gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800 sm:flex-row">
           <button className="btn-primary flex-1" onClick={handleSubmit} disabled={saving}>{saving ? tr(t, 'saving', 'Saving...') : tr(t, 'save', 'Save')}</button>
           <button className="btn-secondary" onClick={onClose} disabled={saving}>{tr(t, 'cancel', 'Cancel')}</button>
         </div>

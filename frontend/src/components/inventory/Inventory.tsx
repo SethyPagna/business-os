@@ -1,6 +1,6 @@
 // Main Inventory page sub-components imported from sibling files.
 
-import { Fragment, Suspense, lazy, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
+import { Fragment, Suspense, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react'
 import type { Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
@@ -8,38 +8,68 @@ import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
-import Package from 'lucide-react/dist/esm/icons/package.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import Package from 'lucide-react/dist/esm/icons/package.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
+import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { fmtTime } from '../../utils/formatters'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
-import ExportMenu from '../shared/ExportMenu'
+import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import AlphaIndexRail from '../shared/AlphaIndexRail'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
+import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
+import SearchInput from '../shared/SearchInput'
+import ScanSearchButton from '../shared/ScanSearchButton'
+import { toggleMultiValue, toggleMultiValues, isMultiActive, matchesMulti, parseMultiValues } from '../../utils/multiSelect'
+import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilterOptions.tsx'
+import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
+import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
+import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
+import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
+import PageSizeSelect from '../shared/PageSizeSelect'
 import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
+import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import InventoryProductsSurface from './InventoryProductsSurface'
-const ProductDetailModal = lazy(() => import('./ProductDetailModal')) as any
-const InventoryImportModal = lazy(() => import('./InventoryImportModal')) as any
-const InventoryMovementsSurface = lazy(() => import('./InventoryMovementsSurface')) as any
-const InventoryRfidSurface = lazy(() => import('./InventoryRfidSurface')) as any
-const InventoryStockModals = lazy(() => import('./InventoryStockModals')) as any
-const InventoryBatchModal = lazy(() => import('./InventoryBatchModal')) as any
-const InventoryReasonManagerModal = lazy(() => import('./InventoryReasonManagerModal')) as any
-const InventoryStatDetailModal = lazy(() => import('./InventoryStatDetailModal')) as any
+import { createLongPressHandlers, createLongPressState, consumeLongPressClick, type LongPressState } from '../../utils/longPress.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
+const InventoryImportModal = lazyRetry(() => import('./InventoryImportModal'), 'inventory-import') as any
+const InventoryMovementsSurface = lazyRetry(() => import('./InventoryMovementsSurface'), 'inventory-movements-surface') as any
+const InventoryRfidSurface = lazyRetry(() => import('./InventoryRfidSurface'), 'inventory-rfid-surface') as any
+const InventoryStockModals = lazyRetry(() => import('./InventoryStockModals'), 'inventory-stock-modals') as any
+const InventoryBatchModal = lazyRetry(() => import('./InventoryBatchModal'), 'inventory-batch-modal') as any
+const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
+const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
+const InventoryStatDetailModal = lazyRetry(() => import('./InventoryStatDetailModal'), 'inventory-stat-detail-modal') as any
+const ProductHistoryPreviewModal = lazyRetry(() => import('./ProductHistoryPreviewModal'), 'inventory-product-history-preview-modal') as any
 const InventoryProductsSurfaceView = InventoryProductsSurface as any
 
-import { buildMovementGroups, getMovementGroupPage, movementGroupHaystack } from './movementGroups'
+import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
+
+// Default quantity the Adjust-stock "Add" form starts with -- see
+// InventoryStockModals.tsx's quick-pick chips (1 / this value / 5 / 10 /
+// 20, deduplicated). A plain constant for now rather than a per-business
+// setting; if a settings-driven default is wanted later, this is the one
+// place to read it from.
+const DEFAULT_ADD_QUANTITY = 1
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
-import { aggregateInitialOptions, buildInitialOptionsFromProducts } from '../../utils/initials.ts'
-import { buildProductGroupSections } from '../../utils/productGrouping.ts'
+import { aggregateInitialOptions, buildInitialOptionsFromProducts, getInitialKey } from '../../utils/initials.ts'
+import { buildProductCategorySections } from '../../utils/productGrouping.ts'
+import { buildProductGroupPriceLabel, buildProductGroupSummaryParts } from '../products/helpers/productGroupViewHelpers.ts'
 import { buildBatchPreview } from '../../utils/productBatches.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
+import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import type { QueryParams } from '../../api/query.ts'
@@ -108,30 +138,32 @@ type ReturnStats = LegacyInventoryRecord | null
 
 type InventoryFormValue = string | number
 
+// See InventoryStockModals.tsx's matching comment: one "Cost" field (not
+// a separate cost + purchase price pair), and a pricingLocked toggle --
+// locked (default) skips all of this and adds straight to the current
+// row; unlocked lets the backend (resolveAddStockTarget) find-or-create
+// the right row for genuinely different pricing.
 type AdjustForm = {
   product_id?: InventoryId
   type: string
   quantity: InventoryFormValue
-  unit_cost_usd: InventoryFormValue
-  unit_cost_khr: InventoryFormValue
   reason: string
   branch_id: InventoryId | ''
-}
-
-type MoveForm = {
-  mode: string
-  destination_product_id: InventoryId | ''
-  destination_name: string
-  quantity: InventoryFormValue
-  branch_id: InventoryId | ''
-  reason: string
-  note: string
-  selling_price_usd: string
-  special_price_usd: string
+  pricingLocked: boolean
+  selling_price_usd: InventoryFormValue
+  selling_price_khr: InventoryFormValue
+  special_price_usd: InventoryFormValue
+  special_price_khr: InventoryFormValue
   discount_enabled: boolean
   discount_type: string
-  discount_percent: string
-  discount_amount_usd: string
+  discount_percent: InventoryFormValue
+  discount_amount_usd: InventoryFormValue
+  cost_usd: InventoryFormValue
+  cost_khr: InventoryFormValue
+  barcode: string
+  // Mirrors InventoryStockModals.tsx's own AdjustForm.batch_id -- see that
+  // file's comment. Kept in sync as the same literal type ('' | 'new' | id).
+  batch_id: InventoryId | ''
 }
 
 type TransferForm = {
@@ -305,17 +337,8 @@ const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
 const INVENTORY_RETURNS_STATS_TIMEOUT_MS = 12000
 const INVENTORY_DASHBOARD_STATS_TIMEOUT_MS = 12000
 const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
-const INVENTORY_METADATA_READ_DELAY_MS = 2500
-const INVENTORY_METADATA_IDLE_TIMEOUT_MS = 5000
-
-function reuseSetWhenUnchanged<T>(current: Set<T>, nextValues: T[] = []): Set<T> {
-  const next = new Set(nextValues)
-  if (next.size !== current.size) return next
-  for (const value of current) {
-    if (!next.has(value)) return next
-  }
-  return current
-}
+const INVENTORY_METADATA_READ_DELAY_MS = 120
+const INVENTORY_METADATA_IDLE_TIMEOUT_MS = 800
 
 function normalizeFiniteIdsFrom<T>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
   return items.reduce((normalized, item) => {
@@ -343,17 +366,6 @@ function countSelectedIds(ids: InventoryId[] = [], selectedIds: Set<InventoryId>
     if (selectedIds.has(id)) count += 1
   }
   return count
-}
-
-function buildDestinationProductOptions(products: InventoryProduct[] = [], excludedProductId: InventoryId | undefined, placeholder: string): AppSelectOption[] {
-  const excludedId = Number(excludedProductId)
-  const options: AppSelectOption[] = [{ value: '', label: placeholder }]
-  for (const product of products) {
-    const id = Number(product?.id)
-    if (Number.isFinite(excludedId) && id === excludedId) continue
-    options.push({ value: String(product.id), label: product.name || String(product.id) })
-  }
-  return options
 }
 
 const INVENTORY_MOBILE_INITIAL_ITEM_LIMIT = 4
@@ -459,11 +471,11 @@ const RFID_READER_REQUIREMENTS = [
 ]
 
 const INVENTORY_SECTION_OPTIONS = [
-  { value: 'all', label: 'All', hint: 'Show inventory statistics, products, movements, and RFID tools together.' },
-  { value: 'stats', label: 'Stats', hint: 'Show only the inventory summary cards.' },
-  { value: 'products', label: 'Products', hint: 'Show product stock, values, and item-level controls.' },
-  { value: 'movements', label: 'Movements', hint: 'Show stock movement history and grouped movement filters.' },
-  { value: 'rfid', label: 'RFID', hint: 'Show branch-locked RFID tagging, stock count, search, exception, and session tools.' },
+  { value: 'all', labelKey: 'all', label: 'All', hintKey: 'inventory_section_all_hint', hint: 'Show inventory statistics, products, movements, and RFID tools together.' },
+  { value: 'stats', labelKey: 'stats', label: 'Stats', hintKey: 'inventory_section_stats_hint', hint: 'Show only the inventory summary cards.' },
+  { value: 'products', labelKey: 'products', label: 'Products', hintKey: 'inventory_section_products_hint', hint: 'Show product stock, values, and item-level controls.' },
+  { value: 'movements', labelKey: 'movements', label: 'Movements', hintKey: 'inventory_section_movements_hint', hint: 'Show stock movement history and grouped movement filters.' },
+  { value: 'rfid', labelKey: 'rfid', label: 'RFID', hintKey: 'inventory_section_rfid_hint', hint: 'Show branch-locked RFID tagging, stock count, search, exception, and session tools.' },
 ]
 
 const RFID_SECTION_OPTIONS = [
@@ -509,19 +521,48 @@ export default function Inventory() {
   const [taxDelivery,   setTaxDelivery]   = useState({ tax: 0, delivery: 0, deliveryCount: 0 })
   const [branchFilter,  setBranchFilter]  = useState('all')
   const [adjustModal,   setAdjustModal]   = useState<InventoryProduct | null>(null)
-  const [adjustForm,    setAdjustForm]    = useState<AdjustForm>({ type:'add', quantity:1, unit_cost_usd:0, unit_cost_khr:0, reason:'', branch_id:'' })
-  const [moveModal,     setMoveModal]     = useState<InventoryProduct | null>(null)
-  const [moveForm,      setMoveForm]      = useState<MoveForm>({ mode: 'existing', destination_product_id: '', destination_name: '', quantity: 1, branch_id: '', reason: 'broken', note: '', selling_price_usd: '', special_price_usd: '', discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '' })
+  const [manageBatchesModal, setManageBatchesModal] = useState<InventoryProduct | null>(null)
+  const [adjustForm,    setAdjustForm]    = useState<AdjustForm>({
+    type: 'add', quantity: DEFAULT_ADD_QUANTITY, reason: '', branch_id: '',
+    pricingLocked: true,
+    selling_price_usd: '', selling_price_khr: '', special_price_usd: '', special_price_khr: '',
+    discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
+    cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '',
+  })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
   const [search,        setSearch]        = useState('')
-  const [searchMode, setSearchMode] = useState('AND') // 'AND' | 'OR'
-  const deferredSearch = String(search || '').trim()
+  // AND/OR toggle restored (Aug 20 2026) -- no longer a standalone button
+  // next to the search box (still gone, per the Aug 19 2026 UI request),
+  // but reachable again from inside the Filter menu, via
+  // buildSearchModeFilterSection (components/shared/SearchModeFilterOptions.tsx),
+  // same as Products.tsx/POS.tsx. AND stays the default.
+  const [searchMode, setSearchMode] = useState<'AND' | 'OR'>('AND')
+  // Debounced (matches Products.tsx/POS.tsx's 180ms) rather than a plain
+  // alias of `search` -- this used to fire a full bootstrap/products/stats/
+  // movements re-fetch on every keystroke (no debounce at all on this page),
+  // which is what actually caused the long-standing "search results render
+  // incrementally / one at a time" report: the visible list was being
+  // replaced mid-typing, once per character, not once the person paused.
+  // `search` itself stays undebounced for the input's own `value` so typing
+  // still feels instant; only the value driving network effects/pagination
+  // resets below waits out the pause.
+  const debouncedSearch = useDebouncedValue(search, 180)
+  const deferredSearch = String(debouncedSearch || '').trim()
   const [brandFilter,   setBrandFilter]   = useState('all')
+  // Comma-joined multi-value string (matches movementUserFilter/movFilter's
+  // shape above), not a plain 'all'/single-category string -- lets the
+  // Category filter menu below select several categories (or a whole
+  // "Main - Sub" hierarchical group) at once. See utils/multiSelect.ts.
+  const [catFilter,     setCatFilter]     = useState('all')
   const [stockFilter,   setStockFilter]   = useState('all')
   const [groupFilter,   setGroupFilter]   = useState('all') // all | group | standalone
+  // Comma-joined multi-value string (matches catFilter's shape) -- several
+  // issue keys can be selected at once, OR'd together. See
+  // IssuesFilterOptions.tsx and searchMatch.ts's ISSUE_STATE_KEYS.
+  const [issueFilter,   setIssueFilter]   = useState('all')
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
-  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(20)
+  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(50)
   const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
   const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
   const [inventoryProductsLoaded, setInventoryProductsLoaded] = useState(false)
@@ -535,8 +576,32 @@ export default function Inventory() {
   const [inventoryInitialFilter, setInventoryInitialFilter] = useState('all')
   const [inventoryInitials, setInventoryInitials] = useState<LegacyInventoryRecord[]>([])
   const [cachedInventoryInitialOptions, setCachedInventoryInitialOptions] = useState<LegacyInventoryRecord[]>([])
-  const [inventoryProductFilters, setInventoryProductFilters] = useState<{ brands: string[] }>({ brands: [] })
+  const [inventoryProductFilters, setInventoryProductFilters] = useState<{ brands: string[]; categories: string[] }>({ brands: [], categories: [] })
   const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(() => new Set())
+  // Checkboxes/section-select-all only render once this is true, matching
+  // Products.tsx's part-77/part-190 pattern: press-and-hold (long-press) a
+  // row to enter select mode by selecting it, tap a row's checkbox to
+  // toggle it directly once select mode is already active, and select mode
+  // ends automatically once the last item is deselected. Previously
+  // Inventory always rendered a checkbox on every row/section/group
+  // regardless of whether anything was selected -- reported as "Inventory
+  // page still using checkboxes" once Products moved to this pattern.
+  const selectionModeActive = selectedProductIds.size > 0
+  // One long-press timer/start-point slot per visible row, keyed by
+  // product id -- same reasoning as Products.tsx's own
+  // longPressStateByRowIdRef: InventoryProductsSurface renders a row once
+  // per item inside a .map(), not as its own mounted component, so this
+  // can't be a plain useRef living inside the row-render code itself. Kept
+  // here (owned by Inventory.tsx, the parent) and handed down as a getter
+  // so InventoryProductsSurface doesn't need its own separate copy.
+  const longPressStateByRowIdRef = useRef<Map<number, LongPressState>>(new Map())
+  const getInventoryLongPressState = useCallback((rowId: number): LongPressState => {
+    const existing = longPressStateByRowIdRef.current.get(rowId)
+    if (existing) return existing
+    const created = createLongPressState()
+    longPressStateByRowIdRef.current.set(rowId, created)
+    return created
+  }, [])
   const [inventoryBatch, setInventoryBatch] = useState<InventoryBatch>(null)
   const [batchApplying, setBatchApplying] = useState(false)
   const [rfidStatus, setRfidStatus] = useState<LegacyInventoryRecord | null>(null)
@@ -555,6 +620,12 @@ export default function Inventory() {
   const [movementSortDirection, setMovementSortDirection] = useState('desc')
   const [selectedMovementIds, setSelectedMovementIds] = useState<Set<string>>(() => new Set())
   const [detailProduct, setDetailProduct] = useState<InventoryProduct | null>(null)
+  const [historyPreview, setHistoryPreview] = useState<{
+    product: InventoryProduct
+    movements: Array<Record<string, any>> | null
+    loading: boolean
+    error: string | null
+  } | null>(null)
   const [expandedMovementGroups, setExpandedMovementGroups] = useState<Set<string>>(() => new Set())
   const [expandedMovementPages, setExpandedMovementPages] = useState<Record<string, number>>({})
   const [collapsedMovementSections, setCollapsedMovementSections] = useState<Set<string>>(() => new Set())
@@ -563,7 +634,6 @@ export default function Inventory() {
   const [loading,       setLoading]       = useState(true)
   const [loadError,     setLoadError]     = useState<string | null>(null)
   const [adjustSaving,  setAdjustSaving]  = useState(false)
-  const [moveSaving,    setMoveSaving]    = useState(false)
   const [transferSaving, setTransferSaving] = useState(false)
   const [statDetail,    setStatDetail]    = useState<StatDetail>(null)
   const [showImport, setShowImport] = useState(false)
@@ -574,6 +644,20 @@ export default function Inventory() {
   const [historyReady, setHistoryReady] = useState(false)
   const movementSelectAllRef = useRef<HTMLInputElement | null>(null)
   const inventorySelectAllRef = useRef<HTMLInputElement | null>(null)
+  // Same "edited-but-filtered-out row stays visible until re-search" fix
+  // Products.tsx already has (see its own pinnedEditedProductsRef comment,
+  // parts 133/139) -- a silent load(true) after a stock adjust/transfer
+  // would otherwise drop a row the person just changed if it no longer
+  // matches the active filters (e.g. an out-of-stock filter after zeroing
+  // a branch's quantity). Only populated for the two mutation paths where
+  // the resulting branch_stock is fully computable client-side from the
+  // request + previous snapshot (single-branch adjust; two-branch
+  // transfer) -- deliberately NOT used for multi-batch auto-drain removals
+  // or anything where the server's own stock math isn't a simple, known
+  // delta, matching the same caution Products.tsx's handleBulkChangeBranch
+  // note documents for its own unsafe-to-approximate case. Cleared when
+  // the person changes the search box themselves (see handleSearchChange).
+  const pinnedEditedInventoryRef = useRef<Map<number, InventoryProduct>>(new Map())
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
   const loadWatchdogRef = useRef<number | null>(null)
@@ -586,7 +670,6 @@ export default function Inventory() {
   const inventoryUsersLoadedRef = useRef(false)
   const inventoryUsersPromiseRef = useRef<Promise<InventoryUserOption[]> | null>(null)
   const adjustStockInFlightRef = useRef(false)
-  const moveStockInFlightRef = useRef(false)
   const transferStockInFlightRef = useRef(false)
   const batchInventoryInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady, user })
@@ -655,12 +738,28 @@ export default function Inventory() {
       hint: tr(option.hintKey, option.hint),
     }))
   ), [tr])
+  const inventorySectionOptions = useMemo(() => (
+    INVENTORY_SECTION_OPTIONS.map((option) => ({
+      value: option.value,
+      label: tr(option.labelKey, option.label),
+      hint: tr(option.hintKey, option.hint),
+    }))
+  ), [tr])
 
   const reasonsByType = useMemo(() => ({
     adjust: inventoryReasons.filter((item) => item?.type === 'adjust'),
     transfer: inventoryReasons.filter((item) => item?.type === 'transfer'),
     move: inventoryReasons.filter((item) => item?.type === 'move'),
   }), [inventoryReasons])
+
+  // Still used by InventoryBatchModal's per-line "move" action (a batch
+  // session can write off/move individual lines) even though the old
+  // standalone single-product Move Stock modal is gone -- unrelated
+  // features that happened to share a reason type.
+  const moveReasonOptions = useMemo(() => [
+    { value: '', label: tr('choose_reason', 'Choose a reason') },
+    ...reasonsByType.move.map((entry) => ({ value: entry.label, label: entry.label })),
+  ], [reasonsByType.move, tr])
 
   const needsStatsData = inventorySection === 'all' || inventorySection === 'stats'
   const needsProductSummary = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
@@ -739,7 +838,9 @@ export default function Inventory() {
       }
       const branchOpts = {
         ...(branchFilter !== 'all' ? { branchId: parseInt(branchFilter, 10) } : {}),
-        ...(isAdmin && movementUserFilter !== 'all' ? { userId: movementUserFilter } : {}),
+        ...(isAdmin && movementUserFilter !== 'all' && parseMultiValues(movementUserFilter).length === 1
+          ? { userId: parseMultiValues(movementUserFilter)[0] }
+          : {}),
       }
       const productQuery = {
         ...branchOpts,
@@ -747,20 +848,33 @@ export default function Inventory() {
         pageSize: inventoryProductPageSize,
         query: deferredSearch,
         searchMode,
+        // No searchFields override (was hard-coded to 'name', which
+        // forced a name-only match server-side -- see products.ts's
+        // buildSearchFilters / this file's appendInventoryProductFilters
+        // for the full field list this now searches instead).
         brand: brandFilter,
+        category: catFilter,
         stockState: stockFilter,
         groupState: groupFilter,
         initial: inventoryInitialFilter,
-        metadata: '0',
+        // "Issues" quick filter -- see buildIssueStateClauses in
+        // cloudflare/src/lib/searchMatch.ts. Multi-value, OR'd.
+        issueState: issueFilter === 'all' ? '' : issueFilter,
+        // First load fetches initials/filters inline (single round trip) so the alphabet
+        // bar is complete on first paint. Later loads (pagination/filtering/silent
+        // refresh) keep this cheap and let the deferred metadata-only fetch refresh it.
+        metadata: loadedOnceRef.current ? '0' : '1',
       }
       const statsQuery = {
         branchId: branchOpts.branchId,
         query: deferredSearch,
         searchMode,
         brand: brandFilter,
+        category: catFilter,
         stockState: stockFilter,
         groupState: groupFilter,
         initial: inventoryInitialFilter,
+        issueState: issueFilter === 'all' ? '' : issueFilter,
       }
       const canBootstrapProducts = needsProductSummary && !needsStatsData && !needsMovementData && !needsRfidData
       const loadInventoryBootstrap = () => withLoaderTimeout(
@@ -848,7 +962,19 @@ export default function Inventory() {
           throw versionMismatchError
         }
         if (needsProductSummary && Array.isArray(sum)) {
-          setSummary(sum || [])
+          // Re-insert any pinned just-adjusted/transferred rows the fresh
+          // server page no longer contains -- see pinnedEditedInventoryRef's
+          // own comment. Same shape as Products.tsx's identical re-insert
+          // in its own load().
+          if (pinnedEditedInventoryRef.current.size) {
+            const presentIds = new Set(sum.map((p: InventoryProduct) => Number(p.id)))
+            const missingPinned = Array.from(pinnedEditedInventoryRef.current.entries())
+              .filter(([id]) => !presentIds.has(id))
+              .map(([, snapshot]) => snapshot)
+            setSummary(missingPinned.length ? [...sum, ...missingPinned] : sum)
+          } else {
+            setSummary(sum || [])
+          }
           setInventoryProductsLoaded(true)
           if (sumResult && !Array.isArray(sumResult)) {
             setInventoryProductTotal(Number(sumResult.total || 0))
@@ -911,7 +1037,7 @@ export default function Inventory() {
         loadedOnceRef.current = true
         setLoadError(null)
 
-        if (needsProductSummary && typeof window !== 'undefined') {
+        if (needsProductSummary && typeof window !== 'undefined' && productQuery.metadata !== '1') {
           if (inventoryMetadataCancelRef.current) inventoryMetadataCancelRef.current()
           const metadataQuery = {
             ...productQuery,
@@ -1020,12 +1146,14 @@ export default function Inventory() {
   }, [
     branchFilter,
     brandFilter,
+    catFilter,
     deferredSearch,
     groupFilter,
     inventoryInitialFilter,
     inventoryProductPage,
     inventoryProductPageSize,
     isAdmin,
+    issueFilter,
     movementUserFilter,
     movementStartDate,
     movementEndDate,
@@ -1085,6 +1213,23 @@ export default function Inventory() {
       window.sessionStorage.removeItem(DASHBOARD_INVENTORY_FOCUS_KEY)
     }
   }, [isActive])
+  // Per-product notification click-to-focus: routes/notifications.ts's
+  // inventory section sets `anchor: 'product-<id>'`, which AppContext's
+  // navigateTo() turns into a `#product-<id>` URL hash before dispatching
+  // APP_NAVIGATION_EVENT (see Users.tsx's identical `#devices` pattern for
+  // precedent). This page can already be mounted when that navigation
+  // happens, so check the hash on mount too, not just on the event.
+  const [focusProductId, setFocusProductId] = useState<number | null>(null)
+  useEffect(() => {
+    if (!isActive) return undefined
+    const applyHashFocus = () => {
+      const match = /^#product-(\d+)$/.exec(window.location.hash)
+      if (match) setFocusProductId(Number(match[1]))
+    }
+    applyHashFocus()
+    window.addEventListener(APP_NAVIGATION_EVENT, applyHashFocus)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, applyHashFocus)
+  }, [isActive])
   useEffect(() => {
     if (!isActive || reasonManager.open !== true) return
     void ensureInventoryReasonsLoaded()
@@ -1099,13 +1244,28 @@ export default function Inventory() {
     setSavingReasons(true)
     try {
       const result = await getInventoryApi().saveInventoryReasons?.(nextItems)
+      // Part 152: /reasons now queues under Review Required instead of
+      // applying directly (`{ success: true, pending: true,
+      // pendingActionId }`, no `items` field since nothing was actually
+      // written yet). Previously `result?.items` being absent on ANY
+      // unexpected response shape silently reset the visible list to
+      // empty -- harmless before this route could return anything but a
+      // full applied `{ items }`, but would have wiped the saved-reasons
+      // list on every Review Required submission the moment this shipped.
+      // Keep the current (optimistic) list on a pending response instead
+      // of clearing it -- nothing changed server-side yet, so nothing
+      // should visibly change client-side either.
+      if (result?.pending) {
+        notify(tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.'))
+        return inventoryReasons
+      }
       const items = Array.isArray(result?.items) ? result.items as InventoryReason[] : []
       setInventoryReasons(items)
       return items
     } finally {
       setSavingReasons(false)
     }
-  }, [])
+  }, [inventoryReasons, notify, tr])
 
   const addSavedReason = useCallback(async () => {
     const label = reasonDraft.trim()
@@ -1147,11 +1307,44 @@ export default function Inventory() {
     if (branchFilter !== 'all') return product.display_quantity ?? product.stock_quantity ?? 0
     return product.stock_quantity ?? 0
   }, [branchFilter])
-  const parentProductIds = useMemo(() => new Set(
-    summary
-      .map((product) => Number(product?.parent_id || 0))
-      .filter(Boolean),
-  ), [summary])
+  // Builds the pinned-row snapshot for pinnedEditedInventoryRef -- see that
+  // ref's own comment for why only these two mutation shapes (a known set
+  // of per-branch deltas) are safe to compute here rather than guessed at.
+  // Mirrors the exact fields routes/inventory.ts's bootstrap/summary query
+  // derives server-side: `stock_quantity` (real total across all branches)
+  // and `display_quantity` (the currently-filtered branch's quantity, or
+  // the same total when no branch filter is active -- see that route's
+  // own `display_quantity` comment for the two query shapes this mirrors).
+  const buildPinnedInventorySnapshot = useCallback((
+    product: InventoryProduct,
+    changes: { branchId: number; delta: number }[],
+  ): InventoryProduct => {
+    const branchStockById = new Map(
+      (Array.isArray(product.branch_stock) ? product.branch_stock : [])
+        .map((entry) => [Number(entry?.branch_id || 0), { ...entry }]),
+    )
+    let totalDelta = 0
+    for (const { branchId, delta } of changes) {
+      totalDelta += delta
+      const existing = branchStockById.get(branchId)
+      if (existing) {
+        existing.quantity = Math.max(0, Number(existing.quantity || 0) + delta)
+      } else if (delta > 0) {
+        branchStockById.set(branchId, { branch_id: branchId, quantity: delta })
+      }
+    }
+    const nextStockQuantity = Math.max(0, Number(product.stock_quantity || 0) + totalDelta)
+    const filterBranchId = branchFilter !== 'all' ? Number(branchFilter) : null
+    const nextDisplayQuantity = filterBranchId != null
+      ? Number(branchStockById.get(filterBranchId)?.quantity ?? product.display_quantity ?? 0)
+      : nextStockQuantity
+    return {
+      ...product,
+      branch_stock: Array.from(branchStockById.values()),
+      stock_quantity: nextStockQuantity,
+      display_quantity: nextDisplayQuantity,
+    }
+  }, [branchFilter])
   const adjustTargetOptions = useMemo(() => {
     if (!adjustModal) return []
     const selectedId = Number(adjustModal.id || 0)
@@ -1186,30 +1379,39 @@ export default function Inventory() {
     { value: '', label: chooseBranchLabel },
     ...branchSelectOptions,
   ], [branchSelectOptions, chooseBranchLabel])
-  const moveReasonOptions = useMemo(() => [
-    { value: '', label: t('reason') || 'Reason' },
-    ...reasonsByType.move.map((entry) => ({ value: entry.label, label: entry.label })),
-    { value: 'broken', label: tr('reason_broken', 'Broken') },
-    { value: 'open', label: tr('reason_opened', 'Opened') },
-    { value: 'loose', label: tr('reason_loose', 'Loose') },
-    { value: 'discount', label: tr('reason_discount', 'Discount / promotion') },
-    { value: 'special_price', label: tr('reason_special_price', 'Special price') },
-    { value: 'other', label: t('other') || 'Other' },
-  ], [reasonsByType.move, t, tr])
-  const moveDestinationProductOptions = useMemo(
-    () => moveModal
-      ? buildDestinationProductOptions(summary, moveModal.id, tr('choose_destination_product', 'Choose a destination product row'))
-      : [],
-    [moveModal, summary, tr],
-  )
   const adjustCurrentQuantity = adjustModal
     ? getStockQty(summaryById.get(Number(adjustForm.product_id || adjustModal.id)) || adjustModal)
     : 0
+  // Resolved against the *currently selected* adjust target (not just the
+  // row the modal was opened from) so switching the "Adjust target" picker
+  // (adjustTargetOptions.length > 1) updates the displayed locked price too
+  // -- same resolution `adjustCurrentQuantity` above and `handleAdjust`'s
+  // own `selectedAdjustProduct` already use, kept in sync with both rather
+  // than reading `adjustForm`'s pre-filled-at-open-time price fields, which
+  // never get refreshed on a target switch (those only matter once
+  // unlocked, as edit-starting-point values, not as a display source).
+  const adjustCurrentPricing = adjustModal
+    ? (() => {
+        const selected = summaryById.get(Number(adjustForm.product_id || adjustModal.id)) || adjustModal
+        return {
+          selling_price_usd: Number(selected?.selling_price_usd) || 0,
+          selling_price_khr: Number(selected?.selling_price_khr) || 0,
+        }
+      })()
+    : { selling_price_usd: 0, selling_price_khr: 0 }
 
   const handleAdjust = async () => {
     if (adjustSaving) return
     const qty = parseFloat(String(adjustForm.quantity))
     if (!qty || qty <= 0) return notify('Invalid quantity', 'error')
+    // Mirrors the transfer form's own required-reason check just below, and
+    // backs up routes/inventory.ts's /adjust hard requirement (added
+    // alongside the unconditional batch-ledger routing) with a fast inline
+    // error instead of letting the request round-trip to a 400.
+    if (!String(adjustForm.reason || '').trim()) {
+      notify(tr('adjust_reason_required', 'A reason is required for this stock adjustment.'), 'error')
+      return
+    }
     const selectedAdjustProduct = summaryById.get(Number(adjustForm.product_id || adjustModal?.id)) || adjustModal
     if (!selectedAdjustProduct) return notify('Select a product first', 'error')
     const previousSnapshot = cloneHistorySnapshot(selectedAdjustProduct)
@@ -1221,22 +1423,51 @@ export default function Inventory() {
     const previousQuantity = numericBranchId
       ? Number(selectedBranchStock?.quantity || 0)
       : Number(getStockQty(selectedAdjustProduct) || 0)
+    // Pricing only ever goes on the wire when it's genuinely unlocked --
+    // locked (the default) is the fast add-to-this-row path, matching
+    // this endpoint's behavior before the grouping feature existed.
+    const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
+    // Mandatory batch selection -- flat rows only (matches
+    // InventoryStockModals.tsx's own `showBatchPicker` derivation: group
+    // rows excluded, and an unlocked add always gets a fresh batch
+    // server-side so there's nothing to require picking here). Checked
+    // client-side for a fast error message; routes/inventory.ts's /adjust
+    // also accepts a missing batchId on 'remove' from other callers
+    // (undo/redo, bulk edits) without requiring one -- this validation is
+    // this form's own rule, not the wire contract's.
+    if (!unlockPricing && !selectedAdjustProduct.is_group && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
+      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
+      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a batch first'), 'error'); return }
+    }
     const adjustmentRequest = {
       productId: selectedAdjustProduct.id,
       productName: selectedAdjustProduct.name,
       type: adjustForm.type,
       quantity: qty,
-      unitCostUsd: parseFloat(String(adjustForm.unit_cost_usd)) || 0,
-      unitCostKhr: parseFloat(String(adjustForm.unit_cost_khr)) || 0,
       reason: adjustForm.reason || '',
       branchId: numericBranchId,
       userId: user?.id,
       userName: user?.name || user?.username,
+      unlockPricing,
+      batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
+      pricing: unlockPricing ? {
+        selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
+        selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
+        special_price_usd: parseFloat(String(adjustForm.special_price_usd)) || 0,
+        special_price_khr: parseFloat(String(adjustForm.special_price_khr)) || 0,
+        discount_enabled: !!adjustForm.discount_enabled,
+        discount_type: adjustForm.discount_type,
+        discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,
+        discount_amount_usd: parseFloat(String(adjustForm.discount_amount_usd)) || 0,
+        cost_usd: parseFloat(String(adjustForm.cost_usd)) || 0,
+        cost_khr: parseFloat(String(adjustForm.cost_khr)) || 0,
+        barcode: adjustForm.barcode || null,
+      } : undefined,
     }
     if (adjustForm.type === 'remove') {
       if (numericBranchId) {
         const available = selectedBranchStock?.quantity || 0
-        if (available <= 0) { notify(t('error')||'No stock in this branch to remove', 'error'); return }
+        if (available <= 0) { notify(tr('no_stock_in_branch', 'No stock in this branch to remove'), 'error'); return }
         if (qty > available) { notify(`Cannot remove ${qty} - only ${available} available`, 'error'); return }
       } else {
         const totalQty = getStockQty(adjustModal)
@@ -1257,22 +1488,69 @@ export default function Inventory() {
     setAdjustSaving(true)
     try {
       const res = await runInventoryMutation(() => getInventoryApi().adjustStock(adjustmentRequest), 'Adjust inventory stock')
-      if (res?.success) {
+      // Match the defensive pattern used elsewhere (BulkAddStockModal,
+      // BranchStockAdjuster): treat an explicit `success: false` as failure,
+      // not a missing/undefined field. A write that reaches this line
+      // without throwing already succeeded server-side (the server route
+      // now always sets `success: true`, but staying defensive here means a
+      // future response-shape change can't silently reintroduce the
+      // "succeeded but shows an error toast" bug).
+      if (res?.success !== false) {
+        // The inverse of a batch-scoped adjustment must target the *same*
+        // batch the original one actually resolved to -- for a plain
+        // pick this is just adjustmentRequest.batchId, but an 'add' with
+        // batch_id 'new' didn't know which batch that'd be until the
+        // server created it. `res.batchId` is that resolved id either
+        // way (routes/inventory.ts's /adjust always echoes it back), so
+        // undo/redo use it instead of blindly replaying the request's own
+        // (possibly 'new') batchId.
+        const resolvedBatchId = (res as { batchId?: number | null } | null)?.batchId ?? null
+        const inverseBatchId = resolvedBatchId != null ? resolvedBatchId : adjustmentRequest.batchId
+        // Pin only when the resolved branch/delta is fully known: a
+        // specific branch was named (not the server's default-branch
+        // fallback, since we can't see which branch that resolved to
+        // without it echoing one back that matches what we asked for),
+        // the mutation actually landed on the same row we started from
+        // (not redirected to a newly-created sibling via unlockPricing),
+        // and something actually changed (a same-value 'set' is a
+        // real no-op server-side, nothing to pin).
+        const adjustRes = res as { branchId?: number; movementType?: string; quantity?: number; productId?: number; createdSibling?: boolean } | null
+        if (
+          numericBranchId
+          && adjustRes?.branchId === numericBranchId
+          && adjustRes?.productId === selectedAdjustProduct.id
+          && !adjustRes?.createdSibling
+          && Number(adjustRes?.quantity) > 0
+          && (adjustRes?.movementType === 'add' || adjustRes?.movementType === 'remove')
+        ) {
+          const delta = adjustRes.movementType === 'add' ? Number(adjustRes.quantity) : -Number(adjustRes.quantity)
+          pinnedEditedInventoryRef.current.set(
+            Number(selectedAdjustProduct.id),
+            buildPinnedInventorySnapshot(selectedAdjustProduct, [{ branchId: numericBranchId, delta }]),
+          )
+        }
         actionHistory.pushAction({
           label: `Adjust stock for ${previousSnapshot?.name || adjustModal?.name || 'product'}`,
           undo: async () => {
             const inverseRequest = adjustmentRequest.type === 'set'
               ? { ...adjustmentRequest, type: 'set', quantity: previousQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
               : adjustmentRequest.type === 'remove'
-                ? { ...adjustmentRequest, type: 'add', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-                : { ...adjustmentRequest, type: 'remove', reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                ? { ...adjustmentRequest, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
+                : { ...adjustmentRequest, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
             const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
-            if (!undoResult?.success) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
+            if (undoResult?.success === false) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
+            // Clear rather than recompute: a reverted row should follow
+            // fresh server truth on the next load, not keep showing the
+            // pre-undo pinned snapshot (which would be wrong if the
+            // reverted row genuinely no longer matches the active
+            // filters -- see pinnedEditedInventoryRef's own comment).
+            pinnedEditedInventoryRef.current.delete(Number(selectedAdjustProduct.id))
             await load(true)
           },
           redo: async () => {
-            const redoResult = await runInventoryMutation(() => getInventoryApi().adjustStock({ ...adjustmentRequest, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` }), 'Redo inventory adjustment')
-            if (!redoResult?.success) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
+            const redoResult = await runInventoryMutation(() => getInventoryApi().adjustStock({ ...adjustmentRequest, batchId: inverseBatchId, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}` }), 'Redo inventory adjustment')
+            if (redoResult?.success === false) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
+            pinnedEditedInventoryRef.current.delete(Number(selectedAdjustProduct.id))
             await load(true)
           },
         })
@@ -1288,34 +1566,48 @@ export default function Inventory() {
     }
   }
 
+  // A fresh search is exactly the "search again" moment
+  // pinnedEditedInventoryRef's own comment refers to -- once the person is
+  // intentionally re-querying, a just-adjusted/transferred row that no
+  // longer matches should behave like any other non-matching row again.
+  // Same pattern as Products.tsx's handleSearchInputChange.
+  const handleSearchChange = useCallback((value: string) => {
+    pinnedEditedInventoryRef.current.clear()
+    setSearch(value)
+  }, [])
+
   const openAdjust = (p: InventoryProduct) => {
     void ensureInventoryReasonsLoaded()
     setAdjustModal(p)
     const defaultBranchId = defaultBranch?.id?.toString() || ''
-    setAdjustForm({ product_id: p.id, type:'add', quantity:1, unit_cost_usd: p.purchase_price_usd || p.cost_price_usd || 0, unit_cost_khr: p.purchase_price_khr || 0, reason:'', branch_id: defaultBranchId })
+    // pricingLocked starts true (the fast "add to this row" path) --
+    // these price/cost/discount fields only matter once the person
+    // unlocks pricing, but are pre-filled from the current row so the
+    // fields aren't blank if they do unlock.
+    setAdjustForm({
+      product_id: p.id,
+      type: 'add',
+      quantity: DEFAULT_ADD_QUANTITY,
+      reason: '',
+      branch_id: defaultBranchId,
+      pricingLocked: true,
+      selling_price_usd: p.selling_price_usd || 0,
+      selling_price_khr: p.selling_price_khr || 0,
+      special_price_usd: p.special_price_usd || 0,
+      special_price_khr: p.special_price_khr || 0,
+      discount_enabled: !!p.discount_enabled,
+      discount_type: p.discount_type || 'percent',
+      discount_percent: p.discount_percent || 0,
+      discount_amount_usd: p.discount_amount_usd || 0,
+      cost_usd: p.cost_price_usd || p.purchase_price_usd || 0,
+      cost_khr: p.cost_price_khr || p.purchase_price_khr || 0,
+      barcode: p.barcode || '',
+      batch_id: '',
+    })
   }
 
-  const openMove = (p: InventoryProduct) => {
-    void ensureInventoryReasonsLoaded()
-    setMoveModal(p)
-    const defaultBranchId = branchFilter !== 'all'
-      ? String(branchFilter)
-      : defaultBranch?.id?.toString() || ''
-    setMoveForm({
-      mode: 'existing',
-      destination_product_id: '',
-      destination_name: `${p.name} - ${tr('damaged', 'Damaged')}`,
-      quantity: 1,
-      branch_id: defaultBranchId,
-      reason: 'broken',
-      note: '',
-      selling_price_usd: p.selling_price_usd || '',
-      special_price_usd: p.special_price_usd || '',
-      discount_enabled: false,
-      discount_type: 'percent',
-      discount_percent: '',
-      discount_amount_usd: '',
-    })
+  const openManageBatches = (p: InventoryProduct) => {
+    setManageBatchesModal(p)
   }
 
   const openTransfer = (p: InventoryProduct) => {
@@ -1336,6 +1628,49 @@ export default function Inventory() {
       reason: '',
     })
   }
+
+  // Reverse direction of openMovementProductDetail below: jump FROM the
+  // product detail modal's "view stock history" row TO the Movements tab,
+  // pre-filtered to just this product. Movements filtering already keys off
+  // the shared `search` box (movHay includes product_name -- see matchesSearch
+  // usage on filteredMovements), so reusing that same state here is enough to
+  // scope the tab to this product with no separate filter plumbing needed.
+  const openProductHistoryFromDetail = useCallback((product: InventoryProduct) => {
+    const name = String(product?.name || '').trim()
+    setDetailProduct(null)
+    setHistoryPreview(null)
+    setInventorySection('movements')
+    setTab('movements')
+    if (name) setSearch(name)
+  }, [setSearch])
+
+  // Scoped preview of a single product's stock movements, opened from the
+  // "View stock history" row in ProductDetailModal. Uses the precise
+  // productId-scoped `/api/inventory/movements` query (landed part 39)
+  // rather than the fuzzy name-based `search` filter openProductHistoryFromDetail
+  // above still uses for the full Movements tab, so it can't under/over-match
+  // a renamed or similarly-named product. Stacks on top of the still-open
+  // detail modal instead of navigating away from it.
+  const fetchProductHistoryPreview = useCallback(async (product: InventoryProduct) => {
+    setHistoryPreview({ product, movements: null, loading: true, error: null })
+    const productId = Number(product?.id || 0)
+    try {
+      const result = await withLoaderTimeout(
+        () => getInventoryApi().getInventoryMovements({ productId, pageSize: 25 }),
+        'Inventory product history preview',
+        INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS,
+      )
+      const items = Array.isArray(result?.items) ? result.items : []
+      setHistoryPreview({ product, movements: items, loading: false, error: null })
+    } catch (error: unknown) {
+      setHistoryPreview({
+        product,
+        movements: null,
+        loading: false,
+        error: error instanceof Error ? error.message : tr('history_load_failed', 'Failed to load stock history'),
+      })
+    }
+  }, [tr])
 
   const openMovementProductDetail = useCallback(async (movement: InventoryMovement) => {
     const productId = Number(movement?.product_id || 0)
@@ -1373,78 +1708,6 @@ export default function Inventory() {
     })
   }, [summaryById, t])
 
-  const handleMoveStock = async () => {
-    if (moveSaving || !moveModal) return
-    const qty = parseFloat(String(moveForm.quantity))
-    if (!qty || qty <= 0) return notify(tr('invalid_quantity', 'Invalid quantity'), 'error')
-    const request = {
-      sourceProductId: moveModal.id,
-      destinationProductId: moveForm.mode === 'existing' ? Number(moveForm.destination_product_id || 0) : null,
-      destinationProduct: moveForm.mode === 'new'
-        ? {
-            name: moveForm.destination_name,
-            selling_price_usd: moveForm.selling_price_usd,
-            special_price_usd: moveForm.special_price_usd,
-            discount_enabled: moveForm.discount_enabled ? 1 : 0,
-            discount_type: moveForm.discount_type,
-            discount_percent: moveForm.discount_percent,
-            discount_amount_usd: moveForm.discount_amount_usd,
-          }
-        : null,
-      branchId: moveForm.branch_id || null,
-      quantity: qty,
-      reason: moveForm.reason || 'stock move',
-      note: moveForm.note || '',
-      userId: user?.id,
-      userName: user?.name || user?.username,
-    }
-    if (moveForm.mode === 'existing' && !request.destinationProductId) {
-      return notify(tr('choose_destination_product', 'Choose a destination product row.'), 'error')
-    }
-    if (moveForm.mode === 'new' && !String(moveForm.destination_name || '').trim()) {
-      return notify(tr('name_required_alert', 'Name is required'), 'error')
-    }
-    const moveTargetLabel = moveForm.mode === 'existing'
-      ? tr('existing_product', 'existing product')
-      : String(moveForm.destination_name || '').trim()
-    if (!beginSingleAction(moveStockInFlightRef, { blocked: moveSaving })) return
-    if (!window.confirm(tr('confirm_move_stock'))) {
-      finishSingleAction(moveStockInFlightRef)
-      return
-    }
-    setMoveSaving(true)
-    try {
-      const result = await runInventoryMutation(() => getInventoryApi().moveStockRow(request), 'Move inventory stock')
-      if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
-      actionHistory.pushAction({
-        label: `${tr('move_stock', 'Move stock')}: ${moveModal.name}`,
-        undo: async () => {
-          const undoResult = await runInventoryMutation(() => getInventoryApi().moveStockRow({
-            sourceProductId: result.destinationProductId || request.destinationProductId,
-            destinationProductId: request.sourceProductId,
-            branchId: request.branchId,
-            quantity: qty,
-            reason: `Undo: ${request.reason}`,
-          }), 'Undo inventory stock move')
-          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
-          await load(true)
-        },
-        redo: async () => {
-          const redoResult = await runInventoryMutation(() => getInventoryApi().moveStockRow(request), 'Redo inventory stock move')
-          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
-          await load(true)
-        },
-      })
-      notify(tr('stock_moved', 'Stock moved'))
-      setMoveModal(null)
-      await load(true)
-    } catch (error: unknown) {
-      notify(error instanceof Error ? error.message : tr('stock_move_failed', 'Stock move failed'), 'error')
-    } finally {
-      finishSingleAction(moveStockInFlightRef)
-      setMoveSaving(false)
-    }
-  }
 
   const handleTransferStock = async () => {
     if (transferSaving || !transferModal) return
@@ -1489,7 +1752,18 @@ export default function Inventory() {
         userId: user?.id,
         userName: user?.name || user?.username,
       }), 'Transfer inventory stock')
-      if (!result?.success) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed'))
+      if (result?.success === false) throw new Error(result?.error || tr('stock_transfer_failed', 'Stock transfer failed'))
+      // A transfer's from/to branches and quantity are exactly what this
+      // form already validated and sent -- both branches are known and
+      // named by the person, unlike adjust's default-branch fallback
+      // case, so this is safe to pin unconditionally on success.
+      pinnedEditedInventoryRef.current.set(
+        Number(transferModal.id),
+        buildPinnedInventorySnapshot(transferModal, [
+          { branchId: Number(transferForm.from_branch_id), delta: -quantity },
+          { branchId: Number(transferForm.to_branch_id), delta: quantity },
+        ]),
+      )
       actionHistory.pushAction({
         label: `${tr('transfer', 'Transfer')}: ${transferModal.name}`,
         undo: async () => {
@@ -1502,7 +1776,10 @@ export default function Inventory() {
             userId: user?.id,
             userName: user?.name || user?.username,
           }), 'Undo inventory stock transfer')
-          if (!undoResult?.success) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
+          if (undoResult?.success === false) throw new Error(undoResult?.error || tr('undo_failed', 'Undo failed'))
+          // Same reasoning as the adjust undo/redo above: clear rather
+          // than recompute, so a reverted row follows fresh server truth.
+          pinnedEditedInventoryRef.current.delete(Number(transferModal.id))
           await load(true)
         },
         redo: async () => {
@@ -1515,7 +1792,8 @@ export default function Inventory() {
             userId: user?.id,
             userName: user?.name || user?.username,
           }), 'Redo inventory stock transfer')
-          if (!redoResult?.success) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
+          if (redoResult?.success === false) throw new Error(redoResult?.error || tr('redo_failed', 'Redo failed'))
+          pinnedEditedInventoryRef.current.delete(Number(transferModal.id))
           await load(true)
         },
       })
@@ -1539,15 +1817,29 @@ export default function Inventory() {
       : []
   ), [deferredSearch])
 
-  const matchesSearch = useCallback((hay: string): boolean => {
-    if (!searchTerms.length) return true
-    return searchMode === 'AND'
-      ? searchTerms.every(term => hay.includes(term))
-      : searchTerms.some(term => hay.includes(term))
-  }, [searchMode, searchTerms])
+  // Routed through matchesSearchTermGroups (searchMatch.ts) for typo/
+  // joiner/word-order/diacritic tolerance, same fix as Products.tsx's
+  // filterProductsForPage -- this call itself is a no-op today per the
+  // comment above productHay (hasServerBackedProductSearch gates it out
+  // whenever searchTerms is non-empty), but matches server-side search
+  // quality rather than silently regressing to a plain substring check
+  // if that gating logic ever changes.
+  const matchesSearch = useCallback((hay: string): boolean => (
+    matchesSearchTermGroups(hay, searchTerms, searchMode)
+  ), [searchMode, searchTerms])
 
+  // Widened to match POS.tsx's own local haystack (name/sku/barcode/
+  // category/brand/supplier/description/unit) -- this was previously
+  // name-only, which silently dropped this page's client-side re-filter
+  // for any product that only matched by e.g. barcode or brand. In
+  // practice this re-filter is a no-op today (see hasServerBackedProductSearch
+  // below: it only runs when there ISN'T a server-backed search, and an
+  // empty searchTerms list always passes matchesSearch anyway), but
+  // widening it keeps it correct rather than silently wrong if that ever
+  // changes, and matches the same fix already made to Products.tsx's
+  // filterProductsForPage.
   const productHay = useCallback((p: InventoryProduct): string => (
-    `${p.name} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.sku||''} ${p.barcode||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
+    `${p.name||''} ${p.sku||''} ${p.barcode||''} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
   ), [])
 
   const movHay = useCallback((m: InventoryMovement): string => (
@@ -1555,35 +1847,83 @@ export default function Inventory() {
   ), [])
 
   const hasServerBackedProductSearch = !!searchTerms.length
+  // groupFilter is intentionally NOT re-applied as an exclusionary check
+  // here (same fix, same root cause, as productFilterHelpers.ts's
+  // filterProductsForPage on the Products page, and originally POS.tsx's
+  // visibleProductCards -- see either comment for the full incident
+  // writeup). `summary` is only ever the current server page, but the
+  // server's own groupState filter (appendInventoryProductFilters in
+  // cloudflare/src/routes/inventory.ts) already scopes "grouped" across the
+  // whole active catalog, including same-name rows with no is_group/
+  // parent_id set. A client-side recheck using only this page's own
+  // is_group/parent_id fields (the removed `parentProductIds` set) has no
+  // way to see that broader relationship, so it would drop rows the server
+  // had already confirmed were grouped -- exactly what caused the "Groups
+  // filter not showing/refreshing" symptom this project's history already
+  // root-caused once for POS; this page had the same latent bug, just not
+  // yet reported.
   const filteredSummary = useMemo(() => summary.filter((p: InventoryProduct) => {
     if (!hasServerBackedProductSearch && !matchesSearch(productHay(p))) return false
     const normalizedBrandFilter = String(brandFilter || '').trim().replace(/\s+/g, ' ').toLowerCase()
     const normalizedProductBrand = String(p.brand || '').trim().replace(/\s+/g, ' ').toLowerCase()
     if (normalizedBrandFilter !== 'all' && normalizedProductBrand !== normalizedBrandFilter) return false
-    const isParent = Boolean(p.is_group || parentProductIds.has(Number(p.id)))
-    const isVariant = Boolean(p.parent_id)
-    const normalizedGroupFilter = String(groupFilter || 'all').toLowerCase()
-    const isGroupedFamilyMember = isParent || isVariant
-    if (['group', 'groups', 'grouped', 'parent', 'variant'].includes(normalizedGroupFilter) && !isGroupedFamilyMember) return false
-    if (normalizedGroupFilter === 'standalone' && isGroupedFamilyMember) return false
+    // Category -- new filter, same client-side-recheck shape as the
+    // brand check above it (redundant with the server's own category
+    // WHERE clause today, kept for the same reason productHay's widened
+    // haystack above is). matchesMulti handles the comma-joined multi-
+    // value shape (and the 'all' sentinel) the same way movFilter/
+    // movementUserFilter already do elsewhere in this file.
+    if (!matchesMulti(catFilter, p.category)) return false
+    // "Issues" -- same scoped key set and OR semantics as
+    // productFilterHelpers.ts's productHasIssue (Products.tsx) and
+    // buildIssueStateClauses (searchMatch.ts); kept as a small local check
+    // here rather than importing across pages, same reasoning as the
+    // brand/category re-checks above it.
+    if (issueFilter !== 'all' && issueFilter) {
+      const issueKeys = parseMultiValues(issueFilter)
+      const outThresholdForIssue = p.out_of_stock_threshold || 0
+      const hasIssue = issueKeys.some((key) => {
+        switch (key) {
+          case 'out_of_stock': return getStockQty(p) <= outThresholdForIssue
+          case 'no_image': return !String(p.image_path || '').trim()
+          case 'no_barcode': return !String(p.barcode || '').trim()
+          case 'no_category': return !String(p.category || '').trim()
+          case 'no_price': return Number(p.selling_price_usd || 0) <= 0 && Number(p.selling_price_khr || 0) <= 0
+          default: return false
+        }
+      })
+      if (!hasIssue) return false
+    }
+    // 'in_stock' means positive stock (includes both low and healthy) --
+    // 'healthy' is the stricter subset above the low-stock threshold. This
+    // used to conflate the two (in_stock required qty above low_stock_
+    // threshold, same bucket 'healthy' now covers), matching backend
+    // semantics in routes/products.ts / routes/branches.ts.
     const qty = getStockQty(p)
-    if (stockFilter === 'low')      return qty > 0 && qty <= p.low_stock_threshold
-    if (stockFilter === 'out')      return qty <= (p.out_of_stock_threshold || 0)
-    if (stockFilter === 'in_stock') return qty > (p.low_stock_threshold || 0)
+    const outThreshold = p.out_of_stock_threshold || 0
+    const lowThreshold = p.low_stock_threshold || 10
+    if (stockFilter === 'low')      return qty > outThreshold && qty <= lowThreshold
+    if (stockFilter === 'out')      return qty <= outThreshold
+    if (stockFilter === 'in_stock') return qty > outThreshold
+    if (stockFilter === 'healthy')  return qty > lowThreshold
     return true
-  }), [brandFilter, groupFilter, hasServerBackedProductSearch, matchesSearch, parentProductIds, productHay, stockFilter, summary])
+  }), [brandFilter, catFilter, hasServerBackedProductSearch, issueFilter, matchesSearch, productHay, stockFilter, summary])
 
   const inventoryProductsById = useMemo(
     () => new Map(summary.map((product) => [Number(product?.id || 0), product])),
     [summary],
   )
 
+  // Category-first sectioning, same decided ask as Products.tsx (see that
+  // file's productSections comment): category header first A-Z, name A-Z
+  // within category, rail jumps by category initial.
   const inventoryProductSections = useMemo(
-    () => buildProductGroupSections(filteredSummary, {
+    () => buildProductCategorySections(filteredSummary, {
       productsById: inventoryProductsById,
       sortDirection: 'asc',
+      uncategorizedLabel: t('uncategorized') || 'Uncategorized',
     }),
-    [filteredSummary, inventoryProductsById],
+    [filteredSummary, inventoryProductsById, t],
   )
 
   const visibleInventoryProducts = useMemo(
@@ -1606,6 +1946,52 @@ export default function Inventory() {
     () => limitInventorySectionsForMobile(inventoryProductSections, INVENTORY_MOBILE_INITIAL_ITEM_LIMIT),
     [inventoryProductSections],
   )
+
+  // Vertical A-Z jump rail wiring (Aug 19 2026 UI request) -- same
+  // replacement as Products.tsx's AlphaIndexRail: jump to a section
+  // instead of filtering it. Unlike Products.tsx, Inventory never had any
+  // jump-target plumbing to begin with (only the filter), so this is new:
+  // maps each section's own letter label to its section id (already a
+  // stable, unique `product-letter:${letter}` string from
+  // buildProductGroupSections), and jumps by querying the
+  // data-inventory-jump-id now rendered on each section header in
+  // InventoryProductsSurface.tsx (both the desktop <tr> and mobile <div>
+  // section headers).
+  const inventoryJumpTargetIdsByLetter = useMemo(() => {
+    const targets = new Map<string, string>()
+    inventoryProductSections.forEach((section) => {
+      if (collapsedInventorySections.has(section.id)) return
+      // Key by the section label's own initial letter, not the raw label --
+      // now that sections are category-named ("Perfume") rather than a bare
+      // letter, this maps down to the rail's A-Z key ("P"). Sections arrive
+      // pre-sorted A-Z, so the first section seen per initial is always the
+      // alphabetically-earliest one; the `has()` guard keeps that one
+      // instead of a later same-initial category overwriting it.
+      const key = getInitialKey(section.label)
+      if (targets.has(key)) return
+      targets.set(key, section.id)
+    })
+    return targets
+  }, [collapsedInventorySections, inventoryProductSections])
+  const inventoryVisibleLetters = useMemo(
+    () => [...inventoryJumpTargetIdsByLetter.keys()].sort((a, b) => a.localeCompare(b)),
+    [inventoryJumpTargetIdsByLetter],
+  )
+  const jumpToInventoryLetter = useCallback((letter: string) => {
+    const targetId = inventoryJumpTargetIdsByLetter.get(String(letter || '').toUpperCase())
+    if (!targetId) return
+    const node = document.querySelector(`[data-inventory-jump-id="${targetId}"]`)
+    if (!(node instanceof HTMLElement)) return
+    const scrollParent = node.closest('.page-scroll') as HTMLElement | null
+    const offset = 96
+    if (scrollParent) {
+      const delta = node.getBoundingClientRect().top - scrollParent.getBoundingClientRect().top - offset
+      scrollParent.scrollTo({ top: Math.max(0, scrollParent.scrollTop + delta), behavior: 'smooth' })
+      return
+    }
+    const top = node.getBoundingClientRect().top + window.scrollY - offset
+    window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+  }, [inventoryJumpTargetIdsByLetter])
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
@@ -1673,7 +2059,7 @@ export default function Inventory() {
 
   useEffect(() => {
     setInventoryProductPage(1)
-  }, [branchFilter, brandFilter, deferredSearch, groupFilter, inventoryInitialFilter, searchMode, stockFilter, tab])
+  }, [branchFilter, brandFilter, catFilter, deferredSearch, groupFilter, inventoryInitialFilter, issueFilter, searchMode, stockFilter, tab])
 
   useEffect(() => {
     setMovementMeta((current) => ({ ...current, page: 1 }))
@@ -1686,12 +2072,14 @@ export default function Inventory() {
   }, [
     branchFilter,
     brandFilter,
+    catFilter,
     deferredSearch,
     groupFilter,
     inventoryInitialFilter,
     inventoryProductPage,
     inventoryProductPageSize,
     isActive,
+    issueFilter,
     load,
     needsProductSummary,
     searchMode,
@@ -1717,7 +2105,7 @@ export default function Inventory() {
 
   useEffect(() => {
     const validIds = new Set(visibleInventoryProductIds)
-    setSelectedProductIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id))))
+    setSelectedProductIds((current) => pruneSelectionToVisibleIds(current, validIds))
   }, [visibleInventoryProductIds])
 
   useEffect(() => {
@@ -1847,7 +2235,7 @@ export default function Inventory() {
             unitCostUsd: item.unitCostUsd,
             unitCostKhr: item.unitCostKhr,
           }), 'Batch adjust inventory stock')
-          if (!result?.success) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed'))
+          if (result?.success === false) throw new Error(result?.error || tr('adjust_failed', 'Adjustment failed'))
         } else if (item.action === 'transfer') {
           const result = await runInventoryMutation(() => getInventoryApi().transferInventoryStock({
             productId: item.productId,
@@ -1856,7 +2244,7 @@ export default function Inventory() {
             quantity,
             reason: item.reason,
           }), 'Batch transfer inventory stock')
-          if (!result?.success) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed'))
+          if (result?.success === false) throw new Error(result?.error || tr('transfer_failed', 'Transfer failed'))
         } else if (item.action === 'move') {
           const request: LegacyInventoryRecord = {
             sourceProductId: item.productId,
@@ -1878,7 +2266,7 @@ export default function Inventory() {
             }
           }
           const result = await runInventoryMutation(() => getInventoryApi().moveStockRow(request), 'Batch move inventory stock')
-          if (!result?.success) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
+          if (result?.success === false) throw new Error(result?.error || tr('stock_move_failed', 'Stock move failed'))
         }
       })
       const failedItems = applyRun.failures.map((entry: LegacyInventoryRecord) => ({
@@ -1893,7 +2281,12 @@ export default function Inventory() {
         notify(
           successCount === 1
             ? tr('batch_inventory_done_one', 'Applied inventory update.')
-            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`),
+            // Same missing-.replace('{count}', ...) bug as the two selected-
+            // count labels above, found in the same audit pass -- the
+            // stored translation is the literal string "{count} inventory
+            // updates applied." in both en/km, so without this the toast
+            // showed "{count}" verbatim instead of the actual number.
+            : tr('batch_inventory_done_many', `${successCount} inventory updates applied.`).replace('{count}', String(successCount)),
         )
         return
       }
@@ -1914,9 +2307,10 @@ export default function Inventory() {
 
   const hasServerBackedMovementSearch = !!searchTerms.length
   const filteredMovements = useMemo(() => movements.filter(m => {
-    if (movFilter !== 'all' && m.movement_type !== movFilter) return false
+    if (!matchesMulti(movFilter, m.movement_type)) return false
+    if (!matchesMulti(movementUserFilter, m.user_id)) return false
     return hasServerBackedMovementSearch ? true : matchesSearch(movHay(m))
-  }), [hasServerBackedMovementSearch, matchesSearch, movFilter, movHay, movements])
+  }), [hasServerBackedMovementSearch, matchesSearch, movFilter, movementUserFilter, movHay, movements])
 
   const groupedMovements = useMemo(() => {
     const groups = buildMovementGroups(filteredMovements)
@@ -1935,14 +2329,14 @@ export default function Inventory() {
       getDate: (group) => group?.latest_at || group?.created_at,
       getItemId: (group) => group?.id,
       getActionKey: (group) => group?.movement_type || 'other',
-      getActionLabel: (group) => group?.movementLabel || group?.movement_type || 'Other',
+      getActionLabel: (group) => translateMovementType(group?.movement_type, t),
       year: movementYearFilter,
       month: movementMonthFilter,
       timeMode: movementTimeMode,
       groupMode: movementGroupMode,
       sortDirection: movementSortDirection,
     })
-  ), [groupedMovements, movementGroupMode, movementMonthFilter, movementSortDirection, movementTimeMode, movementYearFilter])
+  ), [groupedMovements, movementGroupMode, movementMonthFilter, movementSortDirection, movementTimeMode, movementYearFilter, t])
 
   const visibleMovementGroups = useMemo(
     () => movementSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
@@ -1973,9 +2367,7 @@ export default function Inventory() {
   )
 
   useEffect(() => {
-    setExpandedMovementGroups((current) => {
-      return reuseSetWhenUnchanged(current, [...current].filter((id) => visibleMovementGroupIds.has(id)))
-    })
+    setExpandedMovementGroups((current) => pruneSelectionToVisibleIds(current, visibleMovementGroupIds))
   }, [visibleMovementGroupIds])
 
   useEffect(() => {
@@ -1985,7 +2377,7 @@ export default function Inventory() {
   }, [visibleMovementGroupIds])
 
   useEffect(() => {
-    setSelectedMovementIds((current) => reuseSetWhenUnchanged(current, [...current].filter((id) => visibleMovementGroupIds.has(id))))
+    setSelectedMovementIds((current) => pruneSelectionToVisibleIds(current, visibleMovementGroupIds))
   }, [visibleMovementGroupIds])
 
   useEffect(() => {
@@ -2035,26 +2427,21 @@ export default function Inventory() {
   useEffect(() => {
     setCollapsedMovementSections((current) => {
       const validIds = new Set(movementSections.map((section) => section.id))
-      return reuseSetWhenUnchanged(current, [...current].filter((id) => validIds.has(id)))
+      return pruneSelectionToVisibleIds(current, validIds)
     })
   }, [movementSections])
 
-  const MOV_COLORS = {
-    add:             'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
-    remove:          'bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300',
-    sale:            'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
-    purchase:        'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300',
-    return:          'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
-    supplier_return: 'bg-fuchsia-100 dark:bg-fuchsia-900/30 text-fuchsia-700 dark:text-fuchsia-300',
-    return_reversal: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-    adjust:          'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
-    adjustment:      'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
-    set:             'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
-    writeoff:        'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200',
-    transfer:        'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
-    row_move_in:     'bg-cyan-100 dark:bg-cyan-900/30 text-cyan-700 dark:text-cyan-300',
-    row_move_out:    'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
-  }
+  // Semantic color resolver for a grouped movement row -- see
+  // movementColorClass's own doc comment in movementGroups.ts for the
+  // red/green/yellow/gray rule this replaced the old 13-unrelated-colors
+  // map with. A group's `signedQuantity` already carries the group's net
+  // direction (all items in one group share the same movement_type, so
+  // the sign is consistent across the whole group).
+  const movementGroupColorClass = useCallback(
+    (group: { movement_type?: unknown; signedQuantity?: number }) =>
+      movementColorClass(group.movement_type, Number(group.signedQuantity || 0)),
+    [],
+  )
 
   // Stats from backend SQL already net out returned quantities and revenue.
   const visibleInventoryStats = useMemo(() => {
@@ -2091,6 +2478,15 @@ export default function Inventory() {
   const lowStockCount = Number(stockStats?.low_stock ?? visibleLowStockCount)
   const outStockCount = Number(stockStats?.out_of_stock ?? visibleOutStockCount)
   const inStockCount = Number(stockStats?.in_stock ?? visibleInventoryStats.inStock)
+  // Strict subset of inStockCount (above the low-stock threshold, not just
+  // above zero/out-of-stock) -- see familyStockStats.ts's own `healthy`
+  // column comment for why this is now split out from in_stock rather than
+  // being the same number. No client-side fallback needed the way the
+  // other counts have one: this is a purely additive breakdown figure
+  // (inStockCount - lowStockCount already gets you the same number), so a
+  // stale/missing stockStats just means the "Healthy" line doesn't render
+  // yet, not a wrong total anywhere else on the page.
+  const healthyCount = Number(stockStats?.healthy ?? Math.max(0, inStockCount - lowStockCount))
   const totalProducts = Number(
     stockStats?.total_products
     ?? (inventoryProductsLoaded ? inventoryProductTotal : null)
@@ -2117,30 +2513,53 @@ export default function Inventory() {
     ?? visibleInventoryStats.membershipDiscountUsd,
   )
   const totalProfit   = totalRevenue - totalCOGS
-  const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || PAGE_SIZE_OPTIONS[0]))
+  const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || PAGE_SIZE_OPTIONS[1]))
   const inventoryProductSafePage = clampPage(inventoryProductPage, totalProducts, inventoryProductSafePageSize)
   const inventoryProductTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalProducts || 0)) / inventoryProductSafePageSize))
+
+  // Same class of bug as Products.tsx (see the comment there): the backend's
+  // /products bootstrap endpoint clamps `page` to [1, 100000], not to the
+  // query's actual totalPages, and echoes the requested page straight back
+  // (see cloudflare/src/routes/inventory.ts) -- so `setInventoryProductPage
+  // (sumResult.page ...)` after a fetch never actually corrects anything.
+  // Deleting/adjusting the last item(s) on the current page shrinks
+  // totalProducts without any filter change to trigger a reset-to-1, so the
+  // raw `inventoryProductPage` used in the fetch (below) can end up past
+  // inventoryProductTotalPages and get stuck showing an empty grid under a
+  // clamped-looking "page N of N" label. Self-heal it client-side instead.
+  useEffect(() => {
+    if (inventoryProductPage > inventoryProductTotalPages) {
+      setInventoryProductPage(inventoryProductTotalPages)
+    }
+  }, [inventoryProductPage, inventoryProductTotalPages])
+
   const inventoryProductStart = totalProducts ? (((inventoryProductSafePage - 1) * inventoryProductSafePageSize) + 1) : 0
   const inventoryProductEnd = totalProducts ? Math.min(totalProducts, inventoryProductSafePage * inventoryProductSafePageSize) : 0
   const inventoryProductSummaryLabel = totalProducts
     ? `${inventoryProductStart.toLocaleString()}-${inventoryProductEnd.toLocaleString()} / ${Number(totalProducts || 0).toLocaleString()}`
     : (loading && needsProductSummary && !inventoryProductsLoaded ? tr('loading', 'Loading') : '0 / 0')
+  // Both delegate to the same shared helper Products.tsx uses
+  // (productGroupViewHelpers.ts) rather than reimplementing the min/max
+  // price and count/stock/branches logic a second time -- this used to be
+  // its own near-duplicate copy that had drifted to not include a branches
+  // part at all.
   const getInventoryGroupPriceLabel = useCallback((group: LegacyInventoryRecord) => {
-    const min = Number(group?.minSellingPriceUsd || 0)
-    const max = Number(group?.maxSellingPriceUsd || 0)
-    if (group?.hasMultipleItems && min !== max) return `${fmtUSD(min)} - ${fmtUSD(max)}`
-    return fmtUSD(max || min || 0)
+    return buildProductGroupPriceLabel(group, (value: unknown) => fmtUSD(Number(value)))
   }, [fmtUSD])
   const getInventoryGroupSummaryParts = useCallback((group: LegacyInventoryRecord, { includeCount = true }: { includeCount?: boolean } = {}) => {
-    const parts = [
-      includeCount ? `${group?.items?.length || 0} ${(group?.items?.length || 0) === 1 ? (t('option') || 'option') : (t('options') || 'options')}` : null,
-      `${group?.stockTotal || 0} ${(t('stock') || 'stock').toLowerCase()}`,
-      getInventoryGroupPriceLabel(group),
-    ]
-    return parts.filter(Boolean) as string[]
-  }, [getInventoryGroupPriceLabel, t])
+    return buildProductGroupSummaryParts(group, {
+      includeCount,
+      t: (key: string) => t(key) || key,
+      fmtUSD: (value: unknown) => fmtUSD(Number(value)),
+    })
+  }, [fmtUSD, t])
   const inventoryControlLabels = useMemo(() => ({
-    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`),
+    // tr() is a plain key lookup, no {count} interpolation (see
+    // AppContext.tsx's t()) -- the stored translation is the literal
+    // string "{count} selected" in both en/km, so it must be substituted
+    // by hand, same fix and same root cause as Products.tsx's identical
+    // productSelectedLabel bug found in the same audit pass.
+    selected: tr('inventory_selected_count', `${selectedProducts.length} selected`).replace('{count}', String(selectedProducts.length)),
     selectAll: `${tr('select_all', 'Select all')} (${visibleInventoryProducts.length})`,
     batch: tr('inventory_batch_session', 'Batch'),
     reasons: tr('saved_reasons', 'Reasons'),
@@ -2220,6 +2639,8 @@ export default function Inventory() {
   const statsValue = (value: ReactNode) => (stockStatsLoaded ? value : '...')
   const inventoryStatLabels = {
     products: safeT('products', safeT('products_total', 'Products')),
+    inStock: tr('in_stock', 'In stock'),
+    healthy: tr('healthy_stock', 'Healthy'),
     lowStock: tr('low_stock', 'Low stock'),
     outOfStock: tr('out_of_stock', 'Out of stock'),
     stockValue: tr('stock_value', 'Stock value'),
@@ -2244,6 +2665,7 @@ export default function Inventory() {
   }
   const lowShortLabel = tr('low_stock_short', 'Low')
   const outShortLabel = tr('out_of_stock_short', 'Out')
+  const healthyShortLabel = tr('healthy_stock_short', 'Healthy')
   const matchStockShortLabel = tr('matching_stock_short', 'Matching')
   const afterReturnsShortLabel = tr('after_returns_short', 'After ret.')
   const afterRefundsShortLabel = tr('after_refunds_short', 'After ref.')
@@ -2261,10 +2683,18 @@ export default function Inventory() {
       value: statsValue(totalProducts),
       cls: 'text-gray-800 dark:text-gray-200',
       sub: stockStatsLoaded
-        ? `${lowStockCount} ${lowShortLabel} | ${outStockCount} ${outShortLabel}`
+        ? `${healthyCount} ${healthyShortLabel} | ${lowStockCount} ${lowShortLabel} | ${outStockCount} ${outShortLabel}`
         : safeT('loading', 'Loading...'),
+      // Full breakdown, not just low/out -- total counts each product
+      // group as one (getFamilyStockStats/paginateProductFamilies both
+      // group by family root, matching the listing's own pagination), and
+      // in-stock is split into its Healthy/Low subsets so this card
+      // answers "how many, and in what shape" in one place instead of
+      // needing the separate stock-status filter to see the split.
       details: [
         { label: inventoryStatLabels.products, value: totalProducts },
+        { label: inventoryStatLabels.inStock, value: inStockCount },
+        { label: inventoryStatLabels.healthy, value: healthyCount },
         { label: inventoryStatLabels.lowStock, value: lowStockCount },
         { label: inventoryStatLabels.outOfStock, value: outStockCount },
         { label: inventoryStatLabels.formula, value: inventoryThresholdFormulaText },
@@ -2410,6 +2840,15 @@ export default function Inventory() {
       : [...new Set(summary.map((p) => String(p.brand || '').trim()).filter(Boolean))]
     ).sort((a, b) => a.localeCompare(b))
   ), [inventoryProductFilters.brands, summary])
+  // New -- same derivation as inventoryBrands above (server metadata when
+  // available, falling back to whatever's on the current page), for the
+  // Category filter section this page previously didn't have at all.
+  const inventoryCategories = useMemo(() => (
+    (Array.isArray(inventoryProductFilters.categories) && inventoryProductFilters.categories.length
+      ? inventoryProductFilters.categories
+      : [...new Set(summary.map((p) => String(p.category || '').trim()).filter(Boolean))]
+    ).sort((a, b) => a.localeCompare(b))
+  ), [inventoryProductFilters.categories, summary])
   const apiInventoryInitialOptions = useMemo(
     () => aggregateInitialOptions(Array.isArray(inventoryInitials) ? inventoryInitials : []).filter((item) => (
       item?.type === 'latin' || item?.type === 'number' || item?.type === 'khmer'
@@ -2681,72 +3120,28 @@ export default function Inventory() {
             ] as [string, string][]).map(([value, label]) => ({
               id: value,
               label,
-              active: movFilter === value,
-              onClick: () => setMovFilter(movFilter === value ? 'all' : value),
+              active: isMultiActive(movFilter, value),
+              onClick: () => setMovFilter(toggleMultiValue(movFilter, value)),
             })),
           ],
         },
         isAdmin ? {
           id: 'movement-user',
           label: t('user') || 'User',
-          render: ({ closeMenu }: { closeMenu: () => void }) => (
-            <AppSelect
-              value={movementUserFilter}
-              onChange={(nextValue) => {
-                setMovementUserFilter(nextValue || 'all')
-                closeMenu()
-              }}
-              ariaLabel={t('user') || 'User'}
-              className="w-full"
-              buttonClassName="h-9 w-full rounded-xl px-3 py-1.5 text-sm"
-              menuClassName="min-w-[10rem]"
-              options={[
-                { value: 'all', label: t('all_users') || 'All users' },
-                ...userOptions.map((option) => {
-                  const id = String(option?.id || '')
-                  return id ? {
-                    value: id,
-                    label: option?.name || option?.username || `User ${id}`,
-                  } : null
-                }).filter(Boolean) as Array<{ value: string; label: string }>,
-              ]}
-            />
-          ),
+          searchable: true,
+          options: [
+            { id: 'all', label: t('all_users') || 'All users', active: movementUserFilter === 'all', onClick: () => setMovementUserFilter('all') },
+            ...userOptions.map((option) => {
+              const id = String(option?.id || '')
+              return id ? {
+                id: `user-${id}`,
+                label: option?.name || option?.username || `User ${id}`,
+                active: isMultiActive(movementUserFilter, id),
+                onClick: () => setMovementUserFilter(toggleMultiValue(movementUserFilter, id)),
+              } : null
+            }).filter(Boolean) as { id: string; label: string; active: boolean; onClick: () => void }[],
+          ],
         } : null,
-        {
-          id: 'movement-year',
-          label: 'Year',
-          options: [
-            { id: 'all', label: 'All years', active: movementYearFilter === 'all', onClick: () => { setMovementYearFilter('all'); setMovementMonthFilter('all') } },
-            ...movementYears.map((year) => ({
-              id: `year-${year}`,
-              label: year,
-              active: movementYearFilter === year,
-              onClick: () => {
-                const next = movementYearFilter === year ? 'all' : year
-                setMovementYearFilter(next)
-                if (next === 'all') setMovementMonthFilter('all')
-              },
-            })),
-          ],
-        },
-        {
-          id: 'movement-month',
-          label: 'Month',
-          options: [
-            { id: 'all', label: 'All months', active: movementMonthFilter === 'all', onClick: () => setMovementMonthFilter('all') },
-            ...Array.from({ length: 12 }, (_, index) => {
-              const month = String(index + 1)
-              const label = new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' })
-              return {
-                id: `month-${month}`,
-                label,
-                active: movementMonthFilter === month,
-                onClick: () => setMovementMonthFilter(movementMonthFilter === month ? 'all' : month),
-              }
-            }),
-          ],
-        },
         {
           id: 'movement-grouping',
           label: t('group_by') || 'Group by',
@@ -2758,106 +3153,88 @@ export default function Inventory() {
         {
           id: 'movement-sort',
           label: t('sort') || 'Sort',
+          searchable: true,
           options: [
             { id: 'desc', label: t('newest_first') || 'Newest first', active: movementSortDirection === 'desc', onClick: () => setMovementSortDirection('desc') },
             { id: 'asc', label: t('oldest_first') || 'Oldest first', active: movementSortDirection === 'asc', onClick: () => setMovementSortDirection('asc') },
+            ...buildPeriodFilterOptions({
+              yearFilter: movementYearFilter,
+              setYearFilter: setMovementYearFilter,
+              monthFilter: movementMonthFilter,
+              setMonthFilter: setMovementMonthFilter,
+              availableYears: movementYears,
+              allTimeLabel: t('all_time') || 'All time',
+            }),
           ],
         },
       ].filter(Boolean)
     }
 
     return [
-      branches.length > 1 ? {
-        id: 'branch',
-        label: t('branch') || 'Branch',
-        render: ({ closeMenu }: { closeMenu: () => void }) => (
-          <AppSelect
-            value={branchFilter}
-            onChange={(nextValue) => {
-              setBranchFilter(nextValue || 'all')
-              closeMenu()
-            }}
-            ariaLabel={t('branch') || 'Branch'}
-            className="w-full"
-            buttonClassName="w-full rounded-xl text-sm"
-            options={[
-              { value: 'all', label: t('all_branches') || 'All branches' },
-              ...branches.map((branch) => ({ value: String(branch.id), label: branch.name })),
-            ]}
-          />
-        ),
-      } : null,
-      {
-        id: 'group',
-        label: t('groups') || 'Groups',
-        render: ({ closeMenu }: { closeMenu: () => void }) => (
-          <AppSelect
-            value={groupFilter}
-            onChange={(nextValue) => {
-              setGroupFilter(nextValue || 'all')
-              closeMenu()
-            }}
-            ariaLabel={t('groups') || 'Groups'}
-            className="w-full"
-            buttonClassName="w-full rounded-xl text-sm"
-            options={[
-              { value: 'all', label: t('all') || 'All' },
-              { value: 'group', label: t('groups') || 'Groups' },
-              { value: 'standalone', label: t('standalone') || 'Standalone' },
-            ]}
-          />
-        ),
-      },
-      {
-        id: 'stock',
-        label: t('stock_status') || 'Stock',
-        render: ({ closeMenu }: { closeMenu: () => void }) => (
-          <AppSelect
-            value={stockFilter}
-            onChange={(nextValue) => {
-              setStockFilter(nextValue || 'all')
-              closeMenu()
-            }}
-            ariaLabel={t('stock_status') || 'Stock'}
-            className="w-full"
-            buttonClassName="w-full rounded-xl text-sm"
-            options={[
-              { value: 'all', label: t('all') || 'All' },
-              { value: 'in_stock', label: t('in_stock') || 'In stock' },
-              { value: 'low', label: t('low_stock') || 'Low stock' },
-              { value: 'out', label: t('out_of_stock') || 'Out of stock' },
-            ]}
-          />
-        ),
-      },
+      // Same splice point as Products.tsx's buildProductFilterSections:
+      // AND/OR search mode right before Availability.
+      buildSearchModeFilterSection({
+        t,
+        searchMode,
+        setSearchMode,
+      }),
+      buildAvailabilityFilterSection({
+        t,
+        branches,
+        stockFilter,
+        setStockFilter,
+        groupFilter,
+        setGroupFilter,
+        branchFilter,
+        setBranchFilter,
+      }),
+      buildIssuesFilterSection({
+        t,
+        issueFilter,
+        setIssueFilter,
+      }),
       inventoryBrands.length ? {
         id: 'brand',
         label: filterLabel('brand', 'Brand'),
-        render: ({ closeMenu }: { closeMenu: () => void }) => (
-          <AppSelect
-            value={brandFilter}
-            onChange={(nextValue) => {
-              setBrandFilter(nextValue || 'all')
-              closeMenu()
-            }}
-            ariaLabel={filterLabel('brand', 'Brand')}
-            className="w-full"
-            buttonClassName="h-9 w-full rounded-xl px-3 py-1.5 text-sm"
-            menuClassName="min-w-[12rem]"
-            options={[
-              { value: 'all', label: filterLabel('all_brands', 'All brands') },
-              ...inventoryBrands.map((brand) => ({ value: brand, label: brand })),
-            ]}
-          />
-        ),
+        searchable: true,
+        options: [
+          { id: 'brand-all', label: filterLabel('all_brands', 'All brands'), active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
+          ...inventoryBrands.map((brand) => ({
+            id: `brand-${brand}`,
+            label: brand,
+            active: brandFilter === brand,
+            onClick: () => setBrandFilter(brandFilter === brand ? 'all' : brand),
+          })),
+        ],
+      } : null,
+      // Inventory previously had no Category filter section at all
+      // (Products/POS both do), even though the underlying data always
+      // had a category column. Multi-select + hierarchical "Main - Sub"
+      // grouping, same shape/behavior as Products and POS -- see
+      // components/shared/CategoryFilterOptions.tsx.
+      inventoryCategories.length ? {
+        id: 'category',
+        label: filterLabel('category', 'Category'),
+        searchable: true,
+        options: [
+          { id: 'category-all', label: filterLabel('all_categories', 'All categories'), active: catFilter === 'all', onClick: () => setCatFilter('all') },
+          ...buildHierarchicalCategoryFilterOptions({
+            categoryNames: inventoryCategories,
+            isSelected: (value) => isMultiActive(catFilter, value, true),
+            onToggle: (values, checked) => setCatFilter(toggleMultiValues(catFilter, values, checked)),
+          }),
+        ],
       } : null,
     ].filter(Boolean)
   }, [
     branchFilter,
     branches,
     brandFilter,
+    catFilter,
     groupFilter,
     inventoryBrands,
+    inventoryCategories,
+    issueFilter,
     movFilter,
     movementGroupMode,
     movementMonthFilter,
@@ -2865,6 +3242,8 @@ export default function Inventory() {
     movementUserFilter,
     movementYearFilter,
     movementYears,
+    searchMode,
+    setSearchMode,
     isAdmin,
     filterLabel,
     stockFilter,
@@ -2896,17 +3275,22 @@ export default function Inventory() {
     return countActiveFlags([
       branchFilter !== 'all',
       brandFilter !== 'all',
+      catFilter !== 'all',
       groupFilter !== 'all',
       stockFilter !== 'all',
+      issueFilter !== 'all',
       inventoryInitialFilter !== 'all',
+      searchMode === 'OR',
     ])
-  }, [branchFilter, brandFilter, groupFilter, inventoryInitialFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementUserFilter, movementYearFilter, stockFilter, tab])
+  }, [branchFilter, brandFilter, catFilter, groupFilter, inventoryInitialFilter, issueFilter, movFilter, movementGroupMode, movementMonthFilter, movementSortDirection, movementUserFilter, movementYearFilter, searchMode, stockFilter, tab])
 
   const clearInventoryFilters = useCallback(() => {
     setBranchFilter('all')
     setBrandFilter('all')
+    setCatFilter('all')
     setGroupFilter('all')
     setStockFilter('all')
+    setIssueFilter('all')
     setInventoryInitialFilter('all')
     setMovFilter('all')
     setMovementUserFilter('all')
@@ -2914,6 +3298,7 @@ export default function Inventory() {
     setMovementMonthFilter('all')
     setMovementGroupMode('time')
     setMovementSortDirection('desc')
+    setSearchMode('AND')
   }, [])
 
   const isMovementScopeFullySelected = useCallback(
@@ -2962,38 +3347,10 @@ export default function Inventory() {
 
   return (
     <div className="page-scroll p-3 sm:p-6">
-      <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-            <Boxes className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            {t('inventory')}
-          </h1>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            <button
-              onClick={() => setShowImport(true)}
-              className="btn-secondary inline-flex min-w-[5.75rem] shrink-0 items-center justify-center whitespace-nowrap px-3 py-1.5 text-xs sm:min-w-[6.5rem] sm:text-sm"
-              title={tr('import', 'Import')}
-            >
-            <span className="inline-flex items-center gap-2">
-              <Upload className="h-4 w-4" />
-              {tr('import', 'Import')}
-            </span>
-          </button>
-          {showProductsSection ? (
-            <ExportMenu
-              label={tr('export', 'Export')}
-              items={inventoryExportItems}
-              compact
-            />
-          ) : null}
-        </div>
-      </div>
-
       <SectionSwitcher
         className="mb-3"
         label=""
-        options={INVENTORY_SECTION_OPTIONS}
+        options={inventorySectionOptions}
         value={inventorySection}
         onChange={selectInventorySection}
         storageKey={sectionStorageKey}
@@ -3048,135 +3405,211 @@ export default function Inventory() {
       </div>
       ) : null}
 
-      {/* Section */}
+      {/* Merged toolbar row: Import/Export/History each take an equal share
+          of the row's full width (flex-1 on all three, not just History)
+          with labels always visible -- previously only History grew to fill
+          the row while Import/Export stayed icon-sized, and growing
+          History's wrapper alone didn't help either since the small icon
+          button inside it didn't stretch, so the row rendered as a cluster
+          of small squares on the left with a large empty gap to the right.
+          Kept above the search row (rather than below it) so Import/Export/
+          History are the first thing in the flow, with search/filter
+          directly underneath. */}
+      {/* Manage (Import + Export folded into one dropdown, same pattern
+          Products.tsx uses) / History -- History before Manage, matching
+          Products' ordering. Export items only apply to the Products tab
+          (Movements/RFID don't have exportable rows the same way), so
+          they're only added to the menu when showProductsSection is true;
+          Import stays available regardless of tab. */}
       {showInventorySections ? (
-      <div className="mb-2 overflow-x-auto pb-1">
-        <div className="flex min-w-[19.5rem] items-center gap-1.5 sm:min-w-0">
-          <input
-            id="inventory-search"
-            name="inventory_search"
-            autoComplete="off"
-            aria-label="Inventory search"
-            className="input min-w-0 flex-1 text-sm"
-            placeholder={tab === 'products'
-              ? `${t('search') || 'Search'} - separate terms with commas, then choose match mode`
-              : tab === 'rfid'
-                ? 'Search RFID sessions, EPC / TID, reader, or product mapping'
-                : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {tab === 'products' && (
-            <div className="flex shrink-0 items-center gap-0.5 rounded-xl border border-gray-300 bg-white p-0.5 dark:border-gray-600 dark:bg-gray-900">
-              {['AND','OR'].map(m => (
-                <button key={m}
-                  onClick={() => setSearchMode(m)}
-                  className={`min-w-[2.65rem] rounded-lg px-2 py-1.5 text-xs font-bold transition-colors ${searchMode===m ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-500 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800'}`}>
-                  {m}
-                </button>
-              ))}
-            </div>
+      <div className="inventory-history-row mb-2 flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
+        <ActionHistoryBar history={actionHistory} className="min-w-0 flex-1" showLabel t={t} />
+        <LazyPortalMenu
+          align="auto"
+          triggerWrapperClassName={`min-w-0 ${TOOLBAR_BUTTON_WIDTH}`}
+          menuClassName="max-h-[70vh] overflow-auto"
+          trigger={(
+            <button
+              type="button"
+              // Was a fully hand-rolled border/bg/hover color set -- the
+              // only "Manage" trigger in the app NOT using the shared
+              // .btn-secondary look (Products/Sales both do), and it also
+              // had no desktop width cap (`w-full` inside an uncapped
+              // `flex-1` wrapper), so it stretched wider than every other
+              // page's Manage button on large screens. Switched to the
+              // same shared class + sizing (Aug 23 2026, "History/Manage/
+              // Product button sizing on large screens").
+              className={`w-full ${manageToolbarButtonClassName}`}
+              aria-haspopup="true"
+              aria-label={tr('manage', 'Manage')}
+              title={tr('manage', 'Manage')}
+            >
+              <Settings2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">{tr('manage', 'Manage')}</span>
+            </button>
           )}
-          {showMovementsSection ? (
+          items={([
+            { label: tr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            ...(showProductsSection
+              ? [
+                'divider' as const,
+                ...(inventoryExportItems || [])
+                  .filter((item): item is PortalMenuItem => Boolean(item))
+                  .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
+              ]
+              : []),
+          ] as PortalMenuItem[])}
+        />
+      </div>
+      ) : null}
+
+      {/* Items-per-page / page-number bar for the Products tab -- deliberately
+          NOT part of the sticky group below (Aug 11 2026 UI-polish request:
+          pin search / select-all / bulk-action bar on scroll, but leave
+          pagination out of it so it scrolls away normally). Used to be
+          bundled into the same sticky card as select-all below it; split
+          out so toggling page size or jumping pages doesn't require a
+          control that's permanently glued to the top of the screen -- same
+          split Products.tsx uses, kept in sync here for parity. */}
+      {showProductsSection ? (
+        <div className="relative mb-2 -mx-1 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 sm:mx-0">
+          <div className={inventoryProductControlsRevealReady ? '' : 'invisible'}>
+            <div className="grid min-w-0 grid-cols-[minmax(5.2rem,1fr)_minmax(6.4rem,7.6rem)_minmax(6.9rem,9.4rem)] items-center gap-1.5">
+              <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
+                {inventoryProductSummaryLabel}
+              </span>
+              <div className="flex min-w-0 items-center gap-1">
+              <PageSizeSelect
+                value={inventoryProductSafePageSize}
+                options={PAGE_SIZE_OPTIONS}
+                onChange={(nextValue) => {
+                  setInventoryProductPageSize(nextValue)
+                  setInventoryProductPage(1)
+                }}
+                // Matches routes/inventory.ts's clampInt(query.pageSize,
+                // 20, 1, 100) for the product-search endpoint this
+                // control drives -- see the matching note on
+                // Products.tsx's PageSizeSelect.
+                maxValue={100}
+                ariaLabel={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
+                className="h-7 w-full min-w-0"
+                buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-[10px] font-semibold shadow-none"
+                menuClassName="min-w-[9rem]"
+                optionClassName="text-xs"
+              />
+              </div>
+              <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                  disabled={inventoryProductSafePage <= 1}
+                  onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  aria-label={t('page') || 'Page'}
+                  className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
+                  value={inventoryProductPageDraft}
+                  onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
+                  onBlur={commitInventoryProductPageDraft}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      commitInventoryProductPageDraft()
+                      event.currentTarget.blur()
+                    } else if (event.key === 'Escape') {
+                      setInventoryProductPageDraft(String(inventoryProductSafePage))
+                      event.currentTarget.blur()
+                    }
+                  }}
+                />
+                <span className="pr-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
+                  / {inventoryProductTotalPages}
+                </span>
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+                  disabled={inventoryProductSafePage >= inventoryProductTotalPages}
+                  onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
+                  aria-label="Next page"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+          {!inventoryProductControlsRevealReady ? (
+            <div className="pointer-events-none absolute inset-0 flex items-center px-2 py-1.5">
+              <div className="grid w-full min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5">
+                <div className="h-5 rounded-full bg-slate-100 dark:bg-slate-800" />
+                <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
+                <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* Search bar, select-all, and bulk-action bar all pin to the top of
+          the page's scroll container while scrolling (same Aug 11 2026
+          request as the pagination note above, now consistent with
+          Products.tsx's layout). Grouped into ONE sticky wrapper, rather
+          than independently-sticky siblings, so there's no need to
+          hand-compute a per-element `top` offset to stack them without
+          overlapping. The search row itself is shared across every
+          Inventory tab (Products/Movements/RFID all filter through the
+          same box); the select-all/bulk-action card underneath only
+          renders for the Products tab, same as before. */}
+      {showInventorySections ? (
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        {/* Search row: search input + (products) AND/OR toggle + icon-only
+            Filter. Filter placement is consistent across every tab,
+            matching the Sales/Returns pattern. Same overflow fix as
+            Products.tsx's identical row -- see that file's comment for
+            the full reasoning: a hard min-w-[19.5rem] row floor forced a
+            horizontal scrollbar on narrow screens instead of letting
+            SearchInput's own `min-w-0 flex-1` do the shrinking it already
+            supports, since every other child here is already shrink-0. */}
+        <div className="pt-1">
+          <div className="flex items-center gap-1.5">
+            <SearchInput
+              id="inventory-search"
+              name="inventory_search"
+              ariaLabel="Inventory search"
+              value={search}
+              onChange={handleSearchChange}
+              placeholder={tab === 'products'
+                ? tr('search_terms_placeholder', 'Search divide by comma, any order: name, barcode/sku, brand, category')
+                : tab === 'rfid'
+                  ? tr('search_rfid_placeholder', 'Search RFID sessions, EPC / TID, reader, or product mapping')
+                  : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
+              className="min-w-[3.5rem] flex-1"
+              inputClassName="text-sm"
+            />
+            {tab === 'products' && (
+              <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
+            )}
+            {/* AND/OR toggle removed (Aug 19 2026 UI request) -- search is
+                always 'AND' now, same change as Products.tsx/POS.tsx. */}
             <FilterMenu
               label={t('filters') || 'Filters'}
               activeCount={activeInventoryFilterCount}
               sections={inventoryFilterSections}
               onClear={clearInventoryFilters}
-              compact
+              mobileIconOnly
             />
-          ) : null}
+          </div>
         </div>
-      </div>
-      ) : null}
-      {showInventorySections && !showMovementsSection ? (
-      <div className="inventory-history-row mb-2 flex min-w-0 items-center gap-2">
-        <ActionHistoryBar history={actionHistory} className="min-w-0 flex-1" />
-        <FilterMenu
-          label={t('filters') || 'Filters'}
-          activeCount={activeInventoryFilterCount}
-          sections={inventoryFilterSections}
-          onClear={clearInventoryFilters}
-          compact
-        />
-      </div>
-      ) : null}
 
-      {showInventorySections && !showProductsSection && (tab === 'rfid' || isMovementsFirstLoad) ? (
-      <p className="text-xs text-gray-400 mb-2">
-        {tab === 'rfid'
-          ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
-          : `${t('loading') || 'Loading'} ${t('movements') || 'movements'}...`}
-      </p>
-      ) : null}
-
-      {/* Products */}
-      {showProductsSection && (
-        <>
-          <div className="sticky top-2 z-30 mb-2 -mx-1 overflow-hidden rounded-2xl border border-blue-200 bg-blue-50/95 shadow-sm backdrop-blur dark:border-blue-900/60 dark:bg-blue-950/25 sm:mx-0 sm:rounded-xl">
-            <div className="relative px-2 py-2">
-              <div className={inventoryProductControlsRevealReady ? '' : 'invisible'}>
-                <div className="grid min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
-                  <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-2 py-1 text-[10px] font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-100">
-                    {inventoryProductSummaryLabel}
-                  </span>
-                  <AppSelect
-                    value={inventoryProductSafePageSize}
-                    options={PAGE_SIZE_OPTIONS.map((size) => ({ value: size, label: size }))}
-                    onChange={(nextValue) => {
-                      setInventoryProductPageSize(Number(nextValue) || PAGE_SIZE_OPTIONS[0])
-                      setInventoryProductPage(1)
-                    }}
-                    ariaLabel={`${t('per_page') || 'per page'} ${inventoryProductSafePageSize}`}
-                    className="h-7 w-full min-w-0"
-                    buttonClassName="h-7 w-full rounded-full px-2 py-0 pl-2 pr-1.5 text-[10px] font-semibold shadow-none"
-                    menuClassName="min-w-[4rem]"
-                    optionClassName="text-xs"
-                  />
-                  <div className="inline-flex h-7 min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
-                    <button
-                      type="button"
-                      className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-                      disabled={inventoryProductSafePage <= 1}
-                      onClick={() => setInventoryProductPage(inventoryProductSafePage - 1)}
-                      aria-label="Previous page"
-                    >
-                      <ChevronLeft className="h-3.5 w-3.5" />
-                    </button>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      aria-label={t('page') || 'Page'}
-                      className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 text-center text-[10px] font-semibold text-slate-700 outline-none dark:text-slate-100"
-                      value={inventoryProductPageDraft}
-                      onChange={(event) => setInventoryProductPageDraft(event.target.value.replace(/[^\d]/g, '') || '')}
-                      onBlur={commitInventoryProductPageDraft}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                          event.preventDefault()
-                          commitInventoryProductPageDraft()
-                          event.currentTarget.blur()
-                        } else if (event.key === 'Escape') {
-                          setInventoryProductPageDraft(String(inventoryProductSafePage))
-                          event.currentTarget.blur()
-                        }
-                      }}
-                    />
-                    <span className="pr-1.5 text-[10px] font-semibold text-slate-500 dark:text-slate-300">
-                      / {inventoryProductTotalPages}
-                    </span>
-                    <button
-                      type="button"
-                      className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
-                      disabled={inventoryProductSafePage >= inventoryProductTotalPages}
-                      onClick={() => setInventoryProductPage(inventoryProductSafePage + 1)}
-                      aria-label="Next page"
-                    >
-                      <ChevronRight className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                </div>
-                <div className={`mt-1.5 grid items-center gap-1.5 ${hasSelectedProducts ? 'grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]' : 'grid-cols-1'}`}>
+        {showProductsSection ? (
+          <div className="bulk-toolbar relative overflow-hidden rounded-2xl border shadow-sm sm:rounded-xl">
+            <div className={inventoryProductControlsRevealReady ? '' : 'invisible'}>
+              <div className="px-2 py-2">
+                <div className={`grid items-center gap-1.5 ${hasSelectedProducts ? 'grid-cols-[minmax(0,1fr)_4.25rem_4.6rem]' : 'grid-cols-1'}`}>
                   <label className="inline-flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2.5 py-1.5 text-[11px] font-medium text-slate-700 shadow-sm dark:border-slate-700 dark:bg-slate-900/85 dark:text-slate-100">
                     <input
                       ref={inventorySelectAllRef}
@@ -3219,53 +3652,36 @@ export default function Inventory() {
                   ) : null}
                 </div>
               </div>
-              {!inventoryProductControlsRevealReady ? (
-                <div className="pointer-events-none absolute inset-0 flex flex-col gap-1.5 px-2 py-2">
-                  <div className="grid min-w-0 grid-cols-[minmax(5.7rem,1fr)_3.35rem_minmax(6.9rem,9.4rem)] items-center gap-1.5 overflow-hidden rounded-2xl border border-slate-200 bg-white/95 px-2 py-1.5 shadow-sm dark:border-slate-700 dark:bg-slate-900/85">
-                    <div className="h-5 rounded-full bg-slate-100 dark:bg-slate-800" />
-                    <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
-                    <div className="h-7 rounded-full bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                  <div className="grid grid-cols-1 items-center gap-1.5">
-                    <div className="h-9 rounded-2xl border border-slate-200 bg-white/95 dark:border-slate-700 dark:bg-slate-900/85" />
-                  </div>
-                </div>
-              ) : null}
             </div>
+            {!inventoryProductControlsRevealReady ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center px-2 py-2">
+                <div className="h-9 w-full rounded-2xl bg-slate-100 dark:bg-slate-800" />
+              </div>
+            ) : null}
           </div>
-          {shouldReserveInventoryInitialBar ? (
-            <div className="mb-2 h-[42px]">
-              {inventoryInitialOptions.length ? (
-                <div className="flex h-full gap-1 overflow-x-auto rounded-xl border border-gray-200 bg-white p-1 text-xs dark:border-gray-700 dark:bg-gray-800">
-                  <button
-                    type="button"
-                    className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                    onClick={() => setInventoryInitialFilter('all')}
-                  >
-                    {t('all') || 'All'}
-                  </button>
-                  {inventoryInitialOptions.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`h-8 min-w-8 rounded-lg px-2 font-semibold ${inventoryInitialFilter === item.key ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                      onClick={() => setInventoryInitialFilter(inventoryInitialFilter === item.key ? 'all' : item.key)}
-                      title={`${item.label} (${item.count})`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="flex h-full items-center gap-1 overflow-hidden rounded-xl border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-800">
-                  <div className="h-8 min-w-[2.75rem] animate-pulse rounded-lg bg-slate-100 dark:bg-slate-700/80" />
-                  {Array.from({ length: 9 }, (_, index) => (
-                    <div key={`inventory-initial-skeleton-${index}`} className="h-8 min-w-8 animate-pulse rounded-lg bg-slate-100 dark:bg-slate-700/80" />
-                  ))}
-                </div>
-              )}
-            </div>
-          ) : null}
+        ) : null}
+      </div>
+      ) : null}
+
+      {showInventorySections && !showProductsSection && (tab === 'rfid' || isMovementsFirstLoad) ? (
+      <p className="text-xs text-gray-400 mb-2">
+        {tab === 'rfid'
+          ? `RFID inventory for ${rfidGatewayStatus.branchName} - reader gateway, tag mapping, sessions, and barcode fallback`
+          : `${t('loading') || 'Loading'} ${t('movements') || 'movements'}...`}
+      </p>
+      ) : null}
+
+      {/* Products */}
+      {showProductsSection && (
+        <>
+          {/* Horizontal A-Z filter bar removed (Aug 19 2026 UI request) --
+              same change as Products.tsx: replaced with the vertical
+              AlphaIndexRail rendered further down, which jumps to a
+              section instead of narrowing the list to one letter.
+              shouldReserveInventoryInitialBar / inventoryInitialOptions /
+              cachedInventoryInitialOptions and their loading-skeleton
+              reservation removed with it -- nothing else in this file
+              referenced them. */}
           <InventoryProductsSurfaceView
             InventoryBatchPreview={InventoryBatchPreview}
             InventoryDiscountBadge={InventoryDiscountBadge}
@@ -3275,6 +3691,8 @@ export default function Inventory() {
             collapsedInventorySections={collapsedInventorySections}
             fmtKHR={fmtKHR}
             fmtUSD={fmtUSD}
+            focusProductId={focusProductId}
+            onFocusHandled={() => setFocusProductId(null)}
             getInventoryGroupSummaryParts={getInventoryGroupSummaryParts}
             getStockQty={getStockQty}
             initialDesktopRevealReady={initialInventoryDesktopRevealReady}
@@ -3287,6 +3705,8 @@ export default function Inventory() {
             loading={loading && isProductsFirstLoad}
             openAdjust={openAdjust}
             selectedProductIds={selectedProductIds}
+            selectionModeActive={selectionModeActive}
+            getInventoryLongPressState={getInventoryLongPressState}
             setDetailProduct={setDetailProduct}
             showProductsSection={showProductsSection}
             t={t}
@@ -3296,6 +3716,7 @@ export default function Inventory() {
             toggleSelectedProduct={toggleSelectedProduct}
             visibleInventoryProducts={visibleInventoryProducts}
           />
+          <AlphaIndexRail letters={inventoryVisibleLetters} onJump={jumpToInventoryLetter} label={t('jump_to_letter') || 'Jump to letter'} />
         </>
       )}
       {/* Movements */}
@@ -3304,7 +3725,7 @@ export default function Inventory() {
           <InventoryMovementsSurface
             actionHistory={actionHistory}
             collapsedMovementSections={collapsedMovementSections}
-            MOV_COLORS={MOV_COLORS}
+            movementColorClass={movementGroupColorClass}
             PaginationControls={PaginationControls}
             expandedMovementGroups={expandedMovementGroups}
             expandedMovementPages={expandedMovementPages}
@@ -3376,10 +3797,11 @@ export default function Inventory() {
         </Suspense>
       ) : null}
 
-      {adjustModal || transferModal || moveModal ? (
+      {adjustModal || transferModal ? (
         <Suspense fallback={null}>
           <InventoryStockModals
             adjustBranchSelectOptions={adjustBranchSelectOptions}
+            adjustCurrentPricing={adjustCurrentPricing}
             adjustCurrentQuantity={adjustCurrentQuantity}
             adjustForm={adjustForm}
             adjustModal={adjustModal}
@@ -3389,21 +3811,16 @@ export default function Inventory() {
             branchCount={branches.length}
             branchSelectOptions={branchSelectOptions}
             branchWithPlaceholderOptions={branchWithPlaceholderOptions}
+            defaultAddQuantity={DEFAULT_ADD_QUANTITY}
+            fmtKHR={fmtKHR}
+            fmtUSD={fmtUSD}
             getStockQty={getStockQty}
-            moveDestinationProductOptions={moveDestinationProductOptions}
-            moveForm={moveForm}
-            moveModal={moveModal}
-            moveReasonOptions={moveReasonOptions}
-            moveSaving={moveSaving}
             onAdjust={handleAdjust}
             onCloseAdjust={() => setAdjustModal(null)}
-            onCloseMove={() => setMoveModal(null)}
             onCloseTransfer={() => setTransferModal(null)}
-            onMove={handleMoveStock}
             onTransfer={handleTransferStock}
             reasonsByType={reasonsByType}
             setAdjustForm={setAdjustForm}
-            setMoveForm={setMoveForm}
             setReasonManager={setReasonManager}
             setTransferForm={setTransferForm}
             t={t}
@@ -3456,6 +3873,21 @@ export default function Inventory() {
         </Suspense>
       ) : null}
 
+      {manageBatchesModal ? (
+        <Suspense fallback={null}>
+          <ManageBatchesModal
+            product={manageBatchesModal}
+            branchSelectOptions={branchSelectOptions}
+            defaultBranchId={defaultBranch?.id?.toString() || ''}
+            notify={notify}
+            onClose={() => setManageBatchesModal(null)}
+            onChanged={() => load(true)}
+            t={t}
+            tr={tr}
+          />
+        </Suspense>
+      ) : null}
+
       {showImport ? (
         <Suspense fallback={null}>
           <InventoryImportModal
@@ -3475,9 +3907,24 @@ export default function Inventory() {
             onClose={() => setDetailProduct(null)}
             onAdjust={openAdjust}
             onTransfer={openTransfer}
-            onMoveRow={openMove}
+            onViewHistory={fetchProductHistoryPreview}
+            onManageBatches={openManageBatches}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
+            t={t}
+          />
+        </Suspense>
+      )}
+
+      {historyPreview && (
+        <Suspense fallback={null}>
+          <ProductHistoryPreviewModal
+            state={historyPreview}
+            onClose={() => setHistoryPreview(null)}
+            onRetry={fetchProductHistoryPreview}
+            onViewFullHistory={openProductHistoryFromDetail}
+            fmtTime={fmtTime}
+            movementColorClass={movementColorClassForRecord}
             t={t}
           />
         </Suspense>

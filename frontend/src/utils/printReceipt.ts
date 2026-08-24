@@ -31,11 +31,13 @@ type ImagePdfInput = {
   imageWidthPx: number
   imageHeightPx: number
   pageWidthPt: number
+  pageHeightPt?: number
   title?: string
 }
 type TextPdfInput = {
   lines: unknown[]
   pageWidthPt: number
+  pageHeightPt?: number
   title?: string
 }
 type ReceiptFallbackLine = {
@@ -312,9 +314,15 @@ function buildPdfStream(dict: string, bodyBytes: ByteChunk): ByteChunk {
   ])
 }
 
-function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, title = 'Receipt' }: ImagePdfInput): ByteChunk {
+function buildSingleImagePdf({ imageBytes, imageWidthPx, imageHeightPx, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt' }: ImagePdfInput): ByteChunk {
   const encoder = new TextEncoder()
-  const pageHeightPt = Math.max(36, pageWidthPt * (imageHeightPx / imageWidthPx))
+  const contentHeightPt = pageWidthPt * (imageHeightPx / imageWidthPx)
+  // Continuous-roll thermal paper (58/72/80mm) has no fixed length, so the
+  // page just wraps the content. Fixed-sheet formats (A4/Letter/custom with
+  // an explicit height) pass a minimum height here so a short receipt still
+  // gets a full-size page instead of a tiny sliver -- while a receipt longer
+  // than the sheet still renders in full rather than being cut off.
+  const pageHeightPt = Math.max(36, fixedHeightPt || 0, contentHeightPt)
   const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
   const content = encoder.encode(`q\n${pageWidthPt.toFixed(2)} 0 0 ${pageHeightPt.toFixed(2)} 0 0 cm\n/Im0 Do\nQ`)
 
@@ -376,7 +384,7 @@ function wrapTextLine(text: unknown, maxChars = 54): string[] {
   return lines.length ? lines : ['']
 }
 
-function buildTextOnlyPdf({ lines, pageWidthPt, title = 'Receipt' }: TextPdfInput): ByteChunk {
+function buildTextOnlyPdf({ lines, pageWidthPt, pageHeightPt: fixedHeightPt, title = 'Receipt' }: TextPdfInput): ByteChunk {
   const encoder = new TextEncoder()
   const safeTitle = String(title === '' ? '' : (title || 'Receipt')).replace(/[()\\]/g, '')
   const margin = 18
@@ -386,7 +394,8 @@ function buildTextOnlyPdf({ lines, pageWidthPt, title = 'Receipt' }: TextPdfInpu
     .flatMap((line) => wrapTextLine(line, 54))
     .slice(0, 260)
 
-  const pageHeightPt = Math.max(72, margin * 2 + preparedLines.length * lineHeight + 12)
+  const contentHeightPt = margin * 2 + preparedLines.length * lineHeight + 12
+  const pageHeightPt = Math.max(72, fixedHeightPt || 0, contentHeightPt)
   const startY = pageHeightPt - margin - fontSize
   const contentLines = ['BT', `/F1 ${fontSize} Tf`, `${margin} ${startY.toFixed(2)} Td`]
 
@@ -1030,22 +1039,44 @@ export function getPaperWidthMm(settings: ReceiptPrintSettings = getPrintSetting
   if (settings.paperSize === '58mm') return 58
   if (settings.paperSize === '72mm') return 72
   if (settings.paperSize === '80mm') return 80
+  if (settings.paperSize === '80x50mm') return 80
   if (settings.paperSize === 'A4') return 210
   if (settings.paperSize === 'letter') return 216
   return 80
 }
 
+/**
+ * Fixed sheet length in mm for paper sizes that have a real physical height
+ * (A4, Letter, or a custom size with an explicit height set). Continuous-roll
+ * thermal paper (58/72/80mm) returns null -- its page length is driven by
+ * the receipt content instead, which is the correct behavior for a printer
+ * that feeds a roll rather than cutting fixed sheets.
+ */
+export function getPaperHeightMm(settings: ReceiptPrintSettings = getPrintSettings()): number | null {
+  if (settings.paperSize === 'A4') return 297
+  if (settings.paperSize === 'letter') return 279.4
+  if (settings.paperSize === '80x50mm') return 50
+  if (settings.paperSize === 'custom') {
+    const parsed = parseFloat(String(settings.customHeight ?? ''))
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }
+  return null
+}
+
 export async function createReceiptPdfBlob(content: ReceiptContent, options: ReceiptPrintOptions = {}): Promise<Blob> {
   const printSettings = options.printSettings || getPrintSettings()
   const widthMm = options.paperWidthMm || getPaperWidthMm(printSettings)
+  const heightMm = getPaperHeightMm(printSettings)
   const title = options.title === '' ? '' : (options.title || 'Receipt')
   const pageWidthPt = mmToPt(widthMm)
+  const pageHeightPt = heightMm != null ? mmToPt(heightMm) : undefined
   const allowTextFallback = Boolean(options.allowTextFallback || options.preferTextOnly)
   const buildTextOnlyReceiptBlob = () => {
     const fallbackLines = extractReceiptLines(content)
     const pdfBytes = buildTextOnlyPdf({
       lines: fallbackLines,
       pageWidthPt,
+      pageHeightPt,
       title,
     })
     return new Blob([bytesToBlobPart(pdfBytes)], { type: 'application/pdf' })
@@ -1064,6 +1095,7 @@ export async function createReceiptPdfBlob(content: ReceiptContent, options: Rec
       imageWidthPx: canvas.width,
       imageHeightPx: canvas.height,
       pageWidthPt,
+      pageHeightPt,
       title,
     })
     return new Blob([bytesToBlobPart(pdfBytes)], { type: 'application/pdf' })

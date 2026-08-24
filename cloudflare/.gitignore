@@ -1,3 +1,8 @@
 node_modules/
 .wrangler/
 *.log
+.dev.vars
+.dev.vars.*
+.wrangler-auth.local
+.env
+.env.local

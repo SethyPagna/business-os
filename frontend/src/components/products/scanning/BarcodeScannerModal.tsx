@@ -37,6 +37,13 @@ interface BarcodeScannerModalProps {
   onClose: () => void
   onDetected: (value: string) => void
   t: (key: string) => string
+  /** Hide the manual-entry text field/panel. Used when this modal is opened
+   * from a search bar (ScanSearchButton) -- the search box right behind the
+   * modal is already a manual-entry field, so showing a second one here is
+   * redundant. ProductForm's usage (the only other caller) leaves this
+   * false, since there the scanner modal IS the primary place to type a
+   * barcode. */
+  hideManualEntry?: boolean
 }
 
 interface BarcodeDetectionResult {
@@ -121,6 +128,7 @@ export default function BarcodeScannerModal({
   onClose,
   onDetected,
   t,
+  hideManualEntry = false,
 }: BarcodeScannerModalProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const streamRef = useRef<MediaStream | null>(null)
@@ -148,8 +156,10 @@ export default function BarcodeScannerModal({
     scanReady: tr('scan_ready', 'Point the camera at a barcode or SKU label.', 'ដាក់កាមេរ៉ាទៅលើបាកូដ ឬស្លាក SKU។'),
     scanUnsupported: tr('scan_unsupported', 'Camera scanning is not supported in this browser. You can still paste or type the value below.', 'ការស្កេនកាមេរ៉ាមិនត្រូវបានគាំទ្រដោយកម្មវិធីរុករកនេះទេ។ អ្នកនៅតែអាចបិទភ្ជាប់ ឬវាយតម្លៃខាងក្រោមបាន។'),
     scanPermissionDenied: tr('scan_permission_denied', 'Camera access was denied. Allow it or enter the code manually.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបដិសេធ។ សូមអនុញ្ញាតវា ឬបញ្ចូលកូដដោយដៃ។'),
-    cameraPermissionNeeded: tr('camera_permission_needed', 'We need camera access to scan barcodes. Tap below and allow camera permission when your browser asks.', 'យើងត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។ ចុចខាងក្រោម ហើយអនុញ្ញាតកាមេរ៉ា នៅពេលកម្មវិធីរុករកស្នើសុំ។'),
-    cameraPermissionBlocked: tr('camera_permission_blocked', 'Camera access is blocked here. Allow it in browser settings or use manual entry below.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទនៅទីនេះ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬប្រើការបញ្ចូលដោយដៃខាងក្រោម។'),
+    cameraPermissionNeeded: tr('camera_permission_needed', 'Camera access is needed to scan barcodes.', 'ត្រូវការការអនុញ្ញាតកាមេរ៉ាដើម្បីស្កេនបាកូដ។'),
+    cameraPermissionBlocked: hideManualEntry
+      ? tr('camera_permission_blocked_no_manual', 'Camera access is blocked. Allow it in your browser settings, then try again.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក រួចសាកម្តងទៀត។')
+      : tr('camera_permission_blocked', 'Camera access is blocked. Allow it in browser settings, or use manual entry below.', 'ការអនុញ្ញាតកាមេរ៉ាត្រូវបានបិទ។ សូមអនុញ្ញាតវាក្នុងការកំណត់កម្មវិធីរុករក ឬប្រើការបញ្ចូលដោយដៃខាងក្រោម។'),
     cameraPermissionResetHint: tr('camera_permission_reset_hint', 'Use the lock icon in the browser address bar to switch camera access back to Allow, then try again.', 'សូមប្រើរូបសោនៅលើរបារអាសយដ្ឋាន ដើម្បីប្ដូរសិទ្ធិកាមេរ៉ាត្រឡប់ទៅអនុញ្ញាត រួចសាកម្តងទៀត។'),
     requestCameraAccess: tr('request_camera_access', 'Request camera access', 'ស្នើសុំការអនុញ្ញាតកាមេរ៉ា'),
     tryCameraAgain: tr('try_camera_again', 'Try camera again', 'សាកកាមេរ៉ាម្តងទៀត'),
@@ -163,8 +173,10 @@ export default function BarcodeScannerModal({
     detectedValue: tr('detected_value', 'Detected value', 'តម្លៃដែលបានរកឃើញ'),
     useValue: tr('use_value', 'Use value', 'ប្រើតម្លៃនេះ'),
     scanning: tr('scanning', 'Scanning...', 'កំពុងស្កេន...'),
-    cameraDocumentBlocked: tr('camera_document_blocked', 'This browser view does not allow camera access. Open this page in your regular phone browser to scan, or use manual entry below.', 'ទិដ្ឋភាពកម្មវិធីរុករកនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតានៅលើទូរស័ព្ទរបស់អ្នក ដើម្បីស្កេន ឬបញ្ចូលដោយដៃខាងក្រោម។'),
-  }), [tr])
+    cameraDocumentBlocked: hideManualEntry
+      ? tr('camera_document_blocked_no_manual', 'This view does not allow camera access. Open this page in your regular browser to scan.', 'ទិដ្ឋភាពនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតា ដើម្បីស្កេន។')
+      : tr('camera_document_blocked', 'This browser view does not allow camera access. Open this page in your regular phone browser to scan, or use manual entry below.', 'ទិដ្ឋភាពកម្មវិធីរុករកនេះមិនអនុញ្ញាតឱ្យប្រើកាមេរ៉ាទេ។ សូមបើកទំព័រនេះក្នុងកម្មវិធីរុករកធម្មតានៅលើទូរស័ព្ទរបស់អ្នក ដើម្បីស្កេន ឬបញ្ចូលដោយដៃខាងក្រោម។'),
+  }), [tr, hideManualEntry])
 
   const promptDismissedMessage = tr('scan_prompt_dismissed', 'The camera prompt was dismissed. Tap below to try again, or enter the code manually.', 'សំណើសុំកាមេរ៉ាត្រូវបានបិទចោល។ ចុចខាងក្រោមដើម្បីសាកម្ដងទៀត ឬបញ្ចូលកូដដោយដៃ។')
 
@@ -455,38 +467,49 @@ export default function BarcodeScannerModal({
   const stateBadge: ScannerStateBadge = stateKind === 'scanning'
     ? {
         label: tr('scanner_state_live', 'Live camera', 'កាមេរ៉ាកំពុងដំណើរការ'),
-        className: 'border-emerald-400/30 bg-emerald-500/15 text-emerald-100',
+        className: 'border-white/40 bg-white text-black',
         icon: <CheckCircle2 className="h-3.5 w-3.5" />,
       }
     : stateKind === 'starting'
       ? {
           label: tr('scanner_state_starting', 'Requesting camera', 'កំពុងស្នើសុំកាមេរ៉ា'),
-          className: 'border-cyan-400/30 bg-cyan-500/15 text-cyan-100',
+          className: 'border-white/30 bg-white/15 text-white',
           icon: <ScanLine className="h-3.5 w-3.5" />,
         }
       : stateKind === 'blocked'
         ? {
             label: tr('scanner_state_blocked', 'Permission blocked', 'សិទ្ធិកាមេរ៉ាត្រូវបានបិទ'),
-            className: 'border-red-400/30 bg-red-500/15 text-red-100',
+            className: 'border-white/40 bg-black text-white',
             icon: <ShieldAlert className="h-3.5 w-3.5" />,
           }
         : stateKind === 'dismissed'
           ? {
               label: tr('scanner_state_retry', 'Prompt dismissed', 'សំណើសុំត្រូវបានបិទចោល'),
-              className: 'border-amber-400/30 bg-amber-500/15 text-amber-100',
+              className: 'border-white/30 bg-white/10 text-white',
               icon: <AlertCircle className="h-3.5 w-3.5" />,
             }
           : {
               label: tr('scanner_state_manual', 'Manual entry ready', 'ត្រៀមបញ្ចូលដោយដៃ'),
-              className: 'border-slate-300/20 bg-slate-700/40 text-slate-100',
+              className: 'border-white/20 bg-white/10 text-white',
               icon: <Keyboard className="h-3.5 w-3.5" />,
             }
 
   return (
     <Modal title={title} onClose={onClose} size="lg">
-      <div className="space-y-4">
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-950 dark:border-slate-700">
-          <div className="aspect-[4/3] w-full bg-slate-950">
+      <div className="space-y-3">
+        {/* Sized off the viewport instead of a fixed 4:3 ratio, and with a
+            bigger guide box relative to the frame -- the old fixed ratio
+            left a lot of dead black margin around a comparatively small
+            scan target, and on a short mobile viewport pushed the modal's
+            total height past what fit on screen, forcing a scroll. Also
+            down to ONE instruction line while actively scanning: the
+            overlay hint here and the black status bar that used to sit
+            below the video both said essentially "point the camera at the
+            code" at the same time -- the bar is gone now, and the "Live
+            camera" badge (redundant with the live video feed itself) only
+            shows while still starting up, not once actually scanning. */}
+        <div className="overflow-hidden rounded-2xl border border-black bg-black dark:border-white/20">
+          <div className={`w-full bg-black ${status === 'scanning' || status === 'starting' ? 'scanner-video-shell' : ''}`}>
             {status === 'scanning' || status === 'starting' ? (
               <div className="relative h-full w-full overflow-hidden">
                 <video
@@ -497,57 +520,40 @@ export default function BarcodeScannerModal({
                   playsInline
                 />
                 <div className="pointer-events-none absolute inset-0">
-                  <div className="absolute inset-x-4 top-4">
-                    <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm shadow-lg ${stateBadge.className}`}>
-                      {stateBadge.icon}
-                      <span>{stateBadge.label}</span>
+                  {stateKind !== 'scanning' ? (
+                    <div className="absolute inset-x-4 top-4">
+                      <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium backdrop-blur-sm shadow-lg ${stateBadge.className}`}>
+                        {stateBadge.icon}
+                        <span>{stateBadge.label}</span>
+                      </div>
                     </div>
+                  ) : null}
+                  <div className="absolute left-1/2 top-1/2 h-[70%] w-[86%] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-white/45 shadow-[0_0_0_999px_rgba(0,0,0,0.45)]" />
+                  <div className="absolute left-1/2 top-1/2 h-[70%] w-[86%] -translate-x-1/2 -translate-y-1/2">
+                    <div className="absolute left-0 top-0 h-8 w-8 rounded-tl-[24px] border-l-[3px] border-t-[3px] border-white" />
+                    <div className="absolute right-0 top-0 h-8 w-8 rounded-tr-[24px] border-r-[3px] border-t-[3px] border-white" />
+                    <div className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-[24px] border-b-[3px] border-l-[3px] border-white" />
+                    <div className="absolute bottom-0 right-0 h-8 w-8 rounded-br-[24px] border-b-[3px] border-r-[3px] border-white" />
+                    <div className="absolute inset-x-[11%] top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-white to-transparent opacity-90 shadow-[0_0_16px_rgba(255,255,255,0.8)]" />
                   </div>
-                  <div className="absolute left-1/2 top-1/2 h-[58%] w-[72%] -translate-x-1/2 -translate-y-1/2 rounded-[28px] border border-cyan-300/45 shadow-[0_0_0_999px_rgba(2,6,23,0.42)]" />
-                  <div className="absolute left-1/2 top-1/2 h-[58%] w-[72%] -translate-x-1/2 -translate-y-1/2">
-                    <div className="absolute left-0 top-0 h-8 w-8 rounded-tl-[24px] border-l-[3px] border-t-[3px] border-cyan-300" />
-                    <div className="absolute right-0 top-0 h-8 w-8 rounded-tr-[24px] border-r-[3px] border-t-[3px] border-cyan-300" />
-                    <div className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-[24px] border-b-[3px] border-l-[3px] border-cyan-300" />
-                    <div className="absolute bottom-0 right-0 h-8 w-8 rounded-br-[24px] border-b-[3px] border-r-[3px] border-cyan-300" />
-                    <div className="absolute inset-x-[11%] top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-cyan-300 to-transparent opacity-90 shadow-[0_0_16px_rgba(34,211,238,0.9)]" />
-                  </div>
-                  <div className="absolute inset-x-5 bottom-5 rounded-2xl border border-white/10 bg-slate-950/58 px-3 py-2 text-center text-xs leading-5 text-slate-100 backdrop-blur-sm">
+                  <div className="absolute inset-x-5 bottom-4 rounded-2xl border border-white/10 bg-slate-950/58 px-3 py-2 text-center text-xs leading-5 text-slate-100 backdrop-blur-sm">
                     {tr('scanner_live_hint', 'Center the barcode inside the frame. We will scan it automatically.', 'ដាក់បារកូដឱ្យស្ថិតនៅកណ្ដាលស៊ុម។ ប្រព័ន្ធនឹងស្កេនដោយស្វ័យប្រវត្តិ។')}
                   </div>
                 </div>
               </div>
             ) : (
-              <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 px-6 py-8 text-center text-slate-100">
+              <div className="flex min-h-[240px] flex-col items-center justify-center gap-3 px-6 py-6 text-center text-white">
                 <div className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${stateBadge.className}`}>
                   {stateBadge.icon}
                   <span>{stateBadge.label}</span>
                 </div>
-                <Camera className="h-10 w-10 text-cyan-300" />
-                <div className="space-y-1">
-                  <p className="text-base font-semibold text-white">
-                    {tr('scanner_ready_title', 'Ready to scan a barcode', 'ត្រៀមស្កេនបារកូដ')}
-                  </p>
-                  <p className="max-w-md text-sm leading-6 text-slate-200">{emptyStateMessage}</p>
-                </div>
-                <div className="grid w-full max-w-md gap-2 rounded-2xl border border-white/10 bg-white/5 p-3 text-left text-xs text-slate-200 sm:grid-cols-3">
-                  <div>
-                    <div className="font-semibold text-white">{tr('scanner_step_tap', '1. Tap start', '១. ចុចចាប់ផ្តើម')}</div>
-                    <div className="mt-1 text-slate-300">{tr('scanner_step_tap_detail', 'Open the live camera only when you want to scan.', 'បើកកាមេរ៉ាពេលដែលអ្នកចង់ស្កេន។')}</div>
-                  </div>
-                  <div>
-                    <div className="font-semibold text-white">{tr('scanner_step_allow', '2. Allow camera', '២. អនុញ្ញាតកាមេរ៉ា')}</div>
-                    <div className="mt-1 text-slate-300">{tr('scanner_step_allow_detail', 'Approve the browser prompt when it appears.', 'អនុម័តសំណើរបស់កម្មវិធីរុករក នៅពេលវាលេចឡើង។')}</div>
-                  </div>
-                  <div>
-                    <div className="font-semibold text-white">{tr('scanner_step_manual', '3. Or type manually', '៣. ឬបញ្ចូលដោយដៃ')}</div>
-                    <div className="mt-1 text-slate-300">{tr('scanner_step_manual_detail', 'Manual entry stays available the whole time.', 'ការបញ្ចូលដោយដៃអាចប្រើបានជានិច្ច។')}</div>
-                  </div>
-                </div>
-                <div className="flex w-full max-w-md flex-col items-center gap-2">
+                <Camera className="h-9 w-9 text-white" />
+                <p className="max-w-sm text-sm leading-6 text-white/80">{emptyStateMessage}</p>
+                <div className="flex w-full max-w-xs flex-col items-center gap-2 pt-1">
                   {showCameraAction ? (
                     <button
                       type="button"
-                      className="btn-secondary w-full border-white/20 bg-white/10 text-white hover:bg-white/15"
+                      className="btn-secondary w-full border-white/25 bg-white text-black hover:bg-white/90"
                       disabled={false}
                       onClick={() => startCamera({ preserveManualValue: true })}
                     >
@@ -556,43 +562,27 @@ export default function BarcodeScannerModal({
                   ) : null}
                   <button
                     type="button"
-                    className="btn-secondary w-full border-white/20 bg-white/10 text-white hover:bg-white/15"
+                    className="btn-secondary w-full border-white/25 bg-transparent text-white hover:bg-white/10"
                     disabled={photoBusy}
                     onClick={openPhotoPicker}
                   >
                     {photoBusy ? labels.scanFromPhotoBusy : labels.scanFromPhoto}
                   </button>
                   {permissionState === 'denied' ? (
-                    <p className="text-xs leading-5 text-slate-300">{labels.cameraPermissionResetHint}</p>
+                    <p className="text-xs leading-5 text-white/70">{labels.cameraPermissionResetHint}</p>
                   ) : null}
                 </div>
               </div>
             )}
           </div>
-          <div className="border-t border-slate-800 bg-slate-900/95 px-4 py-3 text-sm text-slate-200">
-            <div className="flex items-center gap-2">
-              <ScanLine className="h-4 w-4 text-cyan-300" />
-              <span>{statusMessage}</span>
-            </div>
-          </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/60">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <label htmlFor="scanner-manual-value" className="block text-sm font-medium text-slate-700 dark:text-slate-200">
-                {manualValue ? labels.detectedValue : labels.manualEntry}
-              </label>
-              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                {tr('scanner_manual_subtitle', 'Paste or type the barcode / SKU if the camera is unavailable or you want to confirm the value yourself.', 'បិទភ្ជាប់ ឬវាយបារកូដ / SKU ប្រសិនបើមិនអាចប្រើកាមេរ៉ា ឬអ្នកចង់បញ្ជាក់តម្លៃដោយខ្លួនឯង។')}
-              </p>
-            </div>
-            <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-full bg-slate-200 px-2 py-1 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-              <Keyboard className="h-3.5 w-3.5" />
-              {tr('manual_entry', 'Manual entry', 'បញ្ចូលដោយដៃ')}
-            </span>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row">
+        {hideManualEntry ? null : (
+        <div className="border-t border-black/10 pt-3 dark:border-white/10">
+          <label htmlFor="scanner-manual-value" className="block text-sm font-medium text-black dark:text-white">
+            {manualValue ? labels.detectedValue : labels.manualEntry}
+          </label>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
               id="scanner-manual-value"
               name="scanner_manual_value"
@@ -618,20 +608,8 @@ export default function BarcodeScannerModal({
               {labels.useValue}
             </button>
           </div>
-          <div className="mt-3 flex justify-end">
-            <button
-              type="button"
-              className="btn-secondary text-sm"
-              disabled={photoBusy}
-              onClick={openPhotoPicker}
-            >
-              {photoBusy ? labels.scanFromPhotoBusy : labels.scanFromPhoto}
-            </button>
-          </div>
-          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            {tr('manual_entry_hint', 'Manual entry stays available if the camera is unavailable.', 'ការបញ្ចូលដោយដៃនៅតែអាចប្រើបាន ប្រសិនបើកាមេរ៉ាមិនអាចប្រើបាន។')}
-          </p>
         </div>
+        )}
         <input
           ref={photoInputRef}
           type="file"

@@ -13,11 +13,11 @@ const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__';
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`;
 const APP_SHELL_CACHE = APP_SHELL_VERSION;
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`;
-const APP_SHELL_URLS = ['/', '/index.html', '/icon.png'];
+const APP_SHELL_URLS = ['/', '/index.html', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png'];
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox';
 const DB_NAME = 'BusinessOS';
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create';
-const RETRY_DELAY_MS = 30000;
+const RETRY_DELAY_MS = 30_000;
 const OFFLINE_FILE_CHUNK_SIZE = 1024 * 1024;
 const FILE_CHUNK_ENDPOINTS = {
     init: '/api/sync/files/chunks/init',
@@ -140,7 +140,7 @@ function broadcastSyncEvent(type, detail = {}) {
 }
 function nextRetryAt(row) {
     const retryCount = Math.max(0, Number(row?.retry_count || 0) + 1);
-    const delay = Math.min(5 * 60000, RETRY_DELAY_MS * Math.max(1, retryCount));
+    const delay = Math.min(5 * 60_000, RETRY_DELAY_MS * Math.max(1, retryCount));
     return {
         retry_count: retryCount,
         retry_at: new Date(Date.now() + delay).toISOString(),
@@ -354,6 +354,12 @@ function isNeverCachedPath(pathname) {
 function isCacheableStaticPath(pathname) {
     return pathname.startsWith('/assets/')
         || pathname === '/icon.png'
+        || pathname === '/icon-192.png'
+        || pathname === '/icon-512.png'
+        || pathname === '/icon-192-maskable.png'
+        || pathname === '/icon-512-maskable.png'
+        || pathname === '/apple-touch-icon.png'
+        || pathname === '/manifest.json'
         || pathname === '/runtime-noise-guard.js'
         || pathname === '/theme-bootstrap.js';
 }

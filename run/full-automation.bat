@@ -3,12 +3,11 @@ chcp 65001 >nul 2>&1
 setlocal
 
 REM ==========================================================================
-REM  Runs the full local verification suite, then builds and starts a new
-REM  Docker release image in one step (verify -> docker-release.ps1 -Action
-REM  Release -> docker-release.ps1 -Action Start). Intended for cutting a
-REM  new versioned release and deploying it locally in one command.
-REM  Takes longer than run\docker\update.bat -- use that instead for a
-REM  routine "pull latest and restart".
+REM  Runs the full Cloudflare release pipeline in one step: typecheck ->
+REM  build frontend -> apply remote D1 migrations -> wrangler deploy -> live
+REM  health check against the real Workers URL. Intended for cutting a new
+REM  release and deploying it in one command. See
+REM  ops\scripts\powershell\full-automation.ps1 for the implementation.
 REM ==========================================================================
 
 if defined BUSINESS_OS_REPO_ROOT (

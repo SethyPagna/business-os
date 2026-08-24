@@ -4,6 +4,8 @@ import {
   buildProductsById,
   buildVariantChildrenByParentId,
   buildVisibleProductCards,
+  computeCartLineSavings,
+  computeExpiryStatus,
   findMatchingCartLineIndex,
   getCartLineId,
   getVariantChoices,
@@ -39,6 +41,25 @@ await runTest('grouped products resolve to their parent card and sorted variant 
   assert.equal(getVariantRootProduct(products[1], productsById)?.id, 1)
   assert.deepEqual(getVariantChoices(visible[0], children).map((item) => item.name), ['Root Product', 'Variant A', 'Variant B'])
   assert.deepEqual(visible.map((item) => item.id), [1])
+})
+
+await runTest('variant children sort by name, then branch, then price, then barcode', () => {
+  // Same regression as productGrouping.test.ts's equivalent case, but for
+  // POS's own variant-child list (buildVariantChildrenByParentId), which
+  // used to sort by name only.
+  const products = [
+    { id: 1, name: 'Root', parent_id: null, is_group: 1 },
+    {
+      id: 2, name: 'Same Name', parent_id: 1, selling_price_usd: 10,
+      branch_stock: [{ branch_id: 2, branch_name: 'Siem Reap', quantity: 5 }],
+    },
+    {
+      id: 3, name: 'Same Name', parent_id: 1, selling_price_usd: 20,
+      branch_stock: [{ branch_id: 1, branch_name: 'Phnom Penh', quantity: 5 }],
+    },
+  ]
+  const children = buildVariantChildrenByParentId(products)
+  assert.deepEqual(children.get(1)?.map((item) => item.id), [3, 2], 'Phnom Penh (id 3) should sort before Siem Reap (id 2) despite costing more')
 })
 
 await runTest('product lookup ignores invalid ids', () => {
@@ -161,6 +182,79 @@ await runTest('promotion price mode applies active product discounts and preserv
   assert.equal(promotion.product_discount_type, 'percent')
   assert.equal(promotion.product_discount_label, 'Launch deal')
   assert.equal(promotion.product_discount_usd, 2)
+})
+
+await runTest('computeCartLineSavings is inactive for plain selling-priced lines', () => {
+  const savings = computeCartLineSavings({
+    price_mode: 'selling',
+    selling_price_usd: 20,
+    selling_price_khr: 82000,
+    base_price_usd: 20,
+    base_price_khr: 82000,
+  })
+  assert.equal(savings.active, false)
+  assert.equal(savings.savings_usd, 0)
+})
+
+await runTest('computeCartLineSavings reports was/save figures for a special-priced line', () => {
+  const savings = computeCartLineSavings({
+    price_mode: 'special',
+    selling_price_usd: 20,
+    selling_price_khr: 82000,
+    base_price_usd: 15,
+    base_price_khr: 61500,
+  })
+  assert.equal(savings.active, true)
+  assert.equal(savings.compare_at_usd, 20)
+  assert.equal(savings.savings_usd, 5)
+  assert.equal(savings.savings_khr, 20500)
+  assert.equal(savings.savings_percent, 25)
+})
+
+await runTest('computeCartLineSavings reports was/save figures for an active promotion line, falling back to applied_price when base_price is absent', () => {
+  const savings = computeCartLineSavings({
+    price_mode: 'promotion',
+    selling_price_usd: 20,
+    selling_price_khr: 82000,
+    applied_price_usd: 18,
+    applied_price_khr: 73800,
+  })
+  assert.equal(savings.active, true)
+  assert.equal(savings.savings_usd, 2)
+  assert.equal(savings.savings_percent, 10)
+})
+
+await runTest('computeCartLineSavings stays inactive when the "special" price is not actually lower', () => {
+  const savings = computeCartLineSavings({
+    price_mode: 'special',
+    selling_price_usd: 20,
+    selling_price_khr: 82000,
+    base_price_usd: 20,
+    base_price_khr: 82000,
+  })
+  assert.equal(savings.active, false)
+})
+
+await runTest('computeExpiryStatus classifies expired, expiring-soon, and ok dates against a fixed "today"', () => {
+  const today = '2026-08-20'
+  assert.equal(computeExpiryStatus(null, 30, today), null)
+  assert.equal(computeExpiryStatus(undefined, 30, today), null)
+
+  const expired = computeExpiryStatus('2026-08-10', 30, today)
+  assert.equal(expired?.status, 'expired')
+  assert.equal(expired?.daysRemaining, -10)
+
+  const expiring = computeExpiryStatus('2026-09-05', 30, today)
+  assert.equal(expiring?.status, 'expiring')
+  assert.equal(expiring?.daysRemaining, 16)
+
+  const ok = computeExpiryStatus('2027-01-01', 30, today)
+  assert.equal(ok?.status, 'ok')
+
+  // Missing/invalid alert_days falls back to the same 30-day default the
+  // product form itself defaults to.
+  const defaultedWindow = computeExpiryStatus('2026-09-10', undefined, today)
+  assert.equal(defaultedWindow?.status, 'expiring')
 })
 
 if (failed > 0) {

@@ -1,3 +1,4 @@
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { fmtDate } from '../../utils/formatters'
 import { PERMISSION_DEFS as PERMISSION_DEFS_SOURCE } from './permissionDefinitions'
 
@@ -77,7 +78,7 @@ export default function UserDetailSheet({ user, roles, canManage, onEdit, onRese
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="flex max-h-modal-85 w-full max-w-md flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-blue-100 text-lg font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
@@ -91,10 +92,10 @@ export default function UserDetailSheet({ user, roles, canManage, onEdit, onRese
           <button
             type="button"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center text-2xl text-gray-400 hover:text-gray-600"
+            className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"
             aria-label={translateLabel(t, 'close', 'Close')}
           >
-            x
+            <X className="h-4 w-4" />
           </button>
         </div>
 
@@ -119,6 +120,7 @@ export default function UserDetailSheet({ user, roles, canManage, onEdit, onRese
                 return (
                   <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                     {translateLabel(t, perm?.tKey || key, perm?.label || key)}
+                    {permissions[key] === 'review' ? ` (${translateLabel(t, 'review_required', 'Review Required')})` : ''}
                   </span>
                 )
               })}

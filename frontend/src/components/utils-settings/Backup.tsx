@@ -1,15 +1,19 @@
-import { Suspense, lazy, memo, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ButtonHTMLAttributes, ComponentType, ReactNode } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArchiveRestore from 'lucide-react/dist/esm/icons/archive-restore.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Cloud from 'lucide-react/dist/esm/icons/cloud.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import FolderInput from 'lucide-react/dist/esm/icons/folder-input.js'
 import FolderOutput from 'lucide-react/dist/esm/icons/folder-output.js'
 import HardDriveDownload from 'lucide-react/dist/esm/icons/hard-drive-download.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import Link2Off from 'lucide-react/dist/esm/icons/link-2-off.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -268,23 +272,39 @@ const QUICK_BACKUP_SECTIONS = [
   'Portal + files',
 ]
 
-const LazyResetData = lazy(async () => {
+const LazyResetData = lazyRetry(async () => {
   const module = await import('./ResetData')
   return { default: module.ResetData as ComponentType<MaintenanceResetPanelProps> }
-})
+}, 'backup-reset-data')
 
-const LazyFactoryReset = lazy(async () => {
+const LazySectionReset = lazyRetry(async () => {
+  const module = await import('./ResetData')
+  return { default: module.SectionReset as ComponentType<MaintenanceResetPanelProps> }
+}, 'backup-section-reset')
+
+const LazyFactoryReset = lazyRetry(async () => {
   const module = await import('./ResetData')
   return { default: module.FactoryReset as ComponentType<MaintenanceResetPanelProps> }
-})
+}, 'backup-factory-reset')
 
-const BACKUP_SECTION_OPTIONS: Array<{ value: BackupSectionId; label: string; hint: string }> = [
-  { value: 'all', label: 'Overview', hint: 'Open one backup tool at a time so the page stays responsive.' },
-  { value: 'doctor', label: 'Doctor', hint: 'Check Docker data, storage, Google Drive, Google login, and backup package readiness.' },
-  { value: 'export', label: 'Export', hint: 'Create a full Docker-safe backup package.' },
-  { value: 'restore', label: 'Restore', hint: 'Restore a verified Business OS backup folder.' },
-  { value: 'drive', label: 'Google Drive', hint: 'Connect and manage Drive sync for backup mirrors.' },
-  { value: 'maintenance', label: 'Maintenance', hint: 'Advanced maintenance and reset tools.' },
+// Ordered least-to-most destructive -- 'section' (single entity: customers/
+// suppliers/delivery contacts/audit log) is the safest and deliberately
+// the default first-shown tab, 'data' (sales/products/all) is the next
+// step up, 'factory' (everything, unrecoverable) is last. See this
+// section's own render comment for why this tier layer exists.
+const MAINTENANCE_TIERS: Array<{ id: 'section' | 'data' | 'factory'; icon: ComponentType<{ className?: string }>; labelKey: string; label: string; hintKey: string; hint: string }> = [
+  { id: 'section', icon: RotateCcw, labelKey: 'maintenance_tier_section', label: 'Section Reset', hintKey: 'maintenance_tier_section_hint', hint: 'Clear one contact-type section (customers, suppliers, delivery contacts, or audit log) on its own.' },
+  { id: 'data', icon: Trash2, labelKey: 'maintenance_tier_data', label: 'Data Reset', hintKey: 'maintenance_tier_data_hint', hint: 'Sales-only, Products-only, or a full data reset -- users, roles, branches, and settings are kept.' },
+  { id: 'factory', icon: ShieldAlert, labelKey: 'maintenance_tier_factory', label: 'Factory Reset', hintKey: 'maintenance_tier_factory_hint', hint: 'Deletes everything and returns the app to factory defaults. The most dangerous option here, and unrecoverable.' },
+]
+
+const BACKUP_SECTION_OPTIONS: Array<{ value: BackupSectionId; labelKey: string; label: string; hintKey: string; hint: string }> = [
+  { value: 'all', labelKey: 'overview', label: 'Overview', hintKey: 'backup_section_overview_hint', hint: 'Open one backup tool at a time so the page stays responsive.' },
+  { value: 'doctor', labelKey: 'doctor', label: 'Doctor', hintKey: 'backup_section_doctor_hint', hint: 'Check Cloudflare data, storage, Google Drive, Google login, and backup package readiness.' },
+  { value: 'export', labelKey: 'export', label: 'Export', hintKey: 'backup_section_export_hint', hint: 'Create a full Cloudflare-safe backup package.' },
+  { value: 'restore', labelKey: 'restore', label: 'Restore', hintKey: 'backup_section_restore_hint', hint: 'Restore a verified Business OS backup folder.' },
+  { value: 'drive', labelKey: 'google_drive', label: 'Google Drive', hintKey: 'backup_section_drive_hint', hint: 'Connect and manage Drive sync for backup mirrors.' },
+  { value: 'maintenance', labelKey: 'maintenance', label: 'Maintenance', hintKey: 'backup_section_maintenance_hint', hint: 'Advanced maintenance and reset tools.' },
 ]
 
 const BACKUP_SECTION_IDS = new Set<BackupSectionId>(BACKUP_SECTION_OPTIONS.map((option) => option.value))
@@ -296,17 +316,17 @@ function isBackupSectionId(value: string): value is BackupSectionId {
 const BACKUP_LOCAL_COPY: BackupLocalCopy = {
   km: {
     backup: 'បម្រុងទុក',
-    export_backup_desc: 'បង្កើតកញ្ចប់បម្រុងទុក Docker ពេញលេញ ដែលមានទិន្នន័យ Postgres, R2 ឬ object storage offline, ការកំណត់, អ្នកប្រើ, ឯកសារ portal និង metadata សម្រាប់ស្ដារ។',
+    export_backup_desc: 'បង្កើត backup Cloudflare ពេញលេញទៅ R2 ដែលមានទិន្នន័យ D1 ការកំណត់ អ្នកប្រើ portal និង metadata សម្រាប់ស្ដារ។',
     export_backup_title: 'នាំចេញបម្រុងទុក',
-    folder_backup_placeholder: 'ថតម៉ាស៊ីនមេជាជម្រើសសម្រាប់ backup ពេញលេញ',
+    folder_backup_placeholder: 'ទុកទទេ ដើម្បីប្រើ R2 backups/cloudflare/',
     browse_folder: 'ជ្រើសថត',
     browse: 'រុករក',
     hide_advanced_browser: 'លាក់',
     export_backup_btn: 'នាំចេញ',
     exporting: 'កំពុងនាំចេញ...',
     import_backup_title: 'ស្ដារបម្រុងទុក',
-    import_backup_desc: 'ស្ដារថតបម្រុងទុក Business OS ពេញលេញពីម៉ាស៊ីនមេ។',
-    folder_restore_placeholder: 'ជ្រើសផ្លូវថត backup ពេញលេញ',
+    import_backup_desc: 'ស្ដារ backup Business OS ពី R2 ហើយសរសេរជំនួសទិន្នន័យ D1 បច្ចុប្បន្ន។',
+    folder_restore_placeholder: 'ឈ្មោះ backup ឬ key R2',
     restore_backup_btn: 'ស្ដារ',
     importing_backup: 'កំពុងស្ដារ...',
     folder_restore_note: 'ការស្ដារទទួលយកតែកញ្ចប់ backup Business OS ចុងក្រោយ ឬ Google Drive datasync version។',
@@ -317,14 +337,14 @@ const BACKUP_LOCAL_COPY: BackupLocalCopy = {
     clear: 'សម្អាត',
     choose_folder_first: 'សូមជ្រើសថតជាមុន',
     server_folder_note: 'សកម្មភាពថតប្រើ path នៅលើម៉ាស៊ីនមេ Business OS។ សូមវាយ path ដែលមាននៅលើម៉ាស៊ីនមេ មិនមែនឧបករណ៍ browser ពីចម្ងាយទេ។',
-    server_restore_note: 'Restore ប្រើថត backup ចុងក្រោយពីម៉ាស៊ីនមេ Business OS។ សូមវាយ path ម៉ាស៊ីនមេ ឬស្ដារពី Google Drive datasync version។',
+    server_restore_note: 'សូមវាយឈ្មោះ backup R2 ដូចជា business-os-cloudflare-YYYYMMDD-HHmmssZ.json ឬ key ពេញ backups/cloudflare/...។ ការស្ដារនឹងសរសេរជំនួសទិន្នន័យ D1។',
     host_ui_local_only: 'សកម្មភាពនេះដំណើរការបានតែលើម៉ាស៊ីនមេប៉ុណ្ណោះ។ ពេលភ្ជាប់ពីចម្ងាយ សូមវាយ ឬបិទភ្ជាប់ path ម៉ាស៊ីនមេដោយដៃ។',
     restore: 'ស្ដារ',
     export: 'នាំចេញ',
     refresh: 'ផ្ទុកឡើងវិញ',
     save: 'រក្សាទុក',
     integration_doctor_title: 'ពិនិត្យការភ្ជាប់ប្រព័ន្ធ',
-    integration_doctor_desc: 'ពិនិត្យ Docker data, R2/offline storage, Google Drive, Google login, backup packages, Redis jobs និង DuckDB/Parquet ដោយមិនបង្ហាញ secret។',
+    integration_doctor_desc: 'ពិនិត្យ Cloudflare D1, R2, Queues, Google Drive ជាជម្រើស និង backup packages ដោយមិនបង្ហាញ secret។',
     integration_doctor_complete: 'ពិនិត្យប្រព័ន្ធរួចរាល់',
     integration_doctor_failed: 'ពិនិត្យប្រព័ន្ធបរាជ័យ',
     run_deep_doctor: 'ពិនិត្យ storage',
@@ -507,7 +527,7 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
             {copy('integration_doctor_title', 'Integration doctor')}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {copy('integration_doctor_desc', 'Checks Docker data, R2/offline storage, Google Drive, Google login, backup packages, Redis jobs, and DuckDB/Parquet without showing secrets.')}
+            {copy('integration_doctor_desc', 'Checks Cloudflare D1, R2, Queues, optional Google Drive and backup packages, without showing secrets.')}
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -523,10 +543,10 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
       </div>
 
       <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-        <DoctorStatusPill label="Postgres" check={checks.database} />
+        <DoctorStatusPill label="Cloudflare D1" check={checks.database} />
         <DoctorStatusPill label={`${String(runtime.objectStorageDriver || 'R2').toUpperCase()} storage`} check={storage} />
-        <DoctorStatusPill label="Redis jobs" check={checks.queue} />
-        <DoctorStatusPill label="DuckDB / Parquet" check={checks.analytics} />
+        <DoctorStatusPill label="Cloudflare Queues" check={checks.queue} />
+        <DoctorStatusPill label="Analytics" check={checks.analytics} />
         <DoctorStatusPill label="Google Drive" check={drive} />
         <DoctorStatusPill label="Google login" check={google_login} />
         <DoctorStatusPill label="Backup packages" check={checks.backup} />
@@ -562,19 +582,34 @@ function IntegrationDoctorCard({ copy, notify, active }: IntegrationDoctorCardPr
 }
 
 function useCopy(t: TranslateFn): CopyFn {
-  const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
-  return (key: string, fallback: string, fallbackKm = fallback): string => {
-    const value = t?.(key)
-    if (value && value !== key && !isBrokenLocalizedString(value)) return value
-    if (isKhmer) {
-      const localKm = BACKUP_LOCAL_COPY.km?.[key]
-      if (localKm && !isBrokenLocalizedString(localKm)) return localKm
-      if (fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
+  // Memoized on `t` alone -- this used to return a brand-new closure on
+  // *every* render. Several callbacks in this file (most importantly
+  // GoogleDriveSyncSection's `load`) list `copy` in their dependency
+  // array, so a fresh identity every render made those callbacks -- and
+  // any effect depending on them -- re-run every render too. Combined
+  // with the Drive section's own state churn (activeJob updates every
+  // ~2s while a job is polling), that turned into an unthrottled
+  // render -> refetch -> setState -> render loop that hammered the
+  // network and the main thread for as long as the Drive section stayed
+  // mounted -- read as "the Backup page freezes/becomes unresponsive"
+  // once the user then tried to click to another section. Memoizing
+  // this hook's return value breaks the loop at its root, independent of
+  // the effect-dependency fix applied below.
+  return useMemo(() => {
+    const isKhmer = /[\u1780-\u17FF]/.test(t?.('cancel') || '')
+    return (key: string, fallback: string, fallbackKm = fallback): string => {
+      const value = t?.(key)
+      if (value && value !== key && !isBrokenLocalizedString(value)) return value
+      if (isKhmer) {
+        const localKm = BACKUP_LOCAL_COPY.km?.[key]
+        if (localKm && !isBrokenLocalizedString(localKm)) return localKm
+        if (fallbackKm && !isBrokenLocalizedString(fallbackKm)) return fallbackKm
+      }
+      const localEn = BACKUP_LOCAL_COPY.en?.[key]
+      if (localEn && !isBrokenLocalizedString(localEn)) return localEn
+      return isBrokenLocalizedString(fallback) ? key : fallback
     }
-    const localEn = BACKUP_LOCAL_COPY.en?.[key]
-    if (localEn && !isBrokenLocalizedString(localEn)) return localEn
-    return isBrokenLocalizedString(fallback) ? key : fallback
-  }
+  }, [t])
 }
 
 function formatDateTime(raw: unknown): string {
@@ -860,11 +895,21 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       invalidateTrackedRequest(loadRequestRef)
       return
     }
-    load({ force: true })
+    // Deliberately depends on `active` only, not `load` -- `load`'s own
+    // identity churns with every state update inside this section
+    // (activeJob polling, status/form changes), and this effect used to
+    // list it as a dependency, so it re-ran (and re-fetched) on every
+    // single one of those re-renders instead of once per real mount.
+    // `loadRef` (kept current by the effect right above this one) is the
+    // mechanism this file already uses elsewhere to call the latest
+    // `load` without depending on its identity -- this effect just
+    // wasn't using it. See useCopy's own memoization fix above for the
+    // other half of what caused that loop.
+    loadRef.current?.({ force: true })
     return () => {
       isMountedRef.current = false
     }
-  }, [active, load])
+  }, [active])
   useEffect(() => () => {
     isMountedRef.current = false
     actionLockRef.current = ''
@@ -997,7 +1042,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
       return
     }
     if (status && !status.hasClientSecret) {
-      notify(copy('drive_sync_secret_env_required', 'Google Drive client secret is missing from the server env. Add it to the ignored Docker env file, then restart Business OS.'), 'error')
+      notify(copy('drive_sync_secret_env_required', 'Google Drive client secret is missing from Cloudflare Worker secrets. Add it with Wrangler, then redeploy Business OS.'), 'error')
       return
     }
 
@@ -1137,7 +1182,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             {copy('drive_sync_title', 'Google Drive Sync')}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            {copy('drive_sync_desc', 'Mirror the live Business OS data folder into Google Drive on an ongoing background schedule.')}
+            {copy('drive_sync_desc', 'Mirror Cloudflare backups to Google Drive on an optional background schedule.')}
           </p>
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
@@ -1167,7 +1212,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
               : copy('drive_sync_secret_env_missing', 'Missing from server env')}
           </div>
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            {copy('drive_sync_secret_env_note', 'The secret is never typed or shown in the browser. Update the ignored Docker env file when it changes.')}
+            {copy('drive_sync_secret_env_note', 'The secret is never typed or shown in the browser. Store it as a Cloudflare Worker secret when Google Drive sync is enabled.')}
           </p>
         </div>
         <label className="grid gap-1.5 text-sm text-gray-600 dark:text-gray-300">
@@ -1215,7 +1260,7 @@ function GoogleDriveSyncSection({ t, notify, active = true, actionHistory = null
             ))}
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            {copy('drive_sync_interval_note', 'Default is 360 minutes (every 6 hours). Quick choices use 3, 6, 9, 12, or 24 hours.')}
+            {copy('drive_sync_interval_note', 'Default is 360 minutes (every 6 hours). Quick choices use 1, 3, 6, 12, or 24 hours. Google Drive keeps up to 10 backup versions.')}
           </p>
         </label>
       </div>
@@ -1344,7 +1389,7 @@ function BackupOverview({ copy, onSelect }: BackupOverviewProps) {
       id: 'export',
       icon: FolderOutput,
       title: copy('export_backup_title', 'Export backup'),
-      body: copy('backup_overview_export_desc', 'Queue a Docker-safe package without blocking the page.'),
+      body: copy('backup_overview_export_desc', 'Create a Cloudflare R2 backup without blocking the page.'),
     },
     {
       id: 'restore',
@@ -1410,12 +1455,18 @@ export default function Backup() {
   const [folderImportPath, setFolderImportPath] = useState('')
   const [activeJob, setActiveJob] = useState<BackupJob | null>(null)
   const [advancedMaintenanceOpen, setAdvancedMaintenanceOpen] = useState(false)
+  const [maintenanceTier, setMaintenanceTier] = useState<'section' | 'data' | 'factory'>('section')
   const [backupSection, setBackupSection] = useState<BackupSectionId>('all')
   const aliveRef = useRef(true)
   const jobStopRef = useRef<StopFn | null>(null)
   const activeJobSignatureRef = useRef('')
   const actionLockRef = useRef<BackupAction>('')
   const showBackupSection = (sectionId: BackupSectionId) => backupSection === sectionId
+  const backupSectionOptions = BACKUP_SECTION_OPTIONS.map((option) => ({
+    value: option.value,
+    label: copy(option.labelKey, option.label),
+    hint: copy(option.hintKey, option.hint),
+  }))
   const handleBackupSectionChange = useCallback((value: string) => {
     if (isBackupSectionId(value)) setBackupSection(value)
   }, [])
@@ -1521,7 +1572,12 @@ export default function Backup() {
 
   const handleFolderImport = async () => {
     if (actionLockRef.current) return
-    if (!hasPermission('backup')) return notify(copy('no_permission', 'No permission'), 'error')
+    // Restore requires 'backup_restore' specifically, not just 'backup' --
+    // matches the backend gate in routes/backups.ts. These used to be the
+    // same check (backup_restore silently fell back to backup) which meant
+    // granting someone "Backup export" also silently gave them full
+    // database restore power; fixed both sides together this session.
+    if (!hasPermission('backup_restore')) return notify(copy('no_permission', 'No permission'), 'error')
     if (!folderImportPath) return notify(copy('choose_folder_first', 'Choose a folder first'), 'error')
     if (!confirm(`${copy('import_backup_warning', 'This validates a backup package before any restore can replace live data.')}\n\n${copy('import_backup_confirm', 'Continue?')}`)) return
 
@@ -1621,13 +1677,22 @@ export default function Backup() {
           tone="blue"
           title={copy('backup', 'Backup')}
           subtitle={copy('backup_page_subtitle', 'Create, restore, and verify full Business OS backups.', 'បង្កើត ស្ដារ និងពិនិត្យ backup Business OS ពេញលេញ។')}
+          historySlot={<ActionHistoryBar history={actionHistory} className="flex-shrink-0" t={t} showLabel />}
         />
-        <SectionSwitcher
-          label=""
-          options={BACKUP_SECTION_OPTIONS}
-          value={backupSection}
-          onChange={handleBackupSectionChange}
-        />
+        {/* Sections get their own full-width row now that History sits next
+            to the page-guide icon in PageHeader's row above (per explicit
+            user direction: the icon explaining what this page does, then
+            History, both on the left) instead of sharing this row with the
+            section pills. */}
+        <div className="flex min-w-0 items-center gap-2">
+          <SectionSwitcher
+            label=""
+            className="min-w-0 flex-1"
+            options={backupSectionOptions}
+            value={backupSection}
+            onChange={handleBackupSectionChange}
+          />
+        </div>
         <LoadingWatchdog
           loading={!!loading}
           timeoutMs={9000}
@@ -1635,7 +1700,6 @@ export default function Backup() {
           details={loading ? `Backup operation: ${loading}` : ''}
           onRetry={() => setLoading('')}
         />
-        <ActionHistoryBar history={actionHistory} className="mb-3" />
         <JobProgressCard job={activeJob} copy={copy} onClear={() => setActiveJob(null)} onCancel={cancelActiveBackupJob} />
           {backupSection === 'all' ? <MemoBackupOverview copy={copy} onSelect={setBackupSection} /> : null}
           {showBackupSection('doctor') ? (
@@ -1648,7 +1712,7 @@ export default function Backup() {
             {copy('export_backup_title', 'Export backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('export_backup_desc', 'Create a full Docker backup package with Postgres data, R2 or offline object assets, settings, users, portal files, and restore metadata.')}
+            {copy('export_backup_desc', 'Create a full Cloudflare backup in R2 with D1 data, settings, users, portal records, inventory, sales, returns, and restore metadata. Automatic Cloudflare backups run every 6 hours and keep the newest 2.')}
           </p>
           <div className="mb-3 flex flex-wrap gap-2">
             {QUICK_BACKUP_SECTIONS.map((section) => (
@@ -1667,8 +1731,8 @@ export default function Backup() {
             </div>
             <p className="text-xs text-blue-700 dark:text-blue-300">
               {folderExportPath
-                ? copy('backup_custom_path_note', 'Export will use the advanced server path below.')
-                : copy('backup_default_path_note', 'Export uses the safe Docker backup folder automatically. No folder choice is needed.')}
+                ? copy('backup_custom_path_note', 'Export will still use R2; the value below is treated as an optional label.')
+                : copy('backup_default_path_note', 'Export uses R2 backups/cloudflare/ automatically. No folder choice is needed.')}
             </p>
 
             <details className="rounded-xl border border-blue-100 bg-white/60 p-3 text-sm dark:border-blue-900/50 dark:bg-zinc-900/40">
@@ -1684,7 +1748,7 @@ export default function Backup() {
                     autoComplete="off"
                     value={folderExportPath}
                     onChange={(event) => setFolderExportPath(event.target.value)}
-                    placeholder={copy('folder_backup_placeholder', 'Optional server folder for full backups')}
+                    placeholder={copy('folder_backup_placeholder', 'Leave blank to use R2 backups/cloudflare/')}
                   />
                 </div>
                 <p className="text-xs text-blue-700 dark:text-blue-300">
@@ -1703,13 +1767,13 @@ export default function Backup() {
             {copy('import_backup_title', 'Restore backup')}
           </h2>
           <p className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            {copy('import_backup_desc', 'Restore a full Business OS backup folder from the server. This replaces current data, uploads, settings, users, portal files, stock, and custom tables.')}
+            {copy('import_backup_desc', 'Restore a full Business OS backup from R2. This overwrites current D1 data including settings, users, portal records, products, stock, sales, returns, and custom tables.')}
           </p>
 
           <div className="grid gap-3 rounded-2xl border border-amber-100 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-900/10">
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               <PrimaryActionButton data-testid="backup-restore-start" onClick={handleFolderImport} disabled={!!loading || activeBackupJobRunning}>
-                <Upload className="h-4 w-4" />
+                <Download className="h-4 w-4" />
                 {loading === 'folder-import' ? copy('importing_backup', 'Importing...') : copy('restore_backup_btn', 'Restore')}
               </PrimaryActionButton>
             </div>
@@ -1731,11 +1795,11 @@ export default function Backup() {
                     autoComplete="off"
                     value={folderImportPath}
                     onChange={(event) => setFolderImportPath(event.target.value)}
-                    placeholder={copy('folder_restore_placeholder', 'Choose a full backup folder path')}
+                    placeholder={copy('folder_restore_placeholder', 'business-os-cloudflare-YYYYMMDD-HHmmssZ.json')}
                   />
                 </div>
                 <p className="text-xs text-amber-700 dark:text-amber-300">
-                  {copy('server_restore_note', 'Restore uses a final backup folder from the Business OS server/container. Type a server path or restore from a Google Drive datasync version.')}
+                  {copy('server_restore_note', 'Restore uses an R2 backup key from backups/cloudflare/. It validates the backup format before replacing D1 rows.')}
                 </p>
               </div>
             </details>
@@ -1764,9 +1828,41 @@ export default function Backup() {
                 </div>
               )}
             >
+              {/* Was: all three tools (Section Reset, Data Reset, Factory
+                  Reset) stacked and fully rendered at once under this one
+                  toggle -- three separate mode-grids-with-full-descriptions
+                  laid out flat, which is the "too text heavy" complaint on
+                  the open backlog. Now a tier picker gates which single
+                  tool renders below, ordered least-to-most destructive so
+                  the safest tool is the default first thing shown, same
+                  "pick one to reveal its options" pattern just applied to
+                  each tool's own mode grid above (see ResetData.tsx). */}
               <div className="mt-4 space-y-4">
-                <LazyResetData actionHistory={actionHistory} />
-                <LazyFactoryReset actionHistory={actionHistory} />
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {MAINTENANCE_TIERS.map((tier) => (
+                    <button
+                      key={tier.id}
+                      type="button"
+                      onClick={() => setMaintenanceTier(tier.id)}
+                      className={`rounded-xl border-2 p-3 text-left text-sm transition-colors ${
+                        maintenanceTier === tier.id
+                          ? 'border-red-500 bg-red-50 dark:bg-red-900/20'
+                          : 'border-gray-200 hover:border-red-300 dark:border-gray-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 font-semibold text-gray-800 dark:text-gray-200">
+                        <tier.icon className="h-4 w-4 shrink-0" />
+                        {copy(tier.labelKey, tier.label)}
+                      </div>
+                      {maintenanceTier === tier.id ? (
+                        <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{copy(tier.hintKey, tier.hint)}</div>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+                {maintenanceTier === 'section' ? <LazySectionReset actionHistory={actionHistory} /> : null}
+                {maintenanceTier === 'data' ? <LazyResetData actionHistory={actionHistory} /> : null}
+                {maintenanceTier === 'factory' ? <LazyFactoryReset actionHistory={actionHistory} /> : null}
               </div>
             </Suspense>
           ) : null}

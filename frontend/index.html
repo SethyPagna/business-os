@@ -8,10 +8,13 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Business OS" />
     <meta name="format-detection" content="telephone=no" />
+    <link rel="manifest" href="/manifest.json" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico?v=business-os" />
-    <link rel="icon" type="image/png" href="/icon.png" />
-    <link rel="apple-touch-icon" href="/icon.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/icon-512.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Business OS</title>
     <script>
       (function setInitialBusinessOsRoute() {
@@ -76,42 +79,40 @@
       }
       .business-os-initial-shell {
         position: fixed;
-        top: 12px;
-        left: 12px;
+        inset: 0;
         z-index: 1;
         display: flex;
         align-items: center;
+        justify-content: center;
         box-sizing: border-box;
         pointer-events: none;
       }
       .business-os-initial-panel {
-        display: inline-flex;
+        display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 8px;
-        max-width: calc(100vw - 24px);
-        border: 1px solid rgba(148, 163, 184, 0.28);
+        gap: 14px;
+        max-width: calc(100vw - 32px);
+        text-align: center;
+      }
+      .business-os-initial-spinner {
+        width: 44px;
+        height: 44px;
         border-radius: 999px;
-        background: rgba(255, 255, 255, 0.86);
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-        padding: 6px 10px 6px 6px;
-        backdrop-filter: blur(10px);
+        border: 3px solid rgba(37, 99, 235, 0.18);
+        border-top-color: #2563eb;
+        animation: business-os-spin 0.8s linear infinite;
+      }
+      @keyframes business-os-spin {
+        to {
+          transform: rotate(360deg);
+        }
       }
       .business-os-initial-brand {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 8px;
-      }
-      .business-os-initial-mark {
-        width: 28px;
-        height: 28px;
-        border-radius: 999px;
-        display: grid;
-        place-items: center;
-        background: #2563eb;
-        color: #fff;
-        font-size: 11px;
-        font-weight: 800;
-        letter-spacing: 0;
+        gap: 2px;
       }
       [data-business-os-initial-route="admin"] [data-business-os-public],
       [data-business-os-initial-route="public"] [data-business-os-admin] {
@@ -119,26 +120,21 @@
       }
       .business-os-initial-title {
         margin: 0;
-        font-size: 13px;
-        line-height: 1.1;
+        font-size: 14px;
+        line-height: 1.2;
         font-weight: 800;
       }
       .business-os-initial-copy {
-        margin: 1px 0 0;
+        margin: 0;
         color: #64748b;
         font-size: 11px;
-        line-height: 1.2;
+        line-height: 1.3;
       }
       @media (prefers-color-scheme: dark) {
         :root,
         body {
           background: #101827;
           color: #e5edf7;
-        }
-        .business-os-initial-panel {
-          background: rgba(17, 24, 39, 0.94);
-          border-color: rgba(148, 163, 184, 0.22);
-          box-shadow: 0 18px 50px rgba(0, 0, 0, 0.24);
         }
         .business-os-initial-copy {
           color: #a7b4c6;
@@ -150,21 +146,16 @@
     <div id="root">
       <div class="business-os-initial-shell" role="status" aria-live="polite">
         <div class="business-os-initial-panel">
+          <div class="business-os-initial-spinner" aria-hidden="true"></div>
           <div class="business-os-initial-brand">
-            <div class="business-os-initial-mark">
-              <span data-business-os-admin>OS</span>
-              <span data-business-os-public>LE</span>
-            </div>
-            <div>
-              <h1 class="business-os-initial-title">
-                <span data-business-os-admin>Business OS</span>
-                <span data-business-os-public>Leang Cosmetic</span>
-              </h1>
-              <p class="business-os-initial-copy">
-                <span data-business-os-admin>Opening workspace</span>
-                <span data-business-os-public>Opening catalog</span>
-              </p>
-            </div>
+            <h1 class="business-os-initial-title">
+              <span data-business-os-admin>Business OS</span>
+              <span data-business-os-public>Leang Cosmetics</span>
+            </h1>
+            <p class="business-os-initial-copy">
+              <span data-business-os-admin>Opening workspace</span>
+              <span data-business-os-public>Opening catalog</span>
+            </p>
           </div>
         </div>
       </div>
@@ -215,11 +206,9 @@
           && !/\.[a-z0-9]+$/i.test(pathname)
           && !adminRoutes[segment]
         if (!publicRoute) return
-        var mark = document.querySelector('.business-os-initial-mark')
         var title = document.querySelector('.business-os-initial-title')
         var copy = document.querySelector('.business-os-initial-copy')
-        if (mark) mark.textContent = 'LE'
-        if (title) title.textContent = 'Leang Cosmetic'
+        if (title) title.textContent = 'Leang Cosmetics'
         if (copy) copy.textContent = 'Opening catalog'
       }())
     </script>

@@ -1,6 +1,12 @@
+import { getInitialKey } from '../../../utils/initials.ts'
+
 interface ProductSelectionRecord {
   id?: unknown
   parent_id?: unknown
+  // Present on rows produced by mergeSameDetailRows (utils/productGrouping.ts)
+  // -- always set, even for a 1-item cluster (as [id]). Lists every real
+  // underlying product id a merged display row represents.
+  __mergedProductIds?: unknown[]
   [key: string]: unknown
 }
 
@@ -54,6 +60,23 @@ export function normalizePositiveProductIds<TValue>(
 export function buildVisibleProductIds(products: ProductSelectionRecord[] = []): number[] {
   const ids: number[] = []
   for (const product of products) {
+    // A merged display row (2+ branch-duplicate rows collapsed into one --
+    // see mergeSameDetailRows) is selected/scoped by ALL of its underlying
+    // ids (rowScopeIds in Products.tsx uses __mergedProductIds the same
+    // way), not just the lead row's own `id`. Falling back to `product.id`
+    // alone here would silently drop the non-lead ids from every
+    // "visible" set downstream (selectedVisibleIds/selectedVisibleCount,
+    // isSelectionScopeFullySelected/PartiallySelected), so a merged row's
+    // checkbox could never show fully-checked and the selected count
+    // wouldn't reflect what toggling that row actually selected.
+    const mergedIds = product?.__mergedProductIds
+    if (Array.isArray(mergedIds) && mergedIds.length) {
+      for (const mergedId of mergedIds) {
+        const id = Number(mergedId)
+        if (Number.isFinite(id)) ids.push(id)
+      }
+      continue
+    }
     const id = Number(product?.id)
     if (Number.isFinite(id)) ids.push(id)
   }
@@ -127,8 +150,20 @@ export function buildJumpTargetIdsByLetter(
     if (collapsedSectionIds.has(section.id)) return
     const firstGroup = section.groups?.[0]
     if (!firstGroup) return
+    // Keyed by the section label's own initial letter, not the raw label --
+    // for name-initial sections (POS, or the old Products/Inventory mode)
+    // the label already *is* a single letter, so getInitialKey is a no-op.
+    // For category-labeled sections (Products/Inventory's category-first
+    // sort) the label is a full category name ("Perfume"), and this maps
+    // it down to the rail's A-Z key ("P") instead of leaking the full name
+    // in as a bogus "letter". Sections are pre-sorted alphabetically before
+    // this runs, so the first section seen for a given initial is always
+    // the alphabetically-earliest one -- `has()` guard keeps that one
+    // instead of letting a later same-initial section overwrite it.
+    const key = getInitialKey(section.label)
+    if (targets.has(key)) return
     targets.set(
-      section.label,
+      key,
       Number(firstGroup.anchorId || firstGroup.leadProduct?.id || firstGroup.items?.[0]?.id || 0),
     )
   })

@@ -37,7 +37,13 @@ assert.deepEqual(
     minSellingPriceUsd: 5,
     maxSellingPriceUsd: 9,
   }, { t, fmtUSD }),
-  ['2 options', '14 stock', '$5.00 - $9.00'],
+  // includeBranches defaults true and branchNames is absent here, so
+  // branchCount is 0 -- buildProductGroupBranchLabel now shows "0
+  // branches" explicitly instead of returning null/being dropped.
+  // No price part: a group's rows can have different prices, and this
+  // summary line only ever showed one number for the whole group --
+  // dropped rather than show something not representative of every row.
+  ['2 options', '14 stock', '0 branches'],
 )
 
 assert.deepEqual(
@@ -46,7 +52,7 @@ assert.deepEqual(
     stockTotal: 1,
     minSellingPriceUsd: 4,
   }, { includeCount: false, t, fmtUSD }),
-  ['1 stock', '$4.00'],
+  ['1 stock', '0 branches'],
 )
 
 console.log('productGroupViewHelpers tests passed')

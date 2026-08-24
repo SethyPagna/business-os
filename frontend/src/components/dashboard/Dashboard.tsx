@@ -1,23 +1,30 @@
-import { Suspense, lazy, useState, useEffect, useCallback } from 'react'
+import { Suspense, useState, useEffect, useCallback } from 'react'
 import type { ReactNode } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import MiniStat from './MiniStat'
-import { fmtTime } from '../../utils/formatters'
-import { todayStr, offsetDate } from '../../utils/dateHelpers'
+import { fmtTime, getBusinessTimezoneOffsetHours } from '../../utils/formatters'
+import { todayStr, offsetDate, businessYear, businessMonth } from '../../utils/dateHelpers'
 import ExportMenu from '../shared/ExportMenu'
 import { useIsPageActive } from '../shared/pageActivity'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { getAnalytics, getDashboard, getDashboardStartup } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
+import { listImportJobs } from '../../api/importJobsTransport.ts'
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
+import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 
-const BarChart = lazy(() => import('./charts/BarChart'))
-const LineChart = lazy(() => import('./charts/LineChart'))
-const DonutChart = lazy(() => import('./charts/DonutChart'))
+const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
+
+const BarChart = lazyRetry(() => import('./charts/BarChart'), 'dashboard-bar-chart')
+const LineChart = lazyRetry(() => import('./charts/LineChart'), 'dashboard-line-chart')
+const DonutChart = lazyRetry(() => import('./charts/DonutChart'), 'dashboard-donut-chart')
 
 type TranslateFn = (key: string) => string
 type FormatMoneyFn = (value: unknown) => string
@@ -49,6 +56,7 @@ interface AppContextValue {
   fmtKHR: FormatMoneyFn
   navigateTo: NavigateFn
   user?: AppUser | null
+  hasPermission: (key: string) => boolean
 }
 
 interface SyncContextValue {
@@ -217,6 +225,20 @@ interface KpiDetail {
   details?: Array<{ label: ReactNode; value: ReactNode }>
 }
 
+// Trimmed shape the "Recent imports" card needs from an import_jobs row --
+// deliberately not the full serialized job (see serializeJob in
+// importJobs.ts), just enough to list + open a report. Lists recent import
+// files generally (not only ones with warnings) -- clicking a row opens
+// the same report screen (ImportReportModal) either way.
+interface ImportFileSummary {
+  id: string
+  type?: string | null
+  status?: string | null
+  warning_count?: number | null
+  created_at?: string | null
+  fileName?: string | null
+}
+
 interface DashboardApi {
   getDashboard: () => Promise<unknown>
   getAnalytics: (params: { startDate: string; endDate: string; granularity: DashboardGranularity }) => Promise<unknown>
@@ -354,6 +376,156 @@ function getSaleStatusTone(status: unknown): string {
   return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
 }
 
+function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr }: {
+  analytics: DashboardAnalytics | null
+  analyticsPending: boolean
+  analyticsUnavailable: boolean
+  analyticsError: string
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+}) {
+  const payments = analytics?.byPayment || []
+  const total = payments.reduce((sum, row) => sum + (row.revenue_usd || 0), 0)
+  const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#dc2626', '#0891b2']
+  return (
+    <div className="card p-3 sm:p-4">
+      <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់')}</h2>
+      {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? (
+        <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
+      ) : (
+        <>
+          <Suspense fallback={<ChartFallback className="h-28" />}>
+            <DonutChart data={payments} valueKey="revenue_usd" />
+          </Suspense>
+          <div className="mt-2 max-h-32 space-y-1 overflow-auto">
+            {payments.map((payment, index) => {
+              const percent = total > 0 ? ((payment.revenue_usd || 0) / total * 100).toFixed(1) : 0
+              return (
+                <div key={`${payment.payment_method || payment.method || 'payment'}-${index}`} className="flex items-center justify-between text-xs">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <div className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: colors[index % colors.length] }} />
+                    <span className="max-w-20 truncate text-gray-600 dark:text-gray-400">{payment.payment_method || payment.method}</span>
+                  </div>
+                  <div className="shrink-0 text-right"><span className="font-medium text-gray-900 dark:text-white">{percent}%</span><span className="ml-1 text-gray-400">({payment.count})</span></div>
+                </div>
+              )
+            })}
+            {!payments.length ? <p className="py-2 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : null}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function RecentSalesCard({ summary, t, translateOr, fmtUSD, fmtKHR, formatStatus, onOpenSale, onViewMore }: {
+  summary: DashboardSummary | null
+  t: TranslateFn
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  fmtUSD: FormatMoneyFn
+  fmtKHR: FormatMoneyFn
+  formatStatus: (status: unknown) => string
+  onOpenSale: (sale: DashboardSale) => void
+  onViewMore: () => void
+}) {
+  const sales = summary?.recent_sales || []
+  return (
+    <div className="card">
+      <div className="border-b border-gray-100 p-3 sm:p-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2></div>
+      <div className="divide-y divide-gray-100 dark:divide-gray-700">
+        {!sales.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : sales.slice(0, 5).map((sale) => (
+          <button key={sale.id} type="button" className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4" onClick={() => onOpenSale(sale)}>
+            <div className="min-w-0"><p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{sale.receipt_number}</p><p className="truncate text-xs text-gray-400">{compactDashboardMetaParts([fmtTime(sale.created_at), sale.branch_name, sale.customer_name]).join(' | ')}</p></div>
+            <div className="shrink-0 text-right"><span className="font-semibold text-green-600">{fmtUSD(sale.total_usd || sale.total || 0)}</span>{(sale.total_khr || 0) > 0 ? <div className="text-xs text-gray-400">{fmtKHR(sale.total_khr || 0)}</div> : null}<div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(sale.sale_status)}`}>{formatStatus(sale.sale_status)}</div></div>
+          </button>
+        ))}
+      </div>
+      {sales.length > 5 ? <div className="relative z-10 border-t border-gray-100 px-4 py-2 dark:border-gray-700"><button type="button" onClick={onViewMore} className="relative z-10 w-full py-0.5 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">{translateOr('view_more', 'View more')}</button></div> : null}
+    </div>
+  )
+}
+
+function BranchPerformanceCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, showAll, setShowAll, t, translateOr, fmtUSD }: {
+  analytics: DashboardAnalytics | null
+  analyticsPending: boolean
+  analyticsUnavailable: boolean
+  analyticsError: string
+  showAll: boolean
+  setShowAll: (next: boolean | ((current: boolean) => boolean)) => void
+  t: TranslateFn
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  fmtUSD: FormatMoneyFn
+}) {
+  const all = analytics?.byBranch || []
+  const visible = showAll ? all : all.slice(0, 4)
+  const colors = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#0891b2']
+  const maxRevenue = Math.max(...all.map((branch) => branch.revenue_usd || 0), 0.01)
+  return <div className="card p-3 sm:p-4">
+    <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
+    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
+      <div className="space-y-2">
+        {!all.length ? <p className="py-4 text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : visible.map((branch, index) => {
+          const percent = ((branch.revenue_usd || 0) / maxRevenue * 100).toFixed(0)
+          return <div key={`${branch.branch_id || branch.branch_name || 'branch'}-${index}`}><div className="mb-0.5 flex justify-between text-xs"><span className="max-w-28 truncate text-gray-600 dark:text-gray-400">{branch.branch_name}</span><span className="font-medium text-gray-900 dark:text-white">{fmtUSD(branch.revenue_usd || 0)}</span></div><div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700"><div className="h-full rounded-full" style={{ width: `${percent}%`, background: colors[index % colors.length] }} /></div><div className="mt-0.5 text-right text-xs text-gray-400">{branch.count} {t('sale')}</div></div>
+        })}
+      </div>
+      {all.length > 4 ? <button onClick={() => setShowAll((current) => !current)} className="mt-2 w-full py-1 text-xs text-blue-600 hover:underline dark:text-blue-400">{showAll ? t('show_less') : `${t('view_all')} ${all.length} ${t('branches')}`}</button> : null}
+    </>}
+  </div>
+}
+
+function ExpiryAlertsCard({ summary, showAll, setShowAll, translateOr }: {
+  summary: DashboardSummary | null
+  showAll: boolean
+  setShowAll: (next: boolean | ((current: boolean) => boolean)) => void
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+}) {
+  const items = summary?.expiring_products || []
+  const visible = showAll ? items : items.slice(0, 5)
+  return <div className="card">
+    <div className="flex items-center justify-between border-b border-gray-100 p-3 sm:p-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{items.length ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{items.length}</span> : null}</div>
+    <div className="divide-y divide-gray-100 dark:divide-gray-700">{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : visible.map((item) => <div key={item.id} className="flex items-center justify-between gap-2 px-3 py-2.5 sm:px-4"><div className="min-w-0"><p className="truncate text-sm text-gray-700 dark:text-gray-300">{item.name}</p>{item.category ? <p className="text-xs text-gray-400">{item.category}</p> : null}</div><span className={Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}>{item.expiry_date}</span></div>)}</div>
+    {items.length > 5 ? <div className="border-t border-gray-100 px-4 py-2 dark:border-gray-700"><button onClick={() => setShowAll((current) => !current)} className="w-full py-0.5 text-xs text-blue-600 hover:underline dark:text-blue-400">{showAll ? 'Show less' : `View all ${items.length} items`}</button></div> : null}
+  </div>
+}
+
+function BestHourCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, showAll, setShowAll, t, translateOr, fmtUSD, onOpenHour }: {
+  analytics: DashboardAnalytics | null
+  analyticsPending: boolean
+  analyticsUnavailable: boolean
+  analyticsError: string
+  showAll: boolean
+  setShowAll: (next: boolean | ((current: boolean) => boolean)) => void
+  t: TranslateFn
+  translateOr: (key: string, fallback: string, khmerFallback?: string) => string
+  fmtUSD: FormatMoneyFn
+  onOpenHour: (hour: DashboardHourRow, rank?: number | null) => void
+}) {
+  const hourly = analytics?.hourlyDist || []
+  // Business-timezone offset, not the device's own -- backend hour buckets
+  // are UTC, and this chart must read the same "9am" for every user
+  // regardless of what timezone their device is set to.
+  const timezoneOffset = getBusinessTimezoneOffsetHours()
+  const merged: Record<number, DashboardHourRow> = {}
+  hourly.forEach((hour) => {
+    const localHour = ((Math.round(Number.parseInt(String(hour.hour), 10) + timezoneOffset)) % 24 + 24) % 24
+    if (!merged[localHour]) merged[localHour] = { hour: localHour, count: 0, revenue_usd: 0 }
+    merged[localHour].count = (merged[localHour].count || 0) + (Number(hour.count) || 0)
+    merged[localHour].revenue_usd = (merged[localHour].revenue_usd || 0) + (Number.parseFloat(String(hour.revenue_usd || 0)) || 0)
+  })
+  const maxCount = Math.max(...Object.values(merged).map((hour) => hour.count || 0), 1)
+  const allHours = Array.from({ length: 24 }, (_, hour) => merged[hour] || { hour, count: 0, revenue_usd: 0 })
+  const busyHours = Object.values(merged).filter((hour) => (hour.count || 0) > 0).sort((left, right) => (right.count || 0) - (left.count || 0))
+  const visible = showAll ? busyHours : busyHours.slice(0, 3)
+  return <div className="card p-3 sm:p-4">
+    <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2><span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{translateOr('tap_to_view', 'Tap to view')}</span></div>
+    {analyticsPending ? <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-700" /> : analyticsUnavailable ? <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div> : <>
+      <div className="relative mb-3"><div className="grid gap-px" style={{ gridTemplateColumns: 'repeat(24,1fr)' }}>{allHours.map((hour) => { const opacity = (hour.count || 0) === 0 ? 0.06 : 0.12 + (hour.count || 0) / maxCount * 0.88; return <button key={hour.hour} type="button" title={`${String(hour.hour).padStart(2, '0')}:00 - ${hour.count} ${t('sale')}(s), ${fmtUSD(hour.revenue_usd)}`} aria-label={`${translateOr('best_hour', 'Best hour')} ${formatDashboardHourLabel(hour.hour)}`} className="rounded-sm transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-700" style={{ height: 40, background: `rgba(37,99,235,${opacity.toFixed(2)})` }} onClick={() => onOpenHour(hour, busyHours.findIndex((item) => item.hour === hour.hour) + 1 || null)} /> })}</div><div className="relative mt-1 flex h-[18px] text-[11px] font-medium text-gray-400">{[0, 6, 12, 18, 23].map((hour) => <span key={hour} className="absolute" style={{ left: `${hour / 23 * 100}%`, transform: 'translateX(-50%)' }}>{formatDashboardHourLabel(hour).replace(' ', '')}</span>)}</div></div>
+      <div className="space-y-1">{!visible.length ? <p className="text-center text-xs text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : visible.map((hour, index) => <button key={hour.hour} type="button" className="flex w-full items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 text-left transition hover:border-blue-200 hover:bg-blue-50/60 dark:border-gray-700 dark:bg-gray-900/40 dark:hover:border-blue-800 dark:hover:bg-blue-950/20" onClick={() => onOpenHour(hour, index + 1)}><div><div className="text-sm font-semibold text-gray-800 dark:text-gray-100">{`#${index + 1} ${formatDashboardHourLabel(hour.hour)}`}</div><div className="text-[11px] text-gray-500 dark:text-gray-400">{String(hour.hour).padStart(2, '0')}:00 - {String((Number(hour.hour) + 1) % 24).padStart(2, '0')}:00</div></div><div className="text-right"><div className="text-sm font-semibold text-gray-900 dark:text-white">{hour.count} {t('sale')}{hour.count !== 1 ? 's' : ''}</div><div className="text-[11px] text-green-600 dark:text-green-400">{fmtUSD(hour.revenue_usd)}</div></div></button>)}</div>
+      {busyHours.length > 3 ? <button onClick={() => setShowAll((current) => !current)} className="mt-2 w-full py-1 text-xs text-blue-600 hover:underline dark:text-blue-400">{showAll ? t('show_less') : `${t('view_all')} ${busyHours.length} ${t('hours') || 'hours'}`}</button> : null}
+    </>}
+  </div>
+}
+
 function isDashboardSummaryPayload(value: unknown): value is DashboardSummary {
   if (!value || typeof value !== 'object') return false
   const payload = value as Partial<DashboardSummary>
@@ -413,7 +585,7 @@ function normalizeDashboardAnalyticsPayload(value: unknown): DashboardAnalytics 
 }
 
 export default function Dashboard() {
-  const { t, fmtUSD, fmtKHR, navigateTo, user } = useApp()
+  const { t, fmtUSD, fmtKHR, navigateTo, user, hasPermission } = useApp()
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('dashboard')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -425,6 +597,13 @@ export default function Dashboard() {
   }, [isKhmer, t])
   const exportLabel = translateOr('export', 'Export')
   const refreshLabel = translateOr('refresh', 'Refresh')
+  // The 5 detail-drawer close buttons below (recent sales, sale detail,
+  // product detail, customer detail, KPI detail) were hardcoded "Close" in
+  // English, bypassing i18n entirely -- same bug class as the icon-only
+  // close buttons fixed app-wide in Part 124 (see progress.md), just a
+  // text-button variant that grep missed there. One shared label, same
+  // `close` key already used everywhere else in the app.
+  const closeLabel = translateOr('close', 'Close')
   const dashboardFilterStorageKey = useMemo(() => getDashboardFilterStorageKey(user), [user?.email, user?.id, user?.username])
   const dashboardFilterStorageKeys = useMemo(
     () => [dashboardFilterStorageKey, DASHBOARD_FILTER_STORAGE_FALLBACK_KEY],
@@ -439,8 +618,8 @@ export default function Dashboard() {
   const RANGE_PRESETS: DashboardRangePreset[] = [
     { id: 'today',  label: translateOr('range_today', 'Today', 'ថ្ងៃនេះ'),      getRange: () => ({ start: todayStr(), end: todayStr(), gran: 'day' }) },
     { id: '7d',     label: translateOr('range_7d', '7 Days', '៧ ថ្ងៃ'),          getRange: () => ({ start: offsetDate(-6), end: todayStr(), gran: 'day' }) },
-    { id: 'month',  label: translateOr('range_this_month', 'This Month', 'ខែនេះ'),  getRange: () => { const n = new Date(); return { start: `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' } } },
-    { id: 'year',   label: translateOr('range_this_year', 'This Year', 'ឆ្នាំនេះ'),   getRange: () => ({ start: `${new Date().getFullYear()}-01-01`, end: todayStr(), gran: 'month' }) },
+    { id: 'month',  label: translateOr('range_this_month', 'This Month', 'ខែនេះ'),  getRange: () => ({ start: `${businessYear()}-${String(businessMonth()).padStart(2,'0')}-01`, end: todayStr(), gran: 'day' }) },
+    { id: 'year',   label: translateOr('range_this_year', 'This Year', 'ឆ្នាំនេះ'),   getRange: () => ({ start: `${businessYear()}-01-01`, end: todayStr(), gran: 'month' }) },
     { id: 'custom', label: translateOr('range_custom', 'Custom', 'កំណត់'),      getRange: null },
   ]
 
@@ -468,6 +647,9 @@ export default function Dashboard() {
   const [recentSalesOpen, setRecentSalesOpen]   = useState(false)
   const [recentSaleDetail, setRecentSaleDetail] = useState<DashboardSale | null>(null)
   const [kpiDetail, setKpiDetail]               = useState<KpiDetail | null>(null)
+  const [recentImportFiles, setRecentImportFiles] = useState<ImportFileSummary[]>([])
+  const [recentImportFilesLoading, setRecentImportFilesLoading] = useState(true)
+  const [importReportJobId, setImportReportJobId] = useState<string | null>(null)
   const summaryRequestRef = useRef(0)
   const analyticsRequestRef = useRef(0)
   const startupRequestRef = useRef(0)
@@ -690,7 +872,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const ch = syncChannel.channel
-    if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory') {
+    // 'dashboard' itself is one of the channels a completed background
+    // import broadcasts (see importJobRefresh.ts's
+    // getImportCompletionRefreshChannels) -- it was missing from this list,
+    // so on the (common) case where 'dashboard' happened to be the last of
+    // several same-tick channel events to settle, the Dashboard would end
+    // up NOT refreshing even though earlier channels in the same batch
+    // (products/inventory/sales) usually did trigger a refresh moments
+    // before. Listing it explicitly closes that gap instead of relying on
+    // a sibling channel happening to still be "in flight".
+    if (ch === 'sales' || ch === 'products' || ch === 'returns' || ch === 'inventory' || ch === 'dashboard') {
       const refreshId = beginTrackedRequest(refreshRequestRef)
       setSilentRefresh(true)
       Promise.allSettled([
@@ -709,6 +900,85 @@ export default function Dashboard() {
     invalidateTrackedRequest(analyticsRequestRef)
     invalidateTrackedRequest(refreshRequestRef)
   }, [])
+
+  // "Recent imports" card -- a lightweight, independent fetch of the last
+  // few import files/jobs (any type), regardless of whether they had any
+  // warnings. This used to only surface jobs with warning_count > 0 under
+  // an "Import warnings" heading -- narrower than useful (a routine,
+  // warning-free import had no trace here at all) and framed around
+  // warnings specifically rather than "here are your recent import
+  // files, open one to see its report". Deliberately not folded into
+  // loadSummary/loadAnalytics above -- this doesn't depend on the
+  // date-range filter those use, and a failure here shouldn't block the
+  // rest of the dashboard from rendering.
+  const mapRecentImportJobs = (result: unknown): ImportFileSummary[] => {
+    const jobs = Array.isArray((result as { jobs?: unknown })?.jobs) ? (result as { jobs: Record<string, unknown>[] }).jobs : []
+    return jobs.map((j) => ({
+      id: String(j.id),
+      type: (j.type as string) ?? null,
+      status: (j.status as string) ?? null,
+      warning_count: Number(j.warning_count) || 0,
+      created_at: (j.created_at as string) ?? null,
+      fileName: (j.file_name as string) ?? null,
+    })) as ImportFileSummary[]
+  }
+
+  useEffect(() => {
+    if (!isActive) return
+    let cancelled = false
+    const loadRecentImportFiles = () => {
+      listImportJobs({ limit: 5 })
+        .then((result) => {
+          if (cancelled) return
+          setRecentImportFiles(mapRecentImportJobs(result))
+        })
+        .catch(() => { /* non-critical widget -- silently leave the list as-is on failure, the card itself still renders with a no-data/error-tolerant state below */ })
+        .finally(() => { if (!cancelled) setRecentImportFilesLoading(false) })
+    }
+    loadRecentImportFiles()
+    const onActivity = () => loadRecentImportFiles()
+    window.addEventListener('import-job:activity', onActivity)
+    // A job that finishes purely from background polling (nobody in this
+    // tab triggered it -- 'import-job:activity' only fires for actions the
+    // current tab itself initiated, see notifyImportJobActivity in
+    // importJobsTransport.ts) never fires that event, so this card could
+    // sit stale even after a real import completed elsewhere. Piggyback on
+    // the same sync-channel signal the rest of the Dashboard reacts to
+    // above (see the effect right below this one).
+    return () => {
+      cancelled = true
+      window.removeEventListener('import-job:activity', onActivity)
+    }
+  }, [isActive])
+
+  // Real bug found here: this used to gate on
+  // `syncChannel?.channel !== 'dashboard'` -- but 'dashboard' was never a
+  // real channel name to begin with (see durable-objects/broadcastHub.ts's
+  // own `BroadcastChannel` union: it isn't in the list), and nothing on
+  // the backend ever broadcasts one (lib/importEngine.ts's own import-
+  // completion broadcast sends 'sales', 'inventory', or 'products' --
+  // never 'dashboard'). So this effect was dead code: it could never
+  // fire from a real completion, only from this tab's own
+  // 'import-job:activity' event above -- meaning an import finished by
+  // another tab, another device, or purely via background polling never
+  // refreshed this card at all, and it could sit empty or stale for the
+  // rest of the session. Listening for the channels that are actually
+  // broadcast fixes that. Also guarded with the same `cancelled` pattern
+  // as the effect above -- this one had none, so a slower-to-resolve
+  // request from an earlier sync tick could land after (and stomp on) a
+  // newer one.
+  const IMPORT_RELATED_SYNC_CHANNELS = new Set(['products', 'inventory', 'sales', 'customers', 'suppliers', 'deliveryContacts'])
+  useEffect(() => {
+    if (!isActive || !syncChannel?.channel || !IMPORT_RELATED_SYNC_CHANNELS.has(syncChannel.channel)) return
+    let cancelled = false
+    listImportJobs({ limit: 5 })
+      .then((result) => {
+        if (cancelled) return
+        setRecentImportFiles(mapRecentImportJobs(result))
+      })
+      .catch(() => { /* non-critical widget -- silently leave it as-is on failure */ })
+    return () => { cancelled = true }
+  }, [isActive, syncChannel?.channel, syncChannel?.ts])
 
   const profit    = (summary?.cost_out || 0) - (summary?.cost_in || 0)
   const summaryReady = isDashboardSummaryPayload(summary)
@@ -733,6 +1003,7 @@ export default function Dashboard() {
   const outOfStockPreviewLimit = Number(summary?.out_of_stock_preview_limit || summary?.out_of_stock?.length || 0)
   const lowStockPreviewTruncated = !!summary?.low_stock_preview_truncated
   const outOfStockPreviewTruncated = !!summary?.out_of_stock_preview_truncated
+  const aStoreDelivery = analytics?.totals?.store_delivery_usd || 0
   const aPrevRevenue = analytics?.prevTotals?.revenue_usd || 0
   const aTxCount  = analytics?.totals?.tx_count || 0
   const aPrevTxCount = analytics?.prevTotals?.tx_count || 0
@@ -757,7 +1028,7 @@ export default function Dashboard() {
   const collectedFormulaText = translateOr('dashboard_formula_collected_total', 'Collected total = Net revenue + Tax + Delivery')
   const storeDiscountFormulaText = translateOr('dashboard_formula_store_discounts', 'Store discounts are the cashier-entered sale discounts and product promotions.')
   const cogsFormulaText = translateOr('dashboard_formula_cogs', 'COGS excludes quantities restored by restocked returns')
-  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Net revenue - COGS')
+  const profitFormulaText = translateOr('dashboard_formula_profit', 'Profit = Net revenue - COGS - Store-paid delivery')
   const avgOrderFormulaText = translateOr('dashboard_formula_avg_order', 'Average order = Net revenue / transaction count')
   const returnsFormulaText = translateOr('dashboard_formula_returns', 'Returns decrease net revenue and loyalty points')
   const revenueExampleText = `${fmtUSD(aRevenue)} = ${fmtUSD(aGrossSales)} - ${fmtUSD(aDiscounts)} - ${fmtUSD(aRefundUsd)}`
@@ -893,6 +1164,7 @@ export default function Dashboard() {
         { label: translateOr('est_profit', 'Est. profit'), value: fmtUSD(aProfit) },
         { label: translateOr('revenue', 'Revenue'), value: fmtUSD(aRevenue) },
         { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
+        { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
         { label: translateOr('formula', 'Formula'), value: profitFormulaText },
       ],
@@ -1110,28 +1382,14 @@ export default function Dashboard() {
   return (
     <div className="page-scroll p-3 sm:p-5 space-y-4 sm:space-y-5">
       {/* Header */}
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <h1 className="flex min-w-0 flex-1 items-center gap-2 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-          <LayoutDashboard className="h-5 w-5 flex-shrink-0 text-blue-600 dark:text-blue-400" />
-          <span className="truncate">{t('dashboard')}</span>
-        </h1>
-        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          {silentRefresh && <span className="text-xs text-blue-500 animate-pulse">{t('loading')}</span>}
-          <button
-            onClick={() => {
-              void Promise.allSettled([
-                loadSummary({ label: 'Dashboard summary manual refresh' }),
-                loadAnalytics(),
-              ])
-            }}
-            className="btn-secondary inline-flex min-w-[6.25rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:min-w-[6.5rem] sm:text-sm"
-          >
-            <RefreshCw className={`h-4 w-4 ${silentRefresh ? 'animate-spin' : ''}`} />
-            {refreshLabel}
-          </button>
-          <ExportMenu label={exportLabel} items={dashboardExportItems} compact triggerClassName="min-w-[6.25rem] sm:min-w-[6.5rem]" />
+      {/* Page title removed: sidebar/nav already identify this page. */}
+      {/* Refresh button removed: data already refreshes automatically (see
+          silentRefresh indicator below), so a manual control was redundant. */}
+      {silentRefresh ? (
+        <div className="flex min-w-0 items-center justify-end gap-2">
+          <span className="text-xs text-blue-500 animate-pulse">{t('loading')}</span>
         </div>
-      </div>
+      ) : null}
 
       {(staleSummaryNotice || staleAnalyticsNotice) ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50/90 px-3 py-2 text-xs text-amber-900 shadow-sm dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-100">
@@ -1151,9 +1409,17 @@ export default function Dashboard() {
       {/* Range selector */}
       <div className="card p-2.5 sm:p-3">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:gap-2">
-          <div className="flex min-w-0 items-center gap-2 lg:max-w-[18rem]">
+          {/* Label + range value + export all share one row -- the range
+              value pill previously grew (flex-1) to fill the row on its own
+              with nothing but blank pill background to its right; export
+              now sits in that same slack space instead of getting its own
+              near-empty row below the preset pills. */}
+          <div className="flex min-w-0 items-center gap-2 lg:max-w-[22rem]">
             <span className="shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-300 sm:text-sm">{translateOr('period_label', 'Range', 'ជ្រើសពេល')}:</span>
             <span className="min-w-0 flex-1 truncate rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-300 sm:text-sm">{rangeLabel}</span>
+            {hasPermission('dashboard_export') && (
+              <ExportMenu label={exportLabel} items={dashboardExportItems} iconOnly />
+            )}
           </div>
           <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5 sm:flex-wrap sm:overflow-visible lg:flex-none lg:pb-0">
               {RANGE_PRESETS.map(p => (
@@ -1289,44 +1555,42 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="card p-3 sm:p-4">
-          <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{translateOr('payment_method', 'Payment Method', 'វិធីទូទាត់')}</h2>
-          {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
-            <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
-          ) : (
-            <>
-              <Suspense fallback={<ChartFallback className="h-28" />}>
-                <DonutChart data={analytics?.byPayment||[]} valueKey="revenue_usd" />
-              </Suspense>
-              <div className="mt-2 space-y-1 max-h-32 overflow-auto">
-                {(analytics?.byPayment||[]).map((p, i) => {
-                  const COLORS = ['#2563eb','#16a34a','#ea580c','#7c3aed','#dc2626','#0891b2']
-                  const total = (analytics?.byPayment||[]).reduce((s,x) => s+(x.revenue_usd||0), 0)
-                  const pct   = total > 0 ? ((p.revenue_usd||0)/total*100).toFixed(1) : 0
-                  return (
-                    <div key={i} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5">
-                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{background: COLORS[i%COLORS.length]}} />
-                        <span className="text-gray-600 dark:text-gray-400 truncate max-w-20">{p.payment_method}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-medium text-gray-900 dark:text-white">{pct}%</span>
-                        <span className="text-gray-400 ml-1">({p.count})</span>
-                      </div>
-                    </div>
-                  )
-                })}
-                {!(analytics?.byPayment?.length) && <p className="text-xs text-gray-400 text-center py-2">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>}
-              </div>
-            </>
-          )}
-        </div>
+        <RecentSalesCard
+          summary={summary}
+          t={t}
+          translateOr={translateOr}
+          fmtUSD={fmtUSD}
+          fmtKHR={fmtKHR}
+          formatStatus={formatSaleStatus}
+          onOpenSale={setRecentSaleDetail}
+          onViewMore={() => setRecentSalesOpen(true)}
+        />
       </div>
 
-      {/* Branches, products, and customers */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+      {/* Branches, products, and customers. Deliberately 3 columns on large
+          screens, not 4 -- this row only ever renders 3 real cards
+          (BestHourCard, Top Products, Top Customers); the two `hidden`
+          legacy blocks below are dead markup kept for reference, not a
+          4th/5th visible card. A 4-column grid for 3 real cards was
+          leaving a full empty column's worth of width unused on large
+          screens instead of giving the 3 real cards room to breathe
+          (user-reported: "the row of top product, best hour, top customer
+          can take more space in large screens"). */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Branch */}
-        <div className="card p-3 sm:p-4">
+        <BestHourCard
+          analytics={analytics}
+          analyticsPending={analyticsPending}
+          analyticsUnavailable={analyticsUnavailable}
+          analyticsError={analyticsError}
+          showAll={showAllHours}
+          setShowAll={setShowAllHours}
+          t={t}
+          translateOr={translateOr}
+          fmtUSD={fmtUSD}
+          onOpenHour={openHourDetail}
+        />
+        <div className="hidden">
           <h2 className="mb-3 text-base font-semibold text-gray-900 dark:text-white">{t('branch_performance')}</h2>
           {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
             <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
@@ -1367,18 +1631,33 @@ export default function Dashboard() {
 
         {/* Top Products */}
         <div className="card p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('top_products')}</h2>
-            <div className="flex gap-1">
+          <div className="flex min-w-0 flex-col items-start gap-2 mb-3 sm:flex-row sm:items-center sm:justify-between">
+            <h2 className="min-w-0 text-base font-semibold text-gray-900 dark:text-white">{t('top_products')}</h2>
+            <div className="max-w-full overflow-x-auto pb-0.5">
+            {/* Segmented-control style aligned with the Analytics tabs
+                above (revenue/profit/volume) instead of this row's own
+                separate, cruder bg-gray-100/bg-blue-600 combo -- same
+                pill container, same white-chip-on-active look, so the two
+                toggles on this page read as one consistent control
+                pattern rather than two different ones. The revenue option
+                also used to splice a literal "$" character into the
+                translated label string (`$ ${t('revenue')}`) -- fragile
+                for translation and looked like a stray typo next to the
+                text (user-reported: "bad color and button design and the
+                icon $"). Replaced with a real DollarSign icon rendered
+                next to the label instead of baked into the string. */}
+            <div className="inline-flex min-w-max rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90">
               {([
-                ['revenue', `$ ${t('revenue')}`],
+                ['revenue', t('revenue')],
                 ['qty', t('quantity')],
               ] satisfies Array<[DashboardTopMode, string]>).map(([m,lbl]) => (
                 <button key={m} onClick={() => setTopMode(m)}
-                  className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold sm:text-[15px] ${topMode===m ? 'bg-blue-600 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                  className={`inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-semibold leading-tight transition-colors sm:px-3 sm:text-sm ${topMode===m ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}>
+                  {m === 'revenue' ? <DollarSign className="h-3.5 w-3.5" aria-hidden="true" /> : null}
                   {lbl}
                 </button>
               ))}
+            </div>
             </div>
           </div>
           {analyticsPending ? <div className="h-28 animate-pulse bg-gray-100 dark:bg-gray-700 rounded-xl" /> : analyticsUnavailable ? (
@@ -1402,7 +1681,7 @@ export default function Dashboard() {
                         <div className="flex justify-between text-xs mb-0.5">
                           <div className="flex items-center gap-1.5">
                             <span className="text-gray-400 w-4 text-right">{i+1}.</span>
-                            <span className="text-gray-700 dark:text-gray-300 truncate max-w-32">{p.product_name}</span>
+                            <span className="text-gray-700 dark:text-gray-300 truncate max-w-32 sm:max-w-48 lg:max-w-72 xl:max-w-96">{p.product_name}</span>
                           </div>
                           <span className="font-medium text-gray-900 dark:text-white">
                             {topMode==='qty' ? `${p.qty_sold} ${t('qty_sold')}` : fmtUSD(p.revenue_usd)}
@@ -1487,7 +1766,8 @@ export default function Dashboard() {
       {/* Hours, low stock, and recent activity */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
         {/* Best Hour */}
-        <div className="card p-3 sm:p-4">
+        <ExpiryAlertsCard summary={summary} showAll={showAllExpiring} setShowAll={setShowAllExpiring} translateOr={translateOr} />
+        <div className="hidden">
           <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="text-base font-semibold text-gray-900 dark:text-white">{t('best_hour')}</h2>
             <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -1498,7 +1778,7 @@ export default function Dashboard() {
             <div className="flex h-28 items-center justify-center rounded-xl border border-amber-200 bg-amber-50/60 px-3 text-center text-xs text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/20 dark:text-amber-100">{analyticsError || 'Analytics unavailable for this range.'}</div>
           ) : (() => {
             const hourly: DashboardHourRow[] = analytics?.hourlyDist || []
-            const tzOff  = -(new Date().getTimezoneOffset())/60
+            const tzOff  = getBusinessTimezoneOffsetHours()
             const merged: Record<number, DashboardHourRow> = {}
             hourly.forEach(h => {
               const lh = ((Math.round(Number.parseInt(String(h.hour),10)+tzOff))%24+24)%24
@@ -1657,7 +1937,18 @@ export default function Dashboard() {
         </div>
 
         {/* Expiring Products */}
-        <div className="card">
+        <BranchPerformanceCard
+          analytics={analytics}
+          analyticsPending={analyticsPending}
+          analyticsUnavailable={analyticsUnavailable}
+          analyticsError={analyticsError}
+          showAll={showAllBranches}
+          setShowAll={setShowAllBranches}
+          t={t}
+          translateOr={translateOr}
+          fmtUSD={fmtUSD}
+        />
+        <div className="hidden">
           <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>
             {(summary?.expiring_products?.length||0) > 0 && (
@@ -1688,56 +1979,80 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* Sales */}
+        {/* Recent imports -- a general list of the last few imported files
+            (any type, any outcome), so it's discoverable and clickable the
+            same way Sales/Inventory activity below is. Click a row to open
+            that file's full report (ImportReportModal) -- counts, any
+            warnings, and errors all live there rather than being summarized
+            with a "warnings"-first framing up here. A small amber badge
+            still calls out a job that did have warnings worth a look, but
+            it's a detail on the row, not the reason the card exists.
+            Deliberately always renders its container (previously gated
+            the whole card, header included, on `recentImportFiles.length
+            > 0` -- the only card on this dashboard that did that, unlike
+            every sibling card above/below it which always renders and
+            shows a "No data found" placeholder when empty. That made this
+            specific card blink out of existence on first load before its
+            fetch resolved, and stay gone for the rest of the session if
+            that fetch ever failed silently -- reported as "the card
+            sometimes disappears". Matches the same
+            loading/empty/populated three-way the rest of the file uses. */}
         <div className="card">
-          <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700">
-            <h2 className="font-semibold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2>
+          <div className="p-3 sm:p-4 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
+            <h2 className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
+              <FileText className="w-4 h-4 text-slate-400" />
+              {translateOr('recent_imports', 'Recent imports')}
+            </h2>
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
-            {!summary?.recent_sales?.length
-              ? <p className="p-4 text-sm text-gray-400 text-center">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
-              : summary.recent_sales.slice(0, 5).map((s) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"
-                  onClick={() => setRecentSaleDetail(s)}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-gray-700 dark:text-gray-300">{s.receipt_number}</p>
-                    <p className="truncate text-xs text-gray-400">
-                      {compactDashboardMetaParts([fmtTime(s.created_at), s.branch_name, s.customer_name]).join(' | ')}
-                    </p>
-                  </div>
-                  <div className="flex-shrink-0 text-right">
-                    <span className="font-semibold text-green-600">{fmtUSD(s.total_usd||s.total||0)}</span>
-                    {(s.total_khr || 0) > 0 && <div className="text-xs text-gray-400">{fmtKHR(s.total_khr || 0)}</div>}
-                    <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${getSaleStatusTone(s.sale_status)}`}>
-                      {formatSaleStatus(s.sale_status)}
+            {recentImportFilesLoading
+              ? <p className="p-4 text-sm text-gray-400 text-center">{translateOr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</p>
+              : recentImportFiles.length === 0
+                ? <p className="p-4 text-sm text-gray-400 text-center">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p>
+                : recentImportFiles.map((job) => (
+                  <button
+                    key={job.id}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"
+                    onClick={() => setImportReportJobId(job.id)}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm text-gray-700 dark:text-gray-300">
+                        {job.fileName || `${job.type || 'products'} import`}
+                      </p>
+                      <p className="truncate text-xs text-gray-400 capitalize">
+                        {[job.created_at ? fmtTime(job.created_at) : job.status, job.fileName ? `${job.type || 'products'} import` : null].filter(Boolean).join(' \u00b7 ')}
+                      </p>
                     </div>
-                  </div>
-                </button>
-              ))}
+                    {(job.warning_count || 0) > 0 && (
+                      <span className="badge-yellow flex-shrink-0 flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3" />
+                        {job.warning_count} {translateOr('warnings_short', 'warnings')}
+                      </span>
+                    )}
+                  </button>
+                ))}
           </div>
-          {(summary?.recent_sales?.length||0) > 5 && (
-            <div className="relative z-10 border-t border-gray-100 px-4 py-2 dark:border-gray-700">
-              <button type="button" onClick={() => setRecentSalesOpen(true)} className="relative z-10 w-full py-0.5 text-xs font-medium text-blue-600 hover:underline dark:text-blue-400">
-                {translateOr('view_more', 'View more')}
-              </button>
-            </div>
-          )}
         </div>
+
+        <PaymentMethodCard
+          analytics={analytics}
+          analyticsPending={analyticsPending}
+          analyticsUnavailable={analyticsUnavailable}
+          analyticsError={analyticsError}
+          translateOr={translateOr}
+        />
       </div>
 
       {recentSalesOpen ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSalesOpen(false)}>
-          <div className="flex max-h-[88vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('sales') || 'Sales'}</h2>
                 <div className="mt-0.5 text-xs text-gray-400">{summary?.recent_sales?.length || 0} {t('entries') || 'entries'}</div>
               </div>
-              <button onClick={() => setRecentSalesOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">Close</button>
+              <button onClick={() => setRecentSalesOpen(false)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
             <div className="modal-scroll divide-y divide-gray-100 dark:divide-gray-700">
               {(summary?.recent_sales || []).map((sale) => (
@@ -1769,13 +2084,13 @@ export default function Dashboard() {
 
       {recentSaleDetail ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setRecentSaleDetail(null)}>
-          <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="flex max-h-modal-85 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('sale') || 'Sale'}</h2>
                 <div className="mt-0.5 max-w-56 truncate text-xs text-gray-400">{recentSaleDetail.receipt_number || `#${recentSaleDetail.id}`}</div>
               </div>
-              <button onClick={() => setRecentSaleDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">Close</button>
+              <button onClick={() => setRecentSaleDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
             <div className="p-4 space-y-2 overflow-y-auto">
               {([
@@ -1810,7 +2125,7 @@ export default function Dashboard() {
       {/* Product detail modal */}
       {productDetail && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setProductDetail(null)}>
-          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-[85vh]" onClick={e=>e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-modal-85 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">
@@ -1820,7 +2135,7 @@ export default function Dashboard() {
                 </h2>
                 <div className="text-xs text-gray-400 mt-0.5 truncate max-w-56">{productDetail.product_name || productDetail.name}</div>
               </div>
-              <button onClick={() => setProductDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">Close</button>
+              <button onClick={() => setProductDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
             <div className="p-4 space-y-3 overflow-y-auto">
               <div className="grid grid-cols-2 gap-2">
@@ -1877,13 +2192,13 @@ export default function Dashboard() {
       {/* Customer detail modal */}
       {customerDetail && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setCustomerDetail(null)}>
-          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-[85vh]" onClick={e=>e.stopPropagation()}>
+          <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm flex flex-col max-h-modal-85 pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={e=>e.stopPropagation()}>
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{t('customer_details')}</h2>
                 <div className="text-xs text-gray-400 mt-0.5">{customerDetail.customer_name}</div>
               </div>
-              <button onClick={() => setCustomerDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">Close</button>
+              <button onClick={() => setCustomerDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
             <div className="p-4 space-y-3 overflow-y-auto">
               <div className="grid grid-cols-2 gap-2">
@@ -1924,13 +2239,13 @@ export default function Dashboard() {
       )}
       {kpiDetail && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setKpiDetail(null)}>
-          <div className="flex max-h-[85vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+          <div className="flex max-h-modal-85 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-sm sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0" onClick={(event) => event.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
               <div>
                 <h2 className="font-bold text-gray-900 dark:text-white">{kpiDetail.label}</h2>
                 <p className="text-xs text-gray-400 mt-1">{periodShort}</p>
               </div>
-              <button onClick={() => setKpiDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">Close</button>
+              <button onClick={() => setKpiDetail(null)} className="text-gray-400 hover:text-gray-600 text-sm w-8 h-8 flex items-center justify-center">{closeLabel}</button>
             </div>
             <div className="modal-scroll p-4 space-y-2">
               {Array.isArray(kpiDetail.details) && kpiDetail.details.length ? kpiDetail.details.map((row, index) => (
@@ -1943,7 +2258,11 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      {importReportJobId && (
+        <Suspense fallback={null}>
+          <ImportReportModal jobId={importReportJobId} onClose={() => setImportReportJobId(null)} />
+        </Suspense>
+      )}
     </div>
   )
 }
-

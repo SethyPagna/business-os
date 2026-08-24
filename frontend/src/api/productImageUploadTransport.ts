@@ -1,10 +1,13 @@
 import { getSyncServerUrl, requireLiveServerWrite } from './http.ts'
+import { compressImageFile } from '../utils/imageCompression.ts'
 
 type ImageUploadPayload = {
   file?: File
   fileName?: string
   filePath?: string
   productId?: string | number
+  /** Product name to rename the stored file to when it matches ("same image name = same product name"). */
+  productName?: string
 }
 
 function dataUrlToBlob(dataUrl: string): Blob {
@@ -20,6 +23,7 @@ export async function uploadProductImage({
   file,
   fileName,
   filePath,
+  productName,
 }: ImageUploadPayload): Promise<unknown> {
   requireLiveServerWrite('products:uploadImage', {
     offlineMessage: 'Server is offline. Product image uploads are invalid until the server reconnects.',
@@ -28,9 +32,22 @@ export async function uploadProductImage({
 
   const form = new FormData()
   if (file instanceof File) {
-    form.append('image', file, file.name || fileName || 'product.jpg')
+    const compressed = await compressImageFile(file, { renameTo: productName })
+    form.append('image', compressed, compressed.name || fileName || 'product.jpg')
   } else if (filePath?.startsWith('data:')) {
-    form.append('image', dataUrlToBlob(filePath), fileName || 'product.jpg')
+    // Real bug fixed this session: this branch used to upload the raw
+    // data-URL blob completely uncompressed -- Products.tsx's
+    // uploadGalleryImages() (the product-edit gallery grid, which stages
+    // picked/cropped images as data URLs before this transport ever runs)
+    // was the one real caller, so every gallery image saved through that
+    // path shipped at its full original size no matter what the `file`
+    // branch above does, which is the most likely source of "many still
+    // went over the limit" reported this session. Route it through the
+    // same compressImageFile() the File branch already uses.
+    const sourceBlob = dataUrlToBlob(filePath)
+    const sourceFile = new File([sourceBlob], fileName || 'product.jpg', { type: sourceBlob.type })
+    const compressed = await compressImageFile(sourceFile, { renameTo: productName })
+    form.append('image', compressed, compressed.name || fileName || 'product.jpg')
   } else if (filePath) {
     throw new Error('Native file path upload not supported in browser mode')
   } else {

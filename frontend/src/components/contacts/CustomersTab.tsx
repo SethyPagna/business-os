@@ -1,23 +1,30 @@
-import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import type { ComponentProps, ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import Download from 'lucide-react/dist/esm/icons/download.js'
-import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
+import type { PortalMenuItem } from '../shared/PortalMenu'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
-import { fmtDate } from '../../utils/formatters'
+import { fmtDateTime24 } from '../../utils/formatters'
 import FilterMenu from '../shared/FilterMenu'
+import SearchInput from '../shared/SearchInput'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.ts'
+import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
+import { fuzzyTextMatches } from '../../utils/searchMatch.ts'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -37,6 +44,14 @@ type CustomerGroupMode = 'time' | 'alphabet'
 type CustomerPayload = Omit<CustomerRow, 'id' | 'points_balance' | 'points_earned' | 'points_redeemed' | 'points_rewarded' | 'points_deducted' | 'created_at'> & {
   userId?: string | number | null
   userName?: string | null
+  // Only buildCustomerPayload (undo/redo replay + delete-restore) ever
+  // sets this -- it needs to carry a deleted/edited customer's original
+  // join date back through create/update so an undo doesn't reset it to
+  // "now". The manual add/edit form's own payload is a separate plain
+  // object literal in handleSave (`{ ...form, userId, userName }`) that
+  // never has this key, since the form has no created_at input -- see
+  // contacts.ts's CUSTOMERS.columns comment for the full reasoning.
+  created_at?: string | null
 }
 
 interface CustomerMutationResult {
@@ -66,6 +81,14 @@ interface CustomersTabProps {
   t: TranslateFn
   notify: NotifyFn
   active?: boolean
+  // Set by Contacts.tsx when the operator clicks "Resolve" on a cluster in
+  // the Possible Duplicates tab -- seeds this tab's own search box with
+  // the contact's name so the two/more records land side by side in the
+  // existing list, ready to edit/merge by hand with the tools already
+  // here. Only seeds `search` once per value change (see the effect
+  // below), so typing something else afterwards isn't repeatedly
+  // stomped on.
+  initialSearch?: string
 }
 
 interface CustomerRow extends Record<string, unknown> {
@@ -75,8 +98,8 @@ interface CustomerRow extends Record<string, unknown> {
   phone?: string | null
   email?: string | null
   address?: string | null
-  company?: string | null
   notes?: string | null
+  gender?: string | null
   created_at?: string | null
   points_balance?: number | string | null
   points_earned?: number | string | null
@@ -120,7 +143,7 @@ const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) 
 
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
 type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
-type CsvUtilsModule = typeof import('../../utils/csv')
+type CsvUtilsModule = typeof import('../../utils/csv') & typeof import('../../utils/xlsxExport')
 
 let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
 let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
@@ -137,7 +160,12 @@ function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule>
 }
 
 function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
-  if (!csvUtilsModulePromise) csvUtilsModulePromise = import('../../utils/csv')
+  if (!csvUtilsModulePromise) {
+    csvUtilsModulePromise = Promise.all([
+      import('../../utils/csv'),
+      import('../../utils/xlsxExport'),
+    ]).then(([csvUtils, xlsxUtils]) => ({ ...csvUtils, ...xlsxUtils }) as CsvUtilsModule)
+  }
   return csvUtilsModulePromise
 }
 
@@ -186,11 +214,11 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
   return value && value !== key ? value : fallback
 }
 
-const ContactImportModal = lazy(() => import('./ContactImportModal'))
-const CustomerFormModal = lazy(() => import('./CustomerFormModal'))
+const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'customers-contact-import')
+const CustomerFormModal = lazyRetry(() => import('./CustomerFormModal'), 'customers-form-modal')
 const CUSTOMER_MUTATION_TIMEOUT_MS = 12000
 
-function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
+function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabProps) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -202,6 +230,12 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
   const bulkDeleteInFlightRef = useRef(false)
   const [customers, setCustomers] = useState<CustomerRow[]>([])
   const [search, setSearch] = useState('')
+  const appliedInitialSearchRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!initialSearch || initialSearch === appliedInitialSearchRef.current) return
+    appliedInitialSearchRef.current = initialSearch
+    setSearch(initialSearch)
+  }, [initialSearch])
   const [modal, setModal] = useState<ContactModal>(null)
   const [selected, setSelected] = useState<CustomerRow | null>(null)
   const [loading, setLoading] = useState(true)
@@ -212,6 +246,7 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
   const [customerTotal, setCustomerTotal] = useState(0)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
+  const [genderFilter, setGenderFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [groupMode, setGroupMode] = useState<CustomerGroupMode>('time')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
@@ -230,31 +265,73 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
     page: customerPage,
     pageSize: customerPageSize,
   }), [customerFilters, customerPage, customerPageSize])
+  const customerTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(customerTotal || 0)) / Math.max(1, Number(customerPageSize || 1))))
 
-  const filteredBySearch = useMemo(() => customers.filter((customer) => {
-    const query = deferredSearch.toLowerCase().trim()
-    if (!query) return true
-    return (
-      String(customer.name || '').toLowerCase().includes(query) ||
-      String(customer.membership_number || '').toLowerCase().includes(query) ||
-      String(customer.phone || '').includes(query) ||
-      String(customer.email || '').toLowerCase().includes(query)
+  // Same class of bug as Products.tsx/Inventory.tsx (see their comments):
+  // cloudflare/src/routes/contacts.ts clamps `page` to [1, 100000], not to
+  // the query's actual totalPages, and echoes the requested page straight
+  // back (customerPage is reset from `payload.page` below, which is just
+  // the same out-of-range value handed back). Deleting the last customer(s)
+  // on a later page leaves customerPage stuck past the new last page, and
+  // the fetched `customers` array comes back empty while customerTotal
+  // still updates -- the pagination footer looks clamped, the table isn't.
+  // Self-heal it client-side, same fix as the other two pages.
+  useEffect(() => {
+    if (customerPage > customerTotalPages) {
+      setCustomerPage(customerTotalPages)
+    }
+  }, [customerPage, customerTotalPages])
+
+
+  // Was a literal `.toLowerCase().includes(query)` check per field -- real,
+  // confirmed gap: routes/contacts.ts's own customer search (part 108) now
+  // runs through customers_fts (typo/joiner/diacritic-tolerant, same FTS5
+  // machinery products.ts uses), so the server can return a customer this
+  // literal substring check then silently dropped from the visible list on
+  // this client-side re-filter pass -- e.g. a typo'd query the server's FTS5
+  // matched via its own tolerance, or "sokha dara" matching a customer named
+  // "Dara Sokha" (word order), neither of which a plain `.includes()` can
+  // ever satisfy. Same class of bug the Products/POS/Sales/Returns re-filter
+  // comments already document (this pass must stay at least as permissive as
+  // the server's own match set, never stricter) -- those pages were already
+  // fixed; this one and Suppliers/Delivery below were not. Switched to the
+  // shared `fuzzyTextMatches` (searchMatch.ts) over a single joined
+  // haystack, matching the fields customers_fts indexes.
+  const filteredBySearch = useMemo(() => customers.filter((customer) => (
+    fuzzyTextMatches(
+      [customer.name, customer.phone, customer.email, customer.membership_number, customer.address].join(' '),
+      deferredSearch,
     )
-  }), [customers, deferredSearch])
+  )), [customers, deferredSearch])
+
+  // Client-side gender filter -- there's no server-side gender query param
+  // (contacts.ts's GET /customers doesn't filter by it), so this narrows
+  // the already-paginated page's worth of rows the same way the search
+  // re-filter above does. Good enough for a same-page toggle; a person
+  // filtering by gender across the *whole* customer list, not just the
+  // current page, still needs to page through -- a real limitation worth
+  // a server-side `gender` query param in a future session if this comes
+  // up as more than a same-page narrowing tool.
+  const filteredByGender = useMemo(
+    () => (genderFilter === 'all' ? filteredBySearch : filteredBySearch.filter((customer) => (
+      genderFilter === 'unspecified' ? !customer.gender : customer.gender === genderFilter
+    ))),
+    [filteredBySearch, genderFilter],
+  )
 
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const availableYears = useMemo(
-    () => getAvailableYears(filteredBySearch, (customer) => customer?.created_at),
-    [filteredBySearch],
+    () => getAvailableYears(filteredByGender, (customer) => customer?.created_at),
+    [filteredByGender],
   )
   const filteredSections = useMemo(() => (
     groupMode === 'alphabet'
-      ? buildAlphabetActionSections(filteredBySearch, {
+      ? buildAlphabetActionSections(filteredByGender, {
         getName: (customer) => customer?.name,
         getItemId: (customer) => Number(customer?.id),
         sortDirection: 'asc',
       })
-      : buildTimeActionSections(filteredBySearch, {
+      : buildTimeActionSections(filteredByGender, {
         getDate: (customer) => customer?.created_at,
         getItemId: (customer) => Number(customer?.id),
         year: yearFilter,
@@ -263,7 +340,7 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
         groupMode: 'time',
         sortDirection,
       })
-  ), [filteredBySearch, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
+  ), [filteredByGender, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
 
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
@@ -285,14 +362,29 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
   )
 
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleCustomers)
-  const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'company', 'Company'), 'Options']
+  // Gender/Created were already surfaced in the detail panel and XLSX
+  // export (see the customer detail rows / export map below) but never
+  // made it into this table's own column list -- added here so they're
+  // visible without opening each row's detail panel.
+  // 'Company' removed entirely (chat, Aug 25 2026) -- CustomerFormModal
+  // never actually exposed an input for it, so it was a dead field a
+  // customer could never set through the UI; dropped from the table
+  // column set, search, form payload, and XLSX export. Suppliers keep
+  // their own Company field (SuppliersTab.tsx) -- that form does expose
+  // it and a business identity genuinely applies there.
+  const customerColumns = [tr(t, 'name', 'Name'), 'Membership', tr(t, 'loyalty_points', 'Points'), tr(t, 'phone', 'Phone'), tr(t, 'email', 'Email'), tr(t, 'gender', 'Gender'), tr(t, 'col_added', 'Added'), 'Options']
   const contactFilterSections = useMemo(() => ([
     {
       id: 'sort',
       label: tr(t, 'sort', 'Sort'),
+      searchable: true,
       options: [
         { id: 'sort-desc', label: tr(t, 'newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
         { id: 'sort-asc', label: tr(t, 'oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+        ...buildPeriodFilterOptions({
+          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
+          allTimeLabel: tr(t, 'all_time', 'All time'),
+        }),
       ],
     },
     {
@@ -304,40 +396,18 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
       ],
     },
     {
-      id: 'year',
-      label: tr(t, 'year', 'Year'),
+      id: 'gender',
+      label: tr(t, 'gender', 'Gender'),
       options: [
-        { id: 'all-years', label: tr(t, 'all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
-        ...availableYears.map((year) => ({
-          id: `year-${year}`,
-          label: year,
-          active: yearFilter === year,
-          onClick: () => {
-            const next = yearFilter === year ? 'all' : year
-            setYearFilter(next)
-            if (next === 'all') setMonthFilter('all')
-          },
-        })),
-      ],
-    },
-    {
-      id: 'month',
-      label: tr(t, 'month', 'Month'),
-      options: [
-        { id: 'all-months', label: tr(t, 'all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
-        ...Array.from({ length: 12 }, (_, index) => {
-          const month = String(index + 1)
-          return {
-            id: `month-${month}`,
-            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
-            active: monthFilter === month,
-            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
-          }
-        }),
+        { id: 'gender-all', label: tr(t, 'all', 'All'), active: genderFilter === 'all', onClick: () => setGenderFilter('all') },
+        { id: 'gender-male', label: tr(t, 'male', 'Male'), active: genderFilter === 'male', onClick: () => setGenderFilter('male') },
+        { id: 'gender-female', label: tr(t, 'female', 'Female'), active: genderFilter === 'female', onClick: () => setGenderFilter('female') },
+        { id: 'gender-other', label: tr(t, 'other', 'Other'), active: genderFilter === 'other', onClick: () => setGenderFilter('other') },
+        { id: 'gender-unspecified', label: tr(t, 'unspecified', 'Unspecified'), active: genderFilter === 'unspecified', onClick: () => setGenderFilter('unspecified') },
       ],
     },
 
-  ]), [availableYears, groupMode, monthFilter, sortDirection, t, yearFilter])
+  ]), [availableYears, genderFilter, groupMode, monthFilter, sortDirection, t, yearFilter])
   const displayContactFilterSections = useMemo(() => (
     contactFilterSections.map((section) => {
       if (section.id !== 'group') return section
@@ -351,7 +421,7 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
       }
     })
   ), [contactFilterSections, t])
-  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
+  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time', genderFilter !== 'all'])
   const hasActiveCustomerSearchOrFilters = deferredSearch.trim().length > 0 || activeFilterCount > 0
   const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)
@@ -375,8 +445,15 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
     phone: customer.phone || '',
     email: customer.email || '',
     address: customer.address || '',
-    company: customer.company || '',
     notes: customer.notes || '',
+    gender: customer.gender || '',
+    // Carried through so a restored/redone customer keeps its original
+    // join date -- contacts.ts's CUSTOMERS.columns allowlist accepts this
+    // key specifically for this caller (see its own comment); left
+    // undefined rather than '' when the snapshot has none, so pickColumns
+    // skips the key entirely instead of writing an empty string over
+    // whatever CURRENT_TIMESTAMP would have set.
+    created_at: customer.created_at || undefined,
     userId: user?.id,
     userName: user?.name,
   }), [user?.id, user?.name])
@@ -545,7 +622,16 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
           })
         }
       }
-      notify(selected ? tr(t, 'customer_updated', 'Updated') : tr(t, 'customer_added', 'Added'))
+      // Part 157: a Review Required edit now comes back with `partial:
+      // true` when the server silently dropped every field except name
+      // (see routes/contacts.ts's PUT handler) -- surface that instead of
+      // the generic "Updated" toast so the user isn't left thinking their
+      // full set of changes actually saved.
+      if (selected && (result as { partial?: boolean } | null)?.partial) {
+        notify(tr(t, 'contact_partial_update_notice', 'Only the name was saved -- your other changes need Full Access to Contacts.'), 'warning')
+      } else {
+        notify(selected ? tr(t, 'customer_updated', 'Updated') : tr(t, 'customer_added', 'Added'))
+      }
       setModal(null)
       setSelected(null)
       await load({ silent: true, label: 'Customers after save' })
@@ -628,7 +714,6 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
                 phone: snapshot.phone || '',
                 email: snapshot.email || '',
                 address: snapshot.address || '',
-                company: snapshot.company || '',
                 notes: snapshot.notes || '',
                 userId: user?.id,
                 userName: user?.name,
@@ -662,20 +747,85 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" />
-      <div className="flex min-w-0 items-center gap-2">
+      {/* Manage (Import + Export folded into one dropdown, same pattern
+          Products.tsx uses) / History / Add Customer -- History before
+          Manage per the ordering used on Products. Used to be four equal-
+          width buttons (Import, Export, Add, History); folding Import/
+          Export into one Manage menu leaves more room for each remaining
+          button's label at narrow widths. */}
+      <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
+        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} summaryMode="compact" t={t} className="min-w-0 flex-1" showLabel />
+        <LazyPortalMenu
+          align="auto"
+          triggerWrapperClassName="min-w-0 flex-1"
+          trigger={(
+            <button
+              type="button"
+              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
+              aria-haspopup="true"
+              aria-label={tr(t, 'manage', 'Manage')}
+              title={tr(t, 'manage', 'Manage')}
+            >
+              <Settings2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">{tr(t, 'manage', 'Manage')}</span>
+            </button>
+          )}
+          items={([
+            { label: tr(t, 'import_contacts', 'Import'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            {
+              label: tr(t, 'export', 'Export'),
+              color: 'green',
+              icon: <Upload className="h-4 w-4 shrink-0" />,
+              onClick: async () => {
+                const rows = visibleCustomers.map((customer) => {
+                  const options = parseContactOptions(customer.address)
+                  return {
+                    Name: customer.name || '',
+                    Membership_Number: customer.membership_number || '',
+                    Phone: customer.phone || '',
+                    Email: customer.email || '',
+                    Gender: customer.gender || '',
+                    Options: options.map((option) => `[${option.label || 'Option'}] ${[option.name, option.phone, option.email, option.address].filter(Boolean).join(' | ')}`).join(' || '),
+                    Notes: customer.notes || '',
+                    Created: customer.created_at || '',
+                  }
+                })
+                const { downloadXLSX } = await loadCsvUtilsModule()
+                downloadXLSX(`customers-${new Date().toISOString().slice(0, 10)}.xlsx`, rows)
+              },
+            },
+          ] as PortalMenuItem[])}
+        />
+        <button
+          className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
+          onClick={() => { setSelected(null); setModal('form') }}
+          title={tr(t, 'add_customer', 'Add Customer')}
+          aria-label={tr(t, 'add_customer', 'Add Customer')}
+        >
+          <Plus className="h-4 w-4 shrink-0" />
+          <span className="truncate">{tr(t, 'add_customer', 'Add Customer')}</span>
+        </button>
+      </div>
+
+      {/* Search + filter pin to the top of the page's scroll container while
+          scrolling -- same `sticky top-2` treatment as Products/Inventory/
+          Sales/Returns/Branches (Aug 11 2026 UI-polish request). This tab
+          renders under Contacts.tsx's own Customers/Suppliers/Delivery tab
+          bar, which is NOT sticky and scrolls away like the rest of that
+          page's chrome -- only this row (the thing actually reached for
+          while scrolling a long list) pins. No separate select-all row to
+          include here: ContactTable renders its own selectAll control
+          inside the table header via the `selectAll` prop below. */}
+      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50/95 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <label htmlFor="customer-search" className="sr-only">{tr(t, 'search_customers_placeholder', 'Search customers')}</label>
-          <input
+          <SearchInput
             id="customer-search"
             name="customer_search"
-            autoComplete="off"
-            className="input max-w-xs min-w-0 flex-1"
-            placeholder={tr(t, 'search_customers_placeholder', `${tr(t, 'search', 'Search')} customers`)}
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={setSearch}
+            placeholder={tr(t, 'search_customers_placeholder', `${tr(t, 'search', 'Search')} customers`)}
+            className="min-w-0 max-w-xs flex-1"
           />
-          <span className="whitespace-nowrap text-sm text-gray-400">{customerTotal || visibleCustomers.length}</span>
         </div>
 
         <div className="flex flex-shrink-0 flex-nowrap items-center gap-1.5 overflow-x-auto">
@@ -694,7 +844,7 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
               onClick={handleBulkDelete}
               disabled={bulkActionBusy}
             >
-              Delete {selectedIds.size}
+              {tr(t, 'delete_selected_count', 'Delete {count}').replace('{count}', String(selectedIds.size))}
             </button>
           ) : null}
           <FilterMenu
@@ -706,41 +856,11 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
               setMonthFilter('all')
               setSortDirection('desc')
               setGroupMode('time')
+              setGenderFilter('all')
             }}
             compact
             mobileIconOnly
           />
-          <button className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => setModal('import')} title={tr(t, 'import_contacts', 'Import')}>
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr(t, 'import_contacts', 'Import')}</span>
-          </button>
-          <button
-            className="btn-secondary inline-flex items-center gap-1.5 whitespace-nowrap text-sm"
-            onClick={async () => {
-              const rows = visibleCustomers.map((customer) => {
-                const options = parseContactOptions(customer.address)
-                return {
-                  Name: customer.name || '',
-                  Membership_Number: customer.membership_number || '',
-                  Phone: customer.phone || '',
-                  Email: customer.email || '',
-                  Company: customer.company || '',
-                  Options: options.map((option) => `[${option.label || 'Option'}] ${[option.name, option.phone, option.email, option.address].filter(Boolean).join(' | ')}`).join(' || '),
-                  Notes: customer.notes || '',
-                  Created: customer.created_at || '',
-                }
-              })
-              const { downloadCSV } = await loadCsvUtilsModule()
-              downloadCSV(`customers-${new Date().toISOString().slice(0, 10)}.csv`, rows)
-            }}
-          >
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr(t, 'export', 'Export')}</span>
-          </button>
-          <button className="btn-primary inline-flex items-center gap-1.5 whitespace-nowrap text-sm" onClick={() => { setSelected(null); setModal('form') }} title={tr(t, 'add_customer', 'Add Customer')}>
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr(t, 'add_customer', 'Add Customer')}</span>
-          </button>
         </div>
       </div>
 
@@ -825,7 +945,8 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
               </td>
               <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{primaryOption.phone || customerRow.phone || '-'}</td>
               <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{primaryOption.email || customerRow.email || '-'}</td>
-              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{customerRow.company || '-'}</td>
+              <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{customerRow.gender ? tr(t, customerRow.gender, customerRow.gender) : tr(t, 'unspecified', 'Unspecified')}</td>
+              <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>{fmtDateTime24(customerRow.created_at)}</td>
               <td className="px-4 py-2 cursor-pointer" onClick={() => { setSelected(customerRow); setModal('detail') }}>
                 {options.length === 0 ? (
                   <span className="text-xs text-gray-400">-</span>
@@ -895,7 +1016,6 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
                 {customerRow.membership_number ? <div className="font-mono text-[11px] text-blue-500">{customerRow.membership_number}</div> : null}
                 <div className="text-xs font-semibold text-blue-600 dark:text-blue-300">{tr(t, 'loyalty_points', 'Points')}: {formatPoints(customerRow.points_balance)}</div>
                 {primaryOption.phone || customerRow.phone ? <div className="text-xs text-gray-500">{primaryOption.phone || customerRow.phone}</div> : null}
-                {customerRow.company ? <div className="truncate text-xs text-gray-400">{customerRow.company}</div> : null}
                 {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
               </div>
               <div onClick={(event) => event.stopPropagation()}>
@@ -929,10 +1049,10 @@ function CustomersTab({ t, notify, active = true }: CustomersTabProps) {
             ['Points deducted', Number(selected.points_deducted || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })],
             [tr(t, 'phone', 'Phone'), selected.phone],
             [tr(t, 'email', 'Email'), selected.email],
-            [tr(t, 'company', 'Company'), selected.company],
+            [tr(t, 'gender', 'Gender'), selected.gender ? tr(t, selected.gender, selected.gender) : tr(t, 'unspecified', 'Unspecified')],
             ['Contact Options', buildContactOptionSummary(parseContactOptions(selected.address))],
             [tr(t, 'notes', 'Notes'), selected.notes],
-            [tr(t, 'col_added', 'Added'), selected.created_at || fmtDate(selected.created_at)],
+            [tr(t, 'col_added', 'Added'), fmtDateTime24(selected.created_at)],
           ]}
           onEdit={() => setModal('form')}
           onDelete={() => handleDelete(selected)}

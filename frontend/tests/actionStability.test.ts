@@ -35,7 +35,7 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   const methods = readFrontend('src/api/methods.ts')
   const saleWriteTransport = readFrontend('src/api/saleWriteTransport.ts')
   const salesTransport = readFrontend('src/api/salesTransport.ts')
-  const salesRoute = readRepo('backend/src/routes/sales.ts')
+  const salesRoute = readRepo('cloudflare/src/routes/sales.ts')
 
   assert.match(pos, /if \(loading \|\| checkoutInFlightRef\.current\) return/)
   assert.match(pos, /checkoutInFlightRef\.current = true[\s\S]*setLoading\(true\)/)
@@ -51,10 +51,9 @@ await runTest('POS checkout keeps client, API, and backend duplicate guards', ()
   assert.match(salesTransport, /export function createSaleWithoutWriteDedupe/)
   assert.match(salesTransport, /skipWriteDedupe: true/)
 
-  assert.match(salesRoute, /function findSaleByClientRequestId\(clientRequestId\)/)
-  assert.match(salesRoute, /const existingSale = findSaleByClientRequestId\(clientRequestId\)[\s\S]*if \(existingSale\)/)
+  assert.match(salesRoute, /function normalizeClientRequestId\(value: unknown\)/)
+  assert.match(salesRoute, /const existingSale = await db[\s\S]*WHERE client_request_id = \?[\s\S]*if \(existingSale\) return c\.json\(\{ id: existingSale\.id, receiptNumber: existingSale\.receipt_number, duplicate: true \}\)/)
   assert.match(salesRoute, /INSERT INTO sales \([\s\S]*receipt_number, client_request_id/)
-  assert.match(salesRoute, /const duplicateSale = findSaleByClientRequestId\(clientRequestId\)/)
 })
 
 await runTest('POS quick-add customer and delivery writes are bounded', () => {
@@ -110,17 +109,22 @@ await runTest('background import tracker actions use a synchronous action guard'
   assert.match(source, /withLoaderTimeout\(\s*\(\) => api\.deleteImportJob\(removedId, \{ force \}\)/)
 })
 
-await runTest('backup export and restore keep local busy state plus backend job dedupe', () => {
+await runTest('backup export and restore keep local busy state and are permission-gated', () => {
   const backup = readFrontend('src/components/utils-settings/Backup.tsx')
-  const systemRoute = readRepo('backend/src/routes/system/index.ts')
-  const systemJobs = readRepo('backend/src/systemJobs.ts')
+  const backupsRoute = readRepo('cloudflare/src/routes/backups.ts')
 
   assert.match(backup, /data-testid="backup-export-create"[\s\S]*disabled=\{!!loading \|\| activeBackupJobRunning\}/)
   assert.match(backup, /data-testid="backup-restore-start"[\s\S]*disabled=\{!!loading \|\| activeBackupJobRunning\}/)
-  assert.match(systemJobs, /function findActiveJob\(dedupeKey\)/)
-  assert.match(systemJobs, /const activeJob = findActiveJob\(dedupeKey\)/)
-  assert.match(systemRoute, /dedupeKey: `backup_export_folder:\$\{path\.resolve\(destinationDir\)\}`/)
-  assert.match(systemRoute, /dedupeKey: `backup_restore_folder:\$\{path\.resolve\(sourceDir\)\}`/)
+  // Cloudflare's export/restore run synchronously within a single request
+  // (see routes/backups.ts's own comments) rather than the old Node
+  // backend's background-job queue, so there's no async window for a
+  // second identical job to race the first one -- the frontend's
+  // activeBackupJobRunning disabled-state above is what prevents a
+  // double-click resubmitting mid-request, and every action requires the
+  // `backup` permission (previously only requireAuth, i.e. any staff
+  // account) before it can run at all.
+  assert.match(backupsRoute, /hasPermission\(user, 'backup'\)/)
+  assert.match(backupsRoute, /status: 'completed'/)
 })
 
 await runTest('return create, edit, and supplier flows keep synchronous submit guards', () => {
@@ -130,7 +134,7 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   const supplierReturn = readFrontend('src/components/returns/NewSupplierReturnModal.tsx')
   const methods = readFrontend('src/api/methods.ts')
   const returnsTransport = readFrontend('src/api/returnsTransport.ts')
-  const returnsRoute = readRepo('backend/src/routes/returns.ts')
+  const returnsRoute = readRepo('cloudflare/src/routes/returns.ts')
 
   for (const source of [newReturn, editReturn, supplierReturn]) {
     assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
@@ -174,9 +178,10 @@ await runTest('return create, edit, and supplier flows keep synchronous submit g
   assert.match(methods, /export async function createSupplierReturn\(d\) \{[\s\S]*loadReturnsTransport\(\)/)
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'return'\)/)
   assert.match(returnsTransport, /ensureClientRequestId\(\{ \.\.\.getDevicePayload\(\), \.\.\.\(payload \|\| \{\}\) \}, 'supplier_return'\)/)
-  assert.match(returnsRoute, /function findReturnByClientRequestId\(clientRequestId\)/)
-  assert.match(returnsRoute, /const existingReturn = findReturnByClientRequestId\(clientRequestId\)[\s\S]*duplicate: true/)
-  assert.match(returnsRoute, /const duplicateReturn = findReturnByClientRequestId\(clientRequestId\)[\s\S]*duplicate: true/)
+  assert.match(returnsRoute, /function normalizeClientRequestId\(value: unknown\)/)
+  const returnDedupePattern = /if \(clientRequestId\) \{\s*const existing = await db\.prepare\('SELECT id, return_number FROM returns WHERE client_request_id = \? LIMIT 1'\)[\s\S]*?if \(existing\) return c\.json\(\{ id: existing\.id, returnNumber: existing\.return_number, duplicate: true \}\)\s*\}/g
+  const returnDedupeMatches = returnsRoute.match(returnDedupePattern) || []
+  assert.equal(returnDedupeMatches.length, 2, 'expected the same dedupe check in both the customer-return and supplier-return POST handlers')
 })
 
 await runTest('file picker and library upload/delete flows keep synchronous action guards', () => {
@@ -190,15 +195,21 @@ await runTest('file picker and library upload/delete flows keep synchronous acti
     assert.match(source, /if \(uploadInFlightRef\.current\) return/)
     assert.match(source, /uploadInFlightRef\.current = true[\s\S]*setUploading\(true\)/)
     assert.match(source, /finally \{[\s\S]*uploadInFlightRef\.current = false[\s\S]*setUploading\(false\)/)
-    assert.match(source, /deleteInFlightRef\.current = true[\s\S]*window\.confirm/)
     assert.match(source, /finally \{[\s\S]*deleteInFlightRef\.current = false[\s\S]*setDeletingAssetId\(null\)/)
     assert.match(source, /disabled=\{uploading \|\| deletingAssetId != null\}/)
   }
 
+  // Picker keeps the plain window.confirm gate; FilesPage.tsx replaced it
+  // with a real "type CONFIRM DELETE" modal (with an unlock checkbox for
+  // locked/in-use files) -- these diverged on purpose, so each gets its
+  // own assertion instead of sharing the loop above.
+  assert.match(picker, /deleteInFlightRef\.current = true[\s\S]*window\.confirm/)
+  assert.match(filesPage, /deleteConfirmText\.trim\(\)\.toUpperCase\(\) !== 'CONFIRM DELETE'\) return[\s\S]*const locked = !asset\.canDelete[\s\S]*if \(locked && !deleteUnlockChecked\) return[\s\S]*deleteInFlightRef\.current = true/)
+
   assert.match(filesPage, /const FILES_ASSET_UPLOAD_TIMEOUT_MS = 30000/)
   assert.match(filesPage, /const FILES_ASSET_DELETE_TIMEOUT_MS = 12000/)
-  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => filesApi\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/)
-  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/)
+  assert.match(filesPage, /withLoaderTimeout\(\s*(?:\/\/[^\n]*\n\s*)*\(\) => filesApi\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name, compressOptions: LIBRARY_IMAGE_COMPRESS_OPTIONS \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/)
+  assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{\s*expectedUpdatedAt: asset\.updated_at \|\| undefined,\s*force: locked && deleteUnlockChecked,\s*confirmText: deleteConfirmText\.trim\(\),\s*\}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/)
   assert.match(filesPage, /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete selected file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/)
   assert.match(filesPage, /Download className="mr-1\.5 inline h-3\.5 w-3\.5"/)
   assert.doesNotMatch(filesPage, /<Save className=/)
@@ -222,7 +233,11 @@ await runTest('product form image upload and save keep synchronous guards', () =
   assert.match(source, /if \(imageUploading \|\| imageUploadInFlightRef\.current\) return/)
   assert.match(source, /imageUploadInFlightRef\.current = true/)
   assert.match(source, /finally \{[\s\S]*imageUploadInFlightRef\.current = false[\s\S]*setImageUploading\(false\)/)
-  assert.match(source, /if \(saving \|\| saveInFlightRef\.current\) return/)
+  // Guard now also blocks while an image is still uploading (Part 241
+  // save-button race fix, ProductForm.tsx) -- accept either the original
+  // two-condition guard or that extended form so this assertion doesn't
+  // regress if a future session drops the extra condition again.
+  assert.match(source, /if \(saving \|\| saveInFlightRef\.current(?: \|\| imageUploading)?\) return/)
   assert.match(source, /saveInFlightRef\.current = true[\s\S]*const payload(?:: ProductSavePayload)? = \{/)
   assert.match(source, /finally \{[\s\S]*saveInFlightRef\.current = false[\s\S]*setSaving\(false\)/)
   assert.match(source, /const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000/)
@@ -247,14 +262,25 @@ await runTest('catalog portal submission writes use guarded bounded actions', ()
 
   assert.match(source, /import \{ beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000/)
-  assert.match(source, /const CATALOG_PORTAL_REVIEW_TIMEOUT_MS = 12000/)
   assert.match(source, /const submissionSavingRef = useRef\(false\)/)
-  assert.match(source, /const reviewSavingRef = useRef\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(submissionSavingRef, \{ blocked: submissionSaving \}\)\) return/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.createPortalSubmission\(\{[\s\S]*membershipNumber: membershipNumberValue,[\s\S]*screenshots: submissionDraft\.screenshots,[\s\S]*\}\),\s*'Create portal submission',\s*CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(submissionSavingRef\)[\s\S]*setSubmissionSaving\(false\)/)
+  // Portal-submission *review* (approve/reject) is not on this page -- it
+  // moved to LoyaltyPointsPage.tsx (see the next test below) where staff
+  // manage loyalty/membership submissions. reviewSavingRef/
+  // CATALOG_PORTAL_REVIEW_TIMEOUT_MS never lived here after that move.
+  assert.doesNotMatch(source, /reviewSavingRef|CATALOG_PORTAL_REVIEW_TIMEOUT_MS|reviewPortalSubmission/, 'Catalog page should not reintroduce portal-submission review actions that moved to LoyaltyPointsPage')
+})
+
+await runTest('loyalty portal submission review uses a guarded bounded action', () => {
+  const source = readFrontend('src/components/loyalty-points/LoyaltyPointsPage.tsx')
+
+  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
+  assert.match(source, /const \[reviewSavingId, setReviewSavingId\] = useState<string \| number \| null>\(null\)/)
+  assert.match(source, /const reviewSavingRef = useRef\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(reviewSavingRef, \{ blocked: reviewSavingId != null, value: item\.id \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.reviewPortalSubmission\(item\.id, \{[\s\S]*status,[\s\S]*userName: user\?\.name,[\s\S]*\}\),\s*'Review portal submission',\s*CATALOG_PORTAL_REVIEW_TIMEOUT_MS,\s*\)/)
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => submitPortalReview\(item\.id, \{[\s\S]*status,[\s\S]*reward_points: Number\(item\.reward_points \|\| 0\),[\s\S]*\}\),\s*'Review portal submission',\s*LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(reviewSavingRef\)[\s\S]*setReviewSavingId\(null\)/)
 })
 
@@ -301,13 +327,24 @@ await runTest('reset data and factory reset use guarded bounded actions', () => 
 
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/utils\/loaders\.ts'/)
-  assert.match(source, /const RESET_DATA_TIMEOUT_MS = 60000/)
-  assert.match(source, /const FACTORY_RESET_TIMEOUT_MS = 90000/)
+  // Both raised from 60s/90s to a shared 10-minute ceiling (see
+  // ResetData.tsx's own comment) so this outer client-side timeout isn't
+  // shorter than what systemRuntime.ts's resetData()/factoryReset() calls
+  // now allow the underlying request itself (LONG_SYSTEM_ACTION_TIMEOUT_MS).
+  assert.match(source, /const RESET_DATA_TIMEOUT_MS = 10 \* 60 \* 1000/)
+  assert.match(source, /const FACTORY_RESET_TIMEOUT_MS = 10 \* 60 \* 1000/)
   assert.match(source, /const resetInFlightRef = useRef\(false\)/)
   assert.match(source, /const factoryResetInFlightRef = useRef\(false\)/)
   assert.match(source, /if \(!beginSingleAction\(resetInFlightRef, \{ blocked: working \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(factoryResetInFlightRef, \{ blocked: working \}\)\) return/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/)
+  // resetData's call now also passes the mode='products'-only
+  // includeMovements/includeSales toggles as a second argument (see this
+  // file's own comment on ProductsResetToggles) -- regex widened to
+  // `resetData\?\.\(mode[\s\S]*?\)` (anything up to the matching close
+  // paren) instead of the old exact `resetData\?\.\(mode\)`, same
+  // "regex updated to accept the extended guard condition" precedent as
+  // Part 241's ProductForm.tsx save-guard change.
+  assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode[\s\S]*?\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/)
   assert.match(source, /withLoaderTimeout\(\s*\(\) => [\s\S]*factoryReset\?\.\(\)[\s\S]*'Factory reset',\s*FACTORY_RESET_TIMEOUT_MS,\s*\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(resetInFlightRef\)[\s\S]*setWorking\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(factoryResetInFlightRef\)[\s\S]*setWorking\(false\)/)
@@ -330,18 +367,20 @@ await runTest('server queue and connection actions use guarded bounded actions',
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(testSyncInFlightRef\)[\s\S]*setTesting\(false\)/)
 })
 
-await runTest('audit log retention cleanup uses a guarded bounded action', () => {
+await runTest('audit log retention cleanup is automatic, not a guarded manual action', () => {
+  // The manual "Clear 30d" button (and its guarded bounded action) was
+  // removed from this route during the UI/UX cleanup pass in favor of an
+  // automatic server-side sweep -- see AuditLog.tsx's code comment near the
+  // Settings retention field, and cloudflare/src/lib/audit.ts's
+  // maybeRunScheduledAuditLogRetention(), invoked from the Worker's
+  // scheduled() handler on the cron in wrangler.toml. This route no longer
+  // needs its own single-action guard, timeout constant, or in-flight ref
+  // for that action, so the assertions this replaced (which required all of
+  // that machinery) no longer apply.
   const source = readFrontend('src/components/utils-settings/AuditLog.tsx')
 
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(source, /const AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS = 12000/)
-  assert.match(source, /const \[clearingOldLogs, setClearingOldLogs\] = useState\(false\)/)
-  assert.match(source, /const clearOldLogsInFlightRef = useRef\(false\)/)
-  assert.match(source, /if \(!window\.confirm\('Clear audit logs older than 30 days\?'\)\) return[\s\S]*if \(!beginSingleAction\(clearOldLogsInFlightRef, \{ blocked: clearingOldLogs \}\)\) return/)
-  assert.match(source, /deleteAuditLogsRetention as deleteAuditLogsRetentionRequest/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => deleteAuditLogsRetentionRequest\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(clearOldLogsInFlightRef\)[\s\S]*setClearingOldLogs\(false\)[\s\S]*setLoading\(false\)/)
-  assert.match(source, /disabled=\{clearingOldLogs\}/)
+  assert.doesNotMatch(source, /deleteAuditLogsRetention/, 'Audit Log route should not reintroduce the removed manual retention-clear action')
+  assert.doesNotMatch(source, /AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS|clearingOldLogs|clearOldLogsInFlightRef/, 'Audit Log route should not retain dead state/refs for the removed manual retention-clear action')
 })
 
 await runTest('secondary import modals use the shared single-action guard', () => {
@@ -380,32 +419,6 @@ await runTest('loyalty point rule save uses the shared single-action guard', () 
   assert.match(source, /const saveInFlightRef = useRef\(false\)/)
   assert.match(source, /async function handleSave\(\) \{[\s\S]*if \(!beginSingleAction\(saveInFlightRef\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/)
-})
-
-await runTest('custom tables bound reads and same-tick row mutations', () => {
-  const source = readFrontend('src/components/custom-tables/CustomTables.tsx')
-
-  assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(source, /const CUSTOM_TABLES_LOAD_TIMEOUT_MS = 8000/)
-  assert.match(source, /const CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS = 10000/)
-  assert.match(source, /const CUSTOM_TABLE_MUTATION_TIMEOUT_MS = 12000/)
-  assert.match(source, /const createTableInFlightRef = useRef\(false\)/)
-  assert.match(source, /const saveRowInFlightRef = useRef\(false\)/)
-  assert.match(source, /const deleteRowInFlightRef = useRef\(false\)/)
-  assert.match(source, /function loadCustomTablesApi\(\): Promise<CustomTablesApi> \{[\s\S]*import\('\.\.\/\.\.\/api\/customTablesTransport\.ts'\)/)
-  assert.doesNotMatch(source, /window\.api|getCustomTablesApi/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTablesRequest\(\),\s*'Custom tables',\s*CUSTOM_TABLES_LOAD_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => getCustomTableDataRequest\(tableName\),\s*`Custom table \$\{tableName\}`,\s*CUSTOM_TABLE_ROWS_LOAD_TIMEOUT_MS,\s*\)/)
-  assert.match(source, /if \(!beginSingleAction\(createTableInFlightRef, \{ blocked: savingTable \}\)\) return/)
-  assert.match(source, /if \(!activeTable\?\.name \|\| !beginSingleAction\(saveRowInFlightRef, \{ blocked: savingRow \}\)\) return/)
-  assert.match(source, /if \(!activeTable\?\.name \|\| !beginSingleAction\(deleteRowInFlightRef, \{ blocked: !!deletingRowId, value: id \}\)\) return/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(createTableInFlightRef\)[\s\S]*setSavingTable\(false\)/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveRowInFlightRef\)[\s\S]*setSavingRow\(false\)/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(deleteRowInFlightRef\)[\s\S]*setDeletingRowId\(null\)/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => createCustomTableRequest\(payload\),[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => insertCustomRowRequest\(activeTable\.name, payload\),[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => updateCustomRowRequest\(activeTable\.name,[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
-  assert.match(source, /withLoaderTimeout\(\s*\(\) => deleteCustomRowRequest\(activeTable\.name,[\s\S]*CUSTOM_TABLE_MUTATION_TIMEOUT_MS/)
 })
 
 await runTest('contact tabs use same-tick guards and bounded mutations', () => {
@@ -516,28 +529,33 @@ await runTest('branch CRUD and transfer actions use shared guards and bounded mu
   assert.match(transfer, /finally \{[\s\S]*finishSingleAction\(transferInFlightRef\)[\s\S]*setSaving\(false\)/)
 })
 
-await runTest('inventory adjust, move, transfer, and batch actions use shared guards and bounded mutations', () => {
+await runTest('inventory adjust, transfer, and batch actions use shared guards and bounded mutations', () => {
   const source = readFrontend('src/components/inventory/Inventory.tsx')
   const mutationLines = source
     .split('\n')
     .filter((line) => /getInventoryApi\(\)\.(adjustStock|moveStockRow|transferInventoryStock)\(/.test(line))
 
+  // Note: the standalone single-product "Move Stock" modal (moveModal/
+  // moveForm/moveSaving/moveStockInFlightRef/openMove/handleMoveStock) was
+  // removed -- Add Stock's unlock-pricing path (resolveAddStockTarget on
+  // the backend) now covers what it used to require a second manual step
+  // for. moveStockRow itself is still real and still guarded: it's called
+  // from the batch-apply path for per-line "move" actions within a batch
+  // session (see the batch assertion below), not from a standalone modal.
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(source, /const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(source, /const adjustStockInFlightRef = useRef\(false\)/)
-  assert.match(source, /const moveStockInFlightRef = useRef\(false\)/)
   assert.match(source, /const transferStockInFlightRef = useRef\(false\)/)
   assert.match(source, /const batchInventoryInFlightRef = useRef\(false\)/)
+  assert.doesNotMatch(source, /moveStockInFlightRef|moveSaving|moveModal|moveForm|openMove\(|handleMoveStock/, 'standalone Move Stock modal should stay removed')
   assert.match(source, /const runInventoryMutation = useCallback\(\(loader: InventoryLoader, label: string\): Promise<any> => \([\s\S]*withLoaderTimeout\(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS\)/)
   assert.match(source, /if \(!beginSingleAction\(adjustStockInFlightRef, \{ blocked: adjustSaving \}\)\) return/)
-  assert.match(source, /if \(!beginSingleAction\(moveStockInFlightRef, \{ blocked: moveSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(transferStockInFlightRef, \{ blocked: transferSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(batchInventoryInFlightRef, \{ blocked: batchApplying \}\)\) return/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(adjustStockInFlightRef\)[\s\S]*setAdjustSaving\(false\)/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(moveStockInFlightRef\)[\s\S]*setMoveSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(transferStockInFlightRef\)[\s\S]*setTransferSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(batchInventoryInFlightRef\)[\s\S]*setBatchApplying\(false\)/)
-  assert.ok(mutationLines.length >= 9, 'inventory should still call all stock mutation APIs in normal, undo/redo, and batch paths')
+  assert.ok(mutationLines.length >= 3, 'inventory should still call adjust/move/transfer stock mutation APIs (move now only from the batch path)')
   assert.ok(
     mutationLines.every((line) => line.includes('runInventoryMutation')),
     `unbounded inventory mutation lines:\n${mutationLines.filter((line) => !line.includes('runInventoryMutation')).join('\n')}`,
@@ -670,10 +688,23 @@ await runTest('product page save and delete actions use shared guards and bounde
   assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Initialize product branch stock'/)
   assert.doesNotMatch(source, /await\s+(?:window\.api|productApi)\.(adjustStock|transferStock|createProduct|updateProduct|deleteProduct)\(/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(productSaveInFlightRef\)/)
-  assert.match(source, /if \(!beginSingleAction\(productDeleteInFlightRef\)\) return[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(p\.id \|\| 0, user\?\.id, user\?\.name\), 'Delete product'\)/)
-  assert.match(source, /finally \{ finishSingleAction\(productDeleteInFlightRef\) \}/)
-  assert.match(source, /if \(!beginSingleAction\(bulkActionInFlightRef, \{ blocked: bulkActionBusy \}\)\) return[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(id\), 'Delete product'\)/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(bulkActionInFlightRef\)[\s\S]*setBulkActionBusy\(false\)/)
+  // Delete now goes through DeleteConfirmModal (progress.md part 202: "show
+  // what will be affected and require explicit confirmation") instead of a
+  // bare window.confirm() -- handleDelete/handleBulkDelete only claim the
+  // guard and open the modal; the actual mutation + guard release moved to
+  // runSingleDeleteConfirmed/runBulkDeleteConfirmed, called from the
+  // modal's confirm button via runPendingDeleteConfirmed.
+  assert.match(source, /const handleDelete = \(p: ProductRecord\) => \{[\s\S]*if \(!beginSingleAction\(productDeleteInFlightRef\)\) return/)
+  assert.match(source, /const runSingleDeleteConfirmed = async \(p: ProductRecord, reason: string\) => \{[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(p\.id \|\| 0, reason\), 'Delete product'\)/)
+  assert.match(source, /finally \{[\s\S]*finishSingleAction\(productDeleteInFlightRef\)[\s\S]*setDeleteConfirmBusy\(false\)[\s\S]*setPendingDelete\(null\)[\s\S]*\}/)
+  assert.match(source, /const handleBulkDelete = \(\) => \{[\s\S]*if \(!selectedVisibleIds\.length \|\| bulkActionBusy\) return/)
+  assert.match(source, /const runBulkDeleteConfirmed = async \(ids: EntityId\[\], reason: string\) => \{[\s\S]*if \(!beginSingleAction\(bulkActionInFlightRef, \{ blocked: bulkActionBusy \}\)\) return[\s\S]*runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(id, reason\), 'Delete product'\)/)
+  // Delete now requires a reason (progress.md's product-delete-reason
+  // item): runPendingDeleteConfirmed forwards DeleteConfirmModal's own
+  // required-reason field straight into both delete runners above.
+  assert.match(source, /const runPendingDeleteConfirmed = async \(reason: string\) => \{/)
+  assert.match(source, /finally \{[\s\S]*finishSingleAction\(bulkActionInFlightRef\)[\s\S]*setBulkActionBusy\(false\)[\s\S]*setDeleteConfirmBusy\(false\)[\s\S]*setPendingDelete\(null\)/)
+  assert.match(source, /<DeleteConfirmModal[\s\S]*onConfirm=\{runPendingDeleteConfirmed\}[\s\S]*summary=\{summarizeDeleteImpact\(snapshotProductsByIds\(pendingDelete\.ids\)\)\}/)
 })
 
 await runTest('product stock helper modals use shared guards and bounded mutations', () => {

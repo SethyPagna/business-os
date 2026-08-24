@@ -28,6 +28,51 @@ export const FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS: FirstPartyPortalLanguageOption
   { value: 'tr', label: 'Turkish', nativeLabel: 'Türkçe', dir: 'ltr', type: 'expanded' },
 ]
 
+/**
+ * Ready-to-render dropdown options for the "translate this page" picker:
+ * 'Original' plus every first-party language, labeled "English name -
+ * Native name" when the two differ. Single source of truth for both the
+ * admin editor's live preview (CatalogPage.tsx) and the real public portal
+ * (PublicCatalogPage.tsx) so the two can't silently drift apart again —
+ * that drift (the public portal hardcoding only 3 of these) was the root
+ * cause of most languages appearing "not to work" on the live site.
+ */
+export const FIRST_PARTY_TRANSLATE_LANG_OPTIONS: { value: string; label: string; kind: 'first_party'; dir?: 'ltr' | 'rtl' }[] = [
+  { value: 'original', label: 'Original', kind: 'first_party' },
+  ...FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => ({
+    value: option.value,
+    label: option.nativeLabel && option.nativeLabel !== option.label
+      ? `${option.label} - ${option.nativeLabel}`
+      : option.label,
+    kind: 'first_party' as const,
+    dir: option.dir,
+  })),
+]
+
+/**
+ * Languages with no first-party translation, served only via the legacy
+ * Google "Website Translator" widget (external script + cookie switch —
+ * slower and less reliable than the first-party packs above, but the only
+ * option for these 9 until someone writes first-party packs for them).
+ */
+export const GOOGLE_TRANSLATE_FALLBACK_OPTIONS: { value: string; label: string; kind: 'external' }[] = [
+  { value: 'nl', label: 'Dutch' },
+  { value: 'sv', label: 'Swedish' },
+  { value: 'pl', label: 'Polish' },
+  { value: 'cs', label: 'Czech' },
+  { value: 'ro', label: 'Romanian' },
+  { value: 'uk', label: 'Ukrainian' },
+  { value: 'el', label: 'Greek' },
+  { value: 'bn', label: 'Bengali' },
+  { value: 'ta', label: 'Tamil' },
+].map((option) => ({ ...option, kind: 'external' as const }))
+
+/** Every language the "translate this page" picker can offer, first-party then external. */
+export const ALL_PUBLIC_TRANSLATE_OPTIONS = [
+  ...FIRST_PARTY_TRANSLATE_LANG_OPTIONS,
+  ...GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
+]
+
 const PACK_BY_LOWER = new Map(
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => [option.value.toLowerCase(), option.value])
 )

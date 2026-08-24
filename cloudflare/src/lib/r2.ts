@@ -19,6 +19,18 @@ export async function deleteObject(bucket: R2Bucket, key: string) {
   return bucket.delete(key)
 }
 
+// R2 has no server-side "copy" op on the Workers binding -- a copy is a
+// get() followed by a put() of the same bytes/metadata under a new key.
+// Used by lib/backup.ts to actually back up asset *contents*, not just a
+// manifest of their keys.
+export async function copyObject(bucket: R2Bucket, sourceKey: string, destKey: string): Promise<boolean> {
+  const object = await bucket.get(sourceKey)
+  if (!object) return false
+  const contentType = object.httpMetadata?.contentType
+  await bucket.put(destKey, object.body, contentType ? { httpMetadata: { contentType } } : undefined)
+  return true
+}
+
 export async function listObjects(bucket: R2Bucket, prefix: string) {
   const out: R2Object[] = []
   let cursor: string | undefined

@@ -1,19 +1,25 @@
 import type { ChangeEvent, ComponentProps, ComponentType, ReactNode } from 'react'
-import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
 import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import Lock from 'lucide-react/dist/esm/icons/lock.js'
+import LockOpen from 'lucide-react/dist/esm/icons/unlock.js'
+import PencilLine from 'lucide-react/dist/esm/icons/pencil-line.js'
 import RefreshCcw from 'lucide-react/dist/esm/icons/refresh-ccw.js'
 import Square from 'lucide-react/dist/esm/icons/square.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import PageHeader from '../shared/PageHeader'
+import Modal from '../shared/Modal'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect from '../shared/AppSelect'
+import FilterMenu from '../shared/FilterMenu'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
@@ -28,6 +34,8 @@ import {
 import {
   deleteFileAsset as deleteFileAssetRequest,
   getFiles as getFilesRequest,
+  LIBRARY_IMAGE_COMPRESS_OPTIONS,
+  renameFileAsset as renameFileAssetRequest,
   uploadFileAsset as uploadFileAssetRequest,
 } from '../../api/fileTransport.ts'
 import {
@@ -41,8 +49,8 @@ import {
 
 const loadFilesProvidersTab = () => import('./FilesProvidersTab.tsx')
 const loadFilesResponsesTab = () => import('./FilesResponsesTab')
-const FilesProvidersTab = lazy(loadFilesProvidersTab)
-const FilesResponsesTab = lazy(loadFilesResponsesTab as () => Promise<{ default: ComponentType<FilesResponsesTabProps> }>)
+const FilesProvidersTab = lazyRetry(loadFilesProvidersTab, 'files-providers-tab')
+const FilesResponsesTab = lazyRetry(loadFilesResponsesTab as () => Promise<{ default: ComponentType<FilesResponsesTabProps> }>, 'files-responses-tab')
 
 const FILES_LIBRARY_LOAD_TIMEOUT_MS = 10000
 const AI_PROVIDERS_LOAD_TIMEOUT_MS = 8000
@@ -67,6 +75,8 @@ interface AppContextValue {
   notify: NotifyFunction
   user?: AppUser | null
   t: TranslateFunction
+  hasPermission: (key: string) => boolean
+  getPermissionTier: (key: string) => 'full' | 'review' | 'none'
 }
 
 interface SyncContextValue {
@@ -88,6 +98,9 @@ interface FileAsset {
   updated_at?: string | null
   usageCount?: number
   canDelete?: boolean
+  // Breakdown behind usageCount, so the UI can say exactly what's using a
+  // locked file ("Used by 2 products") instead of a generic "in use".
+  usage?: { products?: number; gallery?: number; avatars?: number; settings?: number }
 }
 
 interface FilesResponse {
@@ -216,8 +229,9 @@ type FilesResponsesTabProps = {
 
 interface FilesApi {
   getFiles: (options: { search: string; mediaType: MediaTypeFilter; page: number; pageSize: number; includeMeta: boolean }) => Promise<FilesResponse>
-  uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string }) => Promise<unknown>
-  deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string }) => Promise<unknown>
+  uploadFileAsset: (payload: { file: File; userId?: string | number; userName?: string; compressOptions?: typeof LIBRARY_IMAGE_COMPRESS_OPTIONS }) => Promise<unknown>
+  deleteFileAsset: (id: string | number, options: { expectedUpdatedAt?: string; force?: boolean; confirmText?: string }) => Promise<unknown>
+  renameFileAsset: (id: string | number, originalName: string) => Promise<unknown>
   getAiProviders: () => Promise<ProvidersResponse>
   getAiResponses: (limit: number) => Promise<AiResponsesResponse>
   createAiProvider: (payload: ProviderPayload) => Promise<ProviderMutationResult>
@@ -228,6 +242,7 @@ interface FilesApi {
 
 interface AssetPreviewProps {
   asset: FileAsset | null | undefined
+  onOpenPreview?: (asset: FileAsset) => void
 }
 
 type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
@@ -239,6 +254,7 @@ const focusedFilesApi: FilesApi = {
   getFiles: (options) => getFilesRequest(options) as Promise<FilesResponse>,
   uploadFileAsset: (payload) => uploadFileAssetRequest(payload),
   deleteFileAsset: (id, options) => deleteFileAssetRequest(id, options),
+  renameFileAsset: (id, originalName) => renameFileAssetRequest(id, originalName),
   getAiProviders: () => getAiProvidersRequest() as Promise<ProvidersResponse>,
   getAiResponses: (limit) => getAiResponsesRequest(limit) as Promise<AiResponsesResponse>,
   createAiProvider: (payload) => createAiProviderRequest(payload) as Promise<ProviderMutationResult>,
@@ -263,13 +279,25 @@ function sanitizeFallback(value: string): string {
   return hasMojibake(value) ? '' : value
 }
 
-function AssetPreview({ asset }: AssetPreviewProps) {
+// Clicking an image thumbnail opens the full-size lightbox (onOpenPreview,
+// wired up by the grid below) -- previously these thumbnails were purely
+// decorative with no way to see the asset any larger than the grid card
+// itself. Video keeps its own inline controls (play/scrub/fullscreen
+// already cover "see it properly" for video, and a click there is a
+// play/pause gesture, not a preview-open one) and non-media files have
+// nothing to preview, so neither gets the click handler.
+function AssetPreview({ asset, onOpenPreview }: AssetPreviewProps) {
   const previewUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
   if (asset?.media_type === 'image') {
     return (
-      <div className="aspect-[4/3] w-full overflow-hidden rounded-2xl bg-slate-100">
+      <button
+        type="button"
+        onClick={() => asset && onOpenPreview?.(asset)}
+        className="block aspect-[4/3] w-full cursor-zoom-in overflow-hidden rounded-2xl bg-slate-100 transition hover:opacity-90"
+        aria-label={asset.original_name || 'Preview file'}
+      >
         <img src={previewUrl || ''} alt={asset.original_name || 'File preview'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
-      </div>
+      </button>
     )
   }
   if (asset?.media_type === 'video') {
@@ -283,6 +311,21 @@ function AssetPreview({ asset }: AssetPreviewProps) {
     <div className="flex aspect-[4/3] w-full items-center justify-center rounded-2xl bg-slate-100 px-3 text-center text-xs text-slate-500">
       {asset?.mime_type || 'File'}
     </div>
+  )
+}
+
+// Full-size lightbox for a Library image -- opened by clicking an
+// AssetPreview thumbnail. Deliberately just an image + filename + close,
+// not a rebuild of the card's rename/delete/history actions (those stay
+// on the card itself; this is purely "let me actually see the picture").
+function AssetPreviewModal({ asset, onClose }: { asset: FileAsset; onClose: () => void }) {
+  const previewUrl = resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path
+  return (
+    <Modal title={sanitizeFallback(asset.original_name || '') || 'Preview'} onClose={onClose} size="xl">
+      <div className="flex max-h-[70vh] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
+        <img src={previewUrl || ''} alt={asset.original_name || 'File preview'} className="max-h-[70vh] w-full object-contain" />
+      </div>
+    </Modal>
   )
 }
 
@@ -360,8 +403,7 @@ function compactTabLabel(label: string): string {
 }
 
 function getDefaultFilesPageSize(): number {
-  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 24
-  return window.matchMedia('(max-width: 767px)').matches ? 12 : 24
+  return 50
 }
 
 function downloadAssetFile(asset: FileAsset) {
@@ -377,7 +419,17 @@ function downloadAssetFile(asset: FileAsset) {
 }
 
 export default function FilesPage() {
-  const { notify, user, t } = useApp()
+  const { notify, user, t, hasPermission, getPermissionTier } = useApp()
+  // Library view/manage split (see cloudflare/src/routes/files.ts's own
+  // top-of-file comment for the full backend-side rule this mirrors):
+  // browsing/searching/previewing an asset is available to every
+  // authenticated user who can reach this page at all, no `library` grant
+  // needed. Upload ("import"), bulk download ("export"), rename, and
+  // delete are all management actions and need real Full Access to
+  // `library` -- same legacy `settings`-full fallback the backend still
+  // honors, kept here so the button doesn't disappear for an admin whose
+  // role predates the `library` key existing.
+  const canManageLibrary = getPermissionTier('library') === 'full' || hasPermission('settings')
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('files')
   const filesApi = useMemo(() => getFilesApi(), [])
@@ -393,7 +445,39 @@ export default function FilesPage() {
   const [loadingFiles, setLoadingFiles] = useState(true)
   const [uploading, setUploading] = useState(false)
   const [deletingAssetId, setDeletingAssetId] = useState<string | number | null>(null)
+  // Rename (inline, see renderAssetCard below): `renamingAssetId` is which
+  // asset's name field is in edit mode, `renameDraft` its in-progress text,
+  // `renameSavingId` which one currently has a save request in flight (so
+  // the input can disable/show a spinner without a global page-level lock,
+  // same shape as `deletingAssetId` above but per-field rather than
+  // per-row -- rename doesn't need the destructive-action confirm dialog
+  // delete does, so no shared in-flight ref is needed here).
+  const [renamingAssetId, setRenamingAssetId] = useState<string | number | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const [previewAsset, setPreviewAsset] = useState<FileAsset | null>(null)
+  const [renameSavingId, setRenameSavingId] = useState<string | number | null>(null)
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<number>>(() => new Set())
+  // User-reported gap: single-file delete used a plain window.confirm() and
+  // a generic "in use" notify with no reason and no way to proceed even
+  // when the person genuinely wants to delete an in-use file. Replaced
+  // with a real modal: always requires typing the literal phrase "CONFIRM
+  // DELETE" (deleteConfirmText), and for a locked (in-use) file also shows
+  // the usage breakdown and requires the explicit "unlock" checkbox before
+  // the Delete button in the modal enables at all -- the actual override
+  // still goes through the server's own force+confirmText check (routes/
+  // files.ts), this is just the UI gate in front of it.
+  const [deleteConfirmAsset, setDeleteConfirmAsset] = useState<FileAsset | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+  const [deleteUnlockChecked, setDeleteUnlockChecked] = useState(false)
+  // Same "type CONFIRM DELETE" gate as the single-file modal above, applied
+  // to the bulk action -- previously this used a plain window.confirm().
+  // Bulk delete never force-deletes a locked file (no per-item unlock
+  // makes sense for a mixed batch); it only ever removes the
+  // already-unlocked subset and states the skipped count up front, same
+  // as before, just through a real modal with the typed-confirmation gate
+  // instead of window.confirm.
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
+  const [bulkDeleteConfirmText, setBulkDeleteConfirmText] = useState('')
 
   const [providers, setProviders] = useState<AiProvider[]>([])
   const [providerMeta, setProviderMeta] = useState<ProviderMetaMap>({})
@@ -519,7 +603,14 @@ export default function FilesPage() {
         includeMeta: true,
       }), 'Files library', FILES_LIBRARY_LOAD_TIMEOUT_MS)
       if (!isTrackedRequestCurrent(fileLoadRequestRef, requestId)) return
-      const nextFiles = Array.isArray(result?.items) ? result.items : []
+      // A malformed/transient response must not erase a library that is
+      // already on screen. The transport normally rejects failures; this
+      // guard also protects the UI against a proxy or stale runtime that
+      // resolves without the expected payload shape.
+      if (!result || !Array.isArray(result.items)) {
+        throw new Error('Files library returned an invalid response')
+      }
+      const nextFiles = result.items
       setFiles(nextFiles)
       setTotalFiles(Number(result?.total || nextFiles.length || 0))
       filesLoadedOnceRef.current = true
@@ -677,7 +768,11 @@ export default function FilesPage() {
     setUploading(true)
     try {
       await withLoaderTimeout(
-        () => filesApi.uploadFileAsset({ file, userId: user?.id, userName: user?.name }),
+        // Library uploads get a tighter compression budget than the
+        // shared default (see LIBRARY_IMAGE_COMPRESS_OPTIONS) -- these
+        // are content/reference thumbnails, not full-bleed product
+        // photography, so they can afford to compress harder.
+        () => filesApi.uploadFileAsset({ file, userId: user?.id, userName: user?.name, compressOptions: LIBRARY_IMAGE_COMPRESS_OPTIONS }),
         'Upload file asset',
         FILES_ASSET_UPLOAD_TIMEOUT_MS,
       )
@@ -691,31 +786,102 @@ export default function FilesPage() {
     }
   }
 
-  async function handleDeleteAsset(asset: FileAsset) {
+  function handleDeleteAsset(asset: FileAsset) {
     if (!asset?.id || deletingAssetId || deleteInFlightRef.current) return
-    if (!asset.canDelete) {
-      notify(tr('file_in_use', 'This file is still in use and cannot be deleted.'), 'error')
-      return
-    }
+    setDeleteConfirmText('')
+    setDeleteUnlockChecked(false)
+    setDeleteConfirmAsset(asset)
+  }
+
+  function closeDeleteConfirm() {
+    if (deleteInFlightRef.current) return
+    setDeleteConfirmAsset(null)
+    setDeleteConfirmText('')
+    setDeleteUnlockChecked(false)
+  }
+
+  async function performDeleteAsset() {
+    const asset = deleteConfirmAsset
+    if (!asset?.id || deleteInFlightRef.current) return
+    if (deleteConfirmText.trim().toUpperCase() !== 'CONFIRM DELETE') return
+    const locked = !asset.canDelete
+    if (locked && !deleteUnlockChecked) return
     deleteInFlightRef.current = true
-    if (!window.confirm(`Delete "${asset.original_name}"?`)) {
-      deleteInFlightRef.current = false
-      return
-    }
     setDeletingAssetId(asset.id)
     try {
       await withLoaderTimeout(
-        () => filesApi.deleteFileAsset(asset.id, { expectedUpdatedAt: asset.updated_at || undefined }),
+        () => filesApi.deleteFileAsset(asset.id, {
+          expectedUpdatedAt: asset.updated_at || undefined,
+          force: locked && deleteUnlockChecked,
+          confirmText: deleteConfirmText.trim(),
+        }),
         'Delete file asset',
         FILES_ASSET_DELETE_TIMEOUT_MS,
       )
       notify(tr('file_deleted', 'File deleted'), 'success')
+      setDeleteConfirmAsset(null)
+      setDeleteConfirmText('')
+      setDeleteUnlockChecked(false)
       await loadFiles()
     } catch (error) {
       notify(getErrorMessage(error, 'Delete failed'), 'error')
     } finally {
       deleteInFlightRef.current = false
       setDeletingAssetId(null)
+    }
+  }
+
+  // "Used by 2 products, 1 avatar" style summary from the usage breakdown
+  // the server now sends -- replaces the old generic "in use" message with
+  // the actual reason a file is locked.
+  function describeAssetUsage(asset: FileAsset): string {
+    const usage = asset.usage || {}
+    const parts: string[] = []
+    if (usage.products) parts.push(`${usage.products} product${usage.products === 1 ? '' : 's'}`)
+    if (usage.gallery) parts.push(`${usage.gallery} product image${usage.gallery === 1 ? '' : 's'}`)
+    if (usage.avatars) parts.push(`${usage.avatars} user avatar${usage.avatars === 1 ? '' : 's'}`)
+    if (usage.settings) parts.push('a business/portal setting')
+    if (!parts.length) return tr('file_in_use', 'This file is still in use.')
+    return `${tr('used_by', 'Used by')} ${parts.join(', ')}`
+  }
+
+  function startRenameAsset(asset: FileAsset) {
+    if (!asset?.id || renameSavingId) return
+    setRenamingAssetId(asset.id)
+    setRenameDraft(asset.original_name || '')
+  }
+
+  function cancelRenameAsset() {
+    if (renameSavingId) return
+    setRenamingAssetId(null)
+    setRenameDraft('')
+  }
+
+  async function commitRenameAsset(asset: FileAsset) {
+    if (!asset?.id || renameSavingId) return
+    const nextName = renameDraft.trim()
+    // No-op or empty submit both just close the field -- nothing worth a
+    // round trip, and an empty name would be rejected server-side anyway.
+    if (!nextName || nextName === (asset.original_name || '')) {
+      setRenamingAssetId(null)
+      setRenameDraft('')
+      return
+    }
+    setRenameSavingId(asset.id)
+    try {
+      await withLoaderTimeout(
+        () => filesApi.renameFileAsset(asset.id, nextName),
+        'Rename file asset',
+        FILES_ASSET_DELETE_TIMEOUT_MS,
+      )
+      notify(tr('file_renamed', 'File renamed'), 'success')
+      setRenamingAssetId(null)
+      setRenameDraft('')
+      await loadFiles()
+    } catch (error) {
+      notify(getErrorMessage(error, 'Rename failed'), 'error')
+    } finally {
+      setRenameSavingId(null)
     }
   }
 
@@ -760,25 +926,22 @@ export default function FilesPage() {
     notify(tr('download_started', 'Download started'), 'success')
   }
 
-  async function handleDeleteSelectedAssets() {
+  function handleDeleteSelectedAssets() {
     if (!bulkDeletableAssets.length || deletingAssetId != null || deleteInFlightRef.current) return
-    const blockedCount = selectedAssets.length - bulkDeletableAssets.length
-    const confirmMessage = blockedCount > 0
-      ? tr(
-        'delete_selected_partial_confirm',
-        `Delete ${bulkDeletableAssets.length} selected files? ${blockedCount} file(s) are still in use and will be skipped.`,
-        `លុបឯកសារដែលបានជ្រើស ${bulkDeletableAssets.length} មែនទេ? មាន ${blockedCount} ឯកសារកំពុងត្រូវបានប្រើ ហើយនឹងត្រូវរំលង។`,
-      )
-      : tr(
-        'delete_selected_confirm',
-        `Delete ${bulkDeletableAssets.length} selected file(s)?`,
-        `លុបឯកសារដែលបានជ្រើស ${bulkDeletableAssets.length} មែនទេ?`,
-      )
+    setBulkDeleteConfirmText('')
+    setBulkDeleteConfirmOpen(true)
+  }
+
+  function closeBulkDeleteConfirm() {
+    if (deleteInFlightRef.current) return
+    setBulkDeleteConfirmOpen(false)
+    setBulkDeleteConfirmText('')
+  }
+
+  async function performDeleteSelectedAssets() {
+    if (!bulkDeletableAssets.length || deleteInFlightRef.current) return
+    if (bulkDeleteConfirmText.trim().toUpperCase() !== 'CONFIRM DELETE') return
     deleteInFlightRef.current = true
-    if (!window.confirm(confirmMessage)) {
-      deleteInFlightRef.current = false
-      return
-    }
     setDeletingAssetId('bulk')
     try {
       for (const asset of bulkDeletableAssets) {
@@ -797,6 +960,8 @@ export default function FilesPage() {
         'success',
       )
       setSelectedAssetIds(new Set())
+      setBulkDeleteConfirmOpen(false)
+      setBulkDeleteConfirmText('')
       await loadFiles()
     } catch (error) {
       notify(getErrorMessage(error, 'Bulk delete failed'), 'error')
@@ -991,6 +1156,17 @@ export default function FilesPage() {
         tone="blue"
         title={tr('library', 'Library')}
         subtitle={tr('library_page_hint', 'Manage uploaded assets, AI providers, and saved AI research from one place.', 'គ្រប់គ្រងឯកសារ AI providers និងចម្លើយ AI ដែលបានរក្សាទុក នៅកន្លែងតែមួយ។')}
+        // Guide icon before History -- same historySlot treatment
+        // Backup.tsx got in Part 212, per the same explicit user
+        // direction. Kept scoped to the assets tab exactly like the old
+        // inline placement was (activeTab === 'assets' below) -- this is
+        // a pure relocation, not a fix to whether History should also be
+        // visible on the providers/responses tabs (a separate, unasked
+        // question; History does track provider add/edit actions too,
+        // see actionHistory.pushAction calls in the provider handlers
+        // above, but that's an existing mis-scoping this move
+        // deliberately leaves untouched).
+        historySlot={activeTab === 'assets' ? <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} t={t} /> : null}
         actions={(
           <div className="inline-flex min-w-0 items-center gap-1 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm dark:border-slate-700 dark:bg-slate-900">
           {tabButton('assets', tr('library_assets', 'Assets'), FolderOpen)}
@@ -1000,54 +1176,82 @@ export default function FilesPage() {
         )}
       />
 
-      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryProp} className="mb-1" />
-
       {activeTab === 'assets' ? (
         <>
+          {/* Upload button gets the row to itself now that History sits in
+              PageHeader's own row above (next to the page-guide icon, per
+              Part 212's historySlot convention) instead of sharing this
+              row with it. */}
+          {canManageLibrary ? (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <label htmlFor="library-upload-file" className="btn-primary ml-auto inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap px-4 text-sm">
+                <Upload className="h-4 w-4" />
+                {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
+                <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
+              </label>
+            </div>
+          ) : (
+            <div className="mb-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
+              {tr('library_view_only_hint', 'You can browse and preview the library. Uploading, downloading, renaming, and deleting need Full Access to Library.')}
+            </div>
+          )}
+
+          {/* Search row, select-all summary, and bulk-action bar all pin to
+              the top of the page's scroll container while scrolling (Aug 11
+              2026 UI-polish request, same treatment as
+              Products.tsx/Inventory.tsx/Sales.tsx/Returns.tsx/Branches.tsx/
+              contacts tabs/AuditLog.tsx). Grouped into ONE sticky wrapper,
+              rather than independently-sticky siblings, so there's no need
+              to hand-compute a per-element `top` offset to stack them
+              without overlapping. The original "card" box that used to wrap
+              search+upload+select-all+bulk-bar together now wraps only the
+              sticky portion -- Upload moved out above, everything else
+              keeps its existing look/padding unchanged. */}
+          <div className="sticky top-2 z-30 -mx-1 pb-2 sm:mx-0">
           <div className="card p-3 sm:p-4">
-            <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(14rem,1fr)_minmax(9rem,180px)_minmax(5.25rem,7rem)_auto] md:items-center">
+            {/* Search row: media type + rows-per-page are now one icon-only
+                Filter trigger instead of two separate dropdowns. */}
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               <label htmlFor="library-search" className="sr-only">{tr('search_files', 'Search files')}</label>
               <input
                 id="library-search"
                 name="library_search"
-                className="input h-10 min-w-0 rounded-xl text-sm"
+                className="input h-10 min-w-0 flex-1 rounded-xl text-sm"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={tr('search_files', 'Search files')}
               />
-              <label id="library-media-type-label" htmlFor="library-media-type" className="sr-only">{tr('filter_media_type', 'Filter by media type')}</label>
-              <AppSelect
-                id="library-media-type"
-                name="library_media_type"
-                className="h-10 min-w-0"
-                buttonClassName="h-10 w-full rounded-xl text-sm"
-                menuClassName="min-w-[11rem]"
-                value={mediaType}
-                onChange={setMediaType}
-                ariaLabel={tr('filter_media_type', 'Filter by media type')}
-                options={[
-                  { value: 'all', label: tr('all', 'All') },
-                  { value: 'image', label: tr('images', 'Images') },
-                  { value: 'video', label: tr('videos', 'Videos') },
-                  { value: 'document', label: tr('documents', 'Documents') },
+              <FilterMenu
+                label={tr('filters', 'Filters')}
+                activeCount={(mediaType !== 'all' ? 1 : 0) + (pageSize !== getDefaultFilesPageSize() ? 1 : 0)}
+                mobileIconOnly
+                onClear={() => {
+                  setMediaType('all')
+                  setPageSize(getDefaultFilesPageSize())
+                }}
+                sections={[
+                  {
+                    id: 'type',
+                    label: tr('filter_media_type', 'Filter by media type'),
+                    options: [
+                      { id: 'all', label: tr('all', 'All'), active: mediaType === 'all', onClick: () => setMediaType('all') },
+                      { id: 'image', label: tr('images', 'Images'), active: mediaType === 'image', onClick: () => setMediaType('image') },
+                      { id: 'video', label: tr('videos', 'Videos'), active: mediaType === 'video', onClick: () => setMediaType('video') },
+                      { id: 'document', label: tr('documents', 'Documents'), active: mediaType === 'document', onClick: () => setMediaType('document') },
+                    ],
+                  },
+                  {
+                    id: 'rows',
+                    label: tr('rows_per_page', 'Rows per page'),
+                    options: [12, 24, 48].map((nextPageSize) => ({
+                      id: nextPageSize,
+                      label: String(nextPageSize),
+                      active: pageSize === nextPageSize,
+                      onClick: () => setPageSize(nextPageSize),
+                    })),
+                  },
                 ]}
               />
-              <label id="library-page-size-label" htmlFor="library-page-size" className="sr-only">{tr('rows_per_page', 'Rows per page')}</label>
-              <AppSelect
-                id="library-page-size"
-                name="library_page_size"
-                className="h-10 min-w-0"
-                buttonClassName="h-10 w-full rounded-xl text-sm"
-                menuClassName="min-w-[6rem]"
-                value={pageSize}
-                onChange={(nextValue) => setPageSize(Number(nextValue || 24))}
-                ariaLabel={tr('rows_per_page', 'Rows per page')}
-                options={[12, 24, 48].map((nextPageSize) => ({ value: nextPageSize, label: nextPageSize }))}
-              />
-              <label htmlFor="library-upload-file" className="btn-primary inline-flex h-10 cursor-pointer items-center justify-center whitespace-nowrap px-4 text-sm">
-                {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
-                <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
-              </label>
             </div>
             {files.length || totalFiles ? (
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-slate-200 pt-3 text-xs text-slate-500 dark:border-slate-700">
@@ -1067,22 +1271,26 @@ export default function FilesPage() {
                   <Copy className="mr-1.5 inline h-3.5 w-3.5" />
                   {tr('copy_links', 'Copy links', 'ចម្លងតំណ')}
                 </button>
-                <button type="button" className="btn-secondary px-3 py-1.5 text-xs sm:text-sm" onClick={handleDownloadSelected}>
-                  <Download className="mr-1.5 inline h-3.5 w-3.5" />
-                  {tr('download', 'Download', 'ទាញយក')}
-                </button>
-                <button
-                  type="button"
-                  className="btn-danger px-3 py-1.5 text-xs sm:text-sm"
-                  onClick={handleDeleteSelectedAssets}
-                  disabled={!bulkDeletableAssets.length || deletingAssetId != null}
-                >
-                  <Trash2 className="mr-1.5 inline h-3.5 w-3.5" />
-                  {deletingAssetId === 'bulk'
-                    ? tr('deleting', 'Deleting...')
-                    : tr('delete_selected', 'Delete selected', 'លុបដែលបានជ្រើស')}
-                </button>
-                {bulkDeletableAssets.length !== selectedAssets.length ? (
+                {canManageLibrary ? (
+                  <button type="button" className="btn-secondary px-3 py-1.5 text-xs sm:text-sm" onClick={handleDownloadSelected}>
+                    <Download className="mr-1.5 inline h-3.5 w-3.5" />
+                    {tr('download', 'Download', 'ទាញយក')}
+                  </button>
+                ) : null}
+                {canManageLibrary ? (
+                  <button
+                    type="button"
+                    className="btn-danger px-3 py-1.5 text-xs sm:text-sm"
+                    onClick={handleDeleteSelectedAssets}
+                    disabled={!bulkDeletableAssets.length || deletingAssetId != null}
+                  >
+                    <Trash2 className="mr-1.5 inline h-3.5 w-3.5" />
+                    {deletingAssetId === 'bulk'
+                      ? tr('deleting', 'Deleting...')
+                      : tr('delete_selected', 'Delete selected', 'លុបដែលបានជ្រើស')}
+                  </button>
+                ) : null}
+                {canManageLibrary && bulkDeletableAssets.length !== selectedAssets.length ? (
                   <span className="text-[11px] text-amber-600 dark:text-amber-300">
                     {tr(
                       'some_files_in_use',
@@ -1093,6 +1301,7 @@ export default function FilesPage() {
                 ) : null}
               </div>
             ) : null}
+          </div>
           </div>
 
           {loadingFiles && !files.length ? (
@@ -1121,13 +1330,46 @@ export default function FilesPage() {
                         {selected ? <CheckSquare className="h-4 w-4 text-blue-600" /> : <Square className="h-4 w-4" />}
                         <span>{tr('select', 'Select')}</span>
                       </button>
-                      <span className={`max-w-full rounded-full px-2 py-1 text-[10px] font-semibold ${asset.usageCount ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200'}`}>
+                      <span
+                        className={`max-w-full rounded-full px-2 py-1 text-[10px] font-semibold ${asset.usageCount ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-200' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200'}`}
+                        title={asset.usageCount ? describeAssetUsage(asset) : undefined}
+                      >
                         {asset.usageCount ? `${asset.usageCount} use(s)` : tr('unused', 'Unused')}
                       </span>
                     </div>
-                    <AssetPreview asset={asset} />
+                    <AssetPreview asset={asset} onOpenPreview={setPreviewAsset} />
                     <div className="mt-3 min-w-0">
-                      <div className="truncate text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={asset.original_name || ''}>{asset.original_name || '-'}</div>
+                      {canManageLibrary && renamingAssetId === asset.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="text"
+                            className="input min-w-0 flex-1 py-1 text-sm"
+                            value={renameDraft}
+                            autoFocus
+                            disabled={renameSavingId === asset.id}
+                            onChange={(event) => setRenameDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') { event.preventDefault(); void commitRenameAsset(asset) }
+                              if (event.key === 'Escape') { event.preventDefault(); cancelRenameAsset() }
+                            }}
+                            onBlur={() => void commitRenameAsset(asset)}
+                            aria-label={tr('rename_file', 'Rename file')}
+                          />
+                        </div>
+                      ) : canManageLibrary ? (
+                        <button
+                          type="button"
+                          className="block w-full truncate rounded px-0.5 text-left text-sm font-semibold leading-5 text-slate-900 hover:bg-slate-100 dark:text-white dark:hover:bg-slate-800"
+                          title={tr('rename_file_hint', 'Click to rename')}
+                          onClick={() => startRenameAsset(asset)}
+                        >
+                          {asset.original_name || '-'}
+                        </button>
+                      ) : (
+                        <div className="block w-full truncate px-0.5 text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={asset.original_name || ''}>
+                          {asset.original_name || '-'}
+                        </div>
+                      )}
                       <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={assetUrl}>{assetUrl}</div>
                       <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[11px] text-slate-500">
                         <span>{asset.media_type || 'file'}</span>
@@ -1136,22 +1378,36 @@ export default function FilesPage() {
                         <span className="text-right">{formatDateTime(asset.created_at)}</span>
                       </div>
                     </div>
-                    <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className={`mt-4 grid gap-2 ${canManageLibrary ? 'grid-cols-3' : 'grid-cols-1'}`}>
                       <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(assetUrl).catch(() => {})} title={tr('copy', 'Copy')}>
                         <Copy className="inline h-4 w-4 sm:mr-2" />
                         <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
                       </button>
-                      <button
-                        type="button"
-                        className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3"
-                        onClick={() => handleDeleteAsset(asset)}
-                        disabled={!asset.canDelete || deletingAssetId != null}
-                        title={tr('delete', 'Delete')}
-                      >
-                        <Trash2 className="inline h-4 w-4 sm:mr-2" />
-                        <span className="hidden sm:inline">{deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}</span>
-                        <span className="sm:hidden">{deletingAssetId === asset.id ? '...' : null}</span>
-                      </button>
+                      {canManageLibrary ? (
+                        <button
+                          type="button"
+                          className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3"
+                          onClick={() => startRenameAsset(asset)}
+                          disabled={renameSavingId != null}
+                          title={tr('rename', 'Rename')}
+                        >
+                          <PencilLine className="inline h-4 w-4 sm:mr-2" />
+                          <span className="hidden sm:inline">{tr('rename', 'Rename')}</span>
+                        </button>
+                      ) : null}
+                      {canManageLibrary ? (
+                        <button
+                          type="button"
+                          className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3"
+                          onClick={() => handleDeleteAsset(asset)}
+                          disabled={deletingAssetId != null}
+                          title={asset.canDelete ? tr('delete', 'Delete') : describeAssetUsage(asset)}
+                        >
+                          {asset.canDelete ? <Trash2 className="inline h-4 w-4 sm:mr-2" /> : <Lock className="inline h-4 w-4 sm:mr-2" />}
+                          <span className="hidden sm:inline">{deletingAssetId === asset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}</span>
+                          <span className="sm:hidden">{deletingAssetId === asset.id ? '...' : null}</span>
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                 )
@@ -1217,6 +1473,117 @@ export default function FilesPage() {
             formatDateTime={formatDateTime}
           />
         </Suspense>
+      ) : null}
+
+      {previewAsset ? <AssetPreviewModal asset={previewAsset} onClose={() => setPreviewAsset(null)} /> : null}
+
+      {deleteConfirmAsset ? (
+        <Modal title={tr('delete_file', 'Delete file')} onClose={closeDeleteConfirm} size="sm">
+          <div className="flex flex-col gap-4">
+            <p className="truncate text-sm font-medium text-slate-900 dark:text-white" title={deleteConfirmAsset.original_name || ''}>
+              {deleteConfirmAsset.original_name || '-'}
+            </p>
+            {!deleteConfirmAsset.canDelete ? (
+              <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+                <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="font-medium">{tr('file_locked', 'This file is locked')}</p>
+                  <p className="mt-0.5">{describeAssetUsage(deleteConfirmAsset)}</p>
+                </div>
+              </div>
+            ) : null}
+            {!deleteConfirmAsset.canDelete ? (
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700 dark:text-slate-200">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={deleteUnlockChecked}
+                  onChange={(event) => setDeleteUnlockChecked(event.target.checked)}
+                />
+                <span className="flex items-center gap-1.5">
+                  {deleteUnlockChecked ? <LockOpen className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                  {tr('unlock_and_delete_anyway', 'Unlock and delete this file anyway')}
+                </span>
+              </label>
+            ) : null}
+            <div>
+              <label className="mb-1 block text-sm text-slate-600 dark:text-slate-300">
+                {tr('type_confirm_delete', 'Type CONFIRM DELETE to continue')}
+              </label>
+              <input
+                type="text"
+                className="input w-full"
+                value={deleteConfirmText}
+                autoFocus
+                onChange={(event) => setDeleteConfirmText(event.target.value)}
+                placeholder="CONFIRM DELETE"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary text-sm" onClick={closeDeleteConfirm} disabled={deletingAssetId != null}>
+                {tr('cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                className="btn-danger text-sm"
+                onClick={() => void performDeleteAsset()}
+                disabled={
+                  deletingAssetId != null
+                  || deleteConfirmText.trim().toUpperCase() !== 'CONFIRM DELETE'
+                  || (!deleteConfirmAsset.canDelete && !deleteUnlockChecked)
+                }
+              >
+                {deletingAssetId === deleteConfirmAsset.id ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      ) : null}
+
+      {bulkDeleteConfirmOpen ? (
+        <Modal title={tr('delete_files', 'Delete files')} onClose={closeBulkDeleteConfirm} size="sm">
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-slate-700 dark:text-slate-200">
+              {selectedAssets.length - bulkDeletableAssets.length > 0
+                ? tr(
+                  'delete_selected_partial_confirm',
+                  `Delete ${bulkDeletableAssets.length} selected files? ${selectedAssets.length - bulkDeletableAssets.length} file(s) are still in use and will be skipped.`,
+                  `លុបឯកសារដែលបានជ្រើស ${bulkDeletableAssets.length} មែនទេ? មាន ${selectedAssets.length - bulkDeletableAssets.length} ឯកសារកំពុងត្រូវបានប្រើ ហើយនឹងត្រូវរំលង។`,
+                )
+                : tr(
+                  'delete_selected_confirm',
+                  `Delete ${bulkDeletableAssets.length} selected file(s)?`,
+                  `លុបឯកសារដែលបានជ្រើស ${bulkDeletableAssets.length} មែនទេ?`,
+                )}
+            </p>
+            <div>
+              <label className="mb-1 block text-sm text-slate-600 dark:text-slate-300">
+                {tr('type_confirm_delete', 'Type CONFIRM DELETE to continue')}
+              </label>
+              <input
+                type="text"
+                className="input w-full"
+                value={bulkDeleteConfirmText}
+                autoFocus
+                onChange={(event) => setBulkDeleteConfirmText(event.target.value)}
+                placeholder="CONFIRM DELETE"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-secondary text-sm" onClick={closeBulkDeleteConfirm} disabled={deletingAssetId != null}>
+                {tr('cancel', 'Cancel')}
+              </button>
+              <button
+                type="button"
+                className="btn-danger text-sm"
+                onClick={() => void performDeleteSelectedAssets()}
+                disabled={deletingAssetId != null || bulkDeleteConfirmText.trim().toUpperCase() !== 'CONFIRM DELETE'}
+              >
+                {deletingAssetId === 'bulk' ? tr('deleting', 'Deleting...') : tr('delete', 'Delete')}
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
     </div>
   )

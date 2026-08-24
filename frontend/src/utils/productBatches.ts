@@ -21,6 +21,11 @@ type VisibleProductBatch = ProductBatch & {
 
 type BatchPreviewOptions = {
   limit?: number
+  includeEmpty?: boolean
+}
+
+type VisibleBatchesOptions = {
+  includeEmpty?: boolean
 }
 
 function normalizeBranchId(branchId: BranchId): number | null {
@@ -29,7 +34,21 @@ function normalizeBranchId(branchId: BranchId): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-export function getVisibleProductBatches(product: ProductWithBatches, branchId: BranchId = 'all'): VisibleProductBatch[] {
+// `includeEmpty` (default false) keeps every existing caller's behavior
+// unchanged -- compact row/list previews (Inventory.tsx, ProductRowParts.tsx)
+// only want lots that actually have stock, since "what's sellable here" is
+// the whole point of a quick badge. A product's full detail view is the one
+// place that should show EVERY active batch, zero-quantity ones included:
+// every product gets one "day added" batch the moment it's created (see
+// cloudflare/src/lib/productWrites.ts's seedInitialBatchForNewProduct), and
+// that batch legitimately starts at 0 stock. Filtering it out by default
+// used to make the detail modal's own "Added <date>" row look like separate,
+// disconnected information from "Batches" below it, when it's really just
+// that same first batch (its lot_code is the same date-derived code every
+// other batch gets, see cloudflare/src/lib/batchCode.ts) -- passing
+// includeEmpty: true is what lets a fresh, still-zero-stock product show
+// that one batch instead of an empty/missing Batches section.
+export function getVisibleProductBatches(product: ProductWithBatches, branchId: BranchId = 'all', { includeEmpty = false }: VisibleBatchesOptions = {}): VisibleProductBatch[] {
   const items = Array.isArray(product?.batches) ? product.batches : []
   const normalizedBranchId = normalizeBranchId(branchId)
   return items
@@ -47,11 +66,11 @@ export function getVisibleProductBatches(product: ProductWithBatches, branchId: 
         quantity,
       }
     })
-    .filter((batch) => Number(batch?.quantity || 0) > 0)
+    .filter((batch) => includeEmpty || Number(batch?.quantity || 0) > 0)
 }
 
-export function buildBatchPreview(product: ProductWithBatches, branchId: BranchId = 'all', { limit = 3 }: BatchPreviewOptions = {}) {
-  const batches = getVisibleProductBatches(product, branchId)
+export function buildBatchPreview(product: ProductWithBatches, branchId: BranchId = 'all', { limit = 3, includeEmpty = false }: BatchPreviewOptions = {}) {
+  const batches = getVisibleProductBatches(product, branchId, { includeEmpty })
   return {
     items: batches.slice(0, limit),
     extraCount: Math.max(0, batches.length - limit),

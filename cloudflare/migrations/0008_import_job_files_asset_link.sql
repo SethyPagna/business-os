@@ -1,0 +1,16 @@
+-- Links import_job_files rows to the file_assets row that now backs them.
+--
+-- storeUpload() (routes/importJobs.ts) used to write CSV/ZIP/image uploads
+-- to R2 under imports/{jobId}/incoming/..., tracked only in
+-- import_job_files -- invisible to the Library page, which only lists rows
+-- from file_assets (objects under uploads/...). storeUpload() now writes
+-- to the canonical uploads/{storedName} path and inserts a matching
+-- file_assets row alongside the import_job_files row; file_asset_id is the
+-- link between the two.
+--
+-- Nullable and unindexed on purpose: only new uploads (after this change
+-- ships) get a value, existing import_job_files rows from before this
+-- migration stay NULL, and lookups here are always by job_id (already
+-- indexed) or by the handful of rows in a single job, never by
+-- file_asset_id directly.
+ALTER TABLE import_job_files ADD COLUMN file_asset_id INTEGER;

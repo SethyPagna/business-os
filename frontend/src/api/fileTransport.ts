@@ -8,6 +8,8 @@ import {
   route,
 } from './http.ts'
 import { buildMultipartHeaders } from './multipartHeaders.ts'
+import { compressImageFile, isCompressibleImageFile, type CompressImageOptions } from '../utils/imageCompression.ts'
+import { compressVideoFile, isCompressibleVideoFile } from '../utils/videoCompression.ts'
 
 type FileListResponse = {
   items?: unknown[]
@@ -46,6 +48,31 @@ type FileUploadPayload = {
   userName?: string | null
   signal?: AbortSignal
   onProgress?: (progress: UploadProgress) => void
+  // Optional override for compressImageFile's own byte/dimension budget.
+  // Left unset, every caller keeps today's shared DEFAULT_COMPRESS_OPTIONS
+  // (150KB max / 2560px) -- callers whose images genuinely need that
+  // headroom (Catalog promo banners, Settings branding) are untouched.
+  // The Library page (FilesPage.tsx) passes a tighter budget here for its
+  // own uploads specifically, since those are typically just reference/
+  // content thumbnails rather than full-bleed product photography.
+  compressOptions?: CompressImageOptions
+}
+
+// Library-specific compression budget -- content/reference images shown
+// as small grid thumbnails on the Library page don't need the same
+// 150KB/2560px headroom a full-bleed product photo or promo banner does.
+// Tightened again (Part 324, chat) per explicit "compress images more"
+// feedback on top of Part 309's original halving -- 1200px/70KB/40KB is
+// still comfortably above what a thumbnail actually needs to look sharp
+// at grid size, with the compression plan's existing quality-step-down
+// (buildCompressionPlan) doing the real work of hitting these tighter
+// caps rather than this just being a smaller ceiling nothing reaches.
+// App icons in public/ are a separate, exempted path (Part 300) and
+// never go through this at all.
+export const LIBRARY_IMAGE_COMPRESS_OPTIONS: CompressImageOptions = {
+  maxDimension: 1200,
+  maxBytes: 70 * 1024,
+  targetBytes: 40 * 1024,
 }
 
 type AvatarUploadPayload = {
@@ -97,22 +124,39 @@ export async function getFiles(params: FileListParams = {}): Promise<unknown[] |
   const result = await route(
     `files:get:${query}`,
     () => apiFetch('GET', appendQuery('/api/files', query)),
-    () => [],
+    // The media library has no offline mirror. Returning [] on a failed
+    // server read makes a real error look like an empty successful library,
+    // which clears the visible upload list until a manual refresh. Let the
+    // caller keep its current list and show the actual error instead.
+    null,
   )
+  if (result == null) throw new Error('Files library is unavailable')
   return normalizeFileListResult(result, params)
 }
 
 export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<unknown> {
-  const { file, signal, onProgress } = payload
+  const { file, signal, onProgress, compressOptions } = payload
   if (!(file instanceof File)) throw new Error('Choose a file first')
   requireLiveServerWrite('files:upload', {
     offlineMessage: 'Server is offline. File uploads are invalid until the server reconnects.',
     notConfiguredMessage: 'Server is not connected. File uploads are invalid until a live server is configured.',
   })
 
+  // Images get re-encoded/resized client-side before leaving the browser --
+  // the Workers backend has no `sharp` and can't compress on its end (see
+  // routes/files.ts). Video now gets the same treatment via ffmpeg.wasm
+  // (utils/videoCompression.ts) -- automatic settings, no manual
+  // codec/bitrate picker. Documents still pass through untouched; there is
+  // no meaningful client-side compression to do for those file types.
+  const uploadFile = isCompressibleImageFile(file)
+    ? await compressImageFile(file, compressOptions)
+    : isCompressibleVideoFile(file)
+      ? await compressVideoFile(file)
+      : file
+
   const base = getSyncServerUrl().replace(/\/$/, '')
   const form = new FormData()
-  form.append('file', file, file.name)
+  form.append('file', uploadFile, uploadFile.name)
   appendUserAndDeviceFields(form, payload)
 
   return new Promise((resolve, reject) => {
@@ -181,6 +225,19 @@ export function deleteFileAsset(id: string | number, payload: Record<string, unk
   )
 }
 
+// Renames only the asset's display name (`original_name`) -- the storage
+// key / public path are untouched server-side (see routes/files.ts's own
+// comment), so this never breaks an existing product image, avatar, or
+// portal-setting reference to the file.
+export function renameFileAsset(id: string | number, originalName: string): Promise<unknown> {
+  return route(
+    'files:rename',
+    () => apiFetch('PATCH', `/api/files/${encodeURIComponent(String(id))}`, { original_name: originalName }),
+    null,
+    true,
+  )
+}
+
 export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploadPayload): Promise<unknown> {
   if (file instanceof File) {
     const { userId, userName } = getCurrentUserContext()
@@ -197,8 +254,12 @@ export async function uploadUserAvatar({ filePath, fileName, file }: AvatarUploa
   })
   if (!filePath?.startsWith('data:')) throw new Error('No avatar image data provided')
 
+  const sourceBlob = dataUrlToBlob(filePath)
+  const sourceFile = new File([sourceBlob], fileName || 'avatar.jpg', { type: sourceBlob.type })
+  const compressed = isCompressibleImageFile(sourceFile) ? await compressImageFile(sourceFile) : sourceFile
+
   const form = new FormData()
-  form.append('image', dataUrlToBlob(filePath), fileName || 'avatar.jpg')
+  form.append('image', compressed, compressed.name || fileName || 'avatar.jpg')
 
   const base = getSyncServerUrl().replace(/\/$/, '')
   const res = await fetch(`${base}/api/users/avatar-upload`, {

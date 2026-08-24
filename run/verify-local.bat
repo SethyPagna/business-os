@@ -1,14 +1,16 @@
 @echo off
 chcp 65001 >nul 2>&1
-setlocal enabledelayedexpansion
+setlocal
 
 REM ==========================================================================
-REM  Runs the full local verification suite (backend + frontend build,
-REM  typecheck, lint, i18n/UI/performance verifiers) without Docker or a
-REM  live database -- the same checks CI would run, usable before pushing.
-REM  Usage: run\verify-local.bat [--skip-frontend-build]
-REM  Read-only with respect to runtime data; only writes build output under
-REM  frontend/dist and backend/frontend-dist.
+REM  Local-only counterpart to full-automation.bat: remove stray files ->
+REM  install frontend + Cloudflare Worker dependencies -> typecheck both ->
+REM  run the pure-logic test suites -> build the frontend. Never calls
+REM  wrangler, never touches D1, never pushes secrets, never deploys -- use
+REM  this after pulling in a change to confirm it actually installs,
+REM  typechecks, passes its tests, and builds, without cutting a release.
+REM  See ops\scripts\powershell\verify-local.ps1 for the implementation.
+REM  For an actual release, use run\full-automation.bat instead.
 REM ==========================================================================
 
 if defined BUSINESS_OS_REPO_ROOT (
@@ -17,140 +19,14 @@ if defined BUSINESS_OS_REPO_ROOT (
   for %%I in ("%~dp0..") do set "ROOT=%%~fI"
 )
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-set "SKIP_FRONTEND_BUILD=0"
 
-:parse_args
-if "%~1"=="" goto after_args
-if /i "%~1"=="--skip-frontend-build" (
-  set "SKIP_FRONTEND_BUILD=1"
-  shift
-  goto parse_args
-)
-shift
-goto parse_args
-
-:after_args
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\verify-local.ps1" %*
+set "EXIT_CODE=%ERRORLEVEL%"
 echo.
-echo ========================================================================
-echo   Business OS ^| Local Verification
-echo ========================================================================
-echo.
-
-cd /d "%ROOT%"
-
-echo [preflight 1/6] Verifying tracked runtime dependencies...
-node ops\scripts\verification\verify-runtime-deps.ts
-if errorlevel 1 exit /b 1
-echo [OK] Runtime dependency manifest check passed
-echo.
-
-echo [preflight 2/6] Verifying Docker-only release automation...
-node ops\scripts\verification\verify-docker-release.ts
-if errorlevel 1 exit /b 1
-echo [OK] Docker-only release automation check passed
-echo.
-
-echo [preflight 3/6] Verifying tracked secret hygiene...
-node ops\scripts\verification\verify-secret-hygiene.ts
-if errorlevel 1 exit /b 1
-echo [OK] Tracked secret hygiene check passed
-echo.
-
-echo [preflight 4/6] Verifying Business OS Docker release runtime...
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\docker-release.ps1" -Action Doctor
-if errorlevel 1 exit /b 1
-echo [OK] Business OS Docker release diagnostics passed
-echo.
-
-echo [preflight 5/6] Checking running app API route contract when available...
-node ops\scripts\runtime\smoke\check-route-contract.ts http://127.0.0.1:4000 --skip-if-unavailable
-if errorlevel 1 exit /b 1
-echo [OK] Running app API route contract check passed or was skipped
-echo.
-
-echo [preflight 6/6] Writing running app diagnostics when available...
-node ops\scripts\runtime\smoke\post-start-diagnostics.ts http://127.0.0.1:4000 --skip-if-unavailable --output ops\runtime\reports\verify-local-post-start-diagnostics.json
-if errorlevel 1 exit /b 1
-echo [OK] Running app diagnostics passed, wrote report, or was skipped
-echo.
-
-cd /d "%ROOT%\frontend"
-echo [frontend 1/6] Ensuring frontend dependencies...
-set "FRONTEND_INSTALL_MODE=install"
-for /f "usebackq delims=" %%s in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\npm-install-mode.ps1" -ProjectPath "%ROOT%\frontend"`) do set "FRONTEND_INSTALL_MODE=%%s"
-if /i "!FRONTEND_INSTALL_MODE!"=="skip" (
-  echo [OK] Frontend dependencies already up to date
+if "%EXIT_CODE%"=="0" (
+  echo [DONE] Local verify finished - nothing was deployed.
 ) else (
-  call npm.cmd install --prefer-offline --no-audit --loglevel=warn
-  if errorlevel 1 exit /b 1
-  echo [OK] Frontend dependencies installed
+  echo [ERROR] Local verify failed. Review the step above.
 )
-echo.
-if "%SKIP_FRONTEND_BUILD%"=="0" (
-  echo [frontend 2/6] Building frontend...
-  call npm.cmd run build
-  if errorlevel 1 exit /b 1
-  if not exist "%ROOT%\frontend\dist\index.html" (
-    echo [ERROR] Frontend build did not produce frontend\dist\index.html.
-    exit /b 1
-  )
-  echo [OK] Frontend build passed
-  echo.
-) else (
-  echo [frontend 2/6] Skipping frontend build ^(--skip-frontend-build^)
-  echo.
-)
-
-echo [frontend 3/6] Running frontend utility tests...
-call npm.cmd run test:utils
-if errorlevel 1 exit /b 1
-echo [OK] Frontend utility tests passed
-echo.
-
-echo [frontend 4/6] Verifying frontend i18n...
-call npm.cmd run verify:i18n
-if errorlevel 1 exit /b 1
-echo [OK] Frontend i18n verification passed
-echo.
-
-echo [frontend 5/6] Verifying frontend UI coverage...
-call npm.cmd run verify:ui
-if errorlevel 1 exit /b 1
-echo [OK] Frontend UI coverage verification passed
-echo.
-
-echo [frontend 6/6] Verifying frontend performance guardrails...
-call npm.cmd run verify:performance
-if errorlevel 1 exit /b 1
-echo [OK] Frontend performance guardrails passed
-echo.
-
-cd /d "%ROOT%\backend"
-echo [backend 1/3] Ensuring backend dependencies...
-set "BACKEND_INSTALL_MODE=install"
-for /f "usebackq delims=" %%s in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\ops\scripts\powershell\npm-install-mode.ps1" -ProjectPath "%ROOT%\backend"`) do set "BACKEND_INSTALL_MODE=%%s"
-if /i "!BACKEND_INSTALL_MODE!"=="skip" (
-  echo [OK] Backend dependencies already up to date
-) else (
-  call npm.cmd install --prefer-offline --no-audit --loglevel=warn
-  if errorlevel 1 exit /b 1
-  echo [OK] Backend dependencies installed
-)
-echo.
-echo [backend 2/3] Running backend utility/security/core tests...
-call npm.cmd run test:utils
-if errorlevel 1 exit /b 1
-echo [OK] Backend utility/security/core tests passed
-echo.
-
-echo [backend 3/3] Verifying backend data integrity...
-call npm.cmd run verify:integrity
-if errorlevel 1 exit /b 1
-echo [OK] Backend data integrity verification passed
-echo.
-
-echo ========================================================================
-echo   VERIFICATION PASSED
-echo ========================================================================
-echo.
-exit /b 0
+if not "%BUSINESS_OS_NO_PAUSE%"=="1" pause
+exit /b %EXIT_CODE%

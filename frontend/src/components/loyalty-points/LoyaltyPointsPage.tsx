@@ -5,6 +5,7 @@ import Gift from 'lucide-react/dist/esm/icons/gift.js'
 import Save from 'lucide-react/dist/esm/icons/save.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
+import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -18,11 +19,12 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getCustomers as getLoyaltyCustomers } from '../../api/contactReadTransport.ts'
+import { awardCustomerPoints } from '../../api/contactWriteTransport.ts'
 
 type LocaleCopy = Record<string, string>
 
 type LoyaltyBasis = 'usd' | 'khr'
-type LoyaltySection = 'all' | 'rules' | 'behavior' | 'lookup' | 'leaders'
+type LoyaltySection = 'all' | 'rules' | 'behavior' | 'lookup' | 'leaders' | 'review'
 
 type LoyaltySettingsForm = {
   customer_portal_points_basis: LoyaltyBasis
@@ -45,6 +47,7 @@ type CustomerPointRow = {
 
 type MembershipLookupData = {
   customer?: {
+    id?: number | string | null
     name?: string | null
     membership_number?: string | null
   } | null
@@ -67,6 +70,19 @@ type MembershipLookupTotals = {
 }
 
 type PortalTransportModule = typeof import('../../api/portalTransport.ts')
+
+type ReviewSubmissionItem = {
+  id: string | number
+  customer_name?: string | null
+  membership_number?: string | null
+  platform?: string | null
+  note?: string | null
+  screenshots?: string[]
+  reward_points?: number | string
+  review_note?: string
+  status?: string
+  created_at?: string | null
+}
 
 type AppContextValue = {
   settings: Record<string, unknown>
@@ -129,6 +145,20 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     attachHint: 'Use Sales > sale details > attach customer when a past anonymous sale should start counting for membership.',
     pointsPreview: 'Current policy preview',
     unitLabel: '1 redemption unit',
+    reviewQueue: 'Review queue',
+    reviewQueueHint: 'Approve, reject, and award points for customer share submissions.',
+    noSubmissions: 'No share submissions yet.',
+    rewardPoints: 'Reward points',
+    shareReviewNote: 'Review note',
+    reviewNotePlaceholder: 'Internal review note',
+    approve: 'Approve',
+    reject: 'Reject',
+    pending: 'Pending',
+    addPoints: 'Add points',
+    pointsToAdd: 'Points to add',
+    pointNote: 'Reason / note',
+    pointNotePlaceholder: 'e.g. service recovery or membership promotion',
+    addPointsSuccess: 'Points added to the customer.',
   },
   km: {
     pageTitle: 'ពិន្ទុសមាជិក',
@@ -175,15 +205,30 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     attachHint: 'ប្រើ Sales > sale details > attach customer នៅពេលត្រូវភ្ជាប់សមាជិកទៅការលក់អនាមិកចាស់។',
     pointsPreview: 'ការមើលជាមុននៃច្បាប់បច្ចុប្បន្ន',
     unitLabel: '1 ឯកតាប្តូរ',
+    reviewQueue: 'ការត្រួតពិនិត្យការចែករំលែក',
+    reviewQueueHint: 'អនុម័ត បដិសេធ និងផ្តល់ពិន្ទុសម្រាប់ការចែករំលែករបស់អតិថិជន។',
+    noSubmissions: 'មិនទាន់មានការចែករំលែកទេ។',
+    rewardPoints: 'ពិន្ទុរង្វាន់',
+    shareReviewNote: 'កំណត់ចំណាំពិនិត្យ',
+    reviewNotePlaceholder: 'កំណត់ចំណាំផ្ទៃក្នុង',
+    approve: 'អនុម័ត',
+    reject: 'បដិសេធ',
+    pending: 'កំពុងរង់ចាំ',
+    addPoints: 'បន្ថែមពិន្ទុ',
+    pointsToAdd: 'ពិន្ទុត្រូវបន្ថែម',
+    pointNote: 'មូលហេតុ / កំណត់ចំណាំ',
+    pointNotePlaceholder: 'ឧ. សេវាកម្ម ឬការផ្តល់ជូនសមាជិក',
+    addPointsSuccess: 'បានបន្ថែមពិន្ទុទៅអតិថិជន។',
   },
 }
 
 const LOYALTY_SECTION_OPTIONS = [
-  { value: 'all', label: 'All', hint: 'Show point rules, behavior, preview, lookup, and top balances.' },
-  { value: 'rules', label: 'Rules', hint: 'Edit earning basis, redemption values, and portal display settings.' },
-  { value: 'behavior', label: 'Behavior', hint: 'Review how points move through sales, returns, and manual customer attachment.' },
-  { value: 'lookup', label: 'Lookup', hint: 'Check a customer membership number and current balance.' },
-  { value: 'leaders', label: 'Top Points', hint: 'Show customers with the highest current point balances.' },
+  { value: 'all', labelKey: 'sectionAll', label: 'All', hintKey: 'sectionAllHint', hint: 'Show point rules, behavior, preview, lookup, and top balances.' },
+  { value: 'rules', labelKey: 'sectionRules', label: 'Rules', hintKey: 'sectionRulesHint', hint: 'Edit earning basis, redemption values, and portal display settings.' },
+  { value: 'behavior', labelKey: 'sectionBehavior', label: 'Behavior', hintKey: 'sectionBehaviorHint', hint: 'Review how points move through sales, returns, and manual customer attachment.' },
+  { value: 'lookup', labelKey: 'sectionLookup', label: 'Lookup', hintKey: 'sectionLookupHint', hint: 'Check a customer membership number and current balance.' },
+  { value: 'leaders', labelKey: 'sectionLeaders', label: 'Top Points', hintKey: 'sectionLeadersHint', hint: 'Show customers with the highest current point balances.' },
+  { value: 'review', labelKey: 'sectionReview', label: 'Review Queue', hintKey: 'sectionReviewHint', hint: 'Approve, reject, and award points for customer share submissions.' },
 ]
 const LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS = 12000
 const LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
@@ -222,7 +267,24 @@ function formatLookupValue(value: number | string | null | undefined): string {
 }
 
 function normalizeLoyaltySection(value: string): LoyaltySection {
-  return ['all', 'rules', 'behavior', 'lookup', 'leaders'].includes(value) ? value as LoyaltySection : 'all'
+  return ['all', 'rules', 'behavior', 'lookup', 'leaders', 'review'].includes(value) ? value as LoyaltySection : 'all'
+}
+
+function formatReviewDateTime(value: unknown): string {
+  if (!value) return '-'
+  const raw = String(value)
+  const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
+async function fetchPortalReviewItems(): Promise<unknown> {
+  const module = await getPortalTransport()
+  return module.getPortalSubmissionsForReview()
+}
+
+async function submitPortalReview(id: string | number, payload: Record<string, unknown>): Promise<unknown> {
+  const module = await getPortalTransport()
+  return module.reviewPortalSubmission(id, payload)
 }
 
 export default function LoyaltyPointsPage() {
@@ -253,14 +315,33 @@ export default function LoyaltyPointsPage() {
   const [lookupLoading, setLookupLoading] = useState(false)
   const [lookupError, setLookupError] = useState('')
   const [lookupData, setLookupData] = useState<MembershipLookupData | null>(null)
+  const [manualPoints, setManualPoints] = useState('')
+  const [manualPointNote, setManualPointNote] = useState('')
+  const [manualPointSaving, setManualPointSaving] = useState(false)
   const [customerPoints, setCustomerPoints] = useState<CustomerPointRow[]>([])
   const [customerPointsLoading, setCustomerPointsLoading] = useState(true)
   const [loyaltySection, setLoyaltySection] = useState<LoyaltySection>('all')
+  const [reviewItems, setReviewItems] = useState<ReviewSubmissionItem[]>([])
+  const [reviewLoading, setReviewLoading] = useState(true)
+  const [reviewSavingId, setReviewSavingId] = useState<string | number | null>(null)
   const lookupRequestRef = useRef(0)
   const customerPointsRequestRef = useRef(0)
+  const reviewRequestRef = useRef(0)
   const saveInFlightRef = useRef(false)
+  const reviewSavingRef = useRef(false)
   const sectionStorageKey = 'business-os:loyalty:section'
   const showLoyaltySection = (sectionId: Exclude<LoyaltySection, 'all'>): boolean => loyaltySection === 'all' || loyaltySection === sectionId
+  const globalCopy = useCallback((key: string, fallback: string): string => {
+    const translated = t?.(key)
+    return translated && translated !== key ? translated : fallback
+  }, [t])
+  const loyaltySectionOptions = useMemo(() => (
+    LOYALTY_SECTION_OPTIONS.map((option) => ({
+      value: option.value,
+      label: globalCopy(`loyalty_${option.labelKey}`, option.label),
+      hint: globalCopy(`loyalty_${option.hintKey}`, option.hint),
+    }))
+  ), [globalCopy])
 
   useEffect(() => {
     setForm({
@@ -295,21 +376,66 @@ export default function LoyaltyPointsPage() {
     }
   }, [])
 
+  const loadReviewItems = useCallback(async (label = 'Loyalty review items'): Promise<void> => {
+    const requestId = beginTrackedRequest(reviewRequestRef)
+    setReviewLoading(true)
+    try {
+      const result = await withLoaderTimeout(() => fetchPortalReviewItems(), label, LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS)
+      if (!isTrackedRequestCurrent(reviewRequestRef, requestId)) return
+      const nextItems = Array.isArray(result) ? (result as ReviewSubmissionItem[]).slice(0, 30) : []
+      setReviewItems(nextItems)
+    } catch {
+      if (!isTrackedRequestCurrent(reviewRequestRef, requestId)) return
+    } finally {
+      if (isTrackedRequestCurrent(reviewRequestRef, requestId)) {
+        setReviewLoading(false)
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (!isActive) {
       invalidateTrackedRequest(customerPointsRequestRef)
       invalidateTrackedRequest(lookupRequestRef)
+      invalidateTrackedRequest(reviewRequestRef)
       setCustomerPointsLoading(false)
       setLookupLoading(false)
+      setReviewLoading(false)
       return undefined
     }
 
     void loadCustomerPoints()
+    void loadReviewItems()
     return () => {
       invalidateTrackedRequest(customerPointsRequestRef)
       invalidateTrackedRequest(lookupRequestRef)
+      invalidateTrackedRequest(reviewRequestRef)
     }
-  }, [isActive, loadCustomerPoints])
+  }, [isActive, loadCustomerPoints, loadReviewItems])
+
+  async function handleReviewSubmission(item: ReviewSubmissionItem, status: string): Promise<void> {
+    if (!beginSingleAction(reviewSavingRef, { blocked: reviewSavingId != null, value: item.id })) return
+    try {
+      setReviewSavingId(item.id)
+      await withLoaderTimeout(
+        () => submitPortalReview(item.id, {
+          status,
+          reward_points: Number(item.reward_points || 0),
+            review_note: item.review_note || '',
+        }),
+        'Review portal submission',
+        LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
+      )
+      notify(status === 'approved' ? copy('approve', 'Approve') : status === 'rejected' ? copy('reject', 'Reject') : copy('pending', 'Pending'))
+      void loadReviewItems('Reload loyalty review items')
+      if (status === 'approved') void loadCustomerPoints('Reload loyalty customer points after review')
+    } catch (error) {
+      notify(getErrorMessage(error, 'Failed to update submission'), 'error')
+    } finally {
+      finishSingleAction(reviewSavingRef)
+      setReviewSavingId(null)
+    }
+  }
 
   const basis = form.customer_portal_points_basis === 'khr' ? 'khr' : 'usd'
   const redeemPoints = sanitizeInteger(form.customer_portal_redeem_points, 100, 1)
@@ -393,12 +519,37 @@ export default function LoyaltyPointsPage() {
     }
   }
 
+  async function handleAwardPoints(): Promise<void> {
+    const customerId = lookupData?.customer?.id
+    const points = Number(manualPoints)
+    if (!customerId || !Number.isFinite(points) || points <= 0) {
+      notify(copy('pointsToAdd', 'Points to add'), 'error')
+      return
+    }
+    try {
+      setManualPointSaving(true)
+      await withLoaderTimeout(
+        () => awardCustomerPoints(customerId, { points, note: manualPointNote.trim() }),
+        'Award customer loyalty points',
+        LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,
+      )
+      setManualPoints('')
+      setManualPointNote('')
+      notify(copy('addPointsSuccess', 'Points added to the customer.'))
+      await Promise.all([handleLookup(), loadCustomerPoints('Reload loyalty customer points after manual award')])
+    } catch (error) {
+      notify(getErrorMessage(error, 'Failed to add loyalty points'), 'error')
+    } finally {
+      setManualPointSaving(false)
+    }
+  }
+
   return (
     <div className="page-scroll p-4 sm:p-6">
       <div className="mx-auto max-w-7xl space-y-5">
         <SectionSwitcher
-          label="Loyalty"
-          options={LOYALTY_SECTION_OPTIONS}
+          label={globalCopy('loyalty', 'Loyalty')}
+          options={loyaltySectionOptions}
           value={loyaltySection}
           onChange={(value) => setLoyaltySection(normalizeLoyaltySection(value))}
           storageKey={sectionStorageKey}
@@ -690,6 +841,16 @@ export default function LoyaltyPointsPage() {
                       <span className="font-medium text-gray-900 dark:text-white">{fmtUSD((lookupData.totals || lookupData.summary || {}).membershipDiscountUsd || 0)}</span>
                     </div>
                   </div>
+
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+                    <div className="text-sm font-semibold text-blue-950 dark:text-blue-100">{copy('addPoints', 'Add points')}</div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-[150px_minmax(0,1fr)_auto]">
+                      <input id="loyalty-manual-points" name="loyalty_manual_points" className="input" type="number" min="0.01" step="0.01" value={manualPoints} onChange={(event: ChangeEvent<HTMLInputElement>) => setManualPoints(event.target.value)} placeholder={copy('pointsToAdd', 'Points to add')} />
+                      <input id="loyalty-manual-points-note" name="loyalty_manual_points_note" className="input" maxLength={500} value={manualPointNote} onChange={(event: ChangeEvent<HTMLInputElement>) => setManualPointNote(event.target.value)} placeholder={copy('pointNotePlaceholder', 'Reason / note')} />
+                      <button type="button" className="btn-primary" disabled={manualPointSaving || !manualPoints} onClick={handleAwardPoints}>{copy('addPoints', 'Add points')}</button>
+                    </div>
+                    <label htmlFor="loyalty-manual-points-note" className="mt-2 block text-xs text-blue-700 dark:text-blue-300">{copy('pointNote', 'Reason / note')}</label>
+                  </div>
                 </div>
               ) : null}
             </section>
@@ -724,6 +885,94 @@ export default function LoyaltyPointsPage() {
             ) : null}
           </aside>
         </div>
+
+        {showLoyaltySection('review') ? (
+          <section className="card p-4 sm:p-5">
+            <div className="flex items-start gap-3">
+              <div className="rounded-2xl bg-rose-100 p-3 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300">
+                <ClipboardCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{copy('reviewQueue', 'Review queue')}</h2>
+                <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{copy('reviewQueueHint', 'Approve, reject, and award points for customer share submissions.')}</p>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              {reviewLoading ? (
+                <div className="rounded-2xl border border-dashed border-gray-200 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">
+                  {t('loading') || 'Loading...'}
+                </div>
+              ) : reviewItems.length ? reviewItems.map((item) => (
+                <article key={item.id} className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/60">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900 dark:text-white">{item.customer_name || item.membership_number || `#${item.id}`}</div>
+                      <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{item.membership_number || '-'}{item.platform ? ` • ${item.platform}` : ''}</div>
+                    </div>
+                    <div className="text-xs font-semibold text-gray-500 dark:text-gray-400">{formatReviewDateTime(item.created_at)}</div>
+                  </div>
+                  {item.note ? <p className="mt-3 text-sm text-gray-700 dark:text-gray-300">{item.note}</p> : null}
+                  {(item.screenshots || []).length ? (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      {(item.screenshots || []).map((image, index) => (
+                        <button
+                          key={`${item.id}-${index}`}
+                          type="button"
+                          className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700"
+                          onClick={() => window.open(image, '_blank', 'noreferrer')}
+                        >
+                          <img src={image} alt={`review-${item.id}-${index + 1}`} className="h-28 w-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label htmlFor={`loyalty-review-reward-${item.id}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">{copy('rewardPoints', 'Reward points')}</label>
+                      <input
+                        id={`loyalty-review-reward-${item.id}`}
+                        name={`loyalty_review_reward_${item.id}`}
+                        className="input mt-1"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={item.reward_points || 0}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) => setReviewItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, reward_points: event.target.value } : entry))}
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor={`loyalty-review-note-${item.id}`} className="block text-sm font-medium text-gray-700 dark:text-gray-300">{copy('shareReviewNote', 'Review note')}</label>
+                      <input
+                        id={`loyalty-review-note-${item.id}`}
+                        name={`loyalty_review_note_${item.id}`}
+                        className="input mt-1"
+                        value={item.review_note || ''}
+                        placeholder={copy('reviewNotePlaceholder', 'Internal review note')}
+                        onChange={(event: ChangeEvent<HTMLInputElement>) => setReviewItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, review_note: event.target.value } : entry))}
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" className="btn-primary text-sm" disabled={reviewSavingId === item.id} onClick={() => handleReviewSubmission(item, 'approved')}>
+                      {copy('approve', 'Approve')}
+                    </button>
+                    <button type="button" className="btn-secondary text-sm" disabled={reviewSavingId === item.id} onClick={() => handleReviewSubmission(item, 'rejected')}>
+                      {copy('reject', 'Reject')}
+                    </button>
+                    <button type="button" className="btn-secondary text-sm" disabled={reviewSavingId === item.id} onClick={() => handleReviewSubmission(item, 'pending')}>
+                      {copy('pending', 'Pending')}
+                    </button>
+                  </div>
+                </article>
+              )) : (
+                <div className="rounded-2xl border border-dashed border-gray-200 px-3 py-6 text-center text-sm text-gray-400 dark:border-gray-700">
+                  {copy('noSubmissions', 'No share submissions yet.')}
+                </div>
+              )}
+            </div>
+          </section>
+        ) : null}
       </div>
     </div>
   )

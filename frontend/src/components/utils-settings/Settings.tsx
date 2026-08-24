@@ -1,6 +1,7 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
@@ -29,9 +30,7 @@ import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import FontFamilyPicker from './FontFamilyPicker'
-import type { OtpModalProps } from './OtpModal'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS, orderNavItems, parseNavSetting } from '../shared/navigationConfig'
-import PageHeader from '../shared/PageHeader'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -51,7 +50,6 @@ type NotifyFn = (message: string, type?: string) => void
 type SettingValue = string | number | null | undefined
 type SettingsRecord = Record<string, SettingValue>
 type SettingsSectionId = 'all' | 'business' | 'appearance' | 'security'
-type OtpModalMode = OtpModalProps['mode'] | null
 type ColorChoice = [string, string, string]
 type UploadState = ReturnType<typeof createInitialUploadState>
 type UploadStateMap = Record<string, UploadState>
@@ -81,7 +79,6 @@ interface AppContextValue {
 }
 
 interface SettingsApi {
-  otpStatus?: (userId: string | number) => Promise<{ otpEnabled?: boolean }>
   uploadFileAsset?: (payload: {
     file: File
     userId?: string | number
@@ -128,7 +125,6 @@ interface SettingsSectionProps {
 type CopyFn = (key: string, fallback: string) => string
 
 const useApp = useAppHook as () => AppContextValue
-const LazyOtpModal = lazy(async () => ({ default: (await import('./OtpModal')).default }))
 
 function getSettingsApi(): SettingsApi {
   return (window as unknown as { api: SettingsApi }).api || {}
@@ -148,7 +144,6 @@ function toNumberValue(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-const SETTINGS_OTP_STATUS_TIMEOUT_MS = 8000
 const SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS = 8000
 const SETTINGS_FAVICON_PREVIEW_DELAY_MS = 1800
 const SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS = 7000
@@ -179,6 +174,8 @@ const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
     pinned: 'Pinned',
     inMoreMenu: 'In menu',
     navReset: 'Reset navigation',
+    defaultLandingPage: 'Default landing page',
+    defaultLandingPageHint: 'Which page opens first after signing in. Applies to every user unless they navigate elsewhere.',
   },
   km: {
     appearanceHintAccent: 'Buttons, active links, and highlights',
@@ -222,13 +219,27 @@ const SIDEBAR_TEXT_COLORS: ColorChoice[] = [
   ['#111827', 'Dark', '#374151'],
 ]
 
-const DEFAULT_PAYMENT_METHODS = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR', 'Pi Pay', 'Transfer']
+const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
+const DEFAULT_PAYMENT_METHODS = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
 
-const SETTINGS_SECTION_OPTIONS: Array<{ value: SettingsSectionId; label: string; hint: string }> = [
-  { value: 'all', label: 'All', hint: 'Show every settings section.' },
-  { value: 'business', label: 'Business', hint: 'Business profile, browser icon, currency, receipt, and payment settings.' },
-  { value: 'appearance', label: 'Appearance', hint: 'Theme, colors, fonts, typography, and navigation layout.' },
-  { value: 'security', label: 'Security', hint: 'Session duration, notifications, and two-factor authentication.' },
+function normalizePaymentMethods(value: unknown): string[] {
+  const methods = Array.isArray(value) ? value : []
+  const seen = new Set<string>()
+  return methods
+    .map((method) => String(method || '').trim())
+    .filter((method) => {
+      const normalized = method.toLocaleLowerCase()
+      if (!method || RETIRED_PAYMENT_METHODS.has(normalized) || seen.has(normalized)) return false
+      seen.add(normalized)
+      return true
+    })
+}
+
+const SETTINGS_SECTION_OPTIONS: Array<{ value: SettingsSectionId; labelKey: string; label: string; hintKey: string; hint: string }> = [
+  { value: 'all', labelKey: 'all', label: 'All', hintKey: 'settings_section_all_hint', hint: 'Show every settings section.' },
+  { value: 'business', labelKey: 'business', label: 'Business', hintKey: 'settings_section_business_hint', hint: 'Business profile, browser icon, currency, receipt, and payment settings.' },
+  { value: 'appearance', labelKey: 'appearance', label: 'Appearance', hintKey: 'settings_section_appearance_hint', hint: 'Theme, colors, fonts, typography, and navigation layout.' },
+  { value: 'security', labelKey: 'security', label: 'Security', hintKey: 'settings_section_security_hint', hint: 'Session duration, notifications, and two-factor authentication.' },
 ]
 
 const SETTINGS_SECTION_IDS = new Set<SettingsSectionId>(SETTINGS_SECTION_OPTIONS.map((option) => option.value))
@@ -242,8 +253,13 @@ const LANGUAGE_OPTION_KEYS = [['en', 'englishLabel', 'English'], ['km', 'khmerLa
 const CARD_STYLE_OPTION_KEYS = [['sharp', 'sharp'], ['rounded', 'rounded'], ['pill', 'pill']]
 const DENSITY_OPTION_KEYS = [['comfortable', 'comfortable'], ['compact', 'compact'], ['spacious', 'spacious']]
 
+// Default swatch changed from blue (#2563eb) to the app's new brass accent,
+// #9c7a3c (Aug 24 2026 -- "clean, professional, expensive", no blue). Other
+// presets left as alternate options for orgs that want a different accent;
+// only the default/first swatch and the '#2563eb' fallbacks below (and the
+// matching one in AppContext.tsx) needed to change.
 const ACCENT_COLORS: Array<[string, string]> = [
-  ['#2563eb', 'Light'],
+  ['#9c7a3c', 'Brass'],
   ['#7c3aed', 'Mid light'],
   ['#0f766e', 'Mid dark'],
   ['#1f2937', 'Dark'],
@@ -281,41 +297,6 @@ function buildColorChoices(baseColors: ColorChoice[], customColors: string[] = [
   }
   return next
 }
-
-const TIMEZONE_OPTIONS = [
-  'Asia/Phnom_Penh',
-  'Asia/Bangkok',
-  'Asia/Ho_Chi_Minh',
-  'Asia/Singapore',
-  'Asia/Kuala_Lumpur',
-  'Asia/Jakarta',
-  'Asia/Manila',
-  'Asia/Yangon',
-  'Asia/Dhaka',
-  'Asia/Kolkata',
-  'Asia/Kathmandu',
-  'Asia/Karachi',
-  'Asia/Dubai',
-  'Asia/Riyadh',
-  'Asia/Baghdad',
-  'Africa/Nairobi',
-  'Europe/Moscow',
-  'Europe/Istanbul',
-  'Africa/Cairo',
-  'Europe/London',
-  'Europe/Paris',
-  'Europe/Berlin',
-  'Europe/Amsterdam',
-  'UTC',
-  'America/New_York',
-  'America/Chicago',
-  'America/Denver',
-  'America/Los_Angeles',
-  'America/Toronto',
-  'America/Sao_Paulo',
-  'Pacific/Auckland',
-  'Pacific/Sydney',
-]
 
 const FONT_PREVIEW_CSS = {
   system: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -407,7 +388,7 @@ function SwatchPicker({
               background: color || fallbackValue,
               border: `2px solid ${border}`,
             }}
-            className={`w-8 h-8 rounded-lg transition-transform text-xs flex items-center justify-center ${(value || '') === color ? 'ring-2 ring-offset-1 ring-blue-500 scale-110' : 'hover:scale-105'}`}
+            className={`w-8 h-8 rounded-lg transition-transform text-xs flex items-center justify-center ${(value || '') === color ? 'ring-2 ring-offset-1 ring-primary-500 scale-110' : 'hover:scale-105'}`}
           >
             {color === '' ? <span style={{ fontSize: '9px', color: '#666' }}>{autoLabel}</span> : null}
           </button>
@@ -491,14 +472,13 @@ function SettingsSection({
 
 export default function Settings() {
   const { t, settings, saveSettings, loadSettings, user, notify, deviceTimezone } = useApp()
-  const [otpStatus, setOtpStatus] = useState(false)
-  const [otpModal, setOtpModal] = useState<OtpModalMode>(null)
   const [pmList, setPmList] = useState<string[]>([])
   const [newPm, setNewPm] = useState('')
   const [form, setForm] = useState<SettingsRecord>({})
   const [previewNow, setPreviewNow] = useState(() => new Date())
   const [appFaviconPreview, setAppFaviconPreview] = useState('')
   const [dragPinnedId, setDragPinnedId] = useState<string | null>(null)
+  const [dragNavId, setDragNavId] = useState<string | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('all')
   const [settingsConflict, setSettingsConflict] = useState<SettingsConflictState | null>(null)
   const [showConflictReview, setShowConflictReview] = useState(false)
@@ -506,13 +486,14 @@ export default function Settings() {
   const [uploadStates, setUploadStates] = useState<UploadStateMap>(() => ({
     ui_app_favicon_image: createInitialUploadState(),
   }))
-  const otpStatusRequestRef = useRef(0)
   const faviconPreviewRequestRef = useRef(0)
   const settingsSaveInFlightRef = useRef(false)
   const uploadInFlightKeysRef = useRef<Set<string>>(new Set())
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map())
   const uploadOriginalValuesRef = useRef<Map<string, string>>(new Map())
   const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map())
+  const formHydratedRef = useRef(false)
+  const formDirtyRef = useRef(false)
   const aliveRef = useRef(true)
   const sectionStorageKey = 'business-os:settings:section'
   const showSettingsSection = (sectionId: SettingsSectionId) => settingsSection === 'all' || settingsSection === sectionId
@@ -533,7 +514,7 @@ export default function Settings() {
   const previewSectionSize = form.ui_section_font_size || Math.max(15, Math.round(previewBaseSize * 1.08))
   const previewChipSize = form.ui_chip_font_size || Math.max(11, Math.round(previewBaseSize * 0.78))
   const previewTableSize = form.ui_table_font_size || (form.ui_font_size || 14)
-  const selectedDisplayTimezone = toStringValue(form.display_timezone || settings.display_timezone || deviceTimezone, Intl.DateTimeFormat().resolvedOptions().timeZone)
+  const selectedDisplayTimezone = BUSINESS_TIME_ZONE
   const previewLanguage = uiLanguage === 'km' ? 'km' : 'en'
   const customAccentColors = useMemo(() => parseStoredColors(form.ui_custom_accent_colors), [form.ui_custom_accent_colors])
   const customSidebarColors = useMemo(() => parseStoredColors(form.ui_custom_sidebar_colors), [form.ui_custom_sidebar_colors])
@@ -565,7 +546,6 @@ export default function Settings() {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
-      invalidateTrackedRequest(otpStatusRequestRef)
       invalidateTrackedRequest(faviconPreviewRequestRef)
       uploadControllersRef.current.forEach((controller) => controller?.abort?.())
       uploadControllersRef.current.clear()
@@ -577,36 +557,6 @@ export default function Settings() {
   }, [])
 
   useEffect(() => {
-    if (!user?.id) {
-      invalidateTrackedRequest(otpStatusRequestRef)
-      setOtpStatus(false)
-      return
-    }
-
-    const requestId = beginTrackedRequest(otpStatusRequestRef)
-    const userId = user.id
-    async function loadOtpStatus() {
-      try {
-        const result = await withLoaderTimeout(
-          () => getSettingsApi().otpStatus?.(userId),
-          'OTP status',
-          SETTINGS_OTP_STATUS_TIMEOUT_MS,
-        )
-        if (!aliveRef.current || !isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
-        setOtpStatus(!!result?.otpEnabled)
-      } catch {
-        if (!aliveRef.current || !isTrackedRequestCurrent(otpStatusRequestRef, requestId)) return
-      }
-    }
-
-    loadOtpStatus()
-
-    return () => {
-      invalidateTrackedRequest(otpStatusRequestRef)
-    }
-  }, [user])
-
-  useEffect(() => {
     const source = String(form.ui_app_favicon_image || settings.ui_app_favicon_image || '').trim()
     if (!source) {
       invalidateTrackedRequest(faviconPreviewRequestRef)
@@ -615,13 +565,22 @@ export default function Settings() {
     }
     const requestId = beginTrackedRequest(faviconPreviewRequestRef)
     setAppFaviconPreview(source)
+    const faviconFit = form.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'
+    const faviconZoom = Math.max(80, Math.min(220, toNumberValue(form.ui_app_favicon_zoom, 100)))
+    const faviconPositionX = Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_x, 50)))
+    const faviconPositionY = Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_y, 50)))
     let timeoutId = 0
     let idleId = 0
     async function loadFaviconPreview() {
       try {
         const { createCircularFaviconDataUrl } = await import('../../utils/favicon.ts')
         const preview = await withLoaderTimeout(
-          () => createCircularFaviconDataUrl(source, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 }),
+          () => createCircularFaviconDataUrl(source, {
+            fit: faviconFit,
+            zoom: faviconZoom,
+            positionX: faviconPositionX,
+            positionY: faviconPositionY,
+          }),
           'Settings favicon preview',
           SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS,
         )
@@ -647,19 +606,34 @@ export default function Settings() {
       if (timeoutId) window.clearTimeout(timeoutId)
       if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
     }
-  }, [form.ui_app_favicon_image, settings.ui_app_favicon_image])
+  }, [
+    form.ui_app_favicon_fit,
+    form.ui_app_favicon_image,
+    form.ui_app_favicon_position_x,
+    form.ui_app_favicon_position_y,
+    form.ui_app_favicon_zoom,
+    settings.ui_app_favicon_image,
+  ])
 
   useEffect(() => {
     try {
       const raw = toStringValue(settings.pos_payment_methods)
-      setPmList(raw ? JSON.parse(raw) : DEFAULT_PAYMENT_METHODS)
+      const parsed = raw ? JSON.parse(raw) : DEFAULT_PAYMENT_METHODS
+      setPmList(normalizePaymentMethods(parsed))
     } catch {
       setPmList(DEFAULT_PAYMENT_METHODS)
     }
   }, [settings.pos_payment_methods])
 
   useEffect(() => {
-    setForm({ ...settings })
+    const nextSettings = settings && typeof settings === 'object' ? settings : {}
+    // Settings refreshes can briefly deliver an empty mirror while the
+    // authoritative response is still loading. Do not blank a rendered
+    // form, and do not overwrite edits the person is actively making.
+    if (!Object.keys(nextSettings).length && formHydratedRef.current) return
+    if (formDirtyRef.current) return
+    setForm({ ...nextSettings })
+    formHydratedRef.current = true
   }, [settings])
 
   useEffect(() => {
@@ -677,7 +651,7 @@ export default function Settings() {
   }, [user])
 
   const navItems = useMemo<NavItem[]>(
-    () => orderNavItems(NAV_ITEMS, parseNavSetting(toStringValue(form.ui_nav_order), [])).filter((item) => item.id !== 'catalog') as NavItem[],
+    () => orderNavItems(NAV_ITEMS, parseNavSetting(toStringValue(form.ui_nav_order), [])) as NavItem[],
     [form.ui_nav_order],
   )
   const mobilePinned = useMemo(() => parseNavSetting(toStringValue(form.ui_mobile_pinned), DEFAULT_MOBILE_PINNED).slice(0, 4), [form.ui_mobile_pinned])
@@ -686,7 +660,10 @@ export default function Settings() {
     return mobilePinned.map((id) => byId.get(id)).filter((item): item is NavItem => Boolean(item))
   }, [mobilePinned, navItems])
 
-  const setValue = (key: string, value: SettingValue) => setForm((current) => ({ ...current, [key]: value }))
+  const setValue = (key: string, value: SettingValue) => {
+    formDirtyRef.current = true
+    setForm((current) => ({ ...current, [key]: value }))
+  }
   const getUploadState = useCallback(
     (key: string) => uploadStates[key] || createInitialUploadState(),
     [uploadStates],
@@ -695,6 +672,7 @@ export default function Settings() {
     setUploadStates((current) => reduceUploadState(current, { ...(action || {}), key }))
   }, [])
   const updateStoredColorList = useCallback((key: string, updater: (currentList: string[]) => string[]) => {
+    formDirtyRef.current = true
     setForm((current) => {
       const currentList = parseStoredColors(current[key])
       const nextList = updater(currentList)
@@ -738,6 +716,17 @@ export default function Settings() {
     setValue('ui_nav_order', JSON.stringify(items.map((item) => item.id)))
   }
 
+  const moveNavBefore = (dragId: string | null, targetId: string) => {
+    if (!dragId || !targetId || dragId === targetId) return
+    const items = [...navItems]
+    const dragIndex = items.findIndex((item) => item.id === dragId)
+    const targetIndex = items.findIndex((item) => item.id === targetId)
+    if (dragIndex < 0 || targetIndex < 0) return
+    const [dragged] = items.splice(dragIndex, 1)
+    items.splice(dragIndex < targetIndex ? targetIndex - 1 : targetIndex, 0, dragged)
+    setValue('ui_nav_order', JSON.stringify(items.map((item) => item.id)))
+  }
+
   const toggleMobilePinned = (id: string) => {
     const next = [...mobilePinned]
     const existingIndex = next.indexOf(id)
@@ -775,6 +764,7 @@ export default function Settings() {
   const resetNavigationLayout = () => {
     setValue('ui_nav_order', '')
     setValue('ui_mobile_pinned', JSON.stringify(DEFAULT_MOBILE_PINNED))
+    setValue('default_landing_page', '')
   }
 
   const field = (key: string, label: string, type = 'text', placeholder = '') => (
@@ -790,6 +780,7 @@ export default function Settings() {
           key === 'business_phone' ? 'tel' :
           key === 'business_email' ? 'email' :
           key === 'business_address' ? 'street-address' :
+          key === 'business_website' ? 'url' :
           'off'
         }
         placeholder={placeholder}
@@ -917,6 +908,7 @@ export default function Settings() {
         ...current,
         ui_app_favicon_image: sanitizedForm.ui_app_favicon_image,
       }))
+      formDirtyRef.current = false
       setSettingsConflict(null)
       setShowConflictReview(false)
     } finally {
@@ -940,12 +932,14 @@ export default function Settings() {
       ? latest
       : (settingsConflict?.serverSettings || {})
     setForm({ ...nextSettings } as SettingsRecord)
+    formDirtyRef.current = false
     setSettingsConflict(null)
     setShowConflictReview(false)
   }, [loadSettings, settingsConflict])
 
   const keepServerSettings = useCallback(() => {
     setForm({ ...(settingsConflict?.serverSettings || {}) } as SettingsRecord)
+    formDirtyRef.current = false
     setSettingsConflict(null)
     setShowConflictReview(false)
   }, [settingsConflict])
@@ -979,32 +973,33 @@ export default function Settings() {
   const notificationRealertPreset = ['5', '10', '30', '60'].includes(notificationRealertValue)
     ? notificationRealertValue
     : 'custom'
+  const settingsSectionOptions = useMemo(() => (
+    SETTINGS_SECTION_OPTIONS.map((option) => ({
+      value: option.value,
+      label: t(option.labelKey) || option.label,
+      hint: t(option.hintKey) || option.hint,
+    }))
+  ), [t])
 
   return (
     <div className="page-scroll p-4 sm:p-6">
-      <PageHeader
-        icon={SettingsIcon}
-        tone="slate"
-        title={t('settings')}
-        subtitle={uiLanguage === 'km' ? 'ការកំណត់កម្មវិធីទាំងអស់' : 'All app settings'}
-        className="mb-6"
-        stackOnMobile={false}
-        actions={(
-          <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:px-4 sm:py-2 sm:text-sm" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
-            <Save className="h-4 w-4" />
-            <span>{savingSettings ? (t('saving') || 'Saving...') : t('save')}</span>
-          </button>
-        )}
-      />
+      {/* Section tabs share a row with Save so the primary action doesn't
+          need its own separate title bar above them. */}
+      <div className="mx-auto mb-4 flex max-w-[96rem] flex-wrap items-center justify-between gap-2">
+        <SectionSwitcher
+          className="mb-0 flex-1"
+          label=""
+          options={settingsSectionOptions}
+          value={settingsSection}
+          onChange={handleSettingsSectionChange}
+          storageKey={sectionStorageKey}
+        />
+        <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-2 whitespace-nowrap px-4 py-2 text-sm font-medium sm:px-5 sm:py-2.5 sm:text-base" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
+          <Save className="h-4 w-4 sm:h-5 sm:w-5" />
+          <span>{savingSettings ? (t('saving') || 'Saving...') : t('save')}</span>
+        </button>
+      </div>
 
-      <SectionSwitcher
-        className="mx-auto mb-4 max-w-[96rem]"
-        label=""
-        options={SETTINGS_SECTION_OPTIONS}
-        value={settingsSection}
-        onChange={handleSettingsSectionChange}
-        storageKey={sectionStorageKey}
-      />
       <LoadingWatchdog
         loading={uploadingImage}
         timeoutMs={7000}
@@ -1085,15 +1080,12 @@ export default function Settings() {
             {field('business_address', t('address'), 'text', '123 Main St')}
             {field('business_email', t('email'), 'email', 'info@biz.com')}
             {field('tax_id', t('tax_id'), 'text', 'TAX-000')}
+            {field('business_website', t('business_website') || 'Public portal / website', 'url', 'https://yourshop.example.com')}
           </div>
-        </SettingsSection>
-        ) : null}
 
-        {isAdmin && showSettingsSection('business') ? (
-        <SettingsSection
-          title="Browser tab icon"
-          description="Used for the Business OS admin tab. The public portal tab icon is managed on the Customer Portal page."
-        >
+          <div className="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
+            <div className="mb-1 text-sm font-semibold text-gray-900 dark:text-white">{t('admin_tab_icon')}</div>
+            <div className="mb-4 text-xs text-gray-500 dark:text-gray-400">{t('admin_tab_icon_desc')}</div>
           {(() => {
             const faviconUpload = getUploadState('ui_app_favicon_image')
             return (
@@ -1153,15 +1145,73 @@ export default function Settings() {
               </button>
             </div>
           </div>
+          <div className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-2 dark:border-slate-700 dark:bg-slate-800/50">
+            <div>
+              <label htmlFor="settings-ui-app-favicon-fit" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">Image fit</label>
+              <AppSelect
+                id="settings-ui-app-favicon-fit"
+                name="ui_app_favicon_fit"
+                value={form.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'}
+                onChange={(nextValue) => setValue('ui_app_favicon_fit', nextValue === 'contain' ? 'contain' : 'cover')}
+                ariaLabel="Favicon image fit"
+                className="w-full"
+                buttonClassName="h-9 w-full text-xs"
+                menuClassName="min-w-[10rem]"
+                options={[
+                  { value: 'cover', label: 'Cover (fill circle)' },
+                  { value: 'contain', label: 'Contain (show whole image)' },
+                ]}
+              />
+            </div>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
+              Zoom <span className="font-normal text-slate-500 dark:text-slate-400">{Math.max(80, Math.min(220, toNumberValue(form.ui_app_favicon_zoom, 100)))}%</span>
+              <input
+                className="mt-2 w-full accent-primary-600"
+                type="range"
+                min="80"
+                max="220"
+                step="1"
+                value={Math.max(80, Math.min(220, toNumberValue(form.ui_app_favicon_zoom, 100)))}
+                onChange={(event) => setValue('ui_app_favicon_zoom', event.target.value)}
+                aria-label="Favicon zoom"
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
+              Horizontal focus <span className="font-normal text-slate-500 dark:text-slate-400">{Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_x, 50)))}%</span>
+              <input
+                className="mt-2 w-full accent-primary-600"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_x, 50)))}
+                onChange={(event) => setValue('ui_app_favicon_position_x', event.target.value)}
+                aria-label="Favicon horizontal focus"
+              />
+            </label>
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
+              Vertical focus <span className="font-normal text-slate-500 dark:text-slate-400">{Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_y, 50)))}%</span>
+              <input
+                className="mt-2 w-full accent-primary-600"
+                type="range"
+                min="0"
+                max="100"
+                step="1"
+                value={Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_y, 50)))}
+                onChange={(event) => setValue('ui_app_favicon_position_y', event.target.value)}
+                aria-label="Favicon vertical focus"
+              />
+            </label>
+          </div>
           <div className="mt-3 space-y-2 text-xs">
             {faviconUpload.status === 'uploading' ? (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+              <div className="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-primary-700 dark:border-primary-900/50 dark:bg-primary-950/30 dark:text-primary-200">
                 <div className="flex items-center justify-between gap-3">
                   <span>{faviconUpload.fileName || (uiLanguage === 'km' ? 'កំពុងផ្ទុកឡើង' : 'Uploading')}</span>
                   <span>{Number(faviconUpload.progress || 0)}%</span>
                 </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-blue-100 dark:bg-blue-900/60">
-                  <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${Math.max(6, Number(faviconUpload.progress || 0))}%` }} />
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-primary-100 dark:bg-primary-900/60">
+                  <div className="h-full rounded-full bg-primary-600 transition-all" style={{ width: `${Math.max(6, Number(faviconUpload.progress || 0))}%` }} />
                 </div>
               </div>
             ) : null}
@@ -1181,15 +1231,17 @@ export default function Settings() {
               </>
             )
           })()}
+          </div>
         </SettingsSection>
         ) : null}
 
         {isAdmin && showSettingsSection('business') ? (
-        <SettingsSection title={t('currency_settings')}>
+        <SettingsSection title={t('currency_tax_settings')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {field('currency_usd_symbol', t('currency_usd_symbol'), 'text', '$')}
-            {field('currency_khr_symbol', t('currency_khr_symbol'), 'text', 'KHR')}
+            {field('currency_khr_symbol', t('currency_khr_symbol'), 'text', '៛')}
             {field('exchange_rate', t('exchange_rate'), 'number', '4100')}
+            {field('tax_rate', t('tax_rate'), 'number', '0')}
             <div>
               <label htmlFor="settings-display-currency" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('display_currency')}</label>
               <AppSelect
@@ -1213,23 +1265,18 @@ export default function Settings() {
         ) : null}
 
         {isAdmin && showSettingsSection('business') ? (
-        <SettingsSection title={t('receipt_settings')}>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {field('tax_rate', t('tax_rate'), 'number', '0')}
-            <div>
-              <label htmlFor="settings-receipt-footer" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('footer_message')}</label>
-              <textarea
-                id="settings-receipt-footer"
-                name="receipt_footer"
-                autoComplete="off"
-                className="input resize-none"
-                rows={2}
-                value={form.receipt_footer || ''}
-                onChange={(event) => setValue('receipt_footer', event.target.value)}
-                placeholder="Thank you!"
-              />
+        <SettingsSection title={t('pos_settings') || 'POS Settings'}>
+          <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
+            <div className="pr-3">
+              <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('pos_show_item_discount') || 'Show Discount in Cart'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('pos_show_item_discount_desc') || 'Show the original price and savings for each item in the cart when a special price or discount applies. The price can still be changed in the cart either way.'}</div>
             </div>
-          </div>
+            <input
+              type="checkbox"
+              checked={String(form.pos_show_item_discount ?? 'true') !== 'false'}
+              onChange={(event) => setValue('pos_show_item_discount', event.target.checked ? 'true' : 'false')}
+            />
+          </label>
         </SettingsSection>
         ) : null}
 
@@ -1244,7 +1291,7 @@ export default function Settings() {
                     key={themeValue}
                     type="button"
                     onClick={() => setValue('theme', themeValue)}
-                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${form.theme === themeValue ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${form.theme === themeValue ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {copy(copyKey, defaultLabel)}
                   </button>
@@ -1260,7 +1307,7 @@ export default function Settings() {
                     key={langCode}
                     type="button"
                     onClick={() => setValue('language', langCode)}
-                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${form.language === langCode ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                    className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${form.language === langCode ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-400' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {copy(copyKey, defaultLabel)}
                   </button>
@@ -1288,13 +1335,13 @@ export default function Settings() {
                 step="1"
                 value={form.ui_font_size || 14}
                 onChange={(event) => setValue('ui_font_size', event.target.value)}
-                className="w-full accent-blue-600"
+                className="w-full accent-primary-600"
               />
             </div>
 
             <div>
               <label htmlFor="settings-ui-title-font-size" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Page title size <span className="text-gray-400 font-normal">({previewTitleSize}px)</span>
+                {t('page_title_size_label')} <span className="text-gray-400 font-normal">({previewTitleSize}px)</span>
               </label>
               <input
                 id="settings-ui-title-font-size"
@@ -1305,13 +1352,13 @@ export default function Settings() {
                 step="1"
                 value={form.ui_title_font_size || previewTitleSize}
                 onChange={(event) => setValue('ui_title_font_size', event.target.value)}
-                className="w-full accent-blue-600"
+                className="w-full accent-primary-600"
               />
             </div>
 
             <div>
               <label htmlFor="settings-ui-sidebar-font-size" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Sidebar size <span className="text-gray-400 font-normal">({previewSidebarSize}px)</span>
+                {t('sidebar_text_size_label')} <span className="text-gray-400 font-normal">({previewSidebarSize}px)</span>
               </label>
               <input
                 id="settings-ui-sidebar-font-size"
@@ -1322,13 +1369,13 @@ export default function Settings() {
                 step="1"
                 value={form.ui_sidebar_font_size || previewSidebarSize}
                 onChange={(event) => setValue('ui_sidebar_font_size', event.target.value)}
-                className="w-full accent-blue-600"
+                className="w-full accent-primary-600"
               />
             </div>
 
             <div>
               <label htmlFor="settings-ui-section-font-size" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Section heading size <span className="text-gray-400 font-normal">({previewSectionSize}px)</span>
+                {t('section_heading_size_label')} <span className="text-gray-400 font-normal">({previewSectionSize}px)</span>
               </label>
               <input
                 id="settings-ui-section-font-size"
@@ -1339,13 +1386,13 @@ export default function Settings() {
                 step="1"
                 value={form.ui_section_font_size || previewSectionSize}
                 onChange={(event) => setValue('ui_section_font_size', event.target.value)}
-                className="w-full accent-blue-600"
+                className="w-full accent-primary-600"
               />
             </div>
 
             <div>
               <label htmlFor="settings-ui-table-font-size" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Table and row text <span className="text-gray-400 font-normal">({previewTableSize}px)</span>
+                {t('table_row_text_size_label')} <span className="text-gray-400 font-normal">({previewTableSize}px)</span>
               </label>
               <input
                 id="settings-ui-table-font-size"
@@ -1356,13 +1403,13 @@ export default function Settings() {
                 step="1"
                 value={form.ui_table_font_size || previewTableSize}
                 onChange={(event) => setValue('ui_table_font_size', event.target.value)}
-                className="w-full accent-blue-600"
+                className="w-full accent-primary-600"
               />
             </div>
 
             <div>
               <label htmlFor="settings-ui-chip-font-size" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                Badge and chip text <span className="text-gray-400 font-normal">({previewChipSize}px)</span>
+                {t('badge_chip_text_size_label')} <span className="text-gray-400 font-normal">({previewChipSize}px)</span>
               </label>
               <input
                 id="settings-ui-chip-font-size"
@@ -1373,7 +1420,7 @@ export default function Settings() {
                 step="1"
                 value={form.ui_chip_font_size || previewChipSize}
                 onChange={(event) => setValue('ui_chip_font_size', event.target.value)}
-                className="w-full accent-blue-600"
+                className="w-full accent-primary-600"
               />
             </div>
 
@@ -1387,7 +1434,7 @@ export default function Settings() {
                     key={radius}
                     type="button"
                     onClick={() => setValue('ui_border_radius', radius)}
-                    className={`flex-1 py-2 text-xs border-2 transition-colors ${radius === 'sharp' ? 'rounded-sm' : radius === 'pill' ? 'rounded-full' : 'rounded-lg'} ${(form.ui_border_radius || 'rounded') === radius ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                    className={`py-2 text-xs border-2 transition-colors ${radius === 'sharp' ? 'rounded-sm' : radius === 'pill' ? 'rounded-full' : 'rounded-lg'} ${(form.ui_border_radius || 'rounded') === radius ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {t(labelKey)}
                   </button>
@@ -1403,7 +1450,7 @@ export default function Settings() {
                     key={density}
                     type="button"
                     onClick={() => setValue('ui_density', density)}
-                    className={`flex-1 py-2 text-xs rounded-lg border-2 transition-colors ${(form.ui_density || 'comfortable') === density ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
+                    className={`py-2 text-xs rounded-lg border-2 transition-colors ${(form.ui_density || 'comfortable') === density ? 'border-primary-600 bg-primary-50 dark:bg-primary-900/30 text-primary-800 dark:text-primary-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}
                   >
                     {t(labelKey)}
                   </button>
@@ -1435,14 +1482,14 @@ export default function Settings() {
                     onClick={() => setValue('ui_accent_color', color)}
                     title={name}
                     style={{ background: color }}
-                    className={`w-7 h-7 rounded-full border-4 transition-transform ${(form.ui_accent_color || '#2563eb') === color ? 'border-white scale-125 shadow-lg' : 'border-transparent hover:scale-110'}`}
+                    className={`w-7 h-7 rounded-full border-4 transition-transform ${(form.ui_accent_color || '#9c7a3c') === color ? 'border-white scale-125 shadow-lg' : 'border-transparent hover:scale-110'}`}
                   />
                 ))}
                 <input
                   id="settings-ui-accent-color"
                   name="ui_accent_color"
                   type="color"
-                  value={form.ui_accent_color || '#2563eb'}
+                  value={form.ui_accent_color || '#9c7a3c'}
                   onChange={(event) => setValue('ui_accent_color', event.target.value)}
                   onBlur={(event) => addStoredColor('ui_custom_accent_colors', event.target.value)}
                   title={copy('customColor', 'Custom color')}
@@ -1524,27 +1571,14 @@ export default function Settings() {
         <SettingsSection title={t('timezone')} description={t('timezone_desc')}>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label htmlFor="settings-display-timezone" className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('display_timezone')}</label>
-              <AppSelect
-                id="settings-display-timezone"
-                name="display_timezone"
-                value={form.display_timezone || Intl.DateTimeFormat().resolvedOptions().timeZone}
-                onChange={(nextValue) => setValue('display_timezone', nextValue)}
-                ariaLabel={t('display_timezone')}
-                className="w-full"
-                buttonClassName="h-10 w-full text-sm"
-                menuClassName="min-w-[16rem]"
-                optionClassName="text-sm"
-                options={[
-                  { value: '', label: t('use_device_timezone') },
-                  ...TIMEZONE_OPTIONS.map((timezone) => ({ value: timezone, label: timezone.replace(/_/g, ' ') })),
-                ]}
-              />
+              <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{t('display_timezone')}</div>
+              <div className="flex h-10 items-center rounded-lg border border-gray-200 bg-gray-50 px-3 text-sm font-medium text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100">{BUSINESS_TIME_ZONE.replace(/_/g, ' ')}</div>
+              <p className="mt-1 text-xs text-gray-500">All business timestamps use Phnom Penh time, regardless of this device.</p>
             </div>
 
-            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-xs">
-              <p className="font-semibold text-blue-700 dark:text-blue-300 mb-1">{t('current_device_time')}</p>
-              <p className="font-mono text-blue-600 dark:text-blue-400">{formatPreviewDateTime(previewNow)}</p>
+            <div className="bg-primary-50 dark:bg-primary-900/20 rounded-xl p-3 text-xs">
+              <p className="font-semibold text-primary-700 dark:text-primary-300 mb-1">{t('current_device_time')}</p>
+              <p className="font-mono text-primary-600 dark:text-primary-400">{formatPreviewDateTime(previewNow)}</p>
               <p className="text-gray-500 mt-1">{t('display_timezone')}: <strong>{selectedDisplayTimezone}</strong></p>
               <p className="text-gray-500 mt-1">{t('device_timezone')}: <strong>{deviceTimezone}</strong></p>
               <p className="text-gray-400 mt-1">{t('timezone_display_note')}</p>
@@ -1556,9 +1590,31 @@ export default function Settings() {
         {isAdmin && showSettingsSection('appearance') ? (
         <SettingsSection title={copy('navigationTitle', 'Navigation Layout')} description={copy('navigationHint', 'Choose the sidebar order and which 4 items stay pinned in the mobile bottom bar.')}>
 
-          <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-900/20">
+          <div className="mb-4">
+            <label htmlFor="settings-default-landing-page" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+              {copy('defaultLandingPage', 'Default landing page')}
+            </label>
+            <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+              {copy('defaultLandingPageHint', 'Which page opens first after signing in. Applies to every user unless they navigate elsewhere.')}
+            </p>
+            <AppSelect
+              id="settings-default-landing-page"
+              name="default_landing_page"
+              value={form.default_landing_page ? String(form.default_landing_page) : 'dashboard'}
+              onChange={(nextValue) => setValue('default_landing_page', nextValue)}
+              ariaLabel={copy('defaultLandingPage', 'Default landing page')}
+              className="w-full sm:w-72"
+              buttonClassName="h-9 w-full text-sm"
+              options={navItems.map((item) => ({
+                value: item.id,
+                label: getSettingsNavLabel(item, t),
+              }))}
+            />
+          </div>
+
+          <div className="mb-4 rounded-xl border border-primary-100 bg-primary-50 p-3 dark:border-primary-900/40 dark:bg-primary-900/20">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-xs font-semibold text-blue-700 dark:text-blue-300">{copy('mobilePinned', 'Pinned on mobile')}</div>
+              <div className="text-xs font-semibold text-primary-700 dark:text-primary-300">{copy('mobilePinned', 'Pinned on mobile')}</div>
               <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={resetNavigationLayout}>
                 {copy('navReset', 'Reset navigation')}
               </button>
@@ -1575,7 +1631,7 @@ export default function Settings() {
                     setDragPinnedId(null)
                   }}
                   onDragEnd={() => setDragPinnedId(null)}
-                  className={`flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-xs dark:border-blue-900/50 dark:bg-blue-950/40 ${dragPinnedId === item.id ? 'opacity-60' : ''}`}
+                  className={`flex items-center gap-2 rounded-lg border border-primary-200 bg-white px-2.5 py-1.5 text-xs dark:border-primary-900/50 dark:bg-primary-950/40 ${dragPinnedId === item.id ? 'opacity-60' : ''}`}
                 >
                   <span className="cursor-grab text-gray-400" title={copy('dragToReorder', 'Drag to reorder')}>
                     <GripVertical className="h-4 w-4" />
@@ -1583,7 +1639,7 @@ export default function Settings() {
                   <span className="min-w-0 flex flex-1 items-center gap-2 truncate text-gray-700 dark:text-gray-200">
                     {(() => {
                       const Icon = SETTINGS_NAV_ICONS[item.id] || SettingsIcon
-                      return <Icon className="h-4 w-4 flex-shrink-0 text-blue-600 dark:text-blue-400" />
+                      return <Icon className="h-4 w-4 flex-shrink-0 text-primary-600 dark:text-primary-400" />
                     })()}
                     <span className="truncate">{index + 1}. {getSettingsNavLabel(item, t)}</span>
                   </span>
@@ -1609,7 +1665,7 @@ export default function Settings() {
                   </button>
                 </div>
               )) : (
-                <div className="rounded-lg border border-dashed border-blue-200 px-3 py-2 text-xs text-blue-700 dark:border-blue-900/50 dark:text-blue-300">
+                <div className="rounded-lg border border-dashed border-primary-200 px-3 py-2 text-xs text-primary-700 dark:border-primary-900/50 dark:text-primary-300">
                   {copy('noPinnedItems', 'No pinned items yet.')}
                 </div>
               )}
@@ -1621,9 +1677,23 @@ export default function Settings() {
               const isPinned = mobilePinned.includes(item.id)
               const Icon = SETTINGS_NAV_ICONS[item.id] || SettingsIcon
               return (
-                <div key={item.id} className="rounded-xl border border-gray-200 bg-gray-50 px-2 py-1.5 dark:border-gray-700 dark:bg-gray-800/70">
+                <div
+                  key={item.id}
+                  draggable
+                  onDragStart={() => setDragNavId(item.id)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    moveNavBefore(dragNavId, item.id)
+                    setDragNavId(null)
+                  }}
+                  onDragEnd={() => setDragNavId(null)}
+                  className={`rounded-xl border border-gray-200 bg-gray-50 px-2 py-1.5 dark:border-gray-700 dark:bg-gray-800/70 ${dragNavId === item.id ? 'opacity-60' : ''}`}
+                >
                   <div className="flex items-center gap-2">
-                    <div className="rounded-lg bg-white p-1.5 text-blue-600 shadow-sm dark:bg-gray-900 dark:text-blue-400">
+                    <span className="cursor-grab text-gray-400" title={copy('dragToReorder', 'Drag to reorder')}>
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                    <div className="rounded-lg bg-white p-1.5 text-primary-600 shadow-sm dark:bg-gray-900 dark:text-primary-400">
                       <Icon className="h-3.5 w-3.5" />
                     </div>
                     <div className="min-w-0 flex flex-1 items-center gap-2">
@@ -1655,7 +1725,7 @@ export default function Settings() {
                       </button>
                       <button
                         type="button"
-                        className={`flex h-7 w-7 items-center justify-center rounded-md border px-0 py-0 transition-colors ${isPinned ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
+                        className={`flex h-7 w-7 items-center justify-center rounded-md border px-0 py-0 transition-colors ${isPinned ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}
                         onClick={() => toggleMobilePinned(item.id)}
                         aria-label={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
                         title={isPinned ? copy('pinned', 'Pinned') : copy('inMoreMenu', 'Menu')}
@@ -1702,7 +1772,7 @@ export default function Settings() {
               onChange={(event) => setNewPm(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && newPm.trim()) {
-                  savePaymentMethods([...pmList, newPm.trim()])
+                  savePaymentMethods(normalizePaymentMethods([...pmList, newPm.trim()]))
                   setNewPm('')
                 }
               }}
@@ -1712,42 +1782,12 @@ export default function Settings() {
               className="btn-primary text-sm"
               onClick={() => {
                 if (!newPm.trim()) return
-                savePaymentMethods([...pmList, newPm.trim()])
+                savePaymentMethods(normalizePaymentMethods([...pmList, newPm.trim()]))
                 setNewPm('')
               }}
             >
               + {t('add')}
             </button>
-          </div>
-        </SettingsSection>
-        ) : null}
-
-        {showSettingsSection('security') ? (
-        <SettingsSection title={t('session_duration') || 'Session duration'} description={t('session_duration_hint')}>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label htmlFor="login_session_duration" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('session_duration')}</label>
-              <AppSelect
-                id="login_session_duration"
-                name="login_session_duration"
-                value={form.login_session_duration || 'session'}
-                onChange={(nextValue) => setValue('login_session_duration', nextValue)}
-                ariaLabel={t('session_duration')}
-                className="w-full"
-                buttonClassName="h-10 w-full"
-                menuClassName="min-w-[13rem]"
-                options={[
-                  { value: 'session', label: t('until_browser_closes') },
-                  { value: '1d', label: t('for_1_day') || '1 day' },
-                  { value: '3d', label: t('for_3_days') || '3 days' },
-                  { value: '7d', label: t('days_7') },
-                  { value: '14d', label: t('for_14_days') || '14 days' },
-                  { value: '30d', label: t('days_30') },
-                ]}
-              />
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{t('session_duration_hint')}</p>
-            </div>
           </div>
         </SettingsSection>
         ) : null}
@@ -1763,7 +1803,7 @@ export default function Settings() {
                 ['notifications_expiry_enabled', 'notification_expiry_alerts', 'Expiry alerts', 'notification_expiry_alerts_desc', 'Products expiring soon or already expired'],
                 ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
                 ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
-                ['notifications_portal_enabled', 'notification_portal_alerts', 'Customer portal alerts', 'notification_portal_alerts_desc', 'Pending public submissions and review items'],
+                ['notifications_portal_enabled', 'notification_portal_alerts', 'Customer portal alerts', 'notification_portal_alerts_desc', 'Other customer portal notices (pending Share & Reward submissions always appear, regardless of this setting)'],
                 ['notifications_system_enabled', 'notification_system_alerts', 'System alerts', 'notification_system_alerts_desc', 'Only actionable system reminders'],
               ].map(([key, labelKey, fallbackLabel, descKey, fallbackDesc]) => (
                 <label key={key} className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
@@ -1859,42 +1899,30 @@ export default function Settings() {
           </SettingsSection>
         ) : null}
 
-        {user && isAdmin && showSettingsSection('security') ? (
-          <SettingsSection title={t('two_factor_auth')} description={t('two_factor_desc')}>
-            <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-              </div>
-              <span className={`text-xs px-2 py-1 rounded-full font-medium ${otpStatus ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400'}`}>
-                {otpStatus ? t('otp_enabled') : t('otp_disabled')}
-              </span>
+        {isAdmin && showSettingsSection('security') ? (
+          <SettingsSection
+            title={t('audit_log_retention') || 'Audit log retention'}
+            description={t('audit_log_retention_desc') || 'Audit log entries older than this are cleared automatically. There is no manual "Clear" action anymore.'}
+          >
+            <div className="max-w-xs">
+              <label htmlFor="settings-audit-log-retention-days" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                {t('audit_log_retention_days') || 'Keep audit logs for (days)'}
+              </label>
+              <input
+                id="settings-audit-log-retention-days"
+                name="audit_log_retention_days"
+                className="input max-w-xs"
+                type="number"
+                min="1"
+                max="3650"
+                step="1"
+                value={form.audit_log_retention_days || '21'}
+                onChange={(event) => setValue('audit_log_retention_days', event.target.value)}
+              />
+              <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                {t('audit_log_retention_days_desc') || 'Entries older than this are deleted automatically on a daily schedule. Default is 21 days.'}
+              </p>
             </div>
-
-            <div className="flex flex-col gap-2 sm:flex-row">
-              {!otpStatus ? (
-                <button type="button" className="btn-primary text-sm" onClick={() => setOtpModal('setup')}>
-                  {t('enable_2fa')}
-                </button>
-              ) : (
-                <button type="button" className="btn-danger text-sm" onClick={() => setOtpModal('disable')}>
-                  {t('disable_2fa')}
-                </button>
-              )}
-            </div>
-
-            {otpModal ? (
-              <Suspense fallback={null}>
-                <LazyOtpModal
-                  mode={otpModal}
-                  userId={user.id}
-                  onClose={() => setOtpModal(null)}
-                  onDone={(enabled) => {
-                    setOtpStatus(enabled)
-                    setOtpModal(null)
-                  }}
-                  t={t}
-                />
-              </Suspense>
-            ) : null}
           </SettingsSection>
         ) : null}
 
@@ -1905,6 +1933,3 @@ export default function Settings() {
     </div>
   )
 }
-
-
-

@@ -45,6 +45,7 @@ type LookupTransportModule = typeof import('./api/lookupTransport.ts')
 type BranchTransportModule = typeof import('./api/branchTransport.ts')
 type UserReadTransportModule = typeof import('./api/userReadTransport.ts')
 type ActionHistoryTransportModule = typeof import('./api/actionHistoryTransport.ts')
+type NotesTransportModule = typeof import('./api/notesTransport.ts')
 type ProductQueryParams = Parameters<ProductReadTransportModule['searchProducts']>[0]
 type OfflineVaultKey = CryptoKey | null
 type OfflineRow = AnyRecord & {
@@ -111,6 +112,7 @@ let productReadTransportModulePromise: Promise<ProductReadTransportModule> | nul
 let productWriteTransportModulePromise: Promise<ProductWriteTransportModule> | null = null
 let lookupTransportModulePromise: Promise<LookupTransportModule> | null = null
 let branchTransportModulePromise: Promise<BranchTransportModule> | null = null
+let notesTransportModulePromise: Promise<NotesTransportModule> | null = null
 let userReadTransportModulePromise: Promise<UserReadTransportModule> | null = null
 let actionHistoryTransportModulePromise: Promise<ActionHistoryTransportModule> | null = null
 let localDbPromise: Promise<any> | null = null
@@ -123,7 +125,13 @@ function sanitizeBaseUrl(value: unknown): string {
 function isPublicRuntimePath(): boolean {
   if (typeof location === 'undefined') return false
   const pathname = String(location.pathname || '').toLowerCase()
-  return pathname === '/public' || pathname.startsWith('/public/')
+  const hostname = String(location.hostname || '').toLowerCase()
+  const publicRoot = hostname
+    && hostname !== 'localhost'
+    && hostname !== '127.0.0.1'
+    && hostname !== '::1'
+    && !hostname.startsWith('admin.')
+  return (publicRoot && pathname === '/') || pathname === '/public' || pathname.startsWith('/public/')
 }
 
 function getOfflineDb(): Promise<any> {
@@ -194,6 +202,11 @@ function loadLookupTransportModule(): Promise<LookupTransportModule> {
 function loadBranchTransportModule(): Promise<BranchTransportModule> {
   if (!branchTransportModulePromise) branchTransportModulePromise = import('./api/branchTransport.ts')
   return branchTransportModulePromise
+}
+
+function loadNotesTransportModule(): Promise<NotesTransportModule> {
+  if (!notesTransportModulePromise) notesTransportModulePromise = import('./api/notesTransport.ts')
+  return notesTransportModulePromise
 }
 
 function loadUserReadTransportModule(): Promise<UserReadTransportModule> {
@@ -604,11 +617,18 @@ async function syncUnlockedOfflineOutbox(options: OfflineSyncOptions = {}): Prom
   }
 
   const results = Array.isArray(response?.results) ? response.results : []
+  // Offline sync batches can grow into the hundreds after an extended
+  // period offline; looking up each result's matching operation with
+  // `.find()` was an O(operations x results) scan (they're typically
+  // close to the same size), same shape as other per-item-scan fixes in
+  // this project's Big-O sweep. A Map keyed by client_request_id gives
+  // O(1) lookups instead.
+  const operationsByClientRequestId = new Map(operations.map((operation) => [operation.client_request_id, operation]))
   let synced = 0
   let conflicts = 0
   let failed = 0
   for (const result of results) {
-    const matched = operations.find((operation) => operation.client_request_id === result.client_request_id)
+    const matched = operationsByClientRequestId.get(result.client_request_id)
     const id = matched?.row_key
     if (id == null) continue
     if (result.status === 'applied') {
@@ -954,13 +974,28 @@ if (typeof window !== 'undefined') {
   }, true)
 }
 
-// ?€?€ Synchronous window.api installation ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+// ---- Synchronous window.api installation ----
+// The service worker's 'message' listener below is attached at module load,
+// unconditionally -- so the underlying BUSINESS_OS_APP_UPDATE_AVAILABLE
+// postMessage is never missed at the browser API level. But the re-dispatched
+// 'sync:app-update-available' window CustomEvent IS a fire-and-forget signal,
+// and the only consumer (App.tsx's useSyncStatus effect) only attaches its
+// listener while a user is logged in. If the SW activates a new version while
+// the tab is sitting on the login screen (or between logout and the next
+// login), the event fires into a void with no listener, and the "Update Now"
+// banner would silently never appear -- the user keeps running the stale
+// in-memory JS bundle indefinitely even though the SW has already claimed the
+// page under the new version. Buffer the most recent detail here so any
+// consumer that mounts later (e.g. right after login) can pick up a
+// already-fired update instead of losing it.
+let pendingAppUpdateDetail: Record<string, unknown> | null = null
+
 function forwardServiceWorkerAppEvent(event: MessageEvent): void {
   if (typeof window === 'undefined') return
   if (event?.data?.type !== 'BUSINESS_OS_APP_UPDATE_AVAILABLE') return
-  window.dispatchEvent(new CustomEvent('sync:app-update-available', {
-    detail: event?.data?.detail || {},
-  }))
+  const detail = event?.data?.detail || {}
+  pendingAppUpdateDetail = detail
+  window.dispatchEvent(new CustomEvent('sync:app-update-available', { detail }))
 }
 
 const staticApi = {
@@ -1053,6 +1088,18 @@ const staticApi = {
   async getNotificationSummary() {
     const module = await loadNotificationSummaryModule()
     return module.getNotificationSummary()
+  },
+
+  // Synchronous, not async: this reads an in-memory buffer, not IndexedDB, so
+  // there is no reason to make callers await a microtask for it. See the
+  // pendingAppUpdateDetail comment above forwardServiceWorkerAppEvent for why
+  // this buffer exists.
+  getPendingAppUpdate() {
+    return pendingAppUpdateDetail
+  },
+
+  clearPendingAppUpdate() {
+    pendingAppUpdateDetail = null
   },
 
   async getPendingSyncState() {
@@ -1173,6 +1220,26 @@ const staticApi = {
     return module.getBranches()
   },
 
+  async getNotes() {
+    const module = await loadNotesTransportModule()
+    return module.getNotes()
+  },
+
+  async createNote(payload: unknown = {}) {
+    const module = await loadNotesTransportModule()
+    return module.createNote(payload as Parameters<NotesTransportModule['createNote']>[0])
+  },
+
+  async updateNote(id: unknown, payload: unknown = {}) {
+    const module = await loadNotesTransportModule()
+    return module.updateNote(id as number, payload as Parameters<NotesTransportModule['updateNote']>[1])
+  },
+
+  async deleteNote(id: unknown) {
+    const module = await loadNotesTransportModule()
+    return module.deleteNote(id as number)
+  },
+
   async getUsers() {
     const module = await loadUserReadTransportModule()
     return module.getUsers()
@@ -1263,13 +1330,15 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', () => lockOfflineVault('tab_close'))
 }
 
-// ?€?€ Bootstrap: read stored token, auto-detect server URL from page origin ?€?€?€?€?€
-// KEY FIX: When not in Vite dev mode the page is served BY the backend, so the
-// current origin is always the correct API/WS server ??regardless of any stale
-// URL that may be saved in localStorage from a previous session or a different
-// device (e.g. localhost saved when first run locally, but accessed via Cloudflare
-// on another device). We use the current origin immediately, then persist it
-// after first paint so storage writes do not compete with startup.
+// ---- Bootstrap: read stored token, auto-detect server URL from page origin ----
+// KEY FIX: When not in Vite dev mode the page is served BY the Cloudflare
+// Worker (cloudflare/ -- there is no separate backend process anymore), so
+// the current origin is always the correct API/WS server, regardless of any
+// stale URL that may be saved in localStorage from a previous session or a
+// different device (e.g. localhost saved when first run locally, but accessed
+// via Cloudflare on another device). We use the current origin immediately,
+// then persist it after first paint so storage writes do not compete with
+// startup.
 ;(async () => {
   try {
     const isViteDev = location.hostname === 'localhost' &&
@@ -1291,7 +1360,7 @@ if (typeof window !== 'undefined') {
     // Determine the correct sync server URL
     let url = ''
     if (!isViteDev) {
-      // Served by the Node backend ??current origin IS the server. Always use it.
+      // Served by the Cloudflare Worker -- current origin IS the server. Always use it.
       url = sanitizeSyncServerUrl(location.origin)
       scheduleBootstrapStorageMaintenance(() => {
         try { localStorage.setItem(STORAGE_KEYS.SYNC_SERVER, url) } catch (_) {}
@@ -1300,7 +1369,7 @@ if (typeof window !== 'undefined') {
         scheduleBootstrapOfflineDbWrite((db) => db.settings.put({ key: 'sync_server_url', value: url }))
       }
     } else {
-      // Vite dev ??use stored value (normally points to localhost:4000 backend)
+      // Vite dev -- use stored value (normally points to localhost:8787, wrangler's local dev port)
       url = sanitizeSyncServerUrl(localStorage.getItem(STORAGE_KEYS.SYNC_SERVER) || '')
       if (!skipOfflineBootstrapDb) {
         try {
@@ -1324,4 +1393,3 @@ if (typeof window !== 'undefined') {
     console.warn('[web-api] Bootstrap error:', e.message)
   }
 })()
-

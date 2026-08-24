@@ -42,6 +42,7 @@ runTest('admin path helpers map direct admin URLs to app pages', () => {
   assert.equal(getAdminPageFromPath('/inventory/movements'), 'inventory')
   assert.equal(getAdminPageFromPath('/point-of-sale'), 'pos')
   assert.equal(getAdminPageFromPath('/audit-log'), 'audit_log')
+  assert.equal(getAdminPageFromPath('/fees'), 'fees')
   assert.equal(getAdminPageFromPath('/login'), '')
 })
 
@@ -91,8 +92,12 @@ runTest('service worker serves cached app shell for offline navigations only', (
 })
 
 runTest('successful login reconnects websocket writes immediately', () => {
-  assert.match(appContextSource, /import \{ isWSConnected, reconnectWS \} from '\.\/api\/websocket\.ts'/)
-  assert.match(appContextSource, /cacheClearAll\(\)\s+getAppApi\(\)\.ensureSessionRecoveryListeners\?\.\(\)\s+reconnectWS\(\)\s+startHealthCheck\(\)/)
+  // AppContext calls resumeWS() rather than reconnectWS() directly so a fresh
+  // login also clears any WS backoff/suppression window left over from a
+  // prior session (e.g. a revoked session after a password change). resumeWS
+  // itself clears that suppression and then calls reconnectWS() internally.
+  assert.match(appContextSource, /import \{ isWSConnected, resumeWS \} from '\.\/api\/websocket\.ts'/)
+  assert.match(appContextSource, /cacheClearAll\(\)\s+getAppApi\(\)\.ensureSessionRecoveryListeners\?\.\(\)[\s\S]*?\n\s+resumeWS\(\)\s+startHealthCheck\(\)/)
 })
 
 runTest('guest startup ignores expected unauthorized websocket probes', () => {

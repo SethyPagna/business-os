@@ -188,7 +188,9 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
         ) : null}
       </div>
 
-      <div className="flex gap-3 pt-2">
+      {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx's own
+          fix. */}
+      <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
         <button className="btn-primary flex-1" type="submit" disabled={saving || nameInvalid}>
           {saving ? t('saving') : (t('save_branch') || 'Save Branch')}
         </button>

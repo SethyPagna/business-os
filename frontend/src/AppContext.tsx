@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo, startTransition } from 'react'
 import type { ReactNode } from 'react'
-import { STORAGE_KEYS, SYNC } from './constants'
+import { BUSINESS_TIME_ZONE, STORAGE_KEYS, SYNC } from './constants'
 import { cacheClearAll, ensureSyncUpdateCacheListener, FRONTEND_BUILD_INFO, isTransientGatewayError, pingServerHealth, primeServerHealthFromRuntime, startHealthCheck } from './api/http.ts'
 import {
   normalizeRuntimeDescriptor,
@@ -10,10 +10,10 @@ import {
   shouldResetForRuntimeChange,
   writeStoredRuntimeDescriptor,
 } from './platform/runtime/clientRuntime.ts'
-import { isWSConnected, reconnectWS } from './api/websocket.ts'
-import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage } from './app/pathRouting.ts'
+import { isWSConnected, resumeWS } from './api/websocket.ts'
+import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
-import { parsePermissionMap } from './utils/permissions.ts'
+import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
@@ -160,6 +160,7 @@ type AppContextValue = {
   canAccessPage: (pageId: string) => boolean
   canWriteToServer: boolean
   deviceTimezone: string
+  dismissNotification: () => void
   dismissWriteConflict: () => void
   displayCurrency: string
   displayTimezone: string
@@ -169,6 +170,7 @@ type AppContextValue = {
   formatDateTime: (value: unknown, options?: Intl.DateTimeFormatOptions) => string
   formatPrice: (usd: unknown, khr?: unknown) => string
   getPermissions: () => Record<string, boolean>
+  getPermissionTier: (key: string) => PermissionTier
   hasPermission: (key: string) => boolean
   khrSymbol: string
   khrToUsd: (value: unknown) => number
@@ -176,7 +178,7 @@ type AppContextValue = {
   loadSettings: (options?: { force?: boolean }) => Promise<AppSettings>
   login: (username: string, password: string, sessionDuration?: string, organization?: string) => Promise<AuthResult>
   logout: () => Promise<void>
-  navigateTo: (pageId: string) => void
+  navigateTo: (pageId: string, anchor?: string) => void
   notification: AppNotification | null
   notify: (message: unknown, type?: NotificationKind | string, duration?: number) => void
   page: string
@@ -329,7 +331,6 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   waiting_for_server: 'Waiting for server',
 }
 const CORE_LANGUAGE_CODES = new Set(['en'])
-const CORE_LANGUAGE_PACK_DEFER_MS = 9000
 const CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS = 20000
 
 const LANG_LOADERS: Record<string, () => Promise<TranslationPack>> = {
@@ -534,21 +535,25 @@ function buildRuntimeDescriptorFromBootstrap(payload: BootstrapPayload = {}) {
 }
 
 const PAGE_PERMISSIONS: Record<string, string | null> = {
-  dashboard:        null,        // Always accessible
+  dashboard:        'dashboard',
+  notes:            null,        // Personal scratchpad -- just needs to be logged in, same as dashboard used to be
   catalog:          'customer_portal',
   loyalty_points:   'customer_portal',
   pos:              'pos',
   products:         'products',
   inventory:        'inventory',
-  branches:         'inventory',
+  branches:         'branches',  // Split from 'inventory' -- own key now, see navigationConfig.ts's note
   sales:            'sales',
+  fees:             'fees',
   contacts:         'contacts',  // Requires explicit contacts permission
   users:            'users',
+  review:           'review',  // Review/Approval queue page -- Full Access only, own explicit key (see navigationConfig.ts's own note)
   audit_log:        'audit_log',
   backup:           'backup',
   settings:         'settings',
-  receipt_settings: 'all',
-  returns:          'sales',
+  files:            null,        // Library view is unconditional for any authenticated user (this session) -- matches navigationConfig.ts's own null gate; upload/download/rename/delete still self-gate inside FilesPage.tsx/files.ts on real Full Access to `library`
+  receipt_settings: 'settings',  // was 'all' (super-admin only); Settings.tsx already exposes the core receipt fields (tax_rate, footer) to any 'settings' user inline, so gating the fuller standalone page behind 'all' was an inconsistency, not a deliberate restriction -- aligned with its sibling settings sub-pages (files/server)
+  returns:          'returns',  // was 'sales' -- split into its own key so Sales (Full/None only) and Returns (which will get a Review Required tier once that system is built) can be granted independently
   server:           'settings',
 }
 
@@ -723,7 +728,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         'App settings',
         APP_SETTINGS_LOAD_TIMEOUT_MS,
       )
-      const mergedSettings = mergeSettingsWithDeviceOverrides(serverSettings || {})
+      // A transient mirrored/offline read can legitimately resolve to an
+      // empty object before its local cache is hydrated. Do not replace an
+      // already-rendered settings form with that empty payload: it makes the
+      // Settings page appear to reset until the user manually refreshes.
+      const currentSettings = settingsRef.current && typeof settingsRef.current === 'object' ? settingsRef.current : {}
+      const sourceSettings = serverSettings && Object.keys(serverSettings).length
+        ? serverSettings
+        : (Object.keys(currentSettings).length ? currentSettings : {})
+      const mergedSettings = mergeSettingsWithDeviceOverrides(sourceSettings)
       setSettings(mergedSettings)
       if (mergedSettings.login_session_duration) {
         writeStoredSessionDuration(mergedSettings.login_session_duration)
@@ -863,7 +876,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     ensureSyncUpdateCacheListener()
 
     const onUpdate = (e: Event) => {
-      const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null }>(e)
+      const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; payload?: { action?: string; id?: string | number } | null }>(e)
       const channel = String(detail.channel || '')
       if (!channel) return
       if (debounceRef.current[channel]) clearTimeout(debounceRef.current[channel])
@@ -871,7 +884,31 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         delete debounceRef.current[channel]
         // Settings changes from other devices apply immediately; no reload needed.
         if (channel === 'settings') loadSettings().catch(() => {})
-        if (channel === 'runtime') {
+        // Live permission propagation. Was: a 'users'/'roles' broadcast
+        // (fired by every PATCH /api/users/:id and PATCH /api/roles/:id --
+        // see cloudflare/src/routes/users.ts) only ever invalidated that
+        // page's own list cache here. It never touched the CURRENT
+        // session's own `user.permissions`/`user.role_permissions` --
+        // those only get re-read from the server on the 'runtime' branch
+        // below, or a fresh login. So an already-logged-in employee whose
+        // permissions (or whose role's permissions) an admin edited on
+        // another device kept running on their stale, cached permission
+        // set until they logged out and back in -- exactly "permission
+        // changes don't take effect for employees" and the follow-on
+        // "POS stops showing products", since hasPermission()/
+        // canAccessPage() read straight off that stale `user` object.
+        // Fixed by re-fetching the session (same bootstrap path 'runtime'
+        // already uses) whenever the broadcast's own id says it actually
+        // affects THIS session -- the edited user's id for 'users', or
+        // this user's own role_id for 'roles' -- rather than for every
+        // unrelated user/role edit anyone makes.
+        const payloadId = detail.payload?.id
+        const currentUserId = user?.id != null ? String(user.id) : null
+        const currentRoleId = (user as { role_id?: string | number | null } | null)?.role_id
+        const affectsThisSession =
+          (channel === 'users' && payloadId != null && currentUserId != null && String(payloadId) === currentUserId) ||
+          (channel === 'roles' && payloadId != null && currentRoleId != null && String(payloadId) === String(currentRoleId))
+        if (channel === 'runtime' || affectsThisSession) {
           await clearLocalBusinessState({
             clearAuth: false,
             preserveSyncServer: true,
@@ -998,6 +1035,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       } else if (entity === 'product') {
         message = 'This product changed on another device. Latest data is loading now.'
         entityLabel = 'Product'
+      } else if (entity === 'fee') {
+        message = 'This fee changed on another device. Latest data is loading now.'
+        entityLabel = 'Fee'
       } else if (entity === 'customer') {
         message = 'This customer changed on another device. Latest data is loading now.'
         entityLabel = 'Customer'
@@ -1019,9 +1059,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       } else if (entity === 'category') {
         message = 'This category changed on another device. Latest data is loading now.'
         entityLabel = 'Category'
-      } else if (entity === 'custom table row') {
-        message = 'This custom table row changed on another device. Latest data is loading now.'
-        entityLabel = 'Custom table row'
       } else if (entity === 'ai_provider_config') {
         message = 'This AI provider changed on another device. Latest data is loading now.'
         entityLabel = 'AI provider'
@@ -1047,36 +1084,51 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const onUnauthorized = (e: Event) => {
       const detail = eventDetail<{ error?: string }>(e)
       const message = detail.error || 'Please sign in again to continue.'
-      const recentAuthEstablished = Date.now() - authEstablishedAtRef.current < 8000
       const hasRecoverableSession = !!(user?.id || getStoredUserPayload())
       if (!hasRecoverableSession) {
         return
       }
-      if (hasRecoverableSession && !authRecoveryRef.current && recentAuthEstablished) {
-        authRecoveryRef.current = true
-        window.setTimeout(async () => {
-          try {
-            const bootstrap = await readAppBootstrap('Auth recovery bootstrap')
-            if (bootstrap?.user) {
-              await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
-              authRecoveryRef.current = false
-              return
-            }
-            if (bootstrap?.unauthorized) {
-              authRecoveryRef.current = false
-              await handleUnauthorizedSession(bootstrap.authError || message)
-              return
-            }
-          } catch (_) {}
-          authRecoveryRef.current = false
-          if (Date.now() - authEstablishedAtRef.current < 20000) {
-            return
-          }
-          await handleUnauthorizedSession(message)
-        }, 180)
+      // A single page load/navigation can fire several API calls in the same
+      // tick (bootstrap, notifications summary, import-jobs, org search,
+      // etc). If one of them 401s because of a transient blip -- an edge
+      // hiccup, a session cookie that hadn't finished writing yet, a brief
+      // backend restart -- the rest of that same burst land here too,
+      // within milliseconds of each other. This used to only run a
+      // recovery check (a fresh bootstrap call confirming whether the
+      // session is actually dead) for the FIRST 401, and only within 8s of
+      // login -- every other 401 in the burst, and any 401 arriving later
+      // in a normal session, skipped straight to an immediate logout even
+      // though the very next moment's recovery check might have found the
+      // session was fine all along. That's what caused "logged out on some
+      // pages but not others" -- whichever request's 401 lost the race got
+      // to force the logout before the others (or the shared recovery
+      // check) had a chance to say otherwise.
+      //
+      // Now every 401 always triggers (or, if one is already pending,
+      // shares) a single in-flight recovery check, regardless of how long
+      // ago the session was established, and only that check's own result
+      // decides whether to log out -- once, for the whole burst.
+      if (authRecoveryRef.current) {
         return
       }
-      handleUnauthorizedSession(message).catch(() => {})
+      authRecoveryRef.current = true
+      window.setTimeout(async () => {
+        try {
+          const bootstrap = await readAppBootstrap('Auth recovery bootstrap')
+          if (bootstrap?.user) {
+            await applyBootstrapPayload(bootstrap, { fallbackUser: user || null })
+            authRecoveryRef.current = false
+            return
+          }
+          if (bootstrap?.unauthorized) {
+            authRecoveryRef.current = false
+            await handleUnauthorizedSession(bootstrap.authError || message)
+            return
+          }
+        } catch (_) {}
+        authRecoveryRef.current = false
+        await handleUnauthorizedSession(message)
+      }, 180)
     }
     window.addEventListener('sync:update', onUpdate)
     window.addEventListener('sync:status', onStatus)
@@ -1138,7 +1190,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         await loadSettings()
       }
       setAuthReady(true)
-      setPage('dashboard')
+      // settingsRef, not the settings state var, so this reads whatever
+      // loadSettings()/applyBootstrapPayload() just wrote above rather than
+      // a stale pre-login snapshot -- see settingsRef's own assignment
+      // effect for why callbacks read it instead of closing over `settings`.
+      setPage(resolveAdminLandingPage(settingsRef.current.default_landing_page))
     }
     window.addEventListener('otp:login', handleOtpLogin)
     return () => window.removeEventListener('otp:login', handleOtpLogin)
@@ -1310,6 +1366,18 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       .catch(() => {})
     }
 
+    // NOTE: this used to wait on a fixed ~9s pre-idle defer timer after
+    // `load` before even queuing an idle callback (itself allowed up to
+    // another 20s to fire) before fetching the full dictionary. That fixed
+    // defer constant was deliberately removed -- CORE_ENGLISH_PACK
+    // only covers a curated subset of keys, so any key outside it (e.g.
+    // and_filter/or_filter/pos) fell through t()'s raw-key fallback for
+    // that whole 9-29s window -- visible as literal key names in the UI
+    // ("and_filter", "pos") until the full pack finally loaded and swapped
+    // them for the real labels. English is the default fallback language,
+    // not an optional extra, so fetch it right away (still off the main
+    // paint via requestIdleCallback where available, just without the
+    // extra fixed wait stacked in front of it).
     const scheduleDeferredLanguagePack = () => {
       const runWhenIdle = () => {
         if (cancelled) return
@@ -1321,12 +1389,12 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       }
 
       if (document.readyState === 'complete') {
-        timerId = window.setTimeout(runWhenIdle, CORE_LANGUAGE_PACK_DEFER_MS)
+        runWhenIdle()
         return
       }
 
       loadListener = () => {
-        timerId = window.setTimeout(runWhenIdle, CORE_LANGUAGE_PACK_DEFER_MS)
+        runWhenIdle()
       }
       window.addEventListener('load', loadListener, { once: true })
     }
@@ -1489,7 +1557,14 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     setAuthReady(false)
     cacheClearAll()
     getAppApi().ensureSessionRecoveryListeners?.()
-    reconnectWS()
+    // resumeWS() (not reconnectWS()) so a fresh login always clears any WS
+    // backoff/suppression window left over from a prior session ending
+    // (e.g. a password change that revoked the old session and closed the
+    // socket with an auth error). Without this, logging back in during that
+    // suppression window silently skipped reconnecting and the connection
+    // indicator stayed yellow until something else (window focus, etc.)
+    // happened to call resumeWS() later.
+    resumeWS()
     startHealthCheck()
     authEstablishedAtRef.current = Date.now()
     setUser(nextUser)
@@ -1502,7 +1577,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       await loadSettings()
     }
     setAuthReady(true)
-    setPage('dashboard')
+    // See the OTP login handler's matching comment above -- settingsRef,
+    // not the settings state var, to pick up what was just loaded.
+    setPage(resolveAdminLandingPage(settingsRef.current.default_landing_page))
   }, [applyBootstrapPayload, handleUnauthorizedSession, loadSettings, readAppBootstrap])
 
   const login = useCallback(async (username: string, password: string, sessionDuration = 'session', organization = ''): Promise<AuthResult> => {
@@ -1573,6 +1650,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     setTimeout(() => {
       setNotification((current) => (current?.id === now ? null : current))
     }, duration)
+  }, [])
+
+  const dismissNotification = useCallback(() => {
+    setNotification(null)
   }, [])
 
   const dismissWriteConflict = useCallback(() => {
@@ -1821,17 +1902,35 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   }, [applyDeviceSettings, language])
 
   // Permissions.
-  const getPermissions = useCallback((): Record<string, boolean> => {
+  // Mirrors cloudflare/src/lib/permissions.ts's getMergedPermissions(): a
+  // user's effective permissions are their role's grants merged with any
+  // user-level overrides, with the user-level value winning on key
+  // conflicts. Reading only `user.permissions` here (as this used to do)
+  // meant anyone whose access came from their role -- e.g. a POS
+  // permission granted on the "Employee" role rather than set directly on
+  // the individual user record -- would pass every backend check but the
+  // sidebar/page-guard would never show those pages, because the frontend
+  // never looked at `user.role_permissions` at all. That's what caused
+  // "I only see Dashboard and Notes after logging in": those two are the
+  // only nav items with permission: null (see navigationConfig.ts), so
+  // they're the only ones that don't depend on this merge.
+  const getMergedPermissionsRaw = useCallback((): Record<string, unknown> => {
     if (!user) return {}
     try {
-      const parsed = parsePermissionMap(user.permissions)
-      return Object.fromEntries(
-        Object.entries(parsed).map(([key, value]) => [key, value === true]),
-      )
+      const rolePermissions = parsePermissionMap((user as { role_permissions?: unknown }).role_permissions)
+      const userPermissions = parsePermissionMap(user.permissions)
+      return { ...rolePermissions, ...userPermissions }
     } catch {
       return {}
     }
   }, [user])
+
+  const getPermissions = useCallback((): Record<string, boolean> => {
+    const merged = getMergedPermissionsRaw()
+    return Object.fromEntries(
+      Object.entries(merged).map(([key, value]) => [key, value === true]),
+    )
+  }, [getMergedPermissionsRaw])
 
   const hasPermission = useCallback((key: string) => {
     if (!user) return false
@@ -1839,25 +1938,83 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return !!(p.all || p[key])
   }, [user, getPermissions])
 
+  // Tier-aware read for REVIEW_TIER_KEYS sections (see utils/permissions.ts)
+  // -- 'full' behaves exactly like hasPermission()===true, 'none' exactly
+  // like hasPermission()===false, and 'review' is the new middle case: the
+  // person can still open/use the section, but specific actions (which
+  // vary per section -- see each write route's own comment) get queued
+  // for approval instead of applying immediately. Components that need to
+  // know which write actions to queue-vs-apply, or that render the
+  // Review Required badge/explanation, should read this instead of
+  // hasPermission() -- hasPermission() alone can't distinguish 'review'
+  // from 'none' by design (see permissions.ts's own comment on why that's
+  // deliberate on the backend too).
+  const getPermissionTier = useCallback((key: string): PermissionTier => {
+    const merged = getMergedPermissionsRaw()
+    return getPermissionTierFromMap(merged, key, merged.all === true)
+  }, [getMergedPermissionsRaw])
+
   const canAccessPage = useCallback((pageId: string) => {
     if (!user) return false
+    // `files` (Library) resolves to `null` in PAGE_PERMISSIONS below, same
+    // as `notes` -- view is unconditional for any authenticated user (this
+    // session's ask). See cloudflare/src/routes/files.ts's own
+    // top-of-file comment for the backend-side half of this rule; the
+    // page's own upload/download/rename/delete controls still self-gate
+    // on real Full Access to `library` (FilesPage.tsx's `canManageLibrary`).
     const required = PAGE_PERMISSIONS[pageId]
     if (required == null) return true
-    return hasPermission(required)
-  }, [user, hasPermission])
+    // Tier-aware, not hasPermission(): a Review Required user for a
+    // REVIEW_TIER_KEYS section (e.g. Fees) must still be able to open the
+    // page -- only specific actions inside it get queued, not the whole
+    // page. hasPermission() is strict-boolean by design and would 403 a
+    // 'review'-tier user out of the page entirely, same class of bug the
+    // backend's own permissions.ts comment warns callers about.
+    if (getPermissionTier(required) !== 'none') return true
+    // 'products_image_only' (Part 241): a restricted role with no real
+    // `products` tier of its own still needs into the Products page --
+    // it just gets the lightweight image-only view once there (see
+    // Products.tsx's wrapper). Mirrors the backend's isImageOnlyUser()
+    // shape (cloudflare/src/routes/products.ts): only relevant when the
+    // real tier is 'none', since anyone with actual products access
+    // already passed the check above.
+    if (pageId === 'products' && hasPermission('products_image_only')) return true
+    // 'settings'/'receipt_settings' page (this session, alongside
+    // routes/settings.ts's new per-field business_identity/sales_policy
+    // gating): a user granted only one of the narrower settings
+    // sub-permissions (business_identity, sales_policy, drive_credentials)
+    // -- with no plain `settings` grant at all -- still needs into the
+    // Settings page to actually use that grant. Without this, the backend
+    // fix that lets a business_identity-only user save their own fields
+    // would be unreachable: they'd be turned away at the page gate before
+    // ever getting to try. Settings.tsx's own section-visibility (the
+    // `isAdmin`/`showSettingsSection` checks that hide non-owned fields)
+    // still applies once inside -- this only controls whether the page
+    // itself opens, same as the tier-aware check just above.
+    if ((pageId === 'settings' || pageId === 'receipt_settings') &&
+      (hasPermission('business_identity') || hasPermission('sales_policy') || hasPermission('drive_credentials'))) {
+      return true
+    }
+    return false
+  }, [user, getPermissionTier, hasPermission])
 
-  const navigateTo = useCallback((pageId: string) => {
+  const navigateTo = useCallback((pageId: string, anchor?: string) => {
     if (!canAccessPage(pageId)) return
     if (typeof window !== 'undefined') {
       const nextPath = getAdminPathForPage(pageId)
       const currentUrl = new URL(window.location.href)
-      if (nextPath && currentUrl.pathname !== nextPath) {
-        window.history.pushState(window.history.state, '', `${nextPath}${currentUrl.search}${currentUrl.hash}`)
+      // An explicit anchor (e.g. a notification pointing at a specific tab
+      // on the target page) overrides whatever hash happens to be in the
+      // URL already; otherwise leave the current hash alone.
+      const nextHash = anchor ? `#${anchor}` : currentUrl.hash
+      if (nextPath && (currentUrl.pathname !== nextPath || nextHash !== currentUrl.hash)) {
+        window.history.pushState(window.history.state, '', `${nextPath}${currentUrl.search}${nextHash}`)
       }
       window.dispatchEvent(new CustomEvent(APP_NAVIGATION_EVENT, {
         detail: {
           page: pageId,
           path: nextPath,
+          anchor: anchor || null,
         },
       }))
     }
@@ -1869,10 +2026,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // Currency helpers.
   const exchangeRate    = parseFloat(String(settings.exchange_rate || '4100'))
   const usdSymbol       = String(settings.currency_usd_symbol || '$')
-  const khrSymbol       = String(settings.currency_khr_symbol || 'KHR')
+  const khrSymbol       = String(settings.currency_khr_symbol || '៛')
   const displayCurrency = String(settings.display_currency || 'USD').trim().toLowerCase()
   const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
-  const displayTimezone = String(settings.display_timezone || deviceTimezone)
+  // Business records are interpreted and presented in the business's source
+  // timezone, independent of the cashier's device locale or old per-device
+  // display preferences.
+  const displayTimezone = BUSINESS_TIME_ZONE
 
   const fmtUSD = useCallback((n: unknown): string => {
     return `${usdSymbol}${normalizePriceValue(n || 0).toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 })}`
@@ -1915,8 +2075,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     language, theme, t,
     toggleTheme, toggleLanguage,
     notify, notification,
-    writeConflict, dismissWriteConflict, reloadWriteConflict,
-    hasPermission, canAccessPage, getPermissions,
+    writeConflict, dismissWriteConflict, reloadWriteConflict, dismissNotification,
+    hasPermission, canAccessPage, getPermissions, getPermissionTier,
     formatPrice, fmtUSD, fmtKHR,
     usdSymbol, khrSymbol, displayCurrency, exchangeRate,
     usdToKhr, khrToUsd,

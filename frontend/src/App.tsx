@@ -4,27 +4,37 @@ import { createPortal } from 'react-dom'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
 import ArrowUp from 'lucide-react/dist/esm/icons/arrow-up.js'
 import Bell from 'lucide-react/dist/esm/icons/bell.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from './AppContext.tsx'
-import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, updateMountedPages } from './app/appShellUtils.ts'
+import { NotesProvider } from './components/notes/NotesContext.tsx'
+import { APP_NAVIGATION_EVENT, APP_PAGE_INTENT_EVENT, getAdminPageFromPath, getMountedPageLimit, getNotificationColor, getNotificationPrefix, isPublicCatalogPath, MAX_MOUNTED_PAGES, resolveAdminLandingPage, updateMountedPages } from './app/appShellUtils.ts'
 import { isPublicDomMutationError, shouldAttemptPublicDomRecovery } from './app/publicErrorRecovery.ts'
 import { getScrollTarget, getScrollToPosition } from './components/shared/globalScroll.ts'
+import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
+import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
+import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
+import { refreshAppData } from './utils/appRefresh.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
+import { buildPortalManifest } from './utils/portalManifest.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
 type PageId =
   | 'dashboard'
+  | 'notes'
   | 'products'
   | 'pos'
   | 'sales'
   | 'returns'
+  | 'fees'
   | 'inventory'
   | 'branches'
   | 'contacts'
   | 'catalog'
   | 'loyalty_points'
   | 'users'
+  | 'review'
   | 'audit_log'
   | 'receipt_settings'
   | 'backup'
@@ -60,6 +70,16 @@ interface AppSettings {
   customer_portal_logo_image?: string
   customer_portal_favicon_image?: string
   ui_app_favicon_image?: string
+  ui_app_favicon_fit?: string
+  ui_app_favicon_zoom?: string | number
+  ui_app_favicon_position_x?: string | number
+  ui_app_favicon_position_y?: string | number
+  default_landing_page?: string
+}
+
+function toFiniteNumber(value: unknown, fallback: number): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
 }
 
 interface AppNotification {
@@ -113,6 +133,8 @@ interface SyncUpdateDetail {
 
 interface AppShellApi {
   getPendingSyncState?: () => Promise<PendingSyncState | null | undefined>
+  getPendingAppUpdate?: () => SyncProblemDetail | null | undefined
+  clearPendingAppUpdate?: () => void
   retryPendingSyncNow?: () => Promise<unknown>
 }
 
@@ -121,10 +143,11 @@ interface AppContextValue {
   authReady: boolean
   page: AdminPageId
   notification: AppNotification | null
+  dismissNotification: () => void
   canAccessPage: (pageId: string) => boolean
   AccessDenied: ComponentType
   setPage: (pageId: AdminPageId) => void
-  navigateTo: (pageId: AdminPageId) => void
+  navigateTo: (pageId: AdminPageId, anchor?: string) => void
   settings: AppSettings
   writeConflict: unknown
   dismissWriteConflict: () => void
@@ -149,6 +172,7 @@ interface PageErrorBoundaryState {
 
 interface NotificationProps {
   notification: AppNotification | null
+  onDismiss?: () => void
 }
 
 interface SyncErrorBannerProps {
@@ -163,10 +187,7 @@ interface OfflineModeBannerProps {
   syncUrl: string
   transientOutage: SyncProblemDetail | null
   vaultLocked: SyncProblemDetail | null
-  appUpdate: SyncProblemDetail | null
   conflictsNeedReview: WriteConflictDetail | null
-  onUpdateNow: () => void
-  onDismissUpdate: () => void
 }
 
 interface PageSlotProps {
@@ -247,16 +268,19 @@ function getErrorMessage(error: unknown): string {
 
 const PAGE_IMPORTERS = {
   dashboard: asPageModule(() => import('./components/dashboard/Dashboard')),
+  notes: asPageModule(() => import('./components/notes/NotesPage.tsx')),
   products: asPageModule(() => import('./components/products/Products.tsx')),
   pos: asPageModule(() => import('./components/pos/POS.tsx')),
   sales: asPageModule(() => import('./components/sales/Sales')),
   returns: asPageModule(() => import('./components/returns/Returns')),
+  fees: asPageModule(() => import('./components/fees/FeesPage.tsx')),
   inventory: asPageModule(() => import('./components/inventory/Inventory.tsx')),
   branches: asPageModule(() => import('./components/branches/Branches')),
   contacts: asPageModule(() => import('./components/contacts/Contacts')),
   catalog: asPageModule(() => import('./components/catalog/CatalogPage.tsx')),
   loyalty_points: asPageModule(() => import('./components/loyalty-points/LoyaltyPointsPage')),
   users: asPageModule(() => import('./components/users/Users')),
+  review: asPageModule(() => import('./components/review/ReviewQueue')),
   audit_log: asPageModule(() => import('./components/utils-settings/AuditLog')),
   receipt_settings: asPageModule(() => import('./components/receipt-settings/ReceiptSettings')),
   backup: asPageModule(() => import('./components/utils-settings/Backup')),
@@ -286,6 +310,12 @@ const CHUNK_IMPORT_MAX_ATTEMPTS = 3
 const PAGE_LOADER_STALL_WARNING_MS = 15000
 const STARTUP_STORAGE_CLEANUP_DELAY_MS = 2000
 const STARTUP_STORAGE_CLEANUP_IDLE_TIMEOUT_MS = 9000
+// Mobile top bar auto-hide: shown within this many px of the top of the
+// active page, otherwise toggled by scroll direction once the user has
+// moved at least this many px since the last toggle (a dead zone so small
+// jitters -- a shaky hand, an overscroll bounce -- don't flicker it).
+const MOBILE_HEADER_TOP_ZONE_PX = 24
+const MOBILE_HEADER_SCROLL_DELTA_PX = 12
 const CHUNK_RECOVERY_QUERY_KEYS = ['__bos_reload', '__bos_build', '__bos_reason', '__bos_server_build']
 const FRONTEND_BUILD_HASH = typeof __FRONTEND_BUILD_HASH__ !== 'undefined' ? String(__FRONTEND_BUILD_HASH__ || '') : 'dev'
 
@@ -443,16 +473,19 @@ function lazyWithRetry(importer: ChunkImporter, key: string) {
 }
 
 const Dashboard = lazyWithRetry(PAGE_IMPORTERS.dashboard, 'dashboard')
+const NotesPage = lazyWithRetry(PAGE_IMPORTERS.notes, 'notes')
 const Products = lazyWithRetry(PAGE_IMPORTERS.products, 'products')
 const POS = lazyWithRetry(PAGE_IMPORTERS.pos, 'pos')
 const Sales = lazyWithRetry(PAGE_IMPORTERS.sales, 'sales')
 const Returns = lazyWithRetry(PAGE_IMPORTERS.returns, 'returns')
+const Fees = lazyWithRetry(PAGE_IMPORTERS.fees, 'fees')
 const Inventory = lazyWithRetry(PAGE_IMPORTERS.inventory, 'inventory')
 const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
 const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
 const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
 const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
+const ReviewQueue = lazyWithRetry(PAGE_IMPORTERS.review, 'review')
 const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
 const ReceiptSettings = lazyWithRetry(PAGE_IMPORTERS.receipt_settings, 'receipt_settings')
 const Backup = lazyWithRetry(PAGE_IMPORTERS.backup, 'backup')
@@ -462,19 +495,22 @@ const ServerPage = lazyWithRetry(PAGE_IMPORTERS.server, 'server')
 const Login = lazyWithRetry(asPageModule(() => import('./components/auth/Login')), 'auth-login')
 const NotificationCenter = lazyWithRetry(asPageModule(() => import('./components/shared/NotificationCenter')), 'notification-center')
 const BackgroundImportTracker = lazyWithRetry(asPageModule(() => import('./components/shared/BackgroundImportTracker')), 'background-import-tracker')
+const NotesWidget = lazyWithRetry(asPageModule(() => import('./components/shared/NotesWidget')), 'notes-widget')
 const WriteConflictModal = lazyWithRetry(asPageModule(() => import('./components/shared/WriteConflictModal')), 'write-conflict-modal')
 const Sidebar = lazyWithRetry(asPageModule(() => import('./components/navigation/Sidebar')), 'sidebar')
-const QuickPreferenceToggles = lazyWithRetry(asPageModule(() => import('./components/shared/QuickPreferenceToggles')), 'quick-preference-toggles')
 const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   dashboard: Dashboard,
+  notes: NotesPage,
   products: Products,
   pos: POS,
   sales: Sales,
   returns: Returns,
+  fees: Fees,
   inventory: Inventory,
   branches: Branches,
   contacts: Contacts,
   users: Users,
+  review: ReviewQueue,
   audit_log: AuditLog,
   receipt_settings: ReceiptSettings,
   backup: Backup,
@@ -699,6 +735,18 @@ function useSyncErrorBanner(user: AppUser | null) {
     const onQueueChanged = () => refreshPendingSync()
     const onVaultLocked = (event: Event) => setVaultLocked(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { reason: 'locked', ts: Date.now() })
     const onAppUpdate = (event: Event) => setAppUpdate(event instanceof CustomEvent ? event.detail as SyncProblemDetail : { message: 'New version ready', ts: Date.now() })
+    // The service worker can broadcast BUSINESS_OS_APP_UPDATE_AVAILABLE at any
+    // time, including while this effect isn't mounted yet (no user signed in
+    // -- e.g. sitting on the login screen right after a deploy). The window
+    // CustomEvent it triggers is fire-and-forget, so a listener that only
+    // exists once a user is present would silently miss it, leaving the app
+    // running the stale pre-update JS with no banner ever shown. Pick up
+    // anything that already fired and was buffered before we could listen.
+    const bufferedAppUpdate = getAppShellApi().getPendingAppUpdate?.()
+    if (bufferedAppUpdate) {
+      setAppUpdate(bufferedAppUpdate)
+      getAppShellApi().clearPendingAppUpdate?.()
+    }
     const onConflictReview = (event: Event) => {
       setConflictsNeedReview(event instanceof CustomEvent ? event.detail as WriteConflictDetail : { message: 'Conflicts need review', ts: Date.now() })
       refreshPendingSync()
@@ -1009,24 +1057,47 @@ class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBound
   }
 }
 
-function Notification({ notification }: NotificationProps) {
+function Notification({ notification, onDismiss }: NotificationProps) {
   // Toast notifications are rendered once here so feature pages only need to
   // enqueue messages through AppContext.
   if (!notification) return null
 
   const colorClass = getNotificationColor(notification.type)
   const prefix = getNotificationPrefix(notification.type)
-  const classes = `fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] ${colorClass} text-white px-4 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in max-w-[min(20rem,calc(100vw-1.5rem))]`
+  const classes = `fixed right-3 top-[4.75rem] md:right-5 md:top-5 z-[1100] ${colorClass} text-white pl-4 pr-2.5 py-3 rounded-xl shadow-2xl text-sm font-medium fade-in max-w-[min(20rem,calc(100vw-1.5rem))] flex items-start gap-2`
 
-  const node = <div className={classes}>{prefix}{notification.message}</div>
+  const node = (
+    <div className={classes}>
+      <span className="flex-1 min-w-0 break-words">{prefix}{notification.message}</span>
+      <button
+        type="button"
+        aria-label="Dismiss notification"
+        onClick={onDismiss}
+        className="shrink-0 -mt-0.5 -mr-0.5 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M1 1L13 13M13 1L1 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+        </svg>
+      </button>
+    </div>
+  )
   return typeof document !== 'undefined' ? createPortal(node, document.body) : node
 }
 
 function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProps) {
-  const { t } = useApp()
+  const { t, canAccessPage } = useApp()
   if (!error) return null
   const blocked = String(error?.reason || '').startsWith('server_')
   const title = blocked ? 'Write blocked - server unavailable: ' : 'Write failed - data not saved: '
+  // navigateTo('server') (App.tsx's onGoToServer -> AppContext.tsx's
+  // navigateTo) already silently no-ops for a user without the 'settings'
+  // permission the Server Sync page requires (same gate PageSlot's render
+  // and the sidebar nav entry both already use) -- so a cashier-role user
+  // hitting a write error previously saw a "View details" link that did
+  // nothing when clicked, with no feedback explaining why. Hiding the
+  // action for that role closes the gap using the exact same permission
+  // check already decided elsewhere for this page, not a new gate.
+  const canViewDetails = canAccessPage('server')
 
   return (
     <div className="fixed left-0 right-0 top-16 z-[200] bg-red-600 text-white px-4 py-2.5 flex items-start gap-3 shadow-lg md:top-14">
@@ -1037,11 +1108,77 @@ function SyncErrorBanner({ error, onDismiss, onGoToServer }: SyncErrorBannerProp
         {error.channel && <span className="text-xs opacity-70 ml-2">(operation: {error.channel})</span>}
       </div>
       <div className="flex items-center gap-2 flex-shrink-0">
-        <button onClick={onGoToServer} className="text-xs underline opacity-90 hover:opacity-100 whitespace-nowrap">{t('view_details')}</button>
-        <button onClick={onDismiss} className="text-white opacity-70 hover:opacity-100 text-lg leading-none px-1">x</button>
+        {canViewDetails ? (
+          <button onClick={onGoToServer} className="text-xs underline opacity-90 hover:opacity-100 whitespace-nowrap">{t('view_details')}</button>
+        ) : null}
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={t('close') || 'Close'}
+          className="shrink-0 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
       </div>
     </div>
   )
+}
+
+// The mobile top bar (Sidebar.tsx's fixed `<header>`) used to be pinned in
+// place permanently, unlike every other pinned element in the app -- search
+// bars and filter rows -- which use `position: sticky` and so scroll out of
+// view once the user moves past them. This hook gives the top bar the same
+// "not actually pinned" behavior: visible on entering a page, hidden once
+// the user scrolls down past a small dead zone near the top, shown again
+// the moment they scroll back up. Mirrors the show-near-top /
+// hide-on-scroll-down / show-on-scroll-up model CatalogPage.tsx already
+// uses for the public portal's chrome, just reading scroll position off
+// the currently active `.page-scroll` node via getScrollTarget() instead
+// of window, since the admin shell scrolls per-page (each page has its own
+// internal scroll container), not at the window level.
+function useMobileHeaderAutoHide(page: string): boolean {
+  const [visible, setVisible] = useState(true)
+  const scrollAnchorRef = useRef(0)
+  const frameRequestedRef = useRef(false)
+
+  // Entering a page -- including switching between two already-mounted
+  // pages -- always starts with the bar shown, and resets the anchor so
+  // the next scroll delta is measured from a fresh baseline instead of
+  // whatever position the previously active page happened to leave behind.
+  useEffect(() => {
+    setVisible(true)
+    scrollAnchorRef.current = 0
+  }, [page])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined
+    const update = () => {
+      frameRequestedRef.current = false
+      const target = getScrollTarget(window) as { scrollTop?: number; scrollY?: number }
+      const scrollTop = Math.max(0, Number(target?.scrollTop ?? target?.scrollY ?? 0))
+      const delta = scrollTop - scrollAnchorRef.current
+      if (scrollTop <= MOBILE_HEADER_TOP_ZONE_PX) {
+        setVisible(true)
+      } else if (Math.abs(delta) >= MOBILE_HEADER_SCROLL_DELTA_PX) {
+        setVisible(delta < 0)
+      }
+      scrollAnchorRef.current = scrollTop
+    }
+    const handleScroll = () => {
+      if (frameRequestedRef.current) return
+      frameRequestedRef.current = true
+      window.requestAnimationFrame(update)
+    }
+    // capture: true -- the actual scrolling happens on the active
+    // `.page-scroll` node nested deep inside <main>, and scroll events
+    // don't bubble, so this has to observe them on the way down instead.
+    // Same technique AppSelect.tsx/PortalMenu.tsx already use to reposition
+    // on scroll from anywhere in the tree.
+    window.addEventListener('scroll', handleScroll, true)
+    return () => window.removeEventListener('scroll', handleScroll, true)
+  }, [])
+
+  return visible
 }
 
 function GlobalScrollControls() {
@@ -1059,7 +1196,7 @@ function GlobalScrollControls() {
   }
 
   return (
-    <div className="pointer-events-none fixed bottom-20 right-2.5 z-[1000] flex flex-col gap-1.5 md:bottom-4 md:right-4">
+    <div className="pointer-events-none fixed bottom-[calc(5rem+env(safe-area-inset-bottom))] right-[calc(0.625rem+env(safe-area-inset-right))] z-[1000] flex flex-col gap-1.5 md:bottom-[calc(1rem+env(safe-area-inset-bottom))] md:right-[calc(1rem+env(safe-area-inset-right))]">
       <button
         type="button"
         className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-transparent bg-transparent text-gray-500 shadow-none backdrop-blur-none transition hover:bg-white/70 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-900/55 dark:hover:text-blue-300"
@@ -1097,7 +1234,7 @@ function formatSyncTimestamp(value: unknown): string {
   })
 }
 
-function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, appUpdate, conflictsNeedReview, onUpdateNow, onDismissUpdate }: OfflineModeBannerProps) {
+function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOutage, vaultLocked, conflictsNeedReview }: OfflineModeBannerProps) {
   const { t } = useApp()
   const total = Number(pendingSync?.total || 0)
   const [showRecovered, setShowRecovered] = useState(false)
@@ -1136,30 +1273,29 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
       ? (t('server_tunnel_reconnecting') || 'Server/tunnel reconnecting. Cached data stays visible and read-only checks will refresh automatically.')
       : (t('offline_mode_active') || 'Offline mode: sales are saved on this device and will sync when the server reconnects.')
   const statusSuffix = reconnecting && transientOutage?.status ? ` Status ${transientOutage.status}` : ''
-  const priority = appUpdate
-    ? { title: 'Update ready', message: 'Tap update now', tone: 'info' }
-      : conflictsNeedReview
-        ? { title: 'Conflicts need review', message: 'Review offline changes before syncing.', tone: 'danger' }
-        : vaultLocked
-          ? { title: 'Vault locked', message: 'Unlock offline mode to sync encrypted changes.', tone: 'warning' }
-          : null
+  // appUpdate no longer feeds this banner's own "Update ready" priority
+  // state -- that used to pop this floating banner on effectively every
+  // login/reload (not just when a genuinely new build was waiting),
+  // which read as a redundant nag stacked on top of the top bar. A
+  // manual refresh/update-check action now lives as its own button in
+  // the sidebar (see Sidebar.tsx) instead; this banner still exists for
+  // conflicts-need-review/vault-locked/offline-sync states, just not
+  // app-update anymore.
+  const priority = conflictsNeedReview
+    ? { title: 'Conflicts need review', message: 'Review offline changes before syncing.', tone: 'danger' }
+    : vaultLocked
+      ? { title: 'Vault locked', message: 'Unlock offline mode to sync encrypted changes.', tone: 'warning' }
+      : null
   const toneClass = priority?.tone === 'danger'
     ? 'border-red-200 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200'
-    : priority?.tone === 'info'
-      ? 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-200'
-      : ready
-        ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
-        : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
+    : ready
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200'
+      : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'
   const title = priority?.title || (reconnecting ? (t('server_reconnecting') || 'Server reconnecting') : t('offline_mode') || 'Offline mode')
   const message = priority?.message || `${label}${statusSuffix}`
-  const compactAppUpdate = !!appUpdate && !offline && !total && !vaultLocked && !conflictsNeedReview
-  const shouldShowVerboseImmediately = (!!priority && !compactAppUpdate) || total > 0 || offline
+  const shouldShowVerboseImmediately = !!priority || total > 0 || offline
 
   useEffect(() => {
-    if (compactAppUpdate) {
-      setShowVerboseMessage(false)
-      return undefined
-    }
     if (!offline && !ready && !priority && !showRecovered) {
       setShowVerboseMessage(false)
       return undefined
@@ -1173,18 +1309,16 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
     return () => window.clearTimeout(timer)
   }, [offline, ready, priority, showRecovered, shouldShowVerboseImmediately])
 
-  if (!offline && !total && !showRecovered && !vaultLocked && !appUpdate && !conflictsNeedReview) return null
+  if (!offline && !total && !showRecovered && !vaultLocked && !conflictsNeedReview) return null
 
   return (
-    <div className={`pointer-events-none fixed left-1/2 top-16 z-[1100] ${compactAppUpdate ? 'w-[min(calc(100vw-1rem),34rem)]' : showVerboseMessage ? 'w-[min(calc(100vw-1rem),56rem)]' : 'w-[min(calc(100vw-1rem),24rem)]'} -translate-x-1/2 px-2 md:top-[4.25rem]`}>
-      <div className={`pointer-events-auto rounded-2xl border ${compactAppUpdate ? 'px-3 py-1.5' : 'px-3 py-2'} text-xs shadow-lg backdrop-blur-sm ${toneClass}`}>
+    <div className={`pointer-events-none fixed left-1/2 top-16 z-[1100] ${showVerboseMessage ? 'w-[min(calc(100vw-1rem),56rem)]' : 'w-[min(calc(100vw-1rem),24rem)]'} -translate-x-1/2 px-2 md:top-[4.25rem]`}>
+      <div className={`pointer-events-auto rounded-2xl border px-3 py-2 text-xs shadow-lg backdrop-blur-sm ${toneClass}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <strong className="shrink-0">{title}</strong>
-              {compactAppUpdate ? (
-                <span className="text-[11px] opacity-80">{message}</span>
-              ) : !showVerboseMessage ? (
+              {!showVerboseMessage ? (
                 <span className="rounded-full border border-current/20 px-2 py-0.5 text-[11px] font-medium opacity-80">
                   {ready ? (t('status_ready') || 'Ready') : (t('status_active') || 'Active')}
                 </span>
@@ -1215,20 +1349,6 @@ function OfflineModeBanner({ pendingSync, canWriteToServer, syncUrl, transientOu
             ) : null}
           </div>
             <div className="flex shrink-0 items-center gap-2">
-              {appUpdate ? (
-                <>
-                  <button
-                    type="button"
-                    className={`rounded-full border border-current font-semibold ${compactAppUpdate ? 'px-2.5 py-0.5 text-[11px]' : 'px-3 py-1'}`}
-                    onClick={onUpdateNow}
-                  >
-                    Update now
-                  </button>
-                  <button type="button" className={`rounded-full opacity-75 hover:opacity-100 ${compactAppUpdate ? 'px-2 py-0.5 text-[11px]' : 'px-3 py-1'}`} onClick={onDismissUpdate}>
-                    Later
-                  </button>
-                </>
-            ) : null}
             {total ? (
               <button
                 type="button"
@@ -1267,57 +1387,67 @@ function PageLoader() {
 
   return (
     <div
-      className="flex-1 flex items-center justify-center bg-slate-50 px-4 py-6 text-slate-600 dark:bg-slate-950 dark:text-slate-300"
+      className="flex-1"
       role="status"
       aria-live="polite"
     >
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/95">
-        <div className="mb-3 flex items-center gap-3">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-blue-600 text-sm font-extrabold text-white">
-            OS
-          </div>
-          <div>
-            <p className="m-0 text-base font-extrabold leading-tight text-slate-950 dark:text-slate-100">
-              Business OS
-            </p>
-            <p className="m-0 text-xs text-slate-500 dark:text-slate-400">
+      {/* Same centered spinner design used everywhere else in the boot
+          sequence (see index.html's static shell, InitialShellFallback in
+          index.tsx, and the authReady gate below) -- previously this had
+          its own distinct, bigger "card with a progress bar" design that
+          showed right after the boot sequence's loader on every fresh
+          page-chunk load. Now there is exactly one loading design app-wide. */}
+      <div className="business-os-initial-shell">
+        <div className="business-os-initial-panel">
+          <div className="business-os-initial-spinner" aria-hidden="true" />
+          <div className="business-os-initial-brand">
+            <h1 className="business-os-initial-title">Business OS</h1>
+            <p className="business-os-initial-copy">
               {stalled ? 'Page bundle is still loading' : 'Loading this workspace view...'}
             </p>
           </div>
+          {stalled ? (
+            <div
+              className="max-w-[19rem] rounded-xl border border-slate-200 bg-white/95 p-2.5 text-xs text-slate-500 shadow-sm dark:border-slate-700 dark:bg-slate-900/95 dark:text-slate-400"
+              style={{ pointerEvents: 'auto' }}
+            >
+              The app is still fetching this page chunk. Reload only if the connection has recovered and the page does not continue.
+              <button
+                type="button"
+                className="mt-2 block w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-blue-400 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
+                onClick={() => window.location.reload()}
+              >
+                Reload page
+              </button>
+            </div>
+          ) : null}
         </div>
-        <div className="relative h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" aria-hidden="true">
-          <div className="h-full w-2/5 animate-[business-os-initial-progress_1.1s_ease-in-out_infinite_alternate] rounded-full bg-blue-600" />
-        </div>
-        {stalled ? (
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            The app is still fetching this page chunk. Reload only if the connection has recovered and the page does not continue.
-          </p>
-        ) : null}
-        {stalled ? (
-          <button
-            type="button"
-            className="mt-3 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:border-blue-400 hover:text-blue-600 dark:border-slate-700 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-300"
-            onClick={() => window.location.reload()}
-          >
-            Reload page
-          </button>
-        ) : null}
       </div>
     </div>
   )
 }
 
-function NotificationCenterFallback({ compact = false, onClick }: NotificationCenterFallbackProps) {
+function NotificationCenterFallback({ onClick }: NotificationCenterFallbackProps) {
+  // Sized/styled to exactly match the real trigger button this stands in
+  // for (NotificationCenter.tsx's own <button>: h-10 w-10, rounded-full,
+  // icon-only, no border) and QuickPreferenceToggles' identical
+  // ToggleButton -- so the theme/language/bell icon row reads as one
+  // consistent set the whole time, not just once the real bell finishes
+  // its deferred mount. Previously this had its own smaller
+  // (`compact` shrank it to h-8/h-9) bordered-pill look, which is what
+  // was actually on screen during NOTIFICATION_CENTER_INITIAL_MOUNT_DELAY_MS
+  // (and longer, since mount is otherwise wake-event-gated) -- i.e. what
+  // most people saw first, not an edge case.
   return (
     <button
       type="button"
-      className={`relative inline-flex items-center justify-center rounded-full border border-slate-200 bg-white/90 text-slate-400 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300 ${compact ? 'h-8 w-8 sm:h-9 sm:w-9' : 'h-10 w-10'}`}
+      className="relative inline-flex h-10 w-10 items-center justify-center rounded-full text-slate-600 transition hover:bg-slate-100 hover:text-blue-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-blue-300"
       aria-label="Notifications"
       title="Notifications"
       onClick={onClick}
       disabled={!onClick}
     >
-      <Bell className={compact ? 'h-4 w-4' : 'h-[18px] w-[18px]'} />
+      <Bell className="h-5 w-5" />
     </button>
   )
 }
@@ -1364,6 +1494,7 @@ export default function App() {
     authReady,
     page,
     notification,
+    dismissNotification,
     canAccessPage,
     AccessDenied,
     setPage,
@@ -1380,18 +1511,40 @@ export default function App() {
     t,
   } = useApp()
   const faviconRequestRef = useRef(0)
+  const manifestRequestRef = useRef(0)
   const offlineNoticeRef = useRef({ queued: '', synced: '' })
   const {
     syncError,
     transientOutage,
     pendingSync,
     vaultLocked,
-    appUpdate,
     conflictsNeedReview,
-    clearAppUpdate,
     clearSyncError,
   } = useSyncErrorBanner(authReady ? user : null)
   const mountedPages = useMountedPages(page)
+  const mobileHeaderVisible = useMobileHeaderAutoHide(page)
+  const mainRef = useRef<HTMLElement | null>(null)
+  // Swipe-down-to-refresh: listens on the shell's <main> (an ancestor of
+  // whichever page's own `.page-scroll` div is actually scrolling --
+  // touch events bubble, so this doesn't need to live on that inner
+  // node), and re-checks the CURRENT scroll position via the same
+  // getScrollTarget() the header-hide effect above already uses, since
+  // which node is "the" scrollable one can change as pages mount/unmount.
+  // Firing refreshAppData() re-broadcasts every real sync channel (see
+  // utils/appRefresh.ts) -- the same "refresh everything currently on
+  // screen" mechanism ResetData.tsx and settingsTransport.ts's own
+  // conflict-recovery path already trigger elsewhere in this app, so a
+  // pull here re-fetches exactly what those already-proven paths do,
+  // rather than a new, untested refresh mechanism.
+  const { pullDistance, refreshing: pullRefreshing } = usePullToRefresh(
+    mainRef,
+    () => {
+      const target = getScrollTarget(window) as { scrollTop?: number; scrollY?: number }
+      return Math.max(0, Number(target?.scrollTop ?? target?.scrollY ?? 0))
+    },
+    () => refreshAppData(),
+    Boolean(user),
+  )
   const shouldMountImportTracker = useDeferredImportTrackerMount(authReady ? user : null)
   const shouldMountQuickPreferences = useDeferredQuickPreferencesMount(authReady ? user : null)
   const {
@@ -1511,14 +1664,58 @@ export default function App() {
 
   const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/'
   const isPublicCatalogRoute = isPublicCatalogPath(pathname)
-  const requestedAdminPage = pathname === '/' ? 'dashboard' : normalizePageId(getAdminPageFromPath(pathname), 'dashboard')
+  // '/' resolves through the org's configurable default landing page
+  // (Settings > Navigation Layout, settings.default_landing_page) instead of
+  // a hardcoded 'dashboard' -- resolveAdminLandingPage falls back to
+  // 'dashboard' itself for an unset/unrecognized value, and the access-guard
+  // effect below still won't navigate a user to a page they can't open.
+  const requestedAdminPage = pathname === '/'
+    ? normalizePageId(resolveAdminLandingPage(settings.default_landing_page), 'dashboard')
+    : normalizePageId(getAdminPageFromPath(pathname), 'dashboard')
 
   useEffect(() => {
     if (!user || !requestedAdminPage || requestedAdminPage === page) return
     if (canAccessPage(requestedAdminPage)) setPage(requestedAdminPage)
   }, [canAccessPage, page, requestedAdminPage, setPage, user])
 
+  // User-reported bug ("logging into other users it shows me access denied
+  // then redirect me afterwards"): `page`'s initial value (AppContext's
+  // getInitialAdminPage) is resolved from the URL/default landing page at
+  // mount, before this component knows whether the just-logged-in user can
+  // actually open it -- a real case for any role whose org-wide default
+  // landing page (Settings > Navigation Layout) isn't one of their granted
+  // pages (e.g. an employee role with no 'dashboard' permission logging
+  // into a deployment whose default landing page is Dashboard). The effect
+  // above only ever corrects `page` toward `requestedAdminPage` (the URL);
+  // it never had a path OFF of an inaccessible page, so PageSlot rendered
+  // AccessDenied and stayed there -- confirmed by reading canAccessPage's
+  // own `!user` early return plus PageSlot's `canAccessPage(pageId) ?
+  // <Page/> : accessDenied` branch, no other effect in this file ever
+  // moves `page` away from a denied value. Fix: once the user is known and
+  // the CURRENT page turns out to be inaccessible, jump to the first page
+  // (in the sidebar's own NAV_ITEMS order, so the user lands somewhere
+  // they'd naturally expect from the nav rather than an arbitrary one)
+  // they're actually granted -- so AccessDenied never renders as a
+  // dead end, only ever (if at all) for the one paint before this effect's
+  // first run resolves it.
+  useEffect(() => {
+    if (!user || !page || canAccessPage(page)) return
+    const fallback = NAV_ITEMS.find((item) => canAccessPage(item.id))
+    if (fallback && fallback.id !== page) setPage(fallback.id as AdminPageId)
+  }, [canAccessPage, page, setPage, user])
+
   const accessDeniedNode = useMemo(() => <AccessDenied />, [AccessDenied])
+
+  useEffect(() => {
+    if (isPublicCatalogRoute || typeof document === 'undefined') return undefined
+    const businessName = String(settings.business_name || '').trim()
+    if (!businessName) return undefined
+    const previousTitle = document.title
+    document.title = businessName
+    return () => {
+      document.title = previousTitle
+    }
+  }, [isPublicCatalogRoute, settings.business_name])
 
   useEffect(() => {
     if (isPublicCatalogRoute || typeof document === 'undefined') return undefined
@@ -1530,39 +1727,56 @@ export default function App() {
       || '',
     ).trim()
     if (!iconSource) return undefined
+    const faviconFit = settings.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'
+    const faviconZoom = Math.max(80, Math.min(220, toFiniteNumber(settings.ui_app_favicon_zoom, 100)))
+    const faviconPositionX = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_x, 50)))
+    const faviconPositionY = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_y, 50)))
 
-    let iconEl = document.querySelector('link[rel="icon"]')
+    let iconEls = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'))
     let createdIcon = false
-    let previousHref = ''
+    const previousIcons = iconEls.map((icon) => ({
+      icon,
+      href: icon.getAttribute('href') || '',
+      type: icon.getAttribute('type') || '',
+      sizes: icon.getAttribute('sizes') || '',
+    }))
     let idleId: number | null = null
     let timerId: number | null = null
     const requestId = (Number(faviconRequestRef.current) || 0) + 1
     faviconRequestRef.current = requestId
 
-    if (iconEl) previousHref = iconEl.getAttribute('href') || ''
-    if (!iconEl) {
-      iconEl = document.createElement('link')
+    if (!iconEls.length) {
+      const iconEl = document.createElement('link')
       iconEl.setAttribute('rel', 'icon')
       document.head.appendChild(iconEl)
+      iconEls = [iconEl]
       createdIcon = true
     }
-    iconEl.setAttribute('href', iconSource)
+    iconEls.forEach((iconEl) => iconEl.setAttribute('href', iconSource))
 
     async function processFavicon() {
       try {
         const faviconHref = await withLoaderTimeout(
           async () => {
             const { createCircularFaviconDataUrl } = await import('./utils/favicon.ts')
-            return createCircularFaviconDataUrl(iconSource, { fit: 'cover', zoom: 100, positionX: 50, positionY: 50 })
+            return createCircularFaviconDataUrl(iconSource, {
+              fit: faviconFit,
+              zoom: faviconZoom,
+              positionX: faviconPositionX,
+              positionY: faviconPositionY,
+            })
           },
           'App favicon',
           APP_FAVICON_REQUEST_TIMEOUT_MS,
         )
-        if (faviconRequestRef.current !== requestId || !iconEl) return
-        iconEl.setAttribute('href', faviconHref || iconSource)
+        if (faviconRequestRef.current !== requestId) return
+        iconEls.forEach((iconEl) => {
+          iconEl.setAttribute('href', faviconHref || iconSource)
+          iconEl.setAttribute('type', 'image/png')
+        })
       } catch {
-        if (faviconRequestRef.current !== requestId || !iconEl) return
-        iconEl.setAttribute('href', iconSource)
+        if (faviconRequestRef.current !== requestId) return
+        iconEls.forEach((iconEl) => iconEl.setAttribute('href', iconSource))
       }
     }
     timerId = window.setTimeout(() => {
@@ -1579,18 +1793,152 @@ export default function App() {
       if (idleId != null && typeof window.cancelIdleCallback === 'function') {
         window.cancelIdleCallback(idleId)
       }
-      if (createdIcon && iconEl) {
-        iconEl.remove()
-      } else if (iconEl) {
-        if (previousHref) iconEl.setAttribute('href', previousHref)
-        else iconEl.removeAttribute('href')
+      if (createdIcon) {
+        iconEls.forEach((iconEl) => iconEl.remove())
+      } else {
+        previousIcons.forEach(({ icon, href, type, sizes }) => {
+          if (href) icon.setAttribute('href', href)
+          else icon.removeAttribute('href')
+          if (type) icon.setAttribute('type', type)
+          else icon.removeAttribute('type')
+          if (sizes) icon.setAttribute('sizes', sizes)
+          else icon.removeAttribute('sizes')
+        })
       }
     }
   }, [
     isPublicCatalogRoute,
     settings.customer_portal_favicon_image,
     settings.customer_portal_logo_image,
+    settings.ui_app_favicon_fit,
     settings.ui_app_favicon_image,
+    settings.ui_app_favicon_position_x,
+    settings.ui_app_favicon_position_y,
+    settings.ui_app_favicon_zoom,
+  ])
+
+  // Real gap this fixes: the app ships one static /manifest.json ("Business
+  // OS", generic icon) and static index.html <meta name="apple-mobile-web-
+  // app-title">/<link rel="apple-touch-icon"> shared by every deployment --
+  // the tab title/favicon above already get re-branded with the real
+  // business's name/logo, but iOS/Android's "Add to Home Screen" reads this
+  // completely different set of tags, which nothing ever touched, so it
+  // baked in "Business OS" + the generic icon at build time and reset to
+  // that on every redeploy no matter what was configured in Settings.
+  // Mirrors CatalogPage.tsx's own manifest-swap effect for the public
+  // storefront (idle-callback deferred, request-ref guarded, restores the
+  // original on cleanup) -- same fix, just for the admin app's own
+  // "Add to Home Screen" instead of a customer's portal one.
+  useEffect(() => {
+    if (isPublicCatalogRoute || typeof document === 'undefined') return undefined
+
+    const manifestLinkEl = document.querySelector('link[rel="manifest"]')
+    const previousManifestHref = manifestLinkEl?.getAttribute('href') || ''
+    const appleTitleMetaEl = document.querySelector('meta[name="apple-mobile-web-app-title"]')
+    const previousAppleTitle = appleTitleMetaEl?.getAttribute('content') || ''
+    const appleIconEl = document.querySelector('link[rel="apple-touch-icon"]')
+    const previousAppleIconHref = appleIconEl?.getAttribute('href') || ''
+
+    const businessName = String(settings.business_name || '').trim()
+    const iconSource = String(
+      settings.ui_app_favicon_image
+      || settings.customer_portal_favicon_image
+      || settings.customer_portal_logo_image
+      || '',
+    ).trim()
+
+    if (!businessName && !iconSource) return undefined
+
+    if (appleTitleMetaEl && businessName) {
+      appleTitleMetaEl.setAttribute('content', businessName)
+    }
+
+    if (!iconSource) return () => {
+      if (appleTitleMetaEl) {
+        if (previousAppleTitle) appleTitleMetaEl.setAttribute('content', previousAppleTitle)
+        else appleTitleMetaEl.removeAttribute('content')
+      }
+    }
+
+    const iconFit = settings.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'
+    const iconZoom = Math.max(80, Math.min(220, toFiniteNumber(settings.ui_app_favicon_zoom, 100)))
+    const iconPositionX = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_x, 50)))
+    const iconPositionY = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_y, 50)))
+
+    let idleId: number | null = null
+    let timerId: number | null = null
+    let manifestBlobUrl: string | null = null
+    const requestId = (Number(manifestRequestRef.current) || 0) + 1
+    manifestRequestRef.current = requestId
+
+    if (appleIconEl) appleIconEl.setAttribute('href', iconSource)
+
+    async function applyAppManifest() {
+      try {
+        const { createSquareIconDataUrl } = await import('./utils/favicon.ts')
+        const [icon192, icon512] = await withLoaderTimeout(
+          () => Promise.all([
+            createSquareIconDataUrl(iconSource, { size: 192, fit: iconFit, zoom: iconZoom, positionX: iconPositionX, positionY: iconPositionY }),
+            createSquareIconDataUrl(iconSource, { size: 512, fit: iconFit, zoom: iconZoom, positionX: iconPositionX, positionY: iconPositionY }),
+          ]),
+          'App manifest icons',
+          APP_FAVICON_REQUEST_TIMEOUT_MS,
+        )
+        if (manifestRequestRef.current !== requestId) return
+        if (!icon192 && !icon512) return
+        const manifest = buildPortalManifest({
+          businessName,
+          publicPath: '/',
+          icon192: icon192 || icon512,
+          icon512: icon512 || icon192,
+        })
+        const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' })
+        manifestBlobUrl = URL.createObjectURL(blob)
+        if (manifestLinkEl) manifestLinkEl.setAttribute('href', manifestBlobUrl)
+        if (appleTitleMetaEl) appleTitleMetaEl.setAttribute('content', manifest.name)
+        if (appleIconEl && (icon192 || icon512)) appleIconEl.setAttribute('href', icon512 || icon192)
+      } catch {
+        // Leave the swapped-in raw iconSource/business name in place; not
+        // worth failing the whole app shell over a home-screen icon render.
+      }
+    }
+
+    timerId = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        idleId = window.requestIdleCallback(applyAppManifest, { timeout: APP_FAVICON_IDLE_TIMEOUT_MS })
+      } else {
+        applyAppManifest()
+      }
+    }, APP_FAVICON_PROCESSING_DELAY_MS)
+
+    return () => {
+      manifestRequestRef.current = requestId + 1
+      if (timerId != null) window.clearTimeout(timerId)
+      if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
+      if (manifestBlobUrl) URL.revokeObjectURL(manifestBlobUrl)
+      if (manifestLinkEl) {
+        if (previousManifestHref) manifestLinkEl.setAttribute('href', previousManifestHref)
+        else manifestLinkEl.removeAttribute('href')
+      }
+      if (appleTitleMetaEl) {
+        if (previousAppleTitle) appleTitleMetaEl.setAttribute('content', previousAppleTitle)
+        else appleTitleMetaEl.removeAttribute('content')
+      }
+      if (appleIconEl) {
+        if (previousAppleIconHref) appleIconEl.setAttribute('href', previousAppleIconHref)
+        else appleIconEl.removeAttribute('href')
+      }
+    }
+  }, [
+    isPublicCatalogRoute,
+    settings.business_name,
+    settings.customer_portal_favicon_image,
+    settings.customer_portal_logo_image,
+    settings.ui_app_favicon_fit,
+    settings.ui_app_favicon_image,
+    settings.ui_app_favicon_position_x,
+    settings.ui_app_favicon_position_y,
+    settings.ui_app_favicon_zoom,
   ])
 
   if (isPublicCatalogRoute) {
@@ -1600,24 +1948,20 @@ export default function App() {
   const storedAuthSessionPending = !user && hasUsableStoredAuthSession()
 
   if ((!authReady && !user) || storedAuthSessionPending) {
+    // Deliberately reuses the exact classNames (and CSS, defined once in
+    // index.html's <style data-business-os-initial-shell> block, which
+    // stays in <head> for the page's whole lifetime) as the static
+    // pre-hydration shell in index.html and index.tsx's InitialShellFallback,
+    // and as PageLoader below -- one single centered-spinner loading design
+    // used everywhere in the app, instead of several different-looking
+    // loading screens appearing back to back during boot/navigation.
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 text-slate-600 dark:bg-slate-950 dark:text-slate-300" role="status" aria-live="polite">
-        <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/95">
-          <div className="mb-3 flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-blue-600 text-sm font-extrabold text-white">
-              OS
-            </div>
-            <div>
-              <p className="m-0 text-lg font-extrabold leading-tight text-slate-950 dark:text-slate-100">
-                Business OS
-              </p>
-              <p className="m-0 text-sm text-slate-500 dark:text-slate-400">
-                Preparing secure sign-in...
-              </p>
-            </div>
-          </div>
-          <div className="relative h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800" aria-hidden="true">
-            <div className="h-full w-2/5 animate-[business-os-initial-progress_1.1s_ease-in-out_infinite_alternate] rounded-full bg-blue-600" />
+      <div className="business-os-initial-shell" role="status" aria-live="polite">
+        <div className="business-os-initial-panel">
+          <div className="business-os-initial-spinner" aria-hidden="true" />
+          <div className="business-os-initial-brand">
+            <h1 className="business-os-initial-title">Business OS</h1>
+            <p className="business-os-initial-copy">Preparing secure sign-in...</p>
           </div>
         </div>
       </div>
@@ -1634,88 +1978,61 @@ export default function App() {
 
   return (
     <div id="app-root" className="flex h-screen flex-col overflow-hidden bg-gray-50 dark:bg-gray-900">
-      <div className="app-topbar hidden h-14 flex-shrink-0 items-center justify-between border-b px-4 md:flex">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center overflow-hidden rounded-full ${settings?.customer_portal_logo_image ? 'ring-1 ring-slate-200/80 dark:ring-slate-700/70' : 'border border-slate-200/80 bg-[var(--ui-accent)] dark:border-slate-700/70'}`}>
-            {settings?.customer_portal_logo_image ? (
-              <img
-                src={settings.customer_portal_logo_image}
-                alt={settings?.business_name || 'Business OS'}
-                loading="eager"
-                decoding="async"
-                fetchPriority="high"
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <span className="grid h-full w-full place-items-center text-sm font-semibold text-white">
-                {String(settings?.business_name || 'Business OS').slice(0, 2).toUpperCase()}
-              </span>
-            )}
-          </div>
-          <div className="flex min-w-0 items-center gap-2">
-            <div className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">
-              {settings?.business_name || 'Business OS'}
-            </div>
-            <button
-              type="button"
-              onClick={() => navigateTo('server')}
-              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
-            >
-              <span>{t('sync_server_title') || 'Sync Server'}</span>
-              {syncUrl ? <span className={`h-2 w-2 rounded-full ${canWriteToServer ? 'bg-emerald-400' : 'bg-amber-400'}`} /> : null}
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {desktopNotificationSlot}
-          {shouldMountQuickPreferences ? (
-            <Suspense fallback={null}>
-              <QuickPreferenceToggles />
-            </Suspense>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <Suspense fallback={null}>
-          <Sidebar notificationSlot={mobileNotificationSlot} showQuickPreferences={shouldMountQuickPreferences} />
-        </Suspense>
-
-        <main className="flex-1 flex flex-col min-h-0 overflow-hidden pt-16 pb-16 md:pt-0 md:pb-0">
-          <div className="flex min-w-0 items-center gap-3">
-          </div>
-          <OfflineModeBanner
-            pendingSync={pendingSync}
-            canWriteToServer={canWriteToServer}
-            syncUrl={syncUrl}
-            transientOutage={transientOutage}
-            vaultLocked={vaultLocked}
-            appUpdate={appUpdate}
-            conflictsNeedReview={conflictsNeedReview}
-            onDismissUpdate={clearAppUpdate}
-            onUpdateNow={() => {
-              navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
-              window.setTimeout(() => window.location.reload(), 250)
-            }}
-          />
-          {shouldMountImportTracker ? (
-            <Suspense fallback={null}>
-              <BackgroundImportTracker />
-            </Suspense>
-          ) : null}
-          {mountedPages.map((mountedPage) => (
-            <PageSlot
-              key={mountedPage}
-              accessDenied={accessDeniedNode}
-              activePageId={page}
-              canAccessPage={canAccessPage}
-              pageId={mountedPage}
+      {/* Desktop's standalone top bar (logo, business name, notification
+          bell, theme/language toggles in their own h-14 row above the
+          sidebar+content) is gone -- per request, large screens fold all
+          of that (minus the business name, which is dropped everywhere)
+          into the sidebar's own header row instead. See Sidebar.tsx's
+          <aside> header. The mobile top bar is untouched here; it's
+          rendered by Sidebar.tsx itself as a fixed-position header. */}
+      <NotesProvider>
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <Suspense fallback={null}>
+            <Sidebar
+              notificationSlot={mobileNotificationSlot}
+              desktopNotificationSlot={desktopNotificationSlot}
+              showQuickPreferences={shouldMountQuickPreferences}
+              mobileHeaderVisible={mobileHeaderVisible}
             />
-          ))}
-        </main>
-      </div>
+          </Suspense>
 
-      <Notification notification={notification} />
+          <main
+            ref={mainRef}
+            className={`relative flex-1 flex flex-col min-h-0 overflow-hidden pb-[calc(3.55rem+env(safe-area-inset-bottom))] transition-[padding-top] duration-300 ease-in-out md:pb-0 md:pt-0 ${mobileHeaderVisible ? 'pt-[calc(4rem+env(safe-area-inset-top))]' : 'pt-[env(safe-area-inset-top)]'}`}
+          >
+            <PullToRefreshIndicator pullDistance={pullDistance} refreshing={pullRefreshing} />
+            <div className="flex min-w-0 items-center gap-3">
+            </div>
+            <OfflineModeBanner
+              pendingSync={pendingSync}
+              canWriteToServer={canWriteToServer}
+              syncUrl={syncUrl}
+              transientOutage={transientOutage}
+              vaultLocked={vaultLocked}
+              conflictsNeedReview={conflictsNeedReview}
+            />
+            {shouldMountImportTracker ? (
+              <Suspense fallback={null}>
+                <BackgroundImportTracker />
+              </Suspense>
+            ) : null}
+            <Suspense fallback={null}>
+              <NotesWidget />
+            </Suspense>
+            {mountedPages.map((mountedPage) => (
+              <PageSlot
+                key={mountedPage}
+                accessDenied={accessDeniedNode}
+                activePageId={page}
+                canAccessPage={canAccessPage}
+                pageId={mountedPage}
+              />
+            ))}
+          </main>
+        </div>
+      </NotesProvider>
+
+      <Notification notification={notification} onDismiss={dismissNotification} />
       <GlobalScrollControls />
       {writeConflict ? (
         <Suspense fallback={null}>

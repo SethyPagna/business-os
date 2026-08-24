@@ -6,10 +6,16 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Brass/gold accent replacing the old blue scale (Aug 24 2026 --
+        // "clean, neat, professional, expensive" request; charcoal/graphite
+        // neutrals + one warm brass accent, no blue). 600 matches
+        // --ui-accent in styles/main.css so the two systems agree if a
+        // component ever reaches for `primary-*` classes directly instead
+        // of the CSS variable.
         primary: {
-          50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe',
-          300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6',
-          600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a',
+          50: '#fbf7ee', 100: '#f5ecd8', 200: '#e9d5a8',
+          300: '#dcbe78', 400: '#c9a34e', 500: '#b3893a',
+          600: '#9c7a3c', 700: '#7d5f2a', 800: '#5f481f', 900: '#423214',
         },
       },
     },

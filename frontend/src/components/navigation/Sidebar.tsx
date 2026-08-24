@@ -1,4 +1,4 @@
-import { Suspense, lazy, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState } from 'react'
+import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
@@ -7,12 +7,16 @@ import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
+import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import Server from 'lucide-react/dist/esm/icons/server.js'
 import Settings from 'lucide-react/dist/esm/icons/settings.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
@@ -22,6 +26,23 @@ import Users from 'lucide-react/dist/esm/icons/users.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { DEFAULT_MOBILE_PINNED, NAV_ITEMS as NAV_CONFIG_ITEMS, orderNavItems, parseNavSetting, type NavigationItem, type NavigationPermission } from '../shared/navigationConfig'
 import { APP_PAGE_INTENT_EVENT } from '../../app/appShellUtils.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+
+const QuickPreferenceToggles = lazyRetry(() => import('../shared/QuickPreferenceToggles'), 'quick-preference-toggles')
+
+// Reserves the exact footprint of the two 40px toggle buttons (h-10 w-10,
+// gap-2) so there's no layout shift while the chunk loads or retries -- the
+// "space is always there" behavior from the original bug report was already
+// correct and is preserved here; only the "sometimes renders nothing forever"
+// failure mode is what lazyRetry()/this fallback fix.
+function QuickPreferenceTogglesFallback() {
+  return (
+    <div className="flex items-center gap-2" aria-hidden="true">
+      <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white/85 dark:border-slate-700 dark:bg-slate-900/70" />
+      <div className="h-10 w-10 rounded-xl border border-gray-200 bg-white/85 dark:border-slate-700 dark:bg-slate-900/70" />
+    </div>
+  )
+}
 
 type TranslateFn = (key: string) => string
 type IntentSource = 'focus' | 'pointer' | 'touch'
@@ -50,6 +71,7 @@ interface SidebarAppContext {
   t: TranslateFn
   settings?: SidebarSettings | null
   hasPermission: (permission: NavigationPermission) => boolean
+  canAccessPage: (pageId: string) => boolean
   syncUrl?: string | null
   syncConnected?: boolean
 }
@@ -64,19 +86,27 @@ type UserProfileModalProps = {
 
 type SidebarProps = {
   notificationSlot?: ReactNode
+  // Desktop's notification bell -- desktop no longer has its own top bar
+  // (folded into this component, see the <aside> header row below), so
+  // App.tsx passes its desktop-flavored notification slot down here
+  // separately from the mobile one above.
+  desktopNotificationSlot?: ReactNode
   showQuickPreferences?: boolean
+  // Controls the mobile top bar's hide-on-scroll-down / show-on-scroll-up
+  // behavior (see useMobileHeaderAutoHide in App.tsx). Defaults to visible
+  // so any caller that doesn't pass this (e.g. a future test render) still
+  // gets a bar that's actually on screen.
+  mobileHeaderVisible?: boolean
 }
 
 const useApp = useAppHook as () => SidebarAppContext
-const UserProfileModal = lazy(async () => ({
+const UserProfileModal = lazyRetry(async () => ({
   default: (await import('../users/UserProfileModal')).default as ComponentType<UserProfileModalProps>,
-}))
-const QuickPreferenceToggles = lazy(async () => ({
-  default: (await import('../shared/QuickPreferenceToggles')).default,
-}))
+}), 'sidebar-user-profile-modal')
 
 const ICONS_BY_ID: Record<string, LucideIcon> = {
   dashboard: LayoutDashboard,
+  notes: Pencil,
   catalog: ShoppingBag,
   loyalty_points: Ticket,
   pos: ShoppingCart,
@@ -85,8 +115,10 @@ const ICONS_BY_ID: Record<string, LucideIcon> = {
   branches: Building2,
   sales: BadgeDollarSign,
   returns: RotateCcw,
+  fees: HandCoins,
   contacts: BookUser,
   users: Users,
+  review: ClipboardCheck,
   audit_log: ClipboardList,
   receipt_settings: Receipt,
   backup: DatabaseBackup,
@@ -154,7 +186,7 @@ function isNavigationItemWithIcon(item: NavigationItemWithIcon | undefined): ite
   return !!item
 }
 
-export default function Sidebar({ notificationSlot = null, showQuickPreferences = false }: SidebarProps = {}) {
+export default function Sidebar({ notificationSlot = null, desktopNotificationSlot = null, showQuickPreferences = false, mobileHeaderVisible = true }: SidebarProps = {}) {
   const {
     page,
     navigateTo,
@@ -163,6 +195,7 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
     t,
     settings,
     hasPermission,
+    canAccessPage,
     syncUrl,
     syncConnected,
   } = useApp()
@@ -170,13 +203,33 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
   const [moreOpen, setMoreOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
 
+  // Real bug found and fixed this session: this used to filter on a plain
+  // strict `hasPermission(item.permission)`, which can never return true
+  // for a 'review' tier value (hasPermission is deliberately strict-
+  // boolean, see cloudflare/src/lib/permissions.ts's own comment on why).
+  // That meant every Review-Required-tier user for a REVIEW_TIER_KEYS
+  // section (Products/Inventory/Branches/Returns/Fees/Contacts) had their
+  // sidebar link hidden entirely, even though AppContext.tsx's own
+  // canAccessPage() already correctly lets them open the page (only
+  // specific actions inside it get queued for review, not the whole
+  // page) -- link hidden, page reachable, the exact "sidebar and guard
+  // disagree" bug class navigationConfig.test.ts already exists to catch
+  // for the null-vs-string-permission case, just not this tier case. Also
+  // fixes the same-shape gap for a user holding only one of Settings'
+  // narrower business_identity/sales_policy/drive_credentials grants
+  // (this session's Settings per-field permission work) and for
+  // products_image_only users -- canAccessPage() already special-cases
+  // both. Switched to canAccessPage(item.id), which every page id already
+  // has a real entry for (navigationConfig.test.ts's own cross-check
+  // enforces that), so this is a strict improvement, not a behavior
+  // change for anyone who already saw their correct link.
   const visibleItems = useMemo<NavigationItemWithIcon[]>(() => {
     const orderedIds = parseNavSetting(settings?.ui_nav_order, [])
     const allowedItems = NAV_CONFIG_ITEMS
-      .filter((item) => item.permission === null || hasPermission(item.permission))
+      .filter((item) => canAccessPage(item.id))
       .map((item) => ({ ...item, icon: getIconForItem(item.id) }))
     return orderNavItems(allowedItems, orderedIds)
-  }, [hasPermission, settings?.ui_nav_order])
+  }, [canAccessPage, settings?.ui_nav_order])
 
   const mobilePinnedIds = useMemo<string[]>(() => {
     const saved = parseNavSetting(settings?.ui_mobile_pinned, DEFAULT_MOBILE_PINNED)
@@ -193,7 +246,6 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
   const language = settings?.language || 'en'
   const brandLogo = settings?.customer_portal_logo_image || ''
   const brandName = settings?.business_name || 'Business OS'
-  const mobileBrandName = brandName.length > 7 ? `${brandName.slice(0, 7)}...` : brandName
   const sidebarBg = settings?.ui_sidebar_color || ''
   const sidebarTextColor = settings?.ui_sidebar_text_color || ''
   const isDark = sidebarBg ? isDarkColor(sidebarBg) : null
@@ -225,7 +277,47 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
 
   return (
     <>
-      <aside className={`sticky top-14 hidden h-[calc(100vh-3.5rem)] w-[220px] flex-shrink-0 flex-col border-r min-h-0 md:flex ${!sidebarBg ? 'border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-transparent'}`}>
+      {/* h-full (not a `calc(100vh-3.5rem)` vh recomputation) deliberately --
+          this <aside> is the immediate flex child of App.tsx's
+          `flex min-h-0 flex-1 overflow-hidden` row, whose own real height is
+          already exactly (app-root's h-screen/dvh height minus the h-14
+          topbar) via flex layout, not vh math. Redeclaring that same
+          quantity here via a raw, non-dvh-aware `100vh` calc could drift
+          from the row's real (dvh-based) height whenever the browser's
+          dynamic toolbar/keyboard changes the visible viewport mid-session
+          (100vh tracks the largest possible viewport, not the current one,
+          so it doesn't move in lockstep with the row's actual dvh-driven
+          height) -- on this page in particular, which scrolls further than
+          most, that gap showed up as a solid dark strip of empty space
+          below the sidebar's own last item once the two heights diverged.
+          h-full inherits the parent's real, already-correct height instead
+          of re-deriving a competing one, so there's nothing left to drift. */}
+      <aside className={`sticky top-0 hidden h-full w-[220px] flex-shrink-0 flex-col border-r min-h-0 md:flex ${!sidebarBg ? 'border-gray-200 bg-white dark:border-slate-800 dark:bg-slate-900' : 'border-transparent'}`}>
+        {/* Desktop no longer gets its own top bar (App.tsx used to render a
+            separate h-14 row above the whole layout with the logo, brand
+            name, notification bell, and theme/language toggles) -- per the
+            "for large screen remove topbar for pages, just merge into
+            sidebar" request, all of that except the brand name (explicitly
+            asked to drop) now lives here as the aside's own header row. */}
+        <div className={`flex flex-shrink-0 items-center gap-2 border-b p-3 ${borderClass}`}>
+          <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full ${brandLogo ? 'ring-1 ring-slate-200/80 dark:ring-slate-700/70' : 'border border-slate-200/80'}`} style={!brandLogo ? { background: 'var(--ui-accent)' } : undefined}>
+            {brandLogo ? (
+              <img src={brandLogo} alt={brandName} loading="eager" decoding="async" fetchPriority="high" className="h-full w-full object-cover" />
+            ) : (
+              <span className="grid h-full w-full place-items-center text-xs font-semibold text-white">
+                {brandName.slice(0, 2).toUpperCase()}
+              </span>
+            )}
+          </div>
+          <div className="ml-auto flex items-center gap-1.5">
+            {desktopNotificationSlot}
+            {showQuickPreferences ? (
+              <Suspense fallback={<QuickPreferenceTogglesFallback />}>
+                <QuickPreferenceToggles />
+              </Suspense>
+            ) : null}
+          </div>
+        </div>
         <nav className="flex-1 overflow-y-auto p-3 pt-4">
           <div className="space-y-0.5">
             {visibleItems.map((item) => {
@@ -276,6 +368,25 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
               </div>
             </button>
             <button
+              onClick={() => {
+                // Manual "check for update and refresh" action, replacing the
+                // old always-appearing floating "Update ready" banner (see
+                // App.tsx's OfflineModeBanner) -- that banner reappeared on
+                // effectively every login/reload rather than only once when
+                // a genuinely new build was waiting, which read as a
+                // redundant nag. This does the same underlying work (tell
+                // any waiting service worker to activate, then reload) but
+                // only when the person actually asks for it.
+                navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
+                window.setTimeout(() => window.location.reload(), 250)
+              }}
+              className={`transition-colors hover:text-blue-500 ${textClass ? 'opacity-60 hover:opacity-100' : 'text-gray-400'}`}
+              title={t('refresh_app') || 'Refresh / check for update'}
+              style={textStyle}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </button>
+            <button
               onClick={logout}
               className={`transition-colors hover:text-red-500 ${textClass ? 'opacity-60 hover:opacity-100' : 'text-gray-400'}`}
               title={t('logout')}
@@ -287,7 +398,15 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
         </div>
       </aside>
 
-      <header className="fixed left-0 right-0 top-0 z-40 flex h-16 items-center justify-between border-b border-gray-200 bg-white px-4 dark:border-slate-800 dark:bg-slate-900 md:hidden">
+      {/* iPhone notch / Dynamic Island: a bare h-16 fixed header sits flush
+          against the physical top edge, so its buttons render partially
+          under the status bar/notch on any device with a safe-area inset.
+          pt-[env(...)] pushes the flex row down inside a taller box whose
+          background still extends fully behind the notch; App.tsx's <main>
+          padding-top is matched to this same total height. */}
+      <header
+        className={`fixed left-0 right-0 top-0 z-40 flex h-[calc(4rem+env(safe-area-inset-top))] items-center justify-between border-b border-gray-200 bg-white pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] transition-transform duration-300 ease-in-out dark:border-slate-800 dark:bg-slate-900 md:hidden ${mobileHeaderVisible ? 'translate-y-0' : '-translate-y-full'}`}
+      >
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-full border border-slate-200/80 bg-slate-100 dark:border-slate-700 dark:bg-slate-800/80">
             {brandLogo ? (
@@ -298,17 +417,11 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
               </span>
             )}
           </div>
-          <div className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-base font-bold text-gray-900 dark:text-white" style={textStyle}>
-              {mobileBrandName}
-            </span>
-            {syncUrl ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} /> : null}
-          </div>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
           {notificationSlot}
           {showQuickPreferences ? (
-            <Suspense fallback={null}>
+            <Suspense fallback={<QuickPreferenceTogglesFallback />}>
               <QuickPreferenceToggles />
             </Suspense>
           ) : null}
@@ -365,7 +478,12 @@ export default function Sidebar({ notificationSlot = null, showQuickPreferences 
       {moreOpen ? (
         <>
           <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setMoreOpen(false)} />
-          <div className="fixed bottom-16 left-0 right-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden">
+          {/* bottom-[...] matches the bottom nav's actual height (3.55rem +
+              safe-area-inset-bottom, see .safe-area-inset-bottom in main.css)
+              instead of a flat bottom-16, so this drawer doesn't slide in
+              underneath -- and get hidden behind -- the taller nav bar that
+              env(safe-area-inset-bottom) produces on notched iPhones. */}
+          <div className="fixed bottom-[calc(3.55rem+env(safe-area-inset-bottom))] left-0 right-0 z-40 max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900 md:hidden">
             <div className="sticky top-0 bg-white px-3 pb-1 pt-3 dark:bg-gray-900">
               <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-gray-300 dark:bg-gray-600" />
             </div>

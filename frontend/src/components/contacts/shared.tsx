@@ -7,6 +7,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -89,12 +90,8 @@ export function useContactSelection<T extends ContactRow>(rows: T[] = []): Conta
   )
 
   useEffect(() => {
-    setSelectedIds((previous) => {
-      const validIds = new Set(rowIds)
-      const nextIds = [...previous].filter((id) => validIds.has(Number(id)))
-      if (nextIds.length === previous.size && nextIds.every((id) => previous.has(id))) return previous
-      return new Set(nextIds)
-    })
+    const validIds = new Set(rowIds)
+    setSelectedIds((previous) => pruneSelectionToVisibleIds(previous, validIds))
   }, [rowIds])
 
   const toggleOne = (id: unknown) => {

@@ -99,7 +99,7 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
     return (
       <div
         aria-hidden="true"
-        className={`bg-gray-100 text-gray-400 dark:bg-gray-700/80 dark:text-gray-500 ${className || ''}`}
+        className={`bg-gray-100 text-gray-400 dark:bg-neutral-700/80 dark:text-neutral-500 ${className || ''}`}
       />
     )
   }

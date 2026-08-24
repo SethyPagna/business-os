@@ -199,9 +199,9 @@ function loadHttpCoreModule() {
   return httpCoreModulePromise
 }
 
-async function buildImportCsvTemplate(headers, filename) {
+async function buildImportCsvTemplate(headers, filename, exampleRow) {
   const { buildCSVTemplate } = await loadCsvTemplateModule()
-  return buildCSVTemplate(headers, filename)
+  return buildCSVTemplate(headers, filename, exampleRow)
 }
 
 /**
@@ -212,6 +212,7 @@ async function buildImportCsvTemplate(headers, filename) {
  */
 
 import { getSyncServerUrl } from './httpState.ts'
+import { pokeImportTracker } from '../utils/importJobRefresh.ts'
 export async function openCSVDialog() {
   const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
   return openBrowserCSVDialog()
@@ -282,7 +283,15 @@ export async function refreshOfflineDeviceSnapshot(options = {}) {
   return refreshOfflineDeviceSnapshotRequest(options)
 }
 
-async function invalidateClientRuntimeState(reason = 'server-mutation') {
+// mirrorTables: when omitted, every local IndexedDB mirror table is wiped
+// (the right call for factory-reset / data-path switch, which really do
+// invalidate everything). When passed, only those tables are cleared --
+// see clientRuntime.ts's resetClientRuntimeState for why this matters:
+// without it, a scoped server-side reset (e.g. reset-data mode='products')
+// still wiped the *entire* local mirror, leaving unrelated pages (Inventory
+// Movements, Sales, etc.) looking empty even though the server never
+// touched their data.
+async function invalidateClientRuntimeState(reason = 'server-mutation', mirrorTables?: string[]) {
   const { resetClientRuntimeState } = await loadClientRuntimeModule()
   const { cacheClearAll } = await loadHttpCoreModule()
   await resetClientRuntimeState({
@@ -291,6 +300,7 @@ async function invalidateClientRuntimeState(reason = 'server-mutation') {
     preserveSyncServer: true,
     preserveSessionDuration: true,
     preserveRuntimeMeta: false,
+    ...(mirrorTables ? { mirrorTables } : {}),
   }).catch(() => {})
   cacheClearAll()
   if (typeof window !== 'undefined') {
@@ -318,6 +328,21 @@ if (typeof window !== 'undefined') {
     if (['inventory', 'products', 'branches', 'sales', 'returns'].includes(channel)) {
       void loadQueryCacheModule().then(({ clearCachedQueryResults }) =>
         clearCachedQueryResults(['inventory:products:search:']),
+      )
+    }
+    // Customers is the one contacts entity that goes through the paged
+    // queryCache path (readContactList in contactsTransport.ts, gated on
+    // routeKey === 'customers'); suppliers/deliveryContacts always read
+    // through the Dexie live-mirror table instead, so they have nothing to
+    // clear here. Without this, a customer edited on another device could
+    // sit in this device's IndexedDB fallback cache until the next
+    // successful live read overwrites it, instead of being cleared the
+    // moment the mutation is known about — closes the gap flagged in
+    // Session 2 for the same class of "cache doesn't refresh with the
+    // code" issue already handled for products/inventory above.
+    if (channel === 'customers') {
+      void loadQueryCacheModule().then(({ clearCachedQueryResults }) =>
+        clearCachedQueryResults(['customers:get:']),
       )
     }
   })
@@ -606,9 +631,9 @@ export const updateProduct = async (id, payload) => {
   const module = await loadProductWriteTransport()
   return module.updateProduct(id, payload)
 }
-export const deleteProduct = async (id) => {
+export const deleteProduct = async (id, reason) => {
   const module = await loadProductWriteTransport()
-  return module.deleteProduct(id)
+  return module.deleteProduct(id, reason)
 }
 
 // ─── OTP / 2FA ────────────────────────────────────────────────────────────────
@@ -646,7 +671,11 @@ export const bulkImportProducts = async payload => {
 
 export const createImportJob = async payload => {
   const module = await loadImportJobsTransport()
-  return module.createImportJob(payload)
+  const result = await module.createImportJob(payload)
+  // Let BackgroundImportTracker.tsx refetch immediately instead of waiting
+  // for its own poll timer -- see pokeImportTracker's comment.
+  pokeImportTracker()
+  return result
 }
 export const listImportJobs = async (params = {}) => {
   const module = await loadImportJobsTransport()
@@ -664,6 +693,18 @@ export const updateImportJobDecisions = async (id, decisions = {}) => {
   const module = await loadImportJobsTransport()
   return module.updateImportJobDecisions(id, decisions)
 }
+export const assignImportJobImage = async (id, fileId, rowNumber = null) => {
+  const module = await loadImportJobsTransport()
+  return module.assignImportJobImage(id, fileId, rowNumber)
+}
+export const resolveImportJobImageLimit = async (id, rowNumber, keepFileIds = []) => {
+  const module = await loadImportJobsTransport()
+  return module.resolveImportJobImageLimit(id, rowNumber, keepFileIds)
+}
+export const assignImportJobImageToExistingProduct = async (id, fileId, productId) => {
+  const module = await loadImportJobsTransport()
+  return module.assignImportJobImageToExistingProduct(id, fileId, productId)
+}
 export const preflightImportJob = async id => {
   const module = await loadImportJobsTransport()
   return module.preflightImportJob(id)
@@ -679,6 +720,10 @@ export const approveImportJob = async (id, options = {}) => {
 export const cancelImportJob = async (id, options = {}) => {
   const module = await loadImportJobsTransport()
   return module.cancelImportJob(id, options)
+}
+export const dismissImportJob = async (id, options = {}) => {
+  const module = await loadImportJobsTransport()
+  return module.dismissImportJob(id, options)
 }
 export const retryImportJob = async (id, options = {}) => {
   const module = await loadImportJobsTransport()
@@ -707,6 +752,10 @@ export const uploadImportJobZip = async payload => {
 export const uploadImportJobImages = async payload => {
   const module = await loadImportJobsTransport()
   return module.uploadImportJobImages(payload)
+}
+export const recompressImportJobZipImages = async (jobId, images, onProgress) => {
+  const module = await loadImportJobsTransport()
+  return module.recompressImportJobZipImages(jobId, images, onProgress)
 }
 
 export const getFiles = async (params = {}) => {
@@ -808,9 +857,29 @@ export const getInventoryReasons = async () => {
   const { getInventoryReasons: getInventoryReasonsRequest } = await loadInventoryTransport()
   return getInventoryReasonsRequest()
 }
-export const saveInventoryReasons = async (items = []) => {
+export const saveInventoryReasons = async (items: unknown[] = []) => {
   const module = await loadInventoryWriteTransport()
   return module.saveInventoryReasons(items)
+}
+
+// Dated stock-reconciliation import review flow (see
+// inventoryWriteTransport.ts's own header comment for the full 4-call
+// shape: resolve -> apply-decisions -> preview -> apply).
+export const resolveDatedStockCountRows = async (rows: unknown[] = []) => {
+  const module = await loadInventoryWriteTransport()
+  return module.resolveDatedStockCountRows(rows)
+}
+export const applyDatedStockCountDecisions = async (payload: Record<string, unknown> = {}) => {
+  const module = await loadInventoryWriteTransport()
+  return module.applyDatedStockCountDecisions(payload)
+}
+export const previewDatedStockCount = async (entries: unknown[] = []) => {
+  const module = await loadInventoryWriteTransport()
+  return module.previewDatedStockCount(entries)
+}
+export const applyDatedStockCount = async (entries: unknown[] = []) => {
+  const module = await loadInventoryWriteTransport()
+  return module.applyDatedStockCount(entries)
 }
 
 export const getRfidStatus = async (params = {}) => {
@@ -1064,9 +1133,56 @@ export const syncGoogleDriveNow = async () => {
   return syncGoogleDriveNowRequest()
 }
 
-export async function resetData(mode = 'sales') {
-  const result = await callSystemRuntimeMethod('resetData', mode)
-  await invalidateClientRuntimeState(mode === 'all' ? 'reset-data-all' : 'reset-data-sales')
+// Local Dexie mirror tables to clear per reset-data mode, matching what the
+// *server* actually deletes/zeroes for that mode (see cloudflare/src/routes/
+// system.ts's reset-data handler and coreDataInvariants.ts's
+// PRODUCTS_RESET_TABLES) -- not every locally-mirrored table. mode='all' is
+// deliberately left out of this map: it deletes almost the entire dataset
+// (see reset-data's mode==='all' branch), so it keeps the original
+// unscoped full-mirror wipe rather than needing its own near-total list.
+function resetDataMirrorTables(mode, options = {}) {
+  if (mode === 'products') {
+    const tables = ['products', 'branch_stock']
+    if (options.includeMovements) tables.push('inventory_movements', 'stock_transfers')
+    if (options.includeSales) tables.push('sales', 'sale_items', 'returns')
+    return tables
+  }
+  if (mode === 'sales') {
+    // Server deletes sales/returns/movements/transfers and zeroes stock
+    // quantities (branch_stock, products.stock_quantity) -- products rows
+    // themselves, customers, suppliers, and contacts are untouched.
+    return ['sales', 'sale_items', 'returns', 'inventory_movements', 'stock_transfers', 'branch_stock', 'products']
+  }
+  return undefined
+}
+
+export async function resetData(mode = 'sales', options = {}) {
+  const result = await callSystemRuntimeMethod('resetData', mode, options)
+  await invalidateClientRuntimeState(
+    mode === 'all' ? 'reset-data-all' : mode === 'products' ? 'reset-data-products' : 'reset-data-sales',
+    resetDataMirrorTables(mode, options),
+  )
+  return result
+}
+
+// Local mirror table(s) per reset-section section -- same one-table-in,
+// one-table-out shape as resetDataMirrorTables above, just simpler since
+// each of these four sections is already a single plain DELETE server-side
+// (see routes/system.ts's SECTION_CONFIG). customer_share_submissions
+// (the one section with a second server-side table) has no local Dexie
+// mirror table of its own to clear -- it was never mirrored locally in the
+// first place (not in localDb.ts's schema), so there's nothing to add here
+// for it.
+const RESET_SECTION_MIRROR_TABLES = {
+  customers: ['customers'],
+  suppliers: ['suppliers'],
+  delivery_contacts: ['delivery_contacts'],
+  audit_log: ['audit_logs'],
+}
+
+export async function resetSection(section) {
+  const result = await callSystemRuntimeMethod('resetSection', section)
+  await invalidateClientRuntimeState(`reset-section-${section}`, RESET_SECTION_MIRROR_TABLES[section] || [])
   return result
 }
 
@@ -1081,46 +1197,179 @@ export function downloadImportTemplate(type) {
   // 1) Branch by import entity and emit a CSV header-only template.
   // 2) Product template focuses on filename-based image columns.
   // 3) `image_conflict_mode` controls keep/replace/append behavior during bulk import.
+  // Note: internal bookkeeping columns (_action, _conflict_mode, _field_rules,
+  // _target_product_id, _parent_id, etc.) are deliberately excluded here - the
+  // import planner computes them automatically, so a blank template a person
+  // fills in by hand should start at the first real data column.
   if (type === 'customer') return downloadCustomerTemplate()
+  // gender and created_date (delivery contact template below) added for
+  // parity with the customer/supplier templates -- classifyContacts
+  // (importEngine.ts) parses both identically for delivery_contacts as it
+  // does for the other two contact tables.
   if (type === 'deliveryContact') return buildImportCsvTemplate([
-    '_conflict_mode', '_field_rules',
-    'name', 'phone', 'area', 'address', 'notes',
+    'name', 'phone', 'area', 'address', 'gender', 'created_date', 'notes',
     'contact_label_1','contact_name_1','contact_phone_1','contact_area_1',
     'contact_label_2','contact_name_2','contact_phone_2','contact_area_2',
     'contact_label_3','contact_name_3','contact_phone_3','contact_area_3',
   ], 'delivery-contacts-template.csv')
   if (type === 'supplier') return downloadSupplierTemplate()
   if (type === 'sales') {
+    // Sales import records HISTORY -- it links each line to a product but
+    // never deducts or adds stock on its own (the sale already happened,
+    // long before this file existed; deducting again would double-count
+    // against today's real stock). The one exception is sale_status
+    // 'returned'/'partial_return': that's stock physically coming back, so
+    // it's the one status that restocks -- see lib/salesStatus.ts and
+    // classifySales' own header comment on the reasoning.
+    // batch_label/returned_quantity only matter for a return: batch_label
+    // (optional) restocks a specific existing lot instead of just the
+    // branch total; returned_quantity (optional) says how much of THIS
+    // line actually came back -- leave both blank for a normal sale.
+    // discount_usd/tax_usd/exchange_rate/amount_paid_*/membership_*/
+    // delivery_* mirror the same order-level fields a manual POS checkout
+    // records (routes/sales.ts POST /) -- all optional, all default the
+    // same way an in-store sale with none of them filled in would (0
+    // discount/tax, full amount paid, no membership redemption, not a
+    // delivery). membership_points_redeemed is trusted as given, not
+    // re-validated against the customer's live points balance the way a
+    // real-time checkout redemption is -- that check exists to stop a
+    // replayed/stale live request from overspending a balance that could
+    // have changed since the cashier's screen last loaded it, which has
+    // no equivalent for a historical file being loaded once.
     return buildImportCsvTemplate([
-      '_conflict_mode',
-      'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency',
+      'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency', 'exchange_rate',
       'branch', 'customer_name', 'customer_phone', 'customer_address',
       'cashier_name', 'name', 'sku', 'barcode', 'quantity',
-      'unit_price_usd', 'unit_price_khr', 'notes',
-    ], 'sales-template.csv')
+      'unit_price_usd', 'unit_price_khr', 'batch_label', 'returned_quantity',
+      'discount_usd', 'discount_khr', 'tax_usd', 'amount_paid_usd', 'amount_paid_khr',
+      'membership_discount_usd', 'membership_discount_khr', 'membership_points_redeemed',
+      'is_delivery', 'delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address',
+      'delivery_fee_usd', 'delivery_fee_khr', 'delivery_fee_paid_by', 'notes',
+    ], 'sales-template.csv', {
+      receipt_number: 'RCT-1001', sale_date: '', sale_status: 'completed', payment_method: 'cash', payment_currency: 'USD', exchange_rate: '',
+      branch: 'Main Branch', customer_name: '', customer_phone: '', customer_address: '',
+      cashier_name: '', name: 'Iced Coffee', sku: 'BEV-001', barcode: '', quantity: '2',
+      unit_price_usd: '2.50', unit_price_khr: '', batch_label: '', returned_quantity: '',
+      discount_usd: '', discount_khr: '', tax_usd: '', amount_paid_usd: '5.00', amount_paid_khr: '',
+      membership_discount_usd: '', membership_discount_khr: '', membership_points_redeemed: '',
+      is_delivery: '', delivery_contact_name: '', delivery_contact_phone: '', delivery_contact_address: '',
+      delivery_fee_usd: '', delivery_fee_khr: '', delivery_fee_paid_by: '', notes: '',
+    })
+  }
+  // Inventory used to ship as one template with a free-text 'action' column
+  // (add/remove/set typed by hand into the CSV) -- easy to mistype, and
+  // easy to end up with a file that mixes actions row-to-row without
+  // meaning to. Split into one template per action instead: the action is
+  // now which template you downloaded, not a column value, so the import
+  // only ever needs the columns that action actually uses.
+  if (type === 'inventoryAdd') {
+    // Receiving stock: a positive quantity, plus the cost it came in at
+    // (optional -- updates the product's cost price when given, same
+    // as a manual product edit would). `date` is optional too -- when
+    // given, backdates the recorded movement to that date (e.g. "this
+    // stock actually arrived last Tuesday"); left blank, it lands at
+    // today/now, same as a manual Receive Stock action with no date
+    // typed in.
+    return buildImportCsvTemplate([
+      'date', 'branch', 'name', 'sku', 'barcode', 'quantity',
+      'unit_cost_usd', 'unit_cost_khr', 'reason',
+    ], 'inventory-add-template.csv', {
+      date: '', branch: 'Main Branch', name: 'Iced Coffee', sku: 'BEV-001', barcode: '',
+      quantity: '20', unit_cost_usd: '1.20', unit_cost_khr: '', reason: 'Restock from supplier',
+    })
+  }
+  if (type === 'inventoryRemove') {
+    // Removing stock (shrinkage, breakage, manual correction downward):
+    // quantity is how much to take out, always entered as a positive
+    // number -- no unit cost, since a removal doesn't change what the
+    // product is worth. `date` optional, same fallback-to-now rule as
+    // the 'add' template above.
+    return buildImportCsvTemplate([
+      'date', 'branch', 'name', 'sku', 'barcode', 'quantity', 'reason',
+    ], 'inventory-remove-template.csv', {
+      date: '', branch: 'Main Branch', name: 'Iced Coffee', sku: 'BEV-001', barcode: '',
+      quantity: '2', reason: 'Damaged in storage',
+    })
+  }
+  if (type === 'inventorySet') {
+    // Setting an exact count (stock take / physical count reconciliation):
+    // quantity is the true on-hand count, not a delta -- the import
+    // computes the add/remove movement needed to reach it. `date`
+    // optional, same fallback-to-now rule as above.
+    return buildImportCsvTemplate([
+      'date', 'branch', 'name', 'sku', 'barcode', 'quantity', 'reason',
+    ], 'inventory-set-template.csv', {
+      date: '', branch: 'Main Branch', name: 'Iced Coffee', sku: 'BEV-001', barcode: '',
+      quantity: '38', reason: 'Physical count',
+    })
   }
   if (type === 'inventory') {
+    // Legacy combined template, kept for anyone with an existing
+    // spreadsheet/integration built against the old single-file shape --
+    // still reads 'action' per row rather than being tied to one action.
     return buildImportCsvTemplate([
-      '_conflict_mode',
       'date', 'action', 'branch', 'name', 'sku', 'barcode', 'quantity',
       'unit_cost_usd', 'unit_cost_khr', 'reason',
-    ], 'inventory-template.csv')
+    ], 'inventory-template.csv', {
+      date: '', action: 'in', branch: 'Main Branch', name: 'Iced Coffee', sku: 'BEV-001', barcode: '',
+      quantity: '20', unit_cost_usd: '1.20', unit_cost_khr: '', reason: 'Restock from supplier',
+    })
   }
+  // Discount columns and image_conflict_mode dropped from this template
+  // (Aug 23 2026, user request). Discounts/promotions are their own
+  // dedicated flow (Promotions) -- not something a person setting up a
+  // product catalog actually filled in by hand here, and they made the
+  // template wider plus needed their own explanation paragraph below for
+  // a feature most imports never touch. image_conflict_mode is similar:
+  // BulkImportModal's review step already asks per-row (or in bulk) what
+  // to do with a product's existing images via an interactive picker,
+  // with a sensible automatic default already computed from whether the
+  // row has incoming images (see buildCsvForImportJob's own
+  // `image_conflict_mode:` line in BulkImportModal.tsx) -- the CSV column
+  // was a redundant, easy-to-get-wrong second way to set the same thing
+  // by hand. Removing both here only removes the blank-template columns;
+  // the underlying import behavior and the review screen's picker are
+  // unchanged.
   return buildImportCsvTemplate([
-    '_action','_target_product_id','_parent_id','_field_rules',
     'name','sku','barcode','category','brand','unit','description',
     'selling_price_usd','selling_price_khr',
     'special_price_usd','special_price_khr',
-    'discount_enabled','discount_type','discount_percent','discount_amount_usd','discount_amount_khr',
-    'discount_label','discount_badge_color','discount_starts_at','discount_ends_at',
-    'purchase_price_usd','purchase_price_khr',
-    'stock_quantity','low_stock_threshold','expiry_date','expiry_alert_days',
+    'cost_price_usd','cost_price_khr',
+    'stock_quantity','low_stock_threshold','batch(mm/dd/yyyy)','expiry_date','expiry_alert_days',
     'branch','supplier',
     'parent_id','is_group',
     'image_filename_1','image_filename_2','image_filename_3','image_filename_4','image_filename_5',
-    'image_filenames','image_conflict_mode',
+    'image_filenames',
     'is_active'
-  ], 'products-template.csv')
+  ], 'products-template.csv', {
+    name: 'Iced Coffee', sku: 'BEV-001', barcode: '', category: 'Beverages', brand: '', unit: 'cup',
+    description: '', selling_price_usd: '2.50', selling_price_khr: '',
+    special_price_usd: '', special_price_khr: '',
+    cost_price_usd: '1.20', cost_price_khr: '',
+    stock_quantity: '40', low_stock_threshold: '10',
+    // Column consolidation (Aug 24 2026): the old separate `batch` label
+    // column and `date` column are now one column, `batch(mm/dd/yyyy)`.
+    // Leave it blank to let the system stamp today's date and
+    // auto-derive the batch code from it, or fill in a specific received
+    // date (e.g. "08/24/2026") -- the system reads that date and
+    // auto-formats it into the stored batch code (e.g. "AUG242026") for
+    // you; there's no separate free-typed label to fill in anymore.
+    'batch(mm/dd/yyyy)': '', expiry_date: '', expiry_alert_days: '30',
+    branch: 'Main Branch', supplier: '',
+    parent_id: '', is_group: '',
+    // Naming convention: spaces in the product name stay as real spaces,
+    // only characters a filename can't contain (/, \, :, etc.) become a
+    // dash -- see importImageMatch.ts's sanitizeBaseName/normalizeImageMatchKey
+    // for the authoritative rule. The trailing _1/_2/.../_n is the per-image
+    // index, always an underscore regardless of what's in the name itself.
+    // "iced-coffee.jpg" was a misleading example: "Iced Coffee" has a
+    // space, not a disallowed character, so it should never come out
+    // dash-joined -- that shape is what "10/20ml.jpg" would produce, not this.
+    image_filename_1: 'Iced Coffee_1.jpg', image_filename_2: '', image_filename_3: '',
+    image_filename_4: '', image_filename_5: '',
+    image_filenames: '',
+    is_active: '1',
+  })
 }
 
 // ─── No-ops for API compatibility ────────────────────────────────────────────

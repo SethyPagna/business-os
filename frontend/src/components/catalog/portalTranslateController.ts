@@ -309,6 +309,10 @@ export function readStoredTranslateTarget(sourceLang: unknown): string {
   return 'original'
 }
 
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
+}
+
 export function requestPortalTranslateReload(reason = 'translate-change', minIntervalMs = 5000): boolean {
   if (typeof window === 'undefined') return false
   const now = Date.now()

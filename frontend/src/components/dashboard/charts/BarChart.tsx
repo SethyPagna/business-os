@@ -42,7 +42,7 @@ function formatAxisLabel(value: unknown, includeYear = false): string {
   return raw.length > 5 ? raw.slice(-5) : raw
 }
 
-export default function BarChart({ data, valueKey, labelKey, color = '#2563eb', isCount = false }: BarChartProps) {
+export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', isCount = false }: BarChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const [chartWidth, setChartWidth] = useState(760)
   const [tooltip, setTooltip] = useState<BarTooltip | null>(null)
@@ -118,14 +118,14 @@ export default function BarChart({ data, valueKey, labelKey, color = '#2563eb', 
           if (y < PAD_T) return null
           return (
             <g key={v}>
-              <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1.15" strokeDasharray="4 5" />
-              <text x={PAD_L - 9} y={y + axisFontSize * 0.34} textAnchor="end" fontSize={axisFontSize} fontWeight="700" fill="#64748b">
+              <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="currentColor" strokeWidth="1.15" strokeDasharray="4 5" className="text-slate-200 dark:text-slate-700" style={{ color: '#e2e8f0' }} />
+              <text x={PAD_L - 9} y={y + axisFontSize * 0.34} textAnchor="end" fontSize={axisFontSize} fontWeight="700" fill="currentColor" className="text-slate-500 dark:text-slate-400" style={{ color: '#64748b' }}>
                 {isCount ? fmtCount(v) : fmtShort(v)}
               </text>
             </g>
           )
         })}
-        <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH} stroke="#cbd5e1" strokeWidth="1.35" />
+        <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH} stroke="currentColor" strokeWidth="1.35" className="text-slate-300 dark:text-slate-600" style={{ color: '#cbd5e1' }} />
 
         {data.map((d, i) => {
           const val = Number(d[valueKey]) || 0
@@ -164,7 +164,7 @@ export default function BarChart({ data, valueKey, labelKey, color = '#2563eb', 
                 </text>
               )}
               {showLbl && (
-                <text x={cx} y={PAD_T + plotH + 24} textAnchor="middle" fontSize={xFontSize} fontWeight="700" fill="#475569">
+                <text x={cx} y={PAD_T + plotH + 24} textAnchor="middle" fontSize={xFontSize} fontWeight="700" fill="currentColor" className="text-slate-600 dark:text-slate-300" style={{ color: '#475569' }}>
                   {lbl}
                 </text>
               )}

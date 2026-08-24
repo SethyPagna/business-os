@@ -14,7 +14,7 @@ type NormalizedZipFile = {
   content: string
 }
 
-function escapeCsvValue(value: unknown): string {
+export function escapeCsvValue(value: unknown): string {
   if (value == null) return ''
   let text = String(value)
   if (/^[=+\-@]/.test(text) || /^[\t\r]/.test(text)) {
@@ -110,42 +110,99 @@ function encodeZipTimestamp(date = new Date()): { time: number; date: number } {
   }
 }
 
-export function buildZip(files: ZipFileInput[] = []): Blob | null {
+// ZIP compression method codes. STORE (0) writes bytes as-is; DEFLATE (8) is
+// the one non-stored method cloudflare/src/lib/zipReader.ts already knows how
+// to decompress (it uses the same `DecompressionStream('deflate-raw')` this
+// module's `deflateRaw` mirrors), so a report package built here would still
+// open correctly if it ever needed to round-trip through that reader.
+const ZIP_METHOD_STORE = 0
+const ZIP_METHOD_DEFLATE = 8
+
+function supportsDeflate(): boolean {
+  return typeof CompressionStream === 'function' && typeof Blob === 'function' && typeof Response === 'function'
+}
+
+// Deflates one entry's bytes via the browser/runtime's built-in
+// CompressionStream -- no bundled zip library needed, same "use what the
+// platform already gives us" approach as zipReader.ts's DecompressionStream
+// use on the read side. Returns null (never throws) when unsupported or on
+// any encoding failure, so callers always have a safe STORE fallback -- the
+// same never-block-on-a-compression-failure contract as
+// imageCompression.ts/videoCompression.ts.
+async function deflateRaw(bytes: Uint8Array): Promise<Uint8Array | null> {
+  if (!supportsDeflate()) return null
+  try {
+    const stream = new Blob([toBlobPart(bytes)]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+    const buffer = await new Response(stream).arrayBuffer()
+    return new Uint8Array(buffer)
+  } catch {
+    return null
+  }
+}
+
+type ZipEntry = {
+  name: string
+  storedBytes: Uint8Array
+  uncompressedSize: number
+  method: number
+  checksum: number
+}
+
+// Compresses every entry (CSV/HTML report text compresses very well, often
+// 70-90% smaller) and picks STORE per-file instead when deflate doesn't
+// actually help -- tiny files or already-dense content can grow slightly
+// under deflate's per-block overhead, so this never ships something bigger
+// than the uncompressed bytes, mirroring compressImageFile's "never ship
+// bigger than what was already there" rule. Deflate is byte-exact and
+// reversible, so a compressed entry decompresses to identical content --
+// nothing here can silently corrupt or truncate a row.
+async function buildZipEntries(files: ZipFileInput[]): Promise<{ entries: ZipEntry[]; encoder: TextEncoder }> {
   const encoder = new TextEncoder()
   const normalizedFiles = files
     .map(normalizeZipFile)
     .filter((file): file is NormalizedZipFile => Boolean(file))
-    .map((file) => ({
-      name: file.name,
-      bytes: encoder.encode(file.content),
-    }))
-  if (!normalizedFiles.length) return null
+    .map((file) => ({ name: file.name, bytes: encoder.encode(file.content) }))
+
+  const entries = await Promise.all(normalizedFiles.map(async (file) => {
+    const checksum = crc32(file.bytes)
+    const deflated = file.bytes.length ? await deflateRaw(file.bytes) : null
+    if (deflated && deflated.length < file.bytes.length) {
+      return { name: file.name, storedBytes: deflated, uncompressedSize: file.bytes.length, method: ZIP_METHOD_DEFLATE, checksum }
+    }
+    return { name: file.name, storedBytes: file.bytes, uncompressedSize: file.bytes.length, method: ZIP_METHOD_STORE, checksum }
+  }))
+
+  return { entries, encoder }
+}
+
+export async function buildZip(files: ZipFileInput[] = []): Promise<Blob | null> {
+  const { entries, encoder } = await buildZipEntries(files)
+  if (!entries.length) return null
 
   const localParts: Uint8Array[] = []
   const centralParts: Uint8Array[] = []
   let offset = 0
   const { time, date } = encodeZipTimestamp(new Date())
 
-  normalizedFiles.forEach((file) => {
-    const nameBytes = encoder.encode(file.name)
-    const contentBytes = file.bytes
-    const checksum = crc32(contentBytes)
+  entries.forEach((entry) => {
+    const nameBytes = encoder.encode(entry.name)
+    const compressedBytes = entry.storedBytes
 
     const localHeader = new Uint8Array(30 + nameBytes.length)
     const localView = new DataView(localHeader.buffer)
     writeUint32(localView, 0, 0x04034b50)
     writeUint16(localView, 4, 20)
     writeUint16(localView, 6, 0)
-    writeUint16(localView, 8, 0)
+    writeUint16(localView, 8, entry.method)
     writeUint16(localView, 10, time)
     writeUint16(localView, 12, date)
-    writeUint32(localView, 14, checksum)
-    writeUint32(localView, 18, contentBytes.length)
-    writeUint32(localView, 22, contentBytes.length)
+    writeUint32(localView, 14, entry.checksum)
+    writeUint32(localView, 18, compressedBytes.length)
+    writeUint32(localView, 22, entry.uncompressedSize)
     writeUint16(localView, 26, nameBytes.length)
     writeUint16(localView, 28, 0)
     localHeader.set(nameBytes, 30)
-    localParts.push(localHeader, contentBytes)
+    localParts.push(localHeader, compressedBytes)
 
     const centralHeader = new Uint8Array(46 + nameBytes.length)
     const centralView = new DataView(centralHeader.buffer)
@@ -153,12 +210,12 @@ export function buildZip(files: ZipFileInput[] = []): Blob | null {
     writeUint16(centralView, 4, 20)
     writeUint16(centralView, 6, 20)
     writeUint16(centralView, 8, 0)
-    writeUint16(centralView, 10, 0)
+    writeUint16(centralView, 10, entry.method)
     writeUint16(centralView, 12, time)
     writeUint16(centralView, 14, date)
-    writeUint32(centralView, 16, checksum)
-    writeUint32(centralView, 20, contentBytes.length)
-    writeUint32(centralView, 24, contentBytes.length)
+    writeUint32(centralView, 16, entry.checksum)
+    writeUint32(centralView, 20, compressedBytes.length)
+    writeUint32(centralView, 24, entry.uncompressedSize)
     writeUint16(centralView, 28, nameBytes.length)
     writeUint16(centralView, 30, 0)
     writeUint16(centralView, 32, 0)
@@ -169,7 +226,7 @@ export function buildZip(files: ZipFileInput[] = []): Blob | null {
     centralHeader.set(nameBytes, 46)
     centralParts.push(centralHeader)
 
-    offset += localHeader.length + contentBytes.length
+    offset += localHeader.length + compressedBytes.length
   })
 
   const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0)
@@ -178,8 +235,8 @@ export function buildZip(files: ZipFileInput[] = []): Blob | null {
   writeUint32(endView, 0, 0x06054b50)
   writeUint16(endView, 4, 0)
   writeUint16(endView, 6, 0)
-  writeUint16(endView, 8, normalizedFiles.length)
-  writeUint16(endView, 10, normalizedFiles.length)
+  writeUint16(endView, 8, entries.length)
+  writeUint16(endView, 10, entries.length)
   writeUint32(endView, 12, centralSize)
   writeUint32(endView, 16, offset)
   writeUint16(endView, 20, 0)
@@ -189,17 +246,17 @@ export function buildZip(files: ZipFileInput[] = []): Blob | null {
 
 export function buildZipInWorker(files: ZipFileInput[] = [], options: { timeoutMs?: unknown } = {}): Promise<Blob | null> {
   const timeoutMs = Number(options.timeoutMs || ZIP_EXPORT_WORKER_TIMEOUT_MS)
-  if (typeof Worker !== 'function') return Promise.resolve(buildZip(files))
+  if (typeof Worker !== 'function') return buildZip(files)
   return new Promise((resolve) => {
     let worker: Worker | null = null
     let settled = false
     let timeout: ReturnType<typeof globalThis.setTimeout> | null = null
-    const finish = (blob: Blob | null): void => {
+    const finish = (blob: Blob | null | Promise<Blob | null>): void => {
       if (settled) return
       settled = true
       if (timeout != null) globalThis.clearTimeout(timeout)
       worker?.terminate()
-      resolve(blob || buildZip(files))
+      Promise.resolve(blob).then((resolved) => resolve(resolved || buildZip(files))).catch(() => resolve(buildZip(files)))
     }
     timeout = globalThis.setTimeout(() => finish(buildZip(files)), timeoutMs)
     try {
@@ -216,8 +273,8 @@ export function buildZipInWorker(files: ZipFileInput[] = [], options: { timeoutM
   })
 }
 
-export function downloadZipFiles(filename: string, files: ZipFileInput[] = []): void {
-  const blob = buildZip(files)
+export async function downloadZipFiles(filename: string, files: ZipFileInput[] = []): Promise<void> {
+  const blob = await buildZip(files)
   if (!blob) return
   downloadBlob(filename, blob)
 }

@@ -1,3 +1,9 @@
+import History from 'lucide-react/dist/esm/icons/history.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import X from 'lucide-react/dist/esm/icons/x.js'
+import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
+import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
+import Layers from 'lucide-react/dist/esm/icons/layers.js'
 import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { buildBatchPreview, getVisibleProductBatches } from '../../utils/productBatches.ts'
 
@@ -52,7 +58,8 @@ interface ProductDetailModalProps {
   onClose: () => void
   onAdjust: ProductAction
   onTransfer?: ProductAction
-  onMoveRow?: ProductAction
+  onViewHistory?: ProductAction
+  onManageBatches?: ProductAction
   fmtUSD: MoneyFormatter
   fmtKHR: MoneyFormatter
   t?: TranslateFn
@@ -62,7 +69,7 @@ function getBranchStockKey(branchStock: BranchStockEntry, index: number): string
   return String(branchStock.branch_id ?? `${branchStock.branch_name || 'branch'}-${index}`)
 }
 
-export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onMoveRow, fmtUSD, fmtKHR, t }: ProductDetailModalProps) {
+export default function ProductDetailModal({ product: p, onClose, onAdjust, onTransfer, onViewHistory, onManageBatches, fmtUSD, fmtKHR, t }: ProductDetailModalProps) {
   const T = (key: string, fallback: string): string => (typeof t === 'function' ? t(key) : fallback) || fallback
   if (!p) return null
 
@@ -92,8 +99,12 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const branchStock = Array.isArray(p.branch_stock) ? p.branch_stock : []
   const branchCount = branchStock.length
   const promotion = calculateProductDiscount(p)
-  const visibleBatches = getVisibleProductBatches(p)
-  const batchPreview = buildBatchPreview(p, 'all', { limit: 8 }) as {
+  // includeEmpty: true -- same "day added" default-batch reasoning as the
+  // Products surface detail modal (see utils/productBatches.ts): the full
+  // detail view should still surface a fresh product's zero-stock starter
+  // batch instead of showing an empty Batches section.
+  const visibleBatches = getVisibleProductBatches(p, 'all', { includeEmpty: true })
+  const batchPreview = buildBatchPreview(p, 'all', { limit: 8, includeEmpty: true }) as {
     items: ProductBatchEntry[]
     extraCount: number
   }
@@ -101,17 +112,23 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="flex max-h-modal-90 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex-1">
             <div className="font-bold text-gray-900 dark:text-white">{p.name}</div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-2">
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {p.sku ? <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-400 dark:bg-gray-700">{p.sku}</span> : null}
               {p.category ? <span className="text-xs text-blue-600 dark:text-blue-400">{p.category}</span> : null}
               {p.unit ? <span className="text-xs text-gray-400">/{p.unit}</span> : null}
+              {/* Brand + barcode moved here from their own detail rows below --
+                  same text-xs sizing as the rest of this line, so they reuse
+                  this row's existing wrap space instead of costing a new
+                  row's worth of vertical space every time. */}
+              {p.brand ? <span className="text-xs text-gray-400">&middot; {p.brand}</span> : null}
+              {p.barcode ? <span className="font-mono text-xs text-gray-400">&middot; {p.barcode}</span> : null}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-2xl text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}>x</button>
+          <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>
         </div>
 
         <div className="modal-scroll space-y-3 p-4">
@@ -126,10 +143,9 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 style={{ width: `${Math.max(2, Math.min(100, stockPct))}%` }}
               />
             </div>
-            <div className="grid grid-cols-3 gap-2 pt-1 text-center">
+            <div className="grid grid-cols-2 gap-2 pt-1 text-center">
               {[
                 { label: T('low_stock_threshold', 'Low stock threshold'), value: `${lowStockThreshold} ${p.unit || ''}` },
-                { label: T('branches', 'Branches'), value: String(branchCount || 0) },
                 { label: T('batches', 'Batches'), value: String(batchCount || 0) },
               ].map((item) => (
                 <div key={item.label} className="rounded-lg bg-white/80 px-2 py-1.5 dark:bg-slate-800/60">
@@ -138,10 +154,23 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 </div>
               ))}
             </div>
+            {onViewHistory ? (
+              <button
+                type="button"
+                onClick={() => onViewHistory(p)}
+                className="mt-2 flex w-full items-center justify-between rounded-lg bg-white/80 px-2.5 py-1.5 text-left text-xs text-gray-500 transition-colors hover:bg-white hover:text-gray-700 dark:bg-slate-800/60 dark:text-gray-400 dark:hover:bg-slate-800 dark:hover:text-gray-200"
+              >
+                <span className="flex items-center gap-1.5">
+                  <History className="h-3.5 w-3.5" />
+                  {T('view_stock_history', 'View stock history (in, out, sales, returns, imports...)')}
+                </span>
+                <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
+              </button>
+            ) : null}
           </div>
 
           <div className="space-y-3">
-            <div className={`grid gap-3 ${hasSpecialPrice ? 'grid-cols-1 sm:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'}`}>
+            <div className={`grid gap-2 sm:gap-3 ${hasSpecialPrice ? 'grid-cols-3' : 'grid-cols-2'}`}>
               <div className="rounded-xl bg-red-50 p-3 dark:bg-red-900/20">
                 <div className="mb-1 text-xs font-semibold text-red-600 dark:text-red-400">{T('label_cost_purchase', 'Cost Price')}</div>
                 <div className="font-bold text-red-700 dark:text-red-300">{fmtUSD(costPriceUsd)}</div>
@@ -160,7 +189,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 </div>
               ) : null}
             </div>
-            <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+            <div className="grid grid-cols-4 gap-1.5 text-center sm:gap-2">
               {[
                 { label: T('stock_val', 'Stock Value'), value: fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' },
                 { label: T('active_price', 'Active Price'), value: fmtUSD(activePriceUsd), tone: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-50 dark:bg-blue-900/20' },
@@ -184,10 +213,10 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
 
           <div className="grid gap-2 sm:grid-cols-2 sm:gap-x-4">
             {[
-              [T('label_brand', 'Brand'), p.brand],
+              // Brand + barcode now live in the header row next to the
+              // category/unit line -- kept out of this list to avoid
+              // showing them twice.
               [T('label_sku', 'SKU'), p.sku],
-              [T('label_barcode', 'Barcode'), p.barcode],
-              [T('label_unit', 'Unit'), p.unit],
               [T('label_supplier', 'Supplier'), p.supplier],
               [T('label_description', 'Description'), p.description],
             ].filter(([, value]) => value).map(([label, value]) => (
@@ -255,10 +284,50 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           ) : null}
         </div>
 
-        <div className="grid flex-shrink-0 gap-2 border-t border-gray-200 p-3 dark:border-gray-700 sm:grid-cols-3">
-          <button type="button" onClick={() => { onClose(); onAdjust(p) }} className="btn-primary w-full py-2.5 text-sm">{T('adjust_stock', 'Adjust Stock')}</button>
-          <button type="button" onClick={() => { onClose(); onTransfer?.(p) }} className="btn-secondary w-full py-2.5 text-sm">{T('transfer', 'Transfer')}</button>
-          <button type="button" onClick={() => { onClose(); onMoveRow?.(p) }} className="btn-secondary w-full py-2.5 text-sm">{T('move_stock', 'Move Stock')}</button>
+        {/* Icon + label at sm: and up, icon-only (label visually hidden,
+            kept for screen readers via aria-label + a title tooltip) below
+            sm -- same "Product detail-view button layout" convention
+            Products' own ProductDetailModal.tsx already uses (Parts
+            227/241/244), brought here to close the "every other sheet/page
+            ... still open" half of that backlog item (Part 245's
+            writeup). Adjust Stock's icon switched from plain text to
+            SlidersHorizontal per that item's explicit "needs a better/more
+            literal 'adjust' icon" ask -- same icon Products' own detail
+            modal uses for the same action, so the two pages read
+            consistently. */}
+        <div className="grid grid-cols-2 flex-shrink-0 gap-1.5 border-t border-gray-200 p-3 dark:border-gray-700 sm:grid-cols-4 sm:gap-2">
+          <button
+            type="button"
+            onClick={() => { onClose(); onAdjust(p) }}
+            className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+            aria-label={T('adjust_stock', 'Adjust Stock')}
+            title={T('adjust_stock', 'Adjust Stock')}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="hidden truncate sm:inline">{T('adjust_stock', 'Adjust Stock')}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { onClose(); onTransfer?.(p) }}
+            className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+            aria-label={T('transfer', 'Transfer')}
+            title={T('transfer', 'Transfer')}
+          >
+            <ArrowRightLeft className="h-3.5 w-3.5 flex-shrink-0" />
+            <span className="hidden truncate sm:inline">{T('transfer', 'Transfer')}</span>
+          </button>
+          {onManageBatches ? (
+            <button
+              type="button"
+              onClick={() => { onClose(); onManageBatches(p) }}
+              className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              aria-label={T('manage_batches', 'Manage Batches')}
+              title={T('manage_batches', 'Manage Batches')}
+            >
+              <Layers className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="hidden truncate sm:inline">{T('manage_batches', 'Manage Batches')}</span>
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

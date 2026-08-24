@@ -18,12 +18,19 @@ export type ReceiptTemplate = {
   show_customer_name: boolean
   show_customer_phone: boolean
   show_customer_address: boolean
+  show_customer_membership: boolean
   show_item_sku: boolean
   show_item_qty: boolean
   show_item_unit_price: boolean
   show_item_khr: boolean
+  show_item_discount: boolean
+  show_discount_khr: boolean
+  show_membership_discount_khr: boolean
+  show_delivery_khr: boolean
   show_subtotal: boolean
   show_discount: boolean
+  show_membership_discount: boolean
+  show_membership_points: boolean
   show_tax: boolean
   show_delivery: boolean
   show_total_khr: boolean
@@ -44,6 +51,23 @@ export type ReceiptTemplate = {
   discount_position: 'before_tax' | string
   show_emojis: boolean
   field_order: string[]
+  show_qr_codes: boolean
+  qr_show_portal: boolean
+  qr_portal_url: string
+  qr_portal_label: string
+  qr_show_social: boolean
+  qr_social_links: ReceiptQrSocialLink[]
+  sales_receipt_enabled: boolean
+  sales_receipt_aba_account_name: string
+  sales_receipt_aba_account_number: string
+  sales_receipt_aba_qr_image: string
+  sales_receipt_note: 'none' | 'received_payment' | string
+}
+
+export type ReceiptQrSocialLink = {
+  id: string
+  label: string
+  url: string
 }
 
 export type ReceiptFieldItem = {
@@ -75,12 +99,19 @@ export const DEFAULT_TEMPLATE: ReceiptTemplate = {
   show_customer_name: true,
   show_customer_phone: true,
   show_customer_address: true,
+  show_customer_membership: true,
   show_item_sku: false,
   show_item_qty: true,
   show_item_unit_price: true,
   show_item_khr: true,
+  show_item_discount: true,
+  show_discount_khr: true,
+  show_membership_discount_khr: true,
+  show_delivery_khr: true,
   show_subtotal: true,
   show_discount: true,
+  show_membership_discount: true,
+  show_membership_points: true,
   show_tax: true,
   show_delivery: true,
   show_total_khr: true,
@@ -104,6 +135,17 @@ export const DEFAULT_TEMPLATE: ReceiptTemplate = {
     'header', 'order_info', 'customer', 'delivery', 'items', 'subtotal',
     'discount', 'tax', 'delivery_fee', 'total', 'payment', 'change', 'footer',
   ],
+  show_qr_codes: false,
+  qr_show_portal: true,
+  qr_portal_url: '',
+  qr_portal_label: '',
+  qr_show_social: false,
+  qr_social_links: [],
+  sales_receipt_enabled: false,
+  sales_receipt_aba_account_name: '',
+  sales_receipt_aba_account_number: '',
+  sales_receipt_aba_qr_image: '',
+  sales_receipt_note: 'none',
 }
 
 export function getFieldItems(t: TranslateReceiptLabel | null): ReceiptFieldItem[] {
@@ -132,6 +174,7 @@ export function getFieldItems(t: TranslateReceiptLabel | null): ReceiptFieldItem
     { key: 'show_customer_name', label: T('customer_name', 'Customer Name'), section: sections.customer, desc: T('rfd_customer_name', 'Customer name on receipt') },
     { key: 'show_customer_phone', label: T('customer_phone', 'Customer Phone'), section: sections.customer, desc: T('rfd_customer_phone', 'Customer phone') },
     { key: 'show_customer_address', label: T('customer_address', 'Customer Address'), section: sections.customer, desc: T('rfd_customer_address', 'Customer address') },
+    { key: 'show_customer_membership', label: T('customer_membership_id', 'Membership ID'), section: sections.customer, desc: T('rfd_customer_membership', 'Customer membership number') },
     { key: 'delivery_show_contact', label: T('delivery_contact', 'Delivery Contact'), section: sections.delivery, desc: T('rfd_delivery_contact', 'Master switch for delivery contact fields') },
     { key: 'delivery_show_driver_name', label: T('show_delivery_driver_name', 'Show Driver Name'), section: sections.delivery, desc: T('rfd_delivery_driver_name', 'Driver/rider name on receipt') },
     { key: 'delivery_show_driver_phone', label: T('show_delivery_driver_phone', 'Show Driver Phone'), section: sections.delivery, desc: T('rfd_delivery_driver_phone', 'Driver/rider phone on receipt') },
@@ -141,11 +184,17 @@ export function getFieldItems(t: TranslateReceiptLabel | null): ReceiptFieldItem
     { key: 'show_item_qty', label: T('item_qty', 'Quantity'), section: sections.items, desc: T('rfd_item_qty', 'Qty multiplier') },
     { key: 'show_item_unit_price', label: T('item_unit_price', 'Unit Price'), section: sections.items, desc: T('rfd_item_unit_price', 'Price per unit') },
     { key: 'show_item_khr', label: T('item_khr', 'Price in KHR'), section: sections.items, desc: T('rfd_item_khr', 'Secondary KHR price per item') },
+    { key: 'show_item_discount', label: T('item_discount', 'Per-Item Discount'), section: sections.items, desc: T('rfd_item_discount', 'Show original price + savings when a product-level discount was applied') },
     { key: 'item_separator', label: T('item_separator', 'Item Separator'), section: sections.items, desc: T('rfd_item_separator', 'Line between items') },
     { key: 'show_subtotal', label: T('subtotal', 'Subtotal'), section: sections.totals, desc: T('rfd_subtotal', 'Sum before discounts/tax') },
     { key: 'show_discount', label: T('discount', 'Discount'), section: sections.totals, desc: T('rfd_discount', 'Applied discount amount') },
+    { key: 'show_discount_khr', label: T('discount_khr', 'Discount in KHR'), section: sections.totals, desc: T('rfd_discount_khr', 'Secondary KHR amount under discount') },
+    { key: 'show_membership_discount', label: T('membership_discount_field', 'Membership Discount'), section: sections.totals, desc: T('rfd_membership_discount', 'Discount earned from membership tier') },
+    { key: 'show_membership_discount_khr', label: T('membership_discount_khr', 'Membership Discount in KHR'), section: sections.totals, desc: T('rfd_membership_discount_khr', 'Secondary KHR amount under membership discount') },
+    { key: 'show_membership_points', label: T('membership_points_field', 'Membership Points Redeemed'), section: sections.totals, desc: T('rfd_membership_points', 'Points redeemed on this sale') },
     { key: 'show_tax', label: T('tax', 'Tax'), section: sections.totals, desc: T('rfd_tax', 'Tax amount line') },
     { key: 'show_delivery', label: T('delivery_fee_row', 'Delivery Fee Row'), section: sections.totals, desc: T('rfd_delivery_fee_row', 'Delivery fee in totals section') },
+    { key: 'show_delivery_khr', label: T('delivery_khr', 'Delivery in KHR'), section: sections.totals, desc: T('rfd_delivery_khr', 'Secondary KHR amount under delivery fee') },
     { key: 'show_total_khr', label: T('total_khr', 'Total in KHR'), section: sections.totals, desc: T('rfd_total_khr', 'KHR equivalent of total') },
     { key: 'show_amount_paid', label: T('amount_paid', 'Amount Paid'), section: sections.totals, desc: T('rfd_amount_paid', 'Amount customer tendered') },
     { key: 'show_change', label: T('change', 'Change'), section: sections.totals, desc: T('rfd_change', 'Change given back') },

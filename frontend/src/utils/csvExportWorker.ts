@@ -23,10 +23,10 @@ function getErrorMessage(error: unknown): string {
 
 const workerSelf = self as unknown as CsvExportWorkerScope
 
-workerSelf.addEventListener('message', (event: MessageEvent<CsvExportWorkerRequest>) => {
+workerSelf.addEventListener('message', async (event: MessageEvent<CsvExportWorkerRequest>) => {
   const { id, files } = event.data || {}
   try {
-    const blob = buildZip(Array.isArray(files) ? files as CsvExportFile[] : [])
+    const blob = await buildZip(Array.isArray(files) ? files as CsvExportFile[] : [])
     workerSelf.postMessage({ id, type: 'result', blob })
   } catch (error) {
     workerSelf.postMessage({ id, type: 'error', error: getErrorMessage(error) })

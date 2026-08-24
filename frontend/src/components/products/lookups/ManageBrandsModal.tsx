@@ -587,7 +587,7 @@ export default function ManageBrandsModal({
     <Modal title={`${t('brand') || 'Brand'} ${t('manage') || 'Manage'}`} onClose={onClose}>
       <div className="space-y-4">
         {error ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{error}</div> : null}
-        <ActionHistoryBar history={actionHistoryForBar} />
+        <ActionHistoryBar history={actionHistoryForBar} t={t} />
 
         <div className="flex items-end gap-2">
           <div className="flex-1">

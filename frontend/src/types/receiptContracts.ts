@@ -18,12 +18,19 @@ export interface NormalizedReceiptTemplate {
   show_customer_name: boolean
   show_customer_phone: boolean
   show_customer_address: boolean
+  show_customer_membership: boolean
   show_item_sku: boolean
   show_item_qty: boolean
   show_item_unit_price: boolean
   show_item_khr: boolean
+  show_item_discount: boolean
+  show_discount_khr: boolean
+  show_membership_discount_khr: boolean
+  show_delivery_khr: boolean
   show_subtotal: boolean
   show_discount: boolean
+  show_membership_discount: boolean
+  show_membership_points: boolean
   show_tax: boolean
   show_delivery: boolean
   show_total_khr: boolean
@@ -44,6 +51,17 @@ export interface NormalizedReceiptTemplate {
   discount_position: string
   show_emojis: boolean
   field_order: string[]
+  show_qr_codes: boolean
+  qr_show_portal: boolean
+  qr_portal_url: string
+  qr_portal_label: string
+  qr_show_social: boolean
+  qr_social_links: Array<{ id: string; label: string; url: string }>
+  sales_receipt_enabled: boolean
+  sales_receipt_aba_account_name: string
+  sales_receipt_aba_account_number: string
+  sales_receipt_aba_qr_image: string
+  sales_receipt_note: string
 }
 
 export interface ReceiptPrintSettings {

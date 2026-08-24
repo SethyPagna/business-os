@@ -4,6 +4,7 @@ import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 type InventoryMovementParams = {
   branchId?: string | number | null
   userId?: string | number | null
+  productId?: string | number | null
   search?: string | null
   searchMode?: string | null
   startDate?: string | null
@@ -31,16 +32,16 @@ function readInventoryCache(cacheKey: string): Promise<unknown> {
   return import('./queryCache.ts').then(({ readCachedQueryResult }) => readCachedQueryResult(cacheKey))
 }
 
-function routeCachedInventoryQuery(cacheKey: string, path: string): Promise<unknown> {
+function routeCachedInventoryQuery(cacheKey: string, path: string, searchGroup?: string): Promise<unknown> {
   return route(
     cacheKey,
-    async () => {
-      const result = await apiFetch('GET', path)
+    async (signal?: AbortSignal) => {
+      const result = await apiFetch('GET', path, undefined, undefined, { signal })
       scheduleInventoryCacheWrite(cacheKey, result)
       return result
     },
     () => readInventoryCache(cacheKey),
-    { raceLocalFallback: false },
+    { raceLocalFallback: false, searchGroup },
   )
 }
 
@@ -65,18 +66,22 @@ export function getInventoryStats(params: QueryParams = {}): Promise<unknown> {
 export function searchInventoryProducts(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `inventory:products:search:v2:${query}`
-  return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/products/search', query))
+  // Stable group (not the per-query cacheKey): a new keystroke aborts
+  // whatever previous Inventory search request was still in flight, same
+  // reasoning as products:search in productReadTransport.ts.
+  return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/products/search', query), 'inventory:search')
 }
 
 export function getInventoryBootstrap(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `inventory:bootstrap:v1:${query}`
-  return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/bootstrap', query))
+  return routeCachedInventoryQuery(cacheKey, appendQuery('/api/inventory/bootstrap', query), 'inventory:bootstrap')
 }
 
 export function getInventoryMovements({
   branchId,
   userId,
+  productId,
   search,
   searchMode,
   startDate,
@@ -89,6 +94,7 @@ export function getInventoryMovements({
   const query = buildQueryString({
     branchId,
     userId,
+    productId,
     search,
     searchMode,
     startDate,

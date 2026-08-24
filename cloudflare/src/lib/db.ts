@@ -36,6 +36,30 @@ function translate(sql: string, params: BindParams): { sql: string; values: unkn
   return { sql: translatedSql, values }
 }
 
+// D1 (like any networked database) occasionally throws a transient error
+// that has nothing to do with the query itself -- a dropped connection to
+// the storage backend, a momentary internal error, etc. This was showing up
+// to users as e.g. "Write failed - data not saved: Internal Server Error
+// (operation: actionHistory:create)", which then worked fine on a page
+// refresh (i.e. the *same* query, retried, succeeded) -- the textbook
+// signature of a transient fault with no retry, not a real/permanent one.
+// Real errors (a bad column name, a constraint violation, a malformed
+// query) are deterministic and will fail again identically on retry, so
+// this only retries errors whose message looks infrastructure-related, and
+// only once, after a short delay.
+const TRANSIENT_D1_ERROR_PATTERN = /network|timeout|timed out|internal error|too many|busy|reset|ECONNRESET|fetch failed|D1_ERROR/i
+
+async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (!TRANSIENT_D1_ERROR_PATTERN.test(message)) throw error
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    return run()
+  }
+}
+
 class D1CompatStatement {
   constructor(private readonly db: D1Database, private readonly sql: string) {}
 
@@ -45,17 +69,17 @@ class D1CompatStatement {
   }
 
   async get<T = Record<string, unknown>>(params?: BindParams): Promise<T | undefined> {
-    const row = await this.bound(params).first<T>()
+    const row = await withD1Retry(() => this.bound(params).first<T>())
     return row ?? undefined
   }
 
   async all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> {
-    const result = await this.bound(params).all<T>()
+    const result = await withD1Retry(() => this.bound(params).all<T>())
     return result.results ?? []
   }
 
   async run(params?: BindParams): Promise<{ changes: number; lastInsertRowid: number }> {
-    const result = await this.bound(params).run()
+    const result = await withD1Retry(() => this.bound(params).run())
     return {
       changes: result.meta?.changes ?? 0,
       lastInsertRowid: Number(result.meta?.last_row_id ?? 0),
@@ -89,7 +113,7 @@ export class D1Compat {
       const { sql: translatedSql, values } = translate(sql, params)
       return this.d1.prepare(translatedSql).bind(...values)
     })
-    return this.d1.batch(prepared)
+    return withD1Retry(() => this.d1.batch(prepared))
   }
 
   async transaction<T>(fn: (db: D1Compat) => Promise<T>): Promise<T> {
@@ -103,4 +127,24 @@ export class D1Compat {
 
 export function getDb(env: { DB: D1Database }): D1Compat {
   return new D1Compat(env.DB)
+}
+
+// Shared boolean-coercion for DB columns that store 0/1 but can be sent as
+// a real JS boolean, a number, or a string (form/URL-encoded inputs, or a
+// value round-tripped through JSON as text) -- "false"/"0"/"no"/"off" must
+// resolve to 0, not to JS's own truthiness (which treats every non-empty
+// string, including the literal string "false", as truthy). Moved here
+// (previously a private, non-exported copy inside routes/branches.ts) so
+// lib/reviewApply.ts's branch appliers can share the exact same coercion
+// instead of re-approximating it with plain `value ? 1 : 0`, which silently
+// disagreed with this on a string "false"/"0" input -- caught while
+// auditing direct-write vs. review-apply paths for drift this session (the
+// same class of bug as the products/create/product branch_stock fix
+// logged in progress.md).
+export function toDbBool(value: unknown, fallback: 0 | 1 = 1): 0 | 1 {
+  if (value == null || value === '') return fallback
+  if (typeof value === 'boolean') return value ? 1 : 0
+  if (typeof value === 'number') return value ? 1 : 0
+  const normalized = String(value).trim().toLowerCase()
+  return ['1', 'true', 'yes', 'on'].includes(normalized) ? 1 : 0
 }

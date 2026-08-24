@@ -1,8 +1,10 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ComponentType, ReactNode } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -157,12 +159,12 @@ interface StoredOrganization {
 
 const useApp = useAppHook as () => AppContextValue
 const isBrokenLocalizedString = isBrokenLocalizedStringHook as (value: unknown) => boolean
-const LazyOtpModal = lazy(async () => ({
+const LazyOtpModal = lazyRetry(async () => ({
   default: (await import('../utils-settings/OtpModal')).default as ComponentType<OtpModalProps>,
-}))
-const LazyFilePickerModal = lazy(async () => ({
+}), 'user-profile-otp-modal')
+const LazyFilePickerModal = lazyRetry(async () => ({
   default: (await import('../files/FilePickerModal')).default as ComponentType<ProfileFilePickerModalProps>,
-}))
+}), 'user-profile-file-picker-modal')
 
 function getProfileApi(): ProfileApi {
   if (typeof window === 'undefined' || !window.api) throw new Error('Profile API is not available.')
@@ -214,7 +216,7 @@ function ProfileSectionButton({ active, children, onClick }: ProfileSectionButto
       type="button"
       onClick={onClick}
       className={[
-        'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+        'flex-shrink-0 whitespace-nowrap rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
         active
           ? 'border-blue-300 bg-blue-50 text-blue-700 dark:border-blue-500/50 dark:bg-blue-900/30 dark:text-blue-300'
           : 'border-gray-200 bg-white text-gray-600 hover:border-blue-300 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300 dark:hover:border-blue-500/50 dark:hover:text-blue-300',
@@ -298,8 +300,6 @@ const PROFILE_KM_FALLBACKS: Record<string, string> = {
   for_14_days: 'រយៈពេល ១៤ ថ្ងៃ',
   for_30_days: 'រយៈពេល ៣០ ថ្ងៃ',
   save_login_duration: 'រក្សាទុករយៈពេលចូលប្រើ',
-  sign_out: 'ចាកចេញ',
-  sign_out_profile_hint: 'ប្រើវា ដើម្បីបញ្ចប់សម័យប្រើប្រាស់នៅលើឧបករណ៍បច្ចុប្បន្ន នៅពេលអ្នករួចរាល់។',
   logout: 'ចេញ',
   organization_privacy_hint: 'អត្តសញ្ញាណអង្គភាពត្រូវបានលាក់នៅទីនេះ។ បង្ហាញតែឈ្មោះអង្គភាព និងតួនាទីប៉ុណ្ណោះ។',
   organization_name: 'ឈ្មោះអង្គភាព',
@@ -464,9 +464,9 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
   const [activeSection, setActiveSection] = useState<ProfileSection>('personal')
   const [sessionDuration, setSessionDuration] = useState(() => {
     try {
-      return localStorage.getItem(STORAGE_KEYS.SESSION_DURATION) || 'session'
+      return localStorage.getItem(STORAGE_KEYS.SESSION_DURATION) || 'always'
     } catch (_) {
-      return 'session'
+      return 'always'
     }
   })
   const [avatarZoom, setAvatarZoom] = useState(100)
@@ -658,7 +658,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
 
   const handlePasswordSave = async () => {
     if (savingPassword || savePasswordInFlightRef.current) return
-    if (newPassword.length < 4) return notify(tr('new_password_min_length', 'Use at least 4 characters for the new password'), 'error')
+    if (newPassword.length < 6) return notify(tr('password_min_6', 'Use at least 6 characters for the new password.'), 'error')
     if (newPassword !== confirmPassword) return notify(tr('new_password_confirm_mismatch', 'New password confirmation does not match'), 'error')
     if (!canAdminOverride && !currentPassword.trim()) return notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
 
@@ -901,44 +901,68 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         {loading || !profile ? (
           <div className="py-10 text-center text-sm text-gray-400">{tr('loading_account', 'Loading account...')}</div>
         ) : (
-          <div className="space-y-6">
-            <ActionHistoryBar history={actionHistory} className="mb-1" />
-            <div className="flex flex-col gap-4 rounded-2xl bg-gray-50 p-4 dark:bg-zinc-800/70 sm:flex-row sm:items-center">
+          <div className="space-y-4">
+            <div className="flex flex-col gap-3 rounded-2xl bg-gray-50 p-3 dark:bg-zinc-800/70 sm:flex-row sm:items-center">
               <AvatarPreview name={profile.name} avatarPath={profile.avatar_path} />
               <div className="min-w-0 flex-1">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="truncate text-lg font-semibold text-gray-900 dark:text-white">{profile.name}</div>
-                    <div className="truncate text-sm text-gray-500 dark:text-gray-400">@{profile.username}</div>
-                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                      {profile.role_name || tr('no_role', 'No role')} {' | '} {otpEnabled ? tr('otp_enabled', 'OTP enabled') : tr('otp_not_enabled', 'OTP not enabled')}
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-base font-semibold leading-tight text-gray-900 dark:text-white">{profile.name}</div>
+                    <div className="truncate text-xs text-gray-500 dark:text-gray-400">
+                      @{profile.username} {' · '} {profile.role_name || tr('no_role', 'No role')} {' · '} {otpEnabled ? tr('otp_enabled', 'OTP enabled') : tr('otp_not_enabled', 'OTP not enabled')}
                     </div>
                   </div>
                   <button
                     type="button"
-                    className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-800/60 dark:bg-zinc-900/70 dark:text-red-300 dark:hover:bg-red-950/20 sm:w-auto"
+                    title={tr('refresh_app', 'Refresh / check for update')}
+                    aria-label={tr('refresh_app', 'Refresh / check for update')}
+                    className="inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-2.5 py-2 text-xs font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-zinc-900/70 dark:text-gray-300 dark:hover:bg-zinc-800/60 sm:px-3 sm:text-sm"
+                    onClick={() => {
+                      // Same manual "tell any waiting service worker to
+                      // activate, then reload" action as the desktop
+                      // sidebar's own update button -- that one only
+                      // renders in the desktop-only <aside> (Sidebar.tsx's
+                      // `hidden ... md:flex`), so there was previously no
+                      // way at all to check for an update from a phone/PWA
+                      // install, which is exactly where a stale cached
+                      // build is most likely to linger unnoticed.
+                      navigator.serviceWorker?.controller?.postMessage?.({ type: 'BUSINESS_OS_SKIP_WAITING' })
+                      window.setTimeout(() => window.location.reload(), 250)
+                    }}
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    <span className="hidden sm:inline">{tr('refresh_app', 'Refresh / check for update')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    title={tr('logout', 'Logout')}
+                    aria-label={tr('logout', 'Logout')}
+                    className="inline-flex flex-shrink-0 items-center justify-center gap-1.5 rounded-xl border border-red-200 bg-white px-2.5 py-2 text-xs font-medium text-red-700 shadow-sm transition-colors hover:bg-red-50 dark:border-red-800/60 dark:bg-zinc-900/70 dark:text-red-300 dark:hover:bg-red-950/20 sm:px-3 sm:text-sm"
                     onClick={logout}
                   >
                     <LogOut className="h-4 w-4" />
-                    {tr('logout', 'Logout')}
+                    <span className="hidden sm:inline">{tr('logout', 'Logout')}</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              <ProfileSectionButton active={activeSection === 'personal'} onClick={() => setActiveSection('personal')}>
-                {tr('personal_details', 'Personal details')}
-              </ProfileSectionButton>
-              <ProfileSectionButton active={activeSection === 'login_methods'} onClick={() => setActiveSection('login_methods')}>
-                {tr('sign_in_methods', 'Sign-in methods')}
-              </ProfileSectionButton>
-              <ProfileSectionButton active={activeSection === 'security'} onClick={() => setActiveSection('security')}>
-                {tr('security', 'Security')}
-              </ProfileSectionButton>
-              <ProfileSectionButton active={activeSection === 'organization'} onClick={() => setActiveSection('organization')}>
-                {tr('organization', 'Organization')}
-              </ProfileSectionButton>
+            <div className="flex items-center gap-2">
+              <div className="-mx-1 flex min-w-0 flex-1 gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+                <ProfileSectionButton active={activeSection === 'personal'} onClick={() => setActiveSection('personal')}>
+                  {tr('personal_details', 'Personal details')}
+                </ProfileSectionButton>
+                <ProfileSectionButton active={activeSection === 'login_methods'} onClick={() => setActiveSection('login_methods')}>
+                  {tr('sign_in_methods', 'Sign-in methods')}
+                </ProfileSectionButton>
+                <ProfileSectionButton active={activeSection === 'security'} onClick={() => setActiveSection('security')}>
+                  {tr('security', 'Security')}
+                </ProfileSectionButton>
+                <ProfileSectionButton active={activeSection === 'organization'} onClick={() => setActiveSection('organization')}>
+                  {tr('organization', 'Organization')}
+                </ProfileSectionButton>
+              </div>
+              <ActionHistoryBar history={actionHistory} t={t} />
             </div>
 
             {activeSection === 'personal' ? (
@@ -1029,24 +1053,6 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                 />
                 <div className="mt-2 rounded-lg border border-dashed border-gray-300 bg-gray-50 px-3 py-2 text-xs text-gray-500 dark:border-zinc-700 dark:bg-zinc-800/70 dark:text-gray-400">
                   {profile.avatar_path || tr('no_avatar_uploaded', 'No avatar uploaded yet.')}
-                </div>
-              </div>
-              <div className="rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/20">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-red-700 dark:text-red-300">{tr('sign_out', 'Sign out')}</div>
-                    <p className="mt-1 text-xs text-red-600/90 dark:text-red-300/80">
-                      {tr('sign_out_profile_hint', 'Use this to end your session from the current device when you are done.')}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/20"
-                    onClick={logout}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    {tr('logout', 'Logout')}
-                  </button>
                 </div>
               </div>
               <div className="flex justify-end">
@@ -1214,6 +1220,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     buttonClassName="h-10 w-full"
                     menuClassName="min-w-[13rem]"
                     options={[
+                      { value: 'always', label: tr('always_stay_signed_in', 'Always stay signed in') },
                       { value: 'session', label: tr('until_browser_closes', 'Until browser closes') },
                       { value: '1d', label: tr('for_1_day', 'For 1 day') },
                       { value: '3d', label: tr('for_3_days', 'For 3 days') },
@@ -1224,25 +1231,6 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                   />
                 </div>
                 <button className="btn-secondary" onClick={handleSessionSave}>{tr('save_login_duration', 'Save login duration')}</button>
-              </div>
-
-              <div className="hidden rounded-xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/20 sm:block">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-red-700 dark:text-red-300">{tr('sign_out', 'Sign out')}</div>
-                    <p className="mt-1 text-xs text-red-600/90 dark:text-red-300/80">
-                      {tr('sign_out_profile_hint', 'Use this to end your session from the current device when you are done.')}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-300 px-3 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-100 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/20"
-                    onClick={logout}
-                  >
-                    <LogOut className="h-4 w-4" />
-                    {tr('logout', 'Logout')}
-                  </button>
-                </div>
               </div>
             </section>
             ) : null}

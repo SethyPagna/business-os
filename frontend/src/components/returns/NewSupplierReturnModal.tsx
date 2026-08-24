@@ -1,3 +1,4 @@
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
@@ -9,6 +10,7 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
+import ContactPicker from '../contacts/ContactPicker.tsx'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
@@ -37,6 +39,7 @@ interface BranchRow {
 interface SupplierRow {
   id: number | string
   name?: string
+  phone?: string | null
 }
 
 interface InventoryProductRow {
@@ -324,10 +327,6 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     { value: '', label: tr('select_branch', 'Select branch') },
     ...branches.map((item) => ({ value: item.id, label: item.name || String(item.id) })),
   ], [branches, t])
-  const supplierOptions = useMemo<AppSelectOption[]>(() => [
-    { value: '', label: tr('select_supplier', 'Select supplier') },
-    ...suppliers.map((item) => ({ value: item.id, label: item.name || String(item.id) })),
-  ], [suppliers, t])
   const settlementOptions = useMemo<AppSelectOption[]>(() => SUPPLIER_RETURN_SETTLEMENT_VALUES.map((value) => ({
     value,
     label: {
@@ -384,15 +383,23 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     }
   }
 
+  // Backdrop/X close should not fire while a submit is in flight -- the
+  // Cancel button below already guards on `submitting` for this reason,
+  // same pattern ReceiveBatchModal.tsx/ManageBatchesModal.tsx/
+  // InventoryBatchModal.tsx use, but backdrop/X bypassed it entirely.
+  const closeIfIdle = () => {
+    if (!submitting) onClose?.()
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-4xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={closeIfIdle}>
+      <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-4xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div>
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">{tr('return_to_supplier', 'Return to Supplier')}</h2>
             <p className="text-xs text-gray-500 dark:text-gray-400">{tr('supplier_return_hint', 'Send stock back to supplier and record compensation/loss.')}</p>
           </div>
-          <button onClick={onClose} className="text-2xl leading-none text-gray-400 hover:text-gray-600">x</button>
+          <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
         </div>
 
         {loading ? (
@@ -414,13 +421,13 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
               </div>
               <div>
                 <label htmlFor="supplier-return-supplier" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('supplier', 'Supplier')}</label>
-                <AppSelect
+                <ContactPicker
                   id="supplier-return-supplier"
                   className="w-full"
-                  buttonClassName="w-full text-sm"
+                  contacts={suppliers}
                   value={supplierId}
-                  options={supplierOptions}
                   onChange={setSupplierId}
+                  placeholder={tr('select_supplier', 'Select supplier')}
                   ariaLabel={tr('supplier', 'Supplier')}
                 />
               </div>
@@ -574,7 +581,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
         )}
 
         <div className="flex items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-          <button className="btn-secondary flex-1" onClick={onClose} disabled={submitting}>{tr('cancel', 'Cancel')}</button>
+          <button className="btn-secondary flex-1" onClick={closeIfIdle} disabled={submitting}>{tr('cancel', 'Cancel')}</button>
           <button className="btn-primary flex-1" onClick={submit} disabled={loading || loadingProducts || submitting}>
             {submitting ? `${tr('saving_label', 'Saving')}...` : tr('save', 'Save')}
           </button>

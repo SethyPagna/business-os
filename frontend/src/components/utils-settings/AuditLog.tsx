@@ -5,27 +5,27 @@ import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Clock3 from 'lucide-react/dist/esm/icons/clock-3.js'
 import MonitorSmartphone from 'lucide-react/dist/esm/icons/monitor-smartphone.js'
-import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import Search from 'lucide-react/dist/esm/icons/search.js'
+import SearchInput from '../shared/SearchInput'
 import User2 from 'lucide-react/dist/esm/icons/user-round.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { clampPage } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
-import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
-  deleteAuditLogsRetention as deleteAuditLogsRetentionRequest,
   getAuditLogs as getAuditLogsRequest,
 } from '../../api/auditLogTransport.ts'
+import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
 
 type SortDirection = 'asc' | 'desc'
 type AuditGroupMode = 'time' | 'time+action'
@@ -115,7 +115,6 @@ function getErrorMessage(error: unknown, fallback: string): string {
 
 const DEFAULT_ACTION_CLASS = 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
 const AUDIT_LOG_LOAD_TIMEOUT_MS = 20000
-const AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS = 12000
 
 const ACTION_COLOR_CLASS: Record<string, string> = {
   create: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
@@ -346,14 +345,17 @@ export default function AuditLog() {
   const [initialDesktopRevealReady, setInitialDesktopRevealReady] = useState(false)
   const [initialMobileRevealReady, setInitialMobileRevealReady] = useState(false)
   const [detailLog, setDetailLog] = useState<AuditLogRow | null>(null)
+  const [showRawAuditJson, setShowRawAuditJson] = useState(false)
+  const openLogDetail = useCallback((log: AuditLogRow) => {
+    setDetailLog(log)
+    setShowRawAuditJson(false)
+  }, [])
   const [error, setError] = useState<string | null>(null)
-  const [clearingOldLogs, setClearingOldLogs] = useState(false)
   const skeletonRows = useMemo(() => Array.from({ length: 8 }, (_, index) => index), [])
   const loadedOnceRef = useRef(false)
   const pageLoadRequestedRef = useRef(false)
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
-  const clearOldLogsInFlightRef = useRef(false)
   const selectAllRef = useRef<HTMLInputElement | null>(null)
   const aliveRef = useRef(true)
   const isAdmin = useMemo(() => {
@@ -735,39 +737,6 @@ export default function AuditLog() {
 
   const filterSections = useMemo(() => ([
     {
-      id: 'year',
-      label: copy('year', 'Year'),
-      options: [
-        { id: 'all', label: copy('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
-        ...availableYears.map((year) => ({
-          id: `year-${year}`,
-          label: year,
-          active: yearFilter === year,
-          onClick: () => {
-            const next = yearFilter === year ? 'all' : year
-            setYearFilter(next)
-            if (next === 'all') setMonthFilter('all')
-          },
-        })),
-      ],
-    },
-    {
-      id: 'month',
-      label: copy('month', 'Month'),
-      options: [
-        { id: 'all', label: copy('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
-        ...Array.from({ length: 12 }, (_, index) => {
-          const month = String(index + 1)
-          return {
-            id: `month-${month}`,
-            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
-            active: monthFilter === month,
-            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
-          }
-        }),
-      ],
-    },
-    {
       id: 'action',
       label: t('action') || 'Action',
       options: [
@@ -775,14 +744,15 @@ export default function AuditLog() {
         ...actionOptions.map(([id, label]) => ({
           id,
           label,
-          active: actionFilter === id,
-          onClick: () => setActionFilter(actionFilter === id ? 'all' : id),
+          active: isMultiActive(actionFilter, id),
+          onClick: () => setActionFilter(toggleMultiValue(actionFilter, id)),
         })),
       ],
     },
     isAdmin ? {
       id: 'user',
       label: t('user') || 'User',
+      searchable: true,
       options: [
         { id: 'all', label: t('all_users') || 'All users', active: userFilter === 'all', onClick: () => setUserFilter('all') },
         ...auditUsers.map((auditUser) => {
@@ -790,8 +760,8 @@ export default function AuditLog() {
           return {
             id: `user-${id}`,
             label: auditUser?.name || `User ${id}`,
-            active: userFilter === id,
-            onClick: () => setUserFilter(userFilter === id ? 'all' : id),
+            active: isMultiActive(userFilter, id),
+            onClick: () => setUserFilter(toggleMultiValue(userFilter, id)),
           }
         }).filter((option) => option.id !== 'user-'),
       ],
@@ -799,9 +769,14 @@ export default function AuditLog() {
     {
       id: 'sort',
       label: copy('sort', 'Sort'),
+      searchable: true,
       options: [
         { id: 'desc', label: copy('newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
         { id: 'asc', label: copy('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+        ...buildPeriodFilterOptions({
+          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
+          allTimeLabel: copy('all_time', 'All time'),
+        }),
       ],
     },
     {
@@ -819,96 +794,8 @@ export default function AuditLog() {
     [actionFilter, groupMode, monthFilter, sortDirection, userFilter, yearFilter],
   )
 
-  const clearOldAuditLogs = useCallback(async () => {
-    if (!isAdmin) return
-    if (!window.confirm('Clear audit logs older than 30 days?')) return
-    if (!beginSingleAction(clearOldLogsInFlightRef, { blocked: clearingOldLogs })) return
-    try {
-      setClearingOldLogs(true)
-      setLoading(true)
-      await withLoaderTimeout(
-        () => deleteAuditLogsRetentionRequest(30),
-        'Clear old audit logs',
-        AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,
-      )
-      await load(true)
-    } catch (err) {
-      setError(getErrorMessage(err, 'Failed to clear old audit logs.'))
-    } finally {
-      finishSingleAction(clearOldLogsInFlightRef)
-      setClearingOldLogs(false)
-      setLoading(false)
-    }
-  }, [clearingOldLogs, isAdmin, load])
-
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2 min-w-0">
-        <h1
-          className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl"
-          title={t('audit_log_desc') || 'Default columns: Record, Device, User, Action. Click a row to see full details and data changes.'}
-        >
-          <ClipboardList className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-          {t('audit_log') || 'Audit Log'}
-        </h1>
-        <div className="flex min-w-0 flex-nowrap items-center gap-2 overflow-x-auto pb-0.5">
-          <button onClick={handleRefresh} className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs sm:text-sm">
-            <RefreshCw className="h-4 w-4" />
-            {copy('refresh', 'Refresh')}
-          </button>
-          {isAdmin ? (
-            <button
-              onClick={clearOldAuditLogs}
-              disabled={clearingOldLogs}
-              className="btn-secondary inline-flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 px-3 py-1.5 text-xs disabled:opacity-50 sm:text-sm"
-            >
-              <X className="h-4 w-4" />
-              {copy('clear_30_days', 'Clear 30d')}
-            </button>
-          ) : null}
-          <ExportMenu label={copy('export', 'Export')} items={exportItems} compact triggerClassName="min-w-[6.5rem]" />
-        </div>
-      </div>
-
-      <div className="mb-2 flex flex-wrap items-center gap-2 sm:flex-nowrap">
-        <label htmlFor="audit-log-search" className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            id="audit-log-search"
-            name="audit_log_search"
-            className="input min-w-0 w-full pl-9 text-sm"
-            placeholder={t('search_audit_placeholder') || 'Search logs'}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            autoComplete="off"
-          />
-        </label>
-        <FilterMenu
-          label={t('filters') || 'Filters'}
-          activeCount={activeFilterCount}
-          sections={filterSections}
-          onClear={() => {
-            setYearFilter('all')
-            setMonthFilter('all')
-            setActionFilter('all')
-            setUserFilter('all')
-            setGroupMode('time')
-            setSortDirection('desc')
-          }}
-          compact
-        />
-      </div>
-
-      {selectedLogs.length > 0 ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-sm dark:border-blue-900/40 dark:bg-blue-900/20">
-          <span className="font-semibold text-blue-700 dark:text-blue-300">{selectedLogs.length} selected</span>
-          <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>Export selected</button>
-          <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
-            {t('clear') || 'Clear'}
-          </button>
-        </div>
-      ) : null}
-
       <div className="mb-3 min-h-[2.75rem]">
         {loading && !hasLoadedOnce ? (
           <div className="flex h-14 animate-pulse items-center justify-between rounded-xl border border-slate-200 bg-white/80 px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-900/70">
@@ -936,6 +823,62 @@ export default function AuditLog() {
             }}
           />
         )}
+      </div>
+
+      {/* Search row + bulk-action bar pin to the top of the page's scroll
+          container while scrolling (Aug 11 2026 UI-polish request, same
+          treatment as Products.tsx/Inventory.tsx/Sales.tsx). Pagination now
+          lives above this group instead of below it, same reordering those
+          pages got. Filter + Export are icon-only here, next to search. The
+          old standalone Refresh button was removed (the list already
+          refreshes itself on load/filter changes; the error banner below
+          still has its own contextual "Try again" retry), and the manual
+          "Clear 30d" action was replaced by automatic retention -- audit
+          logs are now cleared on a schedule (default 21 days, configurable
+          from the Settings page) instead of requiring an admin to remember
+          to click something. */}
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        <div
+          className="flex flex-wrap items-center gap-2 pt-1 sm:flex-nowrap"
+          title={t('audit_log_desc') || 'Default columns: Record, Device, User, Action. Click a row to see full details and data changes.'}
+        >
+          <SearchInput
+            id="audit-log-search"
+            name="audit_log_search"
+            value={search}
+            onChange={setSearch}
+            placeholder={t('search_audit_placeholder') || 'Search logs'}
+            inputClassName="text-sm"
+          />
+          <ExportMenu label={copy('export', 'Export')} items={exportItems} compact mobileIconOnly />
+          {/* Filter stays last in the row -- same rule as every other list
+              page's search+action row. */}
+          <FilterMenu
+            label={t('filters') || 'Filters'}
+            activeCount={activeFilterCount}
+            sections={filterSections}
+            onClear={() => {
+              setYearFilter('all')
+              setMonthFilter('all')
+              setActionFilter('all')
+              setUserFilter('all')
+              setGroupMode('time')
+              setSortDirection('desc')
+            }}
+            compact
+            mobileIconOnly
+          />
+        </div>
+
+        {selectedLogs.length > 0 ? (
+          <div className="bulk-toolbar flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-sm">
+            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedLogs.length} selected</span>
+            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>Export selected</button>
+            <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
+              {t('clear') || 'Clear'}
+            </button>
+          </div>
+        ) : null}
       </div>
 
       {error ? (
@@ -1040,7 +983,7 @@ export default function AuditLog() {
                         <tr
                           key={log.id}
                           className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10"
-                          onClick={() => setDetailLog(log)}
+                          onClick={() => openLogDetail(log)}
                         >
                           <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
                             <input
@@ -1054,8 +997,10 @@ export default function AuditLog() {
                           <td className="px-3 py-2">
                             <div className="text-xs font-semibold text-gray-500 dark:text-gray-300">{sessionEntryLabel(log)}</div>
                           </td>
-                          <td className="px-3 py-2">
-                            <div className="text-xs font-medium text-gray-800 dark:text-gray-200">{formatEntityName(log)}</div>
+                          <td className="max-w-[160px] px-3 py-2">
+                            <div className="truncate text-xs font-medium text-gray-800 dark:text-gray-200" title={formatEntityName(log)}>
+                              {formatEntityName(log)}
+                            </div>
                           </td>
                           <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{log.user_name || '--'}</td>
                           <td className="px-3 py-2">
@@ -1069,7 +1014,10 @@ export default function AuditLog() {
                             </div>
                             <div className="text-xs font-mono text-blue-500 dark:text-blue-400">{auditTimezoneLabel(log)}</div>
                           </td>
-                          <td className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400 truncate">
+                          <td
+                            className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400 truncate"
+                            title={readableSummary(log) || undefined}
+                          >
                             {readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}
                           </td>
                           <td className="px-3 py-2 text-xs leading-snug text-gray-400" title={formatLogTime(log)}>
@@ -1195,7 +1143,7 @@ export default function AuditLog() {
                     key={log.id}
                     type="button"
                     className="card w-full p-3 text-left active:bg-blue-50 dark:active:bg-blue-900/10"
-                    onClick={() => setDetailLog(log)}
+                    onClick={() => openLogDetail(log)}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -1215,7 +1163,14 @@ export default function AuditLog() {
                           <span className="truncate text-xs text-gray-500">{formatEntityName(log)}</span>
                           <span className="shrink-0 text-xs text-gray-400">{sessionEntryLabel(log)}</span>
                         </div>
-                        {readableSummary(log) ? <div className="mt-1 text-xs text-gray-400 line-clamp-2">{readableSummary(log)}</div> : null}
+                        {readableSummary(log) ? (
+                          <div
+                            className="mt-1 truncate text-xs text-gray-400"
+                            title={readableSummary(log) ?? undefined}
+                          >
+                            {readableSummary(log)}
+                          </div>
+                        ) : null}
                         <div className="mt-1 text-xs text-gray-400">{formatLogTime(log)}</div>
                       </div>
                       <ChevronRight className="h-4 w-4 text-gray-300" />
@@ -1246,7 +1201,7 @@ export default function AuditLog() {
       {detailLog ? (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setDetailLog(null)}>
           <div
-            className="flex max-h-[88vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl"
+            className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -1295,23 +1250,73 @@ export default function AuditLog() {
                 </div>
               </div>
 
-              {detailLog.old_value ? (
-                <div>
-                  <div className="mb-1 text-xs font-semibold text-red-500">{t('before_data') || 'Before (old data)'}</div>
-                  <pre className="max-h-48 overflow-auto rounded-lg bg-red-50 p-3 text-xs font-mono text-red-700 whitespace-pre-wrap break-all dark:bg-red-900/20 dark:text-red-300">
-                    {formatJsonPretty(detailLog.old_value)}
-                  </pre>
-                </div>
-              ) : null}
+              {(() => {
+                const fieldDiffRows = buildAuditFieldDiff(detailLog.old_value, detailLog.new_value)
+                const hasRawData = Boolean(detailLog.old_value || detailLog.new_value)
+                if (!hasRawData) return null
+                return (
+                  <div className="space-y-3">
+                    {fieldDiffRows.length ? (
+                      <div>
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <div className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                            {copy('changed_fields', 'Changed fields', 'វាលដែលបានផ្លាស់ប្តូរ')}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setShowRawAuditJson((current) => !current)}
+                            className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
+                          >
+                            {showRawAuditJson
+                              ? copy('hide_raw_data', 'Hide raw data', 'លាក់ទិន្នន័យដើម')
+                              : copy('view_raw_data', 'View raw data', 'មើលទិន្នន័យដើម')}
+                          </button>
+                        </div>
+                        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
+                          {fieldDiffRows.map((row) => (
+                            <div key={row.key} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
+                              <span className="w-32 flex-shrink-0 font-medium text-gray-500 dark:text-gray-400">{row.label}</span>
+                              {row.changeType === 'added' ? (
+                                <span className="break-all text-green-600 dark:text-green-400">{row.after}</span>
+                              ) : row.changeType === 'removed' ? (
+                                <span className="break-all text-red-500 line-through dark:text-red-400">{row.before}</span>
+                              ) : (
+                                <span className="flex flex-wrap items-center gap-1 break-all">
+                                  <span className="text-red-500 line-through dark:text-red-400">{row.before}</span>
+                                  <span className="text-gray-400">&rarr;</span>
+                                  <span className="text-green-600 dark:text-green-400">{row.after}</span>
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
 
-              {detailLog.new_value ? (
-                <div>
-                  <div className="mb-1 text-xs font-semibold text-green-600">{t('after_data') || 'After (new data)'}</div>
-                  <pre className="max-h-48 overflow-auto rounded-lg bg-green-50 p-3 text-xs font-mono text-green-700 whitespace-pre-wrap break-all dark:bg-green-900/20 dark:text-green-300">
-                    {formatJsonPretty(detailLog.new_value)}
-                  </pre>
-                </div>
-              ) : null}
+                    {showRawAuditJson || !fieldDiffRows.length ? (
+                      <>
+                        {detailLog.old_value ? (
+                          <div>
+                            <div className="mb-1 text-xs font-semibold text-red-500">{t('before_data') || 'Before (old data)'}</div>
+                            <pre className="max-h-48 overflow-auto rounded-lg bg-red-50 p-3 text-xs font-mono text-red-700 whitespace-pre-wrap break-all dark:bg-red-900/20 dark:text-red-300">
+                              {formatJsonPretty(detailLog.old_value)}
+                            </pre>
+                          </div>
+                        ) : null}
+
+                        {detailLog.new_value ? (
+                          <div>
+                            <div className="mb-1 text-xs font-semibold text-green-600">{t('after_data') || 'After (new data)'}</div>
+                            <pre className="max-h-48 overflow-auto rounded-lg bg-green-50 p-3 text-xs font-mono text-green-700 whitespace-pre-wrap break-all dark:bg-green-900/20 dark:text-green-300">
+                              {formatJsonPretty(detailLog.new_value)}
+                            </pre>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                )
+              })()}
             </div>
           </div>
         </div>

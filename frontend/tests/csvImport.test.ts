@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { decodeTextBuffer, normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../src/utils/csvImport.ts'
+import { decodeTextBuffer, getBlankCsvHeaderColumns, normalizeCsvKey, normalizeCsvMoney, parseCsvNumber, parseCsvRows } from '../src/utils/csvImport.ts'
 
 let failed = 0
 
@@ -73,11 +73,107 @@ await runTest('background import modals notify parent pages when a job is queued
     '../src/components/contacts/ContactImportModal.tsx',
     '../src/components/products/import/BulkImportModal.tsx',
   ]
+  // Most of these modals call signalDone(<queued result var>) directly at the
+  // point the job is queued. BulkImportModal.tsx instead routes through a
+  // handOffToBackgroundTracker(payload) wrapper (it closes the modal and
+  // points the person at the top-right import tracker instead of showing a
+  // dead-end confirmation screen -- see the code comment above that
+  // function), which itself calls signalDone(payload) and is invoked with
+  // the queued result. Both are valid ways to notify the parent; accept
+  // either the direct call or a wrapper-forwarded one.
+  const directCall = /await\s+signalDone\(.*queuedResult|await\s+signalDone\(response\)|await\s+signalDone\(nextResult\)/
   for (const file of files) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
     assert.match(source, /signalDone\s*=\s*async\s*\(payload(?::[^)]*)?\)/, `${file} should define a queued import callback helper`)
-    assert.match(source, /await\s+signalDone\(.*queuedResult|await\s+signalDone\(response\)|await\s+signalDone\(nextResult\)/, `${file} should notify the parent after queueing an import job`)
+    if (directCall.test(source)) continue
+    const wrapperMatch = source.match(/const (\w+) = async \(payload(?::[^)]*)?\)[\s\S]{0,200}?await\s+signalDone\(payload\)/)
+    assert.ok(wrapperMatch, `${file} should notify the parent after queueing an import job`)
+    const wrapperName = wrapperMatch[1]
+    const wrapperCallPattern = new RegExp(`await\\s+${wrapperName}\\((?:.*queuedResult|response|nextResult)\\)`)
+    assert.match(source, wrapperCallPattern, `${file} should invoke its signalDone wrapper (${wrapperName}) with the queued job result`)
   }
+})
+
+
+await runTest('contact/sales list exports use XLSX (barcode-as-text safe), not plain CSV', () => {
+  // Products already exports XLSX via xlsxExport.ts. This locks in the same
+  // conversion for the other row-export buttons across the app so a
+  // spreadsheet round-trip never re-introduces the barcode-scientific-
+  // notation or Khmer-mangled-by-ANSI-CSV problems described in
+  // spreadsheetImport.ts -- see that file's header comment for why.
+  const files = [
+    '../src/components/contacts/CustomersTab.tsx',
+    '../src/components/contacts/DeliveryTab.tsx',
+    '../src/components/contacts/SuppliersTab.tsx',
+  ]
+  for (const file of files) {
+    const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
+    assert.match(source, /downloadXLSX\(`[^`]+\.xlsx`/, `${file} should export via downloadXLSX with an .xlsx filename`)
+    assert.doesNotMatch(source, /downloadCSV\(`[^`]+\.csv`/, `${file} should not still call the old downloadCSV export path`)
+  }
+  const salesSource = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  const xlsxCalls = salesSource.match(/downloadXLSX\(`[^`]+\.xlsx`/g) || []
+  assert.ok(xlsxCalls.length >= 2, 'Sales.tsx should export both its selected-rows and filtered-list downloads via downloadXLSX')
+  assert.doesNotMatch(salesSource, /downloadCSV\(`[^`]+\.csv`/, 'Sales.tsx should not still call the old downloadCSV export path')
+})
+
+await runTest('product/inventory/sales import modals accept a dropped file, not just the file-dialog picker', () => {
+  // Each of these historically only supported clicking "Choose File" /
+  // "Upload CSV" (native dialog). This checks the drop-handling half of
+  // that story is wired end to end: a real onDrop/onDropFile prop, backed
+  // by a handler that reads the file with parseImportFile (so a dropped
+  // .xlsx behaves identically to one picked via the dialog) and feeds the
+  // same analysis path the picker uses.
+  //
+  const bulkImportSource = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
+  assert.match(bulkImportSource, /import \{ parseImportFile \} from '\.\.\/\.\.\/\.\.\/utils\/spreadsheetImport\.ts'/)
+  assert.match(bulkImportSource, /const handleDropCSV = async \(file: File\)/)
+  assert.match(bulkImportSource, /await parseImportFile\(file\)/)
+  assert.match(bulkImportSource, /onDrop=\{handleDropCSVEvent\}/)
+
+  const inventorySource = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.tsx', import.meta.url), 'utf8')
+  assert.match(inventorySource, /import \{ parseImportFile \} from '\.\.\/\.\.\/utils\/spreadsheetImport\.ts'/)
+  assert.match(inventorySource, /const handleDropFile = async \(file: File\)/)
+  assert.match(inventorySource, /onDropFile=\{handleDropFile\}/)
+
+  const salesImportSource = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
+  assert.match(salesImportSource, /import \{ parseImportFile \} from '\.\.\/\.\.\/utils\/spreadsheetImport\.ts'/)
+  assert.match(salesImportSource, /const handleDropFile = async \(file: File\)/)
+  assert.match(salesImportSource, /onDropFile=\{handleDropFile\}/)
+
+  // ContactImportModal.tsx doesn't use the shared CsvImportPreview/
+  // onDropFile prop pattern (it has its own inline "no file selected" box,
+  // same as BulkImportModal) -- so it wires a local handleDropFile straight
+  // to an onDrop={handleDropCSVEvent} div, matching BulkImportModal's shape
+  // rather than Inventory/Sales's onDropFile-prop shape.
+  const contactImportSource = fs.readFileSync(new URL('../src/components/contacts/ContactImportModal.tsx', import.meta.url), 'utf8')
+  assert.match(contactImportSource, /import \{ parseImportFile \} from '\.\.\/\.\.\/utils\/spreadsheetImport\.ts'/)
+  assert.match(contactImportSource, /const handleDropFile = async \(file: File\)/)
+  assert.match(contactImportSource, /await parseImportFile\(file\)/)
+  assert.match(contactImportSource, /onDrop=\{handleDropCSVEvent\}/)
+})
+
+// Real-file audit (Aug 23 2026, chat) -- getBlankCsvHeaderColumns, found
+// via the user's own uploaded customers-template-final.csv (a blank header
+// at column 3 with real phone-number data underneath it).
+await runTest('getBlankCsvHeaderColumns flags a blank header with real data under it', () => {
+  const text = 'name,membership_number,,email\nBelie Bee,,0965196900,'
+  assert.deepEqual(getBlankCsvHeaderColumns(text), [3])
+})
+
+await runTest('getBlankCsvHeaderColumns ignores a genuinely empty spare column (no header, no data)', () => {
+  const text = 'name,email,\nBelie Bee,belie@example.com,'
+  assert.deepEqual(getBlankCsvHeaderColumns(text), [])
+})
+
+await runTest('getBlankCsvHeaderColumns flags multiple blank-header columns, 1-based and in order', () => {
+  const text = 'name,,email,,notes\nBelie Bee,012,belie@example.com,extra,'
+  assert.deepEqual(getBlankCsvHeaderColumns(text), [2, 4])
+})
+
+await runTest('getBlankCsvHeaderColumns returns empty for a file with no blank headers at all', () => {
+  const text = 'name,email\nBelie Bee,belie@example.com'
+  assert.deepEqual(getBlankCsvHeaderColumns(text), [])
 })
 
 if (failed > 0) {

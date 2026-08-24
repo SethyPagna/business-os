@@ -15,10 +15,12 @@
  * Layout (mobile  < md):   Tab bar toggles between Products and Cart views.
  */
 
-import { Suspense, lazy, useState, useEffect, useRef, useCallback, useDeferredValue, useMemo } from 'react'
+import { Suspense, useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { ChangeEvent, KeyboardEvent } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
-import Info from 'lucide-react/dist/esm/icons/info.js'
+import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
 import { useApp, useSync } from '../../AppContext'
 import {
   PAYMENT_METHODS,
@@ -31,6 +33,7 @@ import {
 import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
 import PaginationControls from '../shared/PaginationControls'
+import ScanSearchButton from '../shared/ScanSearchButton'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   buildProductsById,
@@ -40,6 +43,9 @@ import {
   resolveCartPriceValues,
   getCartLineId,
   findMatchingCartLineIndex,
+  applyManualDiscount,
+  computeExpiryStatus,
+  type ManualDiscountType,
 } from './posCore.ts'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import {
@@ -51,19 +57,24 @@ import {
 import type { QueryParams } from '../../api/query.ts'
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
+import AlphaIndexRail from '../shared/AlphaIndexRail'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import {
   buildProductLightboxState,
   getProductGalleryImages,
 } from '../products/helpers/productGalleryHelpers.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
+import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
 import { buildProductSupplierOptions } from '../products/helpers/productSupplierOptions.ts'
-const Receipt = lazy(() => import('../receipt/Receipt'))
-const ImageGalleryLightbox = lazy(() => import('../shared/ImageGalleryLightbox'))
-const FilterPanel = lazy(() => import('./FilterPanel'))
-const ProductDetailSheet = lazy(() => import('./ProductDetailSheet'))
-const POSQuickAddModals = lazy(() => import('./POSQuickAddModals'))
+import { getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
+import type { BatchSelection } from '../../api/batchesTransport.ts'
+const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'pos-receipt')
+const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'pos-image-gallery-lightbox')
+const FilterPanel = lazyRetry(() => import('./FilterPanel'), 'pos-filter-panel')
+const ProductDetailSheet = lazyRetry(() => import('./ProductDetailSheet'), 'pos-product-detail-sheet')
+const POSQuickAddModals = lazyRetry(() => import('./POSQuickAddModals'), 'pos-quick-add-modals')
 
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
 const POS_CONTACT_OPTIONS_TIMEOUT_MS = 8000
@@ -180,6 +191,10 @@ type ProductRecord = Record<string, unknown> & {
   cost_price_usd?: string | number
   description?: string
   discount_label?: string
+  // Flat, non-batch expiry tracking -- distinct from the per-lot expiry
+  // carried by the batch/lot system. See ProductDetailSheet.tsx.
+  expiry_date?: string | null
+  expiry_alert_days?: string | number
   id: string | number
   image_gallery?: string | string[]
   image_path?: string
@@ -210,10 +225,26 @@ type ProductRecord = Record<string, unknown> & {
 type CartLineRecord = ProductRecord & {
   applied_price_khr: number
   applied_price_usd: number
+  // Price before any manual, cashier-entered discount -- the resolved
+  // selling/special/promotion price. See posCore.ts's applyManualDiscount.
+  base_price_usd?: number
+  base_price_khr?: number
+  manual_discount_type?: 'percent' | 'fixed' | null
+  manual_discount_value?: number
+  manual_discount_usd?: number
+  manual_discount_khr?: number
   cart_line_id: string
   id: string | number
   name: string
   quantity: number
+  // Present only when this line was added via the batch/expiry picker (see
+  // ProductDetailSheet) -- the specific lot picked, and that lot's
+  // remaining stock at pick time, used as this line's quantity ceiling
+  // instead of the product's overall stock (see getDisplayStock/updateQty).
+  batch_id?: number | null
+  batch_label?: string | null
+  batch_expiry_date?: string | null
+  batch_available_quantity?: number
 }
 
 type CustomerRecord = Record<string, unknown> & {
@@ -268,6 +299,12 @@ type PosOrder = Record<string, unknown> & {
   deliverySearch: string
   discountKhr: string
   discountUsd: string
+  // Added alongside discountUsd/discountKhr for the percent-of-subtotal
+  // discount mode (see discUsd/discKhr below) -- discountType defaults to
+  // 'fixed' so existing carts/orders that never set it keep behaving
+  // exactly as the USD/KHR fields already did.
+  discountType: 'fixed' | 'percent'
+  discountPercent: string
   id: string
   isDelivery: boolean
   label?: string
@@ -276,8 +313,16 @@ type PosOrder = Record<string, unknown> & {
   membershipRedeemUnits: string
   paidKhr: string
   paidUsd: string
+  paymentDetails: PaymentDetail[]
   paymentMethod: string
   selectedDelivery: DeliveryContactRecord | null
+}
+
+type PaymentDetail = {
+  id: string
+  method: string
+  usd: string
+  khr: string
 }
 
 type MembershipInfo = {
@@ -302,9 +347,14 @@ type ProductPayload = {
   total?: number
 }
 
-type ProductBootstrapPayload = {
+// /api/products/bootstrap responds with the same envelope as
+// searchProductsPayload() -- items/total/page/pageSize/totalPages -- plus
+// filters/initials/branches layered on top. There has never been a
+// top-level `products` key here; ProductPayload already models this
+// shape (see loadCatalogData's use of payloadRecord.items below), so
+// bootstrap's payload just extends it with the branches array.
+type ProductBootstrapPayload = ProductPayload & {
   branches?: BranchRecord[]
-  products?: ProductPayload | ProductRecord[]
 }
 
 type SaleResult = {
@@ -429,11 +479,26 @@ async function createPosSale(payload: Record<string, unknown>): Promise<SaleResu
 
 function normalizeOrder(order: Partial<PosOrder> = {}, fallbackIndex = 1): PosOrder {
   const base = createEmptyOrder(fallbackIndex) as PosOrder
+  const legacyDetail: PaymentDetail = {
+    id: `payment-${fallbackIndex}-1`,
+    method: String(order.paymentMethod || base.paymentMethod || 'Cash'),
+    usd: String(order.paidUsd || ''),
+    khr: String(order.paidKhr || ''),
+  }
+  const paymentDetails = Array.isArray(order.paymentDetails) && order.paymentDetails.length
+    ? order.paymentDetails.map((detail, index) => ({
+        id: String(detail?.id || `payment-${fallbackIndex}-${index + 1}`),
+        method: String(detail?.method || base.paymentMethod || 'Cash'),
+        usd: String(detail?.usd || ''),
+        khr: String(detail?.khr || ''),
+      }))
+    : [legacyDetail]
   return {
     ...base,
     ...order,
     cart: Array.isArray(order.cart) ? order.cart : base.cart,
     customer: { ...base.customer, ...(order.customer || {}) },
+    paymentDetails,
     selectedDelivery: order.selectedDelivery || null,
   }
 }
@@ -450,13 +515,9 @@ function asNumber(value: unknown): number {
   return Number(value || 0)
 }
 
-function useDebouncedValue<T>(value: T, delayMs = 180): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs)
-    return () => window.clearTimeout(timer)
-  }, [delayMs, value])
-  return debounced
+function paymentMethodSummary(details: PaymentDetail[]): string {
+  const methods = Array.from(new Set(details.map((detail) => detail.method.trim()).filter(Boolean)))
+  return methods.join(' + ') || 'Cash'
 }
 
 function ProductDiscountBadge({
@@ -494,8 +555,19 @@ export default function POS() {
   const [defaultBranchId,  setDefaultBranchId]  = useState<string | number | null>(null)
 
 // Product filter state is persisted in sessionStorage so navigation does not reset it
-  const [search,          setSearch]          = useState('')
-  const [searchMode,      setSearchMode]      = useState<'AND' | 'OR'>('AND')
+  // Persisted in sessionStorage like the other pos_* filters below --
+  // was plain useState(''), so a full page reload (e.g. AppContext.tsx's
+  // runtime-mismatch auto-reload on a fresh backend deploy) silently threw
+  // away whatever the person had typed, while every OTHER filter dimension
+  // survived the same reload. Reported as "sometimes it causes the page to
+  // refresh thus losing search results".
+  const [search,          setSearch]          = useState(() => sessionStorage.getItem('pos_search') || '')
+  // AND/OR toggle restored (Aug 20 2026) -- no longer a standalone button
+  // next to the search box (that's still gone, per the Aug 19 2026 UI
+  // request), but reachable again from inside the Filter menu itself, via
+  // buildSearchModeFilterSection (components/shared/SearchModeFilterOptions.tsx).
+  // AND stays the default, matching the initial state below.
+  const [searchMode, setSearchMode] = useState<'AND' | 'OR'>('AND')
   const [categoryFilter,  setCategoryFilter]  = useState(() => sessionStorage.getItem('pos_cat')      || 'all')
   const [brandFilter,     setBrandFilter]     = useState(() => sessionStorage.getItem('pos_brand')    || 'all')
   const [branchFilter,    setBranchFilter]    = useState(() => sessionStorage.getItem('pos_branch')   || 'all')
@@ -504,19 +576,55 @@ export default function POS() {
   const [supplierFilter,  setSupplierFilter]  = useState(() => sessionStorage.getItem('pos_supplier') || 'all')
   const [initialFilter,   setInitialFilter]   = useState(() => sessionStorage.getItem('pos_initial')  || 'all')
   const [filterOpen,      setFilterOpen]      = useState(false)
+
   const [productPage, setProductPage] = useState(1)
-  const [productPageSize, setProductPageSize] = useState(20)
+  const [productPageSize, setProductPageSize] = useState(50)
   const [productTotal, setProductTotal] = useState(0)
   const [productFilterMeta, setProductFilterMeta] = useState<ProductFilterMeta>({ brands: [], suppliers: [], initials: [] })
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)
-  // Persist filter changes
-  const setPersistedCat      = (v: string) => { sessionStorage.setItem('pos_cat',      v); setCategoryFilter(v) }
-  const setPersistedBrand    = (v: string) => { sessionStorage.setItem('pos_brand',    v); setBrandFilter(v) }
-  const setPersistedBranch   = (v: string) => { sessionStorage.setItem('pos_branch',   v); setBranchFilter(v) }
-  const setPersistedStock    = (v: string) => { sessionStorage.setItem('pos_stock',    v); setStockFilter(v) }
-  const setPersistedGroup    = (v: string) => { sessionStorage.setItem('pos_group',    v); setGroupFilter(v) }
-  const setPersistedSupplier = (v: string) => { sessionStorage.setItem('pos_supplier', v); setSupplierFilter(v) }
+  // Surfaced when loadCatalogData's fetch actually fails (auth hiccup, timeout,
+  // server error) -- previously this was only console.error'd, so a real
+  // failure and "filters legitimately match nothing" looked identical to the
+  // cashier: an empty grid with a generic "No data found" message and no way
+  // to tell which one it was or how to recover.
+  const [catalogLoadError, setCatalogLoadError] = useState('')
+  // Product ids that carry active batch/expiry tracking, scoped to the
+  // current branch filter -- see batchesTransport.ts. Drives whether
+  // tapping a product forces the detail sheet's batch-picker step (see
+  // openProductCard) instead of the normal one-tap/detail-sheet flow.
+  const [trackedBatchProductIds, setTrackedBatchProductIds] = useState<Set<number>>(new Set())
+  // Persist filter changes. Each setter now *toggles* the given value in/out
+  // of a comma-joined multi-select set (passing 'all' clears the whole filter).
+  const setPersistedCat      = (v: string) => { const next = toggleMultiValue(categoryFilter, v); sessionStorage.setItem('pos_cat',      next); setCategoryFilter(next) }
+  // Batch variant of setPersistedCat -- applies one checked/unchecked state
+  // to several category values at once (selecting a whole "Main - Sub"
+  // hierarchical group from the Category filter in one tap, same as
+  // Products/Inventory). See utils/multiSelect.ts's toggleMultiValues and
+  // components/shared/CategoryFilterOptions.tsx.
+  const setPersistedCatBatch = (values: string[], checked: boolean) => { const next = toggleMultiValues(categoryFilter, values, checked); sessionStorage.setItem('pos_cat', next); setCategoryFilter(next) }
+  const setPersistedBrand    = (v: string) => { const next = toggleMultiValue(brandFilter,    v); sessionStorage.setItem('pos_brand',    next); setBrandFilter(next) }
+  const setPersistedBranch   = (v: string) => { const next = toggleMultiValue(branchFilter,   v); sessionStorage.setItem('pos_branch',   next); setBranchFilter(next) }
+  const setPersistedStock    = (v: string) => { const next = toggleMultiValue(stockFilter,    v); sessionStorage.setItem('pos_stock',    next); setStockFilter(next) }
+  const setPersistedGroup    = (v: string) => { const next = toggleMultiValue(groupFilter,    v); sessionStorage.setItem('pos_group',    next); setGroupFilter(next) }
+  const setPersistedSupplier = (v: string) => { const next = toggleMultiValue(supplierFilter, v); sessionStorage.setItem('pos_supplier', next); setSupplierFilter(next) }
   const setPersistedInitial  = (v: string) => { sessionStorage.setItem('pos_initial',  v); setInitialFilter(v) }
+  // A stale filter value (e.g. a category/brand/supplier that was renamed or
+  // deleted, or an old branch selection) silently matches zero products
+  // server-side forever, since these persist in sessionStorage across visits
+  // -- and nothing else here re-validates them against the live catalog. This
+  // resets every filter dimension in one action so a cashier isn't stuck
+  // hunting for which one is the culprit.
+  const clearAllPosFilters = () => {
+    setSearch('')
+    ;['pos_cat', 'pos_brand', 'pos_branch', 'pos_stock', 'pos_group', 'pos_supplier', 'pos_initial', 'pos_search'].forEach((key) => sessionStorage.removeItem(key))
+    setCategoryFilter('all')
+    setBrandFilter('all')
+    setBranchFilter('all')
+    setStockFilter('all')
+    setGroupFilter('all')
+    setSupplierFilter('all')
+    setInitialFilter('all')
+  }
 // Multi-order state
   // Restore orders from sessionStorage so navigating away and back preserves
   // all open orders, carts, customer info, and delivery details.
@@ -555,7 +663,14 @@ export default function POS() {
       // Update any orders still on the hardcoded 'Cash' default
       setOrders(prev => prev.map(o =>
         o.paymentMethod === 'Cash' && !o.customPayment && !o.cart.length
-          ? { ...o, paymentMethod: firstMethod }
+          ? {
+              ...o,
+              paymentMethod: firstMethod,
+              paymentDetails: o.paymentDetails.map((detail) => ({
+                ...detail,
+                method: detail.method === 'Cash' ? firstMethod : detail.method,
+              })),
+            }
           : o
       ))
     } catch {}
@@ -637,6 +752,124 @@ export default function POS() {
 
 // Other UI state
   const [mobileView,       setMobileView]       = useState<'products' | 'cart'>('products')
+
+  // Cart panel content view -- addresses a real user report: the cart
+  // panel always showed product line-items and the customer/delivery/
+  // discount/payment section as two separately-scrolling regions stacked
+  // on top of each other, with no way to focus on just one or the other.
+  // 'all' keeps that exact existing behavior (default, so nobody's layout
+  // changes unless they actively pick something else). 'products'/'details'
+  // let the person collapse to just the section they're working with --
+  // each then gets the panel's full height instead of the items list
+  // always taking the majority share and the details section always
+  // being capped short. Persisted across visits the same way the other
+  // POS display toggles (pos_cat, pos_branch, etc.) are.
+  const [cartViewMode, setCartViewMode] = useState<'all' | 'products' | 'details'>(
+    () => {
+      const stored = sessionStorage.getItem('pos_cart_view')
+      return stored === 'products' || stored === 'details' ? stored : 'all'
+    },
+  )
+  const setPersistedCartViewMode = (mode: 'all' | 'products' | 'details') => {
+    sessionStorage.setItem('pos_cart_view', mode)
+    setCartViewMode(mode)
+  }
+
+  // Cart panel width -- draggable, persisted (desktop/tablet only; mobile
+  // stays on the products/cart tab split above and never uses this). Was
+  // previously a fixed width per breakpoint (22rem/26rem/30rem), which
+  // meant a cart with many edited line items had no way to get more room
+  // without the products panel shrinking to compensate -- this lets the
+  // cashier drag the divider once and keep that width across sessions.
+  const CART_WIDTH_STORAGE_KEY = 'pos_cart_width_px'
+  const CART_WIDTH_DEFAULT_PX = 400   // wider default so a cart with a few
+  // edited lines (branch/price/discount rows) doesn't need the drag straight
+  // away; was 352 (the old md:w-[22rem] default)
+  const CART_WIDTH_MIN_PX = 300
+  const CART_WIDTH_MAX_PX = 860       // was 720 -- some cashiers want the cart
+  // to take most of the screen while reconciling a large order
+  const [cartWidthPx, setCartWidthPx] = useState<number>(() => {
+    const stored = Number(window.localStorage.getItem(CART_WIDTH_STORAGE_KEY))
+    return Number.isFinite(stored) && stored >= CART_WIDTH_MIN_PX && stored <= CART_WIDTH_MAX_PX
+      ? stored
+      : CART_WIDTH_DEFAULT_PX
+  })
+  const [cartResizing, setCartResizing] = useState(false)
+  const mainPanelsRef = useRef<HTMLDivElement | null>(null)
+  // Tracks whether we're above the md breakpoint, so the drag-resized cart
+  // width (a px style, which always wins over the `w-full` class) only
+  // ever applies on desktop/tablet -- on mobile the cart is a full-width
+  // tab, not a side panel, and must never be squeezed to a fixed px width.
+  const [isDesktopViewport, setIsDesktopViewport] = useState(() => window.matchMedia('(min-width: 768px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)')
+    const handleChange = () => setIsDesktopViewport(mq.matches)
+    mq.addEventListener('change', handleChange)
+    return () => mq.removeEventListener('change', handleChange)
+  }, [])
+  const clampCartWidth = useCallback((px: number) => {
+    if (!mainPanelsRef.current) return Math.min(CART_WIDTH_MAX_PX, Math.max(CART_WIDTH_MIN_PX, px))
+    // Leave the products panel at least this wide so it never gets
+    // squeezed into an unusable sliver when someone drags the cart very wide.
+    const PRODUCTS_MIN_PX = 280
+    const containerWidth = mainPanelsRef.current.getBoundingClientRect().width
+    const maxByContainer = Math.max(CART_WIDTH_MIN_PX, containerWidth - PRODUCTS_MIN_PX)
+    return Math.min(CART_WIDTH_MAX_PX, maxByContainer, Math.max(CART_WIDTH_MIN_PX, px))
+  }, [])
+
+  const startCartResize = useCallback((clientX: number) => {
+    if (!mainPanelsRef.current) return
+    const containerRect = mainPanelsRef.current.getBoundingClientRect()
+    setCartResizing(true)
+    const previousUserSelect = document.body.style.userSelect
+    const previousCursor = document.body.style.cursor
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+
+    const handleMove = (moveClientX: number) => {
+      const nextWidth = clampCartWidth(containerRect.right - moveClientX)
+      setCartWidthPx(nextWidth)
+    }
+    const onMouseMove = (event: MouseEvent) => handleMove(event.clientX)
+    const onTouchMove = (event: TouchEvent) => {
+      if (event.touches[0]) handleMove(event.touches[0].clientX)
+    }
+    const stop = () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', stop)
+      document.body.style.userSelect = previousUserSelect
+      document.body.style.cursor = previousCursor
+      setCartResizing(false)
+      setCartWidthPx((current) => {
+        window.localStorage.setItem(CART_WIDTH_STORAGE_KEY, String(current))
+        return current
+      })
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('touchmove', onTouchMove, { passive: true })
+    window.addEventListener('touchend', stop)
+    handleMove(clientX)
+  }, [clampCartWidth])
+
+  const resetCartWidth = useCallback(() => {
+    setCartWidthPx(CART_WIDTH_DEFAULT_PX)
+    window.localStorage.setItem(CART_WIDTH_STORAGE_KEY, String(CART_WIDTH_DEFAULT_PX))
+  }, [])
+
+  // Re-clamp a stored/dragged width against the window itself resizing
+  // (e.g. moving to a smaller monitor, or a browser window shrink) so the
+  // products panel never gets pushed to an unusably small width just by
+  // the window changing size -- clampCartWidth otherwise only runs live
+  // while actively dragging.
+  useEffect(() => {
+    const handleResize = () => setCartWidthPx((current) => clampCartWidth(current))
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [clampCartWidth])
+
   const [detailProduct,    setDetailProduct]    = useState<ProductRecord | null>(null)
   const [loading,          setLoading]          = useState(false)
   const [contactOptionsReady, setContactOptionsReady] = useState(false)
@@ -657,6 +890,7 @@ export default function POS() {
   const pendingCatalogLoadRef = useRef<{ label: string, options?: CatalogLoadOptions } | null>(null)
   const latestLoadCatalogRef = useRef<((label?: string, options?: CatalogLoadOptions) => Promise<{ prods: ProductRecord[] } | null>) | null>(null)
   const catalogMetadataLoadedRef = useRef(false)
+  const catalogMetadataScopeRef = useRef('')
   const catalogLoadedOnceRef = useRef(false)
   const categoryOptionsLoadedRef = useRef(false)
   const categoryOptionsRequestRef = useRef(0)
@@ -670,6 +904,10 @@ export default function POS() {
   const savingDeliveryRef = useRef(false)
   const checkoutInFlightRef = useRef(false)
   const taxRate   = parseFloat(asText(settings.tax_rate || '0')) / 100
+  // Settings > POS Settings > "Show Discount in Cart" (pos_show_item_discount).
+  // Unset/anything but the literal string 'false' means shown -- same
+  // default-on convention as the notifications toggles in Settings.tsx.
+  const showItemDiscountInCart = asText(settings.pos_show_item_discount ?? 'true') !== 'false'
   const redeemPointsStep = Math.max(1, parseInt(asText(settings.customer_portal_redeem_points || '100'), 10) || 100)
   const redeemValueUsdStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_usd || '1')) || 1))
   const rawRedeemValueKhrStep = Math.max(0, Math.round(parseFloat(asText(settings.customer_portal_redeem_value_khr || String(exchangeRate))) || exchangeRate))
@@ -692,7 +930,15 @@ export default function POS() {
   }, [])
 
   const applyCategoryOptions = useCallback((cats: unknown[]) => {
-    setCategories(Array.isArray(cats) ? cats.map(normalizeCategory).filter((category): category is CategoryRecord => Boolean(category)) : [])
+    // Alphabetical by default, same as posBrands (buildProductBrandOptions
+    // sorts) and posSuppliers (buildProductSupplierOptions sorts) -- this
+    // was the one list still rendering in raw backend order.
+    setCategories(
+      Array.isArray(cats)
+        ? cats.map(normalizeCategory).filter((category): category is CategoryRecord => Boolean(category))
+          .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || '')))
+        : [],
+    )
   }, [])
 
   const applyBranchMetadata = useCallback((brs: BranchRecord[]) => {
@@ -718,6 +964,60 @@ export default function POS() {
   useEffect(() => {
     membershipInfoRef.current = membershipInfo
   }, [membershipInfo])
+
+  // Filters are persisted in sessionStorage across visits (see setPersistedBranch
+  // etc. above) so a value picked in a previous session -- a branch that's since
+  // been deactivated/deleted, a brand/category/supplier that was renamed -- can
+  // stick around and silently match zero products *forever*, with no error and
+  // no visible reason: the grid just looks permanently empty ("No data found")
+  // while server-side counts (alphabet bar, brand/category lists) look fine,
+  // because those are computed from the live catalog, not from this stale
+  // client-side selection. This re-validates every multi-select filter dimension
+  // against what the server actually returned as soon as branches/metadata load,
+  // dropping any selected value that no longer exists rather than letting it
+  // quietly zero out the grid on every subsequent visit.
+  useEffect(() => {
+    if (!catalogLoadedOnceRef.current) return
+    const activeBranchIds = new Set((branches || []).map((b) => Number(b?.id)))
+    const knownBrands = new Set((productFilterMeta.brands || []).map((v) => String(v).toLowerCase()))
+    const knownSuppliers = new Set((productFilterMeta.suppliers || []).map((v) => String(v).toLowerCase()))
+    const knownCategories = new Set((categories || []).map((c) => String(c?.name || '').toLowerCase()).filter(Boolean))
+
+    const pruneBranch = (raw: string): string => {
+      const kept = parseMultiValues(raw).filter((v) => activeBranchIds.has(parseInt(v, 10)))
+      return kept.length ? kept.join(',') : 'all'
+    }
+    const pruneAgainst = (raw: string, known: Set<string>): string => {
+      if (!known.size) return raw // metadata for this dimension hasn't loaded yet -- don't guess
+      const kept = parseMultiValues(raw).filter((v) => known.has(v.toLowerCase()))
+      return kept.length ? kept.join(',') : 'all'
+    }
+
+    const nextBranch = pruneBranch(branchFilter)
+    if (nextBranch !== branchFilter) {
+      sessionStorage.setItem('pos_branch', nextBranch)
+      setBranchFilter(nextBranch)
+    }
+    const nextBrand = pruneAgainst(brandFilter, knownBrands)
+    if (nextBrand !== brandFilter) {
+      sessionStorage.setItem('pos_brand', nextBrand)
+      setBrandFilter(nextBrand)
+    }
+    const nextSupplier = pruneAgainst(supplierFilter, knownSuppliers)
+    if (nextSupplier !== supplierFilter) {
+      sessionStorage.setItem('pos_supplier', nextSupplier)
+      setSupplierFilter(nextSupplier)
+    }
+    const nextCategory = pruneAgainst(categoryFilter, knownCategories)
+    if (nextCategory !== categoryFilter) {
+      sessionStorage.setItem('pos_cat', nextCategory)
+      setCategoryFilter(nextCategory)
+    }
+    // Deliberately only keyed on the *metadata* inputs (branches, brands,
+    // suppliers, categories) -- not on the filter values themselves, or this
+    // would fight the user's own filter clicks by re-running and "correcting"
+    // a value they just picked.
+  }, [branches, categories, productFilterMeta.brands, productFilterMeta.suppliers])
 
   const loadCatalogData = useCallback(async (label = 'POS catalog data', options: CatalogLoadOptions = {}) => {
     if (catalogLoadPromiseRef.current) {
@@ -750,12 +1050,17 @@ export default function POS() {
           include: 'branch_stock,images,family',
           metadata: '0',
         } satisfies QueryParams
-        const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current)
+        const metadataScope = JSON.stringify([
+          productQuery.branchId, productQuery.brand, productQuery.category,
+          productQuery.supplier, productQuery.stockState, productQuery.groupState,
+        ])
+        const scopeChanged = catalogMetadataScopeRef.current !== metadataScope
+        const shouldLoadMetadata = Boolean(options.forceMetadata || !catalogMetadataLoadedRef.current || scopeChanged)
         const [productPayload, metadataPayload] = await withLoaderTimeout(
           () => shouldLoadMetadata
             ? loadPosProductBootstrap(productQuery)
               .then((bootstrapPayload) => [
-                bootstrapPayload?.products || [],
+                bootstrapPayload || {},
                 Array.isArray(bootstrapPayload?.branches) ? bootstrapPayload.branches : null,
               ] as [ProductPayload | ProductRecord[], BranchRecord[] | null])
             : Promise.all([
@@ -772,10 +1077,12 @@ export default function POS() {
           : (Array.isArray(productPayload) ? productPayload : [])
         applyCatalogProducts(prods)
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
+        setCatalogLoadError('')
         catalogLoadedOnceRef.current = true
         if (Array.isArray(metadataPayload)) {
           applyBranchMetadata(metadataPayload as BranchRecord[])
           catalogMetadataLoadedRef.current = true
+          catalogMetadataScopeRef.current = metadataScope
           const filters = isPlainRecord(payloadRecord.filters) ? payloadRecord.filters : {}
           applyProductFilterMeta(filters, payloadRecord.initials || [])
         } else if (isPlainRecord(payloadRecord.filters) || Array.isArray(payloadRecord.initials)) {
@@ -785,6 +1092,7 @@ export default function POS() {
       } catch (error) {
         if (!isTrackedRequestCurrent(catalogRequestRef, requestId)) return null
         console.error('[POS] catalog load failed:', getErrorMessage(error))
+        setCatalogLoadError(getErrorMessage(error, posCopy('Could not load products', 'Could not load products')))
         return null
       } finally {
         if (isTrackedRequestCurrent(catalogRequestRef, requestId)) {
@@ -855,6 +1163,21 @@ export default function POS() {
     } catch (error) {
       if (!isTrackedRequestCurrent(categoryOptionsRequestRef, requestId)) return null
       console.error('[POS] categories load failed:', getErrorMessage(error))
+      // Reported as "no Category filter in the filter menu": on failure,
+      // categoryOptionsLoadedRef.current stays false (correct, so a retry
+      // is still possible) but categoryOptionsReady was already flipped
+      // true to get us into this function in the first place -- without
+      // resetting it back to false here, the two effects that drive
+      // loadCategoryOptions (both keyed on categoryOptionsReady *changing*
+      // to true, not merely being true) would never fire again after one
+      // failed attempt, since React bails out of state updates/effects
+      // when the value doesn't actually change. That permanently hid the
+      // Category section (FilterPanel.tsx only renders it when
+      // categories.length > 0) after a single transient error, with
+      // nothing in the UI explaining why and no way to recover short of a
+      // full page reload. Resetting it here lets the next catalog refresh
+      // or filter-panel reopen flip it false -> true again and retry.
+      setCategoryOptionsReady(false)
       return null
     }
   }, [applyCategoryOptions])
@@ -893,7 +1216,23 @@ export default function POS() {
     }
   }, [posCopy])
 
-// Initial data load
+// Initial data load. NOTE: this effect's dependency array is `[isActive,
+// loadCatalogData]`, and `loadCatalogData` is a useCallback that's recreated
+// on every filter/search/page change (see its own dependency list above) --
+// so despite the "Initial" name/comment, this effect actually re-fires on
+// *every* filter change too, which is the intended way this reloads the grid
+// whenever a filter changes without needing to list every filter here again.
+// The bug was `searchRef.current?.focus()` living in that same body: it ran
+// on every one of those re-fires, not just the real initial activation --
+// so picking any option in the Groups (or branch/brand/category/stock/
+// supplier) filter popover yanked keyboard focus back to the search box on
+// every click, which can scroll the input into view and reposition/disrupt
+// the still-open filter popover (PortalMenu repositions on scroll) right as
+// the user is trying to pick something. Root cause for the reported
+// "Groups filter -- not showing, slow, just refreshing" symptom: split the
+// one-time focus behavior out into its own effect keyed only on `isActive`,
+// so it still runs once when the POS tab opens but no longer fires on every
+// subsequent filter-driven reload.
   useEffect(() => {
     if (!isActive) {
       setContactOptionsReady(false)
@@ -912,8 +1251,22 @@ export default function POS() {
     }
 
     void loadCatalogData('POS catalog')
-    searchRef.current?.focus()
   }, [isActive, loadCatalogData])
+
+  // Focus the search box once when the POS tab becomes active -- not on
+  // every subsequent filter-driven reload above (see that effect's comment).
+  // Desktop only, same reasoning as addToCart's refocus below: this is for
+  // the physical-keyboard/barcode-scanner workflow, and popping the mobile
+  // on-screen keyboard the instant the tab opens (before anyone's tapped
+  // the search box themselves) is unwanted there.
+  useEffect(() => {
+    if (!isActive || !isDesktopViewport) return
+    searchRef.current?.focus()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally
+    // keyed only on isActive/isDesktopViewport; refocusing on every
+    // loadCatalogData identity change (i.e. every filter/search/page
+    // change) is the bug this fixes.
+  }, [isActive, isDesktopViewport])
 
   useEffect(() => {
     if (!isActive) {
@@ -967,11 +1320,19 @@ export default function POS() {
     if (!isActive || !filterMetaReady || filterMetaLoadedRef.current) return
     filterMetaLoadedRef.current = true
     const requestId = beginTrackedRequest(filterMetaRequestRef)
-    void withLoaderTimeout(() => loadPosProductFilters({}), 'POS product filters', POS_FILTER_META_TIMEOUT_MS).then((filters) => {
+    const scopedQuery = {
+      branchId: branchFilter === 'all' ? '' : branchFilter,
+      brand: brandFilter === 'all' ? '' : brandFilter,
+      category: categoryFilter === 'all' ? '' : categoryFilter,
+      supplier: supplierFilter === 'all' ? '' : supplierFilter,
+      stockState: stockFilter === 'all' ? '' : stockFilter,
+      groupState: groupFilter === 'all' ? '' : groupFilter,
+    } satisfies QueryParams
+    void withLoaderTimeout(() => loadPosProductFilters(scopedQuery), 'POS product filters', POS_FILTER_META_TIMEOUT_MS).then((filters) => {
       if (!isTrackedRequestCurrent(filterMetaRequestRef, requestId)) return
       applyProductFilterMeta(isPlainRecord(filters) ? filters : {}, [])
     }).catch(() => {})
-  }, [applyProductFilterMeta, filterMetaReady, isActive])
+  }, [applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, filterMetaReady, groupFilter, isActive, stockFilter, supplierFilter])
 
 // Sync-push reload when another device changes data
   useEffect(() => {
@@ -987,6 +1348,13 @@ export default function POS() {
         invalidateTrackedRequest(categoryOptionsRequestRef)
       }
       void loadCatalogData('POS sync catalog', { forceMetadata: channel === 'branches' })
+    }
+    if (channel === 'inventory' || channel === 'sales' || channel === 'returns') {
+      // Stock moved on another device/till (adjustment, transfer, sale, or
+      // return) -- refresh so the grid's stock badges/quantities here don't
+      // go stale and risk overselling at checkout. Metadata (categories/
+      // branches) is unaffected, so no forceMetadata here.
+      void loadCatalogData('POS sync stock')
     }
     if (channel === 'customers') {
       void loadCustomers('POS sync customers')
@@ -1202,20 +1570,39 @@ export default function POS() {
   }
 
 // Product filter: comma-separated terms, AND/OR mode (same as Products page)
-  const deferredSearch = useDeferredValue(search)
-  const searchTerms = useMemo(() => buildProductSearchTerms(deferredSearch), [deferredSearch])
-  const normalizedBrandFilter = useMemo(
-    () => (brandFilter === 'all' ? 'all' : brandFilter.toLowerCase()),
-    [brandFilter],
-  )
-  const normalizedSupplierFilter = useMemo(
-    () => (supplierFilter === 'all' ? 'all' : supplierFilter.toLowerCase()),
-    [supplierFilter],
-  )
-  const branchFilterId = useMemo(
-    () => (branchFilter === 'all' ? null : parseInt(branchFilter, 10)),
+  // Built from `debouncedProductSearch` (180ms, the same value that drives
+  // loadCatalogData's server fetch below), not a per-keystroke
+  // `useDeferredValue` -- previously this re-narrowed the currently loaded
+  // grid on every keystroke, so typing visibly shrank the product list one
+  // character at a time before the server's actual match set landed
+  // (reported as "search results render incrementally / one by one, should
+  // only show once all results are in", same fix applied to Products.tsx's
+  // equivalent). Tying both to the same debounced value means the grid now
+  // updates once, atomically, per settled query.
+  const searchTerms = useMemo(() => buildProductSearchTerms(debouncedProductSearch), [debouncedProductSearch])
+  // Selected branch ids for the (possibly multi-select) branch filter.
+  const branchFilterIds = useMemo(
+    () => parseMultiValues(branchFilter).map((v) => parseInt(v, 10)).filter((n) => Number.isFinite(n)),
     [branchFilter],
   )
+  // Single-branch context (adding to cart, "display stock for this branch") uses the
+  // first selected branch even when several are selected for browsing/filtering.
+  const primaryBranchFilterId = branchFilterIds.length ? branchFilterIds[0] : null
+
+  // Which products currently carry active batch/expiry tracking, scoped to
+  // the branch filter -- refetched whenever it changes. Best-effort: a
+  // failed fetch just means no product gets the batch-picker gate this
+  // render (getTrackedBatchProductIds itself already falls back to an
+  // empty list, see batchesTransport.ts), same non-blocking pattern as the
+  // other POS meta fetches below.
+  useEffect(() => {
+    let cancelled = false
+    getTrackedBatchProductIds(primaryBranchFilterId ?? undefined).then((res) => {
+      if (cancelled) return
+      setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
+    }).catch(() => { if (!cancelled) setTrackedBatchProductIds(new Set()) })
+    return () => { cancelled = true }
+  }, [primaryBranchFilterId])
 
   // Derived filter lists from products
   const posSuppliers = useMemo(
@@ -1227,72 +1614,187 @@ export default function POS() {
     [productFilterMeta.brands, settings?.product_brand_options],
   )
   const posPaymentMethods = useMemo((): string[] => {
-    const fallback = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR', 'Pi Pay', 'Transfer']
+    const fallback = ['Cash', 'Card', 'ABA Bank', 'Wing', 'KHQR']
     try {
       const parsed = JSON.parse(asText(settings.pos_payment_methods || '[]')) as unknown
       if (!Array.isArray(parsed)) return fallback
-      const methods = parsed.map((method) => String(method || '').trim()).filter(Boolean)
+      const retired = new Set(['pi pay', 'transfer'])
+      const methods = parsed
+        .map((method) => String(method || '').trim())
+        .filter((method) => method && !retired.has(method.toLocaleLowerCase()))
       return methods.length ? methods : fallback
     } catch {
       return fallback
     }
   }, [settings.pos_payment_methods])
+
+  const updatePaymentDetails = useCallback((updater: (details: PaymentDetail[]) => PaymentDetail[]) => {
+    setOrders((previous) => previous.map((order) => {
+      if (order.id !== resolvedActiveId) return order
+      const details = updater(order.paymentDetails)
+      return {
+        ...order,
+        paymentDetails: details,
+        paymentMethod: paymentMethodSummary(details),
+        customPayment: false,
+        paidUsd: String(details.reduce((sum, detail) => sum + (Number(detail.usd) || 0), 0) || ''),
+        paidKhr: String(details.reduce((sum, detail) => sum + (Number(detail.khr) || 0), 0) || ''),
+      }
+    }))
+  }, [resolvedActiveId])
+
+  const updatePaymentDetail = useCallback((id: string, patch: Partial<PaymentDetail>) => {
+    updatePaymentDetails((details) => details.map((detail) => detail.id === id ? { ...detail, ...patch } : detail))
+  }, [updatePaymentDetails])
+
+  const addPaymentDetail = useCallback(() => {
+    updatePaymentDetails((details) => [
+      ...details,
+      { id: `payment-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, method: posPaymentMethods[0] || 'Cash', usd: '', khr: '' },
+    ])
+  }, [posPaymentMethods, updatePaymentDetails])
+
+  const setExactPayment = useCallback((currency: 'usd' | 'khr', amount: number) => {
+    updatePaymentDetails((details) => [{
+      id: details[0]?.id || `payment-${Date.now()}`,
+      method: details[0]?.method || posPaymentMethods[0] || 'Cash',
+      usd: currency === 'usd' ? amount.toFixed(2) : '',
+      khr: currency === 'khr' ? Math.ceil(amount).toString() : '',
+    }])
+  }, [posPaymentMethods, updatePaymentDetails])
   const initialOptions = useMemo(
     () => aggregateInitialOptions(productFilterMeta.initials as Array<Record<string, unknown>>),
     [productFilterMeta.initials],
   )
+  // Vertical AlphaIndexRail wiring (replaces the old horizontal A-Z bar --
+  // see its removal below). Unlike Products.tsx/Inventory.tsx, POS's
+  // product grid is server-paginated (50/page, see loadCatalogData's
+  // `initial: initialFilter` param) rather than fully loaded and grouped
+  // client-side, so tapping a letter here can't scroll to an
+  // already-loaded section the way the other two pages do -- there's no
+  // guarantee that letter's products are even on the currently-fetched
+  // page. Instead it re-uses POS's own existing filter mechanism: tapping
+  // (or drag-scrubbing to) a letter sets `initialFilter`, which
+  // loadCatalogData already sends to the server exactly like the old
+  // horizontal bar's buttons did. Tapping the currently-active letter
+  // again clears back to 'all', matching the old bar's own toggle-off
+  // behavior (see the removed buttons' onClick below).
+  const visibleInitialLetters = useMemo(
+    () => initialOptions.map((item) => String(item.key)),
+    [initialOptions],
+  )
+  const jumpToInitial = useCallback((letter: string) => {
+    setPersistedInitial(initialFilter === letter ? 'all' : letter)
+  }, [initialFilter])
 
 // Products that do not match every active filter are fully hidden
   const filteredProducts = useMemo(() => {
     return products.filter((p) => {
-      // Search
+      // Search -- routed through matchesSearchTermGroups (searchMatch.ts)
+      // for typo/joiner/word-order/diacritic tolerance instead of a plain
+      // substring check, matching the same fix in Products.tsx's
+      // filterProductsForPage. Corrected comment (the previous version
+      // here claimed this was the only/live matching path with "no server
+      // round-trip" -- traced the actual data flow and that's wrong):
+      // `products` IS server-search-filtered -- loadCatalogData sends
+      // `query: debouncedProductSearch` to /api/products/bootstrap or
+      // /api/products/search (searchPosCatalogProducts), same as Products.tsx,
+      // and now benefits from the backend's products_fts/products_fts_code
+      // trigram matching same as that page. This client-side pass is the
+      // same "instant feedback between debounce ticks" re-filter pattern as
+      // Products.tsx's filterProductsForPage: `searchTerms` reacts to
+      // `deferredSearch` (near-immediate) while the server re-fetch waits on
+      // `debouncedProductSearch` (180ms), so typing narrows the *last
+      // fetched page* right away instead of waiting on the next round-trip.
+      // It can only ever narrow what the server already returned, never add
+      // back a product the server didn't send for this page/query -- so it
+      // must stay at least as permissive as the server's own match set, not
+      // stricter (this is why it's substring/fuzzy on the same
+      // name+sku+barcode+brand+category+supplier+description+unit haystack,
+      // matching the server's column set, rather than a narrower check).
       if (searchTerms.length > 0) {
-        const hay = `${p.name} ${p.sku||''} ${p.barcode||''} ${p.category||''} ${p.brand||''} ${p.supplier||''} ${p.description||''} ${p.unit||''}`.toLowerCase()
-        const hit = searchMode === 'AND'
-          ? searchTerms.every(t => hay.includes(t))
-          : searchTerms.some(t => hay.includes(t))
-        if (!hit) return false
+        const hay = [p.name, p.sku, p.barcode, p.category, p.brand, p.supplier, p.description, p.unit]
+        if (!matchesSearchTermGroups(hay, searchTerms, searchMode)) return false
       }
 
-      // Category exact match
-      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
+      // Category (one or more selected)
+      if (!matchesMulti(categoryFilter, p.category)) return false
 
-      // Brand exact match (case-insensitive)
-      if (normalizedBrandFilter !== 'all' && (p.brand || '').toLowerCase() !== normalizedBrandFilter) return false
+      // Brand (one or more selected, case-insensitive)
+      if (!matchesMulti(brandFilter, p.brand)) return false
 
-      // Supplier exact match (case-insensitive)
-      if (normalizedSupplierFilter !== 'all' && (p.supplier||'').toLowerCase() !== normalizedSupplierFilter) return false
+      // Supplier (one or more selected, case-insensitive)
+      if (!matchesMulti(supplierFilter, p.supplier)) return false
 
-      // Branch requires a branch_stock entry for the selected branch.
+      // Branch filter: narrow the displayed quantity to the selected
+      // branch(es), but do NOT hide the product just because it has no
+      // branch_stock ROW at all for that branch. A missing row (e.g. a
+      // branch created after the catalog was already imported/seeded,
+      // which never got backfilled to 0 for every existing product --
+      // see branches.ts's POST '/' handler) is functionally identical to
+      // an explicit qty=0 row, and zero-stock products are deliberately
+      // kept visible elsewhere in this same filter (see the NOTE below).
+      // Previously this returned false the moment NO branch_stock row
+      // matched the selected branch(es), which could empty the ENTIRE
+      // grid for a branch that had never been backfilled -- even though
+      // the branch dropdown itself (populated from the separate branches
+      // table) still looked populated and correct, which is exactly the
+      // "select shows numbers correctly but no product found" report.
       let qty = Number(p.stock_quantity || 0)
-      if (branchFilterId != null) {
-        const bs = (p.branch_stock || []).find((b) => Number(b.branch_id) === branchFilterId)
-        if (!bs) return false
-        qty = Number(bs.quantity || 0)
+      if (branchFilterIds.length) {
+        const matches = (p.branch_stock || []).filter((b) => branchFilterIds.includes(Number(b.branch_id)))
+        qty = matches.reduce((sum, b) => sum + Number(b.quantity || 0), 0)
       }
 
-      // Explicit stock filter.
-      if (stockFilter === 'out')      return qty <= asNumber(p.out_of_stock_threshold)
-      if (stockFilter === 'low')      return qty > asNumber(p.out_of_stock_threshold) && qty <= (asNumber(p.low_stock_threshold) || 10)
-      if (stockFilter === 'in_stock') return qty > (asNumber(p.low_stock_threshold) || 10)
+      // Explicit stock filter(s) -- OR'd together when more than one is selected.
+      const stockStates = parseMultiValues(stockFilter)
+      if (stockStates.length) {
+        return stockStates.some((state) => {
+          if (state === 'out')      return qty <= asNumber(p.out_of_stock_threshold)
+          if (state === 'low')      return qty > asNumber(p.out_of_stock_threshold) && qty <= (asNumber(p.low_stock_threshold) || 10)
+          if (state === 'in_stock') return qty > (asNumber(p.low_stock_threshold) || 10)
+          return true
+        })
+      }
 
-      // Default browsing stays sellable-first. Active search/initial filters become discovery mode,
-      // so POS can find the same matching products as Products and Inventory.
-      if (stockFilter === 'all' && !hasProductDiscoveryQuery && qty <= asNumber(p.out_of_stock_threshold)) return false
+      // NOTE: this used to hide every zero-stock product during default
+      // browsing ("sellable-first"), on the theory that a cashier scrolling
+      // the grid shouldn't see things they can't sell. In practice that
+      // silently empties the whole grid for any catalog where stock hasn't
+      // been assigned yet (e.g. right after a CSV import that didn't carry
+      // branch/quantity columns) -- the server-side counts (alphabet bar,
+      // category/brand lists) aren't filtered by stock at all, so admins
+      // saw non-zero counts everywhere but an empty cart-side grid, with no
+      // way to tell why. Products and Inventory never hid zero-stock items
+      // by default, so POS now matches them: zero-stock products stay
+      // visible (cards already render an out-of-stock indicator), and the
+      // explicit Stock filter above remains the way to narrow to
+      // in-stock/low/out specifically.
 
       return true
     })
   }, [
-    branchFilterId,
+    branchFilterIds,
+    brandFilter,
     categoryFilter,
     hasProductDiscoveryQuery,
-    normalizedBrandFilter,
-    normalizedSupplierFilter,
     products,
     searchMode,
     searchTerms,
     stockFilter,
+    supplierFilter,
   ])
+
+  const hasActivePosFilters = useMemo(() => (
+    Boolean(search.trim())
+    || categoryFilter !== 'all'
+    || brandFilter !== 'all'
+    || branchFilter !== 'all'
+    || stockFilter !== 'all'
+    || groupFilter !== 'all'
+    || supplierFilter !== 'all'
+    || initialFilter !== 'all'
+  ), [search, categoryFilter, brandFilter, branchFilter, stockFilter, groupFilter, supplierFilter, initialFilter])
 
   const productsById = useMemo(() => buildProductsById(products) as unknown as Map<number, ProductRecord>, [products])
   const branchesById = useMemo(() => new Map((Array.isArray(branches) ? branches : []).map((branch) => [Number(branch?.id), branch])), [branches])
@@ -1302,17 +1804,31 @@ export default function POS() {
     [products],
   )
 
-  const visibleProductCards = useMemo(() => {
-    const cards = buildVisibleProductCards(filteredProducts, productsById) as unknown as ProductRecord[]
-    if (groupFilter === 'all') return cards
-    return cards.filter((product) => {
-      const meta: ProductGroupMeta = product.__groupMeta || {}
-      const isVariantGroup = meta.groupKind === 'variant' || Boolean(product.parent_id)
-      const isParentGroup = Boolean(product.is_group || meta.hasExplicitGroup || meta.hasMultipleItems)
-      if (['group', 'groups', 'grouped', 'variant', 'parent'].includes(groupFilter)) return isParentGroup || isVariantGroup
-      return !isParentGroup && !isVariantGroup
-    })
-  }, [filteredProducts, groupFilter, productsById])
+  // Root cause of "Groups filter -> no matching product" even though matching
+  // grouped items genuinely exist: groupState is already sent to the server
+  // (loadCatalogData's productQuery.groupState) and /api/products/search
+  // filters authoritatively against the *whole* active catalog (is_group,
+  // parent_id, or a same-name row anywhere else in products -- see
+  // buildSearchFilters in cloudflare/src/routes/products.ts). This client-side
+  // pass used to re-check that same condition again using buildProductGroups
+  // over `productsById`, which is only ever the current *page* of ~20 items
+  // (applyCatalogProducts replaces `products` wholesale per page, it's not
+  // cumulative). For explicit groups (is_group/parent_id flags) that's
+  // harmless since those flags live on the row itself. But this catalog's
+  // groups are mostly duplicate-name rows with neither flag set -- and any
+  // additional filter (brand/category/branch/stock) can easily let one
+  // sibling into the page's result set while excluding the other, or the two
+  // siblings can simply land on different pages. Either way this recheck saw
+  // a "group" of one, `hasMultipleItems` came back false, and a product the
+  // server had already confirmed was grouped got filtered back out --
+  // sometimes emptying the grid entirely. The server's answer is already
+  // scoped correctly across the full catalog, so there is nothing left for
+  // this pass to safely re-verify from a single page; card-building below
+  // still needs buildVisibleProductCards to collapse same-name rows for
+  // display, it just no longer re-filters by groupFilter afterward.
+  const visibleProductCards = useMemo(() => (
+    buildVisibleProductCards(filteredProducts, productsById) as unknown as ProductRecord[]
+  ), [filteredProducts, productsById])
 
   useEffect(() => {
     setProductPage(1)
@@ -1353,26 +1869,49 @@ export default function POS() {
     return bestBranchId || defaultBranchId || null
   }, [defaultBranchId])
 
-  /** Stock quantity relevant to the active branch filter or item branch assignment. */
+  /**
+   * Stock quantity relevant to the active branch filter or item branch
+   * assignment.
+   *
+   * With no branch filter and no cart line yet, this used to fall back to
+   * `product.stock_quantity` -- the sum across ALL branches. A sale line
+   * only ever books against ONE branch (`pickBestBranchId` picks it on the
+   * first add, and every quantity check after that is scoped to that same
+   * branch via `getBranchStockQty`), so a product split e.g. 3+3 across two
+   * branches displayed "6" on the card but could only ever actually accept
+   * 3 into the cart -- the 4th unit always failed with "not enough stock"
+   * even though the card's own number said otherwise. Falling back to the
+   * same single best branch `pickBestBranchId` would assign makes the
+   * number on the card match the real ceiling enforced when adding.
+   */
   const getDisplayStock = useCallback((product: ProductRecord | undefined, cartItem: { branch_id?: string | number | null } | null = null) => {
     if (!product) return 0
 
-    if (branchFilter !== 'all') {
-      return getBranchStockQty(product, branchFilter)
+    if (primaryBranchFilterId != null) {
+      return getBranchStockQty(product, primaryBranchFilterId)
     }
 
     if (cartItem?.branch_id) {
       return getBranchStockQty(product, cartItem.branch_id)
     }
 
+    const bestBranchId = pickBestBranchId(product)
+    if (bestBranchId != null) {
+      return getBranchStockQty(product, bestBranchId)
+    }
+
     return Number(product.stock_quantity || 0)
-  }, [branchFilter, getBranchStockQty])
+  }, [primaryBranchFilterId, getBranchStockQty, pickBestBranchId])
 
   const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
     if (!product) return
     const hasSpecial = asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0
     const hasPromotion = calculateProductDiscount(product, exchangeRate).active
-    if (groupProduct || hasSpecial || hasPromotion) {
+    // Batch-tracked products always need the detail sheet's lot picker --
+    // a one-tap add can't know which lot to sell from -- same gate as
+    // groupProduct/hasSpecial/hasPromotion below.
+    const isBatchTracked = trackedBatchProductIds.has(Number(product.id))
+    if (groupProduct || hasSpecial || hasPromotion || isBatchTracked) {
       setDetailProduct(product)
       return
     }
@@ -1381,7 +1920,7 @@ export default function POS() {
       return
     }
     setDetailProduct(product)
-  }, [addToCart, exchangeRate])
+  }, [addToCart, exchangeRate, trackedBatchProductIds])
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
@@ -1399,22 +1938,28 @@ export default function POS() {
   }, [])
 
 // Cart mutations
-  function addToCart(product: ProductRecord, priceMode = 'selling') {
-    const assignedBranchId = branchFilter !== 'all'
-      ? parseInt(branchFilter, 10)
+  function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection) {
+    const assignedBranchId = primaryBranchFilterId != null
+      ? primaryBranchFilterId
       : pickBestBranchId(product)
     const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
       usdToKhr: (value: unknown, rate: unknown) => CURRENCY.usdToKhr(Number(value || 0), Number(rate || 0)),
     })
+    // Batch-tracked products are capped by the picked lot's own remaining
+    // stock, not the product's overall stock -- a different lot for the
+    // same product/branch/price is a separate cart line (see
+    // findMatchingCartLineIndex/posCore.ts), each with its own ceiling.
+    const batchCeiling = batchSelection ? Math.max(0, Math.floor(batchSelection.quantity)) : null
     const existingIndex = findMatchingCartLineIndex(active.cart, {
       productId: product?.id,
       priceMode: priceValues.price_mode,
       branchId: assignedBranchId,
+      batchId: batchSelection?.batchId ?? null,
     })
     const existing = existingIndex >= 0 ? active.cart[existingIndex] : null
     let newCart: CartLineRecord[]
     if (existing) {
-      const stock = getDisplayStock(product, existing)
+      const stock = batchCeiling != null ? batchCeiling : getDisplayStock(product, existing)
       if (existing.quantity >= stock) { notify(t('not_enough_stock'), 'error'); return }
       const existingLineId = getCartLineId(existing)
       newCart = active.cart.map((item) => (
@@ -1423,26 +1968,46 @@ export default function POS() {
           : item
       ))
     } else {
-      const stock = getDisplayStock(product, { branch_id: assignedBranchId })
+      const stock = batchCeiling != null ? batchCeiling : getDisplayStock(product, { branch_id: assignedBranchId })
       if (stock <= 0) { notify(t('not_enough_stock'), 'error'); return }
       newCart = [...active.cart, {
         ...product,
-        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
+        cart_line_id: `${Number(product.id)}:${priceValues.price_mode}:${Number(assignedBranchId || 0)}:${batchSelection?.batchId || 0}:${Date.now()}:${Math.random().toString(36).slice(2, 7)}`,
         quantity: 1,
         ...priceValues,
         branch_id: assignedBranchId || null,
+        ...(batchSelection ? {
+          batch_id: batchSelection.batchId,
+          batch_label: batchSelection.batchLabel,
+          batch_expiry_date: batchSelection.batchExpiryDate,
+          batch_available_quantity: batchCeiling ?? 0,
+        } : {}),
       } as CartLineRecord]
     }
     patchActive({ cart: newCart })
+    sessionStorage.removeItem('pos_search')
     setSearch('')
-    searchRef.current?.focus()
+    // Refocus the search box after adding an item only on desktop -- this
+    // exists for the barcode-scanner workflow (scan -> item added ->
+    // search cleared -> ready for the next scan without touching the
+    // keyboard). On mobile there's no physical scanner/keyboard driving
+    // this: refocusing a text input there pops the on-screen keyboard on
+    // every single product tap, which is what the "keyboard shows up
+    // every time I tap a product" report was. Gated on the same
+    // `isDesktopViewport` media-query flag already used elsewhere in this
+    // file for other desktop-only behavior.
+    if (isDesktopViewport) searchRef.current?.focus()
   }
 
   const updateQty = (cartLineId: string | number, qty: number) => {
     if (qty <= 0) { patchActive({ cart: active.cart.filter((item) => getCartLineId(item) !== cartLineId) }); return }
     const cartItem = active.cart.find((item) => getCartLineId(item) === cartLineId)
     const product = productsById.get(Number(cartItem?.id))
-    if (qty > getDisplayStock(product, cartItem)) { notify(t('not_enough_stock'), 'error'); return }
+    // A batch-tracked line is capped by the lot's own remaining stock
+    // (captured on the line when it was added -- see addToCart), not the
+    // product's overall stock across every lot.
+    const stockCeiling = cartItem?.batch_id ? (cartItem.batch_available_quantity ?? 0) : getDisplayStock(product, cartItem)
+    if (qty > stockCeiling) { notify(t('not_enough_stock'), 'error'); return }
     patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
 
@@ -1451,21 +2016,84 @@ export default function POS() {
     patchActive({
       cart: active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
+        const baseUsd = item.base_price_usd ?? item.applied_price_usd
+        const baseKhr = item.base_price_khr ?? item.applied_price_khr
+        // Editing the price directly is still a valid way to override a
+        // line's total (kept from the existing behavior), but it now also
+        // reconciles the manual-discount fields against the new price so
+        // the two controls never disagree about what's actually charged --
+        // the discount becomes a plain 'fixed' amount equal to the gap
+        // between the line's base price and the price just typed in.
         if (field === 'usd') {
+          const appliedKhr = normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
+          const discountUsd = Math.max(0, normalizePriceValue(baseUsd - num, 0))
           return {
             ...item,
             applied_price_usd: num,
-            applied_price_khr: normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0),
+            applied_price_khr: appliedKhr,
+            manual_discount_type: discountUsd > 0 ? 'fixed' : null,
+            manual_discount_value: discountUsd,
+            manual_discount_usd: discountUsd,
+            manual_discount_khr: Math.max(0, normalizePriceValue(baseKhr - appliedKhr, 0)),
           }
         }
         if (field === 'khr') {
+          const appliedUsd = normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
+          const discountUsd = Math.max(0, normalizePriceValue(baseUsd - appliedUsd, 0))
           return {
             ...item,
             applied_price_khr: num,
-            applied_price_usd: normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0),
+            applied_price_usd: appliedUsd,
+            manual_discount_type: discountUsd > 0 ? 'fixed' : null,
+            manual_discount_value: discountUsd,
+            manual_discount_usd: discountUsd,
+            manual_discount_khr: Math.max(0, normalizePriceValue(baseKhr - num, 0)),
           }
         }
         return item
+      }),
+    })
+  }
+
+  // Per-item manual discount editor (Tier 2 #1): applies a % or fixed-USD
+  // discount against the line's base (selling/special/promotion) price,
+  // independent of any product-level promotion already in product_discount_*.
+  // Recomputes applied_price_usd/khr so totals, checkout payload, and the
+  // receipt all stay in sync with a single source of truth.
+  //
+  // Root cause of "manual per-item discount not working": CartItem's %/$
+  // toggle buttons activate a mode by calling this with rawValue '0' (there's
+  // nothing typed yet), but applyManualDiscount treats *any* value <= 0 as
+  // "no discount" and reports manual_discount_type back as null -- this used
+  // to trust that collapsed type verbatim, so the instant a cashier clicked
+  // % or $ to start entering a discount, the line's manual_discount_type
+  // snapped straight back to null. CartItem's amount input is
+  // disabled={!item.manual_discount_type}, so the field re-disabled itself
+  // on the same click that was supposed to enable it -- the toggle looked
+  // like it did nothing. The type the cashier just picked (the `type`
+  // parameter here) is kept as-is below instead of trusting the zero-value
+  // result; applyManualDiscount's *amounts* (0 until a real value is typed)
+  // are still used as-is, so a 0-value selection now correctly reads as
+  // "percent/fixed mode selected, no discount amount yet" rather than "no
+  // discount type at all". Passing type: null (the Clear button) still
+  // clears it, since `type` itself is null in that call.
+  const updateDiscount = (cartLineId: string | number, type: ManualDiscountType | null, rawValue: string) => {
+    const value = normalizePriceValue(rawValue, 0)
+    patchActive({
+      cart: active.cart.map((item) => {
+        if (getCartLineId(item) !== cartLineId) return item
+        const baseUsd = item.base_price_usd ?? item.applied_price_usd
+        const baseKhr = item.base_price_khr ?? item.applied_price_khr
+        const result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value)
+        return {
+          ...item,
+          applied_price_usd: result.applied_price_usd,
+          applied_price_khr: result.applied_price_khr,
+          manual_discount_type: type,
+          manual_discount_value: result.manual_discount_value,
+          manual_discount_usd: result.manual_discount_usd,
+          manual_discount_khr: result.manual_discount_khr,
+        }
       }),
     })
   }
@@ -1476,7 +2104,18 @@ export default function POS() {
     const product = productsById.get(Number(item?.id))
     if (!item || !product) return
 
-    const available = getDisplayStock(product, { ...item, branch_id: nextBranchId })
+    // Must check the TARGET branch's own stock directly via
+    // getBranchStockQty, not through getDisplayStock -- getDisplayStock
+    // gives first priority to the active branch filter (primaryBranchFilterId)
+    // over any explicit cartItem.branch_id (see its docstring above), so
+    // whenever a branch filter was active it kept reporting the filtered
+    // branch's stock regardless of which branch this switch was actually
+    // targeting. That let a line be moved to a zero-stock branch as long
+    // as the originally-selected/filtered branch still had stock. Bypass
+    // that fallback chain entirely for this check.
+    const available = nextBranchId != null
+      ? getBranchStockQty(product, nextBranchId)
+      : Number(product.stock_quantity || 0)
     if (item.quantity > available) {
       const branchName = branchesById.get(Number(nextBranchId))?.name || t('selected_branch') || 'selected branch'
       notify(`${t('not_enough_stock') || 'Not enough stock'} (${branchName})`, 'error')
@@ -1510,8 +2149,18 @@ export default function POS() {
   const subtotalUsd = cartTotals.subtotalUsd
   const subtotalKhr = cartTotals.subtotalKhr
 
-  const discUsd      = parseFloat(active.discountUsd) || 0
-  const discKhr      = parseFloat(active.discountKhr) || CURRENCY.usdToKhr(discUsd, exchangeRate)
+  // Overall/store discount (Tier 2 #2): supports a straight fixed USD/KHR
+  // amount (as before) or a percent-of-subtotal amount -- previously only
+  // the fixed field existed, so there was no way to key in e.g. "10% off"
+  // without doing the math by hand. Percent mode is derived off the cart
+  // subtotal so it stays correct as items are added/removed.
+  const discountPercentValue = Math.min(100, Math.max(0, parseFloat(active.discountPercent) || 0))
+  const discUsd = active.discountType === 'percent'
+    ? normalizePriceValue(subtotalUsd * (discountPercentValue / 100), 0)
+    : parseFloat(active.discountUsd) || 0
+  const discKhr = active.discountType === 'percent'
+    ? normalizePriceValue(subtotalKhr * (discountPercentValue / 100), 0)
+    : (parseFloat(active.discountKhr) || CURRENCY.usdToKhr(discUsd, exchangeRate))
   const membershipDiscUsd = parseFloat(active.membershipDiscountUsd) || 0
   const membershipDiscKhr = parseFloat(active.membershipDiscountKhr) || CURRENCY.usdToKhr(membershipDiscUsd, exchangeRate)
   const membershipRedeemUnits = Math.max(0, parseInt(active.membershipRedeemUnits || '0', 10) || 0)
@@ -1533,14 +2182,19 @@ export default function POS() {
   const totalUsd     = afterDiscUsd + taxUsd + customerFeeUsd
   const totalKhr     = afterDiscKhr + taxKhr + customerFeeKhr
 
-  const paidUsdNum   = parseFloat(active.paidUsd) || 0
-  const paidKhrNum   = parseFloat(active.paidKhr) || 0
+  const activePaymentDetails = active.paymentDetails.length
+    ? active.paymentDetails
+    : [{ id: 'legacy-payment', method: active.paymentMethod || 'Cash', usd: active.paidUsd, khr: active.paidKhr }]
+  const paidUsdNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.usd) || 0), 0)
+  const paidKhrNum   = activePaymentDetails.reduce((sum, detail) => sum + (parseFloat(detail.khr) || 0), 0)
   const totalPaid    = paidUsdNum + paidKhrNum / exchangeRate
   const changeUsd    = totalPaid - totalUsd
   const changeKhr    = changeUsd * exchangeRate
 
-  const handleDiscountUsd = (v: string) => patchActive({ discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
-  const handleDiscountKhr = (v: string) => patchActive({ discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
+  const handleDiscountUsd = (v: string) => patchActive({ discountType: 'fixed', discountUsd: v, discountKhr: String(CURRENCY.usdToKhr(parseFloat(v) || 0, exchangeRate)) })
+  const handleDiscountKhr = (v: string) => patchActive({ discountType: 'fixed', discountKhr: v, discountUsd: String(CURRENCY.khrToUsd(parseFloat(v) || 0, exchangeRate)) })
+  const handleDiscountPercent = (v: string) => patchActive({ discountType: 'percent', discountPercent: v })
+  const handleDiscountType = (type: 'fixed' | 'percent') => patchActive({ discountType: type })
   const handleMembershipUnits = (value: string) => {
     const rawUnits = Math.max(0, parseInt(value || '0', 10) || 0)
     const units = Math.min(rawUnits, maxMembershipUnits)
@@ -1628,12 +2282,21 @@ export default function POS() {
         product_discount_label: i.product_discount_label || null,
         product_discount_usd: i.product_discount_usd || 0,
         product_discount_khr: i.product_discount_khr || 0,
+        base_price_usd:    i.base_price_usd ?? i.applied_price_usd,
+        base_price_khr:    i.base_price_khr ?? i.applied_price_khr,
+        manual_discount_type:  i.manual_discount_type  || null,
+        manual_discount_value: i.manual_discount_value || 0,
+        manual_discount_usd:   i.manual_discount_usd   || 0,
+        manual_discount_khr:   i.manual_discount_khr   || 0,
         cost_price_usd:    i.cost_price_usd    || i.purchase_price_usd    || 0,
         cost_price_khr:    i.cost_price_khr    || i.purchase_price_khr    || 0,
         purchase_price_usd: i.purchase_price_usd || 0,
         purchase_price_khr: i.purchase_price_khr || 0,
         total:     i.applied_price_usd * i.quantity,
         branch_id: i.branch_id || null,
+        batch_id:          i.batch_id || null,
+        batch_label:       i.batch_label || null,
+        batch_expiry_date: i.batch_expiry_date || null,
       })),
       subtotal_usd: subtotalUsd, subtotal_khr: subtotalKhr,
       discount_usd: discUsd,    discount_khr: discKhr,
@@ -1642,7 +2305,12 @@ export default function POS() {
       membership_points_redeemed: membershipRedeemUnits * redeemPointsStep,
       tax_usd:      taxUsd,     tax_khr:      taxKhr,
       total_usd:    totalUsd,   total_khr:    totalKhr,
-      payment_method:   active.paymentMethod,
+      payment_method:   paymentMethodSummary(activePaymentDetails),
+      payment_details: activePaymentDetails.map((detail) => ({
+        method: detail.method.trim() || 'Cash',
+        amount_usd: parseFloat(detail.usd) || 0,
+        amount_khr: parseFloat(detail.khr) || 0,
+      })),
       payment_currency: (paidUsdNum > 0 && paidKhrNum > 0) ? 'MIXED' : paidKhrNum > 0 ? 'KHR' : 'USD',
       amount_paid_usd: paidUsdNum,
       amount_paid_khr: paidKhrNum,
@@ -1704,122 +2372,101 @@ export default function POS() {
       </div>
 
       {/* Two-panel main layout */}
-      <div className="flex flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
+      <div ref={mainPanelsRef} className="flex flex-1 min-h-0 overflow-x-auto overflow-y-hidden">
 
         {/* Left: Products panel */}
-        <div className={`flex flex-col flex-1 min-h-0 min-w-0 bg-gray-50 dark:bg-gray-900 md:min-w-[38rem] ${mobileView === 'cart' ? 'hidden md:flex' : 'flex'}`}>
+        <div className={`relative flex flex-col flex-1 min-h-0 min-w-0 bg-gray-50 dark:bg-gray-900 md:min-w-[18rem] lg:min-w-[22rem] ${mobileView === 'cart' ? 'hidden md:flex' : 'flex'}`}>
 
           {/* Filter bar */}
-          <div className="flex-shrink-0 p-3 space-y-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-            {/* Search + AND/OR + Filter toggle */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex-shrink-0 p-2.5 space-y-1.5 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            {/* Search + AND/OR + Filter toggle -- one row at every
+                breakpoint. AND/OR is now a single alternating button (click
+                to flip AND<->OR) instead of a two-option switch, so it
+                keeps a fixed compact width and never needs to wrap onto
+                its own row below the search box. Placeholder stays short
+                (the AND/OR button right next to it already shows the match
+                mode) so the input doesn't need as much width to read clearly. */}
+            <div className="flex items-center gap-1.5">
               <input
                 ref={searchRef}
-                className="input flex-1 min-w-0"
-                placeholder={searchMode === 'AND'
-                  ? `${t('search') || 'Search'} (${t('search_and_tip') || 'comma = AND terms'})`
-                  : `${t('search') || 'Search'} (${t('search_or_tip') || 'comma = OR terms'})`}
+                className="input min-w-0 flex-1"
+                placeholder={`${t('search') || 'Search'} ${t('products') || 'products'}...`}
+                title={searchMode === 'AND'
+                  ? (t('search_mode_and_hint') || 'Matching ALL terms - change in Filters to match ANY term instead')
+                  : (t('search_mode_or_hint') || 'Matching ANY term - change in Filters to match ALL terms instead')}
                 value={search}
-                onChange={e => setSearch(e.target.value)}
+                onChange={e => { const next = e.target.value; sessionStorage.setItem('pos_search', next); setSearch(next) }}
               />
-              <div className="flex w-full items-center gap-2 sm:w-auto">
-                <div className="flex flex-1 rounded-lg border border-gray-300 dark:border-zinc-600 overflow-hidden sm:flex-none">
-                  {(['AND', 'OR'] as const).map(m => (
-                    <button key={m} onClick={() => setSearchMode(m)}
-                      disabled={catalogControlsDisabled}
-                      className={`flex-1 px-2 py-1.5 text-xs font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none ${searchMode===m ? 'bg-blue-600 text-white' : 'bg-white dark:bg-zinc-800 text-gray-500 dark:text-gray-400'}`}>
-                      {m}
-                    </button>
-                  ))}
-                </div>
-                {/* Filter toggle button with active-count badge */}
-                {(() => {
-                  const activeFilters = [
-                    categoryFilter !== 'all' ? 1 : 0,
-                    brandFilter    !== 'all' ? 1 : 0,
-                    branchFilter   !== 'all' ? 1 : 0,
-                    stockFilter    !== 'all' ? 1 : 0,
-                    groupFilter    !== 'all' ? 1 : 0,
-                    supplierFilter !== 'all' ? 1 : 0,
-                    initialFilter  !== 'all' ? 1 : 0,
-                  ].reduce((a, b) => a + b, 0)
-                  return (
-                    <button
-                      onClick={() => setFilterOpen(v => !v)}
-                      disabled={catalogControlsDisabled}
-                      className={`flex flex-1 items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors sm:flex-none ${
-                        filterOpen || activeFilters > 0
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-300 dark:border-gray-600 hover:border-blue-400'
-                      } disabled:cursor-not-allowed disabled:opacity-60`}
-                    >
-                      {activeFilters > 0 ? (t('filters_active') || `Filters (${activeFilters})`).replace('{n}', String(activeFilters)) : (t('filters') || 'Filters')}
-                    </button>
-                  )
-                })()}
-              </div>
+              <ScanSearchButton onDetected={setSearch} t={t} />
+              {/* AND/OR toggle no longer sits here as its own button (Aug
+                  19 2026 UI request) -- reachable again from inside the
+                  Filter menu (search_mode section, see FilterPanel.tsx). */}
+              {/* Filter trigger + popover, self-contained (shared FilterMenu handles
+                  positioning, outside-click, Escape, and per-section search). */}
+              <Suspense fallback={null}>
+                <FilterPanel
+                  t={t}
+                  disabled={catalogControlsDisabled}
+                  onOpenChange={setFilterOpen}
+                  categories={categories}
+                  brands={posBrands}
+                  branches={branches}
+                  suppliers={posSuppliers}
+                  categoryFilter={categoryFilter}   setCategoryFilter={setPersistedCat}   setCategoryFilterBatch={setPersistedCatBatch}
+                  brandFilter={brandFilter}         setBrandFilter={setPersistedBrand}
+                  branchFilter={branchFilter}       setBranchFilter={setPersistedBranch}
+                  stockFilter={stockFilter}         setStockFilter={setPersistedStock}
+                  groupFilter={groupFilter}         setGroupFilter={setPersistedGroup}
+                  supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
+                  searchMode={searchMode}           setSearchMode={setSearchMode}
+                />
+              </Suspense>
             </div>
 
             {searchTerms.length > 1 && (
               <div className="flex gap-1 flex-wrap">{searchTerms.map((term, i) => <span key={i} className="badge-blue text-xs">{term}</span>)}</div>
             )}
 
-            {filterOpen ? (
-              <div className="relative z-20">
-                <div className="pointer-events-none absolute inset-x-0 top-0 pt-2">
-                  <Suspense fallback={null}>
-                    <FilterPanel
-                      open={filterOpen}
-                      t={t}
-                      onClose={() => setFilterOpen(false)}
-                      categories={categories}
-                      brands={posBrands}
-                      branches={branches}
-                      suppliers={posSuppliers}
-                      categoryFilter={categoryFilter}   setCategoryFilter={setPersistedCat}
-                      brandFilter={brandFilter}         setBrandFilter={setPersistedBrand}
-                      branchFilter={branchFilter}       setBranchFilter={setPersistedBranch}
-                      stockFilter={stockFilter}         setStockFilter={setPersistedStock}
-                      groupFilter={groupFilter}         setGroupFilter={setPersistedGroup}
-                      supplierFilter={supplierFilter}   setSupplierFilter={setPersistedSupplier}
-                    />
-                  </Suspense>
-                </div>
-              </div>
-            ) : null}
-
           </div>
 
-          {/* Product grid */}
-          <div className={`flex-1 overflow-y-auto overflow-x-hidden p-3 ${filterOpen ? 'pt-[20.5rem] sm:pt-[18rem]' : ''}`}>
-            {initialOptions.length ? (
-              <div className="mb-3 flex items-center gap-1 overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 text-xs shadow-sm dark:border-slate-700 dark:bg-slate-900">
-                <button
-                  type="button"
-                  className={`min-h-8 shrink-0 rounded-lg px-2.5 font-semibold ${initialFilter === 'all' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-                  onClick={() => setPersistedInitial('all')}
-                >
-                  {t('all') || 'All'}
-                </button>
-                {initialOptions.map((item) => (
+          {/* Product grid. `page-scroll` (also used by every other admin
+              page's own scroll container) is what the mobile top bar's
+              auto-hide-on-scroll hook (App.tsx's useMobileHeaderAutoHide,
+              via getScrollTarget) looks for -- POS previously had no
+              element with this class at all, so on this page specifically
+              the scroll-position read always fell back to the (never
+              moving, since POS scrolls internally) window scrollTop and
+              the top bar could never hide, unlike every other page. */}
+          <div className="page-scroll flex-1 overflow-y-auto overflow-x-hidden p-3">
+            {/* Horizontal A-Z filter bar removed (Part 218 UI request --
+                same rollout as Products.tsx/Inventory.tsx's own removal
+                notes above). Replaced by the vertical AlphaIndexRail
+                rendered further down. Unlike those two pages, POS keeps
+                its server-side filtering behavior underneath (see
+                jumpToInitial's comment) -- so a small chip here is the
+                only remaining on-screen indicator of which letter is
+                active, replacing the old bar's own highlighted-button
+                state. */}
+            {initialFilter !== 'all' && (
+              <div className="mb-3 flex items-center gap-2">
+                <span className="badge-blue inline-flex items-center gap-1.5 text-xs">
+                  {(posCopy('Letter', 'Letter'))}: {initialFilter}
                   <button
-                    key={item.key}
                     type="button"
-                    className={`min-h-8 shrink-0 rounded-lg px-2 font-semibold ${initialFilter === item.key ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'}`}
-                    onClick={() => setPersistedInitial(initialFilter === item.key ? 'all' : item.key)}
-                    title={`${item.label} (${item.count})`}
+                    className="ml-0.5 rounded-full px-1 font-bold hover:bg-blue-700/20"
+                    onClick={() => setPersistedInitial('all')}
+                    aria-label={posCopy('Clear letter filter', 'Clear letter filter')}
                   >
-                    <span>{item.label}</span>
-                    <span className="ml-1 text-[10px] opacity-65">{item.count}</span>
+                    ×
                   </button>
-                ))}
+                </span>
               </div>
-            ) : null}
-            {catalogRefreshing ? (
-              <div className="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
-                {t('refreshing') || 'Refreshing...'}
-              </div>
-            ) : null}
+            )}
+            {/* The "Refreshing..." banner used to also render here, above
+                the pagination controls, in addition to the identical
+                message shown inside the empty-grid state further down --
+                same on-screen duplication as Products.tsx. Removed; the
+                grid's own empty/refreshing state (below) is enough. */}
             <PaginationControls
               className="mb-3"
               page={productPage}
@@ -1848,6 +2495,7 @@ export default function POS() {
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > asNumber(variant.out_of_stock_threshold))
                 const inStock = groupProduct ? variantInStock : stock > asNumber(p.out_of_stock_threshold)
                 const promotion = calculateProductDiscount(p, exchangeRate)
+                const expiryInfo = !groupProduct ? computeExpiryStatus(p.expiry_date, p.expiry_alert_days) : null
                 return (
                   <div
                     key={p.id}
@@ -1862,9 +2510,6 @@ export default function POS() {
                       }
                     }}
                   >
-                    <button className="absolute top-1.5 right-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-white/85 text-gray-500 shadow-sm hover:text-blue-600 dark:bg-gray-900/70" onClick={e => { e.stopPropagation(); setDetailProduct(p) }} title="Details">
-                      <Info className="h-4 w-4" />
-                    </button>
                     <button
                       type="button"
                       className="relative w-full aspect-square rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-2 overflow-hidden"
@@ -1899,27 +2544,88 @@ export default function POS() {
                         {p.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
                       </p>
                     ) : null}
-                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 ${stock <= (asNumber(p.low_stock_threshold) || 10) && stock > 0 ? 'text-yellow-500 font-medium' : 'text-gray-400'}`)}>
-                      {groupProduct ? `${variants.length} ${choiceLabel}` : `${stock} ${p.unit}`}
+                    {/* Colored qty+unit instead of a separate "Out of Stock" label --
+                        same convention as Products/Inventory/Branches: red when out,
+                        amber/yellow when low, emerald when healthy. Group products have
+                        no single qty to color against (variants can each differ), so
+                        they keep the neutral gray style. */}
+                    {/* Options count + total-in-stock used to be two
+                        separate rows (each product card growing a line
+                        taller for no reason); merged into one compact row
+                        with a middle dot separator, same info, less
+                        vertical space. */}
+                    <p {...getKhmerTextProps(groupProduct ? choiceLabel : p.unit, `text-xs mt-0.5 font-medium ${groupProduct ? 'text-gray-400 font-normal' : !inStock ? 'text-red-500' : stock <= (asNumber(p.low_stock_threshold) || 10) ? 'text-yellow-500' : 'text-emerald-500'}`)}>
+                      {groupProduct
+                        ? `${variants.length} ${choiceLabel}${groupMeta?.stockTotal ? ` · ${groupMeta.stockTotal} ${posCopy('total in stock', 'total in stock')}` : ''}`
+                        : `${stock} ${p.unit}`}
                     </p>
-                    {groupProduct && groupMeta?.stockTotal ? (
-                      <p className="text-[11px] text-gray-400">{groupMeta.stockTotal} {posCopy('total in stock', 'total in stock')}</p>
+                    {expiryInfo && expiryInfo.status !== 'ok' ? (
+                      <p className={`text-[11px] font-semibold ${expiryInfo.status === 'expired' ? 'text-red-600' : 'text-yellow-600'}`}>
+                        {expiryInfo.status === 'expired' ? (t('expired') || 'Expired') : (t('expiring_soon') || 'Expiring soon')}
+                      </p>
                     ) : null}
-                    {!inStock ? <span className="text-xs text-red-500 font-medium">{t('out_of_stock')}</span> : null}
                   </div>
                 )
               })}
               {visibleProductCards.length === 0 && (
                 <div className="col-span-full text-center py-12 text-gray-400">
-                  {catalogRefreshing ? (t('refreshing') || 'Refreshing...') : t('no_data')}
+                  {catalogRefreshing ? (
+                    t('refreshing') || 'Refreshing...'
+                  ) : catalogLoadError ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="text-red-500 font-medium">{catalogLoadError}</p>
+                      <button
+                        type="button"
+                        onClick={() => void loadCatalogData('POS catalog retry', { forceMetadata: true })}
+                        className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+                      >
+                        {posCopy('Try again', 'Try again')}
+                      </button>
+                    </div>
+                  ) : hasActivePosFilters ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <p>{posCopy('No products match your filters', 'No products match your filters')}</p>
+                      <button
+                        type="button"
+                        onClick={clearAllPosFilters}
+                        className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700"
+                      >
+                        {posCopy('Clear filters', 'Clear filters')}
+                      </button>
+                    </div>
+                  ) : (
+                    t('no_data')
+                  )}
                 </div>
               )}
             </div>
           </div>
+
+          <AlphaIndexRail letters={visibleInitialLetters} onJump={jumpToInitial} label={t('jump_to_letter') || 'Jump to letter'} />
+        </div>
+
+        {/* Drag handle -- resizes the cart panel (desktop/tablet only; the
+            mobile products/cart tab split above never shows this since
+            only one panel is visible at a time there). Double-click resets
+            to the default width. */}
+        <div
+          className={`hidden md:flex relative w-2 flex-shrink-0 cursor-col-resize items-center justify-center group ${cartResizing ? 'bg-blue-200 dark:bg-blue-900/40' : 'hover:bg-blue-100 dark:hover:bg-blue-900/30'}`}
+          onMouseDown={(event) => { event.preventDefault(); startCartResize(event.clientX) }}
+          onTouchStart={(event) => { if (event.touches[0]) startCartResize(event.touches[0].clientX) }}
+          onDoubleClick={resetCartWidth}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('resize_cart_panel') || 'Resize cart panel'}
+          title={t('resize_cart_panel_tip') || 'Drag to resize, double-click to reset'}
+        >
+          <div className="h-14 w-1 rounded-full bg-gray-300 dark:bg-gray-600 group-hover:bg-blue-400 group-hover:h-20 transition-all" />
         </div>
 
         {/* Right: Cart panel */}
-        <div className={`flex flex-col flex-shrink-0 w-full md:w-80 md:min-w-80 lg:w-96 lg:min-w-96 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 h-full min-h-0 ${mobileView === 'products' ? 'hidden md:flex' : 'flex'}`}>
+        <div
+          className={`flex flex-col flex-shrink-0 w-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 h-full min-h-0 ${mobileView === 'products' ? 'hidden md:flex' : 'flex'}`}
+          style={isDesktopViewport ? { width: `${cartWidthPx}px`, minWidth: `${cartWidthPx}px` } : undefined}
+        >
 
           {/* Order tabs */}
           <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 border-b border-gray-200 dark:border-gray-700 overflow-x-auto bg-gray-50 dark:bg-gray-900 scroll-x">
@@ -1933,7 +2639,14 @@ export default function POS() {
                   <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${resolvedActiveId === order.id ? 'bg-white/30 text-white' : 'bg-blue-600 text-white'}`}>{order.cart.length}</span>
                 )}
                 {orders.length > 1 && (
-                  <span className="text-[11px] opacity-60 hover:opacity-100 ml-0.5 leading-none" onClick={e => { e.stopPropagation(); closeOrder(order.id) }}>x</span>
+                  <button
+                    type="button"
+                    aria-label={t('close') || 'Close'}
+                    className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded text-[11px] leading-none opacity-60 hover:opacity-100 hover:bg-black/10"
+                    onClick={e => { e.stopPropagation(); closeOrder(order.id) }}
+                  >
+                    x
+                  </button>
                 )}
               </div>
             ))}
@@ -1942,15 +2655,45 @@ export default function POS() {
             )}
           </div>
 
-          {/* Scrollable area: items + customer + delivery + payment */}
-          {/*    Everything EXCEPT order tabs and checkout button scrolls.  */}
-          <div className="flex-1 overflow-y-auto min-h-0">
+          {/* Cart panel view toggle -- lets the person collapse to just the
+              product line-items or just the customer/delivery/discount/
+              payment section instead of always seeing both stacked with
+              the details half capped short. 'All' (default) keeps the
+              exact previous layout unchanged. */}
+          <div className="flex-shrink-0 flex items-center gap-1 px-2 py-1 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+            {([
+              ['products', t('products') || 'Products'],
+              ['all',      t('all') || 'All'],
+              ['details',  t('details') || 'Details'],
+            ] as const).map(([mode, label]) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setPersistedCartViewMode(mode)}
+                className={`flex-1 min-h-7 rounded-lg text-xs font-medium transition-colors ${cartViewMode === mode ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
 
-            {/* Cart items */}
+          {/* Cart items -- its own independent scroll region, given first
+              claim on the available space. Previously this shared one
+              scroll container with the customer/delivery/discount/payment
+              section below, so a cart with many edited lines pushed the
+              payment section far down and scrolling either one moved the
+              other -- easy to lose your place while editing. Now the cart
+              list scrolls on its own and the summary section below never
+              shifts because of it. */}
+          <div className={`min-h-0 overflow-y-auto ${cartViewMode === 'details' ? 'hidden' : 'flex-1'}`}>
             <div>
               {active.cart.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-10 text-gray-400 gap-2">
-                  <span className="text-4xl">Cart</span>
+                  {/* Was a big text-4xl "Cart" word -- inconsistent with the
+                      single-symbol empty-state pattern used elsewhere
+                      (Products.tsx/Inventory.tsx's "!" for errors), and
+                      untranslated. A real icon fixes both at once. */}
+                  <ShoppingCart className="h-10 w-10" aria-hidden="true" />
                   <p className="text-sm">{t('cart_empty')}</p>
                   <p className="text-xs">{t('tap_product_to_add')||'Tap a product to add it'}</p>
                 </div>
@@ -1962,16 +2705,28 @@ export default function POS() {
                   </div>
                   {active.cart.map(item => (
                     <CartItem key={item.cart_line_id || `${item.id}-${item.price_mode || 'selling'}-${item.branch_id || 'none'}`} item={item} branches={branches} t={t}
-                      onQtyChange={updateQty} onPriceChange={updatePrice}
+                      onQtyChange={updateQty} onPriceChange={updatePrice} onDiscountChange={updateDiscount}
                       onBranchChange={updateItemBranch}
                       onRemove={id => patchActive({ cart: active.cart.filter(i => getCartLineId(i) !== id) })}
                       onShowDetails={() => { const p = productsById.get(Number(item.id)); if (p) setDetailProduct(p) }}
                       fmtUSD={fmtUSD} fmtKHR={fmtKHR} usdSymbol={usdSymbol} khrSymbol={khrSymbol}
+                      showItemDiscount={showItemDiscountInCart}
                     />
                   ))}
                 </>
               )}
             </div>
+          </div>
+
+          {/* Summary + customer + delivery + discount + payment -- a
+              second, separate scroll region capped to a fraction of the
+              panel height so the cart items above always keep the
+              majority of the space. Only scrolls internally on short
+              screens/many open sub-sections; it never grows at the cart
+              list's expense. In 'details' view mode it takes the full
+              panel height instead (the cart items block above is hidden),
+              since there's no items list left to share space with. */}
+          <div className={`min-h-0 overflow-y-auto ${cartViewMode === 'details' ? 'flex-1' : 'flex-shrink-0 max-h-[46%]'} ${cartViewMode === 'products' ? 'hidden' : ''}`}>
 
             {/* Customer section (collapsible) */}
             <div className="border-t border-gray-200 dark:border-gray-700">
@@ -1992,7 +2747,7 @@ export default function POS() {
                     <input id="pos-customer-search" name="pos_customer_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={t('search_customer')} value={active.customerSearch || ''}
                       onChange={e => { patchActive({ customerSearch: e.target.value, customer: { ...active.customer, name: e.target.value } }); setShowCustomerDrop(true) }}
                       onFocus={() => setShowCustomerDrop(true)} />
-                    {active.customerSearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearCustomer}>Clear</button>}
+                    {active.customerSearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearCustomer}>{t('clear')||'Clear'}</button>}
                     {showCustomerDrop && customerSuggestions.length > 0 && (
                       <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-20 max-h-32 overflow-auto mt-0.5">
                         {customerSuggestions.map(c => (
@@ -2025,13 +2780,13 @@ export default function POS() {
                       {showOptionPicker && customerOptionsList.length > 0 && (
                         <div className="border border-blue-200 dark:border-blue-700 rounded-xl overflow-hidden shadow-sm">
                           <div className="bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 flex items-center justify-between">
-                            <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">Choose contact option</span>
-                            <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setShowOptionPicker(false)}>Close</button>
+                            <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">{t('choose_contact_option')||'Choose contact option'}</span>
+                            <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setShowOptionPicker(false)}>{t('close')||'Close'}</button>
                           </div>
                           {customerOptionsList.map((opt, i) => (
                             <button key={i} onClick={() => applyCustomerOption(opt)}
                               className="w-full text-left px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900/20 border-t border-gray-100 dark:border-gray-700 first:border-t-0 text-xs transition-colors">
-                              <div className="font-semibold text-gray-800 dark:text-gray-200">{opt.label || `Option ${i + 1}`}</div>
+                              <div className="font-semibold text-gray-800 dark:text-gray-200">{opt.label || (t('option_n')||'Option {n}').replace('{n}', String(i + 1))}</div>
                               <div className="text-gray-500 dark:text-gray-400 flex flex-wrap gap-x-2 mt-0.5">
                                 {opt.name    && <span>Name: {opt.name}</span>}
                                 {opt.phone   && <span>Phone: {opt.phone}</span>}
@@ -2076,7 +2831,7 @@ export default function POS() {
                       <input id="pos-delivery-search" name="pos_delivery_search" autoComplete="name" className="input text-xs py-1.5 pr-8" placeholder={`${t('search')}...`} value={active.deliverySearch || ''}
                         onChange={e => { patchActive({ deliverySearch: e.target.value }); setShowDeliveryDrop(true) }}
                         onFocus={() => setShowDeliveryDrop(true)} />
-                      {active.deliverySearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearDelivery}>Clear</button>}
+                      {active.deliverySearch && <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500" onClick={clearDelivery}>{t('clear')||'Clear'}</button>}
                       {showDeliveryDrop && deliverySuggestions.length > 0 && (
                         <div className="absolute top-full left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-lg z-20 max-h-32 overflow-auto mt-0.5">
                           {deliverySuggestions.map(d => (
@@ -2090,7 +2845,7 @@ export default function POS() {
                       )}
                     </div>
                     {deliveryContacts.length === 0 && (
-                      <p className="text-xs text-gray-400 mt-1">No contacts yet. <button className="text-orange-500 underline" onClick={() => setShowAddDelivery(true)}>Add one</button></p>
+                      <p className="text-xs text-gray-400 mt-1">{t('no_contacts_yet')||'No contacts yet.'} <button className="text-orange-500 underline" onClick={() => setShowAddDelivery(true)}>{t('add_one')||'Add one'}</button></p>
                     )}
                   </div>
 
@@ -2130,18 +2885,43 @@ export default function POS() {
 
               {/* Discount */}
               <div>
-                <label htmlFor="pos-discount-usd" className="text-xs text-gray-500 font-medium">{t('discount')}</label>
-                <div className="grid grid-cols-2 gap-1 mt-1">
-                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
-                  <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="pos-discount-usd" className="text-xs text-gray-500 font-medium">{t('discount')}</label>
+                  <div className="flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-[11px] dark:border-gray-600">
+                    <button
+                      type="button"
+                      className={`px-1.5 py-1 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      onClick={() => handleDiscountType('percent')}
+                    >
+                      %
+                    </button>
+                    <button
+                      type="button"
+                      className={`border-l border-gray-200 px-1.5 py-1 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      onClick={() => handleDiscountType('fixed')}
+                    >
+                      {usdSymbol}
+                    </button>
+                  </div>
                 </div>
+                {active.discountType === 'percent' ? (
+                  <div className="relative mt-1">
+                    <input id="pos-discount-usd" name="pos_discount_percent" className="input text-xs py-1 pr-6" type="number" min="0" max="100" step="any" placeholder="0" value={active.discountPercent} onChange={e => handleDiscountPercent(e.target.value)} autoComplete="off" />
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-1 mt-1">
+                    <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
+                    <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                  </div>
+                )}
               </div>
 
               <div>
-                <div className="text-xs text-gray-500 font-medium">{posCopy('Membership discount')}</div>
+                <div className="text-xs text-gray-500 font-medium">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</div>
                 <div className="mt-1 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
                   {!active.customer?.membership_number ? (
-                    <p className="text-xs text-emerald-700">{posCopy('Select a customer with a membership number to apply membership discount separately from store discount.')}</p>
+                    <p className="text-xs text-emerald-700">{posCopy('Select a customer with a membership number to apply membership discount separately from store discount.', 'ជ្រើសអតិថិជនដែលមានលេខសមាជិក ដើម្បីអនុវត្តបញ្ចុះតម្លៃសមាជិកដោយឡែកពីបញ្ចុះតម្លៃហាង។')}</p>
                   ) : membershipLoading ? (
                     <p className="text-xs text-emerald-700">{posCopy('Checking membership points...')}</p>
                   ) : membershipError ? (
@@ -2162,7 +2942,7 @@ export default function POS() {
                         <div className="rounded-lg bg-white/90 px-3 py-2 text-xs text-emerald-900">
                           <div>{posCopy('1 unit')} = {redeemPointsStep} pts = {fmtUSD(redeemValueUsdStep)}</div>
                           <div className="mt-1">{posCopy('Available units')}: {maxMembershipUnits}</div>
-                          <div className="mt-1">{posCopy('Membership discount')}: {fmtUSD(membershipDiscUsd)} / {fmtKHR(membershipDiscKhr)}</div>
+                          <div className="mt-1">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}: {fmtUSD(membershipDiscUsd)} / {fmtKHR(membershipDiscKhr)}</div>
                           <div className="mt-1 text-[11px] text-emerald-700">{posCopy('Staff applies this during checkout. Customers can only view points in the customer portal.')}</div>
                         </div>
                       </div>
@@ -2180,7 +2960,7 @@ export default function POS() {
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-2.5 space-y-1 text-xs">
                 <div className="flex justify-between text-gray-500"><span>{t('subtotal')}</span><span>{fmtUSD(subtotalUsd)}</span></div>
                 {discUsd > 0 && <div className="flex justify-between text-red-500"><span>{t('discount')}</span><span>-{fmtUSD(discUsd)}</span></div>}
-                {membershipDiscUsd > 0 && <div className="flex justify-between text-emerald-600"><span>{posCopy('Membership discount')}</span><span>-{fmtUSD(membershipDiscUsd)}</span></div>}
+                {membershipDiscUsd > 0 && <div className="flex justify-between text-emerald-600"><span>{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</span><span>-{fmtUSD(membershipDiscUsd)}</span></div>}
                 {taxRate > 0  && <div className="flex justify-between text-gray-500"><span>{t('tax')} ({settings.tax_rate}%)</span><span>{fmtUSD(taxUsd)}</span></div>}
                 {active.isDelivery && feeUsd > 0 && (
                   <div className={`flex justify-between ${active.deliveryFeePaidBy === DELIVERY_FEE_PAYER.CUSTOMER ? 'text-orange-600' : 'text-blue-500'}`}>
@@ -2199,28 +2979,35 @@ export default function POS() {
 
               {/* Payment method */}
               <div>
-                <div className="text-xs text-gray-500 font-medium">{t('payment_method')}</div>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {posPaymentMethods.map((m) => (
-                    <button key={m} onClick={() => patchActive({ paymentMethod: m, customPayment: false })}
-                      className={`px-2 py-1 rounded-lg text-xs font-medium ${active.paymentMethod === m && !active.customPayment ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>{m}</button>
-                  ))}
-                  <button onClick={() => patchActive({ customPayment: true })} className={`px-2 py-1 rounded-lg text-xs font-medium ${active.customPayment ? 'bg-blue-600 text-white' : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'}`}>Other</button>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="text-xs text-gray-500 font-medium">{t('payment_methods') || 'Payment methods'}</div>
+                  <button type="button" className="text-xs text-blue-600 hover:underline" onClick={addPaymentDetail}>+ {t('add_payment_method') || 'Add payment method'}</button>
                 </div>
-                {active.customPayment && <input id="pos-custom-payment-method" name="pos_custom_payment_method" className="input text-xs py-1.5 mt-1" placeholder="Payment method" value={active.paymentMethod} onChange={e => patchActive({ paymentMethod: e.target.value })} autoComplete="off" autoFocus />}
-              </div>
-
-              {/* Amount paid */}
-              <div>
-                <label htmlFor="pos-paid-usd" className="text-xs text-gray-500 font-medium">{t('amount_paid')}</label>
-                <div className="grid grid-cols-2 gap-1 mt-1">
-                  <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-paid-usd" name="pos_paid_usd" className="input text-xs py-1.5 pl-5" type="number" step="any" placeholder="0.00" value={active.paidUsd} onChange={e => patchActive({ paidUsd: e.target.value })} autoComplete="off" /></div>
-                  <div className="relative"><label htmlFor="pos-paid-khr" className="sr-only">{`${t('amount_paid')} ${khrSymbol}`}</label><input id="pos-paid-khr" name="pos_paid_khr" className="input text-xs py-1.5 pr-5" type="number" step="any" placeholder="0" value={active.paidKhr} onChange={e => patchActive({ paidKhr: e.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                <datalist id="pos-payment-method-options">
+                  {posPaymentMethods.map((method) => <option key={method} value={method} />)}
+                </datalist>
+                <div className="mt-1.5 space-y-1.5">
+                  {activePaymentDetails.map((detail, index) => (
+                    <div key={detail.id} className="grid grid-cols-[minmax(0,1fr)_78px_78px_auto] gap-1">
+                      <input
+                        aria-label={`${t('payment_method') || 'Payment method'} ${index + 1}`}
+                        className="input min-w-0 py-1.5 text-xs"
+                        list="pos-payment-method-options"
+                        value={detail.method}
+                        onChange={(event) => updatePaymentDetail(detail.id, { method: event.target.value })}
+                        placeholder={t('payment_method_placeholder') || 'Payment method'}
+                        autoComplete="off"
+                      />
+                      <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input aria-label={`${t('amount_paid') || 'Amount paid'} USD ${index + 1}`} className="input w-full py-1.5 pl-5 text-xs" type="number" step="any" placeholder="0.00" value={detail.usd} onChange={(event) => updatePaymentDetail(detail.id, { usd: event.target.value })} autoComplete="off" /></div>
+                      <div className="relative"><input aria-label={`${t('amount_paid') || 'Amount paid'} KHR ${index + 1}`} className="input w-full py-1.5 pr-5 text-xs" type="number" step="any" placeholder="0" value={detail.khr} onChange={(event) => updatePaymentDetail(detail.id, { khr: event.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                      <button type="button" className="flex h-8 w-8 items-center justify-center rounded text-xs text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-900/20" disabled={activePaymentDetails.length === 1} onClick={() => updatePaymentDetails((details) => details.filter((entry) => entry.id !== detail.id))} aria-label={`${t('remove') || 'Remove'} ${detail.method || index + 1}`}>×</button>
+                    </div>
+                  ))}
                 </div>
                 <div className="flex gap-2 mt-1">
-                  <button className="text-xs text-blue-500 hover:underline" onClick={() => patchActive({ paidUsd: totalUsd.toFixed(2), paidKhr: '' })}>Exact {usdSymbol}</button>
+                  <button className="text-xs text-blue-500 hover:underline" onClick={() => setExactPayment('usd', totalUsd)}>Exact {usdSymbol}</button>
                   <span className="text-gray-300">|</span>
-                  <button className="text-xs text-blue-500 hover:underline" onClick={() => patchActive({ paidKhr: Math.ceil(totalKhr).toString(), paidUsd: '' })}>Exact {khrSymbol}</button>
+                  <button className="text-xs text-blue-500 hover:underline" onClick={() => setExactPayment('khr', totalKhr)}>Exact {khrSymbol}</button>
                 </div>
                 {(paidUsdNum > 0 || paidKhrNum > 0) && (
                   <div className={`mt-1.5 p-2 rounded-lg text-xs ${changeUsd >= 0 ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
@@ -2236,7 +3023,7 @@ export default function POS() {
               </div>
 
             </div>{/* end scroll area content */}
-          </div>{/* end scrollable area */}
+          </div>{/* end summary/payment scroll region */}
 
           {/* Checkout button pinned at the bottom */}
           <div className="flex-shrink-0 px-3 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
@@ -2253,8 +3040,8 @@ export default function POS() {
         <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-sm fade-in">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="font-bold text-gray-900 dark:text-white">Record Sale As</h3>
-              <button onClick={closeStatusPicker} disabled={loading} className="text-gray-400 hover:text-gray-600 text-sm leading-none w-8 h-8 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">Close</button>
+              <h3 className="font-bold text-gray-900 dark:text-white">{t('record_sale_as')||'Record Sale As'}</h3>
+              <button onClick={closeStatusPicker} disabled={loading} className="text-gray-400 hover:text-gray-600 text-sm leading-none w-8 h-8 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed">{t('close')||'Close'}</button>
             </div>
             <div className="p-4 space-y-2">
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{t('pos_status_choose_desc')||'Choose how this sale is being processed. This will appear in Sales history.'}</p>
@@ -2308,6 +3095,8 @@ export default function POS() {
             fmtKHR={fmtKHR}
             asNumber={asNumber}
             posCopy={posCopy}
+            activeBranchId={primaryBranchFilterId}
+            trackedBatchProductIds={trackedBatchProductIds}
             getDisplayStock={getDisplayStock}
             getPrimaryProductImage={getPrimaryProductImage}
             getVariantChoices={getVariantChoices}
@@ -2341,7 +3130,7 @@ export default function POS() {
           ) : null}
           {receiptQueue.length > 0 ? (
             <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
-              <div className="relative w-full max-w-md max-h-[90vh] flex flex-col bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-2xl">
+              <div className="relative w-full max-w-md max-h-modal-90 flex flex-col bg-white dark:bg-gray-800 rounded-2xl overflow-hidden shadow-2xl">
                 {receiptQueue.length > 1 && (
                   <div className="flex-shrink-0 bg-blue-600 text-white text-xs text-center py-1 px-3">{receiptQueue.length} receipts waiting - close this one to see the next</div>
                 )}

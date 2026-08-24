@@ -1,53 +1,94 @@
 # Business OS on Cloudflare
 
-This is a separate, in-progress path to run Business OS on Cloudflare
-Workers + D1 + R2 + Queues + KV instead of Docker — no local machine,
-Docker Desktop, or Cloudflare Tunnel required at all.
+This folder runs Business OS on Cloudflare Workers, D1, R2, Queues, KV, and
+Worker static assets.
 
-**Start here:**
+The Worker serves both the API and the built React frontend:
 
-1. **[`PRODUCTION-READINESS.md`](./PRODUCTION-READINESS.md)** — is this
-   ready to use for real? A direct, numbers-based answer (short version:
-   not yet — 28 of 215 backend endpoints exist here so far).
-2. **[`MIGRATION.md`](./MIGRATION.md)** — the full architecture writeup:
-   what's built and tested, how D1/R2/KV/Queues map to what Docker/
-   Postgres/Redis/BullMQ did, what a full migration would take, and
-   answers to specific questions about search, caching, and performance.
+- `https://admin.leangcosmetics.dpdns.org`
+- `https://leangcosmetics.dpdns.org`
 
-## Quick start (local development against real Cloudflare tooling)
+API, upload, and health routes run Worker code first. All other paths fall
+back to the single-page frontend app from `../frontend/dist`.
 
-```
+`cloudflare/` is the only backend — the previous Docker/Postgres app has
+been removed. See `../PORTING_STATUS.md` for the historical migration log.
+
+## Quick Start
+
+```sh
 cd cloudflare
 npm install
-npm run migrate:local     # applies migrations/0001_init.sql to a local D1 database
-npm run dev                # starts wrangler dev
+npm run build:frontend
+npm run migrate:local
+npm run dev
 ```
 
-Then, in another terminal:
+Then check:
 
-```
+```sh
 curl http://localhost:8787/health
 ```
 
-`npm run typecheck` runs the TypeScript compiler in check-only mode.
-`npm run deploy` runs `wrangler deploy` against your real Cloudflare account
-— read `PRODUCTION-READINESS.md` first so you know exactly what will and
-won't work if you do this today.
+## Cloudflare Resources
 
-## Folder layout
+Before the first remote deploy, create or verify:
 
-- `wrangler.toml` — bindings (D1, R2, KV, Queues) and Worker config.
-- `migrations/` — D1 schema, applied via `wrangler d1 migrations apply`.
-- `src/index.ts` — the Hono app entry point (both the HTTP `fetch` handler
-  and the Queues `queue` consumer handler).
-- `src/lib/` — the D1 query adapter, R2 helper, KV/Cache-API cache helper,
-  and session auth — the reusable foundation every route is built on.
-- `src/routes/` — one file per API area, mirroring `backend/src/routes/`.
-- `src/queue.ts` — Cloudflare Queues consumers for background jobs
-  (imports, media processing).
+```sh
+wrangler d1 create business-os
+wrangler kv namespace create CACHE
+wrangler r2 bucket create business-os-assets
+wrangler queues create business-os-import
+wrangler queues create business-os-media
+```
 
-## This is additive, not a replacement
+Copy the returned D1 `database_id` and KV namespace `id` into
+`wrangler.toml`.
 
-`backend/` and `frontend/` are untouched by anything in this folder — the
-Docker path documented in the root `README.md` is still the real, complete,
-working app. Nothing here is wired into the deployed frontend yet.
+## Deploy
+
+```sh
+npm run deploy:full
+```
+
+That command typechecks the Worker, rebuilds frontend assets, applies remote
+D1 migrations, pushes secrets from `.dev.vars` to Cloudflare, and deploys the
+Worker. `run/full-automation.bat` (repo root) runs the same pipeline plus a
+live `/health` check afterward.
+
+The Cloudflare token needs account-level Workers, D1, KV, R2, and Queues edit
+permissions, plus zone permission for Worker routes on the two hostnames.
+
+### One-time local setup (auth + secrets)
+
+Two files, both gitignored, both already listed in `.gitignore` -- never
+commit either:
+
+- **`.wrangler-auth.local`** -- `CLOUDFLARE_API_TOKEN=...` and
+  `CLOUDFLARE_ACCOUNT_ID=...`. Every npm script that calls `wrangler`
+  (`dev`, `deploy`, `migrate:local`, `migrate:remote`, `d1:shell:*`) is
+  wrapped through `scripts/with-wrangler-auth.cjs`, which loads this file
+  and sets those two env vars before running wrangler -- so none of those
+  commands ever prompt for `wrangler login`, and none of them depend on
+  whichever account an OAuth session happens to be cached against. If the
+  file is missing, everything still works, it just falls back to
+  wrangler's normal login/OAuth flow.
+- **`.dev.vars`** -- real secret values (`GOOGLE_LOGIN_CLIENT_SECRET`,
+  `GOOGLE_DRIVE_CLIENT_SECRET`, `RESEND_API_KEY`) for local `wrangler dev`
+  (Wrangler loads this file automatically -- that part needs no wrapper).
+  `npm run secrets:sync` (folded into `deploy:full` automatically) reads
+  the same file and pushes those same values to Cloudflare via
+  `wrangler secret put`, so production stays in sync with local dev
+  without you ever typing that command by hand.
+
+If you rotate the API token, or the Google/Resend secrets, just edit the
+values in these two files -- nothing else in the repo needs to change.
+
+## Layout
+
+- `wrangler.toml`: Worker routes and bindings.
+- `migrations/`: D1 schema migrations.
+- `src/index.ts`: Hono Worker entry point and queue consumer dispatch.
+- `src/lib/`: D1, R2, cache, upload, auth, audit, and conflict helpers.
+- `src/routes/`: Cloudflare-port API routes.
+- `src/queue.ts`: Cloudflare Queues consumers for import and media jobs.

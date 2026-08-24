@@ -4,8 +4,24 @@ import { getDb } from './db'
 import type { Env } from '../index'
 
 const SESSION_COOKIE_NAME = 'bos_session'
-const DEFAULT_SESSION_MS = 24 * 60 * 60 * 1000
+// "Always stay signed in" -- the new default (see createSession below).
+// Not literally infinite (nothing in this schema should store a row with
+// no expiry at all), but 10 years is indistinguishable from "always" for a
+// business app and gives a real upper bound.
+const ALWAYS_SESSION_MS = 10 * 365 * 24 * 60 * 60 * 1000
+// Fallback when no recognized sessionDuration is supplied at all (e.g. an
+// older cached frontend build that predates the 'always' option). Used to
+// be a hardcoded 1 day, which meant anyone who hadn't explicitly picked a
+// duration got silently logged out every 24h -- now matches the new
+// default so "haven't touched the setting" behaves the same as "picked
+// Always stay signed in" instead of the shortest possible option.
+const DEFAULT_SESSION_MS = ALWAYS_SESSION_MS
 const SESSION_DURATIONS_MS: Record<string, number> = {
+  always: ALWAYS_SESSION_MS,
+  // Deliberately short -- "Until I close the browser" is the shared-device
+  // security option, must stay the shortest choice, not get folded into
+  // the new long default.
+  session: 24 * 60 * 60 * 1000,
   '1d': 24 * 60 * 60 * 1000,
   '3d': 3 * 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
@@ -38,12 +54,37 @@ export type SessionUser = {
   role_id: number | null
   permissions: string | null
   is_active: number
+  // Joined from roles (see getSessionUser below) so permission checks can
+  // merge role-level defaults with user-level overrides, matching backend/
+  // src/middleware.ts's getMergedPermissions(). Previously this Worker only
+  // ever checked user.permissions and silently ignored role.permissions
+  // entirely -- a role like "manager" granting `sales: true` had no effect
+  // unless that same key also happened to be copied onto the user row.
+  role_code?: string | null
+  role_permissions?: string | null
+  // Human-readable role label for display surfaces (Sidebar, UserProfileModal,
+  // etc.) -- distinct from role_code, which is the machine-readable key used
+  // for permission checks (isAdminControlUser, etc.). Previously missing from
+  // this query entirely, so every one of those display surfaces always fell
+  // back to "No role" even for a user with a real role_id, since role_code
+  // isn't what they read. routes/users.ts's admin list query already selects
+  // `r.name AS role_name` correctly -- this just brings the session user's
+  // own query in line with that.
+  role_name?: string | null
 }
 
 export async function createSession(
   env: Env,
   userId: number,
-  options: { sessionDuration?: string; deviceName?: string; deviceTz?: string; userAgent?: string; ip?: string } = {},
+  // `deviceId` is the same client-persisted id the device-approval feature
+  // uses (see lib/deviceTrust.ts). Threading it onto the session row is
+  // what lets routes/devices.ts's revoke/reject actually kill a *live*
+  // session for that device, not just block its *next* login -- see
+  // revokeSessionsForDevice below and migrations/0006_session_device_link.sql.
+  // Optional and best-effort: a caller that doesn't have a deviceId (e.g.
+  // a very old cached frontend build) still gets a working session, just
+  // one that a future device revoke can't immediately terminate.
+  options: { sessionDuration?: string; deviceName?: string; deviceTz?: string; userAgent?: string; ip?: string; deviceId?: string | null } = {},
 ): Promise<{ token: string; expiresAt: string }> {
   const token = randomToken()
   const tokenHash = await hashToken(token)
@@ -52,8 +93,8 @@ export async function createSession(
 
   const db = getDb(env)
   await db.prepare(`
-    INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, expires_at)
-    VALUES (@user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @expires_at)
+    INSERT INTO user_sessions (user_id, token_hash, device_name, device_tz, user_agent, last_ip, device_id, expires_at)
+    VALUES (@user_id, @token_hash, @device_name, @device_tz, @user_agent, @ip, @device_id, @expires_at)
   `).run({
     user_id: userId,
     token_hash: tokenHash,
@@ -61,23 +102,56 @@ export async function createSession(
     device_tz: options.deviceTz || null,
     user_agent: options.userAgent || null,
     ip: options.ip || null,
+    device_id: options.deviceId || null,
     expires_at: expiresAt,
   })
 
   return { token, expiresAt }
 }
 
-export function setSessionCookie(c: Context<{ Bindings: Env }>, token: string, expiresAt: string): void {
+// Called from routes/devices.ts when an admin rejects a pending device or
+// revokes a previously-approved one. Previously trust decisions here only
+// affected the device's *next* login attempt -- a session already issued
+// from that device (e.g. before the admin noticed it was stolen/lost, or
+// during the window before rejection) stayed valid until it expired on
+// its own. This immediately invalidates every live session tied to that
+// user+device pair, the same way a password reset invalidates every
+// session for a user (see revokeUserSessions above), just scoped to one
+// device instead of the whole account.
+export async function revokeSessionsForDevice(env: Env, userId: number, deviceId: string | null | undefined): Promise<number> {
+  if (!deviceId || !deviceId.trim()) return 0
+  const db = getDb(env)
+  const result = await db.prepare(
+    'UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = @user_id AND device_id = @device_id AND revoked_at IS NULL',
+  ).run({ user_id: userId, device_id: deviceId })
+  return result?.changes || 0
+}
+
+// Cookies MUST NOT have an Expires more than 400 days out (RFC 6265bis;
+// Hono's setCookie() throws rather than silently truncating -- see
+// node_modules/hono/dist/utils/cookie.js). Session rows themselves can
+// legitimately live up to ALWAYS_SESSION_MS (10 years, see above) so
+// "Always stay signed in" doesn't force a re-login every year -- but the
+// *cookie* has to stay under the cap regardless of how long the
+// server-side session is valid for. 399 days (not the full 400) leaves a
+// day of margin against clock skew between this Worker and the browser.
+const MAX_COOKIE_AGE_MS = 399 * 24 * 60 * 60 * 1000
+
+export function setSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>, token: string, expiresAt: string): void {
+  const requested = new Date(expiresAt)
+  const cookieExpires = requested.getTime() - Date.now() > MAX_COOKIE_AGE_MS
+    ? new Date(Date.now() + MAX_COOKIE_AGE_MS)
+    : requested
   setCookie(c, SESSION_COOKIE_NAME, token, {
     httpOnly: true,
     secure: true,
     sameSite: 'Lax',
     path: '/',
-    expires: new Date(expiresAt),
+    expires: cookieExpires,
   })
 }
 
-export function clearSessionCookie(c: Context<{ Bindings: Env }>): void {
+export function clearSessionCookie<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): void {
   deleteCookie(c, SESSION_COOKIE_NAME, { path: '/' })
 }
 
@@ -89,9 +163,11 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
 
   const db = getDb(c.env)
   const row = await db.prepare(`
-    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active
+    SELECT u.id, u.username, u.name, u.organization_id, u.role_id, u.permissions, u.is_active,
+           r.code AS role_code, r.permissions AS role_permissions, r.name AS role_name
     FROM user_sessions s
     JOIN users u ON u.id = s.user_id
+    LEFT JOIN roles r ON r.id = u.role_id
     WHERE s.token_hash = @token_hash
       AND (s.revoked_at IS NULL)
       AND s.expires_at > @now
@@ -120,12 +196,24 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
   return row
 }
 
-export async function revokeSession(c: Context<{ Bindings: Env }>): Promise<void> {
+export async function revokeSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<void> {
   const token = getCookie(c, SESSION_COOKIE_NAME)
   if (!token) return
   const tokenHash = await hashToken(token)
   const db = getDb(c.env)
   await db.prepare("UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE token_hash = ?").run([tokenHash])
+}
+
+// Ported from backend/src/sessionAuth.ts's revokeUserSessions(). Called
+// after a password change/reset so every *other* device signed in as this
+// user is forced to log in again with the new password -- not just the
+// device that made the change. Unlike revokeSession above (single current
+// cookie), this revokes every live session row for the given user id.
+export async function revokeUserSessions(env: Env, userId: number | string): Promise<void> {
+  const db = getDb(env)
+  await db.prepare(
+    'UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE user_id = @user_id AND revoked_at IS NULL',
+  ).run({ user_id: userId })
 }
 
 // Hono middleware -- equivalent to the original's `authToken` Express
@@ -134,7 +222,26 @@ export async function revokeSession(c: Context<{ Bindings: Env }>): Promise<void
 // c.set('user', ...) for handlers to read via c.get('user').
 export async function requireAuth(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: () => Promise<void>) {
   const user = await getSessionUser(c)
-  if (!user) return c.json({ error: 'Not authenticated' }, 401)
+  // `code: 'invalid_session'` matters, not just the message text: the
+  // frontend's isInvalidSessionError() (api/http.ts) checks this field
+  // first, and only falls back to a regex match against `message` that
+  // looks for the phrases "sign in again"/"invalid session"/"cloudflare
+  // access" -- none of which appear in the plain "Not authenticated" text
+  // this middleware used to send alone. Real, confirmed gap: routes/
+  // auth.ts's own /bootstrap handler already sets this code on its 401,
+  // but this shared middleware (gating the large majority of other
+  // authenticated routes -- organizations, notifications, products,
+  // inventory, import-jobs, etc, confirmed by grep across routes/*.ts)
+  // did not, so a 401 from any of THOSE routes was invisible to
+  // isInvalidSessionError() and anything downstream that relies on it
+  // (e.g. isConnectivityError's early "this isn't a connectivity problem,
+  // don't retry it like one" check) -- it fell through as an
+  // unrecognized generic error instead of the recoverable "your session
+  // needs to be re-established" case, which is consistent with the raw
+  // "Not authenticated" text still surfacing on-screen even once the
+  // shared auth-recovery flow (AppContext.tsx's authRecoveryRef check)
+  // had already re-confirmed the session was fine.
+  if (!user) return c.json({ error: 'Not authenticated', code: 'invalid_session' }, 401)
   c.set('user', user)
   await next()
 }

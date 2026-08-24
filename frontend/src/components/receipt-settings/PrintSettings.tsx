@@ -133,6 +133,7 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     { id: '58mm', label: '58mm', desc: T('print_narrow_thermal', 'Narrow thermal') },
     { id: '72mm', label: '72mm', desc: T('print_medium_thermal', 'Medium thermal') },
     { id: '80mm', label: '80mm', desc: T('print_standard_thermal', 'Standard thermal') },
+    { id: '80x50mm', label: '80 × 50mm', desc: T('print_sales_summary', 'Compact sales summary') },
     { id: 'A4', label: 'A4', desc: T('print_standard_office', 'Standard office') },
     { id: 'letter', label: 'Letter', desc: T('print_us_standard', 'US standard') },
     { id: 'custom', label: T('print_set_size', 'Custom'), desc: T('print_set_size', 'Set size') },

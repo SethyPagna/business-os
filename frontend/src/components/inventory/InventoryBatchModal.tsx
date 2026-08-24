@@ -100,7 +100,7 @@ export default function InventoryBatchModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={closeIfIdle}>
-      <div className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-5xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
+      <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-5xl sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
           <div>
             <h2 className="font-bold text-gray-900 dark:text-white">{tr('inventory_batch_session', 'Batch session')}</h2>

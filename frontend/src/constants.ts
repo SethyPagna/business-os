@@ -12,9 +12,21 @@ export const STORAGE_KEYS = {
   OAUTH_LOGIN_PENDING: 'businessos_oauth_login_pending',
   OAUTH_LINK_PENDING: 'businessos_oauth_link_pending',
   OAUTH_CALLBACK_RESULT: 'businessos_oauth_callback_result',
+  // The persisted device-approval identifier (utils/deviceInfo.ts's
+  // getOrCreatePersistentDeviceId()) -- was a raw literal key that lived
+  // outside this map entirely, which meant nothing that clears
+  // `businessos_`-prefixed storage keys on logout (see
+  // platform/runtime/clientRuntime.ts's resetClientRuntimeState) knew it
+  // needed to be kept. Every logout silently deleted it, so the very next
+  // login generated a brand-new device id and the device-approval feature
+  // treated the same physical device as unrecognized again, forcing the
+  // whole pending-approval flow to repeat. Now tracked here so it can be
+  // added to the preserve list explicitly.
+  DEVICE_ID: 'businessos_device_id',
 } as const
 
 const DEFAULT_EXCHANGE_RATE = 4100
+export const BUSINESS_TIME_ZONE = 'Asia/Phnom_Penh'
 
 export const CURRENCY = {
   DEFAULT_EXCHANGE_RATE,
@@ -30,8 +42,6 @@ export const PAYMENT_METHODS = [
   'ABA Bank',
   'Wing',
   'KHQR',
-  'Pi Pay',
-  'Transfer',
 ] as const
 
 export const DELIVERY_FEE_PAYER = {
@@ -89,10 +99,6 @@ export const WRITE_CHANNELS = new Set([
   'settings:set',
   'data:reset',
   'data:factoryReset',
-  'customTables:create',
-  'customTables:insertRow',
-  'customTables:updateRow',
-  'customTables:deleteRow',
 ] as const)
 
 export const LAYOUT = {
@@ -116,6 +122,12 @@ export type PosOrder = {
   deliveryFeePaidBy: typeof DELIVERY_FEE_PAYER.CUSTOMER
   discountUsd: string
   discountKhr: string
+  // See POS.tsx's local PosOrder shadow type for why these exist: they
+  // back the percent-of-subtotal discount mode alongside the fixed
+  // USD/KHR fields above. discountType defaults to 'fixed' below so
+  // existing orders that never touch this behave exactly as before.
+  discountType: 'fixed' | 'percent'
+  discountPercent: string
   membershipDiscountUsd: string
   membershipDiscountKhr: string
   membershipRedeemUnits: string
@@ -139,6 +151,8 @@ export function createEmptyOrder(number: number): PosOrder {
     deliveryFeePaidBy: DELIVERY_FEE_PAYER.CUSTOMER,
     discountUsd: '',
     discountKhr: '',
+    discountType: 'fixed',
+    discountPercent: '',
     membershipDiscountUsd: '',
     membershipDiscountKhr: '',
     membershipRedeemUnits: '',
@@ -158,6 +172,7 @@ export function formatDate(dateStr: unknown): string {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
+      timeZone: BUSINESS_TIME_ZONE,
     })
   } catch {
     return raw

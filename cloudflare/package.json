@@ -3,17 +3,27 @@
   "version": "0.1.0",
   "private": true,
   "description": "Business OS on Cloudflare Workers + D1 + R2 + Queues (Docker-free runtime)",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
-    "dev": "wrangler dev --local",
+    "dev": "node scripts/with-wrangler-auth.cjs wrangler dev --local",
+    "build:frontend": "npm --prefix ../frontend run build",
     "typecheck": "tsc --noEmit",
-    "migrate:local": "wrangler d1 migrations apply business-os --local",
-    "migrate:remote": "wrangler d1 migrations apply business-os --remote",
-    "deploy": "wrangler deploy",
-    "d1:shell:local": "wrangler d1 execute business-os --local --command",
-    "d1:shell:remote": "wrangler d1 execute business-os --remote --command"
+    "test:import-engine": "node scripts/test-import-engine-pure.cjs",
+    "test:import-image-match": "node scripts/test-import-image-match.cjs",
+    "test:zip-reader": "node scripts/test-zip-reader.cjs",
+    "migrate:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --local",
+    "migrate:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --remote",
+    "deploy": "node scripts/with-wrangler-auth.cjs wrangler deploy",
+    "secrets:sync": "node scripts/sync-secrets.cjs",
+    "deploy:full": "npm run typecheck && npm run build:frontend && npm run migrate:remote && npm run secrets:sync && npm run deploy",
+    "d1:shell:local": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --local --command",
+    "d1:shell:remote": "node scripts/with-wrangler-auth.cjs wrangler d1 execute business-os --remote --command"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^13.0.3",
     "hono": "^4.12.31"
   },
   "devDependencies": {

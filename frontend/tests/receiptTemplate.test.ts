@@ -38,6 +38,29 @@ await runTest('serializeReceiptTemplate keeps default fields available for previ
   assert.equal(Array.isArray(reparsed.field_order), true)
 })
 
+await runTest('compact ABA receipt and KHR visibility settings survive a template round trip', () => {
+  const serialized = serializeReceiptTemplate({
+    sales_receipt_enabled: true,
+    sales_receipt_aba_account_name: 'Leang Cosmetics',
+    sales_receipt_aba_account_number: '123 456 789',
+    sales_receipt_aba_qr_image: '/uploads/aba-payment.webp',
+    sales_receipt_note: 'received_payment',
+    show_discount_khr: false,
+    show_membership_discount_khr: false,
+    show_delivery_khr: false,
+  })
+  const reparsed = parseReceiptTemplate(serialized)
+
+  assert.equal(reparsed.sales_receipt_enabled, true)
+  assert.equal(reparsed.sales_receipt_aba_account_name, 'Leang Cosmetics')
+  assert.equal(reparsed.sales_receipt_aba_account_number, '123 456 789')
+  assert.equal(reparsed.sales_receipt_aba_qr_image, '/uploads/aba-payment.webp')
+  assert.equal(reparsed.sales_receipt_note, 'received_payment')
+  assert.equal(reparsed.show_discount_khr, false)
+  assert.equal(reparsed.show_membership_discount_khr, false)
+  assert.equal(reparsed.show_delivery_khr, false)
+})
+
 await runTest('receipt preview remains strict-CSP compatible and binds buttons outside markup', () => {
   const source = fs.readFileSync(new URL('../src/utils/printReceipt.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(source, /onclick\s*=/i)
@@ -87,6 +110,18 @@ await runTest('receipt layout keeps Khmer labels, item columns, and row-aware im
   assert.match(utilSource, /const nameMaxWidth = Math\.max\(92, qtyX - paddingX - 18\)/)
   assert.match(utilSource, /querySelectorAll\?\.\('\[data-receipt-line="true"\]'\)/)
   assert.match(utilSource, /if \(markedLines\.length\) return markedLines/)
+})
+
+await runTest('compact receipt output uses ABA details and configurable secondary KHR rows', () => {
+  const receiptSource = fs.readFileSync(new URL('../src/components/receipt/Receipt.tsx', import.meta.url), 'utf8')
+  assert.match(receiptSource, /sales_receipt_enabled === true/)
+  assert.match(receiptSource, /sales_receipt_aba_account_name/)
+  assert.match(receiptSource, /sales_receipt_aba_account_number/)
+  assert.match(receiptSource, /sales_receipt_aba_qr_image/)
+  assert.match(receiptSource, /sales_receipt_note === 'received_payment'/)
+  assert.match(receiptSource, /tpl\.show_discount_khr !== false/)
+  assert.match(receiptSource, /tpl\.show_membership_discount_khr !== false/)
+  assert.match(receiptSource, /tpl\.show_delivery_khr !== false/)
 })
 
 await runTest('receipt asset inlining uses bounded workers', () => {

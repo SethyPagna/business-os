@@ -31,8 +31,6 @@ interface ProductRecord {
   low_stock_threshold?: unknown
   name?: unknown
   parent_id?: unknown
-  purchase_price_khr?: unknown
-  purchase_price_usd?: unknown
   selling_price_khr?: unknown
   selling_price_usd?: unknown
   sku?: unknown
@@ -46,6 +44,46 @@ interface ProductRecord {
 
 type ProductExportRow = Record<string, string | number>
 
+export type ExportFieldGroup = 'basic' | 'pricing' | 'discount' | 'stock' | 'supplier' | 'images'
+
+// Column membership per group, used to build an optional field picker
+// (ExportFieldsModal.tsx) so users aren't forced to export every column
+// every time. Name/SKU/Barcode/Category/Brand/Unit/Description/Created_At/
+// Active/Is_Group/Parent_ID live in 'basic' and stay in the export even if
+// a caller narrows the group set to something that would otherwise leave no
+// usable identifying columns -- see ALWAYS_INCLUDED_COLUMNS below.
+export const EXPORT_FIELD_GROUPS: Array<{ key: ExportFieldGroup; columns: string[] }> = [
+  { key: 'basic', columns: ['Name', 'SKU', 'Barcode', 'Category', 'Brand', 'Unit', 'Description', 'Created_At', 'Active', 'Is_Group', 'Parent_ID'] },
+  { key: 'pricing', columns: ['Selling_Price_USD', 'Selling_Price_KHR', 'Special_Price_USD', 'Special_Price_KHR', 'Cost_Price_USD', 'Cost_Price_KHR'] },
+  { key: 'discount', columns: ['Discount_Enabled', 'Discount_Type', 'Discount_Percent', 'Discount_Amount_USD', 'Discount_Amount_KHR', 'Discount_Label', 'Discount_Badge_Color', 'Discount_Starts_At', 'Discount_Ends_At'] },
+  { key: 'stock', columns: ['Stock_Quantity', 'Low_Stock_Threshold', 'Branch', 'Branch_Stock_JSON'] },
+  { key: 'supplier', columns: ['Supplier'] },
+  { key: 'images', columns: ['Image_Filename_1', 'Image_Filename_2', 'Image_Filename_3', 'Image_Filename_4', 'Image_Filename_5', 'Image_URL_1', 'Image_URL_2', 'Image_URL_3', 'Image_URL_4', 'Image_URL_5', 'Image_Filenames', 'Image_URLs', 'Image_Conflict_Mode'] },
+]
+
+// Never dropped regardless of which groups are selected -- without at
+// least the product name, an exported row is unusable/unidentifiable.
+const ALWAYS_INCLUDED_COLUMNS = new Set(['Name'])
+
+export type BuildProductExportRowsOptions = {
+  groups?: ExportFieldGroup[]
+  // When set (a branch id, as the export scope's own branch filter -- see
+  // Products.tsx's exportProductsCsv), Stock_Quantity and Branch reflect
+  // THAT branch's own row, not the cross-branch aggregate/first-nonzero-
+  // branch fallback below. Without this, exporting "Current filtered
+  // results" while filtered to one branch still wrote the OTHER branches'
+  // stock into every row's Stock_Quantity (it's products.stock_quantity,
+  // a SUM across every branch -- see importEngine.ts's own comment on why
+  // that column is never branch-specific) -- reimporting that file against
+  // the filtered branch would have overwritten it with every branch's
+  // combined total instead of just its own, silently duplicating stock
+  // that already existed at other branches. Mirrors the same
+  // branch-lookup getProductBranchQuantity in productFilterHelpers.ts
+  // already uses for on-screen branch-filtered stock display, so the
+  // exported number always matches what the page showed when exporting.
+  branchId?: string | number | null
+}
+
 function toNumber(value: unknown, fallback = 0): number {
   const num = Number(value)
   return Number.isFinite(num) ? num : fallback
@@ -55,13 +93,21 @@ function getImageGallery(product: ProductRecord): unknown[] {
   return Array.isArray(product?.image_gallery) ? product.image_gallery : []
 }
 
-export function buildProductExportRows(products: ProductRecord[] = []): ProductExportRow[] {
+export function buildProductExportRows(products: ProductRecord[] = [], options: BuildProductExportRowsOptions = {}): ProductExportRow[] {
   const toImageName = (value: unknown) => String(value || '').split(/[\\/]/).pop() || ''
   const toImageUrl = (value: unknown) => String(value || '').trim()
   const priceCsv = (value: unknown) => formatPriceNumber(value || 0)
+  const branchId = options.branchId != null && String(options.branchId) !== 'all' ? options.branchId : null
+  const allowedColumns = options.groups
+    ? new Set([
+      ...ALWAYS_INCLUDED_COLUMNS,
+      ...EXPORT_FIELD_GROUPS.filter((group) => options.groups!.includes(group.key)).flatMap((group) => group.columns),
+    ])
+    : null
+
   return products.map((product) => {
     const imageGallery = getImageGallery(product)
-    return {
+    const row: ProductExportRow = {
       Name: String(product.name || ''),
       SKU: String(product.sku || ''),
       Barcode: String(product.barcode || ''),
@@ -83,11 +129,11 @@ export function buildProductExportRows(products: ProductRecord[] = []): ProductE
       Discount_Badge_Color: String(product.discount_badge_color || ''),
       Discount_Starts_At: String(product.discount_starts_at || ''),
       Discount_Ends_At: String(product.discount_ends_at || ''),
-      Purchase_Price_USD: priceCsv(product.purchase_price_usd || product.cost_price_usd || 0),
-      Purchase_Price_KHR: priceCsv(product.purchase_price_khr || product.cost_price_khr || 0),
-      Cost_Price_USD: priceCsv(product.cost_price_usd || product.purchase_price_usd || 0),
-      Cost_Price_KHR: priceCsv(product.cost_price_khr || product.purchase_price_khr || 0),
-      Stock_Quantity: toNumber(product.stock_quantity),
+      Cost_Price_USD: priceCsv(product.cost_price_usd || 0),
+      Cost_Price_KHR: priceCsv(product.cost_price_khr || 0),
+      Stock_Quantity: branchId != null
+        ? toNumber((product.branch_stock || []).find((stock) => String(stock.branch_id) === String(branchId))?.quantity)
+        : toNumber(product.stock_quantity),
       Low_Stock_Threshold: toNumber(product.low_stock_threshold),
       Supplier: String(product.supplier || ''),
       Image_Filename_1: toImageName(imageGallery[0] || product.image_path || ''),
@@ -104,6 +150,18 @@ export function buildProductExportRows(products: ProductRecord[] = []): ProductE
       Image_URLs: imageGallery.map((entry) => toImageUrl(entry)).filter(Boolean).join('|'),
       Image_Conflict_Mode: '',
       Branch: (() => {
+        // Same branchId-scoped rule as Stock_Quantity above: when the
+        // export is scoped to one branch, name THAT branch, even if it
+        // currently carries 0 (still tracked -- see Part 215's
+        // allActiveBranchIds seeding -- so a 0 row here is real, not a
+        // sign the row is missing/skippable). Falls back to the previous
+        // "first branch with any stock" heuristic only for an
+        // unscoped/full-catalog export, where there's no single branch to
+        // prefer.
+        if (branchId != null) {
+          const scoped = (product.branch_stock || []).find((stock) => String(stock.branch_id) === String(branchId))
+          return String(scoped?.branch_name || '')
+        }
         const primary = (product.branch_stock || []).find((stock) => toNumber(stock.quantity) > 0)
         return String(primary?.branch_name || '')
       })(),
@@ -116,5 +174,11 @@ export function buildProductExportRows(products: ProductRecord[] = []): ProductE
       Is_Group: product.is_group ? 'Yes' : 'No',
       Active: product.is_active ? 'Yes' : 'No',
     }
+    if (!allowedColumns) return row
+    const filtered: ProductExportRow = {}
+    for (const key of Object.keys(row)) {
+      if (allowedColumns.has(key)) filtered[key] = row[key]
+    }
+    return filtered
   })
 }

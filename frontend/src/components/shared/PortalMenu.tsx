@@ -10,6 +10,11 @@ export type PortalMenuItem = 'divider' | {
   onClick?: () => void
   color?: MenuColor | string
   disabled?: boolean
+  // Optional leading icon (e.g. a lucide-react element sized h-4 w-4).
+  // Purely additive -- every existing caller that doesn't pass one renders
+  // exactly as before (no icon slot, no extra gap), since the row only
+  // switches to a two-child flex layout when an icon is actually present.
+  icon?: ReactNode
 }
 
 type PortalContentHelpers = {
@@ -20,13 +25,29 @@ type PortalContentHelpers = {
 export type PortalMenuProps = {
   trigger: ReactNode
   items?: Array<PortalMenuItem | null | undefined | false>
-  align?: 'left' | 'right'
+  // 'left'/'right' pin the menu to that edge of the trigger regardless of
+  // where the trigger sits on screen. 'auto' (the default) instead reads
+  // the trigger's actual position each time it opens: it prefers opening
+  // rightward from the trigger's left edge (the natural reading-order
+  // anchor for a button sitting anywhere left-of-center or inline in a
+  // toolbar), and only flips to hugging the trigger's right edge when a
+  // right-aligned trigger would otherwise force the menu to overflow the
+  // viewport. This replaces every caller that used to hardcode `right`
+  // regardless of where its own button actually landed on each page.
+  align?: 'left' | 'right' | 'auto'
   content?: ReactNode | ((helpers: PortalContentHelpers) => ReactNode) | null
   menuClassName?: string
   closeOnContentClick?: boolean
   defaultOpen?: boolean
   triggerWrapperClassName?: string
   onOpenChange?: ((open: boolean) => void) | null
+  // Denser row padding/text size and a smaller default width -- for menus
+  // that are a handful of short "quick action" lines (e.g. ExportMenu)
+  // rather than a longer list of row actions, so the popover doesn't read
+  // as an oversized card next to a small trigger button. Still follows the
+  // app's own light/dark mode via the normal `dark:` classes below -- this
+  // only ever changes spacing/size, never a fixed color palette.
+  compact?: boolean
 }
 
 type ThreeDotPortalLabels = {
@@ -60,13 +81,14 @@ function isPortalMenuItem(item: PortalMenuItem | null | undefined | false): item
 export default function PortalMenu({
   trigger,
   items,
-  align = 'right',
+  align = 'auto',
   content = null,
   menuClassName = '',
   closeOnContentClick = false,
   defaultOpen = false,
   triggerWrapperClassName = '',
   onOpenChange = null,
+  compact = false,
 }: PortalMenuProps) {
   const [open, setOpen] = useState(defaultOpen)
   const [position, setPosition] = useState({ top: 0, left: 0 })
@@ -86,15 +108,42 @@ export default function PortalMenu({
     const menuHeight = menuRef.current?.offsetHeight || 160
     const menuWidth = menuRef.current?.offsetWidth || 170
 
+    // On phones the fixed bottom nav (plus its safe-area-inset-bottom on
+    // notched iPhones) covers a real strip of the viewport. window.innerHeight
+    // doesn't know about that, so without this a menu opened from a row near
+    // the bottom of the screen would be positioned as if that space were free
+    // -- placing its last item(s) directly under the nav bar, functionally
+    // unreachable even though z-index draws the menu visually on top.
+    const bottomNav = document.querySelector('nav.safe-area-inset-bottom')
+    const bottomReserve = bottomNav && bottomNav.getBoundingClientRect().width > 0
+      ? Math.max(8, viewportHeight - bottomNav.getBoundingClientRect().top + 8)
+      : 8
+
     let top = triggerRect.bottom + 4
-    if (top + menuHeight > viewportHeight - 8) {
+    if (top + menuHeight > viewportHeight - bottomReserve) {
       top = Math.max(8, triggerRect.top - menuHeight - 4)
     }
-    if (top + menuHeight > viewportHeight - 8) {
-      top = Math.max(8, viewportHeight - menuHeight - 8)
+    if (top + menuHeight > viewportHeight - bottomReserve) {
+      top = Math.max(8, viewportHeight - bottomReserve - menuHeight)
     }
 
-    let left = align === 'right' ? triggerRect.right - menuWidth : triggerRect.left
+    let left: number
+    if (align === 'right') {
+      left = triggerRect.right - menuWidth
+    } else if (align === 'left') {
+      left = triggerRect.left
+    } else {
+      // auto: anchor to the trigger's own left edge by default -- this is
+      // what actually makes the menu feel attached to the button that
+      // opened it, whether that button sits at the start of a toolbar, in
+      // the middle of a row, or anywhere else. Only hug the trigger's
+      // right edge instead when the trigger is far enough right that a
+      // left-anchored menu would spill past the viewport -- e.g. a
+      // three-dot action button at the end of a table row.
+      left = triggerRect.left + menuWidth <= viewportWidth - 8
+        ? triggerRect.left
+        : triggerRect.right - menuWidth
+    }
     if (left + menuWidth > viewportWidth - 8) left = viewportWidth - menuWidth - 8
     if (left < 8) left = 8
 
@@ -127,7 +176,18 @@ export default function PortalMenu({
       if (!(target instanceof Node)) return
       const insideMenu = menuRef.current?.contains(target)
       const insideTrigger = triggerRef.current?.contains(target)
-      if (!insideMenu && !insideTrigger) setOpen(false)
+      // A menu opened *inside* this menu's content (e.g. the section-level
+      // filter dropdowns nested inside FilterMenu's own popover) renders its
+      // own content into a separate document.body portal, so it's not a DOM
+      // descendant of `menuRef` even though it's a React descendant of the
+      // content this menu rendered. Without this check, interacting with
+      // that nested popover (typing in its search box, ticking a checkbox)
+      // looks like an "outside" click to this outer menu and closes it out
+      // from under the nested one. Treat a click landing in any open
+      // portal-menu content as "inside" so nested popovers can be used
+      // without collapsing their parent.
+      const insideNestedPortalMenu = target instanceof Element ? Boolean(target.closest('[data-portal-menu-content]')) : false
+      if (!insideMenu && !insideTrigger && !insideNestedPortalMenu) setOpen(false)
     }
 
     const closeMenu = () => setOpen(false)
@@ -207,18 +267,21 @@ export default function PortalMenu({
       {open && createPortal(
         <div
           ref={menuRef}
+          data-portal-menu-content=""
           onClick={(event) => {
             event.stopPropagation()
             if (closeOnContentClick) setOpen(false)
           }}
           style={{ position: 'fixed', top: position.top, left: position.left, zIndex: 9999 }}
-          className={`bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 min-w-[170px] py-1 fade-in ${menuClassName}`.trim()}
+          className={`bg-white dark:bg-neutral-900 shadow-2xl border border-gray-200 dark:border-neutral-700 fade-in ${
+            compact ? 'rounded-lg min-w-[150px] py-0.5' : 'rounded-xl min-w-[170px] py-1'
+          } ${menuClassName}`.trim()}
         >
           {resolvedContent
             ? resolvedContent
             : menuItems.map((item, index) => (
               item === 'divider'
-                ? <div key={`divider-${index}`} className="border-t border-gray-100 dark:border-gray-700 my-1" />
+                ? <div key={`divider-${index}`} className={`border-t border-gray-100 dark:border-neutral-700 ${compact ? 'my-0.5' : 'my-1'}`} />
                 : (
                   <button
                     key={`item-${index}`}
@@ -228,11 +291,16 @@ export default function PortalMenu({
                       setOpen(false)
                     }}
                     disabled={item.disabled}
-                    className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    className={`w-full flex items-center text-left font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                      item.icon ? 'gap-2' : ''
+                    } ${
+                      compact ? 'px-3 py-1.5 text-xs' : 'px-4 py-2.5 text-sm'
+                    } ${
                       colorClassByType[item.color || 'gray'] || colorClassByType.gray
                     }`}
                   >
-                    {item.label}
+                    {item.icon ? <span className="shrink-0 inline-flex">{item.icon}</span> : null}
+                    <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   </button>
                 )
             ))}

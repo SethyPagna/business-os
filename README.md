@@ -1,190 +1,98 @@
 # Business OS
 
-Business OS is Windows business software: one launcher starts the app, Docker services, workers, backups, and Cloudflare access.
+Business OS is a POS / inventory / e-commerce admin system. It runs entirely
+on Cloudflare — Workers (API), D1 (database), R2 (files/media), Queues
+(background jobs), and KV (cache). There is no local server, no Docker, and
+no separate backend process: `cloudflare/` **is** the backend, and it is
+always deployed and always on.
 
-## Current Version And Engineering Status
+- Admin app: `https://admin.leangcosmetics.dpdns.org`
+- Public customer portal: `https://leangcosmetics.dpdns.org`
 
-- App/package version: `6.0.0`.
-- Active roadmap position: Phase 8.4 live verification active; Phase 26 remains at 51 completed organization moves; Phase 28 remains active with the R2 prune follow-up; Phase 29 is active for repeated schema, cleanup, TypeScript, runtime, and performance sweeps.
-- Frontend migration status: first-party frontend app source is now TypeScript/TSX, including the app shell, page shells, shared UI, product/POS/inventory/catalog/receipt/settings surfaces, and the domain API registry path. Compatibility wrappers were removed where reference scans proved direct typed imports.
-- Remaining high-risk TypeScript hardening target: `frontend/src/api/methods.ts`, the large domain API registry. Split it into smaller typed sections so request payloads, retries, cache invalidation, import jobs, and offline mirrors become fully type-checked.
-- Latest local verification scope includes strict frontend typecheck, JSX syntax scan, backend utility tests, production build, Docker release build/start/health, and Phase 8.4 Playwright route-load/LCP checks. Move 895 served Docker image `business-os:v6.0.0-202606102309` with frontend hash `0dcd7c3e85311dd1`; local Inventory, Returns, and Users LCP measured at 332 ms, 352 ms, and 284 ms with zero failed requests/errors. Public Cloudflare traces still show real transfer/API delays, not fake loader delays: Inventory LCP 5.184 s, Returns 3.992 s, Users 3.992 s, with zero failed requests/errors.
+For step-by-step install/deploy/redeploy instructions, see **[DEPLOY.md](./DEPLOY.md)**.
 
-## Which File Do I Use?
+## Architecture
 
-Use **`Start Business OS.bat`** in the root folder.
+| Concern | Service |
+|---|---|
+| API + serving the built frontend | Cloudflare Workers (`cloudflare/`, Hono) |
+| Database (products, sales, users, settings, etc.) | Cloudflare D1 |
+| File/image/video storage | Cloudflare R2 |
+| Background jobs (imports, media processing) | Cloudflare Queues |
+| Cache | Cloudflare KV |
+| Frontend | React + TypeScript, built to static assets and served by the Worker |
 
-Do not open Docker Compose, Redis, Postgres, MinIO, workers, Node, npm, or Cloudflare commands for everyday use. The `run\` folder is for support, updates, backup/restore, diagnostics, and source-development tasks.
+`frontend/` builds to `frontend/dist`, which the Worker serves directly
+(`[assets]` in `cloudflare/wrangler.toml`) — API/upload/health routes run
+Worker code first, everything else falls back to the single-page app.
 
-## Blank Windows Laptop To Running App
+## Repo layout
 
-1. Copy the complete **Business OS Docker portable folder** to the laptop.
-2. Double-click **`Start Business OS.bat`**.
-3. Let Business OS check Docker Desktop and Cloudflare Tunnel.
-4. If Windows asks for administrator permission, WSL2, virtualization, or a restart, accept it. Business OS does not require Linux commands; Docker Desktop may need WSL2 internally.
-5. Restart Windows if Docker asks.
-6. Double-click **`Start Business OS.bat`** again.
-7. Wait until the window says Business OS is ready.
-8. Open the URLs printed in the window.
+- `frontend/` — React/TypeScript admin + portal UI. Build with `npm run build`.
+- `cloudflare/` — the Worker: routes, D1 migrations, R2/Queues/KV integration.
+  See `cloudflare/README.md` for its own quick-start.
+- `ops/scripts/powershell/full-automation.ps1` — one-command release pipeline
+  (typecheck -> build -> migrate -> deploy -> health check).
+- `run/full-automation.bat` — Windows entry point for the script above.
+- `run/open-app.bat` — opens the live admin URL (there's nothing to "start" locally).
 
-For a laptop without source code, build the release with `run\build-release.bat` or `run\docker\release.bat`, copy the full `release\business-os\` folder, then double-click **`Start Business OS.bat`** inside that folder.
+There is no `backend/`, `ops/docker/`, or `run/docker/` folder anymore - those
+held the retired self-hosted Docker/Postgres stack and have been removed.
+`PORTING_STATUS.md` and `CHANGES-VERIFIED.md` are the historical record of
+that migration.
 
-### Starting From This Source Checkout (New Laptop, No Prebuilt Release Yet)
+## Data model
 
-If you were handed the source folder (this repo) instead of a prebuilt `release\business-os\` folder:
+- **D1** owns products, stock, POS, sales, returns, contacts, users, roles,
+  settings, portal content, audit history, and import job metadata.
+- **R2** owns uploads, product images, logos, avatars, portal/about images,
+  file library assets, thumbnails, import media, and backup assets.
+- **Queues** run large imports (products, inventory, sales, contacts) and
+  media optimization as background jobs so the UI never blocks on them.
+- **KV** is a short-lived cache in front of D1 for hot read paths.
 
-1. Install [Docker Desktop](https://www.docker.com/products/docker-desktop/) and [Node.js 24 LTS](https://nodejs.org/), then restart if Windows asks.
-2. Put real credentials in `backend\.env` (Cloudflare account/tunnel IDs, Cloudflare API token, R2 access key/secret) and `ops\runtime\secrets\cloudflare-api-token.txt`. Both are gitignored — they never get committed.
-3. Run `run\docker\install.bat`. This generates `ops\runtime\docker-release\docker-release.env` from `backend\.env` (or fresh values) and loads the Docker image bundle.
-4. Run `run\docker\rotate-cloudflare.bat` once. This uses the Cloudflare API token to fetch a fresh Cloudflare **Tunnel connector token** — a different secret than the API token — and writes it to the tunnel token file. Skip this only if that file is already populated.
-5. Double-click `Start Business OS.bat`.
-6. If the public/admin URL shows a Cloudflare "Error 1033" or "Error 530" page, run `run\docker\verify-tunnel.bat` — it pinpoints exactly which of the above steps is incomplete.
+Images are normalized through a media optimizer before storage: compressible
+formats are resized/recompressed to fit a 40KB budget; formats that can't
+meet that are rejected with a clear upload error. Videos are recompressed
+(H.264, CRF 24, 96k AAC, 1280px max edge, fast-start).
 
-Normal URLs:
+## Public languages
 
-- Server laptop: `http://localhost:4000`
-- Admin from other devices: `https://admin.leangcosmetics.dpdns.org`
-- Public customer portal: `https://leangcosmetics.dpdns.org/public`
+The customer portal ships first-party language packs for instant switching:
+English, Khmer, Chinese (simplified/traditional), Vietnamese, Thai, Russian,
+French, Spanish, German, Japanese, Korean, Portuguese, Italian, Arabic,
+Hindi, Indonesian, Malay, and Turkish. Business name, portal intro, and
+tagline stay in the original business text.
 
-## Final Data Architecture
+## Large imports
 
-- Postgres owns live products, stock, POS, sales, returns, contacts, users, roles, settings, portal, audit, history, imports, and backup metadata.
-- R2 owns uploads, product images, logos, avatars, portal/about images, file library assets, thumbnails, import media, backup assets, and Parquet snapshots. Emergency/offline mode can use MinIO through the same object-storage keys.
-- Redis owns durable jobs and short-lived cache.
-- DuckDB/Parquet owns heavy staging and read-only workloads such as CSV import staging, conflict scans, exports, analytics snapshots, and backup verification.
+Product, inventory, sales, customer, supplier, and delivery-contact imports
+run as background jobs via Cloudflare Queues:
 
-Images, logos, avatars, portal/about images, and product image uploads are normalized through the same media optimizer before storage. Compressible image formats are resized and recompressed until they fit the 40KB asset budget; oversized image formats that cannot be made 40KB or smaller are rejected with a clear upload error. MP4 videos are recompressed with H.264, slow preset, CRF 24, 96k AAC audio, 1280px max display edge, stripped metadata, and fast-start playback so they stay clear while reducing storage and loading cost.
+- Pick a file with the file picker, or download the CSV template and fill it
+  in — every import screen shows the exact columns and previews the parsed
+  rows before you confirm (no paste-a-blob-of-CSV-text step).
+- CSV/TSV parsing preserves Khmer text and rounds money/percent values to two
+  decimals.
+- Conflicts are grouped by matching name, SKU/barcode, or validation errors.
+- Barcodes exported as spreadsheet scientific notation (e.g. `8.19265E+11`)
+  are blocked during review until fixed.
+- Imports wait for review before applying large changes; cancel, retry,
+  failed-row download, and undo/redo are available where supported.
+- Every import action (create, upload, start, cancel, retry, approve,
+  delete) is recorded in the audit log.
 
-Old loose data folders are not accepted by the final app. Use a verified backup folder or Google Drive `datasync-N` folder so older data cannot overwrite newer Docker data by accident.
+## Security notes
 
-## Secrets, R2, Google, And Owned Auth Setup
+If a Cloudflare API token, D1/R2 credential, or app secret was ever pasted
+into chat, email, or a screenshot, treat it as compromised and rotate it in
+the Cloudflare dashboard immediately. Real secrets belong only in
+`wrangler secret put` / the Cloudflare dashboard's environment variables —
+never in tracked files.
 
-Secrets belong only in ignored runtime files, usually `ops\runtime\docker-release\docker-release.env` inside the release folder. Do not paste real R2 keys, Google client secrets, Cloudflare tokens, or app secrets into tracked code, README files, screenshots, or logs.
+## Support docs
 
-Use the Backup page **Integration Doctor** after filling the runtime env. It reports only whether each secret is present and whether each service responds; it never prints the secret value.
-
-Required runtime categories:
-
-- R2 primary storage: `OBJECT_STORAGE_DRIVER=r2`, `S3_ENDPOINT`, `S3_REGION=auto`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, and optional `R2_PUBLIC_BASE_URL`.
-- Emergency/offline storage: switch `OBJECT_STORAGE_DRIVER=minio` and use the same object keys through the MinIO profile.
-- Google Drive sync: use the Google OAuth client named `Business-os Drive`. Authorized redirect URIs should include:
-  - `https://admin.leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback`
-  - `https://leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback`
-  - `http://localhost:4000/api/system/drive-sync/oauth/callback`
-- Google/Gmail login: use the Business OS owned backend callback. Authorized redirect URIs should include:
-  - `https://admin.leangcosmetics.dpdns.org/api/auth/oauth/callback`
-  - `https://leangcosmetics.dpdns.org/api/auth/oauth/callback`
-  - `http://localhost:4000/api/auth/oauth/callback`
-  Authorized JavaScript origins should include:
-  - `https://admin.leangcosmetics.dpdns.org`
-  - `https://leangcosmetics.dpdns.org`
-  - `http://localhost:4000`
-
-Business OS Postgres owns users, roles, permissions, products, stock, sales, files, backups, and all business data. Old Supabase-linked users must sign in with password/OTP and relink Google.
-
-If any real credential was pasted into chat, sent in email, or shown in a screenshot, rotate it after verification before using the system for production data.
-
-## Docker Data: Copy, Restore, Update
-
-The release folder is portable when it contains:
-
-- `Start Business OS.bat`
-- `images\business-os-image.tar`
-- `ops\runtime\docker-release\docker-release.env`
-- `run\docker\*.bat`
-
-Safest way to move data:
-
-1. On the old laptop, run `run\docker\backup.bat`.
-2. Copy the newest timestamped backup folder from `ops\runtime\docker-release\backups\`, or choose the matching Google Drive `datasync-N` folder.
-3. On the new laptop, copy the full `release\business-os\` folder, including `images\business-os-image.tar`.
-4. Run `run\docker\restore.bat -BackupPath "C:\path\to\that\backup-folder"`.
-5. Double-click **`Start Business OS.bat`** and check products, sales, files, settings, and portal content.
-
-Backup format:
-
-- Local backups and Google Drive `datasync-N` versions use the same folder shape.
-- Each recoverable folder contains `manifest.json`, `data.json`, `objects-manifest.jsonl`, `checksums.json`, `restore-plan.json`, and optional Parquet snapshots.
-- Docker restore validates that folder before replacing live data.
-
-## Public Languages
-
-The customer portal uses first-party language packs for fast public switching. English, Khmer, Chinese simplified/traditional, Vietnamese, Thai, Russian, French, Spanish, German, Japanese, Korean, Portuguese, Italian, Arabic, Hindi, Indonesian, Malay, and Turkish switch without loading Google Translate.
-
-Google Translate remains only a slower fallback for unsupported languages. Business name, portal intro, and short tagline stay in the original business text.
-
-## Portal Promotions And Announcements
-
-The public catalog page (Studio → Display settings in the admin editor) has two separate, complementary ways to promote things — pick whichever fits:
-
-- **Announcement Strip** — small cards that scroll horizontally at the very top of the page, for quick sale/announcement callouts. Manage from Display settings → Announcement strip → Manage. Each card can link to nothing, a specific product (pick from a dropdown, no need to know a URL), or a custom link, plus an optional badge, color, and a show-from/show-until date window.
-- **Promotions and posts** — larger two-column story cards further down the same editor, for longer campaign copy with a title, subtitle, body text, and a button. The button can link to a product (same dropdown-based picker) or a custom URL.
-
-Both are separate from each other on purpose — the editor UI explains which is which where you manage them, so it's clear at a glance you're not duplicating one with the other.
-
-## Large Imports
-
-Large product, inventory, sales, customer, supplier, and delivery imports run as background jobs.
-
-- Workers stay idle when no large action exists and wake automatically when jobs are queued.
-- CSV/TSV parsing preserves Khmer text and rounds money/percent values upward to two decimals.
-- Product conflicts are grouped by same name, same SKU/barcode, and errors/issues.
-- Product barcodes exported as spreadsheet scientific notation, such as `8.19265E+11`, are blocked during review until the barcode is edited, cleared, or the CSV is re-exported with barcode cells stored as text.
-- Imports wait for review before applying large changes.
-- Cancel, retry, failed-row download, remove, undo, and redo are available where supported. Cancelling during upload/start stops the start sequence, and retry resets cancelled jobs before queueing analysis again.
-- Import create, upload, start, cancel, retry, approve, and delete actions are recorded in the audit log with actor, job type, status changes, and cancellation source.
-- Product import review groups same-name families with collapse/expand sections, parent/variant scenario chips, inline editable details, action target labels, filter hover hints, exact row-level error summaries, and undo for accidental conflict-resolution changes.
-
-## RFID Inventory Roadmap
-
-RFID should be added as a parallel inventory capture path, not as a replacement for barcode scanning.
-
-Recommended rollout:
-
-1. Tag products with EPC/UHF RFID labels and store each tag ID against product, variant, branch, and optional lot/expiry metadata.
-2. Add an RFID reader gateway service that receives scans from handheld or fixed readers, deduplicates repeated reads, and posts normalized tag events into Business OS.
-3. Map tag events to inventory movements: receiving, stock count, transfer, POS verification, return verification, and shrinkage review.
-4. Require a review queue for unknown tags, duplicate tags, cross-branch reads, and tags attached to disabled products.
-5. Keep barcode fallback on every RFID screen so staff can resolve unreadable or damaged tags without leaving the workflow.
-
-The Inventory page includes an RFID section for reader gateway status, EPC/TID lookup, product mapping, receiving, stock count, branch transfer, POS verification, returns, unknown tags, and barcode fallback readiness. The reader gateway remains disconnected until hardware/API credentials are configured.
-
-## Audit, Activity, And Receipts
-
-- Audit Log is server-paginated with default 50 rows per page and a 200-row maximum.
-- Admin users can filter Audit Log, Sales, Inventory Movements, and product action history by user. Non-admin users keep their normal permission and ownership limits.
-- Admin users can clear audit entries older than 30 days from the Audit Log retention action after confirmation.
-- Receipt preview keeps the strict Content Security Policy: print, save-as-PDF, and close actions are bound by application code instead of inline scripts, and bilingual 58/80mm receipts are clamped to the preview viewport.
-
-## Update, Backup, Restore
-
-- Start: `Start Business OS.bat`
-- Stop: `run\stop-server.bat`
-- Diagnose: `run\docker\doctor.bat`
-- Backup: `run\docker\backup.bat`
-- Restore: `run\docker\restore.bat`
-- Update Docker release: `run\docker\update.bat`
-
-After any source-code change that should be visible in the running Docker app, rebuild and restart the release image from the updated source:
-
-- Build current source into Docker release image: `powershell -ExecutionPolicy Bypass -File ops\scripts\powershell\docker-release.ps1 -Action Release`
-- Recreate the running release stack: `powershell -ExecutionPolicy Bypass -File ops\scripts\powershell\docker-release.ps1 -Action Start`
-
-Every user-facing command window stays open and prints what to do next.
-The Backup page Integration Doctor is read-only and must not show a write-failed banner for GET/health checks.
-
-## Cloudflare Safety
-
-Business OS uses Cloudflare for the public/admin links. If a Cloudflare tunnel token, origin private key, or API token was pasted into chat or sent to anyone, treat it as compromised and rotate it with `run\docker\rotate-cloudflare.bat --disconnect-old`.
-
-### "Error 1033" / "Error 530" (Cloudflare Tunnel error)
-
-This is Cloudflare's edge saying no `cloudflared` connector is currently registered for the tunnel — it is not an app or database problem. Run `run\docker\verify-tunnel.bat` (or `run\docker\doctor.bat`, which now runs the same check). It checks, in order: the account/tunnel IDs and API token are set, the tunnel connector token file is present and non-empty, Cloudflare's API reports an active connection, the ingress config actually routes your hostnames, and the `cloudflared` container is running. It reports exactly which of those failed.
-
-The most common cause is an empty or stale connector token file. Fix it with `run\docker\rotate-cloudflare.bat`, then `run\docker\start.bat`.
-
-## Cloudflare Workers Migration (Experimental — Not Production Ready)
-
-The `cloudflare\` folder holds a separate, in-progress path to run Business OS entirely on Cloudflare's platform (Workers + D1 + R2 + Queues + KV) instead of Docker — no local machine, no Docker Desktop, no Cloudflare Tunnel needed at all, since Workers serve your domain natively.
-
-**This is not a replacement yet.** The Docker path above is still the real, complete, working app — nothing about it changed. As of this writing, 28 of 215 backend API endpoints have been ported to `cloudflare\`, each one built and tested against a real local Cloudflare environment (not just written and assumed correct). See `cloudflare\PRODUCTION-READINESS.md` for the exact, numbers-based answer to "is it ready," and `cloudflare\MIGRATION.md` for the full architecture writeup, what's tested, and what a full migration would take.
+- `DEPLOY.md` — install, deploy, and redeploy steps.
+- `cloudflare/README.md` — Worker-specific quick start and resource setup.
+- `PORTING_STATUS.md` — historical log of the Docker -> Cloudflare migration.
+- `CHANGES-VERIFIED.md` — verified fix/change log.

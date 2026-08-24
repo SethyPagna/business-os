@@ -814,7 +814,7 @@ export default function ServerPage() {
           icon={Server}
           tone="blue"
           title={t('sync_server_title') || 'Sync Server'}
-          subtitle={t('sync_server_desc') || 'One device runs the server. All others open the Cloudflare URL in their browser with no manual config needed.'}
+          subtitle={t('sync_server_desc') || 'Business OS runs on Cloudflare and is always on — there is no local server to start or keep running.'}
         />
 
         <div className={`card flex items-center gap-4 p-4 ${
@@ -867,29 +867,22 @@ export default function ServerPage() {
               <li className="flex gap-2">
                 <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">1.</span>
                 <div>
-                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step1_title') || 'Run setup on the server PC'}</p>
-                  <p className="mt-0.5">{t('sync_step1_desc') || 'Double-click Start Business OS.bat. It starts Docker, workers, and Cloudflare automatically.'}</p>
+                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step1_title') || 'Open the Business OS URL'}</p>
+                  <p className="mt-0.5">{t('sync_step1_desc') || 'Business OS is always on at its Cloudflare address — there is nothing to start. Open the app there and this device connects automatically.'}</p>
                 </div>
               </li>
               <li className="flex gap-2">
                 <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">2.</span>
                 <div>
-                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step2_title') || 'Wait for URL'}</p>
-                  <p className="mt-0.5">{t('sync_step2_desc') || 'Wait ~10 seconds. A public Cloudflare URL appears in the terminal.'}</p>
+                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step2_title') || 'Not connecting automatically?'}</p>
+                  <p className="mt-0.5">{t('sync_step2_desc') || "Open Advanced / manual server settings below, paste in the server URL, then Save and Reconnect."}</p>
                 </div>
               </li>
               <li className="flex gap-2">
                 <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">3.</span>
                 <div>
-                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step3_title') || 'Open the app on this device'}</p>
-                  <p className="mt-0.5">{t('sync_step3_desc') || 'Copy that URL and paste it below on every device that needs to sync.'}</p>
-                </div>
-              </li>
-              <li className="flex gap-2">
-                <span className="flex-shrink-0 font-bold text-blue-800 dark:text-blue-200">4.</span>
-                <div>
-                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step4_title') || 'Login with server credentials'}</p>
-                  <p className="mt-0.5">{t('sync_step4_desc') || 'Default: admin / admin. Change this password after first login in Users.'}</p>
+                  <p className="font-medium text-blue-800 dark:text-blue-200">{t('sync_step3_title') || 'Log in'}</p>
+                  <p className="mt-0.5">{t('sync_step3_desc') || 'Default: admin / admin. Change this password after first login in Users.'}</p>
                 </div>
               </li>
             </ol>

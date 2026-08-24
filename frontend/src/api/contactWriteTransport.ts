@@ -93,6 +93,15 @@ export function deleteCustomer(id: number | string): Promise<unknown> {
   return deleteContact('customers', '/api/customers', 'customers', id)
 }
 
+export function awardCustomerPoints(id: number | string, payload: { points: number; note?: string }): Promise<unknown> {
+  return route(
+    'customers:awardPoints',
+    () => apiFetch('POST', `/api/customers/${encodeURIComponent(String(id))}/points`, buildContactWritePayload(payload, 'loyalty_points')),
+    null,
+    true,
+  )
+}
+
 export function createSupplier(payload: ContactWritePayload = {}): Promise<unknown> {
   return createContact('suppliers', '/api/suppliers', 'supplier', payload)
 }

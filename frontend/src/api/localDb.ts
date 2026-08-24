@@ -276,6 +276,6 @@ function splitCSVLine(line: string): string[] {
   return result
 }
 
-export function buildCSVTemplate(headers: string[], filename: string): void {
-  buildCSVTemplateFile(headers, filename)
+export function buildCSVTemplate(headers: string[], filename: string, exampleRow?: Record<string, unknown>): void {
+  buildCSVTemplateFile(headers, filename, exampleRow)
 }

@@ -165,12 +165,12 @@ export default function LineChart({ data, lines }: LineChartProps) {
           if (y < PAD_T) return null
           return (
             <g key={value}>
-              <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="#e2e8f0" strokeWidth="1.15" strokeDasharray={value === 0 ? undefined : '4 5'} />
-              <text x={PAD_L - 9} y={y + axisFontSize * 0.34} textAnchor="end" fontSize={axisFontSize} fontWeight="700" fill="#64748b">{fmtShort(value)}</text>
+              <line x1={PAD_L} x2={W - PAD_R} y1={y} y2={y} stroke="currentColor" strokeWidth="1.15" strokeDasharray={value === 0 ? undefined : '4 5'} className="text-slate-200 dark:text-slate-700" style={{ color: '#e2e8f0' }} />
+              <text x={PAD_L - 9} y={y + axisFontSize * 0.34} textAnchor="end" fontSize={axisFontSize} fontWeight="700" fill="currentColor" className="text-slate-500 dark:text-slate-400" style={{ color: '#64748b' }}>{fmtShort(value)}</text>
             </g>
           )
         })}
-        <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH} stroke="#cbd5e1" strokeWidth="1.35" />
+        <line x1={PAD_L} x2={W - PAD_R} y1={PAD_T + plotH} y2={PAD_T + plotH} stroke="currentColor" strokeWidth="1.35" className="text-slate-300 dark:text-slate-600" style={{ color: '#cbd5e1' }} />
 
         {safeLines.map((line, lineIndex) => {
           const color = line.color || CHART_COLORS[lineIndex]
@@ -199,12 +199,18 @@ export default function LineChart({ data, lines }: LineChartProps) {
                 if (!showPoint) return null
                 return (
                   <g key={`${line.key}-${index}`}>
-                    <circle cx={xPx(index)} cy={yPx(value)} r={isHovered ? outerPointRadius + 1.3 : outerPointRadius} fill="white" stroke={`${color}20`} strokeWidth={isCompact ? 4 : 4.2} />
+                    {/* Point halo/inner fill: was hardcoded `fill="white"`
+                        with no dark-mode counterpart, so every point
+                        rendered a literal bright-white circle on dark
+                        cards -- var(--chart-point-fill) (styles/main.css)
+                        follows the same background dark mode already
+                        uses for this chart's containing card. */}
+                    <circle cx={xPx(index)} cy={yPx(value)} r={isHovered ? outerPointRadius + 1.3 : outerPointRadius} fill="var(--chart-point-fill)" stroke={`${color}20`} strokeWidth={isCompact ? 4 : 4.2} />
                     <circle
                       cx={xPx(index)}
                       cy={yPx(value)}
                       r={isHovered ? innerPointRadius + 1.2 : innerPointRadius}
-                      fill={isHovered ? color : 'white'}
+                      fill={isHovered ? color : 'var(--chart-point-fill)'}
                       stroke={color}
                       strokeWidth={isCompact ? 2 : 2.1}
                       className="transition-all"
@@ -222,9 +228,11 @@ export default function LineChart({ data, lines }: LineChartProps) {
             x2={xPx(tooltip.idx)}
             y1={PAD_T}
             y2={PAD_T + plotH}
-            stroke="#94a3b8"
+            stroke="currentColor"
             strokeWidth="1.25"
             strokeDasharray="3 3"
+            className="text-slate-400 dark:text-slate-500"
+            style={{ color: '#94a3b8' }}
           />
         )}
 
@@ -233,7 +241,7 @@ export default function LineChart({ data, lines }: LineChartProps) {
           const raw = String(datum.period || '')
           const lbl = formatAxisLabel(raw, includeYear)
           return (
-            <text key={`${raw}-${index}`} x={xPx(index)} y={PAD_T + plotH + 24} textAnchor="middle" fontSize={xFontSize} fontWeight="700" fill="#475569">
+            <text key={`${raw}-${index}`} x={xPx(index)} y={PAD_T + plotH + 24} textAnchor="middle" fontSize={xFontSize} fontWeight="700" fill="currentColor" className="text-slate-600 dark:text-slate-300" style={{ color: '#475569' }}>
               {lbl}
             </text>
           )

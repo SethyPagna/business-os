@@ -1,13 +1,20 @@
-import { Suspense, lazy, useDeferredValue, useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ComponentProps } from 'react'
-import SearchIcon from 'lucide-react/dist/esm/icons/search.js'
+import { toggleMultiValue, isMultiActive, matchesMulti } from '../../utils/multiSelect'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
+import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
+import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters'
-import ExportMenu from '../shared/ExportMenu'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
+import SearchInput from '../shared/SearchInput'
+import ScanSearchButton from '../shared/ScanSearchButton'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, paginateItems } from '../shared/PaginationControls'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
@@ -15,9 +22,11 @@ import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
+import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
+import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { getSales as fetchSales } from '../../api/salesTransport.ts'
+import { getSales as fetchSales, getSalesStats as fetchSalesStats } from '../../api/salesTransport.ts'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
@@ -25,11 +34,13 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
-const Receipt = lazy(() => import('../receipt/Receipt'))
-const SaleDetailModal = lazy(() => import('./SaleDetailModal'))
-const ExportModal = lazy(() => import('./ExportModal'))
-const SalesImportModal = lazy(() => import('./SalesImportModal'))
+import { lazyRetry } from '../../utils/lazyImport.ts'
+const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
+const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
+const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal')
+const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
 import SalesListSurface from './SalesListSurface'
+import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
@@ -46,6 +57,8 @@ interface SaleItemRecord {
   product_id?: number | string
   branch_name?: string
   quantity?: number | string
+  product_name?: string
+  sku?: string
 }
 
 interface SaleRecord extends Record<string, unknown> {
@@ -153,10 +166,6 @@ function isWriteConflict(error: unknown): boolean {
   )
 }
 
-function multiMatch(text: string, terms: string[]): boolean {
-  return terms.every((term) => text.toLowerCase().includes(term.toLowerCase()))
-}
-
 function normalizeFiniteIdsFrom<T = unknown>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
   return items.reduce<number[]>((normalized, item) => {
     const id = Number(getValue(item))
@@ -215,7 +224,6 @@ export default function Sales() {
   const isActive = useIsPageActive('sales')
   const [sales, setSales] = useState<SaleRecord[]>([])
   const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
@@ -247,7 +255,16 @@ export default function Sales() {
   const bulkStatusInFlightRef = useRef(false)
   const aliveRef = useRef(true)
   const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user })
-  const deferredSearch = useDeferredValue(search)
+  // 180ms, matching Products.tsx/POS.tsx/Inventory.tsx's shared canonical
+  // debounce -- this used to be two separate values (a useDeferredValue of
+  // the raw search string driving the local re-filter, plus an independent
+  // hand-rolled 350ms setState-in-a-useEffect debounce driving the server
+  // fetch below), which produced the same "renders incrementally / narrows
+  // then gets replaced" symptom Part 107 fixed on Products/POS: the local
+  // list narrowed on ~every keystroke while the server response that
+  // actually replaced it landed on a completely different, longer cadence.
+  // One debounced value for both call sites closes that gap here too.
+  const debouncedSearch = useDebouncedValue(search, 180)
   const timeGroupingMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
   const isAdmin = useMemo(() => {
     const roleCode = String(user?.role_code || '').toLowerCase()
@@ -272,7 +289,6 @@ export default function Sales() {
     if (value && value !== key) return value
     return settings?.language === 'km' ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, settings?.language, t])
-  const exportLabel = translateOr('export', 'Export')
   const salesDateRange = useMemo(() => {
     if (yearFilter === 'all') return {}
     const year = Number(yearFilter)
@@ -349,12 +365,33 @@ export default function Sales() {
     return wrappedPromise
   }, [clearLoadWatchdog, debouncedSearch, isAdmin, salesDateRange, statusFilter, translateOr, userFilter])
 
+  // Unbounded revenue/count aggregate (see routes/sales.ts's /stats) --
+  // `sales` above is capped at the list endpoint's page limit, so the
+  // header figures below read from this instead of reducing over `sales`
+  // directly once a filtered range has more matching rows than that cap.
+  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; total_count: number; truncated_in_list: boolean } | null>(null)
+
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedSearch(search.trim())
-    }, 350)
-    return () => window.clearTimeout(timer)
-  }, [search])
+    if (!isActive) return
+    let cancelled = false
+    const params = {
+      ...(isAdmin && userFilter !== 'all' ? { userId: userFilter } : {}),
+      ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+      ...(debouncedSearch ? { search: debouncedSearch } : {}),
+      ...salesDateRange,
+    }
+    fetchSalesStats(params).then((result) => {
+      if (cancelled) return
+      const row = (result || {}) as Record<string, unknown>
+      setSalesStats({
+        revenue_usd: Number(row.revenue_usd) || 0,
+        pending_revenue_usd: Number(row.pending_revenue_usd) || 0,
+        total_count: Number(row.total_count) || 0,
+        truncated_in_list: Boolean(row.truncated_in_list),
+      })
+    }).catch(() => { if (!cancelled) setSalesStats(null) })
+    return () => { cancelled = true }
+  }, [debouncedSearch, isActive, isAdmin, salesDateRange, statusFilter, userFilter])
 
   useEffect(() => {
     if (!isActive) {
@@ -546,13 +583,43 @@ export default function Sales() {
     [sales],
   )
 
-  const searchTerms = useMemo(() => deferredSearch.trim().split(/\s+/).filter(Boolean), [deferredSearch])
+  // Comma-separated groups, same syntax/tokenizer Products.tsx/POS.tsx use
+  // (buildProductSearchTerms) and the same syntax routes/sales.ts's
+  // buildSalesSearchWhere now parses server-side (tokenizeSearchTermGroups)
+  // -- built from `debouncedSearch`, not raw `search`, so this local
+  // re-filter settles on the same cadence as the server fetch below (see
+  // debouncedSearch's own comment for the bug this fixes).
+  const searchTerms = useMemo(() => buildProductSearchTerms(debouncedSearch), [debouncedSearch])
+  // Year/month narrowing happens downstream in buildTimeActionSections (see
+  // allSalesSections below, which is given `year`/`month` directly) -- this
+  // filter only ever checks status and search text, so monthFilter/
+  // yearFilter were never read here. Keeping them out of the dependency
+  // list avoids recomputing (and reallocating) this array on every date
+  // filter change for no behavioral difference.
   const filtered = useMemo(() => sales.filter((sale) => {
-    if (statusFilter !== 'all' && (sale.sale_status || 'completed') !== statusFilter) return false
+    if (!matchesMulti(statusFilter, sale.sale_status || 'completed')) return false
     if (!searchTerms.length) return true
-    const haystack = `${sale.receipt_number || ''} ${sale.cashier_name || ''} ${sale.payment_method || ''} ${sale.notes || ''} ${sale.customer_name || ''} ${sale.customer_membership_number || ''} ${getSaleBranchLabel(sale) || ''}`
-    return multiMatch(haystack, searchTerms)
-  }), [monthFilter, sales, searchTerms, statusFilter, yearFilter])
+    // Mirrors routes/sales.ts's buildSalesSearchWhere as closely as this
+    // page's already-loaded data allows: every flat sale-level column it
+    // searches (now including customer_phone, missing from this haystack
+    // before even though the server already searched it -- a pre-existing
+    // gap, not something this session's backend change introduced) plus
+    // each line item's product_name/sku. Deliberately NOT barcode/brand --
+    // GET /api/sales only returns raw sale_items columns to the client
+    // (see SaleItemRecord), and neither column lives on sale_items itself
+    // (both are snapshotted on products, joined in only inside the
+    // server's own search query) -- so a barcode/brand search still
+    // narrows correctly once the debounced server response lands, it just
+    // can't narrow the *local* pre-response preview the same way a
+    // receipt number or product name can. Same fuzzy/typo/diacritic/
+    // alias-aware matcher (matchesSearchTermGroups) Products.tsx/POS.tsx/
+    // Inventory.tsx already use, AND-only (no searchMode toggle exists on
+    // this page yet, matching the server's own AND default).
+    const items = Array.isArray(sale.items) ? sale.items : []
+    const itemHaystack = items.map((item) => `${item?.product_name || ''} ${item?.sku || ''}`).join(' ')
+    const haystack = `${sale.receipt_number || ''} ${sale.cashier_name || ''} ${sale.customer_name || ''} ${sale.customer_phone || ''} ${sale.payment_method || ''} ${sale.notes || ''} ${sale.customer_membership_number || ''} ${getSaleBranchLabel(sale) || ''} ${itemHaystack}`
+    return matchesSearchTermGroups(haystack, searchTerms, 'AND')
+  }), [sales, searchTerms, statusFilter])
 
   const allSalesSections = useMemo(
     () => buildTimeActionSections(filtered, {
@@ -614,19 +681,12 @@ export default function Sales() {
 
   useEffect(() => {
     const validIds = new Set<number>(filteredIds)
-    setSelectedIds((current) => {
-      const nextIds = [...current].filter((id) => validIds.has(id))
-      if (nextIds.length === current.size && nextIds.every((id) => current.has(id))) return current
-      return new Set<number>(nextIds)
-    })
+    setSelectedIds((current) => pruneSelectionToVisibleIds(current, validIds))
   }, [filteredIds])
 
   useEffect(() => {
-    setCollapsedSalesSections((current) => {
-      const validIds = new Set<string>(salesSections.map((section) => section.id))
-      const next = new Set<string>([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
-    })
+    const validIds = new Set<string>(salesSections.map((section) => section.id))
+    setCollapsedSalesSections((current) => pruneSelectionToVisibleIds(current, validIds))
   }, [salesSections])
 
   const selectedSales = useMemo(
@@ -639,13 +699,17 @@ export default function Sales() {
     selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < filteredIds.length
   }, [filteredIds.length, selectedIds.size])
 
-  const revenue = filtered
-    .filter((sale) => !['cancelled', 'awaiting_payment'].includes(sale.sale_status || 'completed'))
-    .reduce((sum, sale) => sum + (sale.net_total_usd ?? sale.total_usd ?? 0), 0)
+  const revenue = salesStats
+    ? salesStats.revenue_usd
+    : filtered
+        .filter((sale) => !['cancelled', 'awaiting_payment'].includes(sale.sale_status || 'completed'))
+        .reduce((sum, sale) => sum + (sale.net_total_usd ?? sale.total_usd ?? 0), 0)
 
-  const pendingRevenue = filtered
-    .filter((sale) => (sale.sale_status || 'completed') === 'awaiting_payment')
-    .reduce((sum, sale) => sum + (sale.total_usd || 0), 0)
+  const pendingRevenue = salesStats
+    ? salesStats.pending_revenue_usd
+    : filtered
+        .filter((sale) => (sale.sale_status || 'completed') === 'awaiting_payment')
+        .reduce((sum, sale) => sum + (sale.total_usd || 0), 0)
 
   const toggleSelected = (saleId: number | string) => {
     const numericId = Number(saleId)
@@ -694,9 +758,9 @@ export default function Sales() {
 
   const handleExportSelected = useCallback(async () => {
     if (!selectedSales.length) return
-    const { downloadCSV } = await import('../../utils/csv.ts')
+    const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
     const rows = buildSaleExportRows(selectedSales)
-    downloadCSV(`sales-selected-${new Date().toISOString().slice(0, 10)}.csv`, rows)
+    downloadXLSX(`sales-selected-${new Date().toISOString().slice(0, 10)}.xlsx`, rows)
     notify(`Exported ${selectedSales.length} selected sale${selectedSales.length === 1 ? '' : 's'}.`)
   }, [notify, selectedSales])
 
@@ -761,9 +825,9 @@ export default function Sales() {
   }
 
   const exportVisibleSales = useCallback(async (rows: SaleRecord[] = filtered, filePrefix = 'sales-visible') => {
-    const { downloadCSV } = await import('../../utils/csv.ts')
+    const { downloadXLSX } = await import('../../utils/xlsxExport.ts')
     const exportRows = buildSaleExportRows(rows)
-    downloadCSV(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.csv`, exportRows)
+    downloadXLSX(`${filePrefix}-${new Date().toISOString().slice(0, 10)}.xlsx`, exportRows)
   }, [filtered])
 
   const salesExportItems = useMemo<Array<PortalMenuItem | null | false>>(() => ([
@@ -784,47 +848,15 @@ export default function Sales() {
         ...ALL_STATUSES.map((status) => ({
           id: status,
           label: getStatusLabel(status, t),
-          active: statusFilter === status,
-          onClick: () => setStatusFilter(statusFilter === status ? 'all' : status),
+          active: isMultiActive(statusFilter, status),
+          onClick: () => setStatusFilter(toggleMultiValue(statusFilter, status)),
         })),
-      ],
-    },
-    {
-      id: 'year',
-      label: translateOr('year', 'Year', 'ឆ្នាំ'),
-      options: [
-        { id: 'all', label: translateOr('all_years', 'All years', 'គ្រប់ឆ្នាំ'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
-        ...availableYears.map((year) => ({
-          id: `year-${year}`,
-          label: year,
-          active: yearFilter === year,
-          onClick: () => {
-            const next = yearFilter === year ? 'all' : year
-            setYearFilter(next)
-            if (next === 'all') setMonthFilter('all')
-          },
-        })),
-      ],
-    },
-    {
-      id: 'month',
-      label: translateOr('month', 'Month', 'ខែ'),
-      options: [
-        { id: 'all', label: translateOr('all_months', 'All months', 'គ្រប់ខែ'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
-        ...Array.from({ length: 12 }, (_, index) => {
-          const month = String(index + 1)
-          return {
-            id: `month-${month}`,
-            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
-            active: monthFilter === month,
-            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
-          }
-        }),
       ],
     },
     isAdmin ? {
       id: 'user',
       label: t('user') || 'User',
+      searchable: true,
       options: [
         { id: 'all', label: t('all_users') || 'All users', active: userFilter === 'all', onClick: () => setUserFilter('all') },
         ...userOptions.map((option) => {
@@ -832,8 +864,8 @@ export default function Sales() {
           return {
             id: `user-${id}`,
             label: option?.name || option?.username || `User ${id}`,
-            active: userFilter === id,
-            onClick: () => setUserFilter(userFilter === id ? 'all' : id),
+            active: isMultiActive(userFilter, id),
+            onClick: () => setUserFilter(toggleMultiValue(userFilter, id)),
           }
         }).filter((option) => option.id !== 'user-'),
       ],
@@ -849,9 +881,14 @@ export default function Sales() {
     {
       id: 'sort',
       label: translateOr('sort', 'Sort', 'តម្រៀប'),
+      searchable: true,
       options: [
         { id: 'desc', label: translateOr('newest_first', 'Newest first', 'ថ្មីបំផុតមុន'), active: salesSortDirection === 'desc', onClick: () => setSalesSortDirection('desc') },
         { id: 'asc', label: translateOr('oldest_first', 'Oldest first', 'ចាស់បំផុតមុន'), active: salesSortDirection === 'asc', onClick: () => setSalesSortDirection('asc') },
+        ...buildPeriodFilterOptions({
+          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
+          allTimeLabel: translateOr('all_time', 'All time', 'គ្រប់ពេលវេលា'),
+        }),
       ],
     },
   ].filter(Boolean)), [availableYears, isAdmin, monthFilter, salesGroupMode, salesSortDirection, statusFilter, t, translateOr, userFilter, userOptions, yearFilter])
@@ -883,71 +920,141 @@ export default function Sales() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-3 flex min-w-0 items-center justify-between gap-2 sm:mb-4">
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 truncate text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-            <ShoppingBag className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            {t('sales')}
-          </h1>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-          <button onClick={() => setShowImport(true)} className="btn-secondary inline-flex flex-shrink-0 items-center gap-2 whitespace-nowrap px-3 py-1.5 text-xs font-medium sm:text-sm">
-            <Upload className="h-4 w-4" />
-            <span>{translateOr('import', 'Import')}</span>
-          </button>
-          <ExportMenu label={exportLabel} items={salesExportItems} compact primary />
-        </div>
-      </div>
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <label htmlFor="sales-search" className="relative min-w-0 flex-1">
-          <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            id="sales-search"
-            name="sales_search"
-            className="input min-w-0 w-full pl-9"
-            placeholder={`${t('search') || 'Search'}...`}
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            aria-label={t('search') || 'Search sales'}
-          />
-        </label>
-        <FilterMenu
-          label={t('filters') || 'Filters'}
-          activeCount={activeSalesFilterCount}
-          sections={salesFilterSections}
-          onOpenChange={setSalesFiltersOpen}
-          onClear={() => {
-            setStatusFilter('all')
-            setUserFilter('all')
-            setYearFilter('all')
-            setMonthFilter('all')
-            setSalesGroupMode('time')
-            setSalesSortDirection('desc')
-          }}
-          compact
+      {/* Merged toolbar row: Import/Export/History each take an equal share
+          of the row's full width (flex-1 on all three, labels always
+          visible) instead of icon-only buttons clustered on the left with
+          dead space to the right -- same treatment as Inventory's toolbar.
+          Kept above the search row (rather than below it) so the actions
+          people reach for on page load -- Import, Export, History -- are
+          the first thing in the flow, with search/filter right underneath. */}
+      {/* Manage (Import + Export folded into one dropdown, same pattern
+          Products.tsx uses) / History -- History before Manage, matching
+          Products' ordering. */}
+      <div className="mb-3 flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
+        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
+        <LazyPortalMenu
+          align="auto"
+          triggerWrapperClassName={`min-w-0 ${TOOLBAR_BUTTON_WIDTH}`}
+          menuClassName="max-h-[70vh] overflow-auto"
+          trigger={(
+            <button
+              type="button"
+              // Was a hardcoded solid-blue button -- the only "Manage"
+              // trigger in the app styled that way (Products.tsx/
+              // HeaderActions.tsx and Inventory.tsx both use the shared
+              // .btn-secondary white-card look for the identical action).
+              // The blue read as a primary/destructive-adjacent call to
+              // action next to History and confused people expecting the
+              // same neutral affordance as every other page. Switched to
+              // the shared class so Manage looks like Manage everywhere.
+              // Now also pulls the actual sizing from
+              // shared/toolbarButtonStyles.ts instead of its own
+              // `w-full` (no desktop cap) -- this button used to keep
+              // stretching to fill the row on large screens instead of
+              // settling to Products' Manage button's compact width
+              // (Aug 23 2026, "History/Manage/Product button sizing on
+              // large screens").
+              className={`w-full ${manageToolbarButtonClassName}`}
+              aria-haspopup="true"
+              aria-label={translateOr('manage', 'Manage')}
+              title={translateOr('manage', 'Manage')}
+            >
+              <Settings2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">{translateOr('manage', 'Manage')}</span>
+            </button>
+          )}
+          items={([
+            { label: translateOr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            'divider' as const,
+            ...(salesExportItems || [])
+              .filter((item): item is PortalMenuItem => Boolean(item))
+              .map((item) => (item === 'divider' ? item : { ...item, icon: item.icon ?? <Upload className="h-4 w-4 shrink-0" /> })),
+          ] as PortalMenuItem[])}
         />
       </div>
 
-      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} className="mb-3" summaryMode="compact" />
+      <PaginationControls
+        className="mb-2"
+        page={salesPage}
+        pageSize={salesPageSize}
+        totalItems={allVisibleSales.length}
+        label={t('sales') || 'sales'}
+        t={t}
+        onPageChange={setSalesPage}
+        onPageSizeChange={(size) => {
+          setSalesPageSize(size)
+          setSalesPage(1)
+        }}
+      />
 
-      {selectedSales.length > 0 ? (
-        <div className="sticky top-2 z-30 mb-3 flex flex-wrap items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/95 px-2.5 py-2 text-sm shadow-sm backdrop-blur dark:border-blue-900/40 dark:bg-blue-900/30">
-          <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">{selectedSales.length}</span>
-          <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={handleExportSelected}>Export</button>
-          <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? 'Saving...' : 'Done'}</button>
-          <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? 'Saving...' : 'Delivery'}</button>
-          <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'cancelled' ? 'Saving...' : 'Cancel'}</button>
-          <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set<number>())}>
-            Clear
-          </button>
+      {/* Search bar and bulk-action bar pin to the top of the page's scroll
+          container while scrolling (Aug 11 2026 UI-polish request, same
+          treatment as Products.tsx/Inventory.tsx). Grouped into ONE sticky
+          wrapper so there's no need to hand-compute a per-element `top`
+          offset to stack them without overlapping -- previously the
+          bulk-action bar was independently sticky below a non-sticky
+          search row, which pinned the bar but let the search box scroll
+          away. Pagination now lives above this group instead of below it,
+          matching Products/Inventory's order. */}
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <SearchInput
+            id="sales-search"
+            name="sales_search"
+            value={search}
+            onChange={setSearch}
+            placeholder={t('search_sales_placeholder') || 'Search divide by comma, any order: receipt number, customer name, products name, barcode/sku, brand, mem id'}
+            ariaLabel={t('search') || 'Search sales'}
+          />
+          {/* Placeholder above already advertises barcode/sku as a
+              searchable field -- same capability Products.tsx/Inventory.tsx/
+              POS.tsx expose a camera-scan shortcut for. Added here (and to
+              Returns.tsx) to match; same onDetected={setSearch} wiring. */}
+          <ScanSearchButton onDetected={setSearch} t={(key: string) => t(key) || key} />
+          <FilterMenu
+            label={t('filters') || 'Filters'}
+            activeCount={activeSalesFilterCount}
+            sections={salesFilterSections}
+            onOpenChange={setSalesFiltersOpen}
+            onClear={() => {
+              setStatusFilter('all')
+              setUserFilter('all')
+              setYearFilter('all')
+              setMonthFilter('all')
+              setSalesGroupMode('time')
+              setSalesSortDirection('desc')
+            }}
+            mobileIconOnly
+          />
         </div>
-      ) : null}
 
-      <div className={`mb-3 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20 ${filtered.length > 0 ? '' : 'invisible'}`}>
-          <span className="font-semibold text-blue-700 dark:text-blue-300">{filtered.length} {t('sales') || 'sales'}</span>
+        {selectedSales.length > 0 ? (
+          <div className="bulk-toolbar flex flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-2 text-sm shadow-sm">
+            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedSales.length}</span>
+            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={handleExportSelected}>{translateOr('export', 'Export')}</button>
+            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('completed')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'completed' ? translateOr('saving', 'Saving...') : translateOr('done', 'Done')}</button>
+            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('awaiting_delivery')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'awaiting_delivery' ? translateOr('saving', 'Saving...') : translateOr('pos_delivery', 'Delivery')}</button>
+            <button type="button" className="btn-secondary px-2.5 py-1 text-xs" onClick={() => handleBulkStatusUpdate('cancelled')} disabled={!!bulkStatusSaving}>{bulkStatusSaving === 'cancelled' ? translateOr('saving', 'Saving...') : translateOr('cancel', 'Cancel')}</button>
+            <button type="button" className="ml-auto rounded-lg px-2 py-1 text-xs font-medium text-gray-500 hover:bg-white/70 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-slate-700/60 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set<number>())}>
+              {translateOr('clear', 'Clear')}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {filtered.length > 0 ? (
+        <div className="mb-3 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
+          <span className="font-semibold text-blue-700 dark:text-blue-300">{salesStats ? salesStats.total_count : filtered.length} {t('sales') || 'sales'}</span>
           <span className="text-gray-400">|</span>
           <span className="font-semibold text-blue-700 dark:text-blue-300">{fmtUSD(revenue)} {t('revenue')}</span>
+          {salesStats?.truncated_in_list ? (
+            <>
+              <span className="text-gray-400">|</span>
+              <span className="text-gray-400 text-xs" title={t('sales_list_truncated_title') || 'More sales match this filter than are shown in the list below; totals above still cover all of them.'}>
+                {t('sales_list_truncated') || 'showing a partial list'}
+              </span>
+            </>
+          ) : null}
           {statusFilter === 'all' ? (
             <>
               <span className="text-gray-400">|</span>
@@ -962,23 +1069,10 @@ export default function Sales() {
               </span>
             </>
           ) : null}
-      </div>
+        </div>
+      ) : null}
 
       <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
-
-      <PaginationControls
-        className="mb-3"
-        page={salesPage}
-        pageSize={salesPageSize}
-        totalItems={allVisibleSales.length}
-        label={t('sales') || 'sales'}
-        t={t}
-        onPageChange={setSalesPage}
-        onPageSizeChange={(size) => {
-          setSalesPageSize(size)
-          setSalesPage(1)
-        }}
-      />
 
       <SalesListSurface
         collapsedSalesSections={collapsedSalesSections}

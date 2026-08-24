@@ -49,9 +49,31 @@ assert.equal(
 )
 
 assert.equal(
+  buildProductBranchSummaryLabel({ branch_stock: [] }),
+  '0',
+  'branch summary with no tracked branch rows at all falls back to a bare 0 (missing data, not zero stock)',
+)
+
+// Branch-aware zero-stock display (explicit ask, this session): a product
+// with no stock anywhere must name every branch, not collapse to a bare
+// "0" that hides which branches were even checked. This REPLACES a prior
+// test that asserted the opposite (bare "0" for an all-zero product) --
+// that was the exact behavior this request asked to reverse.
+assert.equal(
+  buildProductBranchSummaryLabel({
+    branch_stock: [
+      { branch_id: 1, quantity: 0 },
+      { branch_id: 2, quantity: 0 },
+    ],
+  }, new Map([['1', 'Warehouse'], ['2', 'Shop']])),
+  'Warehouse: 0, Shop: 0',
+  'an all-zero product names every branch instead of collapsing to a bare 0',
+)
+
+assert.equal(
   buildProductBranchSummaryLabel({ branch_stock: [{ branch_id: 1, quantity: 0 }] }),
-  '',
-  'branch summary hides empty stock rows',
+  '1: 0',
+  'a single all-zero branch with no name lookup falls back to its branch id',
 )
 
 const product = { stock_quantity: 8, low_stock_threshold: 10, out_of_stock_threshold: 0 }
@@ -70,8 +92,8 @@ const rowState = buildProductRowDisplayState({
   category: 'Skin',
   stock_quantity: 8,
   selling_price_usd: 20,
-  purchase_price_usd: 12,
-  purchase_price_khr: 48000,
+  cost_price_usd: 12,
+  cost_price_khr: 48000,
   discount_enabled: true,
   discount_type: 'percent',
   discount_percent: 25,
@@ -84,11 +106,11 @@ const rowState = buildProductRowDisplayState({
   exchangeRate: 4000,
   getBranchSummaryLabel: () => 'Mall: 8',
   getBrandColor: () => '#abcdef',
-  t: (key) => ({ low_stock: 'Low' }[key] || key),
+  t: (key) => ({ low_stock_short: 'Low' }[key] || key),
 })
 
-assert.equal(rowState.purchaseUsd, 12)
-assert.equal(rowState.purchaseKhr, 48000)
+assert.equal(rowState.costUsd, 12)
+assert.equal(rowState.costKhr, 48000)
 assert.equal(rowState.marginUsd, 8)
 assert.equal(rowState.marginPct, 40)
 assert.equal(rowState.qty, 8)
@@ -99,6 +121,25 @@ assert.equal(rowState.branchSummaryLabel, 'Mall: 8')
 assert.deepEqual(rowState.compactMeta, [
   { key: 'brand', label: 'Acme', color: '#abcdef' },
   { key: 'category', label: 'Skin', color: '#123456' },
+])
+
+// Regression: barcode joins brand/category in compactMeta (desktop row's
+// name-cell tag line, see Products.tsx's renderDesktopProductRow) instead
+// of staying only in the separate Details-column pill list.
+const rowStateWithBarcode = buildProductRowDisplayState({
+  id: 2,
+  brand: 'Acme',
+  category: 'Skin',
+  barcode: '0123456789012',
+  stock_quantity: 8,
+}, {
+  catMap: { Skin: { color: '#123456' } },
+  getBrandColor: () => '#abcdef',
+})
+assert.deepEqual(rowStateWithBarcode.compactMeta, [
+  { key: 'brand', label: 'Acme', color: '#abcdef' },
+  { key: 'category', label: 'Skin', color: '#123456' },
+  { key: 'barcode', label: '0123456789012', className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' },
 ])
 assert.equal(rowState.promotion.active, true)
 assert.equal(rowState.promotion.applied_price_usd, 15)

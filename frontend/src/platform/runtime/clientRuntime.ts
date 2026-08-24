@@ -20,6 +20,22 @@ type RuntimeResetOptions = {
   preserveOrganization?: boolean
   preserveAuth?: boolean
   clearAuth?: boolean
+  // When omitted/undefined, every local IndexedDB mirror table is wiped
+  // (the original, unscoped behavior -- still correct for factory-reset and
+  // the data-path switch/restore flows, which really do invalidate
+  // everything). When set to an array, only those named Dexie tables are
+  // cleared, leaving every other table's locally-mirrored data untouched.
+  // This exists because reset-data's 'sales'/'products' modes only ever
+  // delete a specific subset of *server* tables (see routes/system.ts and
+  // coreDataInvariants.ts's PRODUCTS_RESET_TABLES) -- but this function was
+  // previously called with no such scoping at all, so every reset mode
+  // cleared the *entire* local mirror regardless of what the server
+  // actually touched. That's the bug behind "Products Only Reset also
+  // emptied Inventory Movements and other pages": the server-side data was
+  // never deleted, but the local offline mirror those pages read from was
+  // wiped anyway, and stayed empty until (if ever) a full resync happened
+  // to refill it.
+  mirrorTables?: string[]
 }
 
 type StorageEntry = [string, string | null]
@@ -226,6 +242,13 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   if (preserveSessionDuration) localPreserveKeys.add(STORAGE_KEYS.SESSION_DURATION)
   if (preserveRuntimeMeta) localPreserveKeys.add(STORAGE_KEYS.CLIENT_RUNTIME)
   if (preserveOrganization) localPreserveKeys.add(STORAGE_KEYS.ORGANIZATION)
+  // Unconditional, unlike the options-gated keys above: the device-approval
+  // id identifies the physical browser/device itself, not a login session
+  // -- it must survive every logout (including handleUnauthorizedSession's
+  // clearAuth: true path), or an approved device becomes "new" again and
+  // has to be re-approved on the very next login. See utils/deviceInfo.ts's
+  // own comment on this key for the full reasoning.
+  localPreserveKeys.add(STORAGE_KEYS.DEVICE_ID)
   if (preserveAuth) {
     localPreserveKeys.add(STORAGE_KEYS.USER)
     localPreserveKeys.add(STORAGE_KEYS.USER_EXPIRY)
@@ -240,8 +263,17 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   clearStorage(canUseBrowserStorage() ? window.sessionStorage : null, sessionPreserveKeys)
 
   await clearServiceWorkersAndCaches()
-  const { resetLocalMirrorDb } = await import('../../api/localDb.ts')
-  await resetLocalMirrorDb()
+  if (Array.isArray(options.mirrorTables)) {
+    // Scoped clear -- only the tables the caller identified as actually
+    // affected server-side. An empty array is a valid, deliberate "clear
+    // nothing" (e.g. mode='sales' with nothing local to invalidate beyond
+    // what sync:update's channel listeners already handle).
+    const { clearLocalMirrorTables } = await import('../../api/localDb.ts')
+    await clearLocalMirrorTables(options.mirrorTables)
+  } else {
+    const { resetLocalMirrorDb } = await import('../../api/localDb.ts')
+    await resetLocalMirrorDb()
+  }
 
   restoreStorage(canUseBrowserStorage() ? window.localStorage : null, keptLocal)
   restoreStorage(canUseBrowserStorage() ? window.sessionStorage : null, keptSession)

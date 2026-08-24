@@ -97,7 +97,7 @@ export default function SalesListSurface({
 
   return (
     <>
-      <div className="card hidden flex-col sm:flex sm:h-[calc(100vh-18rem)] sm:min-h-[28rem] sm:max-h-[42rem] sm:overflow-hidden">
+      <div className="card hidden flex-col sm:flex sm:max-h-[42rem] sm:overflow-hidden">
         <div className="min-h-0 flex-1 overflow-auto">
           <table className="w-full text-sm" style={{ minWidth: 760 }}>
             <thead className="sticky top-0 bg-gray-50 dark:bg-gray-700/50">
@@ -251,7 +251,7 @@ export default function SalesListSurface({
         </div>
       </div>
 
-      <div className="min-h-[32rem] space-y-2 sm:hidden">
+      <div className="space-y-2 sm:hidden">
         {loading ? (
           <div className="space-y-2" aria-hidden="true">
             <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">

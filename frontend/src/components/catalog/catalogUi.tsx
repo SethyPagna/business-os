@@ -20,19 +20,25 @@ type StatusPillProps = {
 }
 
 function statusClass(status: StockStatus): string {
-  if (status === 'out_of_stock') return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-200'
-  if (status === 'low_stock') return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200'
-  return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-200'
+  if (status === 'out_of_stock') return 'text-rose-700 dark:text-rose-300'
+  if (status === 'low_stock') return 'text-amber-700 dark:text-amber-300'
+  return 'text-emerald-700 dark:text-emerald-300'
+}
+
+function statusDotClass(status: StockStatus): string {
+  if (status === 'out_of_stock') return 'bg-rose-500'
+  if (status === 'low_stock') return 'bg-amber-500'
+  return 'bg-emerald-500'
 }
 
 /** Shared shell block for portal sections. */
 export function SectionShell({ title, subtitle, action, children }: SectionShellProps) {
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900/80">
+    <section className="py-5">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
-          {subtitle ? <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p> : null}
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-neutral-100">{title}</h2>
+          {subtitle ? <p className="mt-1 text-sm text-slate-500 dark:text-neutral-400">{subtitle}</p> : null}
         </div>
         {action}
       </div>
@@ -44,8 +50,8 @@ export function SectionShell({ title, subtitle, action, children }: SectionShell
 /** Summary metric tile used in top-level portal overview cards. */
 export function SummaryTile({ icon: Icon, label, value, tone = 'dark' }: SummaryTileProps) {
   const tones = {
-    blue: 'from-sky-600 to-blue-700 text-white',
-    dark: 'from-slate-900 to-slate-700 text-white dark:from-slate-800 dark:to-slate-950',
+    blue: 'from-amber-500 to-amber-600 text-white dark:from-amber-500 dark:to-amber-600 dark:text-neutral-950',
+    dark: 'from-slate-900 to-slate-700 text-white dark:from-neutral-800 dark:to-neutral-950 dark:border dark:border-amber-500/10',
     green: 'from-emerald-600 to-teal-600 text-white',
     amber: 'from-amber-500 to-orange-500 text-white',
   }
@@ -74,7 +80,8 @@ export function StatusPill({ status, copy }: StatusPillProps) {
       : 'inStock'
 
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusClass(status)}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full bg-white/95 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide shadow-sm backdrop-blur dark:bg-neutral-900/90 ${statusClass(status)}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${statusDotClass(status)}`} />
       {copy(labelKey, labelKey)}
     </span>
   )

@@ -6,6 +6,7 @@ import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Modal from '../shared/Modal'
 import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
+import { todayStr, businessYear, businessMonth } from '../../utils/dateHelpers'
 
 const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
 const SALES_EXPORT_CSV_TIMEOUT_MS = 30000
@@ -62,6 +63,8 @@ interface SalesExportData {
   by_status?: SalesExportStatusRow[]
   by_product?: SalesExportProductRow[]
   sales?: CsvRow[]
+  truncated?: boolean
+  total_matching?: number
 }
 
 interface SalesExportApi {
@@ -89,19 +92,26 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
     return value && value !== key ? value : fallback
   }
 
+  // Uses the business timezone (Asia/Phnom_Penh), not the device's own --
+  // previously mixed UTC (`toISOString()`) for daily/month-end with
+  // device-local for the month/year start, so "This Month"/"This Year"
+  // could disagree with "Today" for users outside Cambodia's timezone.
   const computeDates = (selectedPeriod: ExportPeriod): ExportDates => {
-    const now = new Date()
     if (selectedPeriod === 'daily') {
-      const day = now.toISOString().split('T')[0] || ''
+      const day = todayStr()
       return { start: day, end: day }
     }
     if (selectedPeriod === 'monthly') {
-      const start = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
-      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0] || ''
+      const year = businessYear()
+      const month = businessMonth()
+      const start = `${year}-${String(month).padStart(2, '0')}-01`
+      const lastDay = new Date(year, month, 0)
+      const end = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
       return { start, end }
     }
     if (selectedPeriod === 'yearly') {
-      return { start: `${now.getFullYear()}-01-01`, end: `${now.getFullYear()}-12-31` }
+      const year = businessYear()
+      return { start: `${year}-01-01`, end: `${year}-12-31` }
     }
     return { start: startDate, end: endDate }
   }
@@ -258,6 +268,11 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
 
         {preview ? (
           <div className="space-y-4">
+            {preview.truncated ? (
+              <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+                {tr('sales_export_truncated_warning', 'This date range has {total} matching sales, but only the first 5,000 are included in this preview and the CSV export. Narrow the date range to get everything.').replace('{total}', String(preview.total_matching ?? ''))}
+              </div>
+            ) : null}
             <div className="rounded-xl bg-gray-50 p-4 dark:bg-gray-700/50">
               <div className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
                 {tr('accounting_summary', 'Accounting Summary')} {preview.period?.start} to {preview.period?.end}

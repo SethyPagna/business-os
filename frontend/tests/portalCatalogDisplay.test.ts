@@ -8,12 +8,16 @@ import {
   getPortalPromotionDetails,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
+  shouldShowStockStatus,
 } from '../src/components/catalog/portalCatalogDisplay.ts'
 
 const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.ts', import.meta.url), 'utf8')
 const catalogPageSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.tsx', import.meta.url), 'utf8')
 const catalogEditorSource = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.tsx', import.meta.url), 'utf8')
 const catalogSecondaryTabsSource = fs.readFileSync(new URL('../src/components/catalog/CatalogSecondaryTabs.tsx', import.meta.url), 'utf8')
+const publicCatalogPageSource = fs.readFileSync(new URL('../src/components/catalog/PublicCatalogPage.tsx', import.meta.url), 'utf8')
+const catalogPreviewSurfaceSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
+const catalogProductsSectionSource = fs.readFileSync(new URL('../src/components/catalog/CatalogProductsSection.tsx', import.meta.url), 'utf8')
 
 let failed = 0
 
@@ -42,7 +46,7 @@ runTest('normalizeRecommendedProductIds keeps unique positive numeric ids', () =
 })
 
 runTest('portal grid helpers honor configured mobile and desktop columns', () => {
-  assert.equal(getPortalMobileGridClass(3), 'grid-cols-3')
+  assert.equal(getPortalMobileGridClass(3), 'grid-cols-2 sm:grid-cols-3')
   assert.equal(getPortalGridClass(7), 'lg:grid-cols-4 xl:grid-cols-7')
   assert.equal(getPortalGridClass(8), 'lg:grid-cols-4 xl:grid-cols-8')
   assert.equal(getPortalGridClass(10), 'lg:grid-cols-5 xl:grid-cols-10')
@@ -123,15 +127,42 @@ runTest('ranking badges do not render numeric prefixes in compact mobile cards',
 })
 
 runTest('public portal mobile contact actions stay compact', () => {
-  assert.match(catalogSecondaryTabsSource, /className="relative min-h-0 overflow-hidden text-white sm:min-h-\[30rem\]"/, 'public about hero should not force a tall mobile viewport')
+  assert.match(catalogSecondaryTabsSource, /className="relative h-28 sm:h-44"/, 'public about hero banner should be short and fixed-height, not a tall forced viewport')
   assert.match(catalogSecondaryTabsSource, /data-portal-about-hero="true"/, 'public about hero should expose a mobile measurement hook')
   assert.match(catalogSecondaryTabsSource, /data-portal-contact-tray="true"/, 'public contact tray should expose a mobile measurement hook')
-  assert.match(catalogSecondaryTabsSource, /min-h-0 max-w-3xl sm:min-h-\[17rem\]/, 'public about copy should not force desktop hero height on mobile')
+  assert.match(catalogSecondaryTabsSource, /-mt-9 flex flex-wrap items-end gap-4 sm:-mt-12/, 'public about name\/tagline should sit on a plain surface below the banner, not overlaid on it')
   assert.match(catalogSecondaryTabsSource, /portal-contact-value-address/, 'long public portal addresses should be clamped on mobile')
   assert.match(catalogSecondaryTabsSource, /<span className="sr-only sm:not-sr-only">\{item\.label\}<\/span>/, 'social labels should collapse to accessible icon buttons on phones')
   assert.match(catalogSecondaryTabsSource, /businessFacts\?\.length \|\| socialLinks\?\.length/, 'contact and social actions should share one compact mobile tray')
   assert.match(catalogPageSource, /data-portal-secondary-loading="true"/, 'public secondary tab fallback should be compact and measurable')
   assert.doesNotMatch(catalogPageSource, /<SectionShell title=\{copy\('loadingPortal', 'Loading customer portal\.\.\.'\)\}>\s*<div className="text-sm text-slate-500">Loading\.\.\.<\/div>\s*<\/SectionShell>\s*}\)/, 'public secondary tab fallback should not show the large generic loading card')
+})
+
+runTest('public portal About tab keeps the story on the right, the map full-width below, and both logos clickable', () => {
+  // These three items were previously listed as "still open" in progress.md,
+  // but they were already fixed in this exact codebase in an earlier
+  // session -- that entry was stale (copy-pasted forward without
+  // re-checking). Locking each one in with a source assertion here so a
+  // future session can't make the same stale-carry-forward mistake again.
+  assert.match(publicCatalogPageSource, /messenger: MessengerIcon,/, 'public contact icon map should use the stylized MessengerIcon, not a generic MessageSquare stand-in')
+  assert.match(catalogSecondaryTabsSource, /the business story\/description on the right per the requested/, 'About tab facts\\/contact card should stay on the left and the story on the right')
+  assert.match(catalogSecondaryTabsSource, /title="portal-about-map"/, 'About tab map should render as its own full-width section')
+  assert.match(catalogSecondaryTabsSource, /onClick=\{\(\) => openPortalImage\(previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), \[versionedBusinessLogo\]\)\}/, 'About tab logo should open the image lightbox on click')
+  assert.match(catalogPreviewSurfaceSource, /onClick=\{\(\) => setPortalImageView\(\{ open: true, title: displayConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), images: \[versionedBusinessLogo\], index: 0 \}\)\}/, 'Header logo should open the image lightbox on click')
+})
+
+runTest('shouldShowStockStatus defaults to shown and only hides on explicit false', () => {
+  assert.equal(shouldShowStockStatus({}), true, 'no config at all should default to shown')
+  assert.equal(shouldShowStockStatus(), true, 'missing config arg should default to shown')
+  assert.equal(shouldShowStockStatus({ showStockStatus: undefined }), true, 'explicit undefined should still default to shown')
+  assert.equal(shouldShowStockStatus({ showStockStatus: true }), true)
+  assert.equal(shouldShowStockStatus({ showStockStatus: false }), false, 'only literal false should hide it')
+})
+
+runTest('both stock-status render sites (filter pills + card badge) delegate to the shared shouldShowStockStatus helper', () => {
+  assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="rounded-\[1\.1rem\]/, 'stock-status filter-pill row should use the shared helper')
+  assert.match(catalogProductsSectionSource, /shouldShowStockStatus\(previewConfig\)\s*\?\s*\(\s*<div className="absolute right-3 top-3">\s*<StatusPill/, 'card StatusPill badge should use the shared helper')
+  assert.doesNotMatch(catalogProductsSectionSource, /previewConfig\.showStockStatus !== false/, 'no inline !== false check should remain now that the toggle is centralized')
 })
 
 if (failed > 0) {

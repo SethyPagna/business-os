@@ -63,10 +63,52 @@ export function getTimeParts(value: unknown): TimeParts {
   }
 }
 
-export function matchesYearMonthFilters(value: unknown, { year = 'all', month = 'all' } = {}): boolean {
+export type MultiFilterValue = 'all' | string | number | Array<string | number> | Set<string | number> | null | undefined
+
+/**
+ * Normalizes a filter value into either `null` (meaning "no constraint",
+ * i.e. 'all') or a Set of string tokens to match against with OR semantics.
+ * Accepts the legacy single-value shape ('all' | string | number) as well
+ * as an array or Set of values, so existing single-select callers keep
+ * working unchanged while new multi-select UIs can pass multiple values.
+ */
+export function toMultiFilterSet(value: MultiFilterValue): Set<string> | null {
+  if (value == null || value === 'all') return null
+  if (value instanceof Set) {
+    if (!value.size) return null
+    return new Set([...value].map((entry) => String(entry)))
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return null
+    return new Set(value.map((entry) => String(entry)))
+  }
+  return new Set([String(value)])
+}
+
+function normalizeMonthToken(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+  const num = Number(raw)
+  if (Number.isFinite(num) && num >= 1 && num <= 12) return String(num).padStart(2, '0')
+  return raw
+}
+
+export function matchesYearMonthFilters(
+  value: unknown,
+  { year = 'all', month = 'all' }: { year?: MultiFilterValue; month?: MultiFilterValue } = {},
+): boolean {
   const parts = getTimeParts(value)
-  if (year !== 'all' && parts.yearLabel !== String(year)) return false
-  if (month !== 'all' && String(parts.month || '') !== String(month)) return false
+  const yearSet = toMultiFilterSet(year)
+  const monthSet = toMultiFilterSet(month)
+  if (yearSet && !yearSet.has(String(parts.yearLabel))) return false
+  if (monthSet) {
+    // monthSet entries may come in as '01'-'12' (zero-padded, e.g. from
+    // CREATED_MONTH_OPTIONS) while parts.month is a raw 1-12 number; compare
+    // using a normalized zero-padded token on both sides so single-digit
+    // months (Jan-Sep) match correctly instead of silently never matching.
+    const normalizedMonthSet = new Set([...monthSet].map(normalizeMonthToken))
+    if (!normalizedMonthSet.has(normalizeMonthToken(parts.month))) return false
+  }
   return true
 }
 
@@ -86,6 +128,15 @@ export function getTimeGroupingMode(year: string | number = 'all', month: string
   if (month !== 'all') return 'day'
   if (year !== 'all') return 'month'
   return 'year'
+}
+
+/** Toggles a single value in/out of a multi-select filter Set. Returns a new Set. */
+export function toggleMultiFilterValue(currentSet: Set<string> | null | undefined, value: string | number): Set<string> {
+  const next = new Set(currentSet || [])
+  const key = String(value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  return next
 }
 
 export function toggleIdSet(currentSet: Iterable<any> | null | undefined, ids: any[] = [], checked: boolean): Set<any> {

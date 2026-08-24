@@ -41,16 +41,16 @@ function readProductCache(cacheKey: string): Promise<unknown> {
   return import('./queryCache.ts').then(({ readCachedQueryResult }) => readCachedQueryResult(cacheKey))
 }
 
-function routeCachedProductQuery(cacheKey: string, path: string): Promise<unknown> {
+function routeCachedProductQuery(cacheKey: string, path: string, searchGroup?: string): Promise<unknown> {
   return route(
     cacheKey,
-    async () => {
-      const result = await apiFetch('GET', path)
+    async (signal?: AbortSignal) => {
+      const result = await apiFetch('GET', path, undefined, undefined, { signal })
       scheduleProductCacheWrite(cacheKey, result)
       return result
     },
     () => readProductCache(cacheKey),
-    { raceLocalFallback: false },
+    { raceLocalFallback: false, searchGroup },
   )
 }
 
@@ -74,25 +74,51 @@ export function getProducts(): Promise<unknown> {
 export function searchProducts(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `products:search:${query}`
-  return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query))
+  // Fixed group name (not the per-query cacheKey above) -- every call to
+  // searchProducts, regardless of which page called it or what the query
+  // text is, shares this group, so typing a new character aborts whatever
+  // previous searchProducts request was still in flight instead of letting
+  // it keep running against the server after its result can no longer
+  // matter. Products page, POS, and anywhere else calling this share one
+  // group deliberately: they're all "the product search box" from the
+  // server's perspective, and only ever one of them is being typed into at
+  // a time in a single tab.
+  return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query), 'products:search')
 }
 
 export function getProductBootstrap(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `products:bootstrap:${query}`
-  return routeCachedProductQuery(cacheKey, appendQuery('/api/products/bootstrap', query))
+  return routeCachedProductQuery(cacheKey, appendQuery('/api/products/bootstrap', query), 'products:bootstrap')
 }
 
 export function getProductsByIds(ids: unknown[] = [], params: QueryParams = {}): Promise<unknown> {
   const uniqueIds = normalizePositiveUniqueIds(ids, 100)
   if (!uniqueIds.length) return Promise.resolve({ items: [], total: 0, page: 1, pageSize: 0 })
-  return searchProducts({
+  const query = buildQueryString({
     page: 1,
     pageSize: Math.min(Math.max(uniqueIds.length, 1), 100),
     ids: uniqueIds.join(','),
     include: 'branch_stock,images,batches',
     ...params,
   })
+  // Deliberately does NOT go through searchProducts()/its shared
+  // 'products:search' abort group. This function is used to re-fetch the
+  // canonical row(s) for a specific id right after a write (e.g. building
+  // an undo/redo snapshot after Save, or confirming a just-created row) --
+  // a fundamentally different call than "what's currently typed in the
+  // search box." Sharing the group meant an unrelated keystroke or a
+  // background list refresh landing at the same moment could abort THIS
+  // request instead, which callers (e.g. Products.tsx's
+  // handleSaveWithGallery) awaited as part of their own save flow -- the
+  // resulting "Request superseded by a newer search" AbortError bubbled up
+  // through their catch block and got shown to the user as "Failed to save
+  // product," even though the actual write had already succeeded. Each
+  // by-id lookup gets its own cache key (already true) and now its own
+  // unshared request lifecycle, so it can never be cancelled by, or cancel,
+  // the box search.
+  const cacheKey = `products:byIds:${query}`
+  return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query))
 }
 
 export function getProductFilters(params: QueryParams = {}): Promise<unknown> {

@@ -1,10 +1,12 @@
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
+import { computeCartLineSavings } from './posCore.ts'
 import AppSelect from '../shared/AppSelect'
 
 type Translate = (key: string) => string | undefined
 type CurrencyFormatter = (value: number) => string
 type MoneyKind = 'usd' | 'khr'
+type ManualDiscountType = 'percent' | 'fixed'
 
 interface CartLineItem {
   id: string | number
@@ -16,6 +18,24 @@ interface CartLineItem {
   product_discount_label?: string | null
   applied_price_usd: number
   applied_price_khr: number
+  base_price_usd?: number
+  base_price_khr?: number
+  // Ordinary selling price, kept on every cart line regardless of price
+  // mode (see POS.tsx's addToCart, which spreads the source product onto
+  // the line) -- used only to show the "was $X, save $Y" comparison below
+  // when a special price or promotion is in effect.
+  selling_price_usd?: string | number
+  selling_price_khr?: string | number
+  manual_discount_type?: ManualDiscountType | null
+  manual_discount_value?: number
+  manual_discount_usd?: number
+  // Present only when this line was added via the batch/lot picker (see
+  // POS.tsx's addToCart) -- was captured on the line but never actually
+  // rendered anywhere in the cart, so a batch-tracked sale looked
+  // identical to a plain one until the receipt.
+  batch_id?: number | string | null
+  batch_label?: string | null
+  batch_expiry_date?: string | null
 }
 
 interface BranchOption {
@@ -30,6 +50,7 @@ interface CartItemProps {
   t?: Translate
   onQtyChange: (lineId: string | number, quantity: number) => void
   onPriceChange: (lineId: string | number, kind: MoneyKind, value: string) => void
+  onDiscountChange: (lineId: string | number, type: ManualDiscountType | null, value: string) => void
   onBranchChange: (lineId: string | number, branchId: string) => void
   onRemove: (lineId: string | number) => void
   onShowDetails: () => void
@@ -37,6 +58,13 @@ interface CartItemProps {
   fmtKHR: CurrencyFormatter
   usdSymbol: string
   khrSymbol: string
+  // Controlled by Settings' "Show Discount in Cart" toggle
+  // (pos_show_item_discount). Defaults to true (undefined === shown) so
+  // existing behavior doesn't regress for anyone who hasn't touched the
+  // setting. Only affects the before/after comparison below -- the
+  // special/promotion text label above always shows regardless, and the
+  // manual per-item discount editor further down is never hidden by this.
+  showItemDiscount?: boolean
 }
 
 function translate(t: Translate | undefined, key: string, fallback: string): string {
@@ -49,6 +77,7 @@ export default function CartItem({
   t,
   onQtyChange,
   onPriceChange,
+  onDiscountChange,
   onBranchChange,
   onRemove,
   onShowDetails,
@@ -56,15 +85,29 @@ export default function CartItem({
   fmtKHR,
   usdSymbol,
   khrSymbol,
+  showItemDiscount = true,
 }: CartItemProps) {
   const lineId = item.cart_line_id || item.id
   const specialPriceLabel = translate(t, 'special_price', 'Special price')
   const promotionPriceLabel = item.product_discount_label || translate(t, 'promotion_price', 'Discount price')
+  const savings = showItemDiscount ? computeCartLineSavings(item) : null
 
   return (
-    <div className="border-b border-gray-100 px-3 py-2.5 last:border-0 dark:border-gray-700">
-      <div className="mb-2 flex items-start justify-between">
-        <div className="mr-2 min-w-0 flex-1">
+    <div
+      className="cursor-pointer border-b border-gray-100 px-3 py-2.5 last:border-0 hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800/60"
+      role="button"
+      tabIndex={0}
+      onClick={onShowDetails}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onShowDetails()
+        }
+      }}
+      title={translate(t, 'details', 'Details')}
+    >
+      <div className="mb-2 flex items-start justify-between gap-1.5">
+        <div className="mr-1 min-w-0 flex-1">
           <p {...getKhmerTextProps(item.name, 'leading-snug text-sm font-semibold text-gray-900 dark:text-white')}>{item.name}</p>
           {item.price_mode === 'special' ? (
             <div {...getKhmerTextProps(specialPriceLabel, 'mt-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400')}>{specialPriceLabel}</div>
@@ -72,16 +115,44 @@ export default function CartItem({
           {item.price_mode === 'promotion' ? (
             <div {...getKhmerTextProps(promotionPriceLabel, 'mt-0.5 text-[10px] font-semibold text-rose-600 dark:text-rose-300')}>{promotionPriceLabel}</div>
           ) : null}
+          {savings?.active ? (
+            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] text-gray-400 line-through">{fmtUSD(savings.compare_at_usd)}</span>
+              <span {...getKhmerTextProps(translate(t, 'pos_you_save', 'You save'), 'text-[10px] font-semibold text-emerald-600 dark:text-emerald-400')}>
+                {translate(t, 'pos_you_save', 'You save')} {fmtUSD(savings.savings_usd)} ({savings.savings_percent}%)
+              </span>
+            </div>
+          ) : null}
+          {/* Batch/lot the line was sold from -- captured on the cart line
+              since the batch picker (ProductDetailSheet.tsx) but never
+              actually shown here before, so a batch-tracked sale looked
+              no different from a plain one until the receipt printed. */}
+          {item.batch_label ? (
+            <div {...getKhmerTextProps(item.batch_label, 'mt-0.5 truncate text-[10px] font-medium text-sky-600 dark:text-sky-400')} title={item.batch_label}>
+              {item.batch_label}
+            </div>
+          ) : null}
         </div>
-        <div className="flex flex-shrink-0 items-center gap-0.5">
-          <button
-            type="button"
-            onClick={onShowDetails}
-            className="flex h-9 min-w-9 items-center justify-center rounded-lg border border-gray-200 px-2 text-base font-bold leading-none text-gray-500 hover:border-blue-300 hover:text-blue-600 dark:border-gray-700 dark:text-gray-300"
-            title={translate(t, 'details', 'Details')}
-          >
-            ...
-          </button>
+        {/* Branch selector merged into the title row (was its own
+            full-width row below the title before) -- same info, one row
+            instead of two, kept compact so it never crowds the title. */}
+        <div className="flex flex-shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+          {branches.length > 1 ? (
+            <AppSelect
+              className="w-[100px]"
+              buttonClassName="min-h-7 w-full rounded-lg py-1 pl-2 pr-1 text-[11px]"
+              value={item.branch_id || ''}
+              onChange={(nextValue) => onBranchChange(lineId, nextValue)}
+              ariaLabel={translate(t, 'select_branch_placeholder', 'Select branch')}
+              options={[
+                { value: '', label: translate(t, 'select_branch_placeholder', 'Select branch') },
+                ...branches.map((branch) => ({
+                  value: branch.id,
+                  label: `${branch.name}${branch.is_default ? ' *' : ''}`,
+                })),
+              ]}
+            />
+          ) : null}
           <button
             type="button"
             onClick={() => onRemove(lineId)}
@@ -94,26 +165,7 @@ export default function CartItem({
         </div>
       </div>
 
-      {branches.length > 1 ? (
-        <div className="mb-2">
-          <AppSelect
-            className="w-full"
-            buttonClassName="min-h-8 w-full rounded-xl py-1 text-xs"
-            value={item.branch_id || ''}
-            onChange={(nextValue) => onBranchChange(lineId, nextValue)}
-            ariaLabel={translate(t, 'select_branch_placeholder', 'Select branch')}
-            options={[
-              { value: '', label: translate(t, 'select_branch_placeholder', 'Select branch') },
-              ...branches.map((branch) => ({
-                value: branch.id,
-                label: `${branch.name}${branch.is_default ? ' *' : ''}`,
-              })),
-            ]}
-          />
-        </div>
-      ) : null}
-
-      <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center overflow-hidden rounded-lg border border-gray-200 dark:border-gray-600">
           <button type="button" className="flex h-7 w-7 items-center justify-center text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700" onClick={() => onQtyChange(lineId, item.quantity - 1)}>-</button>
           <input
@@ -147,11 +199,56 @@ export default function CartItem({
         </div>
       </div>
 
+      <div className="mb-1.5 flex flex-wrap items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
+        <span className="flex-shrink-0 text-[11px] text-gray-400">{translate(t, 'discount', 'Discount')}</span>
+        <div className="flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-[11px] dark:border-gray-600">
+          <button
+            type="button"
+            className={`px-1.5 py-1 ${item.manual_discount_type === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+            onClick={() => onDiscountChange(lineId, 'percent', String(item.manual_discount_type === 'percent' ? item.manual_discount_value || 0 : 0))}
+          >
+            %
+          </button>
+          <button
+            type="button"
+            className={`border-l border-gray-200 px-1.5 py-1 dark:border-gray-600 ${item.manual_discount_type === 'fixed' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+            onClick={() => onDiscountChange(lineId, 'fixed', String(item.manual_discount_type === 'fixed' ? item.manual_discount_value || 0 : 0))}
+          >
+            {usdSymbol}
+          </button>
+        </div>
+        <input
+          className="input min-w-0 flex-1 py-1 text-xs"
+          type="number"
+          min="0"
+          step="any"
+          disabled={!item.manual_discount_type}
+          placeholder={item.manual_discount_type === 'percent' ? '0%' : '0.00'}
+          value={item.manual_discount_type ? String(item.manual_discount_value ?? '') : ''}
+          onChange={(event) => onDiscountChange(lineId, item.manual_discount_type ?? 'fixed', event.target.value)}
+        />
+        {item.manual_discount_type ? (
+          <button
+            type="button"
+            className="flex-shrink-0 px-1 text-[11px] text-gray-400 hover:text-red-500"
+            onClick={() => onDiscountChange(lineId, null, '0')}
+            title={translate(t, 'clear_discount', 'Clear discount')}
+          >
+            {translate(t, 'clear', 'Clear')}
+          </button>
+        ) : null}
+      </div>
+
       <div className="flex items-baseline justify-between">
         <span className="text-xs text-gray-400">{translate(t, 'line', 'Line')}</span>
         <div className="text-right">
           <span className="text-sm font-bold text-blue-600">{fmtUSD(item.applied_price_usd * item.quantity)}</span>
           {item.applied_price_khr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(item.applied_price_khr * item.quantity)}</div> : null}
+          {item.manual_discount_usd ? (
+            <div {...getKhmerTextProps(translate(t, 'discount', 'Discount'), 'text-[10px] font-medium text-amber-600 dark:text-amber-400')}>
+              -{fmtUSD(item.manual_discount_usd * item.quantity)} {translate(t, 'discount', 'discount')}
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

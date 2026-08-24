@@ -1,3 +1,4 @@
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
 
@@ -79,7 +80,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="flex max-h-[90vh] w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
+      <div className="flex max-h-modal-90 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div>
             <div className="font-mono text-base font-bold text-gray-900 dark:text-white">{ret.return_number}</div>
@@ -89,7 +90,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
             {onEdit ? (
               <button type="button" onClick={onEdit} className="btn-secondary px-3 py-1.5 text-xs">{tr('edit', 'Edit')}</button>
             ) : null}
-            <button type="button" onClick={onClose} className="h-8 w-8 text-2xl leading-none text-gray-400 hover:text-gray-600">x</button>
+            <button type="button" onClick={onClose} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"><X className="h-4 w-4" /></button>
           </div>
         </div>
 

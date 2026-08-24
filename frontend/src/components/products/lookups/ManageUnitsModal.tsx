@@ -480,7 +480,7 @@ export default function ManageUnitsModal({ onClose, onReviewSelection, t }: Mana
     <Modal title={t('manage_units') || 'Manage Units'} onClose={onClose}>
       <div className="space-y-4">
         {err ? <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20">{err}</div> : null}
-        <ActionHistoryBar history={actionHistoryForBar} />
+        <ActionHistoryBar history={actionHistoryForBar} t={t} />
 
         <div className="flex items-end gap-2">
           <div className="flex-1">

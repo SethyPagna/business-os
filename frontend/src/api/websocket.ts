@@ -123,9 +123,18 @@ export function connectWS(): void {
 
   ws.onmessage = (event: MessageEvent<string>) => {
     try {
-      const data = JSON.parse(event.data) as { type?: string; channel?: string }
+      const data = JSON.parse(event.data) as { type?: string; channel?: string; payload?: { action?: string; id?: string | number } | null }
       if (data.type === 'sync:update' && data.channel) {
-        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: data.channel } }))
+        // `payload` (action/id -- see broadcastHub.ts's own broadcast() calls,
+        // e.g. `broadcast(c.env, 'users', { action: 'update', id })`) was
+        // parsed off the wire here but never forwarded into the dispatched
+        // CustomEvent's detail -- only `channel` was. That silently starved
+        // every listener of the one piece of information needed to tell
+        // "something on this channel changed" apart from "the specific
+        // user/role *I* care about changed" -- see AppContext.tsx's onUpdate,
+        // which needs `payload.id` to know whether a live permission edit
+        // belongs to the current session's own user/role.
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: data.channel, payload: data.payload ?? null } }))
       }
       // pong and connected frames are intentionally ignored
     } catch (_) {}

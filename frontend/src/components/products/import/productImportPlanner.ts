@@ -1,4 +1,6 @@
 import {
+  getBlankCsvHeaderColumns,
+  getDuplicateCsvHeaders,
   normalizeCsvKey,
   normalizeCsvMoney,
   normalizeCsvPercent,
@@ -24,7 +26,14 @@ export const PRODUCT_MONEY_FIELDS = [
 ]
 
 export const PRODUCT_PERCENT_FIELDS = ['discount_percent']
-export const PRODUCT_NUMBER_FIELDS = ['stock_quantity', 'low_stock_threshold', 'parent_id', 'is_group']
+export const PRODUCT_NUMBER_FIELDS = [
+  'stock_quantity',
+  'low_stock_threshold',
+  'out_of_stock_threshold',
+  'expiry_alert_days',
+  'parent_id',
+  'is_group',
+]
 
 const IMAGE_FIELDS = new Set([
   'image_filename',
@@ -56,6 +65,12 @@ const DETAIL_FIELDS = [
   'unit',
   'description',
   'supplier',
+  'selling_price_usd',
+  'selling_price_khr',
+  'special_price_usd',
+  'special_price_khr',
+  'purchase_price_usd',
+  'purchase_price_khr',
 ]
 
 const TEXT_CORRUPTION_FIELDS = [
@@ -129,6 +144,14 @@ interface ProductImportAnalysis {
   conflicts: ProductImportConflict[]
   decisions: Record<number, PlannedProductImportAction>
   errors: string[]
+  // Non-blocking, unlike `errors` -- real import-file audit (Aug 22 2026)
+  // found duplicate/near-duplicate CSV headers (an Excel re-export
+  // artifact, e.g. `discount_ends_at` + `discount_ends_at.1`) import
+  // silently today with no signal that a column's data was dropped or
+  // never read. This surfaces that as a warning, not a blocker, since the
+  // import itself still works -- it just may be missing data the operator
+  // thought they included.
+  warnings: string[]
   groups: Array<Record<string, any>>
   summary: {
     total: number
@@ -241,6 +264,17 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
   normalized.discount_percent = normalized.discount_percent ?? 0
   normalized.discount_amount_usd = normalized.discount_amount_usd ?? 0
   normalized.discount_amount_khr = normalized.discount_amount_khr ?? 0
+  // These three mirror products' own column defaults (0001_init.sql) --
+  // materializeImportChunk's INSERT/UPDATE now name these columns
+  // explicitly (see importEngine.ts), and naming a column in an INSERT
+  // bypasses SQLite's own DEFAULT for it, binding a literal NULL instead
+  // if nothing sets a value first. Defaulting here keeps an imported row
+  // that never mentions these columns behaving the same as one created
+  // through the manual Add Product form (which leaves them to the
+  // schema default too).
+  normalized.out_of_stock_threshold = normalized.out_of_stock_threshold ?? 0
+  normalized.expiry_alert_days = normalized.expiry_alert_days ?? 30
+  normalized.discount_badge_color = normalized.discount_badge_color || '#e11d48'
   normalized._import_row_index = Number(row?._import_row_index ?? index)
   normalized._rowNumber = Number(row?._rowNumber ?? index + 2)
   return normalized
@@ -353,6 +387,14 @@ function buildProductImportReviewGroups(rows: ImportRow[] = []): Array<Record<st
     if (!group) return
     const rowIndex = Number(row?._import_row_index ?? index)
     const rowNumber = Number(row?._rowNumber ?? rowIndex + 2)
+    // Same name + every DETAIL_FIELDS value (sku, barcode, category, brand,
+    // unit, description, supplier, prices) collapses into one subgroup --
+    // this is a "same product, different branch" split, not a variant --
+    // regardless of whether a barcode is present. Only an actual difference
+    // in one of those fields (branch is deliberately not one of them) earns
+    // create_variant/new. This used to gate the merge behind having a
+    // barcode at all, which forced every barcode-less multi-branch product
+    // into parent/child variant rows even when nothing but branch differed.
     const signature = row?._detail_signature || getProductImportDetailSignature(row)
     group.rowIndexes.push(rowIndex)
     group.rowNumbers.push(rowNumber)
@@ -545,6 +587,11 @@ export function analyzeProductImportRows(rows: ImportRow[] = [], existingProduct
         ? [barcodeMatch, ...sameNameProducts.filter((product) => Number(product?.id) !== Number(barcodeMatch.id))]
         : sameNameProducts
     const signature = getProductImportDetailSignature(row)
+    // Same name + identical sku/barcode/category/brand/unit/description/
+    // supplier/prices (branch excluded on purpose) -> "the exact same item,
+    // just restock it for another branch". This no longer requires a
+    // barcode: a barcode-less row that matches everything else about an
+    // existing product still merges stock instead of becoming a variant.
     const matchingExisting = existingCandidates.find((product) => getProductImportDetailSignature(product) === signature) || null
     const parent = chooseParentProduct(existingCandidates)
     let plannedAction: PlannedProductImportAction = 'new'
@@ -617,6 +664,7 @@ export function analyzeProductImportRows(rows: ImportRow[] = [], existingProduct
     conflicts,
     decisions,
     errors,
+    warnings: [],
     groups: buildProductImportReviewGroups(normalizedRows),
     summary: {
       total: normalizedRows.length,
@@ -629,5 +677,28 @@ export function analyzeProductImportRows(rows: ImportRow[] = [], existingProduct
 }
 
 export function analyzeProductImportText(text: string, existingProducts: ImportRow[] = []): ProductImportAnalysis {
-  return analyzeProductImportRows(parseCsvRows(text), existingProducts)
+  const analysis = analyzeProductImportRows(parseCsvRows(text), existingProducts)
+  // Header-level check, not row-level -- can only run here, where the raw
+  // text (and its original header row) is still available; by the time
+  // rows reach analyzeProductImportRows they're already keyed objects with
+  // no memory of which literal header produced which key.
+  const duplicateHeaders = getDuplicateCsvHeaders(text)
+  if (duplicateHeaders.length) {
+    analysis.warnings = [
+      ...analysis.warnings,
+      `Duplicate or near-duplicate column header${duplicateHeaders.length > 1 ? 's' : ''} found: ${duplicateHeaders.join(', ')}. One may be silently overwriting or ignoring the other -- check the file before importing.`,
+    ]
+  }
+  // Real-file audit (Aug 23 2026) -- see getBlankCsvHeaderColumns' own
+  // comment in csvImport.ts: a blank-header column with real data under it
+  // (e.g. a stale/hand-edited template) silently loses that column's data
+  // today, with no signal at all otherwise.
+  const blankHeaderColumns = getBlankCsvHeaderColumns(text)
+  if (blankHeaderColumns.length) {
+    analysis.warnings = [
+      ...analysis.warnings,
+      `Column${blankHeaderColumns.length > 1 ? 's' : ''} ${blankHeaderColumns.join(', ')} ${blankHeaderColumns.length > 1 ? 'have' : 'has'} no header but ${blankHeaderColumns.length > 1 ? 'contain' : 'contains'} data -- that data will be skipped on import. Add a header name to that column, or remove it, then re-upload.`,
+    ]
+  }
+  return analysis
 }

@@ -9,6 +9,10 @@ import {
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
+import { parseImportFile } from '../../utils/spreadsheetImport.ts'
+import CsvImportPreview from '../shared/CsvImportPreview.tsx'
+
+const SALES_TEMPLATE_COLUMNS = 'receipt_number, sale_date, sale_status, payment_method, payment_currency, exchange_rate, branch, customer_name, customer_phone, customer_address, cashier_name, name, sku, barcode, quantity, unit_price_usd, unit_price_khr, batch_label, returned_quantity, discount_usd, discount_khr, tax_usd, amount_paid_usd, amount_paid_khr, membership_discount_usd, membership_discount_khr, membership_points_redeemed, is_delivery, delivery_contact_name, delivery_contact_phone, delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by, notes'
 
 const SALES_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
 const SALES_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000
@@ -166,6 +170,16 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
     setSalesCsvText(picked.content, picked.name || 'sales.csv')
   }
 
+  const handleDropFile = async (file: File) => {
+    try {
+      const parsed = await parseImportFile(file)
+      if (!parsed?.content) return
+      setSalesCsvText(parsed.content, parsed.name || file.name || 'sales.csv')
+    } catch (error) {
+      notify(getErrorMessage(error, tr('sales_import_drop_failed', 'Could not read that file.', 'មិនអាចអានឯកសារនោះបានទេ។')), 'error')
+    }
+  }
+
   const handleDownloadTemplate = () => {
     getImportApi().downloadImportTemplate('sales')
   }
@@ -226,40 +240,35 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
   }
 
   return (
-    <Modal title={tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')} onClose={onClose}>
+    <Modal title={tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')} onClose={onClose} draggable>
       <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {tr('sales_import_help', 'Import sales from CSV rows grouped by receipt number. Each row should describe one sold product line.', 'នាំចូលការលក់ពីជួរ CSV ដែលដាក់ជាក្រុមតាមលេខបង្កាន់ដៃ។ មួយជួរគួរតែតំណាងឱ្យមួយបន្ទាត់ផលិតផលដែលបានលក់។')}
         </p>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className="btn-secondary text-sm" onClick={handleDownloadTemplate}>
-            {t('download_template') || 'Download Template'}
-          </button>
-          <button type="button" className="btn-secondary text-sm" onClick={handlePickFile}>
-            {tr('choose_csv_file', 'Choose CSV', 'ជ្រើស CSV')}
-          </button>
-        </div>
-        {fileName ? (
-          <div className="rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-600 dark:border-gray-700 dark:text-gray-300">
-            {fileName}
-          </div>
-        ) : null}
-        <label htmlFor="sales-import-csv" className="sr-only">
-          {tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')}
-        </label>
-        <textarea
-          id="sales-import-csv"
-          name="sales_import_csv"
-          className="input min-h-[180px] font-mono text-xs"
-          value={csvText}
-          onChange={(event) => setSalesCsvText(event.target.value, fileName)}
-          placeholder={tr('csv_paste_placeholder', 'Paste CSV here if you do not want to pick a file.', 'បិទភ្ជាប់ CSV នៅទីនេះ ប្រសិនបើអ្នកមិនចង់ជ្រើសឯកសារ។')}
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          {tr(
+            'sales_import_stock_help',
+            "This just records history and links each line to a product -- it never changes stock on its own. The one exception is sale_status \"returned\" / \"partial_return\": that restocks the returned_quantity (batch_label optional, to restock a specific lot).",
+            'នេះគ្រាន់តែកត់ត្រាប្រវត្តិ ហើយភ្ជាប់ជួរនីមួយៗទៅផលិតផល -- វាមិនផ្លាស់ប្តូរស្តុកដោយខ្លួនឯងទេ។ករណីលើកលែងតែមួយគត់គឺ sale_status "returned" / "partial_return"៖ វានឹងបន្ថែម returned_quantity ត្រឡប់ទៅស្តុកវិញ (batch_label ជាជម្រើស សម្រាប់ត្រឡប់ទៅឡូតជាក់លាក់)។',
+          )}
+        </p>
+        <CsvImportPreview
+          columnsLabel={t('csv_columns_header') || 'Columns'}
+          columnsText={SALES_TEMPLATE_COLUMNS}
+          fileName={fileName}
+          csvText={csvText}
+          rowCount={previewRowCount}
+          analyzing={analyzingCsv}
+          onDownloadTemplate={handleDownloadTemplate}
+          onPickFile={handlePickFile}
+          onDropFile={handleDropFile}
+          dragLabel={tr('sales_import_drop_file', 'Drop file here to import', 'ទម្លាក់ឯកសារទីនេះដើម្បីនាំចូល')}
+          downloadLabel={t('download_template') || 'Download Template'}
+          pickLabel={tr('choose_csv_file', 'Choose CSV or Excel', 'ជ្រើស CSV')}
+          analyzingLabel={tr('sales_import_checking_rows', 'Checking rows...', 'កំពុងពិនិត្យជួរ...')}
+          noFileLabel={tr('sales_import_no_file', 'No CSV or Excel file selected yet.', 'មិនទាន់បានជ្រើសឯកសារ CSV ទេ។')}
+          previewHeadingLabel={tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(previewRowCount))}
         />
-        <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
-          {analyzingCsv
-            ? tr('sales_import_checking_rows', 'Checking rows...')
-            : tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(previewRowCount))}
-        </div>
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">

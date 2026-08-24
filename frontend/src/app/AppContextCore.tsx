@@ -33,7 +33,7 @@ export type AppContextCoreValue = {
   loadSettings: (options?: { force?: boolean }) => Promise<PlainRecord>
   login: (...args: unknown[]) => Promise<PlainRecord>
   logout: () => Promise<void>
-  navigateTo: (pageId: string) => void
+  navigateTo: (pageId: string, anchor?: string) => void
   notification: AppNotification | null
   notify: (message: unknown, type?: NotificationKind | string, duration?: number) => void
   page: string
@@ -110,9 +110,9 @@ export const FALLBACK_APP_CONTEXT: AppContextCoreValue = {
   getPermissions: () => ({}),
   formatPrice: (value: unknown) => String(value ?? ''),
   fmtUSD: (value: unknown) => `$${normalizePriceValue(value || 0).toFixed(2)}`,
-  fmtKHR: (value: unknown) => `${normalizePriceValue(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} KHR`,
+  fmtKHR: (value: unknown) => `${normalizePriceValue(value || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}៛`,
   usdSymbol: '$',
-  khrSymbol: 'KHR',
+  khrSymbol: '៛',
   displayCurrency: 'usd',
   exchangeRate: 4000,
   usdToKhr: (value: unknown) => Number(value || 0) * 4000,

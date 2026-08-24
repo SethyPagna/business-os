@@ -1,6 +1,12 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentType } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import type { ComponentType, DragEvent } from 'react'
+import { lazyRetry } from '../../../utils/lazyImport.ts'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Trash2Icon from 'lucide-react/dist/esm/icons/trash-2.js'
+import LockIcon from 'lucide-react/dist/esm/icons/lock.js'
+import AlertTriangleIcon from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Modal from '../../shared/Modal'
 import AppSelect, { type AppSelectOption } from '../../shared/AppSelect.tsx'
 import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } from '../shared/primitives'
@@ -13,14 +19,15 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../../utils/loaders.ts'
+import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 
-const BarcodeScannerModal = lazy(() => import('../scanning/BarcodeScannerModal'))
+const BarcodeScannerModal = lazyRetry(() => import('../scanning/BarcodeScannerModal'), 'product-form-barcode-scanner-modal')
 const PRODUCT_SUPPLIERS_TIMEOUT_MS = 8000
 const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
 type EntityId = string | number
 type EditableNumber = string | number | null | undefined
-type ProductFormTab = 'basic' | 'pricing' | 'stock'
+type ProductFormTab = 'basic' | 'pricing' | 'discounts' | 'stock' | 'expiry'
 type ScannerField = 'sku' | 'barcode'
 type Translate = (key: string) => string
 
@@ -64,8 +71,6 @@ interface ProductFormState extends GroupCandidate {
   category?: string
   brand?: string
   description?: string
-  purchase_price_usd?: EditableNumber
-  purchase_price_khr?: EditableNumber
   selling_price_usd?: EditableNumber
   selling_price_khr?: EditableNumber
   special_price_usd?: EditableNumber
@@ -96,8 +101,6 @@ interface ProductFormState extends GroupCandidate {
 }
 
 interface ProductSavePayload extends ProductFormState {
-  purchase_price_usd: number
-  purchase_price_khr: number
   selling_price_usd: number
   selling_price_khr: number
   special_price_usd: number
@@ -155,6 +158,14 @@ interface ProductFormProps {
   groupCandidates?: GroupCandidate[]
   onSave: (payload?: ProductSavePayload) => unknown | Promise<unknown>
   onClose: () => void
+  // Optional -- only supplied by callers that already have a delete flow
+  // wired (Products.tsx routes this through its DeleteConfirmModal, same
+  // as every other delete entry point on that page). Omitted entirely
+  // when this form is used to CREATE a new product (there's nothing yet
+  // to delete), and the footer button below only renders when both this
+  // prop is present AND `product` is set, so a fresh "Add product" form
+  // never shows it.
+  onDelete?: () => void
   t: Translate
   usdSymbol: string
   khrSymbol: string
@@ -173,9 +184,9 @@ interface NumericInputOptions {
   allowNegative?: boolean
 }
 
-const FilePickerModal = lazy(async () => ({
+const FilePickerModal = lazyRetry(async () => ({
   default: (await import('../../files/FilePickerModal')).default as ComponentType<FilePickerModalProps>,
-}))
+}), 'product-form-file-picker-modal')
 
 type ContactsTransportModule = typeof import('../../../api/contactsTransport.ts')
 type ProductImageUploadTransportModule = typeof import('../../../api/productImageUploadTransport.ts')
@@ -210,9 +221,29 @@ function normalizeGallery(product?: ProductFormState | null): string[] {
     if (!value || seen.has(value)) continue
     seen.add(value)
     list.push(value)
-    if (list.length >= 5) break
+    if (list.length >= MAX_PRODUCT_GALLERY_IMAGES) break
   }
   return list
+}
+
+// Mirrors cloudflare/src/lib/importImageMatch.ts's buildImageDisplayName --
+// same "ProductName" / "ProductName_2" convention, kept as a small local
+// copy since that module lives in the Workers backend, not a package
+// shared with the frontend. A single image for a product gets the plain
+// product name; two or more get a 1-based "_N" suffix so multiple photos
+// of the same product don't collide on one name.
+//
+// Root cause of "image renaming missing _1/_2 suffixes": uploadPickedImages
+// used to pass the exact same `productName` for every file in a multi-file
+// selection, so a 3-photo album for "Coca Cola" tried to name every file
+// "Coca Cola" -- only the backend's opaque timestamp+random storage suffix
+// kept them from physically colliding, and none of them got a human-
+// readable _1/_2/_3 to tell them apart. Now each upload (including ones
+// added later to a product that already has photos) gets its own position
+// counted against the gallery's final size.
+function buildGalleryImageName(productName: string, position: number, total: number): string {
+  const base = String(productName || '').trim() || 'product'
+  return total > 1 ? `${base}_${position}` : base
 }
 
 function editablePrice(value: unknown, fallback = 0): string {
@@ -227,14 +258,46 @@ function pickImageFiles(maxCount = 1, options: PickImageFilesOptions = {}): Prom
     input.accept = options.accept || 'image/*'
     if (options.capture) input.setAttribute('capture', options.capture)
     input.multiple = maxCount > 1
-    input.onchange = () => {
-      const files = Array.from(input.files || []).slice(0, maxCount)
-      if (!files.length) {
-        resolve([])
-        return
-      }
+    // Visually hidden but attached to the DOM -- some mobile browsers/
+    // in-app webviews only reliably fire `change` on an input that's
+    // actually in the document, not a detached one.
+    input.style.position = 'fixed'
+    input.style.top = '-1000px'
+    input.style.left = '-1000px'
+    input.style.opacity = '0'
+    input.style.pointerEvents = 'none'
+
+    let settled = false
+    let cancelCheckTimer: ReturnType<typeof setTimeout> | null = null
+
+    const cleanup = (): void => {
+      window.removeEventListener('focus', onWindowFocus)
+      if (cancelCheckTimer) clearTimeout(cancelCheckTimer)
+      input.remove()
+    }
+    const settle = (files: File[]): void => {
+      if (settled) return
+      settled = true
+      cleanup()
       resolve(files)
     }
+
+    input.onchange = () => {
+      settle(Array.from(input.files || []).slice(0, maxCount))
+    }
+
+    // The OS file picker gives no reliable "cancelled" event on every
+    // platform. Detecting the window regaining focus after the dialog
+    // closes -- with a short delay so a real `change` event (which fires
+    // first on every browser tested) gets a chance to settle this first --
+    // is the standard fallback so a dismissed dialog doesn't leave this
+    // promise (and the caller's in-flight guard) hanging forever.
+    const onWindowFocus = (): void => {
+      cancelCheckTimer = setTimeout(() => settle(Array.from(input.files || []).slice(0, maxCount)), 300)
+    }
+    window.addEventListener('focus', onWindowFocus)
+
+    document.body.appendChild(input)
     input.click()
   })
 }
@@ -247,6 +310,7 @@ export default function ProductForm({
   brandOptions = [],
   groupCandidates = [],
   onSave,
+  onDelete,
   onClose,
   t,
   usdSymbol,
@@ -271,8 +335,6 @@ export default function ProductForm({
       category: '',
       brand: '',
       description: '',
-      purchase_price_usd: 0,
-      purchase_price_khr: 0,
       selling_price_usd: 0,
       selling_price_khr: 0,
       special_price_usd: 0,
@@ -313,6 +375,7 @@ export default function ProductForm({
   const [form, setForm] = useState<ProductFormState>(initialForm)
   const [imageList, setImageList] = useState(() => normalizeGallery(initialForm))
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
+  const lastTabResetKeyRef = useRef<string>(`${currentProductId}:${initialTab || 'basic'}`)
   const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
   const [supplierDrop, setSupplierDrop] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
@@ -320,7 +383,35 @@ export default function ProductForm({
   const [scannerLaunchingField, setScannerLaunchingField] = useState<ScannerField | ''>('')
   const [saving, setSaving] = useState(false)
   const [imageUploading, setImageUploading] = useState(false)
+  // Which gallery tile is currently being drag-reordered, if any (Part 242) --
+  // see reorderImage/moveImage above.
+  const [dragImageIndex, setDragImageIndex] = useState<number | null>(null)
   const supplierRequestRef = useRef(0)
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  // Locked-name-of-a-grouped-product feature (this session). isGroupedProduct
+  // is computed off the SAVED name this form loaded with (initialForm.name),
+  // not the live-edited form.name -- the lock question is "does this
+  // product currently belong to a name-based group", which is a fact about
+  // what's already saved, not about whatever the person is mid-typing.
+  // Uses groupCandidates (the same list availableGroupParents above already
+  // filters) rather than a separate fetch: any OTHER product in that list
+  // sharing this product's exact name (case/whitespace-insensitive) means
+  // the app's own name-based grouping (see routes/products.ts and
+  // productGrouping.ts's resolveGroupKey) already treats this row as part
+  // of a group. A brand-new product (no id yet) is never "grouped".
+  const isGroupedProduct = useMemo(() => {
+    const name = String(initialForm.name || '').trim().toLowerCase()
+    if (!name || !currentProductId) return false
+    return (Array.isArray(groupCandidates) ? groupCandidates : [])
+      .some((candidate) => Number(candidate?.id || 0) !== currentProductId
+        && String(candidate?.name || '').trim().toLowerCase() === name)
+  }, [groupCandidates, initialForm.name, currentProductId])
+  // Unlocked only for this open/edit session -- resets on every tab-reset
+  // (see the effect below), never persisted, so reopening the form always
+  // starts locked again for a still-grouped product.
+  const [nameUnlocked, setNameUnlocked] = useState(false)
+  const [nameUnlockConfirmOpen, setNameUnlockConfirmOpen] = useState(false)
+  const nameLocked = isGroupedProduct && !nameUnlocked
   const aliveRef = useRef(true)
   const imageUploadInFlightRef = useRef(false)
   const saveInFlightRef = useRef(false)
@@ -388,8 +479,6 @@ export default function ProductForm({
   useEffect(() => {
     setForm({
       ...initialForm,
-      purchase_price_usd: editablePrice(initialForm.purchase_price_usd),
-      purchase_price_khr: editablePrice(initialForm.purchase_price_khr),
       selling_price_usd: editablePrice(initialForm.selling_price_usd),
       selling_price_khr: editablePrice(initialForm.selling_price_khr),
       special_price_usd: editablePrice(initialForm.special_price_usd ?? initialForm.selling_price_usd),
@@ -410,8 +499,21 @@ export default function ProductForm({
       parent_id: initialForm.parent_id ? Number(initialForm.parent_id) : null,
     })
     setImageList(normalizeGallery(initialForm))
-    setActiveTab(initialTab || 'basic')
-  }, [initialForm, initialTab])
+    // Defense-in-depth on top of the Products.tsx memoization fix (see
+    // that file's comment on `modalProduct`): only reset the active tab
+    // when this is genuinely a different product (or the caller asked
+    // for a specific initialTab again), not on every re-run of this
+    // effect. Without this guard, any future caller that passes an
+    // unstable `product`/`initialForm` reference would reintroduce the
+    // same "silently snaps back to Basic Info" bug this session fixed.
+    const resetKey = `${currentProductId}:${initialTab || 'basic'}`
+    if (lastTabResetKeyRef.current !== resetKey) {
+      lastTabResetKeyRef.current = resetKey
+      setActiveTab(initialTab || 'basic')
+      setNameUnlocked(false)
+      setNameUnlockConfirmOpen(false)
+    }
+  }, [initialForm, initialTab, currentProductId])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -467,7 +569,7 @@ export default function ProductForm({
     if (imageUploading || imageUploadInFlightRef.current) return
     imageUploadInFlightRef.current = true
     try {
-      const remaining = Math.max(0, 5 - imageList.length)
+      const remaining = Math.max(0, MAX_PRODUCT_GALLERY_IMAGES - imageList.length)
       if (!remaining) {
         imageUploadInFlightRef.current = false
         return
@@ -479,12 +581,21 @@ export default function ProductForm({
       }
       setImageUploading(true)
       const stagedImages: string[] = []
-      for (const file of files) {
+      const productNameForNaming = String(form.name || '').trim()
+      // Position/total are computed against the gallery's final size (existing
+      // images already on the product + every file in this batch), not just
+      // this batch alone -- see buildGalleryImageName above.
+      const existingCount = imageList.length
+      const totalAfterBatch = Math.min(5, existingCount + files.length)
+      for (const [index, file] of files.entries()) {
         const uploaded = await withLoaderTimeout(
           async () => (await loadProductImageUploadTransportModule()).uploadProductImage({
             productId: currentProductId || undefined,
             file,
             fileName: file.name || 'product.jpg',
+            productName: productNameForNaming
+              ? buildGalleryImageName(productNameForNaming, existingCount + index + 1, totalAfterBatch)
+              : undefined,
           }) as Promise<ProductImageUploadResult | undefined>,
           'Upload product form image',
           PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS,
@@ -512,6 +623,27 @@ export default function ProductForm({
     setImageList((current) => current.filter((_, idx) => idx !== index))
   }
 
+  // Drag-to-reorder for the gallery grid (Part 242), mirrored off the same
+  // HTML5 drag pattern FieldOrderManager.tsx already uses for receipt
+  // section ordering: dragImageIndex tracks the tile being dragged,
+  // onDragOver live-reorders as the pointer crosses tile boundaries, and
+  // moveImage below gives touch/keyboard users (HTML5 drag doesn't fire on
+  // most mobile touchscreens) an equivalent left/right-arrow way to do the
+  // same reorder without a mouse.
+  function reorderImage(fromIndex: number, toIndex: number): void {
+    setImageList((current) => {
+      if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= current.length || toIndex < 0 || toIndex >= current.length) return current
+      const next = [...current]
+      const [moved] = next.splice(fromIndex, 1)
+      next.splice(toIndex, 0, moved)
+      return next
+    })
+  }
+
+  function moveImage(index: number, direction: -1 | 1): void {
+    reorderImage(index, index + direction)
+  }
+
   function setPrimaryImage(index: number): void {
     setImageList((current) => {
       if (index < 0 || index >= current.length) return current
@@ -523,7 +655,12 @@ export default function ProductForm({
   }
 
   async function saveForm(): Promise<void> {
-    if (saving || saveInFlightRef.current) return
+    // imageUploading guard mirrors the Save button's own disabled state --
+    // belt-and-suspenders in case saveForm is ever invoked another way
+    // (e.g. a future keyboard-submit path) that doesn't go through the
+    // disabled button. See the button's own comment for the bug this
+    // closes: saving mid-upload used the stale pre-upload imageList.
+    if (saving || saveInFlightRef.current || imageUploading) return
     if (!String(form.name || '').trim()) {
       alert(tr('name_required_alert', 'Name is required', 'ត្រូវការឈ្មោះ'))
       return
@@ -535,8 +672,6 @@ export default function ProductForm({
     saveInFlightRef.current = true
     const payload: ProductSavePayload = {
       ...form,
-      purchase_price_usd: normalizePriceValue(parseNumericInput(form.purchase_price_usd)),
-      purchase_price_khr: normalizePriceValue(parseNumericInput(form.purchase_price_khr)),
       selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
       selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
       special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
@@ -550,14 +685,14 @@ export default function ProductForm({
       discount_badge_color: /^#[0-9a-f]{6}$/i.test(String(form.discount_badge_color || '')) ? String(form.discount_badge_color) : '#e11d48',
       discount_starts_at: form.discount_starts_at || null,
       discount_ends_at: form.discount_ends_at || null,
-      cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd ?? form.purchase_price_usd)),
-      cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr ?? form.purchase_price_khr)),
+      cost_price_usd: normalizePriceValue(parseNumericInput(form.cost_price_usd)),
+      cost_price_khr: normalizePriceValue(parseNumericInput(form.cost_price_khr)),
       stock_quantity: parseNumericInput(form.stock_quantity),
       low_stock_threshold: parseNumericInput(form.low_stock_threshold, 10),
       out_of_stock_threshold: parseNumericInput(form.out_of_stock_threshold),
       expiry_date: form.expiry_date || null,
       expiry_alert_days: parseNumericInput(form.expiry_alert_days, 30),
-      image_gallery: imageList.slice(0, 5),
+      image_gallery: imageList.slice(0, MAX_PRODUCT_GALLERY_IMAGES),
       image_path: imageList[0] || '',
       is_group: form.parent_id ? 0 : (Number(form.is_group) ? 1 : 0),
       parent_id: form.parent_id ? Number(form.parent_id) : null,
@@ -589,7 +724,6 @@ export default function ProductForm({
     closeScanner()
   }
 
-  const scanLabel = tr('scan_code', 'Scan', 'ស្កេន')
   const scanningLabel = tr('scanner_state_starting', 'Opening camera...', 'កំពុងបើកកាមេរ៉ា...')
   const scanSkuLabel = tr('scan_sku', 'Scan SKU', 'ស្កេន SKU')
   const scanBarcodeLabel = tr('scan_barcode', 'Scan barcode', 'ស្កេនបាកូដ')
@@ -597,7 +731,9 @@ export default function ProductForm({
   const tabs: Array<{ id: ProductFormTab; label: string }> = [
     { id: 'basic', label: tr('basic_info', 'Basic Info', 'ព័ត៌មានមូលដ្ឋាន') },
     { id: 'pricing', label: tr('pricing', 'Pricing', 'តម្លៃ') },
+    { id: 'discounts', label: tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ') },
     { id: 'stock', label: tr('stock', 'Stock', 'ស្តុក') },
+    { id: 'expiry', label: tr('expiry', 'Expiry', 'ផុតកំណត់') },
   ]
 
   const supplierMatches = form.supplier
@@ -607,13 +743,13 @@ export default function ProductForm({
   return (
     <Modal title={product ? `${tr('edit_product', 'Edit Product', 'កែប្រែផលិតផល')}: ${product.name}` : tr('add_product', 'Add Product', 'បន្ថែមផលិតផល')} onClose={onClose} wide>
       <div className="mb-5 -mx-5 border-b border-gray-200 px-5 dark:border-gray-700">
-        <div className="flex gap-1">
+        <div className="flex gap-1 overflow-x-auto">
           {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
               onClick={() => setActiveTab(tab.id)}
-              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${
+              className={`-mb-px shrink-0 border-b-2 px-4 py-2 text-sm font-medium ${
                 activeTab === tab.id
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -630,7 +766,7 @@ export default function ProductForm({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{tr('upload_image', 'Upload Image', 'បង្ហោះរូបភាព')}</p>
-              <p className="text-xs text-gray-400">{imageList.length}/5</p>
+              <p className="text-xs text-gray-400">{imageList.length}/{MAX_PRODUCT_GALLERY_IMAGES}</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary text-sm" onClick={addImages} disabled={saving || imageUploading}>
@@ -644,28 +780,117 @@ export default function ProductForm({
               </button>
             </div>
             {imageList.length ? (
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                {imageList.map((image, index) => (
-                  <div key={`${image}-${index}`} className="group relative overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
-                    <img src={image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" />
-                    <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/55 px-1.5 py-1 text-[10px] text-white">
-                      <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => setPrimaryImage(index)}>
-                        {index === 0 ? tr('primary', 'Primary', 'រូបសំខាន់') : tr('set_primary', 'Set primary', 'កំណត់ជារូបសំខាន់')}
-                      </button>
-                      <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => removeImage(index)}>
-                        {tr('remove', 'Remove', 'លុប')}
-                      </button>
+              <>
+                {imageList.length > 1 ? (
+                  <p className="text-[11px] text-gray-400">
+                    {tr('drag_to_reorder_images', 'Drag to reorder, or use the arrows on each photo.', 'អូសដើម្បីរៀបលំដាប់ ឬប្រើព្រួញនៅលើរូបនីមួយៗ។')}
+                  </p>
+                ) : null}
+                <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                  {imageList.map((image, index) => (
+                    <div
+                      key={`${image}-${index}`}
+                      className={`group relative overflow-hidden rounded-xl border bg-slate-50 ${dragImageIndex === index ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}`}
+                      draggable={imageList.length > 1}
+                      onDragStart={(event: DragEvent<HTMLDivElement>) => {
+                        setDragImageIndex(index)
+                        event.dataTransfer.effectAllowed = 'move'
+                      }}
+                      onDragOver={(event: DragEvent<HTMLDivElement>) => {
+                        event.preventDefault()
+                        if (dragImageIndex == null || dragImageIndex === index) return
+                        reorderImage(dragImageIndex, index)
+                        setDragImageIndex(index)
+                      }}
+                      onDragEnd={() => setDragImageIndex(null)}
+                    >
+                      <img src={image} alt={`product-${index + 1}`} className="h-20 w-full object-cover sm:h-24" />
+                      {index === 0 ? (
+                        <span className="absolute left-1 top-1 rounded bg-blue-600/90 px-1 py-0.5 text-[9px] font-medium text-white">
+                          {tr('primary', 'Primary', 'រូបសំខាន់')}
+                        </span>
+                      ) : null}
+                      {imageList.length > 1 ? (
+                        <div className="absolute right-1 top-1 flex gap-0.5">
+                          <button
+                            type="button"
+                            className="rounded bg-black/55 p-0.5 text-white hover:bg-black/70 disabled:opacity-30"
+                            onClick={() => moveImage(index, -1)}
+                            disabled={index === 0}
+                            title={tr('move_left', 'Move left', 'ផ្លាស់ទីទៅឆ្វេង')}
+                          >
+                            <ChevronLeft className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded bg-black/55 p-0.5 text-white hover:bg-black/70 disabled:opacity-30"
+                            onClick={() => moveImage(index, 1)}
+                            disabled={index === imageList.length - 1}
+                            title={tr('move_right', 'Move right', 'ផ្លាស់ទីទៅស្តាំ')}
+                          >
+                            <ChevronRight className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ) : null}
+                      <div className="absolute inset-x-0 bottom-0 flex items-center justify-between bg-black/55 px-1.5 py-1 text-[10px] text-white">
+                        <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => setPrimaryImage(index)}>
+                          {index === 0 ? tr('primary', 'Primary', 'រូបសំខាន់') : tr('set_primary', 'Set primary', 'កំណត់ជារូបសំខាន់')}
+                        </button>
+                        <button type="button" className="rounded px-1 py-0.5 hover:bg-white/20" onClick={() => removeImage(index)}>
+                          {tr('remove', 'Remove', 'លុប')}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </>
             ) : null}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label htmlFor="product-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
-              <input id="product-name" name="product_name" className="input" value={form.name || ''} onChange={(event) => setField('name', event.target.value)} />
+              <div className="relative">
+                <input
+                  id="product-name"
+                  name="product_name"
+                  ref={nameInputRef}
+                  className={`input ${nameLocked ? 'cursor-pointer bg-gray-50 pr-9 dark:bg-zinc-800/60' : ''}`}
+                  value={form.name || ''}
+                  onChange={(event) => setField('name', event.target.value)}
+                  readOnly={nameLocked}
+                  onClick={() => { if (nameLocked) setNameUnlockConfirmOpen(true) }}
+                  onFocus={(event) => { if (nameLocked) { event.currentTarget.blur(); setNameUnlockConfirmOpen(true) } }}
+                />
+                {nameLocked ? (
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                    onClick={() => setNameUnlockConfirmOpen(true)}
+                    aria-label={tr('unlock_name', 'Unlock name', 'ដោះសោឈ្មោះ')}
+                    title={tr('unlock_name', 'Unlock name', 'ដោះសោឈ្មោះ')}
+                  >
+                    <LockIcon className="h-4 w-4" />
+                  </button>
+                ) : null}
+              </div>
+              {nameLocked ? (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  {tr(
+                    'name_locked_grouped_hint',
+                    'Locked because this product is grouped with others by name. Click the field to unlock and rename it (this removes it from the group).',
+                    'ជាប់សោ ព្រោះផលិតផលនេះស្ថិតនៅក្នុងក្រុមតាមឈ្មោះ។ ចុចលើប្រអប់ដើម្បីដោះសោ ហើយប្តូរឈ្មោះ (វានឹងដកផលិតផលនេះចេញពីក្រុម)។',
+                  )}
+                </p>
+              ) : (isGroupedProduct ? (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  {tr(
+                    'name_unlocked_hint',
+                    'Unlocked -- saving a different name will remove this product from its current group.',
+                    'បានដោះសោ -- ការរក្សាទុកឈ្មោះផ្សេង នឹងដកផលិតផលនេះចេញពីក្រុមបច្ចុប្បន្ន។',
+                  )}
+                </p>
+              ) : null)}
             </div>
             <div>
               <label htmlFor="product-sku" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('sku')}</label>
@@ -682,38 +907,13 @@ export default function ProductForm({
                 />
                 <button
                   type="button"
-                  className="btn-secondary inline-flex items-center gap-1.5 px-3"
+                  className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
                   onClick={() => openScanner('sku')}
+                  title={scannerLaunchingField === 'sku' ? scanningLabel : scanSkuLabel}
                   aria-label={scanSkuLabel}
                   disabled={saving || !!scannerLaunchingField}
                 >
-                  <ScanLine className="h-4 w-4" />
-                  <span className="hidden sm:inline">{scannerLaunchingField === 'sku' ? scanningLabel : scanLabel}</span>
-                </button>
-              </div>
-            </div>
-            <div>
-              <label htmlFor="product-barcode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('barcode')}</label>
-              <div className="flex gap-2">
-                <input
-                  id="product-barcode"
-                  name="product_barcode"
-                  className="input flex-1"
-                  value={form.barcode || ''}
-                  onChange={(event) => setField('barcode', event.target.value)}
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="btn-secondary inline-flex items-center gap-1.5 px-3"
-                  onClick={() => openScanner('barcode')}
-                  aria-label={scanBarcodeLabel}
-                  disabled={saving || !!scannerLaunchingField}
-                >
-                  <ScanLine className="h-4 w-4" />
-                  <span className="hidden sm:inline">{scannerLaunchingField === 'barcode' ? scanningLabel : scanLabel}</span>
+                  <ScanLine className={`h-4 w-4 ${scannerLaunchingField === 'sku' ? 'animate-pulse' : ''}`} />
                 </button>
               </div>
             </div>
@@ -842,28 +1042,27 @@ export default function ProductForm({
         </div>
       ) : null}
 
-      {activeTab === 'pricing' ? (
+      {activeTab === 'pricing' || activeTab === 'discounts' ? (
         <div className="space-y-5">
+          {activeTab === 'pricing' ? <>
           <div className="rounded-xl border border-red-100 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/10">
             <div className="mb-3">
-              <p className="text-sm font-bold text-red-700 dark:text-red-400">{t('cost_in_purchase')}</p>
+              <p className="text-sm font-bold text-red-700 dark:text-red-400">{t('cost')}</p>
               <p className="text-xs text-red-500 dark:text-red-500">{t('what_you_pay_supplier')}</p>
             </div>
             <DualPriceInput
               labelUsd={t('cost_in_usd_label')}
               labelKhr={t('cost_in_khr_label')}
-              valueUsd={form.purchase_price_usd}
-              valueKhr={form.purchase_price_khr}
+              valueUsd={form.cost_price_usd}
+              valueKhr={form.cost_price_khr}
                 onUsdChange={(value) => {
-                  setField('purchase_price_usd', value)
                   setField('cost_price_usd', value)
-                  if (!String(form.purchase_price_khr ?? '').trim()) {
+                  if (!String(form.cost_price_khr ?? '').trim()) {
                     const converted = parseNumericInput(value) * exchangeRate
-                    setField('purchase_price_khr', value === '' ? '' : formatPriceNumber(converted))
+                    setField('cost_price_khr', value === '' ? '' : formatPriceNumber(converted))
                   }
                 }}
               onKhrChange={(value) => {
-                setField('purchase_price_khr', value)
                 setField('cost_price_khr', value)
               }}
               usdSymbol={usdSymbol}
@@ -922,8 +1121,9 @@ export default function ProductForm({
               t={t}
             />
           </div>
+          </> : null}
 
-          <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-950/20">
+          {activeTab === 'discounts' ? <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-950/20">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm font-bold text-rose-700 dark:text-rose-300">{tr('product_discount', 'Discounts', 'បញ្ចុះតម្លៃ')}</p>
@@ -1038,11 +1238,11 @@ export default function ProductForm({
                 })()}
               </div>
             ) : null}
-          </div>
+          </div> : null}
 
-          {Number(form.selling_price_usd || 0) > 0 && Number(form.purchase_price_usd || 0) > 0 ? (
+          {activeTab === 'pricing' && Number(form.selling_price_usd || 0) > 0 && Number(form.cost_price_usd || 0) > 0 ? (
             <MarginCard
-              purchaseUsd={Number(form.purchase_price_usd || 0)}
+              costUsd={Number(form.cost_price_usd || 0)}
               sellingUsd={Number(form.selling_price_usd || 0)}
               usdSymbol={usdSymbol}
             />
@@ -1050,22 +1250,49 @@ export default function ProductForm({
         </div>
       ) : null}
 
-      {activeTab === 'stock' ? (
+      {activeTab === 'stock' || activeTab === 'expiry' ? (
         <div className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${activeTab === 'stock' ? 'lg:grid-cols-3' : ''}`}>
+            {activeTab === 'stock' ? <>
             <div>
               <label htmlFor="product-stock-quantity" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('stock')} ({t('quantity')})</label>
+              {/* Safeguard: for an EXISTING product this field used to be a
+                  plain free-editable number that saved straight through
+                  Save with no reason, no per-branch breakdown, and no
+                  inventory_movements trail -- silently overwriting
+                  products.stock_quantity out from under the real source of
+                  truth (SUM(branch_stock.quantity)) that BranchStockAdjuster
+                  just below this field already keeps in sync properly
+                  (reason required, batch required, tracked). Locked to
+                  read-only here so the ONLY way to change an existing
+                  product's quantity is through that adjuster's guarded
+                  flow; still freely editable for a brand-new product
+                  (no history to protect yet, no adjuster rendered until
+                  after the product exists). */}
               <input
                 id="product-stock-quantity"
                 name="product_stock_quantity"
-                className="input"
+                className={`input${product ? ' cursor-not-allowed bg-gray-100 text-gray-500 dark:bg-gray-900 dark:text-gray-400' : ''}`}
                 type="text"
                 inputMode="decimal"
                 autoComplete="off"
+                readOnly={!!product}
+                aria-readonly={!!product}
                 value={form.stock_quantity ?? ''}
-                onChange={(event) => setNumericField('stock_quantity', event.target.value)}
+                onChange={(event) => { if (!product) setNumericField('stock_quantity', event.target.value) }}
               />
+              {product ? (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {tr(
+                    'product_stock_quantity_locked_hint',
+                    'Total across all branches. Use "Adjust stock" below to change it -- a reason is required.',
+                    'ចំនួនសរុបគ្រប់សាខា។ ប្រើ "លៃតម្រូវស្តុក" ខាងក្រោមដើម្បីផ្លាស់ប្តូរ — ត្រូវការហេតុផល។',
+                  )}
+                </p>
+              ) : null}
             </div>
+            </> : null}
+            {activeTab === 'expiry' ? <>
             <div>
               <label htmlFor="product-low-stock-threshold" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('low_stock_threshold')}</label>
               <input
@@ -1120,9 +1347,10 @@ export default function ProductForm({
                 onChange={(event) => setNumericField('expiry_alert_days', event.target.value)}
               />
             </div>
+            </> : null}
           </div>
 
-          {!product && branches.length > 0 ? (
+          {activeTab === 'stock' && !product && branches.length > 0 ? (
             <div>
               <label htmlFor="product-initial-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('assign_initial_branch', 'Assign Initial Stock to Branch *', 'កំណត់ស្តុកដំបូងទៅសាខា *')}</label>
               <AppSelect
@@ -1138,14 +1366,24 @@ export default function ProductForm({
             </div>
           ) : null}
 
-          {product && branches.length > 0 ? (
+          {/* Stock tab reorg: branch (+ its reason field, both inside
+              BranchStockAdjuster) first, barcode last -- moved here from
+              the Basic tab's identity grid so the whole "what stock is
+              this, where, why, and how do I scan it" flow reads top to
+              bottom as branch -> reason -> barcode, per the Aug 21 2026
+              ask to organize the Stock section that way (mirroring the
+              per-branch adjustment reason work). Barcode itself is still
+              a plain product-level field (not per-branch) -- only its
+              position in the form moved, not its meaning or how it's
+              saved/scanned. */}
+          {activeTab === 'stock' && product && branches.length > 0 ? (
             <BranchStockAdjuster
               product={{
                 ...product,
                 id: product.id || currentProductId,
                 name: product.name || '',
-                purchase_price_usd: parseNumericInput(product.purchase_price_usd),
-                purchase_price_khr: parseNumericInput(product.purchase_price_khr),
+                cost_price_usd: parseNumericInput(product.cost_price_usd),
+                cost_price_khr: parseNumericInput(product.cost_price_khr),
               }}
               branches={branches}
               user={user}
@@ -1153,16 +1391,78 @@ export default function ProductForm({
               t={t}
             />
           ) : null}
+
+          {activeTab === 'stock' ? <div>
+            <label htmlFor="product-barcode" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('barcode')}</label>
+            <div className="flex gap-2">
+              <input
+                id="product-barcode"
+                name="product_barcode"
+                className="input flex-1"
+                value={form.barcode || ''}
+                onChange={(event) => setField('barcode', event.target.value)}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
+                onClick={() => openScanner('barcode')}
+                title={scannerLaunchingField === 'barcode' ? scanningLabel : scanBarcodeLabel}
+                aria-label={scanBarcodeLabel}
+                disabled={saving || !!scannerLaunchingField}
+              >
+                <ScanLine className={`h-4 w-4 ${scannerLaunchingField === 'barcode' ? 'animate-pulse' : ''}`} />
+              </button>
+            </div>
+          </div> : null}
         </div>
       ) : null}
 
-      <div className="mt-6 flex gap-3 border-t border-gray-200 pt-4 dark:border-gray-700">
-        <button type="button" className="btn-primary flex-1" onClick={saveForm} disabled={saving}>
-          {saving ? (t('saving') || 'Saving...') : t('save')}
+      {/* Sticky footer: pinned to the bottom of Modal.tsx's scrollable area
+          (.modal-scroll) so Save/Cancel stay reachable without scrolling
+          past Basic Info/Pricing/Stock on small screens. -mx-5 -mb-5
+          cancels the modal's own p-5 padding so the bar spans full width
+          and sits flush against the bottom edge; px-5 pb-5 pt-4 puts it
+          back inside the bar. */}
+      <div className="sticky bottom-0 -mx-5 -mb-5 mt-6 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
+        {/* Disabled while imageUploading, not just `saving`: previously a
+            fast Save click during an in-flight image upload would save the
+            product with the pre-upload imageList (the just-picked file
+            hadn't landed in state yet), silently orphaning the freshly
+            uploaded asset in the Files library instead of linking it to
+            the product -- the exact "shows uploaded but didn't connect,
+            had to go re-link it via Files" bug reported. Save now can't
+            fire until uploadPickedImages's setImageList has actually
+            landed. */}
+        <button type="button" className="btn-primary flex-1" onClick={saveForm} disabled={saving || imageUploading}>
+          {saving ? (t('saving') || 'Saving...') : imageUploading ? (tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...')) : t('save')}
         </button>
         <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>
           {t('cancel')}
         </button>
+        {/* Delete lives in this same row now (was only reachable from the
+            separate read-only detail sheet before) -- deliberately NOT
+            flex-1 like Save, and icon-only with no text label, so its tap
+            target stays small and off to the side rather than competing
+            with Save for thumb space and inviting an accidental hit.
+            onDelete already routes through Products.tsx's own
+            DeleteConfirmModal (impact summary + explicit confirm), so no
+            second confirmation is added here -- this button only opens
+            that flow, it never deletes directly itself. */}
+        {product && onDelete ? (
+          <button
+            type="button"
+            className="btn-danger shrink-0 px-2.5"
+            onClick={onDelete}
+            disabled={saving}
+            aria-label={t('delete') || 'Delete'}
+            title={t('delete') || 'Delete'}
+          >
+            <Trash2Icon className="h-4 w-4" />
+          </button>
+        ) : null}
       </div>
       {(filePickerOpen || scannerField) ? (
         <Suspense fallback={null}>
@@ -1172,7 +1472,7 @@ export default function ProductForm({
               mediaType="image"
               title={tr('choose_product_image', 'Choose product image', 'ជ្រើសរើសរូបភាពផលិតផល')}
               onClose={() => setFilePickerOpen(false)}
-              onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= 5 ? current : [...current, publicPath])}
+              onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= MAX_PRODUCT_GALLERY_IMAGES ? current : [...current, publicPath])}
             />
           ) : null}
           {scannerField ? (
@@ -1185,6 +1485,44 @@ export default function ProductForm({
             />
           ) : null}
         </Suspense>
+      ) : null}
+      {nameUnlockConfirmOpen ? (
+        <Modal title={tr('unlock_name_confirm_title', 'Unlock product name?', 'ដោះសោឈ្មោះផលិតផល?')} onClose={() => setNameUnlockConfirmOpen(false)} size="sm">
+          <div className="space-y-4 text-sm text-gray-700 dark:text-gray-300">
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/40 dark:bg-amber-950/30">
+              <AlertTriangleIcon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <p className="text-amber-800 dark:text-amber-300">
+                {tr(
+                  'unlock_name_confirm_body',
+                  'This product\'s name is locked because it\'s grouped with other products by name. Unlocking and saving a different name will remove it from that group. Continue?',
+                  'ឈ្មោះផលិតផលនេះជាប់សោ ព្រោះវាស្ថិតនៅក្នុងក្រុមជាមួយផលិតផលផ្សេងទៀតតាមឈ្មោះ។ ការដោះសោ ហើយរក្សាទុកឈ្មោះផ្សេង នឹងដកវាចេញពីក្រុមនោះ។ បន្ត?',
+                )}
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                className="rounded-lg bg-amber-600 px-4 py-2 text-sm text-white hover:bg-amber-700"
+                onClick={() => {
+                  setNameUnlocked(true)
+                  setNameUnlockConfirmOpen(false)
+                  // Focus the now-editable field right away so unlocking
+                  // reads as one continuous action, not two separate clicks.
+                  setTimeout(() => nameInputRef.current?.focus(), 0)
+                }}
+              >
+                {tr('unlock_name_confirm_button', 'Unlock', 'ដោះសោ')}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm text-gray-600 dark:border-gray-600 dark:text-gray-300"
+                onClick={() => setNameUnlockConfirmOpen(false)}
+              >
+                {tr('cancel', 'Cancel', 'បោះបង់')}
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
     </Modal>
   )

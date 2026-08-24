@@ -1,3 +1,5 @@
+import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
+
 type PortalProduct = Record<string, unknown>
 
 interface PortalDisplayConfig {
@@ -22,70 +24,22 @@ interface PortalPromotionDetails {
 type PortalCopy = (key: string, fallback: string) => string
 type PortalPriceFormatter = (usd: unknown, khr: unknown, config: PortalDisplayConfig) => string
 
-function toFiniteNumber(value: unknown, fallback = 0): number {
-  const numberValue = Number(value)
-  return Number.isFinite(numberValue) ? numberValue : fallback
-}
-
-function normalizePriceValue(value: unknown, fallback = 0): number {
-  const numberValue = toFiniteNumber(value, fallback)
-  const rounded = Math.round((numberValue + Number.EPSILON) * 100) / 100
-  return Object.is(rounded, -0) ? 0 : rounded
-}
-
-function normalizeDiscountPercent(value: unknown): number {
-  return Math.min(100, Math.max(0, normalizePriceValue(value, 0)))
-}
-
+// This used to be a second, independent copy of the same discount math
+// as utils/pricing.ts (the one POS.tsx and ProductForm.tsx use) -- same
+// discount_enabled/type/percent/amount/starts_at/ends_at rules, but with
+// its own normalizePriceValue() that rounded with plain Math.round instead
+// of utils/pricing.ts's roundUpToDecimals(). The two could disagree by a
+// cent on the same product/discount at the exact same moment: POS (and
+// the admin product editor preview) would show one discounted price,
+// the public customer portal a different one, purely from which file's
+// copy of "round the price" ran. Delegating to the shared implementation
+// here instead of maintaining a second one that can silently drift.
 function isPortalDiscountActive(product: PortalProduct = {}): boolean {
-  if (!product.discount_enabled) return false
-  const type = String(product.discount_type || '').toLowerCase() === 'fixed' ? 'fixed' : 'percent'
-  if (type === 'percent' && normalizeDiscountPercent(product.discount_percent) <= 0) return false
-  if (type === 'fixed' && normalizePriceValue(product.discount_amount_usd || 0) <= 0 && normalizePriceValue(product.discount_amount_khr || 0) <= 0) return false
-  const nowMs = Date.now()
-  const starts = String(product.discount_starts_at || '').trim()
-  const ends = String(product.discount_ends_at || '').trim()
-  if (starts && !Number.isNaN(new Date(starts).getTime()) && new Date(starts).getTime() > nowMs) return false
-  if (ends && !Number.isNaN(new Date(ends).getTime()) && new Date(ends).getTime() < nowMs) return false
-  return true
+  return isProductDiscountActive(product)
 }
 
 function calculatePortalDiscount(product: PortalProduct = {}, exchangeRate = 4100) {
-  const sellingUsd = normalizePriceValue(product.selling_price_usd || 0)
-  const sellingKhr = normalizePriceValue(product.selling_price_khr || (sellingUsd * exchangeRate))
-  if (!isPortalDiscountActive(product)) {
-    return {
-      active: false,
-      applied_price_usd: sellingUsd,
-      applied_price_khr: sellingKhr,
-      discount_amount_usd: 0,
-      discount_amount_khr: 0,
-      percent_off: 0,
-    }
-  }
-  const type = String(product.discount_type || '').toLowerCase() === 'fixed' ? 'fixed' : 'percent'
-  let discountUsd = 0
-  let discountKhr = 0
-  let percentOff = 0
-  if (type === 'percent') {
-    percentOff = normalizeDiscountPercent(product.discount_percent)
-    discountUsd = normalizePriceValue(sellingUsd * (percentOff / 100))
-    discountKhr = normalizePriceValue(sellingKhr * (percentOff / 100))
-  } else {
-    discountUsd = normalizePriceValue(product.discount_amount_usd || 0)
-    discountKhr = normalizePriceValue(product.discount_amount_khr || (discountUsd * exchangeRate))
-    percentOff = sellingUsd > 0 ? Math.round((Math.min(discountUsd, sellingUsd) / sellingUsd) * 100) : 0
-  }
-  discountUsd = Math.min(discountUsd, sellingUsd)
-  discountKhr = Math.min(discountKhr, sellingKhr)
-  return {
-    active: true,
-    applied_price_usd: normalizePriceValue(Math.max(0, sellingUsd - discountUsd)),
-    applied_price_khr: normalizePriceValue(Math.max(0, sellingKhr - discountKhr)),
-    discount_amount_usd: discountUsd,
-    discount_amount_khr: discountKhr,
-    percent_off: Math.max(0, percentOff),
-  }
+  return calculateProductDiscount(product, exchangeRate)
 }
 
 export function normalizeRecommendedProductIds(value: unknown): number[] {
@@ -111,6 +65,15 @@ export function normalizeRecommendedProductIds(value: unknown): number[] {
   return ids
 }
 
+// showStockStatus is opt-out (undefined/anything but literal `false` means
+// "show"), matching the two JSX call sites in CatalogProductsSection.tsx
+// (filter-pill row + card StatusPill badge). Extracted so that toggle has a
+// pure, directly-testable single source of truth instead of two inline
+// `!== false` checks that could silently drift apart.
+export function shouldShowStockStatus(config: { showStockStatus?: boolean } = {}): boolean {
+  return config.showStockStatus !== false
+}
+
 export function getPortalGridClass(desktopColumns: unknown): string {
   const normalized = Math.min(10, Math.max(2, Math.round(Number(desktopColumns || 4))))
   if (normalized === 2) return 'lg:grid-cols-2'
@@ -125,10 +88,11 @@ export function getPortalGridClass(desktopColumns: unknown): string {
 }
 
 export function getPortalMobileGridClass(mobileColumns: unknown): string {
-  const normalized = Math.min(3, Math.max(1, Math.round(Number(mobileColumns || 1))))
-  if (normalized === 3) return 'grid-cols-3'
-  if (normalized === 2) return 'grid-cols-2'
-  return 'grid-cols-1'
+  const normalized = Math.min(3, Math.max(2, Math.round(Number(mobileColumns || 2))))
+  // Always at least 2 columns on phones (matches the reference storefront layout),
+  // and step up at the `sm:` (tablet) breakpoint.
+  if (normalized === 3) return 'grid-cols-2 sm:grid-cols-3'
+  return 'grid-cols-2 sm:grid-cols-2'
 }
 
 export function productMatchesPortalBranches(product: PortalProduct = {}, branchFilter: unknown): boolean {

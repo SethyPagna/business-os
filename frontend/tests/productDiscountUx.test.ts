@@ -36,8 +36,13 @@ await runTest('POS product cards expose discount badges before opening details',
   assert.match(source, /ProductDiscountBadge/)
   assert.match(source, /calculateProductDiscount\(product,\s*exchangeRate\)/)
   assert.match(source, /pagedProductCards\.map[\s\S]*<ProductDiscountBadge/)
-  assert.match(detailSheet, /variantPromotion\.active/)
-  assert.match(detailSheet, /closeAfterAdd\(variant,\s*'promotion'\)/)
+  // Component uses the "effective" naming convention for whichever variant
+  // the branch+barcode pickers currently resolve to (effectiveVariant,
+  // effectiveVariantStock, effectiveVariantInStock, effectiveVariantPromotion)
+  // -- match that, not a bare "variant"/"variantPromotion" that was never
+  // the actual identifier here.
+  assert.match(detailSheet, /effectiveVariantPromotion\.active/)
+  assert.match(detailSheet, /closeAfterAdd\(effectiveVariant,\s*'promotion'\)/)
 })
 
 await runTest('inventory keeps previous stats during partial refresh failures', () => {

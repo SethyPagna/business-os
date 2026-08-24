@@ -1,55 +1,79 @@
+import type { ReactNode } from 'react'
+import { toggleMultiFilterValue, toMultiFilterSet, type MultiFilterValue } from '../../../utils/recordFilters.ts'
+// Type-only: erased entirely by both tsc and Node's native TS stripping (the
+// `type` modifier means the import statement itself never survives to
+// runtime, so this never actually loads/parses the JSX-bearing module it
+// points at) -- safe even though this file otherwise stays JSX-free so
+// `node tests/productMenuHelpers.test.ts` keeps running under plain node
+// with no JSX transform. See the comment on
+// isProductCategorySelected/toggleProductCategoryValues below for the
+// value-level (non-type-only) version of this same constraint.
+import type { FilterSection as SharedFilterSection } from '../../shared/FilterMenu.tsx'
+
 type ProductRow = Record<string, unknown>
 type Translate = (key: string, fallback?: string) => string
 type Setter = (value: string) => void
+type MultiSetter = (value: Set<string>) => void
 
-interface ProductExportItem {
+interface ProductExportScope {
+  id: 'selected' | 'visible' | 'full'
   label: string
-  onClick: () => void
-  color?: string
+  count: number
+  rows: ProductRow[]
+  filePrefix: string
 }
 
-type ProductExportMenuItem = ProductExportItem | 'divider'
-
 interface BuildProductExportItemsOptions {
-  brandFilter?: unknown
+  brandFilter?: MultiFilterValue
   branchFilter?: unknown
-  catFilter?: unknown
-  createdMonthFilter?: unknown
-  createdYearFilter?: unknown
+  catFilter?: MultiFilterValue
+  createdDateFrom?: string
+  createdDateTo?: string
   exportProductsCsv?: (rows: ProductRow[], prefix: string) => void
   filtered?: ProductRow[]
   products?: ProductRow[]
   selectedProducts?: ProductRow[]
   stockFilter?: unknown
-  supplierFilter?: unknown
+  supplierFilter?: MultiFilterValue
   tr?: Translate
 }
 
 interface ProductFilterState {
-  brandFilter?: unknown
+  brandFilter?: MultiFilterValue
   branchFilter?: unknown
-  catFilter?: unknown
-  createdMonthFilter?: unknown
-  createdYearFilter?: unknown
+  catFilter?: MultiFilterValue
+  createdDateFrom?: string
+  createdDateTo?: string
   groupFilter?: unknown
   initialFilter?: unknown
+  issueFilter?: unknown
   productSortDirection?: unknown
   stockFilter?: unknown
-  supplierFilter?: unknown
+  supplierFilter?: MultiFilterValue
 }
 
 interface FilterOption {
-  id: string
-  label: string
-  active: boolean
+  id: string | number
+  label: ReactNode
+  title?: string
+  active?: boolean
   onClick: () => void
 }
 
-interface FilterSection {
+interface LocalFilterSection {
   id: string
   label: string
   options: FilterOption[]
+  searchable?: boolean
 }
+
+// A section is either one this file builds itself (LocalFilterSection --
+// plain options list) or a pre-built one handed in from a .tsx caller (the
+// hierarchical category rows, or the merged Availability section) which
+// carries the shared FilterMenu.tsx shape (`render`, `summary`,
+// `activeChips`, etc.) -- see availabilitySection below.
+type FilterSection = LocalFilterSection | SharedFilterSection
+
 
 interface BranchOption {
   id?: unknown
@@ -62,22 +86,58 @@ interface CategoryOption {
 }
 
 interface BuildProductFilterSectionsOptions {
-  availableCreatedYears?: unknown[]
   branches?: BranchOption[]
   brandOptions?: unknown[]
   categories?: CategoryOption[]
+  // Pre-built hierarchical "Main - Sub" option rows (built by the .tsx
+  // caller via CategoryFilterOptions.tsx, since that builder returns JSX
+  // labels and this file must stay JSX-free -- see the comment on
+  // isProductCategorySelected/toggleProductCategoryValues above). Falls
+  // back to a flat per-category list if not supplied.
+  categoryOptions?: FilterOption[]
+  // Pre-built merged Branch/Groups/Stock "Availability" section (a JSX
+  // `render`-based FilterMenu section, built by the .tsx caller via
+  // components/shared/AvailabilityFilterOptions.tsx's
+  // buildAvailabilityFilterSection -- same reason as categoryOptions: this
+  // file can't construct JSX itself). Spliced in right after Sort/Created,
+  // before Category. When provided, the separate branch/group/stock
+  // sections below are skipped (this section covers all three). Omitted/
+  // null (e.g. from the plain-node test harness) falls back to those three
+  // separate sections instead.
+  availabilitySection?: FilterSection | null
+  // Pre-built "Issues" quick-filter section (JSX `render`-based, built by
+  // the .tsx caller via components/shared/IssuesFilterOptions.tsx's
+  // buildIssuesFilterSection -- same reason as availabilitySection: this
+  // file can't construct JSX itself). Spliced in right after Availability,
+  // before Category. Omitted (e.g. the plain-node test harness) means no
+  // Issues section at all -- no non-JSX fallback, same as createdSection.
+  issuesSection?: FilterSection | null
+  // Pre-built "Created" date-range section (JSX `render`-based, built by
+  // the .tsx caller via CreatedDateFilterOptions.tsx's
+  // buildCreatedDateFilterSection -- same reason as availabilitySection:
+  // this file can't construct JSX itself). A real server-side batch-date
+  // range (see routes/products.ts's buildSearchFilters), replacing the old
+  // client-only year/month picker this function used to build inline.
+  // Omitted (e.g. the plain-node test harness) means no Created section at
+  // all -- there's no non-JSX fallback for it, unlike availabilitySection.
+  createdSection?: FilterSection | null
+  // Pre-built AND/OR "Search mode" section (JSX `render`-based, built by
+  // the .tsx caller via components/shared/SearchModeFilterOptions.tsx's
+  // buildSearchModeFilterSection -- same reason as availabilitySection/
+  // createdSection: this file can't construct JSX itself). Spliced in
+  // right after Created/Availability, before Category. Omitted (e.g. the
+  // plain-node test harness) means no Search mode section at all -- no
+  // non-JSX fallback, same as createdSection.
+  searchModeSection?: FilterSection | null
   filters?: ProductFilterState
   isOpen?: boolean
-  monthOptions?: Array<[unknown, unknown]>
-  setBrandFilter?: Setter
+  setBrandFilter?: MultiSetter
   setBranchFilter?: Setter
-  setCatFilter?: Setter
-  setCreatedMonthFilter?: Setter
-  setCreatedYearFilter?: Setter
+  setCatFilter?: MultiSetter
   setGroupFilter?: Setter
   setProductSortDirection?: Setter
   setStockFilter?: Setter
-  setSupplierFilter?: Setter
+  setSupplierFilter?: MultiSetter
   suppliers?: unknown[]
   t?: (key: string) => string
 }
@@ -90,6 +150,33 @@ function normalizeOptionValue(value: unknown): string {
   return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
+function normalizeFilterSet(value: MultiFilterValue): Set<string> {
+  const set = toMultiFilterSet(value)
+  return set ? new Set([...set].map(normalizeOptionValue)) : new Set()
+}
+
+/**
+ * Adapter helpers for the shared hierarchical category filter builder
+ * (`components/shared/CategoryFilterOptions.tsx`, a .tsx file that this
+ * module deliberately does NOT import -- this file's tests run under plain
+ * `node` with no JSX transform, so any JSX-bearing import here would break
+ * `node tests/productMenuHelpers.test.ts`. Callers that ARE .tsx files
+ * (Products.tsx) import the JSX builder themselves and pass the resulting
+ * pre-built option rows in via `categoryOptions` below.
+ */
+export function isProductCategorySelected(catFilter: MultiFilterValue, value: string): boolean {
+  return normalizeFilterSet(catFilter).has(normalizeOptionValue(value))
+}
+
+export function toggleProductCategoryValues(catFilter: MultiFilterValue, values: string[], checked: boolean): Set<string> {
+  const next = new Set(toMultiFilterSet(catFilter) || [])
+  for (const value of values) {
+    if (checked) next.add(value)
+    else next.delete(value)
+  }
+  return next
+}
+
 function safeFilterLabel(t: (key: string) => string, key: string, fallback: string): string {
   const value = t(key)
   const normalized = String(value || '').trim().toLowerCase()
@@ -98,73 +185,122 @@ function safeFilterLabel(t: (key: string) => string, key: string, fallback: stri
   return value
 }
 
-export function buildProductExportItems({
+// Replaces the old buildProductExportItems, which used to build one flat
+// menu row PER active filter type (stock/category/brand/supplier/branch/
+// created-time) even though every one of those rows exported the exact
+// same `filtered` array under a slightly different filename -- up to 9
+// near-identical "Export ..." rows stacked directly in the Manage dropdown
+// (user-reported clutter, Aug 2026 polish pass). This instead returns at
+// most 3 genuinely distinct scopes (selected / current view / full list)
+// for the export panel (ExportFieldsModal) to render as a single choice,
+// with the active-filters state folded into one descriptive label +
+// filename instead of one row per filter kind.
+export function buildProductExportScopes({
   brandFilter = 'all',
   branchFilter = 'all',
   catFilter = 'all',
-  createdMonthFilter = 'all',
-  createdYearFilter = 'all',
-  exportProductsCsv = () => {},
+  createdDateFrom = '',
+  createdDateTo = '',
   filtered = [],
   products = [],
   selectedProducts = [],
   stockFilter = 'all',
   supplierFilter = 'all',
   tr = (key, fallback) => fallback || key,
-}: BuildProductExportItemsOptions = {}): ProductExportMenuItem[] {
-  return [
-    { label: tr('export_visible_products', 'Export visible products'), onClick: () => exportProductsCsv(filtered, 'products-visible') },
-    selectedProducts.length ? { label: tr('export_selected_products', 'Export selected products'), onClick: () => exportProductsCsv(selectedProducts, 'products-selected'), color: 'blue' } : null,
-    stockFilter !== 'all' ? { label: tr('export_filtered_stock_state', 'Export filtered stock state'), onClick: () => exportProductsCsv(filtered, `products-${stockFilter}`) } : null,
-    catFilter !== 'all' ? { label: tr('export_filtered_category', 'Export filtered category'), onClick: () => exportProductsCsv(filtered, 'products-category') } : null,
-    brandFilter !== 'all' ? { label: tr('export_filtered_brand', 'Export filtered brand'), onClick: () => exportProductsCsv(filtered, 'products-brand') } : null,
-    supplierFilter !== 'all' ? { label: tr('export_filtered_supplier', 'Export filtered supplier'), onClick: () => exportProductsCsv(filtered, 'products-supplier') } : null,
-    branchFilter !== 'all' ? { label: tr('export_filtered_branch', 'Export filtered branch'), onClick: () => exportProductsCsv(filtered, 'products-branch') } : null,
-    createdYearFilter !== 'all' || createdMonthFilter !== 'all' ? { label: tr('export_filtered_created_time', 'Export filtered created-time range'), onClick: () => exportProductsCsv(filtered, 'products-created-filter') } : null,
-    'divider',
-    { label: tr('export_full_product_list', 'Export full product list'), onClick: () => exportProductsCsv(products, 'products-all'), color: 'green' },
-  ].filter(Boolean) as ProductExportMenuItem[]
+}: BuildProductExportItemsOptions = {}): ProductExportScope[] {
+  const filtersActive = stockFilter !== 'all'
+    || Boolean(toMultiFilterSet(catFilter))
+    || Boolean(toMultiFilterSet(brandFilter))
+    || Boolean(toMultiFilterSet(supplierFilter))
+    || branchFilter !== 'all'
+    || Boolean(createdDateFrom || createdDateTo)
+
+  const scopes: ProductExportScope[] = []
+  if (selectedProducts.length) {
+    scopes.push({
+      id: 'selected',
+      label: tr('export_scope_selected', 'Selected products'),
+      count: selectedProducts.length,
+      rows: selectedProducts,
+      filePrefix: 'products-selected',
+    })
+  }
+  scopes.push({
+    id: 'visible',
+    label: filtersActive ? tr('export_scope_filtered', 'Current filtered results') : tr('export_scope_visible', 'All visible products'),
+    count: filtered.length,
+    rows: filtered,
+    filePrefix: filtersActive ? 'products-filtered' : 'products-visible',
+  })
+  // Only a distinct scope when it would actually export something
+  // different from "visible" above -- an unfiltered visible list already
+  // is the full list, so a separate identical row would just be the same
+  // clutter this function exists to remove.
+  if (products.length !== filtered.length) {
+    scopes.push({
+      id: 'full',
+      label: tr('export_scope_full', 'Full product list (ignore filters)'),
+      count: products.length,
+      rows: products,
+      filePrefix: 'products-all',
+    })
+  }
+  return scopes
 }
 
 export function countActiveProductFilters({
   brandFilter = 'all',
   branchFilter = 'all',
   catFilter = 'all',
-  createdMonthFilter = 'all',
-  createdYearFilter = 'all',
+  createdDateFrom = '',
+  createdDateTo = '',
   groupFilter = 'all',
   initialFilter = 'all',
-  productSortDirection = 'desc',
+  issueFilter = 'all',
+  // 'name_asc' (Name A-Z) is the real default sort for this page, same as
+  // buildProductFilterSections' own default below -- this was left at
+  // 'desc' while only the comparison below (line ~224) was updated to
+  // 'name_asc', so calling this with no args counted the true default as
+  // 1 active filter instead of 0.
+  productSortDirection = 'name_asc',
   stockFilter = 'all',
   supplierFilter = 'all',
 }: ProductFilterState = {}): number {
   return [
-    catFilter !== 'all' ? 1 : 0,
-    brandFilter !== 'all' ? 1 : 0,
+    toMultiFilterSet(catFilter) ? 1 : 0,
+    toMultiFilterSet(brandFilter) ? 1 : 0,
     branchFilter !== 'all' ? 1 : 0,
-    supplierFilter !== 'all' ? 1 : 0,
+    toMultiFilterSet(supplierFilter) ? 1 : 0,
     stockFilter !== 'all' ? 1 : 0,
     groupFilter !== 'all' ? 1 : 0,
     initialFilter !== 'all' ? 1 : 0,
-    createdYearFilter !== 'all' ? 1 : 0,
-    createdMonthFilter !== 'all' ? 1 : 0,
-    productSortDirection !== 'desc' ? 1 : 0,
+    issueFilter && issueFilter !== 'all' ? 1 : 0,
+    createdDateFrom ? 1 : 0,
+    createdDateTo ? 1 : 0,
+    // 'name_asc' (Name A-Z) is the actual default sort now, not 'desc' --
+    // see buildProductFilterSections' own `productSortDirection = 'desc'`
+    // fallback below, which is only a shape-of-data default for callers
+    // that omit the field entirely (e.g. the plain-node test harness), not
+    // the product page's real default. Comparing against 'desc' here would
+    // permanently count the true default (Name A-Z) as "1 active filter".
+    productSortDirection !== 'name_asc' ? 1 : 0,
   ].reduce((sum, value) => sum + value, 0)
 }
 
 export function buildProductFilterSections({
-  availableCreatedYears = [],
+  availabilitySection,
+  issuesSection,
+  createdSection,
+  searchModeSection,
   branches = [],
   brandOptions = [],
   categories = [],
+  categoryOptions,
   filters = {},
   isOpen = true,
-  monthOptions = [],
   setBrandFilter = () => {},
   setBranchFilter = () => {},
   setCatFilter = () => {},
-  setCreatedMonthFilter = () => {},
-  setCreatedYearFilter = () => {},
   setGroupFilter = () => {},
   setProductSortDirection = () => {},
   setStockFilter = () => {},
@@ -174,57 +310,47 @@ export function buildProductFilterSections({
 }: BuildProductFilterSectionsOptions = {}): FilterSection[] {
   if (!isOpen) return []
   const {
-    brandFilter = 'all',
+    brandFilter = 'all' as MultiFilterValue,
     branchFilter = 'all',
-    catFilter = 'all',
-    createdMonthFilter = 'all',
-    createdYearFilter = 'all',
+    catFilter = 'all' as MultiFilterValue,
     groupFilter = 'all',
-    productSortDirection = 'desc',
+    // 'name_asc' (Name A-Z) is the real default sort for this page -- see
+    // countActiveProductFilters' matching comment above.
+    productSortDirection = 'name_asc',
     stockFilter = 'all',
-    supplierFilter = 'all',
+    supplierFilter = 'all' as MultiFilterValue,
   } = filters
 
   return [
-    {
-      id: 'sort',
-      label: t('sort') || 'Sort',
-      options: [
-        { id: 'created-desc', label: t('newest_first') || 'Newest first', active: productSortDirection === 'desc', onClick: () => setProductSortDirection('desc') },
-        { id: 'created-asc', label: t('oldest_first') || 'Oldest first', active: productSortDirection === 'asc', onClick: () => setProductSortDirection('asc') },
-      ],
-    },
-    availableCreatedYears.length ? {
-      id: 'created-year',
-      label: t('year') || 'Year',
-      options: [
-        { id: 'created-year-all', label: t('all') || 'All', active: createdYearFilter === 'all', onClick: () => { setCreatedYearFilter('all'); setCreatedMonthFilter('all') } },
-        ...availableCreatedYears.map((year) => ({
-          id: `created-year-${year}`,
-          label: String(year),
-          active: createdYearFilter === String(year),
-          onClick: () => {
-            const nextYear = createdYearFilter === String(year) ? 'all' : String(year)
-            setCreatedYearFilter(nextYear)
-            if (nextYear === 'all') setCreatedMonthFilter('all')
-          },
-        })),
-      ],
-    } : null,
-    {
-      id: 'created-month',
-      label: t('month') || 'Month',
-      options: [
-        { id: 'created-month-all', label: t('all') || 'All', active: createdMonthFilter === 'all', onClick: () => setCreatedMonthFilter('all') },
-        ...monthOptions.map(([value, label]) => ({
-          id: `created-month-${value}`,
-          label: String(label),
-          active: createdMonthFilter === value,
-          onClick: () => setCreatedMonthFilter(createdMonthFilter === value ? 'all' : String(value)),
-        })),
-      ],
-    },
-    branches.length > 1 ? {
+    // 'sort' and 'supplier' sections intentionally removed from this menu:
+    // the Products/Inventory filter menu now shows only Availability
+    // (merged Branch+Group+Stock), Created, Category, and Brand. The list
+    // itself stays locked to alphabetical (name_asc, this function's own
+    // default below) rather than offering a manual sort toggle.
+    // `setProductSortDirection`/`productSortDirection` are left in this
+    // function's params/state for now (still read by countActiveProductFilters
+    // and the API call in Products.tsx) rather than ripped out, since no
+    // caller can change them via UI anymore and removing the plumbing
+    // itself is a separate, riskier change than just hiding the section.
+    //
+    // "Created" is now a real server-side batch-date range (see
+    // routes/products.ts's buildSearchFilters and
+    // CreatedDateFilterOptions.tsx's buildCreatedDateFilterSection) rather
+    // than the old client-only year/month picker this function used to
+    // build inline against product.created_at -- see progress.md's
+    // "Created section reworked to filter by batch date" item.
+    createdSection ? createdSection : null,
+    // AND/OR search-mode section (see searchModeSection's own comment
+    // above) -- right after Created, before Availability/Category, same
+    // splice point as the standalone button used to sit at (right next to
+    // the search box, which is directly above this menu).
+    searchModeSection ? searchModeSection : null,
+    // Merged Branch/Groups/Stock "Availability" section when the .tsx
+    // caller built one (see components/shared/AvailabilityFilterOptions.tsx)
+    // -- covers all three, so the separate sections below are skipped.
+    // Falls back to those three separate sections when not supplied (e.g.
+    // the plain-node test harness, which can't construct the JSX render).
+    availabilitySection ? availabilitySection : branches.length > 1 ? {
       id: 'branch',
       label: t('branch') || 'Branch',
       options: [
@@ -237,7 +363,7 @@ export function buildProductFilterSections({
         })),
       ],
     } : null,
-    {
+    availabilitySection ? null : {
       id: 'group',
       label: t('groups') || 'Groups',
       options: [
@@ -246,54 +372,61 @@ export function buildProductFilterSections({
         { id: 'group-standalone', label: t('standalone') || 'Standalone', active: groupFilter === 'standalone', onClick: () => setGroupFilter(groupFilter === 'standalone' ? 'all' : 'standalone') },
       ],
     },
-    {
+    availabilitySection ? null : {
       id: 'stock',
       label: t('stock_status') || 'Stock status',
       options: [
         { id: 'stock-all', label: t('all') || 'All', active: stockFilter === 'all', onClick: () => setStockFilter('all') },
         { id: 'stock-in', label: t('in_stock') || 'In Stock', active: stockFilter === 'in_stock', onClick: () => setStockFilter('in_stock') },
+        { id: 'stock-healthy', label: t('healthy_stock') || 'Healthy', active: stockFilter === 'healthy', onClick: () => setStockFilter('healthy') },
         { id: 'stock-low', label: t('low_stock') || 'Low', active: stockFilter === 'low', onClick: () => setStockFilter('low') },
         { id: 'stock-out', label: t('out_of_stock') || 'Out', active: stockFilter === 'out', onClick: () => setStockFilter('out') },
       ],
     },
+    // "Issues" quick filter -- see components/shared/IssuesFilterOptions.tsx
+    // for the section itself. No non-JSX fallback (same as createdSection/
+    // searchModeSection): omitted entirely when not supplied.
+    issuesSection ? issuesSection : null,
     categories.length ? {
       id: 'category',
       label: t('category') || 'Category',
+      searchable: true,
       options: [
-        { id: 'cat-all', label: t('all') || 'All', active: catFilter === 'all', onClick: () => setCatFilter('all') },
-        ...categories.map((category) => ({
-          id: `cat-${category.id}`,
-          label: String(category.name),
-          active: catFilter === category.name,
-          onClick: () => setCatFilter(catFilter === category.name ? 'all' : String(category.name)),
+        { id: 'cat-all', label: t('all') || 'All', active: !toMultiFilterSet(catFilter), onClick: () => setCatFilter(new Set()) },
+        // Hierarchical "Main - Sub" rows when the .tsx caller supplied them
+        // (see categoryOptions above); otherwise a flat per-category list
+        // (e.g. a test harness that doesn't build the JSX rows).
+        ...(categoryOptions ?? categories.map((category) => {
+          const normalizedSet = normalizeFilterSet(catFilter)
+          return {
+            id: `cat-${category.id}`,
+            label: String(category.name),
+            active: normalizedSet.has(normalizeOptionValue(category.name)),
+            onClick: () => setCatFilter(toggleMultiFilterValue(toMultiFilterSet(catFilter) || new Set(), String(category.name))),
+          }
         })),
       ],
     } : null,
     brandOptions.length ? {
       id: 'brand',
       label: safeFilterLabel(t, 'brand', 'Brand'),
+      searchable: true,
       options: [
-        { id: 'brand-all', label: safeFilterLabel(t, 'all_brands', 'All Brands'), active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
-        ...brandOptions.map((brand) => ({
-          id: `brand-${brand}`,
-          label: String(brand),
-          active: normalizeOptionValue(brandFilter) === normalizeOptionValue(brand),
-          onClick: () => setBrandFilter(normalizeOptionValue(brandFilter) === normalizeOptionValue(brand) ? 'all' : asString(brand)),
-        })),
+        { id: 'brand-all', label: safeFilterLabel(t, 'all_brands', 'All Brands'), active: !toMultiFilterSet(brandFilter), onClick: () => setBrandFilter(new Set()) },
+        ...brandOptions.map((brand) => {
+          const normalizedSet = normalizeFilterSet(brandFilter)
+          return {
+            id: `brand-${brand}`,
+            label: String(brand),
+            active: normalizedSet.has(normalizeOptionValue(brand)),
+            onClick: () => setBrandFilter(toggleMultiFilterValue(toMultiFilterSet(brandFilter) || new Set(), asString(brand))),
+          }
+        }),
       ],
     } : null,
-    suppliers.length ? {
-      id: 'supplier',
-      label: t('supplier') || 'Supplier',
-      options: [
-        { id: 'supplier-all', label: t('suppliers') || 'All Suppliers', active: supplierFilter === 'all', onClick: () => setSupplierFilter('all') },
-        ...suppliers.map((supplier) => ({
-          id: `supplier-${supplier}`,
-          label: String(supplier),
-          active: supplierFilter === supplier,
-          onClick: () => setSupplierFilter(supplierFilter === supplier ? 'all' : asString(supplier)),
-        })),
-      ],
-    } : null,
+    // 'supplier' section removed from the filter menu (see comment above
+    // 'created' section) -- suppliers/supplierFilter/setSupplierFilter
+    // params stay for countActiveProductFilters and the export-menu
+    // "filtered supplier" item, just no longer rendered here.
   ].filter(Boolean) as FilterSection[]
 }

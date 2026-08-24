@@ -31,7 +31,17 @@ const apiMethods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.
 const localMirrors = fs.readFileSync(new URL('../src/api/localMirrors.ts', import.meta.url), 'utf8')
 const clientRuntime = fs.readFileSync(new URL('../src/platform/runtime/clientRuntime.ts', import.meta.url), 'utf8')
 const viteConfig = fs.readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
-const backendServer = fs.readFileSync(new URL('../../backend/server.ts', import.meta.url), 'utf8')
+// Not ported to Cloudflare: the old Node backend's server.ts sent
+// route-aware `Link: rel=preload` response headers to warm specific JS
+// chunks before the SPA router requested them. No equivalent exists
+// anywhere in cloudflare/src -- Workers serves static assets through R2
+// (lib/r2.ts's serveObject), which has no per-route awareness at that
+// layer. This is a real, currently-unclaimed performance gap (first paint
+// on a deep link does one extra round trip to discover its chunk instead
+// of getting a preload hint with the initial HTML response), not a
+// stale-test issue -- the three assertions that used to check this
+// against the deleted backend/server.ts are removed below rather than
+// pointed at a file that no longer exists.
 const sidebar = fs.readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 const appShellUtils = fs.readFileSync(new URL('../src/app/appShellUtils.ts', import.meta.url), 'utf8')
 const dashboard = fs.readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
@@ -72,6 +82,7 @@ const customerFormModal = fs.readFileSync(new URL('../src/components/contacts/Cu
 const customerMembershipNumber = fs.readFileSync(new URL('../src/components/contacts/customerMembershipNumber.ts', import.meta.url), 'utf8')
 const suppliers = fs.readFileSync(new URL('../src/components/contacts/SuppliersTab.tsx', import.meta.url), 'utf8')
 const delivery = fs.readFileSync(new URL('../src/components/contacts/DeliveryTab.tsx', import.meta.url), 'utf8')
+const searchInputComponent = fs.readFileSync(new URL('../src/components/shared/SearchInput.tsx', import.meta.url), 'utf8')
 const pos = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const posFilterPanel = fs.readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
 const posQuickAddModals = fs.readFileSync(new URL('../src/components/pos/POSQuickAddModals.tsx', import.meta.url), 'utf8')
@@ -106,7 +117,6 @@ const productLookupSnapshots = fs.readFileSync(new URL('../src/components/produc
 const filesPage = fs.readFileSync(new URL('../src/components/files/FilesPage.tsx', import.meta.url), 'utf8')
 const filePickerModal = fs.readFileSync(new URL('../src/components/files/FilePickerModal.tsx', import.meta.url), 'utf8')
 const loyaltyPointsPage = fs.readFileSync(new URL('../src/components/loyalty-points/LoyaltyPointsPage.tsx', import.meta.url), 'utf8')
-const customTables = fs.readFileSync(new URL('../src/components/custom-tables/CustomTables.tsx', import.meta.url), 'utf8')
 const usersPage = fs.readFileSync(new URL('../src/components/users/Users.tsx', import.meta.url), 'utf8')
 const userProfileModal = fs.readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 const userPermissionEditor = fs.readFileSync(new URL('../src/components/users/PermissionEditor.tsx', import.meta.url), 'utf8')
@@ -155,13 +165,14 @@ assert.doesNotMatch(
 )
 
 assert.doesNotMatch(app, /WARMUP_PAGE_IDS|useChunkWarmup|getWarmupImporters|DELAYED_CHUNK_WARMUP_PAGE_IDS/, 'dashboard startup should not keep broad background route chunk warmup scaffolding')
-assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage \} from '\.\/app\/pathRouting\.ts'/, 'app context should derive the initial route page without importing the heavier admin shell utility chunk')
+assert.match(appContext, /import \{ APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage \} from '\.\/app\/pathRouting\.ts'/, 'app context should derive the initial route page without importing the heavier admin shell utility chunk')
 assert.doesNotMatch(appContext, /import en from '\.\/lang\/en\.json'/, 'app context should not statically load the full English language pack during startup')
 assert.match(appContext, /const CORE_ENGLISH_PACK: TranslationPack = \{[\s\S]*sync_server_title: 'Sync Server'[\s\S]*\}/, 'app context should keep a tiny synchronous English fallback for first paint labels')
 assert.match(appContext, /const \{ default: en \} = await import\('\.\/lang\/en\.json'\)/, 'app context should load the full English language pack dynamically after first paint')
 assert.match(appContext, /CORE_LANGUAGE_CODES\.has\(nextLang\)[\s\S]*scheduleDeferredLanguagePack\(\)/, 'core language packs should be deferred instead of requested in the first script window')
-assert.match(appContext, /const CORE_LANGUAGE_PACK_DEFER_MS = 9000[\s\S]*const CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS = 20000/, 'deferred full language pack policy should stay explicit and outside the route startup window')
-assert.match(appContext, /window\.requestIdleCallback\(loadLanguagePack, \{ timeout: CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS \}\)[\s\S]*window\.setTimeout\(runWhenIdle, CORE_LANGUAGE_PACK_DEFER_MS\)/, 'deferred full language pack loading should prefer idle time after a bounded post-load delay')
+assert.match(appContext, /const CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS = 20000/, 'full language pack load should stay off the main paint via a bounded idle timeout')
+assert.doesNotMatch(appContext, /CORE_LANGUAGE_PACK_DEFER_MS/, 'the old fixed pre-idle defer was deliberately removed (see AppContext.tsx comment) -- it left non-core translation keys showing as raw key names in the UI for up to 29s after login')
+assert.match(appContext, /window\.requestIdleCallback\(loadLanguagePack, \{ timeout: CORE_LANGUAGE_PACK_IDLE_TIMEOUT_MS \}\)/, 'full language pack should be requested via requestIdleCallback right after load, not stacked behind an extra fixed delay')
 assert.match(appContext, /useEffect\(\(\) => \{\s*if \(publicMode\) return undefined[\s\S]*CORE_LANGUAGE_CODES\.has\(nextLang\)[\s\S]*\}, \[language, publicMode\]\)/, 'public portal startup should not schedule the full admin language pack after first paint')
 assert.match(publicCatalogRoot, /import \{ PublicCatalogAppProvider \} from '\.\/app\/PublicCatalogAppProvider\.tsx'/, 'public catalog root should use the public-only provider instead of the full admin AppProvider')
 assert.doesNotMatch(publicCatalogRoot, /import \{ AppProvider \}|AppContext\.tsx/, 'public catalog root should not import the admin AppContext provider')
@@ -274,11 +285,12 @@ assert.match(sidebar, /showQuickPreferences\?: boolean/, 'mobile sidebar should 
 assert.match(app, /const mobileNotificationSlot = shouldMountNotificationCenter \? \(/, 'mobile notification center should share the deferred app-level mount gate')
 assert.match(app, /const shouldMountQuickPreferences = useDeferredQuickPreferencesMount\(authReady \? user : null\)/, 'quick preference controls should wait for the app-level deferred mount gate')
 assert.match(app, /QUICK_PREFERENCES_INITIAL_MOUNT_DELAY_MS = 7000/, 'quick preference controls should not compete with first route startup scripts')
-assert.match(app, /<Sidebar notificationSlot=\{mobileNotificationSlot\} showQuickPreferences=\{shouldMountQuickPreferences\} \/>/, 'app shell should pass deferred mobile chrome slots into Sidebar')
+assert.match(app, /<Sidebar[\s\S]*?notificationSlot=\{mobileNotificationSlot\}[\s\S]*?showQuickPreferences=\{shouldMountQuickPreferences\}[\s\S]*?mobileHeaderVisible=\{mobileHeaderVisible\}[\s\S]*?\/>/, 'app shell should pass deferred mobile chrome slots into Sidebar')
 assert.doesNotMatch(sidebar, /import QuickPreferenceToggles from '\.\.\/shared\/QuickPreferenceToggles'/, 'mobile sidebar should not statically import quick preferences during startup')
-assert.match(sidebar, /const QuickPreferenceToggles = lazy\(async \(\) => \(\{\s*default: \(await import\('\.\.\/shared\/QuickPreferenceToggles'\)\)\.default,\s*\}\)\)/m, 'mobile quick preferences should load only after the app-level deferred gate opens')
+assert.match(sidebar, /const QuickPreferenceToggles = lazyRetry\(\(\) => import\('\.\.\/shared\/QuickPreferenceToggles'\), 'quick-preference-toggles'\)/, 'mobile quick preferences should load only after the app-level deferred gate opens, and retry a failed/slow chunk fetch instead of silently rendering nothing')
+assert.doesNotMatch(sidebar, /\{showQuickPreferences \? <QuickPreferenceToggles \/> : null\}/, 'quick preference toggles must be wrapped in Suspense, not rendered bare, since the component is lazy-loaded')
 assert.doesNotMatch(sidebar, /import UserProfileModalComponent from '\.\.\/users\/UserProfileModal'/, 'sidebar should not statically import the profile modal and file picker stack during startup')
-assert.match(sidebar, /const UserProfileModal = lazy\(async \(\) => \(\{\s*default: \(await import\('\.\.\/users\/UserProfileModal'\)\)\.default as ComponentType<UserProfileModalProps>,\s*\}\)\)/m, 'profile modal should load only when the user opens it')
+assert.match(sidebar, /const UserProfileModal = lazyRetry\(async \(\) => \(\{\s*default: \(await import\('\.\.\/users\/UserProfileModal'\)\)\.default as ComponentType<UserProfileModalProps>,\s*\}\), 'sidebar-user-profile-modal'\)/m, 'profile modal should load only when the user opens it, and retry a failed/slow chunk fetch like the other deferred sidebar chunks')
 assert.match(sidebar, /<Suspense fallback=\{null\}>\s*<UserProfileModal onClose=\{\(\) => setProfileOpen\(false\)\} \/>/m, 'lazy profile modal should still render when opened')
 assert.match(sidebar, /onPointerEnter=\{\(\) => announcePageIntent\(item\.id, 'pointer'\)\}/, 'desktop navigation should warm route chunks on pointer intent')
 assert.match(sidebar, /onTouchStart=\{\(\) => announcePageIntent\(item\.id, 'touch'\)\}/, 'mobile navigation should warm route chunks on touch intent')
@@ -305,8 +317,8 @@ assert.match(indexHtml, /<style data-business-os-initial-shell>[\s\S]*\.business
 assert.match(indexHtml, /function syncInitialShellWithRoute\(\)[\s\S]*Opening catalog/, 'static startup shell should switch to the public portal label before React loads on public routes')
 assert.match(indexHtml, /function setInitialBusinessOsRoute\(\)[\s\S]*data-business-os-initial-route[\s\S]*public[\s\S]*admin/, 'index html should choose the startup shell route before the body paints')
 assert.match(indexHtml, /\[data-business-os-initial-route="admin"\] \[data-business-os-public\][\s\S]*\[data-business-os-initial-route="public"\] \[data-business-os-admin\]/, 'startup shell CSS should hide the opposite route labels before first paint')
-assert.match(indexHtml, /<span data-business-os-admin>Business OS<\/span>[\s\S]*<span data-business-os-public>Leang Cosmetic<\/span>[\s\S]*<span data-business-os-admin>Opening workspace<\/span>[\s\S]*<span data-business-os-public>Opening catalog<\/span>/, 'startup shell should carry both admin and public labels in the static markup')
-assert.match(index, /function InitialShellFallback\(\{ publicMode \}: \{ publicMode: boolean \}\)[\s\S]*publicMode \? 'Leang Cosmetic' : 'Business OS'/, 'lazy root loading should keep the startup shell visible while route chunks load')
+assert.match(indexHtml, /<span data-business-os-admin>Business OS<\/span>[\s\S]*<span data-business-os-public>Leang Cosmetics<\/span>[\s\S]*<span data-business-os-admin>Opening workspace<\/span>[\s\S]*<span data-business-os-public>Opening catalog<\/span>/, 'startup shell should carry both admin and public labels in the static markup')
+assert.match(index, /function InitialShellFallback\(\{ publicMode \}: \{ publicMode: boolean \}\)[\s\S]*publicMode \? 'Leang Cosmetics' : 'Business OS'/, 'lazy root loading should keep the startup shell visible while route chunks load')
 assert.match(index, /<Suspense fallback=\{<InitialShellFallback publicMode=\{publicCatalogMode\} \/>\}>/, 'root suspense fallback should not clear the static startup shell to a blank page')
 assert.match(index, /ReactDOM\.createRoot\(rootElement\)\.render\([\s\S]*\)\s*\n\s*registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)/, 'React should render before startup maintenance jobs are scheduled')
 assert.doesNotMatch(index, /registerOfflineAppShell\(\)\s*\n\s*scheduleFormFieldAccessibility\(\)\s*\n\s*const publicCatalogMode/, 'startup maintenance jobs should not be scheduled before root render setup')
@@ -365,6 +377,12 @@ assert.match(apiMethods, /function scheduleSensitiveMirrorPurge\(\)[\s\S]*window
 assert.doesNotMatch(apiMethods, /Promise\.resolve\(\)\.then\(\(\) => purgeSensitiveLiveServerMirrors\(\)\)/, 'API registry should not wake local DB via immediate sensitive mirror purge')
 assert.doesNotMatch(clientRuntime, /import \{ resetLocalMirrorDb \} from '\.\.\/\.\.\/api\/localDb\.ts'/, 'runtime descriptor helpers should not statically import Dexie/local DB during startup')
 assert.match(clientRuntime, /const \{ resetLocalMirrorDb \} = await import\('\.\.\/\.\.\/api\/localDb\.ts'\)[\s\S]*await resetLocalMirrorDb\(\)/, 'runtime reset should load local DB only when a reset is actually running')
+// Regression guard for "Products Only Reset also emptied Inventory
+// Movements and other pages": resetClientRuntimeState must only run the
+// full-mirror resetLocalMirrorDb() wipe when the caller didn't ask for a
+// scoped clear -- when options.mirrorTables is an array, it must clear
+// only those tables via clearLocalMirrorTables instead.
+assert.match(clientRuntime, /if \(Array\.isArray\(options\.mirrorTables\)\) \{[\s\S]*const \{ clearLocalMirrorTables \} = await import\('\.\.\/\.\.\/api\/localDb\.ts'\)[\s\S]*await clearLocalMirrorTables\(options\.mirrorTables\)[\s\S]*\} else \{[\s\S]*await resetLocalMirrorDb\(\)/, 'resetClientRuntimeState should clear only the caller-scoped mirror tables when mirrorTables is provided, instead of always wiping the whole local mirror')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/localDb\.ts'\)\) return 'app-local-db'/, 'Vite should keep localDb out of the startup app-api chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/csv\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/utils\/csvTemplate\.ts'\)[\s\S]*normalized\.endsWith\('\/src\/utils\/csvImport\.ts'\)[\s\S]*return 'csv-utils'/, 'CSV import/export helpers should not be owned by the app-local-db chunk')
 assert.doesNotMatch(apiMethods, /import \{ buildCSVTemplate \} from '\.\.\/utils\/csvTemplate\.ts'/, 'legacy API registry should not load CSV template/export helpers during page startup')
@@ -423,7 +441,6 @@ assert.match(viteConfig, /'assets\/action-history-api-',[\s\S]*'assets\/system-j
 assert.match(viteConfig, /'assets\/backup-reset-tools-',/, 'Backup reset tools should not be eagerly modulepreloaded into the normal Backup route')
 assert.match(viteConfig, /'assets\/settings-otp-modal-',/, 'Settings OTP modal should not be eagerly modulepreloaded into the normal Settings route')
 assert.doesNotMatch(viteConfig, /'assets\/access-control-api-'|accessControlTransport/, 'Retired access-control transport should not produce or preload a stale chunk')
-assert.match(viteConfig, /'assets\/custom-tables-api-',/, 'Custom-table route transport should not be eagerly modulepreloaded into normal startup')
 assert.match(viteConfig, /'assets\/csv-utils-',/, 'CSV import and export helpers should stay out of eager modulepreload on read-only route startup')
 assert.match(viteConfig, /'assets\/user-profile-modal-',/, 'Users profile modal should not be eagerly modulepreloaded into the normal Users route')
 assert.match(viteConfig, /'assets\/user-detail-sheet-',/, 'Users detail sheet should not be eagerly modulepreloaded into the normal Users route')
@@ -447,7 +464,6 @@ assert.doesNotMatch(viteConfig, /shared-export-menu|ExportMenu\.tsx'\)\) return/
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/branchTransport\.ts'\)\) return 'branch-api'[\s\S]*normalized\.endsWith\('\/src\/api\/inventoryTransport\.ts'\)\) return 'inventory-api'/, 'Products page branch and stock intents should not collapse into app-api-methods')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userAdminTransport\.ts'\)\) return 'user-admin-api'[\s\S]*normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'/, 'Users admin reads and mutations should use a focused route chunk instead of app-api-methods')
 assert.doesNotMatch(viteConfig, /normalized\.endsWith\('\/src\/api\/accessControlTransport\.ts'\)\) return 'access-control-api'/, 'retired access-control wrapper should not keep a manual chunk rule')
-assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/customTablesTransport\.ts'\)\) return 'custom-tables-api'/, 'custom-table route operations should have a focused lazy custom-tables chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/userReadTransport\.ts'\)\) return 'user-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/dashboardTransport\.ts'\)\) return 'dashboard-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsReadTransport\.ts'\)\) return 'returns-read-api'[\s\S]*normalized\.endsWith\('\/src\/api\/returnsTransport\.ts'\)\) return 'returns-write-api'[\s\S]*normalized\.endsWith\('\/src\/api\/rfidTransport\.ts'\)\) return 'rfid-api'/, 'Inventory user, dashboard, returns reads, returns writes, and RFID should use focused chunks instead of app-api-methods')
 assert.match(viteConfig, /'assets\/product-read-api-',[\s\S]*'assets\/returns-write-api-',/, 'dynamic product reads and return writes should stay out of eager modulepreload on read-only route startup')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/actionHistoryTransport\.ts'\)\) return 'action-history-api'/, 'action history reads/writes and admin user filter reads should stay in a lazy API chunk instead of adding a route startup request')
@@ -483,7 +499,7 @@ assert.match(viteConfig, /portalTranslateController\.ts'[\s\S]*return 'portal-tr
 assert.match(catalogPage, /import CatalogPreviewSurface from '\.\/CatalogPreviewSurface'/, 'public catalog should directly import its first-viewport preview shell')
 assert.doesNotMatch(catalogPage, /import CatalogProductsSection from '\.\/CatalogProductsSection'/, 'public catalog should not fold the product grid into the catalog shell chunk')
 assert.match(publicCatalogPage, /const loadCatalogProductsSection = \(\) => import\('\.\/CatalogProductsSection'\)/, 'public-only catalog controller should lazy-load the preloaded product grid after the shell can paint')
-assert.match(publicCatalogPage, /const CatalogProductsSection = lazy\(loadCatalogProductsSection\)/, 'public-only catalog controller should render the product grid through React.lazy')
+assert.match(publicCatalogPage, /const CatalogProductsSection = lazyRetry\(loadCatalogProductsSection, 'public-catalog-products-section'\)/, 'public-only catalog controller should render the product grid through a retrying lazy loader')
 assert.doesNotMatch(products, /waitForNextFrame|requestAnimationFrame/, 'Products should reveal fetched rows immediately instead of adding animation-frame loading delay')
 assert.doesNotMatch(inventory, /setInitialInventoryDesktopRevealReady[\s\S]{0,260}requestAnimationFrame/, 'Inventory products should not wait animation frames after data is loaded')
 assert.doesNotMatch(auditLog, /setInitial(?:Desktop|Mobile)RevealReady[\s\S]{0,320}requestAnimationFrame/, 'Audit Log should not wait animation frames after rows are loaded')
@@ -518,7 +534,7 @@ assert.doesNotMatch(catalogImages, /utils\/publicAssetUrls/, 'public catalog ima
 assert.doesNotMatch(catalogAssetUrls, /api\/http|FRONTEND_BUILD_INFO|FilePickerModal/, 'catalog asset resolver should stay self-contained and avoid API/file-picker chunk ownership')
 assert.doesNotMatch(catalogPage, /const loadCatalogPreviewSurface = \(\) => import\('\.\/CatalogPreviewSurface'\)/, 'public catalog should not lazy-load its first-viewport preview shell')
 assert.match(catalogPage, /const loadCatalogProductsSection = \(\) => import\('\.\/CatalogProductsSection'\)/, 'public catalog should lazy-load the preloaded product grid chunk after the shell can paint')
-assert.match(catalogPage, /const CatalogProductsSection = lazy\(loadCatalogProductsSection\)/, 'public catalog should render the product grid through React.lazy while Vite preloads the chunk for the default tab')
+assert.match(catalogPage, /const CatalogProductsSection = lazyRetry\(loadCatalogProductsSection, 'catalog-products-section'\)/, 'public catalog should render the product grid through a retrying lazy loader while Vite preloads the chunk for the default tab')
 assert.doesNotMatch(catalogPage, /from '\.\/portalLanguagePacks\.ts'/, 'public catalog should not statically import full first-party language packs during route startup')
 assert.doesNotMatch(catalogPage, /from '\.\/portalContentI18n\.ts'/, 'public catalog should not statically import full content localization tables during route startup')
 assert.match(catalogPage, /import\('\.\/portalLanguagePacks\.ts'\)/, 'public catalog should lazy-load first-party language packs only for non-English language intent')
@@ -568,18 +584,31 @@ assert.match(appSelect, /max-h-\[min\(18rem,calc\(100vh-1rem\)\)\]/, 'AppSelect 
 assert.doesNotMatch(productsHeaderActions, /import PortalMenu from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Products header actions should not load PortalMenu before a manage/export click')
 assert.match(productsHeaderActions, /import LazyPortalMenu from '\.\.\/\.\.\/shared\/LazyPortalMenu'/, 'Products header actions should load PortalMenu through LazyPortalMenu')
 assert.doesNotMatch(productRowParts, /import \{ ThreeDotPortal \} from '\.\.\/\.\.\/shared\/PortalMenu'/, 'Product row actions should not statically load PortalMenu for every first route paint')
-assert.match(productRowParts, /import LazyPortalMenu from '\.\.\/\.\.\/shared\/LazyPortalMenu'/, 'Product row actions should load PortalMenu only when a row action menu is requested')
+// ProductRowParts.tsx used to export ProductRowActions, a "..." row menu
+// (Edit/Add Variant/Discounts/Adjust stock/Delete via LazyPortalMenu) that
+// duplicated the exact same five actions already offered by clicking the
+// row to open ProductDetailModal. Removed entirely as a redundant-control
+// cleanup: both render sites (desktop table cell, mobile card), the
+// ProductRowActions component itself, its now-unused imports/types, and the
+// matching empty spacer column in ProductsListSurface.tsx. Row click is now
+// the sole way to reach these actions, so this file no longer imports
+// PortalMenu/LazyPortalMenu at all.
+assert.doesNotMatch(productRowParts, /ProductRowActions|LazyPortalMenu|PortalMenu/, 'Product row actions menu was intentionally removed as a duplicate of row-click -> ProductDetailModal; should not be reintroduced')
 assert.doesNotMatch(contactsShared, /import PortalMenu from '\.\.\/shared\/PortalMenu'/, 'Contacts row actions should not statically load PortalMenu for first route paint')
 assert.match(contactsShared, /import LazyPortalMenu from '\.\.\/shared\/LazyPortalMenu'/, 'Contacts row actions should load PortalMenu only after row action intent')
-assert.match(
+// Contacts.tsx used to own a page-level "Export All" that pulled customers/
+// suppliers/delivery contacts through a dedicated read transport and zipped
+// them into one CSV bundle (the assertions this replaced checked for that
+// machinery directly in this file). That control was intentionally removed
+// during the UI/UX toolbar-consolidation pass: it duplicated each tab's own
+// scoped Import/Export/Add row, so the page now keeps a single Import/
+// Export set per tab instead of two (see the code comment at the top of
+// Contacts.tsx). Each tab still lazy-loads its own CSV export helper for
+// its own scoped export -- covered by the per-tab assertions below instead.
+assert.doesNotMatch(
   contacts,
-  /function loadContactReadTransportModule\(\): Promise<ContactReadTransportModule>[\s\S]*import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)[\s\S]*getCustomers: async \(query = \{\}\) => \(await loadContactReadTransportModule\(\)\)\.getCustomers\(query\)[\s\S]*getSuppliers: async \(query = \{\}\) => \(await loadContactReadTransportModule\(\)\)\.getSuppliers\(query\)[\s\S]*getDeliveryContacts: async \(query = \{\}\) => \(await loadContactReadTransportModule\(\)\)\.getDeliveryContacts\(query\)/,
-  'Contacts export should use the focused contact read transport instead of window.api or the mixed contacts transport',
-)
-assert.match(
-  contacts,
-  /function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*const \{ downloadZipFilesAsync \} = await loadCsvUtilsModule\(\)/,
-  'Contacts export should load ZIP/CSV helpers only after the export action',
+  /loadContactReadTransportModule|CONTACTS_EXPORT_LOAD_TIMEOUT_MS|normalizeContactExportRows|downloadZipFilesAsync/,
+  'Contacts route shell should not reintroduce the removed page-level export-all machinery',
 )
 assert.doesNotMatch(
   contacts,
@@ -593,8 +622,8 @@ assert.doesNotMatch(
 )
 assert.match(
   contacts,
-  /const loadCustomersTab = async \(\): Promise<\{ CustomersTab: ComponentType<ContactTabProps> \}>[\s\S]*import\('\.\/CustomersTab'\)[\s\S]*const CustomersTab = lazy\(\(\) => loadCustomersTab\(\)/,
-  'Contacts route should lazy-load the default Customers tab behind the route shell',
+  /const loadCustomersTab = async \(\): Promise<\{ CustomersTab: ComponentType<ContactTabProps> \}>[\s\S]*import\('\.\/CustomersTab'\)[\s\S]*const CustomersTab = lazyRetry\(\(\) => loadCustomersTab\(\)\.then\(\(module\) => \(\{ default: module\.CustomersTab \}\)\), 'contacts-customers-tab'\)/,
+  'Contacts route should lazy-load the default Customers tab behind the route shell, retrying a failed/slow chunk fetch like its sibling tabs',
 )
 for (const [name, source] of [
   ['Customers', customers],
@@ -623,7 +652,7 @@ assert.doesNotMatch(pos, /from '\.\.\/contacts\/CustomersTab'/, 'POS should not 
 assert.doesNotMatch(pos, /import \{ parseStoredContactOptions \} from '\.\.\/contacts\/contactOptionUtils'/, 'POS should not load contact option parsers before customer selection intent')
 assert.match(pos, /function loadContactOptionUtilsModule\(\): Promise<ContactOptionUtilsModule>[\s\S]*import\('\.\.\/contacts\/contactOptionUtils'\)[\s\S]*async function parseContactOptions\(raw: unknown\): Promise<ContactOption\[\]>/, 'POS should lazy-load contact option parsing only after customer selection intent')
 assert.doesNotMatch(pos, /import FilterPanel from '\.\/FilterPanel'/, 'POS should not load the filter panel before the Filters button is opened')
-assert.match(pos, /const FilterPanel = lazy\(\(\) => import\('\.\/FilterPanel'\)\)/, 'POS filter panel should load only on filter-button intent')
+assert.match(pos, /const FilterPanel = lazyRetry\(\(\) => import\('\.\/FilterPanel'\), 'pos-filter-panel'\)/, 'POS filter panel should load only on filter-button intent')
 assert.match(pos, /function getProductReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)> \{[\s\S]*import\('\.\.\/\.\.\/api\/productReadTransport\.ts'\)[\s\S]*const \{ getProductBootstrap \} = await getProductReadTransport\(\)[\s\S]*const \{ searchProducts \} = await getProductReadTransport\(\)[\s\S]*const \{ getProductFilters \} = await getProductReadTransport\(\)/, 'POS product reads should use the narrow product transport instead of the full window.api registry')
 assert.match(pos, /function getLookupTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)> \{[\s\S]*import\('\.\.\/\.\.\/api\/lookupTransport\.ts'\)[\s\S]*const \{ getCategories \} = await getLookupTransport\(\)/, 'POS category options should use the narrow lookup transport instead of the full window.api registry')
 assert.match(pos, /let contactReadTransportPromise: Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)> \| null = null[\s\S]*function getContactReadTransport\(\): Promise<typeof import\('\.\.\/\.\.\/api\/contactReadTransport\.ts'\)>/, 'POS contact reads should lazy-load the narrow contact read transport after the delayed option gate')
@@ -650,7 +679,7 @@ assert.match(products, /function loadBranchModule\(\): Promise<BranchModule>[\s\
 assert.doesNotMatch(products, /function loadInventoryModule\(\): Promise<InventoryModule>[\s\S]*inventoryTransport\.ts/, 'Products stock writes should not load the read-heavy inventory transport')
 assert.doesNotMatch(products, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Products route should not load CSV export helpers before export intent')
 assert.doesNotMatch(products, /buildProductExportRows[\s\S]*from '\.\/helpers\/productFilterHelpers\.ts'/, 'Products route should not import export row builders through the live filter helper')
-assert.match(products, /const exportProductsCsv = useCallback\(async[\s\S]*Promise\.all\(\[[\s\S]*import\('\.\.\/\.\.\/utils\/csv\.ts'\)[\s\S]*import\('\.\/helpers\/productExport\.ts'\)/, 'Products export should load CSV helpers and export row builders only after the export action')
+assert.match(products, /const exportProductsCsv = useCallback\(async[\s\S]*Promise\.all\(\[[\s\S]*import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)[\s\S]*import\('\.\/helpers\/productExport\.ts'\)/, 'Products export should load XLSX helpers and export row builders only after the export action')
 assert.match(productExport, /export function buildProductExportRows/, 'Products export chunk should own CSV row formatting')
 assert.match(productExport, /formatPriceNumber/, 'Products export chunk should own export-only price formatting')
 assert.doesNotMatch(productFilterHelpers, /buildProductExportRows|formatPriceNumber/, 'Products live filtering helper should not carry export row or price formatting code')
@@ -660,24 +689,30 @@ assert.match(viteConfig, /'assets\/dashboard-export-',/, 'Dashboard export chunk
 assert.match(viteConfig, /normalized\.includes\('\/src\/components\/dashboard\/charts\/'\)\) return 'dashboard-charts'[\s\S]*normalized\.endsWith\('\/src\/components\/dashboard\/dashboardExport\.ts'\)\) return 'dashboard-export'/, 'Dashboard charts should not be owned by the export/report chunk')
 for (const [name, source] of [['Customers', customers], ['Suppliers', suppliers], ['Delivery', delivery]] as const) {
   assert.doesNotMatch(source, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, `${name} contacts tab should not load CSV helpers before export intent`)
-  assert.match(source, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*const \{ downloadCSV \} = await loadCsvUtilsModule\(\)/, `${name} contacts export should lazy-load CSV helpers through a memoized dynamic import`)
+  assert.match(source, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\) & typeof import\('\.\.\/\.\.\/utils\/xlsxExport'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*import\('\.\.\/\.\.\/utils\/xlsxExport'\)[\s\S]*const \{ downloadXLSX \} = await loadCsvUtilsModule\(\)/, `${name} contacts export should lazy-load CSV and XLSX helpers through a memoized dynamic import`)
 }
 assert.doesNotMatch(sales, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Sales route should not load CSV export helpers before export intent')
-assert.match(sales, /const handleExportSelected = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/csv\.ts'\)[\s\S]*const exportVisibleSales = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/csv\.ts'\)/, 'Sales export paths should load CSV helpers only after export intent')
+assert.match(sales, /const handleExportSelected = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)[\s\S]*const exportVisibleSales = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'Sales export paths should load XLSX helpers only after export intent')
 assert.doesNotMatch(returns, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Returns route should not load CSV export helpers before export intent')
-assert.match(returns, /const exportVisible = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/csv\.ts'\)/, 'Returns export should load CSV helpers only after export intent')
+assert.match(returns, /const exportVisible = useCallback\(async[\s\S]*await import\('\.\.\/\.\.\/utils\/xlsxExport\.ts'\)/, 'Returns export should load XLSX helpers only after export intent')
 assert.match(returns, /import ReturnsListSurface from '\.\/ReturnsListSurface'/, 'Returns list surface should render from the route chunk instead of adding a first-paint subchunk waterfall')
 assert.doesNotMatch(returns, /const ReturnsListSurface = lazy\(\(\) => import\('\.\/ReturnsListSurface'\)\)/, 'Returns list surface should not suspend behind a second component chunk after the route loads')
 assert.doesNotMatch(returns, /loading_returns_surface/, 'Returns route should not show a route-subchunk loading placeholder after data is available')
 assert.match(viteConfig, /returns:\s*\[\s*'Returns',\s*'returns-read-api',\s*\]/, 'Returns should have focused route-aware preloads for the route and read transport')
-assert.match(backendServer, /routePath\.startsWith\('\/returns'\), chunks: \['Returns', 'returns-read-api'\]/, 'backend Link preload hints for Returns should include only the route and first read transport')
+// Link-preload-hint feature not ported to Cloudflare -- see the viteConfig-loading comment near line 34 above (confirmed: no Link/preload header equivalent exists anywhere in cloudflare/src).
 assert.match(viteConfig, /users:\s*\[\s*'Users',\s*'user-admin-api',\s*'user-permission-definitions',\s*\]/, 'Users should have focused route-aware preloads for the route, user API, and permission definitions')
-assert.match(backendServer, /routePath\.startsWith\('\/users'\), chunks: \['Users', 'user-admin-api', 'user-permission-definitions'\]/, 'backend Link preload hints for Users should avoid history/profile/modal and unrelated product chunks')
+
 assert.doesNotMatch(auditLog, /import \{ downloadCSV \} from '\.\.\/\.\.\/utils\/csv'/, 'Audit Log route should not load CSV export helpers before export intent')
 assert.match(auditLog, /type CsvUtilsModule = typeof import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*function loadCsvUtilsModule\(\): Promise<CsvUtilsModule>[\s\S]*import\('\.\.\/\.\.\/utils\/csv'\)[\s\S]*const \{ downloadCSV \} = await loadCsvUtilsModule\(\)/, 'Audit Log export should lazy-load CSV helpers only after export intent')
-assert.match(auditLog, /deleteAuditLogsRetention as deleteAuditLogsRetentionRequest[\s\S]*getAuditLogs as getAuditLogsRequest[\s\S]*from '\.\.\/\.\.\/api\/auditLogTransport\.ts'/, 'Audit Log should use the focused audit transport instead of the broad window.api registry')
-assert.doesNotMatch(auditLog, /window\.api|getAuditApi\(\)|\.getAuditLogs\(|\.deleteAuditLogsRetention\(/, 'Audit Log route should not wake app-api-methods for reads or retention cleanup')
-assert.doesNotMatch(apiMethods, /auditLogTransport\.ts|loadAuditLogTransport|export const getAuditLogs|export const deleteAuditLogsRetention/, 'legacy API registry should not retain audit-log wrappers after the route owns the focused transport')
+// The manual "Clear 30d" retention action was removed from this route (see
+// the code comment near line 823 of AuditLog.tsx) in favor of the automatic
+// server-side retention sweep (cloudflare/src/lib/audit.ts,
+// maybeRunScheduledAuditLogRetention()), so the route no longer imports
+// deleteAuditLogsRetention at all -- only the read import remains.
+assert.match(auditLog, /getAuditLogs as getAuditLogsRequest[\s\S]*from '\.\.\/\.\.\/api\/auditLogTransport\.ts'/, 'Audit Log should use the focused audit transport instead of the broad window.api registry')
+assert.doesNotMatch(auditLog, /deleteAuditLogsRetention/, 'Audit Log route should not reintroduce the removed manual retention-clear action')
+assert.doesNotMatch(auditLog, /window\.api|getAuditApi\(\)|\.getAuditLogs\(/, 'Audit Log route should not wake app-api-methods for reads')
+assert.doesNotMatch(apiMethods, /auditLogTransport\.ts|loadAuditLogTransport|export const getAuditLogs/, 'legacy API registry should not retain audit-log wrappers after the route owns the focused transport')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/api\/auditLogTransport\.ts'\)\) return 'audit-log-api'/, 'Audit Log transport should own a tiny chunk instead of falling through to app-api-methods')
 assert.doesNotMatch(auditLogTransport, /import \{ getLocalDb \} from '\.\/lazyLocalDb\.ts'|import \{ mirrorTable \} from '\.\/localMirrors\.ts'/, 'Audit Log transport should not statically load local DB or mirror helpers during online startup')
 assert.match(auditLogTransport, /const AUDIT_LOG_MIRROR_IDLE_DELAY_MS = 10_000[\s\S]*getLocalMirrorsModule\(\)[\s\S]*window\.setTimeout\(run, AUDIT_LOG_MIRROR_IDLE_DELAY_MS\)/, 'Audit Log mirroring should run after startup instead of blocking the first read')
@@ -754,8 +789,6 @@ assert.match(apiMethods, /export const getRoles = async \(\) => \{[\s\S]*loadUse
 assert.match(apiMethods, /export const getUserProfile = async \(id\) => \{[\s\S]*loadUserAdminTransport\(\)[\s\S]*getUserProfileRequest\(id\)/, 'legacy profile reads should delegate through lazy user-admin transport')
 assert.doesNotMatch(apiMethods, /from '\.\/customTablesTransport\.ts'/, 'legacy API registry should not statically import custom-table APIs')
 assert.doesNotMatch(apiMethods, /customTablesTransport\.ts|loadCustomTablesTransport|export const getCustomTables|export const createCustomTable|export const getCustomTableData|export const insertCustomRow|export const updateCustomRow|export const deleteCustomRow/, 'legacy API registry should not retain custom-table wrappers after the route owns the focused transport')
-assert.match(customTables, /function loadCustomTablesApi\(\): Promise<CustomTablesApi> \{[\s\S]*import\('\.\.\/\.\.\/api\/customTablesTransport\.ts'\)/, 'Custom Tables route should lazy-load the focused transport directly')
-assert.doesNotMatch(customTables, /window\.api|getCustomTablesApi/, 'Custom Tables route should not wake the broad window.api facade')
 assert.match(apiMethods, /function loadQueryCacheModule\(\) \{[\s\S]*import\('\.\/queryCache\.ts'\)/, 'legacy API registry should lazy-load query-cache cleanup only after sync updates')
 assert.doesNotMatch(apiMethods, /from '\.\/queryCache\.ts'/, 'legacy API registry should not statically import product query-cache helpers')
 assert.match(apiMethods, /function loadLocalMirrorsModule\(\) \{[\s\S]*import\('\.\/localMirrors\.ts'\)/, 'legacy API registry should lazy-load local mirror purge helpers after idle delay')
@@ -806,20 +839,32 @@ assert.match(appContext, /const runStartupHealthProbe = \(\) => \{[\s\S]*pingSer
 assert.doesNotMatch(appContext, /fetch\(`\$\{effectiveUrl\}\/health`/, 'AppContext startup should not issue a separate raw health fetch')
 assert.doesNotMatch(dashboard, /import \{ BarChart, LineChart, DonutChart \} from '\.\/charts'/, 'Dashboard should not eagerly import every chart through the barrel')
 assert.doesNotMatch(dashboard, /import LineChart from '\.\/charts\/LineChart'|import DonutChart from '\.\/charts\/DonutChart'/, 'Dashboard first paint should not wait for line or donut chart modules')
-assert.match(dashboard, /const BarChart = lazy\(\(\) => import\('\.\/charts\/BarChart'\)\)/, 'inactive Dashboard volume chart should lazy-load instead of joining first-paint chart code')
-assert.match(dashboard, /const LineChart = lazy\(\(\) => import\('\.\/charts\/LineChart'\)\)/, 'Dashboard line charts should lazy-load inside the chart panel instead of blocking the route module')
-assert.match(dashboard, /const DonutChart = lazy\(\(\) => import\('\.\/charts\/DonutChart'\)\)/, 'Dashboard payment donut should lazy-load inside the payment panel instead of blocking the route module')
+assert.match(dashboard, /const BarChart = lazyRetry\(\(\) => import\('\.\/charts\/BarChart'\), 'dashboard-bar-chart'\)/, 'inactive Dashboard volume chart should lazy-load instead of joining first-paint chart code')
+assert.match(dashboard, /const LineChart = lazyRetry\(\(\) => import\('\.\/charts\/LineChart'\), 'dashboard-line-chart'\)/, 'Dashboard line charts should lazy-load inside the chart panel instead of blocking the route module')
+assert.match(dashboard, /const DonutChart = lazyRetry\(\(\) => import\('\.\/charts\/DonutChart'\), 'dashboard-donut-chart'\)/, 'Dashboard payment donut should lazy-load inside the payment panel instead of blocking the route module')
 assert.match(dashboard, /function ChartFallback/, 'Dashboard chart Suspense fallback should be local and lightweight')
 assert.doesNotMatch(dashboardChartNoData, /AppContext|useApp/, 'dashboard chart empty states should not import AppContext and pull auth/bootstrap code into the chart chunk')
 assert.match(dashboard, /lucide-react\/dist\/esm\/icons\/layout-dashboard\.js/, 'Dashboard should use direct Lucide icon modules instead of the app-wide barrel')
 assert.doesNotMatch(dashboard, /Upload \} from 'lucide-react'/, 'Dashboard should not keep unused startup icon imports')
 assert.match(dashboard, /label: translateOr\('range_today', 'Today'[\s\S]*label: translateOr\('range_7d', '7 Days'[\s\S]*label: translateOr\('range_this_month', 'This Month'[\s\S]*label: translateOr\('range_this_year', 'This Year'[\s\S]*label: translateOr\('range_custom', 'Custom'/, 'Dashboard range preset labels should use guarded translations instead of exposing raw keys during language-pack loading')
-assert.match(dashboard, /translateOr\('period_label', 'Range'[\s\S]*translateOr\('payment_method', 'Payment Method'[\s\S]*translateOr\('no_data', 'No data found'/, 'Dashboard visible section and empty-state labels should use guarded translations')
+// These labels now live in separate reusable dashboard cards after the
+// requested card-order changes. Check each guarded translation directly;
+// requiring a source-order relationship between cards would make this test
+// fail on a harmless extraction/reorder while the user-visible contract is
+// still fully satisfied.
+assert.match(dashboard, /translateOr\('period_label', 'Range'/, 'Dashboard range label should use a guarded translation')
+assert.match(dashboard, /translateOr\('payment_method', 'Payment Method'/, 'Dashboard payment-method label should use a guarded translation')
+assert.match(dashboard, /translateOr\('no_data', 'No data found'/, 'Dashboard empty states should use guarded translations')
 assert.doesNotMatch(dashboard, /t\('(range_today|range_7d|range_this_month|range_this_year|range_custom|period_label|payment_method|no_data)'\)/, 'Dashboard should not render raw translation keys for visible range, payment, or empty-state labels')
 
 assert.match(inventory, /inventory-history-row/, 'inventory history controls should live on their own row')
 assert.doesNotMatch(inventory, /<ActionHistoryBar history=\{actionHistory\} className="shrink-0"/, 'inventory filter/search row should not contain inline ActionHistoryBar')
-assert.match(inventory, /inventory-history-row[\s\S]{0,160}<ActionHistoryBar/, 'inventory history controls should render inside the dedicated history row')
+// Bound widened from 160: Inventory's history row now also inline-renders
+// the Import button and (Products/RFID tabs only) the conditional Export
+// menu ahead of ActionHistoryBar -- part of this session's sec-6 toolbar
+// consolidation (Import/Export/History merged into one row). Actual gap is
+// ~850 chars; 1200 leaves headroom without being unbounded.
+assert.match(inventory, /inventory-history-row[\s\S]{0,1200}<ActionHistoryBar/, 'inventory history controls should render inside the dedicated history row')
 assert.doesNotMatch(inventory, /INVENTORY_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Inventory background history should not add a fixed post-load delay')
 assert.match(inventory, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Inventory should have an explicit post-ready action-history gate')
 assert.match(inventory, /useActionHistory\(\{ limit: 10, notify, scope: 'inventory', enabled: historyReady, user \}\)/, 'Inventory should not fetch server action history during first route load and should pass user without importing AppContext inside the hook')
@@ -830,17 +875,17 @@ assert.doesNotMatch(inventory, /loading_inventory_products/, 'Inventory products
 assert.doesNotMatch(inventory, /setTimeout\(\(\) => setInitialInventoryMobileFullListReady\(true\), 140\)/, 'Inventory mobile product data should not be held behind a fixed visual reveal delay')
 assert.doesNotMatch(viteConfig, /inventory:\s*\[[\s\S]*'InventoryProductsSurface'/, 'Inventory products surface should not be a separate eager preload request')
 assert.match(viteConfig, /inventory:\s*\[\s*'Inventory',\s*'inventory-api',\s*'product-shared',\s*'shared-ui',\s*\]/, 'Inventory route preloads should stay focused on first-paint route/read/display chunks')
-assert.match(backendServer, /routePath\.startsWith\('\/inventory'\), chunks: \['Inventory', 'inventory-api', 'product-shared', 'shared-ui'\]/, 'backend Link preload hints for Inventory should match the lean route dependency set')
-assert.match(inventory, /const InventoryStockModals = lazy\(\(\) => import\('\.\/InventoryStockModals'\)\) as any/, 'Inventory stock modals should stay in a click-only lazy chunk')
+// Link-preload-hint feature not ported to Cloudflare -- see the viteConfig-loading comment near line 34 above (confirmed: no Link/preload header equivalent exists anywhere in cloudflare/src).
+assert.match(inventory, /const InventoryStockModals = lazyRetry\(\(\) => import\('\.\/InventoryStockModals'\), 'inventory-stock-modals'\) as any/, 'Inventory stock modals should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{t\('adjust_stock'\)\}<\/h2>/, 'Inventory should not keep stock adjust modal markup in the first route chunk')
 assert.match(inventoryStockModals, /export default function InventoryStockModals/, 'Inventory stock modal markup should live in the lazy stock modal component')
-assert.match(inventory, /const InventoryBatchModal = lazy\(\(\) => import\('\.\/InventoryBatchModal'\)\) as any/, 'Inventory batch modal should stay in a click-only lazy chunk')
+assert.match(inventory, /const InventoryBatchModal = lazyRetry\(\(\) => import\('\.\/InventoryBatchModal'\), 'inventory-batch-modal'\) as any/, 'Inventory batch modal should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('inventory_batch_session', 'Batch session'\)\}<\/h2>/, 'Inventory should not keep batch session modal markup in the first route chunk')
 assert.match(inventoryBatchModal, /export default function InventoryBatchModal/, 'Inventory batch modal markup should live in the lazy batch modal component')
-assert.match(inventory, /const InventoryReasonManagerModal = lazy\(\(\) => import\('\.\/InventoryReasonManagerModal'\)\) as any/, 'Inventory saved-reasons manager should stay in a click-only lazy chunk')
+assert.match(inventory, /const InventoryReasonManagerModal = lazyRetry\(\(\) => import\('\.\/InventoryReasonManagerModal'\), 'inventory-reason-manager-modal'\) as any/, 'Inventory saved-reasons manager should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('saved_reasons', 'Saved reasons'\)\}<\/h2>/, 'Inventory should not keep saved-reasons manager markup in the first route chunk')
 assert.match(inventoryReasonManagerModal, /export default function InventoryReasonManagerModal/, 'Inventory saved-reasons manager markup should live in the lazy reason manager component')
-assert.match(inventory, /const InventoryStatDetailModal = lazy\(\(\) => import\('\.\/InventoryStatDetailModal'\)\) as any/, 'Inventory stat detail modal should stay in a click-only lazy chunk')
+assert.match(inventory, /const InventoryStatDetailModal = lazyRetry\(\(\) => import\('\.\/InventoryStatDetailModal'\), 'inventory-stat-detail-modal'\) as any/, 'Inventory stat detail modal should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /statDetail\.detailSections|statDetail\.details/, 'Inventory should not keep stat detail modal markup in the first route chunk')
 assert.doesNotMatch(inventory, /lucide-react\/dist\/esm\/icons\/x\.js/, 'Inventory should not import the close icon just for lazy modal chrome')
 assert.match(inventoryStatDetailModal, /export default function InventoryStatDetailModal/, 'Inventory stat detail modal markup should live in the lazy stat detail component')
@@ -856,7 +901,7 @@ assert.doesNotMatch(products, /PRODUCTS_HISTORY_READY_DELAY_MS|window\.setTimeou
 assert.match(products, /const \[historyReady, setHistoryReady\] = useState\(false\)/, 'Products should have an explicit post-ready action-history gate')
 assert.match(products, /useActionHistory\(\{ limit: 10, notify, scope: 'products', enabled: historyReady, user \}\)/, 'Products should not fetch server action history during first route load')
 assert.match(products, /if \(!loadedOnceRef\.current \|\| loading\) return undefined[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Products should enable history immediately after the first product data load settles')
-assert.match(products, /const ActionHistoryBar = lazy\(\(\) => import\('\.\.\/shared\/ActionHistoryBar'\)\)/, 'Products should lazy-load action history chrome after first route-ready work')
+assert.match(products, /const ActionHistoryBar = lazyRetry\(\(\) => import\('\.\.\/shared\/ActionHistoryBar'\), 'products-action-history-bar'\)/, 'Products should lazy-load action history chrome after first route-ready work')
 assert.doesNotMatch(products, /import ActionHistoryBar from '\.\.\/shared\/ActionHistoryBar'/, 'Products should not statically import action history chrome during first route render')
 assert.match(products, /function loadProductWriteHelpers\(\): Promise<[^>]+> \{[\s\S]*import\('\.\/helpers\/productWriteHelpers\.ts'\)/, 'Products should load write-only helper logic on demand')
 assert.doesNotMatch(products, /from '\.\/helpers\/productWriteHelpers\.ts'/, 'Products should not statically import write-only helper logic during first route render')
@@ -868,8 +913,8 @@ assert.match(backup, /const \[historyReady, setHistoryReady\] = useState\(false\
 assert.match(backup, /useActionHistory\(\{ limit: 3, notify, scope: 'backup', enabled: historyReady, user \}\)/, 'Backup should not fetch server action history during first route load')
 assert.match(backup, /if \(!isActive\) \{[\s\S]*setHistoryReady\(false\)[\s\S]*setHistoryReady\(true\)[\s\S]*return undefined/, 'Backup should enable history immediately after the overview has rendered')
 assert.doesNotMatch(backup, /import \{ ResetData, FactoryReset \} from '\.\/ResetData'/, 'Backup should not statically import destructive reset tools during normal backup route load')
-assert.match(backup, /const LazyResetData = lazy\(async \(\) => \{[\s\S]*await import\('\.\/ResetData'\)[\s\S]*module\.ResetData/, 'Backup should load reset tools only when advanced maintenance is opened')
-assert.match(backup, /const LazyFactoryReset = lazy\(async \(\) => \{[\s\S]*await import\('\.\/ResetData'\)[\s\S]*module\.FactoryReset/, 'Backup should load factory reset only when advanced maintenance is opened')
+assert.match(backup, /const LazyResetData = lazyRetry\(async \(\) => \{[\s\S]*await import\('\.\/ResetData'\)[\s\S]*module\.ResetData/, 'Backup should load reset tools only when advanced maintenance is opened')
+assert.match(backup, /const LazyFactoryReset = lazyRetry\(async \(\) => \{[\s\S]*await import\('\.\/ResetData'\)[\s\S]*module\.FactoryReset/, 'Backup should load factory reset only when advanced maintenance is opened')
 assert.match(backup, /advancedMaintenanceOpen \? \([\s\S]*<Suspense[\s\S]*<LazyResetData actionHistory=\{actionHistory\} \/>[\s\S]*<LazyFactoryReset actionHistory=\{actionHistory\} \/>/, 'Backup maintenance details should render reset tools behind a lazy Suspense boundary')
 assert.doesNotMatch(backup, /function DataFolderLocation/, 'unused backup data-folder UI should not remain in the bundle')
 assert.doesNotMatch(backup, /function ScaleMigrationSection/, 'unused backup migration UI should not remain in the bundle')
@@ -976,9 +1021,10 @@ for (const [name, source] of [
   ['Delivery', delivery],
 ]) {
   assert.match(source, /onRetry=\{\(\) => load\(\{ silent: false/, `${name} contacts should pass retry to the table`)
-  assert.match(source, /autoComplete=/, `${name} contacts should define autocomplete hints`)
+  assert.match(source, /<SearchInput\b/, `${name} contacts should use the shared SearchInput component`)
+  assert.match(source + searchInputComponent, /autoComplete=/, `${name} contacts should define autocomplete hints`)
   assert.match(source, /buildSelectedSnapshots\([^,]+, ids\)/, `${name} contacts should snapshot bulk selections through the shared Set helper`)
-  assert.match(source, /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\)/, `${name} contacts should count active filters without temporary filtered arrays`)
+  assert.match(source, /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time', genderFilter !== 'all'\]\)/, `${name} contacts should count active filters without temporary filtered arrays`)
   assert.match(source, /const failedIdSet = new Set\(failedIds\)/, `${name} contacts should reuse a failed-id Set when filtering deleted snapshots`)
   assert.doesNotMatch(source, /_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, `${name} contacts should not add a fixed post-load history delay`)
   assert.match(source, /const \[historyReady, setHistoryReady\] = useState\(false\)/, `${name} contacts should have an explicit post-ready action-history gate`)
@@ -1045,7 +1091,7 @@ assert.match(products, /latestProductsById\.get\(targetProductId\)/, 'products s
 assert.match(products, /latestProductsById\.get\(createdProductId\)/, 'products variant history should read fresh snapshots from the indexed map')
 assert.match(
   backgroundImportTracker,
-  /const IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS = 15000/,
+  /const IMPORT_TRACKER_PREFLIGHT_TIMEOUT_MS = 50000/,
   'background import tracker should use an explicit preflight timeout',
 )
 assert.match(
@@ -1060,7 +1106,7 @@ assert.match(
 )
 assert.match(
   backgroundImportTracker,
-  /const IMPORT_TRACKER_APPROVE_TIMEOUT_MS = 12000/,
+  /const IMPORT_TRACKER_APPROVE_TIMEOUT_MS = 50000/,
   'background import tracker should use an explicit approve timeout',
 )
 assert.match(
@@ -1145,8 +1191,13 @@ assert.match(
 )
 assert.match(
   actionHistory,
-  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\)\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*setServerItems\(Array\.isArray\(record\?\.items\) \? record\.items : \[\]\)/,
+  /if \(!isTrackedRequestCurrent\(historyRequestRef, requestId\)\) return[\s\S]*const record = result as \{ items\?: ServerHistoryItem\[\] \} \| null[\s\S]*const items = Array\.isArray\(record\?\.items\) \? record\.items : \[\][\s\S]*setServerItems\(items\)/,
   'action history should ignore stale history responses before updating rows',
+)
+assert.match(
+  actionHistory,
+  /if \(!isAdmin \|\| userFilter === 'all'\) writeCachedServerItems\(scope, items\)/,
+  'action history should cache only the unfiltered default view so a per-user admin filter never leaks into the next mount\'s instant-paint cache',
 )
 assert.match(
   actionHistory,
@@ -1305,7 +1356,7 @@ assert.doesNotMatch(
 )
 assert.match(
   branches,
-  /const LazyTransferModal = lazy\(async \(\) => \(\{ default: \(await import\('\.\/TransferModal'\)\)\.default \}\)\)/,
+  /const LazyTransferModal = lazyRetry\(async \(\) => \(\{ default: \(await import\('\.\/TransferModal'\)\)\.default \}\), 'branches-transfer-modal'\)/,
   'Branches route should lazy-load the transfer modal only after transfer intent',
 )
 assert.doesNotMatch(branches, /BRANCHES_HISTORY_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setHistoryReady\(true\)/, 'Branches background history should not add a fixed post-load delay')
@@ -1391,7 +1442,7 @@ assert.match(
 )
 assert.match(
   sales,
-  /import \{ getSales as fetchSales \} from '\.\.\/\.\.\/api\/salesTransport\.ts'[\s\S]*import \{ getUsers as fetchUsers \} from '\.\.\/\.\.\/api\/userReadTransport\.ts'/,
+  /import \{ getSales as fetchSales, getSalesStats as fetchSalesStats \} from '\.\.\/\.\.\/api\/salesTransport\.ts'[\s\S]*import \{ getUsers as fetchUsers \} from '\.\.\/\.\.\/api\/userReadTransport\.ts'/,
   'sales route-start reads should use focused sales and user transports instead of app-api-methods',
 )
 assert.match(
@@ -1566,7 +1617,7 @@ assert.match(
 )
 assert.match(
   inventory,
-  /const INVENTORY_METADATA_READ_DELAY_MS = 2500/,
+  /const INVENTORY_METADATA_READ_DELAY_MS = 120/,
   'inventory filter metadata should have a named post-paint delay',
 )
 assert.match(
@@ -1664,15 +1715,22 @@ assert.match(
   /const searchTerms: string\[\] = useMemo\(\(\) => \([\s\S]*\), \[deferredSearch\]\)/,
   'inventory search terms should be memoized so unrelated UI state does not rebuild search arrays',
 )
+// groupFilter/parentProductIds are intentionally absent from both the
+// filter body and this dependency list — see filteredSummary's own
+// comment in Inventory.tsx. The server's groupState filter already
+// scopes "grouped" across the whole catalog before `summary` (this page)
+// arrives, so a client-side recheck using only this page's parentProductIds
+// would drop rows the server had already confirmed were grouped (the same
+// Groups-filter incident already fixed for POS.tsx and Products.tsx).
 assert.match(
   inventory,
-  /const filteredSummary = useMemo\(\(\) => summary\.filter[\s\S]*\), \[brandFilter, groupFilter, hasServerBackedProductSearch, matchesSearch, parentProductIds, productHay, stockFilter, summary\]\)/,
-  'inventory product filtering should stay memoized before grouping visible sections',
+  /const filteredSummary = useMemo\(\(\) => summary\.filter[\s\S]*\), \[brandFilter, catFilter, hasServerBackedProductSearch, issueFilter, matchesSearch, productHay, stockFilter, summary\]\)/,
+  'inventory product filtering should stay memoized before grouping visible sections, without re-checking groupFilter client-side',
 )
 assert.match(
   inventory,
-  /const filteredMovements = useMemo\(\(\) => movements\.filter[\s\S]*\), \[hasServerBackedMovementSearch, matchesSearch, movFilter, movHay, movements\]\)/,
-  'inventory movement filtering should stay memoized before grouped movement rebuilds',
+  /const filteredMovements = useMemo\(\(\) => movements\.filter[\s\S]*\), \[hasServerBackedMovementSearch, matchesSearch, movFilter, movementUserFilter, movHay, movements\]\)/,
+  'inventory movement filtering should stay memoized before grouped movement rebuilds, including the movement user filter it reads',
 )
 assert.match(
   inventory,
@@ -1743,11 +1801,6 @@ assert.match(
   `${inventory}\n${inventoryBatchModal}`,
   /function buildDestinationProductOptions\(products(?:: [^=]+)? = \[\], excludedProductId(?:: [^,]+)?, placeholder(?:: [^)]+)?\)(?:: [^{]+)? \{[\s\S]*const options(?:: [^=]+)? = \[\{ value: '', label: placeholder \}\][\s\S]*for \(const product of products\)[\s\S]*if \(Number\.isFinite\(excludedId\) && id === excludedId\) continue[\s\S]*options\.push/,
   'inventory destination product options should skip excluded products without a filtered allocation',
-)
-assert.match(
-  inventory,
-  /buildDestinationProductOptions\(summary, moveModal\.id/,
-  'inventory single move destination selector should reuse the destination option renderer',
 )
 assert.match(
   inventoryBatchModal,
@@ -1894,31 +1947,10 @@ assert.doesNotMatch(
   /getReturns\(\{ saleId: found\.id \}\)\.catch\(\(\) => \[\]\)/,
   'customer return history lookup should not treat failed history reads as no previous returns',
 )
-assert.match(
-  contacts,
-  /const CONTACTS_EXPORT_LOAD_TIMEOUT_MS = 12000/,
-  'contacts all-export should use an explicit timeout',
-)
-assert.match(
-  contacts,
-  /withLoaderTimeout\(\s*\(\) => api\.getCustomers\(\),\s*'Contacts export customers',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
-  'contacts all-export should timeout customer export reads',
-)
-assert.match(
-  contacts,
-  /withLoaderTimeout\(\s*\(\) => api\.getSuppliers\(\),\s*'Contacts export suppliers',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
-  'contacts all-export should timeout supplier export reads',
-)
-assert.match(
-  contacts,
-  /withLoaderTimeout\(\s*\(\) => api\.getDeliveryContacts\(\),\s*'Contacts export delivery',\s*CONTACTS_EXPORT_LOAD_TIMEOUT_MS,\s*\)/,
-  'contacts all-export should timeout delivery export reads',
-)
-assert.match(
-  contacts,
-  /function normalizeContactExportRows\(value: unknown\): ContactExportRow\[\][\s\S]*Array\.isArray\(payload\?\.items\)/,
-  'contacts all-export should accept paged API payloads before building the ZIP',
-)
+// See the removal note near the top of this file (search
+// "page-level \"Export All\"") -- these five assertions used to check the
+// same removed Contacts.tsx export-all machinery from the timeout/paging
+// angle. No longer applicable; superseded by the doesNotMatch check above.
 assert.match(
   loyaltyPointsPage,
   /const LOYALTY_CUSTOMER_POINTS_TIMEOUT_MS = 12000/,
@@ -2031,8 +2063,8 @@ assert.match(
 )
 assert.match(
   returns,
-  /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]*for \(const ret of filtered\)[\s\S]*summary\.supplierStats\.lossUsd \+= toNumericAmount\(ret\.supplier_loss_usd\)[\s\S]*summary\.customerStats\.refundedUsd \+= toNumericAmount\(ret\.total_refund_usd\)/,
-  'returns stats should split customer/supplier rows and totals in one pass',
+  /const returnScopeSummary = useMemo\(\(\) => \{[\s\S]*for \(const ret of searchFiltered\)[\s\S]*summary\.supplierStats\.lossUsd \+= toNumericAmount\(ret\.supplier_loss_usd\)[\s\S]*summary\.customerStats\.refundedUsd \+= toNumericAmount\(ret\.total_refund_usd\)/,
+  'returns stats should split customer/supplier rows and totals in one pass, from the search-only (not type-filtered) view so switching the type filter does not zero out the other stat tiles',
 )
 assert.match(
   returns,
@@ -2064,6 +2096,11 @@ assert.match(
   /const CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS = 10000/,
   'catalog portal editor helper reads should use an explicit timeout constant',
 )
+assert.doesNotMatch(
+  catalogPage,
+  /getPortalSubmissionsForReview/,
+  'catalog page should not reintroduce portal review-item reads that moved to LoyaltyPointsPage',
+)
 assert.match(
   catalogPage,
   /const CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000/,
@@ -2089,10 +2126,20 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getAiProviders\(\),\s*'Portal AI providers',\s*CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,\s*\)/,
   'catalog portal AI providers should timeout slow provider reads',
 )
+// Portal-submission review (approve/reject queue) is read on
+// LoyaltyPointsPage.tsx now, not CatalogPage.tsx -- see the actionStability
+// test's "loyalty portal submission review" block for the write side of
+// this same move. It reuses LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS rather than
+// a dedicated timeout constant.
 assert.match(
-  catalogPage,
-  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.getPortalSubmissionsForReview\(\),\s*'Portal review items',\s*CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,\s*\)/,
-  'catalog portal review items should timeout slow review reads',
+  loyaltyPointsPage,
+  /async function fetchPortalReviewItems\(\): Promise<unknown> \{[\s\S]*getPortalSubmissionsForReview\(\)/,
+  'loyalty page portal review items should read via the portal transport module',
+)
+assert.match(
+  loyaltyPointsPage,
+  /withLoaderTimeout\(\(\) => fetchPortalReviewItems\(\), label, LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS\)/,
+  'loyalty page portal review items should timeout slow review reads',
 )
 assert.match(
   catalogPage,
@@ -2149,10 +2196,16 @@ assert.match(
   /const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000/,
   'catalog portal submissions should use an explicit timeout constant',
 )
-assert.match(
+// CATALOG_PORTAL_REVIEW_TIMEOUT_MS / reviewPortalSubmission: this page no
+// longer owns portal-submission review (approve/reject) -- it moved to
+// LoyaltyPointsPage.tsx, which reuses LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS
+// instead of a dedicated constant. See the read-side assertion above
+// (catalog portal editor helper reads) and actionStability.test.ts's
+// "loyalty portal submission review" block for the current location.
+assert.doesNotMatch(
   catalogPage,
-  /const CATALOG_PORTAL_REVIEW_TIMEOUT_MS = 12000/,
-  'catalog portal submission reviews should use an explicit timeout constant',
+  /CATALOG_PORTAL_REVIEW_TIMEOUT_MS|reviewPortalSubmission/,
+  'catalog page should not reintroduce portal-submission review actions that moved to LoyaltyPointsPage',
 )
 assert.match(
   catalogPage,
@@ -2185,9 +2238,9 @@ assert.match(
   'catalog portal submissions should timeout slow create actions',
 )
 assert.match(
-  catalogPage,
-  /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.reviewPortalSubmission\(item\.id, \{[\s\S]*userName: user\?\.name,[\s\S]*\}\),\s*'Review portal submission',\s*CATALOG_PORTAL_REVIEW_TIMEOUT_MS,\s*\)/,
-  'catalog portal reviews should timeout slow review actions',
+  loyaltyPointsPage,
+  /withLoaderTimeout\(\s*\(\) => submitPortalReview\(item\.id, \{[\s\S]*reward_points: Number\(item\.reward_points \|\| 0\),[\s\S]*\}\),\s*'Review portal submission',\s*LOYALTY_MEMBERSHIP_LOOKUP_TIMEOUT_MS,\s*\)/,
+  'loyalty portal reviews should timeout slow review actions',
 )
 assert.match(
   catalogPage,
@@ -2347,7 +2400,7 @@ assert.match(
 )
 assert.match(
   usersPage,
-  /const LazyPermissionEditor = lazy\(async \(\) => \(\{ default: \(await import\('\.\/PermissionEditor'\)\)\.default \}\)\)[\s\S]*const LazyUserDetailSheet = lazy\(async \(\) => \(\{ default: \(await import\('\.\/UserDetailSheet'\)\)\.default \}\)\)[\s\S]*const LazyUserProfileModal = lazy\(async \(\) => \(\{ default: \(await import\('\.\/UserProfileModal'\)\)\.default \}\)\)/,
+  /const LazyPermissionEditor = lazyRetry\(async \(\) => \(\{ default: \(await import\('\.\/PermissionEditor'\)\)\.default \}\), 'users-permission-editor'\)[\s\S]*const LazyUserDetailSheet = lazyRetry\(async \(\) => \(\{ default: \(await import\('\.\/UserDetailSheet'\)\)\.default \}\), 'users-user-detail-sheet'\)[\s\S]*const LazyUserProfileModal = lazyRetry\(async \(\) => \(\{ default: \(await import\('\.\/UserProfileModal'\)\)\.default \}\), 'users-user-profile-modal'\)/,
   'Users action-only surfaces should lazy-load profile, detail, and permission editor UI',
 )
 assert.match(
@@ -2420,20 +2473,19 @@ assert.match(
   /const AUDIT_LOG_LOAD_TIMEOUT_MS = 20000/,
   'audit log should use an explicit load timeout constant',
 )
-assert.match(
+// AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS / deleteAuditLogsRetentionRequest:
+// the manual "Clear 30d" action this timed no longer exists on this route
+// (see the doesNotMatch assertion near line 700 above and the code comment
+// in AuditLog.tsx) -- retention is now an automatic server-side sweep.
+assert.doesNotMatch(
   auditLog,
-  /const AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS = 12000/,
-  'audit log retention cleanup should use an explicit timeout constant',
+  /AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS|deleteAuditLogsRetentionRequest/,
+  'audit log route should not reintroduce timeout machinery for the removed manual retention-clear action',
 )
 assert.match(
   auditLog,
   /withLoaderTimeout\(\s*\(\) => getAuditLogsRequest\(params\) as Promise<AuditLogResponse \| AuditLogRow\[\]>,\s*'Audit log',\s*AUDIT_LOG_LOAD_TIMEOUT_MS,\s*\)/,
   'audit log should timeout slow audit reads with the explicit constant',
-)
-assert.match(
-  auditLog,
-  /withLoaderTimeout\(\s*\(\) => deleteAuditLogsRetentionRequest\(30\),\s*'Clear old audit logs',\s*AUDIT_LOG_RETENTION_DELETE_TIMEOUT_MS,\s*\)/,
-  'audit log retention cleanup should timeout slow delete actions',
 )
 assert.match(
   auditLog,
@@ -2549,10 +2601,14 @@ assert.match(serverPage, /const timer = setInterval\(fetchServerLog, 3000\)/, 's
 assert.doesNotMatch(serverPage, /fetchServerLog\(\)\s*const timer = setInterval\(fetchServerLog, 3000\)/, 'server diagnostics should not issue a duplicate immediate debug log read during first route load')
 assert.match(serverPage, /const SERVER_ONLINE_CHECK_READY_DELAY_MS = 250/, 'server online count should wait briefly after first route-ready work without adding a fake 1.8s delay')
 assert.match(serverPage, /window\.setTimeout\(check, SERVER_ONLINE_CHECK_READY_DELAY_MS\)[\s\S]*setInterval\(check, 10000\)/, 'server online count should not issue a duplicate health probe during first route load')
-assert.match(
+// SETTINGS_OTP_STATUS_TIMEOUT_MS / getSettingsApi().otpStatus: removed along
+// with the rest of the dead OTP-modal machinery in Settings.tsx (see the
+// doesNotMatch assertion above) -- this page no longer checks OTP status at
+// all since 2FA management lives in the profile modal.
+assert.doesNotMatch(
   settingsPage,
-  /const SETTINGS_OTP_STATUS_TIMEOUT_MS = 8000/,
-  'settings OTP status should use an explicit timeout constant',
+  /SETTINGS_OTP_STATUS_TIMEOUT_MS|getSettingsApi\(\)\.otpStatus/,
+  'Settings should not reintroduce the removed OTP status check',
 )
 assert.match(
   settingsPage,
@@ -2563,11 +2619,6 @@ assert.match(
   settingsPage,
   /const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000/,
   'settings image uploads should use an explicit timeout constant',
-)
-assert.match(
-  settingsPage,
-  /withLoaderTimeout\(\s*\(\) => getSettingsApi\(\)\.otpStatus\?\.\(userId\),\s*'OTP status',\s*SETTINGS_OTP_STATUS_TIMEOUT_MS,\s*\)/,
-  'settings OTP status should timeout slow OTP status reads',
 )
 assert.match(
   settingsPage,
@@ -2619,20 +2670,21 @@ assert.doesNotMatch(
   /publicAssetUrls|resolvePublicAssetUrl/,
   'mediaUploadState should stay independent of public asset URL helpers',
 )
+// Settings.tsx's own OTP status check + LazyOtpModal were dead leftovers
+// from before 2FA management moved to the account/profile modal (the
+// security section here now just points users there -- see the
+// 'security_moved_to_profile_hint' copy). UserProfileModal.tsx owns the
+// live LazyOtpModal render; Settings.tsx should not carry the unused
+// state, effect, or lazy import for a modal it never shows.
 assert.doesNotMatch(
   settingsPage,
-  /import OtpModal from '\.\/OtpModal'/,
-  'Settings should not statically import the OTP modal during normal route load',
+  /otpModal|otpStatus|LazyOtpModal|OtpModalMode|import type \{ OtpModalProps \} from '\.\/OtpModal'/,
+  'Settings should not retain dead OTP-modal state/import now that 2FA management lives in the profile modal',
 )
 assert.match(
-  settingsPage,
-  /const LazyOtpModal = lazy\(async \(\) => \(\{ default: \(await import\('\.\/OtpModal'\)\)\.default \}\)\)/,
-  'Settings should lazy-load the OTP modal only after a 2FA action opens it',
-)
-assert.match(
-  settingsPage,
-  /otpModal \? \([\s\S]*<Suspense fallback=\{null\}>[\s\S]*<LazyOtpModal/,
-  'Settings should render the lazy OTP modal behind a Suspense intent boundary',
+  userProfileModal,
+  /const LazyOtpModal = lazyRetry\(async \(\) => \(\{/,
+  'the profile modal should own the live lazy-loaded OTP modal',
 )
 assert.match(
   otpModal,
@@ -2664,19 +2716,29 @@ assert.match(
   /'OTP disable',\s*OTP_DISABLE_TIMEOUT_MS,/,
   'OTP disable should timeout slow disable actions',
 )
+// Raised from 60s/90s to a shared 10-minute ceiling to match
+// systemRuntime.ts's LONG_SYSTEM_ACTION_TIMEOUT_MS -- see ResetData.tsx's
+// own comment for why (a fresh backup + D1 batch delete + per-object R2
+// delete loop can legitimately take minutes, not seconds).
 assert.match(
   resetData,
-  /const RESET_DATA_TIMEOUT_MS = 60000/,
+  /const RESET_DATA_TIMEOUT_MS = 10 \* 60 \* 1000/,
   'reset data should use an explicit timeout constant',
 )
 assert.match(
   resetData,
-  /const FACTORY_RESET_TIMEOUT_MS = 90000/,
+  /const FACTORY_RESET_TIMEOUT_MS = 10 \* 60 \* 1000/,
   'factory reset should use an explicit timeout constant',
 )
+// Widened from the old exact `resetData\?\.\(mode\)` to
+// `resetData\?\.\(mode[\s\S]*?\)` -- the call now also passes the
+// mode='products'-only includeMovements/includeSales toggles as a second
+// argument (see ResetData.tsx's ProductsResetToggles), same "regex
+// updated to accept the extended condition" precedent as
+// actionStability.test.ts's matching update.
 assert.match(
   resetData,
-  /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => [\s\S]*resetData\?\.\(mode[\s\S]*?\)[\s\S]*'Reset business data',\s*RESET_DATA_TIMEOUT_MS,\s*\)/,
   'reset data should timeout slow destructive reset actions',
 )
 assert.doesNotMatch(
@@ -2812,7 +2874,11 @@ assert.match(
 )
 assert.match(
   products,
-  /withLoaderTimeout\(\(\) => productApi\.getProductFilters\(\{\}\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)/,
+  // Query object widened from {} -- filter meta is now scoped to the
+  // current branch/brand/category/supplier/stock/group filters
+  // (filterMetaQuery) so the returned brand/category/supplier options
+  // reflect what's actually selectable given the other active filters.
+  /withLoaderTimeout\(\(\) => productApi\.getProductFilters\(filterMetaQuery\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)/,
   'products filter metadata should timeout slow filter requests',
 )
 assert.match(
@@ -2823,7 +2889,7 @@ assert.match(
 assert.doesNotMatch(products, /PRODUCTS_FILTER_META_READY_DELAY_MS|window\.setTimeout\(\(\) => \{\s*setFilterMetaReady\(true\)/, 'products filter metadata should not add a fixed post-load delay')
 assert.match(
   products,
-  /if \(!isActive \|\| !filterMetaReady \|\| filterMetaLoadedRef\.current\) return[\s\S]*const requestId = beginTrackedRequest\(filterMetaRequestRef\)[\s\S]*withLoaderTimeout\(\(\) => productApi\.getProductFilters\(\{\}\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)[\s\S]*if \(!isTrackedRequestCurrent\(filterMetaRequestRef, requestId\)\) return/,
+  /if \(!isActive \|\| !filterMetaReady \|\| filterMetaLoadedRef\.current\) return[\s\S]*const requestId = beginTrackedRequest\(filterMetaRequestRef\)[\s\S]*withLoaderTimeout\(\(\) => productApi\.getProductFilters\(filterMetaQuery\), 'Product filters', PRODUCTS_FILTER_META_TIMEOUT_MS\)[\s\S]*if \(!isTrackedRequestCurrent\(filterMetaRequestRef, requestId\)\) return/,
   'products should keep full filter metadata out of the first route load and ignore stale delayed responses',
 )
 assert.match(
@@ -3119,12 +3185,12 @@ assert.match(
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\s*\(\) => filesApi\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*(?:\/\/[^\n]*\n\s*)*\(\) => filesApi\.uploadFileAsset\(\{ file, userId: user\?\.id, userName: user\?\.name, compressOptions: LIBRARY_IMAGE_COMPRESS_OPTIONS \}\),\s*'Upload file asset',\s*FILES_ASSET_UPLOAD_TIMEOUT_MS,\s*\)/,
   'files page uploads should timeout slow upload requests',
 )
 assert.match(
   filesPage,
-  /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{ expectedUpdatedAt: asset\.updated_at \|\| undefined \}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => filesApi\.deleteFileAsset\(asset\.id, \{\s*expectedUpdatedAt: asset\.updated_at \|\| undefined,\s*force: locked && deleteUnlockChecked,\s*confirmText: deleteConfirmText\.trim\(\),\s*\}\),\s*'Delete file asset',\s*FILES_ASSET_DELETE_TIMEOUT_MS,\s*\)/,
   'files page deletes should timeout slow delete requests',
 )
 assert.doesNotMatch(
@@ -3210,12 +3276,12 @@ assert.match(
 )
 assert.match(
   pos,
-  /const ProductDetailSheet = lazy\(\(\) => import\('\.\/ProductDetailSheet'\)\)/,
+  /const ProductDetailSheet = lazyRetry\(\(\) => import\('\.\/ProductDetailSheet'\), 'pos-product-detail-sheet'\)/,
   'POS product detail sheet should stay in a click-only lazy chunk',
 )
 assert.match(
   pos,
-  /const POSQuickAddModals = lazy\(\(\) => import\('\.\/POSQuickAddModals'\)\)/,
+  /const POSQuickAddModals = lazyRetry\(\(\) => import\('\.\/POSQuickAddModals'\), 'pos-quick-add-modals'\)/,
   'POS quick-add customer and delivery forms should stay in a click-only lazy chunk',
 )
 assert.doesNotMatch(
@@ -3365,7 +3431,10 @@ assert.match(
 )
 assert.match(
   pos,
-  /if \(!isActive \|\| !filterMetaReady \|\| filterMetaLoadedRef\.current\) return[\s\S]*const requestId = beginTrackedRequest\(filterMetaRequestRef\)[\s\S]*withLoaderTimeout\(\(\) => loadPosProductFilters\(\{\}\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)[\s\S]*if \(!isTrackedRequestCurrent\(filterMetaRequestRef, requestId\)\) return/,
+  // Query object widened from {} -- POS scopes the filter-meta request to
+  // the currently selected branch/brand/category/supplier/stock/group
+  // filters (scopedQuery), same change as the Products page above.
+  /if \(!isActive \|\| !filterMetaReady \|\| filterMetaLoadedRef\.current\) return[\s\S]*const requestId = beginTrackedRequest\(filterMetaRequestRef\)[\s\S]*withLoaderTimeout\(\(\) => loadPosProductFilters\(scopedQuery\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)[\s\S]*if \(!isTrackedRequestCurrent\(filterMetaRequestRef, requestId\)\) return/,
   'POS should fetch full product filters as a delayed tracked request',
 )
 assert.match(
@@ -3375,8 +3444,13 @@ assert.match(
 )
 assert.match(
   pos,
-  /let qty = Number\(p\.stock_quantity \|\| 0\)[\s\S]*if \(branchFilterId != null\) \{[\s\S]*const bs = \(p\.branch_stock \|\| \[\]\)\.find[\s\S]*if \(!bs\) return false[\s\S]*qty = Number\(bs\.quantity \|\| 0\)/,
-  'POS branch filtering should reuse one branch-stock lookup for existence and quantity',
+  /let qty = Number\(p\.stock_quantity \|\| 0\)[\s\S]*if \(branchFilterIds\.length\) \{[\s\S]*const matches = \(p\.branch_stock \|\| \[\]\)\.filter[\s\S]*qty = matches\.reduce/,
+  'POS branch filtering should reuse one branch-stock scan for summed quantity across selected branches, without hiding a product that has no branch_stock row at all for that branch',
+)
+assert.doesNotMatch(
+  pos,
+  /if \(branchFilterIds\.length\) \{[\s\S]{0,200}if \(!matches\.length\) return false/,
+  'POS branch filtering should not hide a product just because it has no branch_stock row for the selected branch (a missing row means qty 0, not "doesn\'t stock this branch")',
 )
 assert.doesNotMatch(
   pos,

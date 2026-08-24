@@ -140,10 +140,56 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : String(error || fallback)
 }
 
+// Root cause of "history clears on page refresh": the *undoable* stack
+// (undoStack/redoStack) holds live JS closures captured from the page's
+// in-memory state -- those can never survive a reload no matter what's
+// cached, since there's no generic way to serialize "how to undo this"
+// for arbitrary actions. That part is an inherent limit of this pattern,
+// not a bug (formatServerStatus already labels those "No longer
+// reversible" after a reload, correctly).
+//
+// What *is* fixable, and was the actual visible symptom: `serverItems`
+// (the read-only recorded-actions list) only exists in React state, which
+// starts empty on every mount, and `refreshServerItems` doesn't resolve
+// until after ACTION_HISTORY_INITIAL_READ_DELAY_MS plus a network
+// round-trip -- so every refresh showed "No recent actions" for a couple
+// of seconds even though the server has the real list the whole time.
+// Caching the last-seen list per scope in sessionStorage and hydrating
+// synchronously on mount closes that gap; the background fetch still runs
+// exactly as before and overwrites the cache with the authoritative data.
+const ACTION_HISTORY_CACHE_PREFIX = 'actionHistory:cache:'
+
+function cacheKeyFor(scope: string): string {
+  return `${ACTION_HISTORY_CACHE_PREFIX}${scope}`
+}
+
+function readCachedServerItems(scope: string): ServerHistoryItem[] {
+  if (typeof window === 'undefined' || !window.sessionStorage) return []
+  try {
+    const raw = window.sessionStorage.getItem(cacheKeyFor(scope))
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function writeCachedServerItems(scope: string, items: ServerHistoryItem[]): void {
+  if (typeof window === 'undefined' || !window.sessionStorage) return
+  try {
+    window.sessionStorage.setItem(cacheKeyFor(scope), JSON.stringify(items.slice(0, 20)))
+  } catch {
+    // Storage full/unavailable (private browsing, etc.) -- the bar still
+    // works, it just goes back to a brief loading gap on refresh.
+  }
+}
+
 export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true, user = null }: ActionHistoryOptions = {}) {
   const [undoStack, setUndoStack] = useState<ActionHistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<ActionHistoryEntry[]>([])
-  const [serverItems, setServerItems] = useState<ServerHistoryItem[]>([])
+  const [serverItems, setServerItems] = useState<ServerHistoryItem[]>(() => readCachedServerItems(scope))
+  const cachedScopeRef = useRef(scope)
   const [busy, setBusy] = useState<ActionDirection | ''>('')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
@@ -169,10 +215,25 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       .then((result) => {
         if (!isTrackedRequestCurrent(historyRequestRef, requestId)) return
         const record = result as { items?: ServerHistoryItem[] } | null
-        setServerItems(Array.isArray(record?.items) ? record.items : [])
+        const items = Array.isArray(record?.items) ? record.items : []
+        setServerItems(items)
+        // Only cache the unfiltered, default view -- an admin's per-user
+        // filter result isn't what the next mount (or a different user)
+        // should see flashed in before the real fetch resolves.
+        if (!isAdmin || userFilter === 'all') writeCachedServerItems(scope, items)
       })
       .catch(() => {})
   }, [isAdmin, limit, scope, userFilter])
+
+  // Re-hydrate from the new scope's cache immediately when `scope` changes
+  // -- the useState initializer above only runs on first mount, so without
+  // this a scope change would otherwise show a stale previous-scope list
+  // (or an empty one) until the network fetch below catches up.
+  useEffect(() => {
+    if (cachedScopeRef.current === scope) return
+    cachedScopeRef.current = scope
+    setServerItems(readCachedServerItems(scope))
+  }, [scope])
 
   useEffect(() => {
     if (!enabled) return

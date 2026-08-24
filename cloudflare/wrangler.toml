@@ -2,11 +2,38 @@ name = "business-os"
 main = "src/index.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
+account_id = "743e5b727d139e85ed11679097f6f99e"
+workers_dev = false
+
+routes = [
+  { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
+  { pattern = "admin.leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
+]
+
+[assets]
+directory = "../frontend/dist"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*", "/uploads/*", "/health", "/ws"]
+
+[triggers]
+crons = ["0 */6 * * *"]
+
+# NOTE: a [limits] cpu_ms override was here to give the import queue
+# consumer (queue.ts) more CPU headroom for large chunked D1 imports (see
+# importEngine.ts's runD1BatchInChunks). Removed because custom cpu_ms is a
+# Workers PAID-plan-only feature -- it was making `wrangler deploy` fail
+# outright on the Free plan (error code 100328). If/when this account moves
+# to Workers Paid, re-add:
+#   [limits]
+#   cpu_ms = 300000
+# Until then, large imports run under the Free plan's fixed 10ms CPU-time
+# budget per invocation (wall-clock time waiting on D1/R2 doesn't count
+# against it, only actual compute does).
 
 [[d1_databases]]
 binding = "DB"
 database_name = "business-os"
-database_id = "REPLACE_WITH_REAL_D1_ID"
+database_id = "49795be9-eabe-43f1-8e16-b86faed60cb1"
 migrations_dir = "migrations"
 
 [[r2_buckets]]
@@ -15,7 +42,7 @@ bucket_name = "business-os-assets"
 
 [[kv_namespaces]]
 binding = "CACHE"
-id = "REPLACE_WITH_REAL_KV_ID"
+id = "de5f3b41c7264e4582077176fd0c1fe8"
 
 [[queues.producers]]
 binding = "IMPORT_QUEUE"
@@ -25,16 +52,127 @@ queue = "business-os-import"
 binding = "MEDIA_QUEUE"
 queue = "business-os-media"
 
+# Part 122: queue-driven full-asset-coverage backup copy. See
+# lib/backup.ts's createCloudflareBackup/continueCloudflareBackupAssetCopy.
+# BACKUP_QUEUE is OPTIONAL on Env (index.ts) -- if this producer binding is
+# ever removed/unavailable, createCloudflareBackup falls back to the
+# pre-existing Part 48 rotating-cursor behavior, unchanged.
+[[queues.producers]]
+binding = "BACKUP_QUEUE"
+queue = "business-os-backup-assets"
+
 [[queues.consumers]]
 queue = "business-os-import"
-max_batch_size = 5
+# max_batch_size = 1 is load-bearing, not just a throughput knob: queue.ts's
+# handleImportQueue loops over every message in a batch SEQUENTIALLY inside
+# ONE Worker invocation, and the Workers Free plan's CPU-time budget is per
+# INVOCATION, not per message. importEngine.ts's runImportAnalyze/
+# runImportApply are chunked specifically so each chunk gets its own fresh
+# 10ms budget (see migration 0011_import_job_chunking.sql's header) -- a
+# batch size above 1 would silently undo that by packing several chunks'
+# worth of CPU work back into a single invocation again. Higher batch sizes
+# (this used to be 5) are a Workers Paid-plan optimization -- fine to raise
+# again once this account has [limits] cpu_ms room to spare (see the
+# wrangler.toml comment on that block above).
+max_batch_size = 1
+max_batch_timeout = 5
+# Once a message has thrown on every one of Cloudflare's default max_retries
+# attempts, it's moved here instead of silently dropped -- queue.ts's
+# handleImportDeadLetterQueue picks it up and marks the job definitively
+# failed with an actionable last_error (see that function's own comment for
+# the full "why", including what used to happen without this: the job could
+# sit stuck showing 'analyzing'/'applying' with no error and no further
+# progress for up to 20 minutes, until the separate stalled-job reaper in
+# routes/importJobs.ts finally caught it).
+#
+# REQUIRES a one-time manual step this account's owner has to run (this repo
+# has no live Cloudflare credentials to do it from here): the queue itself
+# has to exist before `wrangler deploy` will accept this config --
+#   wrangler queues create business-os-import-dlq
+# -- then deploy as normal. If that queue doesn't exist yet, deploy will
+# fail with a clear "queue not found" error naming it.
+dead_letter_queue = "business-os-import-dlq"
+
+[[queues.consumers]]
+queue = "business-os-import-dlq"
+# Small, generous settings on purpose: this consumer's whole job (see
+# handleImportDeadLetterQueue) is one D1 UPDATE per message, and every
+# message here has ALREADY exhausted its retries on the main import queue --
+# there's nothing time-sensitive left to protect by keeping this consumer's
+# own batch small the way business-os-import's max_batch_size=1 has to.
+max_batch_size = 10
 max_batch_timeout = 30
+# If handleImportDeadLetterQueue's own handling throws (see its comment --
+# should be rare; markJobFailed is designed not to throw), retrying a
+# message that already exhausted retries on the PRIMARY queue would just
+# loop with no further escalation path available. Cap it low rather than
+# leave Cloudflare's own default.
+max_retries = 2
 
 [[queues.consumers]]
 queue = "business-os-media"
 max_batch_size = 5
 max_batch_timeout = 30
 
+[[queues.consumers]]
+queue = "business-os-backup-assets"
+# handleBackupQueue processes one continuation step per message
+# (continueCloudflareBackupAssetCopy copies up to MAX_ASSET_BYTES_PER_BACKUP
+# assets and re-enqueues itself) -- same reasoning as business-os-import's
+# max_batch_size = 1 above: keep each invocation's R2 get()+put() work
+# inside the Workers Free plan's per-invocation CPU budget rather than
+# packing several continuation steps' worth of copying into one call.
+max_batch_size = 1
+max_batch_timeout = 5
+# No dead_letter_queue configured here (unlike business-os-import) --
+# deliberate: an exhausted-retries continuation just leaves that backup's
+# manifest at whatever nextIndex it last reached (assetCopyProgress.complete
+# stays false, summary.assetsSkipped reflects it honestly) rather than
+# needing a separate DLQ-handling code path. A later manually-triggered
+# backup run still succeeds independently -- nothing is left in a broken
+# state, just one backup with partial asset coverage, which the manifest
+# already surfaces via assetsSkipped/assetCopyProgress.
+#
+# REQUIRES the same one-time manual step as business-os-import-dlq above
+# (this repo has no live Cloudflare credentials to run it from here):
+#   wrangler queues create business-os-backup-assets
+# -- then deploy as normal. If that queue doesn't exist yet, deploy will
+# fail with a clear "queue not found" error naming it.
+max_retries = 3
+
+[[durable_objects.bindings]]
+name = "SYNC_UPLOADS"
+class_name = "SyncUploadSession"
+
+[[durable_objects.bindings]]
+name = "BROADCAST_HUB"
+class_name = "BroadcastHub"
+
+[[migrations]]
+tag = "v1-sync-upload-session"
+new_sqlite_classes = ["SyncUploadSession"]
+
+[[migrations]]
+tag = "v2-broadcast-hub"
+new_sqlite_classes = ["BroadcastHub"]
+
 [vars]
 BUSINESS_OS_PUBLIC_URL = "https://leangcosmetics.dpdns.org"
 BUSINESS_OS_ADMIN_URL = "https://admin.leangcosmetics.dpdns.org"
+# Password-reset emails (lib/verification.ts) are sent via Resend. This
+# must be a verified sender/domain on the Resend account, e.g.
+# "Leang Cosmetics <no-reply@leangcosmetics.dpdns.org>". The API key is a
+
+
+GOOGLE_LOGIN_CLIENT_ID = "784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com"
+GOOGLE_LOGIN_REDIRECT_URI = "https://admin.leangcosmetics.dpdns.org/api/auth/oauth/callback"
+
+# Google Drive OAuth (off-Cloudflare backup mirror) -- see
+# cloudflare/src/lib/googleDrive.ts and the /api/system/drive-sync/* routes
+# in cloudflare/src/routes/compat.ts. Separate OAuth client from the login
+# one above, matching the legacy backend's own separation of concerns.
+# CLIENT_SECRET moved out the same way as GOOGLE_LOGIN_CLIENT_SECRET above --
+# see cloudflare/.dev.vars locally, `wrangler secret put
+# GOOGLE_DRIVE_CLIENT_SECRET` for production.
+GOOGLE_DRIVE_CLIENT_ID = "784691087631-8ptg5j6vb15oi3ljg66dli7ssne88jig.apps.googleusercontent.com"
+GOOGLE_DRIVE_REDIRECT_URI = "https://admin.leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback"

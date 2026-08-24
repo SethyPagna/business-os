@@ -215,6 +215,92 @@ export function normalizeCsvKey(value: unknown): string {
     .toLowerCase()
 }
 
+// Reverses csv.ts's forceExcelText() -- a value shaped exactly like
+// ="text" (no embedded quotes) is that deliberate Excel-text wrap, not a
+// real formula a user typed, so unwrap it back to the plain value here.
+// This also covers files a user has protected the same well-known way
+// manually in Excel (typing ="0012345678905" into a barcode cell so it
+// round-trips through Excel as text) -- without this, either case would
+// import the literal ="..." text instead of the value it represents.
+function unwrapExcelFormulaText(value: string): string {
+  const match = /^="([^"]*)"$/.exec(value)
+  return match ? match[1] : value
+}
+
+// Real import-file audit (Aug 22 2026) flagged this as a genuine gap: a
+// file with duplicate-looking headers (most commonly an Excel/CSV
+// re-export artifact, e.g. `discount_ends_at` and `discount_ends_at.1`
+// after a spreadsheet round-trip) currently imports silently -- each
+// normalized key just overwrites the previous one in parseCsvRows' row
+// object with no signal to the operator that data was dropped. This is a
+// read-only detector (doesn't change parseCsvRows' own behavior/callers)
+// so a caller can surface a warning before import, e.g. in
+// productImportPlanner.ts's analysis output.
+// Matches Excel/CSV's own duplicate-header re-export suffix, e.g. a sheet
+// with two "Discount Ends At" columns re-saved as CSV becomes
+// `discount_ends_at` + `discount_ends_at.1` (normalizeCsvKey lowercases but
+// doesn't touch this suffix, so the two don't collide as the same key --
+// `.1` just becomes its own silently-unrecognized extra column instead).
+const EXCEL_DUPLICATE_SUFFIX_PATTERN = /\.\d+$/
+
+export function getDuplicateCsvHeaders(text: string, options: ParseDelimitedOptions = {}): string[] {
+  const delimiter = options.delimiter || detectCsvDelimiter(text)
+  const rows = parseDelimitedRows(text, { delimiter })
+  if (!rows.length) return []
+  const normalizedKeys = rows[0].map((value) => normalizeCsvKey(value)).filter(Boolean)
+  const keySet = new Set(normalizedKeys)
+  const duplicates = new Set<string>()
+
+  // Case 1: two headers that normalize to the exact same key -- a real
+  // silent overwrite, the last one wins in parseCsvRows' row object.
+  const seen = new Set<string>()
+  normalizedKeys.forEach((key) => {
+    if (seen.has(key)) duplicates.add(key)
+    seen.add(key)
+  })
+
+  // Case 2: an Excel-style `.1`/`.2` suffixed header whose base name is
+  // also present -- not an overwrite, but a silently-ignored extra column
+  // that almost always means the same data got split across two headers.
+  normalizedKeys.forEach((key) => {
+    if (!EXCEL_DUPLICATE_SUFFIX_PATTERN.test(key)) return
+    const base = key.replace(EXCEL_DUPLICATE_SUFFIX_PATTERN, '')
+    if (base && keySet.has(base)) duplicates.add(key)
+  })
+
+  return [...duplicates]
+}
+
+// Real-file audit (Aug 23 2026, chat) -- found via the user's own uploaded
+// customers-template-final.csv: column index 2 (between membership_number
+// and email) had a genuinely BLANK header cell, but every data row under it
+// held a real phone number -- a stale/hand-edited template where the header
+// text got deleted but the column of data didn't. `parseCsvRows` below (and
+// the backend's identical `csvValuesToRow` in cloudflare/src/lib/importCsv.ts)
+// both `if (!header) continue`/`return` on a blank header, which silently
+// drops that entire column's data with zero signal to the operator -- a
+// different failure mode than getDuplicateCsvHeaders' two-headers-same-name
+// case above (there, at least one of the two columns survives; here, the
+// data vanishes outright). This is a read-only detector, same shape as
+// getDuplicateCsvHeaders, so a caller can surface a warning before import
+// instead of the data disappearing unexplained. Only flags a blank header
+// that actually has data under it -- a genuinely empty spare column (no
+// header, no data, common at the ragged right edge of a hand-edited sheet)
+// is not a bug and stays silent.
+export function getBlankCsvHeaderColumns(text: string, options: ParseDelimitedOptions = {}): number[] {
+  const delimiter = options.delimiter || detectCsvDelimiter(text)
+  const rows = parseDelimitedRows(text, { delimiter })
+  if (rows.length < 2) return []
+  const headers = rows[0].map((value) => normalizeCsvKey(value))
+  const blankColumns: number[] = []
+  headers.forEach((header, columnIndex) => {
+    if (header) return
+    const hasData = rows.slice(1).some((row) => String(row[columnIndex] ?? '').trim() !== '')
+    if (hasData) blankColumns.push(columnIndex + 1) // 1-based, matches spreadsheet column numbering
+  })
+  return blankColumns
+}
+
 export function parseCsvRows(text: string, options: ParseDelimitedOptions = {}): CsvRow[] {
   const delimiter = options.delimiter || detectCsvDelimiter(text)
   const rows = parseDelimitedRows(text, { delimiter })
@@ -227,7 +313,7 @@ export function parseCsvRows(text: string, options: ParseDelimitedOptions = {}):
       const row: CsvRow = { _rowNumber: index + 2 }
       headers.forEach((header, headerIndex) => {
         if (!header) return
-        row[header] = String(values[headerIndex] ?? '').trim()
+        row[header] = unwrapExcelFormulaText(String(values[headerIndex] ?? '').trim())
       })
       return row
     })

@@ -4,8 +4,10 @@ import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import ImageDown from 'lucide-react/dist/esm/icons/image-down.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
+import { BUSINESS_TIME_ZONE } from '../../constants.ts'
 import { parseReceiptTemplate } from '../receipt-settings/template'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
+import ReceiptQrCodes, { normalizeQrSocialLinksForReceipt, type ReceiptQrEntry } from './ReceiptQrCodes.tsx'
 
 type LanguageMode = 'en' | 'km' | 'both'
 type ReceiptExportMode = 'print' | 'open' | 'image'
@@ -61,6 +63,7 @@ interface ReceiptSale {
   sale_status?: string | null
   cashier_name?: string | null
   payment_method?: string | null
+  payment_details?: string | Array<{ method?: string | null; amount_usd?: number | string | null; amount_khr?: number | string | null }> | null
   customer_name?: string | null
   customer_phone?: string | null
   customer_address?: string | null
@@ -142,6 +145,19 @@ function parseItems(raw: ReceiptSale['items']): ReceiptItem[] {
   }
 }
 
+function parsePaymentDetails(raw: ReceiptSale['payment_details']): Array<{ method: string; amount_usd: number; amount_khr: number }> {
+  const candidate = Array.isArray(raw) ? raw : (() => {
+    if (typeof raw !== 'string') return []
+    try { return JSON.parse(raw) } catch { return [] }
+  })()
+  if (!Array.isArray(candidate)) return []
+  return candidate.map((detail) => ({
+    method: String(detail?.method || '').trim(),
+    amount_usd: toNumber(detail?.amount_usd),
+    amount_khr: toNumber(detail?.amount_khr),
+  })).filter((detail) => detail.method && (detail.amount_usd > 0 || detail.amount_khr > 0))
+}
+
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
@@ -152,6 +168,7 @@ function getReceiptPaperWidthMm(printSettings: { paperSize?: unknown; customWidt
   if (paperSize === '58mm') return 58
   if (paperSize === '72mm') return 72
   if (paperSize === '80mm') return 80
+  if (paperSize === '80x50mm') return 80
   if (paperSize === 'a4') return 210
   if (paperSize === 'letter') return 216
   return Math.max(40, fallback)
@@ -181,8 +198,10 @@ const LABELS = {
     paid: 'Paid:',
     change: 'Change:',
     refunded: 'Refunded:',
-    thankYou: 'Thank you for your business!',
+    thankYou: 'Thank you for your patronage!',
     qty: 'Qty',
+    visitWebsite: 'Visit our website',
+    followUs: 'Follow us',
   },
   km: {
     receipt: 'បង្កាន់ដៃ',
@@ -209,14 +228,27 @@ const LABELS = {
     refunded: 'បានសងវិញ:',
     thankYou: 'សូមអរគុណសម្រាប់ការទិញទំនិញ!',
     qty: 'ចំនួន',
+    visitWebsite: 'ទស្សនាគេហទំព័ររបស់យើង',
+    followUs: 'តាមដានពួកយើង',
   },
 }
 
 const RECEIPT_KHMER_LABELS = LABELS.km satisfies Record<ReceiptLabelKey, string>
 
+function stripTrailingColon(value: string): string {
+  return value.endsWith(':') ? value.slice(0, -1) : value
+}
+
 function labelFor(mode: LanguageMode, key: ReceiptLabelKey): string {
-  if (mode === 'both') return `${LABELS.en[key]} / ${RECEIPT_KHMER_LABELS[key]}`
-  return (mode === 'km' ? RECEIPT_KHMER_LABELS : LABELS.en)[key]
+  if (mode === 'km') return RECEIPT_KHMER_LABELS[key]
+  if (mode !== 'both') return LABELS.en[key]
+  // Bilingual labels: join the English/Khmer terms with a single trailing
+  // colon instead of concatenating two colon-terminated strings (which
+  // produced "Receipt #: / លេខបង្កាន់ដៃ:" -- two colons for one label).
+  const enLabel = LABELS.en[key]
+  const kmLabel = RECEIPT_KHMER_LABELS[key]
+  const endsWithColon = enLabel.endsWith(':')
+  return `${stripTrailingColon(enLabel)} / ${stripTrailingColon(kmLabel)}${endsWithColon ? ':' : ''}`
 }
 
 function Row({ label, value, subValue, bold = false, tone = '' }: RowProps) {
@@ -238,7 +270,11 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const tpl = parseReceiptTemplate(appliedConfig.serializedTemplate)
   const appliedSettings = appliedConfig.settings
   const appliedPrintSettings = appliedConfig.printSettings
-  const receiptWidthMm = getReceiptPaperWidthMm(appliedPrintSettings, tpl.width || 80)
+  const compactSalesReceipt = tpl.sales_receipt_enabled === true || String(appliedPrintSettings.paperSize || '').toLowerCase() === '80x50mm'
+  const effectivePrintSettings = compactSalesReceipt
+    ? { ...appliedPrintSettings, paperSize: 'custom', customWidth: '80', customHeight: '50', marginTop: '0', marginRight: '0', marginBottom: '0', marginLeft: '0' }
+    : appliedPrintSettings
+  const receiptWidthMm = getReceiptPaperWidthMm(effectivePrintSettings, tpl.width || 80)
   const [lang, setLang] = useState<LanguageMode>((tpl.receipt_language as LanguageMode) || 'en')
   const [pdfBusy, setPdfBusy] = useState<ReceiptExportMode | ''>('')
 
@@ -248,11 +284,12 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
 
   const em = (text: string): string => (tpl.show_emojis === false ? stripEmoji(text) : text)
   const items = useMemo(() => parseItems(sale.items), [sale.items])
+  const paymentDetails = useMemo(() => parsePaymentDetails(sale.payment_details), [sale.payment_details])
   const rNum = sale.receiptNumber || sale.receipt_number || 'Receipt'
   const createdAt = sale.created_at
   const createdAtText = createdAt instanceof Date ? createdAt.toISOString() : String(createdAt || '')
   const parsedDate = createdAt ? new Date(createdAtText.includes('T') ? createdAtText : `${createdAtText}Z`) : new Date()
-  const dateStr = Number.isNaN(parsedDate.getTime()) ? String(createdAt || '') : parsedDate.toLocaleString()
+  const dateStr = Number.isNaN(parsedDate.getTime()) ? String(createdAt || '') : parsedDate.toLocaleString(undefined, { timeZone: BUSINESS_TIME_ZONE })
   const exchangeRate = toNumber(sale.exchange_rate) || toNumber(appliedSettings.exchange_rate as number | string | undefined) || 4100
   const subtotalUsd = toNumber(sale.subtotal_usd ?? sale.subtotal)
   const discountUsd = toNumber(sale.discount_usd ?? sale.discount)
@@ -286,7 +323,8 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   const footerDivider = (tpl.footer_separator || '-').repeat(28)
   const headerAlignClass = tpl.align_header === 'left' ? 'text-left' : tpl.align_header === 'right' ? 'text-right' : 'text-center'
 
-  const hasCustomer = sale.customer_name || sale.customer_phone || sale.customer_address || sale.customer_membership_number
+  const showMembershipId = tpl.show_customer_membership !== false
+  const hasCustomer = sale.customer_name || sale.customer_phone || sale.customer_address || (showMembershipId && sale.customer_membership_number)
   const hasDelivery = !!sale.is_delivery && (sale.delivery_contact_name || sale.delivery_contact_phone || sale.delivery_contact_address)
   const showDeliveryContactSection = tpl.delivery_show_contact !== false
   const showDeliveryDriverName = showDeliveryContactSection && tpl.delivery_show_driver_name !== false
@@ -310,7 +348,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         {tpl.show_receipt_number ? <Row label={labelFor(lang, 'receiptNum')} value={rNum} bold /> : null}
         {tpl.show_date ? <Row label={labelFor(lang, 'date')} value={dateStr} /> : null}
         {tpl.show_cashier ? <Row label={labelFor(lang, 'cashier')} value={sale.cashier_name || '-'} /> : null}
-        {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} /> : null}
+        {tpl.show_payment_method ? <Row label={labelFor(lang, 'payment')} value={sale.payment_method || 'Cash'} subValue={paymentDetails.length > 1 ? paymentDetails.map((detail) => `${detail.method}: ${detail.amount_usd > 0 ? fmtUSD(detail.amount_usd) : ''}${detail.amount_usd > 0 && detail.amount_khr > 0 ? ' + ' : ''}${detail.amount_khr > 0 ? fmtKHR(detail.amount_khr) : ''}`).join(' · ') : ''} /> : null}
         {tpl.show_exchange_rate ? <Row label={labelFor(lang, 'rate')} value={`1 USD = ${Number(exchangeRate).toLocaleString()} ${khrSymbol}`} /> : null}
       </div>
     ),
@@ -319,7 +357,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         {tpl.show_customer_name && sale.customer_name ? <Row label={labelFor(lang, 'customer')} value={sale.customer_name} /> : null}
         {tpl.show_customer_phone && sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
         {tpl.show_customer_address && sale.customer_address ? <Row label={labelFor(lang, 'address')} value={displayAddress(sale.customer_address)} /> : null}
-        {sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
+        {showMembershipId && sale.customer_membership_number ? <Row label={labelFor(lang, 'membership')} value={sale.customer_membership_number} /> : null}
       </div>
     ) : null,
     delivery: hasDelivery && showDeliveryContactSection ? (
@@ -343,14 +381,37 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
           const unitKhr = toNumber(item.applied_price_khr ?? item.price_khr)
           const lineUsd = unitUsd * qty
           const lineKhr = unitKhr * qty
+          // Individual/per-product discounts: the item's original list price
+          // (price_usd) vs. what was actually charged (applied_price_usd).
+          // When a product-level discount was applied at time of sale these
+          // differ, so show the crossed-out original + savings per line
+          // instead of silently only reflecting the discounted total.
+          const originalUnitUsd = toNumber(item.price_usd ?? item.price)
+          const hasItemDiscount = tpl.show_item_discount !== false
+            && originalUnitUsd > 0
+            && unitUsd > 0
+            && originalUnitUsd > unitUsd
+            && item.applied_price_usd != null
+          const itemSavingsUsd = hasItemDiscount ? (originalUnitUsd - unitUsd) * qty : 0
           return (
-            <div key={`${item.product_id || item.id || index}-${index}`} className="my-1">
+            <div key={`${item.product_id || item.id || index}-${index}`} className="py-1.5">
               <div data-receipt-line="true" className="grid grid-cols-[minmax(0,1fr)_2.8rem_minmax(4.6rem,auto)] items-start gap-x-2">
                 <div data-receipt-cell="name" className="min-w-0 overflow-hidden whitespace-normal break-words font-semibold leading-snug">
                   <div data-receipt-main="true">
                     {item.product_name || item.name}
                     {tpl.show_item_sku && item.sku ? <span className="ml-1 text-[10px] text-gray-500">[{item.sku}]</span> : null}
                   </div>
+                  {tpl.show_item_unit_price && qty > 1 ? (
+                    <div data-receipt-subline="true" className="text-[10px] font-normal text-gray-500">
+                      {fmtUSD(unitUsd)} x {qty}
+                    </div>
+                  ) : null}
+                  {hasItemDiscount ? (
+                    <div data-receipt-subline="true" className="text-[10px] font-normal text-red-600">
+                      <span className="line-through text-gray-400">{fmtUSD(originalUnitUsd * qty)}</span>{' '}
+                      -{fmtUSD(itemSavingsUsd)}
+                    </div>
+                  ) : null}
                 </div>
                 <div data-receipt-cell="qty" className="whitespace-nowrap text-center leading-snug">{tpl.show_item_qty ? qty : ''}</div>
                 <div data-receipt-cell="price" className="min-w-0 whitespace-nowrap text-right font-semibold leading-snug">
@@ -358,7 +419,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
                   {tpl.show_item_khr && lineKhr > 0 ? <div className="text-[10px] font-normal text-gray-500">{fmtKHR(lineKhr)}</div> : null}
                 </div>
               </div>
-              {tpl.item_separator && index < items.length - 1 ? <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-400">{divider}</div> : null}
+              {tpl.item_separator && index < items.length - 1 ? <div aria-hidden="true" className="mt-1.5 border-t border-gray-200/80" /> : null}
             </div>
           )
         })}
@@ -366,25 +427,25 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
     ),
     subtotal: tpl.show_subtotal ? <Row key="subtotal" label={labelFor(lang, 'subtotal')} value={fmtUSD(subtotalUsd)} /> : null,
     discount: tpl.show_discount && discountUsd > 0 ? (
-      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(discountUsd)}`} subValue={discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : ''} tone="text-red-600" />
+      <Row key="discount" label={labelFor(lang, 'discount')} value={`-${fmtUSD(discountUsd)}`} subValue={tpl.show_discount_khr !== false && discountKhr > 0 ? `-${fmtKHR(discountKhr)}` : ''} tone="text-red-600" />
     ) : null,
-    membership_discount: membershipDiscountUsd > 0 ? (
+    membership_discount: tpl.show_membership_discount !== false && membershipDiscountUsd > 0 ? (
       <Row
         key="membership_discount"
         label={labelFor(lang, 'membershipDiscount')}
         value={`-${fmtUSD(membershipDiscountUsd)}`}
-        subValue={membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : ''}
+        subValue={tpl.show_membership_discount_khr !== false && membershipDiscountKhr > 0 ? `-${fmtKHR(membershipDiscountKhr)}` : ''}
         tone="text-emerald-600"
       />
     ) : null,
-    membership_points: membershipPointsRedeemed > 0 ? (
+    membership_points: tpl.show_membership_points !== false && membershipPointsRedeemed > 0 ? (
       <Row key="membership_points" label={labelFor(lang, 'pointsRedeemed')} value={membershipPointsRedeemed.toLocaleString()} />
     ) : null,
     tax: tpl.show_tax && taxUsd > 0 ? (
       <Row key="tax" label={labelFor(lang, 'tax')} value={fmtUSD(taxUsd)} subValue={taxKhr > 0 ? fmtKHR(taxKhr) : ''} />
     ) : null,
     delivery_fee: tpl.show_delivery !== false && tpl.delivery_show_fee !== false && deliveryFeeUsd > 0 ? (
-      <Row key="delivery_fee" label={labelFor(lang, 'delivery')} value={fmtUSD(deliveryFeeUsd)} subValue={deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : ''} />
+      <Row key="delivery_fee" label={labelFor(lang, 'delivery')} value={fmtUSD(deliveryFeeUsd)} subValue={tpl.show_delivery_khr !== false && deliveryFeeKhr > 0 ? fmtKHR(deliveryFeeKhr) : ''} />
     ) : null,
     refund: refundUsd > 0 ? (
       <Row key="refund" label={labelFor(lang, 'refunded')} value={`-${fmtUSD(refundUsd)}`} subValue={refundKhr > 0 ? `-${fmtKHR(refundKhr)}` : ''} tone="text-orange-600" />
@@ -407,7 +468,9 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       <div key="footer" className="mt-2">
         <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
         <div data-receipt-line="true" className="mt-1 text-center text-[11px]">
-          {tpl.custom_footer || settings?.receipt_footer || labelFor(lang, 'thankYou')}
+          {tpl.custom_footer || settings?.receipt_footer || (lang === 'both' ? (
+            <><div>{LABELS.en.thankYou}</div><div className="mt-0.5">{RECEIPT_KHMER_LABELS.thankYou}</div></>
+          ) : labelFor(lang, 'thankYou'))}
         </div>
         <div data-receipt-line="true" data-receipt-align="center" className="text-center text-[11px] text-gray-500">{footerDivider}</div>
       </div>
@@ -446,6 +509,41 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
       : sectionMap[key]))
     .filter(Boolean)
 
+  const qrEntries: ReceiptQrEntry[] = tpl.show_qr_codes ? [
+    ...(tpl.qr_show_portal !== false && tpl.qr_portal_url ? [{
+      key: 'portal',
+      label: tpl.qr_portal_label || t?.('qr_scan_shop') || 'Shop Online',
+      url: String(tpl.qr_portal_url),
+    }] : []),
+    ...(tpl.qr_show_social ? normalizeQrSocialLinksForReceipt(tpl.qr_social_links) : []),
+  ] : []
+  const qrBlock = qrEntries.length ? (
+    <ReceiptQrCodes key="qr_codes" entries={qrEntries} scanLabel={t?.('qr_scan_to_visit') || 'Scan to visit'} />
+  ) : null
+  const compactReceiptBlock = compactSalesReceipt ? (
+    <div className="space-y-1 text-[10px] leading-snug">
+      {settings.business_name ? <div className="text-center text-sm font-bold">{settings.business_name}</div> : null}
+      {settings.business_phone ? <div className="text-center">{settings.business_phone}</div> : null}
+      <div className="border-t border-gray-300 pt-1">
+        <Row label={labelFor(lang, 'date')} value={dateStr} />
+        {sale.customer_phone ? <Row label={labelFor(lang, 'phone')} value={sale.customer_phone} /> : null}
+        {sale.customer_address ? <Row label={labelFor(lang, 'address')} value={displayAddress(sale.customer_address)} /> : null}
+        <Row label={labelFor(lang, 'qty')} value={items.reduce((sum, item) => sum + (toNumber(item.quantity) || 1), 0).toLocaleString()} />
+      </div>
+      <div className="border-y border-gray-900 py-1">
+        <Row label={labelFor(lang, 'total')} value={fmtUSD(totalUsd)} subValue={fmtKHR(totalKhr)} bold />
+      </div>
+      {tpl.sales_receipt_aba_account_name || tpl.sales_receipt_aba_account_number ? (
+        <div className="text-center">
+          <div className="font-semibold">{tpl.sales_receipt_aba_account_name || 'ABA'}</div>
+          {tpl.sales_receipt_aba_account_number ? <div>{tpl.sales_receipt_aba_account_number}</div> : null}
+        </div>
+      ) : null}
+      {tpl.sales_receipt_aba_qr_image ? <div className="flex justify-center pt-1"><img src={tpl.sales_receipt_aba_qr_image} alt="ABA payment QR" className="h-16 w-16 object-contain" /></div> : null}
+      {tpl.sales_receipt_note === 'received_payment' ? <div className="text-center font-semibold">Received payment</div> : null}
+    </div>
+  ) : null
+
   const receiptTitle = `Receipt ${rNum}`
   const exportReceiptPdf = async (mode: ReceiptExportMode) => {
     if (!printRef.current) return
@@ -456,18 +554,18 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         await printTools.downloadReceiptImage(printRef.current, {
           title: receiptTitle,
           fileName: receiptTitle,
-          printSettings: appliedPrintSettings,
+          printSettings: effectivePrintSettings,
         })
       } else if (mode === 'print') {
         await printTools.printReceipt(printRef.current, {
           title: '',
-          printSettings: appliedPrintSettings,
+          printSettings: effectivePrintSettings,
         })
       } else {
         await printTools.openReceiptPdf(printRef.current, {
           title: '',
           fileName: receiptTitle,
-          printSettings: appliedPrintSettings,
+          printSettings: effectivePrintSettings,
           previewFallback: true,
           previewFallbackNote: t?.('receipt_pdf_preview_fallback') || 'PDF export was unavailable, so a printable receipt preview was opened instead.',
         })
@@ -498,7 +596,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
   }
 
   if (_previewMode) {
-    return <div data-receipt-export-root="true" style={shellStyle}>{renderedSections}</div>
+    return <div data-receipt-export-root="true" style={shellStyle}>{compactReceiptBlock || <>{renderedSections}{qrBlock}</>}</div>
   }
 
   return (
@@ -569,7 +667,7 @@ export default function Receipt({ sale, settings = {}, onClose, _previewMode }: 
         <div style={{ width: '100%', maxWidth: `calc(${receiptWidthMm}mm + 32px)` }}>
           <div className="rounded-[18px] border border-gray-200 bg-white p-2 shadow-[0_22px_48px_rgba(15,23,42,0.14)] dark:border-zinc-700 dark:bg-white">
           <div ref={printRef} data-receipt-export-root="true" style={shellStyle}>
-            {renderedSections}
+            {compactReceiptBlock || <>{renderedSections}{qrBlock}</>}
           </div>
           </div>
           <p className="mt-3 inline-flex w-full items-center justify-center gap-2 text-center text-xs text-gray-400">

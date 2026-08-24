@@ -25,14 +25,47 @@ async function runTest(name: string, fn: TestCallback): Promise<void> {
 
 await runTest('same product name and same non-stock details plans stock merge', () => {
   const analysis = analyzeProductImportRows([
-    { name: 'Serum', sku: 'S-1', selling_price_usd: '12.345', stock_quantity: '3' },
+    { name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '12.345', stock_quantity: '3' },
   ], [
-    { id: 10, name: 'Serum', sku: 'S-1', selling_price_usd: 12.35, stock_quantity: 1 },
+    { id: 10, name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: 12.35, stock_quantity: 1 },
   ])
 
   assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
   assert.equal(analysis.rows[0]._target_product_id, 10)
   assert.equal(analysis.summary.mergeCount, 1)
+})
+
+await runTest('same product name and same details but different branch, no barcode, still plans stock merge', () => {
+  // A barcode is no longer required for the merge shortcut: everything
+  // that identifies "the same product" (name, sku, category, brand, unit,
+  // description, supplier, prices) matches here and only branch differs,
+  // so this is one product restocked at another branch, not a variant.
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum', sku: 'S-1', brand: 'Acme', category: 'Skincare', selling_price_usd: '12', purchase_price_usd: '6', branch: 'Branch B', stock_quantity: '3' },
+  ], [
+    { id: 10, name: 'Serum', sku: 'S-1', brand: 'Acme', category: 'Skincare', selling_price_usd: 12, purchase_price_usd: 6, branch: 'Branch A', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
+  assert.equal(analysis.rows[0]._target_product_id, 10)
+  assert.equal(analysis.summary.mergeCount, 1)
+})
+
+await runTest('same product name, no barcode, but a real detail difference still plans a variant', () => {
+  // Same name/sku, but a different brand (and it's not just branch) -- this
+  // must still become a variant/new row, not a silent stock merge. Price
+  // differences alone are NOT a detail difference (see the "price changes"
+  // test above) -- only branch, sku, barcode, category, brand, unit,
+  // description, and supplier participate in the merge/variant signature.
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum', sku: 'S-1', brand: 'Acme', branch: 'Branch B', stock_quantity: '3' },
+  ], [
+    { id: 10, name: 'Serum', sku: 'S-1', brand: 'Other Brand', branch: 'Branch A', stock_quantity: 1 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
+  assert.equal(analysis.rows[0]._parent_id, 10)
+  assert.equal(analysis.summary.variantCount, 1)
 })
 
 await runTest('same product name and different details plans variant creation', () => {
@@ -47,27 +80,34 @@ await runTest('same product name and different details plans variant creation', 
   assert.equal(analysis.summary.variantCount, 1)
 })
 
-await runTest('same product name with only price changes plans stock merge', () => {
+await runTest('same product name but a different price (no branch involved) plans a variant, not a silent merge', () => {
+  // Confirmed intended behavior: prices are part of the "same details"
+  // signature. A price difference is a real product difference (e.g. a
+  // different size/config sharing a name), not something to silently
+  // fold into existing stock -- only branch is allowed to differ for the
+  // merge shortcut.
   const analysis = analyzeProductImportRows([
     { name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '15', purchase_price_usd: '8', discount_percent: '10', stock_quantity: '2' },
   ], [
     { id: 10, name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: 12, purchase_price_usd: 6, discount_percent: 0 },
   ])
 
-  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
-  assert.equal(analysis.rows[0]._target_product_id, 10)
-  assert.equal(analysis.summary.mergeCount, 1)
+  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
+  assert.equal(analysis.rows[0]._parent_id, 10)
+  assert.equal(analysis.summary.variantCount, 1)
 })
 
 await runTest('malformed existing product rows do not crash import analysis', () => {
   const existingProducts = [
     null,
-    { id: 20, name: 'Safe Cream', sku: 'SAFE-1', image_gallery: null, selling_price_usd: 8.01 },
+    { id: 20, name: 'Safe Cream', sku: 'SAFE-1', barcode: 'BC-SAFE-1', image_gallery: null, selling_price_usd: 8.01 },
     { id: 21, name: '', image_gallery: '{bad json' },
   ] as unknown as ImportFixtureRow[]
 
+  // The null and bad-JSON entries above are the actual crash-safety
+  // regression this test guards against.
   const analysis = analyzeProductImportRows([
-    { name: 'Safe Cream', sku: 'SAFE-1', selling_price_usd: '8.001', stock_quantity: '2' },
+    { name: 'Safe Cream', sku: 'SAFE-1', barcode: 'BC-SAFE-1', selling_price_usd: '8.001', stock_quantity: '2' },
   ], existingProducts)
 
   assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
@@ -146,6 +186,10 @@ await runTest('duplicate imported same-name rows avoid unsafe temporary row ids'
     { name: 'Cream', sku: 'C-2', selling_price_usd: '4.001', stock_quantity: '2' },
   ], [])
 
+  // Row 1 is an exact detail match for row 0 (same sku, same price, no
+  // barcode) so it merges into row 0's stock; row 2 has a different sku and
+  // price, so it's a genuine variant. The actual regression this test
+  // guards (no unsafe 'row:N' temp ids below) is unaffected either way.
   assert.deepEqual(analysis.rows.map((row) => row._planned_action), ['new', 'merge_stock', 'create_variant'])
   assert.equal(analysis.rows.some((row) => String(row._parent_id || '').startsWith('row:')), false)
   assert.equal(analysis.rows.some((row) => String(row._target_product_id || '').startsWith('row:')), false)
@@ -249,10 +293,10 @@ await runTest('bulk import modal explains specific review errors before apply', 
 await runTest('bulk import modal has collapsible inline details and cancelled job recovery', () => {
   const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 
-  assert.match(source, /collapsedDetailRows/)
+  assert.match(source, /expandedDetailRows/)
   assert.match(source, /toggleInlineDetails/)
-  assert.match(source, /Inline details/)
-  assert.match(source, /setCollapsedDetailRows\(new Set\(\(analysis\.rows \|\| \[\]\)/)
+  assert.match(source, /More details/)
+  assert.match(source, /setExpandedDetailRows\(new Set\(\)\)/)
   assert.match(source, /Retry import/)
   assert.match(source, /Delete import/)
   assert.match(source, /Back to upload/)
@@ -282,6 +326,30 @@ await runTest('corrupted Khmer text is blocked before import', () => {
   assert.equal(analysis.conflicts[0].conflictType, 'possible_encoding_corruption')
   assert.deepEqual(analysis.conflicts[0].issueTypes, ['possible_encoding_corruption'])
   assert.match(analysis.errors[0], /UTF-8 or UTF-16/)
+})
+
+// Real-file audit (Aug 23 2026, chat) -- see getBlankCsvHeaderColumns'
+// comment in csvImport.ts. Confirms the products template's own duplicate-
+// header warning still fires (discount_ends_at.1/is_active.1, found in the
+// user's real uploaded products-template_with_description.csv) AND the new
+// blank-header-column warning fires independently, side by side.
+await runTest('analyzeProductImportText warns on a blank header column with real data under it', () => {
+  const text = 'name,,barcode,selling_price_usd,stock_quantity\nCream,SKU-1,BC-1,3,1'
+  const analysis = analyzeProductImportText(text, [])
+  assert.equal(analysis.warnings.some((warning) => /Column 2 has no header/.test(warning)), true)
+})
+
+await runTest('analyzeProductImportText does not warn about blank headers on a clean file', () => {
+  const text = 'name,barcode,selling_price_usd,stock_quantity\nCream,BC-1,3,1'
+  const analysis = analyzeProductImportText(text, [])
+  assert.equal(analysis.warnings.some((warning) => /no header/.test(warning)), false)
+})
+
+await runTest('analyzeProductImportText surfaces both a duplicate-header and a blank-header warning together', () => {
+  const text = 'name,barcode,discount_ends_at,,discount_ends_at.1\nCream,BC-1,2026-01-01,stray,2026-02-01'
+  const analysis = analyzeProductImportText(text, [])
+  assert.equal(analysis.warnings.some((warning) => /Duplicate or near-duplicate/.test(warning)), true)
+  assert.equal(analysis.warnings.some((warning) => /Column 4 has no header/.test(warning)), true)
 })
 
 if (failed > 0) {

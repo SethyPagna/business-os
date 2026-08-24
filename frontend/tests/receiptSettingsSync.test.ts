@@ -28,7 +28,12 @@ assert.match(printSettingsSource, /printSettings:\s*ps/)
 
 assert.match(receiptPreviewSource, /buildAppliedReceiptConfig\(\{ settings, template: tpl \}\)\.settings/)
 assert.match(receiptSource, /const appliedConfig = useMemo\(\(\) => buildAppliedReceiptConfig\(\{ settings \}\), \[settings\]\)/)
-assert.match(receiptSource, /printSettings:\s*appliedPrintSettings/)
+// Compact ABA receipts intentionally override the normal paper frame with
+// an 80 x 50mm, zero-margin effective print configuration. The printable
+// path must receive that resolved object, not the untouched stored settings.
+assert.match(receiptSource, /const effectivePrintSettings = compactSalesReceipt/)
+assert.match(receiptSource, /paperSize: 'custom', customWidth: '80', customHeight: '50'/)
+assert.match(receiptSource, /printSettings:\s*effectivePrintSettings/)
 
 assert.match(printUtilSource, /RECEIPT_PRINT_SETTINGS_STORAGE_KEY/)
 assert.match(printUtilSource, /normalizeReceiptPrintSettings/)

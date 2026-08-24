@@ -117,6 +117,15 @@ export function transferStock(payload: BranchPayload = {}): Promise<unknown> {
   )
 }
 
+export function transferStockBulk(payload: BranchPayload = {}): Promise<unknown> {
+  return route(
+    'branches:transfer-bulk',
+    () => apiFetch('POST', '/api/branches/transfer-bulk', { ...getDevicePayload(), ...(payload || {}) }),
+    null,
+    true,
+  )
+}
+
 export function getBranchStockIntegrity(): Promise<unknown> {
   return route(
     'branches:stockIntegrity',

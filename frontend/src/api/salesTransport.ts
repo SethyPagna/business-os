@@ -140,3 +140,16 @@ export function getSalesExport(params: QueryParams = {}): Promise<unknown> {
     () => ({}),
   )
 }
+
+// Unbounded revenue/count aggregate matching the /api/sales list's filters
+// (see routes/sales.ts's /stats handler) -- used for the Sales page header
+// so it stops silently under-reporting once a filtered range has more rows
+// than the list's own page cap.
+export function getSalesStats(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    'sales:stats',
+    () => apiFetch('GET', appendQuery('/api/sales/stats', query)),
+    () => ({ total_count: 0, revenue_usd: 0, pending_revenue_usd: 0, truncated_in_list: false }),
+  )
+}

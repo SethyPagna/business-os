@@ -1,4 +1,4 @@
-import Languages from 'lucide-react/dist/esm/icons/languages.js'
+import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import Moon from 'lucide-react/dist/esm/icons/moon.js'
 import Sun from 'lucide-react/dist/esm/icons/sun.js'
 import type { MouseEventHandler, ReactNode } from 'react'
@@ -31,10 +31,10 @@ function ToggleButton({ active = false, children, label, onClick }: ToggleButton
       aria-label={label}
       title={label}
       className={[
-        'flex h-10 w-10 items-center justify-center rounded-xl border transition-colors',
-        'border-gray-200 bg-white/85 text-gray-600 hover:border-blue-300 hover:bg-white hover:text-gray-900',
-        'dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-200 dark:hover:border-blue-500/60 dark:hover:bg-slate-800 dark:hover:text-white',
-        active ? 'border-blue-300 text-blue-700 dark:border-blue-500/60 dark:text-blue-300' : '',
+        'relative flex h-10 w-10 items-center justify-center rounded-full transition-colors',
+        'text-gray-600 hover:bg-gray-100 hover:text-gray-900',
+        'dark:text-slate-200 dark:hover:bg-slate-800 dark:hover:text-white',
+        active ? 'text-blue-700 dark:text-blue-300' : '',
       ].join(' ')}
     >
       {children}
@@ -71,7 +71,22 @@ export default function QuickPreferenceToggles({ className = '' }: QuickPreferen
         label={nextLanguageLabel}
         onClick={toggleLanguage}
       >
-        <Languages className="h-4 w-4" />
+        <Globe className="h-4 w-4" />
+        {/* Previously a generic "Languages" glyph that looked identical
+            regardless of which language was active -- swapped for Globe
+            (matching the icon already used for language elsewhere, e.g.
+            ReceiptSettings.tsx) plus this small code badge so the current
+            language is legible at a glance, not just inferable from the
+            active/inactive border color. */}
+        <span
+          aria-hidden="true"
+          className={[
+            'pointer-events-none absolute -bottom-1 -right-1 rounded-full border px-1 text-[9px] font-bold leading-[13px]',
+            'border-white bg-blue-600 text-white dark:border-slate-900',
+          ].join(' ')}
+        >
+          {khmerActive ? 'KM' : 'EN'}
+        </span>
       </ToggleButton>
     </div>
   )

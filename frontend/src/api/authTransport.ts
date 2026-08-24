@@ -1,4 +1,4 @@
-import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { getClientDeviceInfo, getOrCreatePersistentDeviceId } from '../utils/deviceInfo.ts'
 import { apiFetch, route } from './http.ts'
 
 type AuthPayload = Record<string, unknown>
@@ -31,6 +31,12 @@ export function login({
     clientTime: clientTime || device.clientTime || '',
     deviceTz: deviceTz || device.deviceTz || '',
     deviceName: deviceName || device.deviceName || '',
+    // Only meaningful for admin-control accounts (see
+    // cloudflare/src/lib/deviceTrust.ts) -- ignored server-side for
+    // everyone else, but always sent so a first-time admin login from a
+    // new browser isn't misread as "no device id" (which fails closed
+    // into pending rather than skipping the check).
+    deviceId: getOrCreatePersistentDeviceId(),
   })
 }
 
@@ -83,7 +89,16 @@ export function otpStatus(userId: string | number): Promise<unknown> {
 }
 
 export function startGoogleOauth(payload: AuthPayload = {}): Promise<unknown> {
-  return apiFetch('POST', '/api/auth/oauth/start', payload || {})
+  const device = getClientDeviceInfo()
+  return apiFetch('POST', '/api/auth/oauth/start', {
+    ...(payload || {}),
+    // Carried through the OAuth redirect (server signs it into `state`) so
+    // the callback can run the same admin device-approval check POST
+    // /login runs -- see cloudflare/src/lib/deviceTrust.ts. Only
+    // meaningful for admin-control accounts; ignored for everyone else.
+    deviceId: getOrCreatePersistentDeviceId(),
+    deviceName: (payload && (payload as { deviceName?: string }).deviceName) || device.deviceName || '',
+  })
 }
 
 export function completeGoogleOauth(payload: AuthPayload = {}): Promise<unknown> {

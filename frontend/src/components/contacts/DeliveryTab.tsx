@@ -1,25 +1,35 @@
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import type { ComponentProps } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import Download from 'lucide-react/dist/esm/icons/download.js'
-import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import Download from 'lucide-react/dist/esm/icons/download.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import LazyPortalMenu from '../shared/LazyPortalMenu'
+import type { PortalMenuItem } from '../shared/PortalMenu'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
-import { fmtDate } from '../../utils/formatters'
+import { fmtDateTime24 } from '../../utils/formatters'
 import Modal from '../shared/Modal'
+import AppSelect from '../shared/AppSelect.tsx'
 import FilterMenu from '../shared/FilterMenu'
+import SearchInput from '../shared/SearchInput'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
+import { useContactDuplicateFlag } from './useContactDuplicateFlag'
+import DuplicateFlagBanner from './DuplicateFlagBanner'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildAlphabetActionSections, buildTimeActionSections, getAvailableYears, getTimeGroupingMode } from '../../utils/groupedRecords.ts'
+import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
+import { fuzzyTextMatches } from '../../utils/searchMatch.ts'
 import {
   CONTACT_OPTION_LIMIT,
   buildContactOptionSummary,
@@ -30,7 +40,7 @@ import {
 } from './contactOptionUtils'
 import type { ContactOption } from './contactOptionUtils'
 
-const ContactImportModal = lazy(() => import('./ContactImportModal'))
+const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'delivery-contact-import')
 const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
@@ -59,6 +69,8 @@ interface DeliveryTabProps {
   t: TranslateFn
   notify: NotifyFn
   active?: boolean
+  // See CustomersTab.tsx's identical prop for why this exists.
+  initialSearch?: string
 }
 
 interface DeliveryContact extends Record<string, unknown> {
@@ -68,6 +80,7 @@ interface DeliveryContact extends Record<string, unknown> {
   area?: string | null
   address?: string | null
   notes?: string | null
+  gender?: string | null
   created_at?: string | null
 }
 
@@ -77,8 +90,10 @@ interface DeliveryPayload {
   area?: string | null
   address?: string | null
   notes?: string | null
+  gender?: string | null
   userId?: string | number | null
   userName?: string | null
+  confirmDuplicate?: boolean
 }
 
 interface DeliveryMutationResult {
@@ -115,7 +130,7 @@ const useSync = useSyncHook as () => SyncContextValue
 
 type ContactReadTransportModule = typeof import('../../api/contactReadTransport.ts')
 type ContactWriteTransportModule = typeof import('../../api/contactWriteTransport.ts')
-type CsvUtilsModule = typeof import('../../utils/csv')
+type CsvUtilsModule = typeof import('../../utils/csv') & typeof import('../../utils/xlsxExport')
 
 let contactReadTransportModulePromise: Promise<ContactReadTransportModule> | null = null
 let contactWriteTransportModulePromise: Promise<ContactWriteTransportModule> | null = null
@@ -132,7 +147,12 @@ function loadContactWriteTransportModule(): Promise<ContactWriteTransportModule>
 }
 
 function loadCsvUtilsModule(): Promise<CsvUtilsModule> {
-  if (!csvUtilsModulePromise) csvUtilsModulePromise = import('../../utils/csv')
+  if (!csvUtilsModulePromise) {
+    csvUtilsModulePromise = Promise.all([
+      import('../../utils/csv'),
+      import('../../utils/xlsxExport'),
+    ]).then(([csvUtils, xlsxUtils]) => ({ ...csvUtils, ...xlsxUtils }) as CsvUtilsModule)
+  }
   return csvUtilsModulePromise
 }
 
@@ -203,7 +223,7 @@ function OptionEditor({ option, index, total, onChange, onRemove }: OptionEditor
           onChange={e => set('label', e.target.value)}
         />
         {total > 1 && (
-          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 text-xs px-1.5 py-1 rounded flex-shrink-0">x</button>
+          <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600 text-xs px-1.5 py-1 rounded flex-shrink-0" aria-label="Remove delivery option">x</button>
         )}
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -233,7 +253,7 @@ interface DeliveryFormProps {
 }
 
 function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
-  const init: DeliveryPayload = contact ? { ...contact } : { name: '', phone: '', area: '', address: '', notes: '' }
+  const init: DeliveryPayload = contact ? { ...contact } : { name: '', phone: '', area: '', address: '', notes: '', gender: '' }
   const [form, setForm] = useState<DeliveryPayload>(init)
   const [options, setOptions] = useState(() => {
     const parsed = parseDeliveryOptions(init.address)
@@ -241,6 +261,7 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
     return [BLANK_OPTION()]
   })
   const [saving, setSaving] = useState(false)
+  const [localError, setLocalError] = useState('')
   const set = (key: keyof DeliveryPayload, value: string) => setForm((current) => ({ ...current, [key]: value }))
   const addOption = () => setOptions((current) => {
     if (current.length >= CONTACT_OPTION_LIMIT) return current
@@ -248,19 +269,40 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
   })
   const updateOption = (index: number, nextOption: ContactOption) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === index ? nextOption : option)))
   const removeOption = (index: number) => setOptions((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  const livePrimaryOption = getPrimaryContactOption(options, {
+    fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
+  })
+  const duplicateMatches = useContactDuplicateFlag(
+    'delivery_contacts',
+    livePrimaryOption.name || form.name || '',
+    livePrimaryOption.phone || form.phone || '',
+    contact?.id,
+  )
   const handleSave = async () => {
     if (saving) return
+    const primaryOption = getPrimaryContactOption(options, {
+      fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
+    })
+    const phoneConflict = duplicateMatches.find((match) => match.severity === 'phone_conflict')
+    if (phoneConflict) {
+      setLocalError(`This phone number already belongs to "${phoneConflict.name}". Each phone number can only be used by one delivery contact.`)
+      return
+    }
+    const exactMatch = duplicateMatches.find((match) => match.severity === 'exact_match')
+    if (exactMatch && !window.confirm(`"${exactMatch.name}" already has this exact name and phone number. Create a separate delivery contact anyway?`)) {
+      return
+    }
+    setLocalError('')
     setSaving(true)
     try {
-      const primaryOption = getPrimaryContactOption(options, {
-        fallback: { name: form.name || '', phone: form.phone || '', area: form.area || '' },
-      })
       await Promise.resolve(onSave({
         ...form,
         name: primaryOption.name || form.name || '',
         phone: primaryOption.phone || form.phone || '',
         area: primaryOption.area || form.area || '',
         address: serializeDeliveryOptions(options),
+        gender: form.gender || '',
+        confirmDuplicate: !!exactMatch,
       }))
     } finally {
       setSaving(false)
@@ -303,12 +345,41 @@ function DeliveryForm({ contact, onSave, onClose, t }: DeliveryFormProps) {
           </div>
         </div>
         <div>
+          <label htmlFor="delivery-form-gender" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('gender') || 'Gender'}</label>
+          <AppSelect
+            id="delivery-form-gender"
+            name="delivery_gender"
+            value={form.gender || ''}
+            onChange={(nextValue) => set('gender', nextValue)}
+            ariaLabel={t('gender') || 'Gender'}
+            className="w-full"
+            buttonClassName="h-10 w-full"
+            menuClassName="min-w-[10rem]"
+            options={[
+              { value: '', label: t('unspecified') || 'Unspecified' },
+              { value: 'male', label: t('male') || 'Male' },
+              { value: 'female', label: t('female') || 'Female' },
+              { value: 'other', label: t('other') || 'Other' },
+            ]}
+          />
+        </div>
+        <div>
           <label htmlFor="delivery-form-notes" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('notes')||'Notes'}</label>
           <textarea id="delivery-form-notes" name="delivery_notes" autoComplete="off" className="input resize-none" rows={2} value={form.notes||''} onChange={e => set('notes', e.target.value)} />
         </div>
         <p className="text-xs text-gray-400">Provide driver name or phone number.</p>
 
-        <div className="flex gap-3 pt-1">
+        {localError ? (
+          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-300">
+            {localError}
+          </div>
+        ) : null}
+
+        <DuplicateFlagBanner matches={duplicateMatches} entityLabel="delivery contact" />
+
+        {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/
+            CustomerFormModal.tsx's own fix. */}
+        <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
           <button type="button" className="btn-primary flex-1" onClick={handleSave} disabled={saving}>{saving ? (t('saving') || 'Saving...') : t('save')}</button>
           <button type="button" className="btn-secondary" onClick={onClose} disabled={saving}>{t('cancel')}</button>
         </div>
@@ -346,7 +417,7 @@ function OptionsBadge({ raw }: { raw: unknown }) {
 }
 
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
-function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
+function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabProps) {
   const { user } = useApp()
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
@@ -364,6 +435,12 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
   }, [isKhmer, t])
   const [contacts, setContacts] = useState<DeliveryContact[]>([])
   const [search,   setSearch]   = useState('')
+  const appliedInitialSearchRef = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!initialSearch || initialSearch === appliedInitialSearchRef.current) return
+    appliedInitialSearchRef.current = initialSearch
+    setSearch(initialSearch)
+  }, [initialSearch])
   const [modal,    setModal]    = useState<DeliveryModal>(null)
   const [selected, setSelected] = useState<DeliveryContact | null>(null)
   const [loading,  setLoading]  = useState(true)
@@ -371,6 +448,7 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
+  const [genderFilter, setGenderFilter] = useState('all')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
   const [groupMode, setGroupMode] = useState<DeliveryGroupMode>('time')
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
@@ -385,26 +463,39 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
     month: yearFilter !== 'all' && monthFilter !== 'all' ? monthFilter : undefined,
   }), [deferredSearch, monthFilter, yearFilter])
 
-  const filteredBySearch = useMemo(() => contacts.filter((contact) => {
-    const query = deferredSearch.toLowerCase().trim()
-    if (!query) return true
-    return (
-      String(contact.name || '').toLowerCase().includes(query) ||
-      String(contact.phone || '').includes(query) ||
-      String(contact.area || '').toLowerCase().includes(query)
+  // Same fix as CustomersTab.tsx's own filteredBySearch (see its comment):
+  // the server's delivery_contacts_fts search (part 108) is typo/joiner/
+  // order-tolerant, this literal `.includes()` chain was not, so it could
+  // hide a delivery contact the server correctly matched. Switched to the
+  // shared `fuzzyTextMatches` over a joined haystack matching
+  // delivery_contacts_fts's own column set (name, phone, area, address).
+  const filteredBySearch = useMemo(() => contacts.filter((contact) => (
+    fuzzyTextMatches(
+      [contact.name, contact.phone, contact.area, contact.address].join(' '),
+      deferredSearch,
     )
-  }), [contacts, deferredSearch])
+  )), [contacts, deferredSearch])
+
+  // Same same-page gender narrowing as CustomersTab.tsx/SuppliersTab.tsx
+  // (see their comments -- no server-side gender query param on GET
+  // /delivery-contacts).
+  const filteredByGender = useMemo(
+    () => (genderFilter === 'all' ? filteredBySearch : filteredBySearch.filter((contact) => (
+      genderFilter === 'unspecified' ? !contact.gender : contact.gender === genderFilter
+    ))),
+    [filteredBySearch, genderFilter],
+  )
 
   const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
-  const availableYears = useMemo(() => getAvailableYears(filteredBySearch, (contact) => contact?.created_at), [filteredBySearch])
+  const availableYears = useMemo(() => getAvailableYears(filteredByGender, (contact) => contact?.created_at), [filteredByGender])
   const filteredSections = useMemo(() => (
     groupMode === 'alphabet'
-      ? buildAlphabetActionSections(filteredBySearch, {
+      ? buildAlphabetActionSections(filteredByGender, {
         getName: (contact) => contact?.name,
         getItemId: (contact) => Number(contact?.id),
         sortDirection: 'asc',
       })
-      : buildTimeActionSections(filteredBySearch, {
+      : buildTimeActionSections(filteredByGender, {
         getDate: (contact) => contact?.created_at,
         getItemId: (contact) => Number(contact?.id),
         year: yearFilter,
@@ -413,7 +504,7 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
         groupMode: 'time',
         sortDirection,
       })
-  ), [filteredBySearch, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
+  ), [filteredByGender, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
   }, [filteredSections])
@@ -433,14 +524,19 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
   )
 
   const { selectedIds, setSelectedIds, toggleOne, selectAllProp } = useContactSelection(visibleContacts)
-  const deliveryColumns = [t('name') || 'Name', t('phone') || 'Phone', t('area_zone')||'Area / Zone']
+  const deliveryColumns = [t('name') || 'Name', t('phone') || 'Phone', t('area_zone')||'Area / Zone', t('gender') || 'Gender', t('col_added') || 'Added']
   const contactFilterSections = useMemo(() => ([
     {
       id: 'sort',
       label: tr('sort', 'Sort'),
+      searchable: true,
       options: [
         { id: 'sort-desc', label: tr('newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
         { id: 'sort-asc', label: tr('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
+        ...buildPeriodFilterOptions({
+          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
+          allTimeLabel: tr('all_time', 'All time'),
+        }),
       ],
     },
     {
@@ -452,41 +548,19 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
       ],
     },
     {
-      id: 'year',
-      label: tr('year', 'Year'),
+      id: 'gender',
+      label: tr('gender', 'Gender'),
       options: [
-        { id: 'all-years', label: tr('all_years', 'All years'), active: yearFilter === 'all', onClick: () => { setYearFilter('all'); setMonthFilter('all') } },
-        ...availableYears.map((year) => ({
-          id: `year-${year}`,
-          label: year,
-          active: yearFilter === year,
-          onClick: () => {
-            const next = yearFilter === year ? 'all' : year
-            setYearFilter(next)
-            if (next === 'all') setMonthFilter('all')
-          },
-        })),
-      ],
-    },
-    {
-      id: 'month',
-      label: tr('month', 'Month'),
-      options: [
-        { id: 'all-months', label: tr('all_months', 'All months'), active: monthFilter === 'all', onClick: () => setMonthFilter('all') },
-        ...Array.from({ length: 12 }, (_, index) => {
-          const month = String(index + 1)
-          return {
-            id: `month-${month}`,
-            label: new Date(2000, index, 1).toLocaleString(undefined, { month: 'long' }),
-            active: monthFilter === month,
-            onClick: () => setMonthFilter(monthFilter === month ? 'all' : month),
-          }
-        }),
+        { id: 'gender-all', label: tr('all', 'All'), active: genderFilter === 'all', onClick: () => setGenderFilter('all') },
+        { id: 'gender-male', label: tr('male', 'Male'), active: genderFilter === 'male', onClick: () => setGenderFilter('male') },
+        { id: 'gender-female', label: tr('female', 'Female'), active: genderFilter === 'female', onClick: () => setGenderFilter('female') },
+        { id: 'gender-other', label: tr('other', 'Other'), active: genderFilter === 'other', onClick: () => setGenderFilter('other') },
+        { id: 'gender-unspecified', label: tr('unspecified', 'Unspecified'), active: genderFilter === 'unspecified', onClick: () => setGenderFilter('unspecified') },
       ],
     },
 
-  ]), [availableYears, groupMode, monthFilter, sortDirection, tr, yearFilter])
-  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'])
+  ]), [availableYears, genderFilter, groupMode, monthFilter, sortDirection, tr, yearFilter])
+  const activeFilterCount = countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time', genderFilter !== 'all'])
   const toggleSectionCollapsed = (sectionId: string) => setCollapsedSections((current) => {
     const next = new Set(current)
     if (next.has(sectionId)) next.delete(sectionId)
@@ -509,6 +583,7 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
     area: contact.area || '',
     address: contact.address || '',
     notes: contact.notes || '',
+    gender: contact.gender || '',
     userId: user?.id,
     userName: user?.name,
   }), [user?.id, user?.name])
@@ -654,7 +729,13 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
           })
         }
       }
-      notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
+      // Part 157: same partial-save signal CustomersTab/SuppliersTab
+      // handle -- see routes/contacts.ts's PUT handler.
+      if (selected && (res as { partial?: boolean } | null)?.partial) {
+        notify(t('contact_partial_update_notice') || 'Only the name was saved -- your other changes need Full Access to Contacts.', 'warning')
+      } else {
+        notify(selected ? (t('delivery_contact_updated')||'Updated') : (t('delivery_contact_added')||'Added'))
+      }
       setModal(null); setSelected(null); await load({ silent: true, label: 'Delivery contacts after save' })
     } catch (error: unknown) { notify(getErrorMessage(error, 'Failed'), 'error') }
     finally { finishSingleAction(saveInFlightRef) }
@@ -762,14 +843,84 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
 
   return (
     <div className="flex flex-col gap-3">
-      <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} />
-      <div className="flex items-center gap-2 min-w-0">
+      {/* Manage (Import + Export folded into one dropdown, same pattern
+          Products.tsx uses) / History / Add Delivery -- History before
+          Manage per the ordering used on Products. */}
+      <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pb-1">
+        <ActionHistoryBar history={actionHistory as unknown as ActionHistoryBarHistory} t={t} className="min-w-0 flex-1" showLabel />
+        <LazyPortalMenu
+          align="auto"
+          triggerWrapperClassName="min-w-0 flex-1"
+          trigger={(
+            <button
+              type="button"
+              className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
+              aria-haspopup="true"
+              aria-label={tr('manage', 'Manage', 'គ្រប់គ្រង')}
+              title={tr('manage', 'Manage', 'គ្រប់គ្រង')}
+            >
+              <Settings2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">{tr('manage', 'Manage', 'គ្រប់គ្រង')}</span>
+            </button>
+          )}
+          items={([
+            { label: tr('import_contacts', 'Import', 'នាំចូល'), onClick: () => setModal('import'), color: 'blue', icon: <Download className="h-4 w-4 shrink-0" /> },
+            {
+              label: tr('export', 'Export', 'នាំចេញ'),
+              color: 'green',
+              icon: <Upload className="h-4 w-4 shrink-0" />,
+              onClick: async () => {
+                const rows = visibleContacts.map(c => {
+                  const options = parseDeliveryOptions(c.address)
+                  const primaryOption = getPrimaryContactOption(options, {
+                    fallback: { name: c.name || '', phone: c.phone || '', area: c.area || '' },
+                  })
+                  return {
+                    Name: c.name || '',
+                    Phone: primaryOption.phone || c.phone || '',
+                    Area: primaryOption.area || c.area || '',
+                    ContactOptions: buildContactOptionSummary(options, { mode: 'area' }),
+                    Gender: c.gender || '',
+                    Notes: c.notes || '',
+                    Created: c.created_at || '',
+                  }
+                })
+                const { downloadXLSX } = await loadCsvUtilsModule()
+                downloadXLSX(`delivery-contacts-${new Date().toISOString().slice(0,10)}.xlsx`, rows)
+              },
+            },
+          ] as PortalMenuItem[])}
+        />
+        <button
+          className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
+          onClick={() => { setSelected(null); setModal('form') }}
+          title={tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}
+          aria-label={tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}
+        >
+          <Plus className="h-4 w-4 shrink-0" />
+          <span className="truncate">{tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}</span>
+        </button>
+      </div>
+
+      {/* Search + filter pin to the top of the page's scroll container while
+          scrolling -- same `sticky top-2` treatment as Products/Inventory/
+          Sales/Returns/Branches/CustomersTab/SuppliersTab (Aug 11 2026
+          UI-polish request). This tab renders under Contacts.tsx's own
+          Customers/Suppliers/Delivery tab bar, which is NOT sticky and
+          scrolls away like the rest of that page's chrome -- only this row
+          pins. No separate select-all row here: ContactTable renders its
+          own selectAll control inside the table header via the `selectAll`
+          prop below. */}
+      <div className="sticky top-2 z-30 -mx-1 flex min-w-0 items-center gap-2 bg-gray-50/95 pb-2 pt-1 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         <div className="flex gap-2 items-center flex-1 min-w-0">
-          <label htmlFor="delivery-search" className="sr-only">{t('search_delivery_placeholder')||'Search delivery contacts'}</label>
-          <input id="delivery-search" name="delivery_search" autoComplete="off" className="input flex-1 min-w-0 max-w-xs"
-            placeholder={t('search_delivery_placeholder')||`Search...`}
-            value={search} onChange={e => setSearch(e.target.value)} />
-          <span className="text-sm text-gray-400 whitespace-nowrap">{visibleContacts.length}</span>
+          <SearchInput
+            id="delivery-search"
+            name="delivery_search"
+            value={search}
+            onChange={setSearch}
+            placeholder={t('search_delivery_placeholder')||'Search...'}
+            className="min-w-0 max-w-xs flex-1"
+          />
         </div>
         <div className="flex gap-1.5 items-center overflow-x-auto flex-nowrap flex-shrink-0">
           {loadError ? (
@@ -787,7 +938,7 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
               onClick={handleBulkDelete}
               disabled={bulkActionBusy}
             >
-              Delete {selectedIds.size}
+              {tr('delete_selected_count', 'Delete {count}').replace('{count}', String(selectedIds.size))}
             </button>
           )}
           <FilterMenu
@@ -799,38 +950,11 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
               setMonthFilter('all')
               setSortDirection('desc')
               setGroupMode('time')
+              setGenderFilter('all')
             }}
             compact
+            mobileIconOnly
           />
-          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => setModal('import')} title={tr('import_contacts', 'Import', 'នាំចូល')}>
-            <Download className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr('import_contacts', 'Import', 'នាំចូល')}</span>
-          </button>
-          <button className="btn-secondary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={async () => {
-            const rows = visibleContacts.map(c => {
-              const options = parseDeliveryOptions(c.address)
-              const primaryOption = getPrimaryContactOption(options, {
-                fallback: { name: c.name || '', phone: c.phone || '', area: c.area || '' },
-              })
-              return {
-                Name: c.name || '',
-                Phone: primaryOption.phone || c.phone || '',
-                Area: primaryOption.area || c.area || '',
-                ContactOptions: buildContactOptionSummary(options, { mode: 'area' }),
-                Notes: c.notes || '',
-                Created: c.created_at || '',
-              }
-            })
-            const { downloadCSV } = await loadCsvUtilsModule()
-            downloadCSV(`delivery-contacts-${new Date().toISOString().slice(0,10)}.csv`, rows)
-          }} title={tr('export', 'Export', 'នាំចេញ')}>
-            <Upload className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr('export', 'Export', 'នាំចេញ')}</span>
-          </button>
-          <button className="btn-primary inline-flex items-center gap-1.5 text-sm whitespace-nowrap" onClick={() => { setSelected(null); setModal('form') }} title={tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}>
-            <Plus className="h-4 w-4" />
-            <span className="hidden sm:inline">{tr('add_delivery_contact', 'Add Delivery', 'បន្ថែមអ្នកដឹកជញ្ជូន')}</span>
-          </button>
         </div>
       </div>
 
@@ -897,6 +1021,8 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
             <td className="px-4 py-2 font-medium text-gray-900 dark:text-white cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{contact.name}</td>
             <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{primaryOption.phone || contact.phone || '-'}</td>
             <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{primaryOption.area || contact.area || '-'}</td>
+            <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
+            <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{fmtDateTime24(contact.created_at)}</td>
             <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
               <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={() => handleDelete(contact)} />
             </td>
@@ -979,9 +1105,10 @@ function DeliveryTab({ t, notify, active = true }: DeliveryTabProps) {
               [t('name'), selected.name],
               [t('phone'), primaryOption.phone || selected.phone],
               [t('area_zone')||'Area / Zone', primaryOption.area || selected.area],
+              [t('gender') || 'Gender', selected.gender ? (tr(selected.gender, selected.gender)) : (tr('unspecified', 'Unspecified'))],
               ['Contact Options', buildContactOptionSummary(options, { mode: 'area' })],
               [t('notes'), selected.notes],
-              [t('col_added')||'Added', selected.created_at || fmtDate(selected.created_at)],
+              [t('col_added')||'Added', fmtDateTime24(selected.created_at)],
             ]
           })()}
           onEdit={() => setModal('form')} onDelete={() => handleDelete(selected)} onClose={() => { setModal(null); setSelected(null) }} t={t} />

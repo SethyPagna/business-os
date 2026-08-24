@@ -213,14 +213,12 @@ function InitialShellFallback({ publicMode }: { publicMode: boolean }) {
   return (
     <div className="business-os-initial-shell" role="status" aria-live="polite">
       <div className="business-os-initial-panel">
+        <div className="business-os-initial-spinner" aria-hidden="true" />
         <div className="business-os-initial-brand">
-          <div className="business-os-initial-mark">{publicMode ? 'LE' : 'OS'}</div>
-          <div>
-            <h1 className="business-os-initial-title">{publicMode ? 'Leang Cosmetic' : 'Business OS'}</h1>
-            <p className="business-os-initial-copy">
-              {publicMode ? 'Opening catalog' : 'Opening workspace'}
-            </p>
-          </div>
+          <h1 className="business-os-initial-title">{publicMode ? 'Leang Cosmetics' : 'Business OS'}</h1>
+          <p className="business-os-initial-copy">
+            {publicMode ? 'Opening catalog' : 'Opening workspace'}
+          </p>
         </div>
       </div>
     </div>

@@ -84,7 +84,7 @@ export default function DonutChart({ data, valueKey }: DonutChartProps) {
             d={slice.path}
             fill={slice.color}
             fillRule="evenodd"
-            stroke={hoveredIdx === index ? '#fff' : 'white'}
+            stroke="var(--chart-point-fill)"
             strokeWidth={hoveredIdx === index ? 2.5 : 1.5}
             opacity={hoveredIdx !== null && hoveredIdx !== index ? 0.65 : 1}
             className="cursor-pointer transition-all"
@@ -92,8 +92,8 @@ export default function DonutChart({ data, valueKey }: DonutChartProps) {
             onMouseLeave={() => setHoveredIdx(null)}
           />
         ))}
-        <text x={cx} y={cy - 6} textAnchor="middle" fontSize="13" fontWeight="600" fill="#374151">{slices.length}</text>
-        <text x={cx} y={cy + 10} textAnchor="middle" fontSize="10" fill="#9ca3af">methods</text>
+        <text x={cx} y={cy - 6} textAnchor="middle" fontSize="13" fontWeight="600" fill="currentColor" className="text-slate-700 dark:text-slate-200" style={{ color: '#374151' }}>{slices.length}</text>
+        <text x={cx} y={cy + 10} textAnchor="middle" fontSize="10" fill="currentColor" className="text-slate-400 dark:text-slate-400" style={{ color: '#9ca3af' }}>methods</text>
 
         {slices.map((slice, index) => {
           const label = String(slice.raw.payment_method || slice.raw.name || `#${index + 1}`)
@@ -108,8 +108,8 @@ export default function DonutChart({ data, valueKey }: DonutChartProps) {
               onMouseLeave={() => setHoveredIdx(null)}
             >
               <rect width="10" height="10" rx="2" fill={slice.color} />
-              <text x="14" y="9" fontSize="11" fill="#4b5563">{short}</text>
-              <text x="108" y="9" textAnchor="end" fontSize="11" fill="#6b7280">{(slice.pct * 100).toFixed(0)}%</text>
+              <text x="14" y="9" fontSize="11" fill="currentColor" className="text-slate-600 dark:text-slate-300" style={{ color: '#4b5563' }}>{short}</text>
+              <text x="108" y="9" textAnchor="end" fontSize="11" fill="currentColor" className="text-slate-500 dark:text-slate-400" style={{ color: '#6b7280' }}>{(slice.pct * 100).toFixed(0)}%</text>
             </g>
           )
         })}

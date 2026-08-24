@@ -1,22 +1,12 @@
+import { FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
+import type { FirstPartyPortalLanguageOption } from './portalLanguageOptions.ts'
+
 type PortalTextMap = Record<string, string>
 type PortalTextByLanguage = Record<string, PortalTextMap>
 
-type PortalLanguagePack = {
-  value: string
-  label: string
-  nativeLabel: string
-  dir?: 'ltr' | 'rtl'
-  type?: 'primary' | 'expanded'
-  text: PortalTextMap
-}
+type PortalLanguagePack = FirstPartyPortalLanguageOption & { text: PortalTextMap }
 
-export type FirstPartyPortalLanguageOption = {
-  value: string
-  label: string
-  nativeLabel: string
-  dir: 'ltr' | 'rtl'
-  type: 'primary' | 'expanded'
-}
+export type { FirstPartyPortalLanguageOption }
 
 const PORTAL_TEXT_BY_LANGUAGE: PortalTextByLanguage = {
   'zh-CN': {
@@ -755,6 +745,8 @@ const PORTAL_TEXT_BY_LANGUAGE: PortalTextByLanguage = {
 
 const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
   km: {
+    switch_to_light_mode: 'ប្តូរទៅរបៀបភ្លឺ',
+    switch_to_dark_mode: 'ប្តូរទៅរបៀបងងឹត',
     publicTranslation: 'ភាសា',
     followApp: 'ភាសាដើម',
     externalTranslation: 'ការបកប្រែខាងក្រៅ',
@@ -840,6 +832,29 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     askAssistant: "សួរ AI",
     assistantReset: 'សម្អាត',
     assistantLoading: 'កំពុងគិត...',
+    bucketTitle: 'បញ្ជីរបស់ខ្ញុំ',
+    bucketHint: 'មិនមានការទូទាត់ទីនេះទេ -- គ្រាន់តែជាបញ្ជីខ្លីៗសម្រាប់បង្ហាញក្រុមការងាររបស់យើង។',
+    bucketEmpty: 'បញ្ជីរបស់អ្នកនៅទទេ។ សូមចុច "បន្ថែម" លើផលិតផលដែលអ្នកចូលចិត្ត។',
+    clearBucket: 'សម្អាតទាំងអស់',
+    copyList: 'ចម្លងបញ្ជី',
+    downloadList: 'ទាញយកបញ្ជី',
+    bucketCopied: 'បានចម្លង!',
+    bucketCopyFailed: 'មិនអាចចម្លងដោយស្វ័យប្រវត្តិទេ -- សូមសាកល្បងទាញយកជំនួសវិញ។',
+    addToBucket: 'បន្ថែមទៅបញ្ជី',
+    addedToBucket: 'បានបន្ថែម',
+    removeFromBucket: 'លុបចេញ',
+    decreaseQty: 'បន្ថយចំនួន',
+    increaseQty: 'បង្កើនចំនួន',
+    contactUs: 'ទាក់ទងយើង',
+    messenger: 'Messenger',
+    facebook: 'Facebook',
+    instagram: 'Instagram',
+    telegram: 'Telegram',
+    website: 'គេហទំព័រ',
+    scrollToTop: 'ទៅផ្នែកខាងលើ',
+    scrollToBottom: 'ទៅផ្នែកខាងក្រោម',
+    map: 'ផែនទី',
+    close: 'បិទ',
   },
   'zh-CN': {
     liveCatalog: '实时库存,仅显示适合顾客查看的资料。',
@@ -1298,38 +1313,19 @@ Object.entries(PORTAL_PUBLIC_EXTRA_TEXT).forEach(([language, text]) => {
   }
 })
 
-const PORTAL_LANGUAGE_PACKS: PortalLanguagePack[] = [
-  { value: 'en', label: 'English', nativeLabel: 'English', type: 'primary', text: {} },
-  { value: 'km', label: 'Khmer', nativeLabel: 'ភាសាខ្មែរ', type: 'primary', text: PORTAL_TEXT_BY_LANGUAGE.km },
-  { value: 'zh-CN', label: 'Chinese (Simplified)', nativeLabel: '简体中文', text: PORTAL_TEXT_BY_LANGUAGE['zh-CN'] },
-  { value: 'zh-TW', label: 'Chinese (Traditional)', nativeLabel: '繁體中文', text: PORTAL_TEXT_BY_LANGUAGE['zh-TW'] },
-  { value: 'vi', label: 'Vietnamese', nativeLabel: 'Tiếng Việt', text: PORTAL_TEXT_BY_LANGUAGE.vi },
-  { value: 'th', label: 'Thai', nativeLabel: 'ไทย', text: PORTAL_TEXT_BY_LANGUAGE.th },
-  { value: 'ru', label: 'Russian', nativeLabel: 'Русский', text: PORTAL_TEXT_BY_LANGUAGE.ru },
-  { value: 'fr', label: 'French', nativeLabel: 'Français', text: PORTAL_TEXT_BY_LANGUAGE.fr },
-  { value: 'es', label: 'Spanish', nativeLabel: 'Español', text: PORTAL_TEXT_BY_LANGUAGE.es },
-  { value: 'de', label: 'German', nativeLabel: 'Deutsch', text: PORTAL_TEXT_BY_LANGUAGE.de },
-  { value: 'ja', label: 'Japanese', nativeLabel: '日本語', text: PORTAL_TEXT_BY_LANGUAGE.ja },
-  { value: 'ko', label: 'Korean', nativeLabel: '한국어', text: PORTAL_TEXT_BY_LANGUAGE.ko },
-  { value: 'pt', label: 'Portuguese', nativeLabel: 'Português', text: PORTAL_TEXT_BY_LANGUAGE.pt },
-  { value: 'it', label: 'Italian', nativeLabel: 'Italiano', text: PORTAL_TEXT_BY_LANGUAGE.it },
-  { value: 'ar', label: 'Arabic', nativeLabel: 'العربية', dir: 'rtl', text: PORTAL_TEXT_BY_LANGUAGE.ar },
-  { value: 'hi', label: 'Hindi', nativeLabel: 'हिन्दी', text: PORTAL_TEXT_BY_LANGUAGE.hi },
-  { value: 'id', label: 'Indonesian', nativeLabel: 'Bahasa Indonesia', text: PORTAL_TEXT_BY_LANGUAGE.id },
-  { value: 'ms', label: 'Malay', nativeLabel: 'Bahasa Melayu', text: PORTAL_TEXT_BY_LANGUAGE.ms },
-  { value: 'tr', label: 'Turkish', nativeLabel: 'Türkçe', text: PORTAL_TEXT_BY_LANGUAGE.tr },
-]
+// Label/native-name/direction metadata lives once, in portalLanguageOptions.ts
+// (kept lightweight and dependency-free so it can be imported eagerly without
+// pulling in every language's full text bundle). This just attaches each
+// language's translated strings to that shared metadata.
+const PORTAL_LANGUAGE_PACKS: PortalLanguagePack[] = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => ({
+  ...option,
+  text: PORTAL_TEXT_BY_LANGUAGE[option.value] || {},
+}))
 
 const PACK_BY_VALUE = new Map<string, PortalLanguagePack>(PORTAL_LANGUAGE_PACKS.map((pack) => [pack.value, pack]))
 const PACK_BY_LOWER = new Map<string, PortalLanguagePack>(PORTAL_LANGUAGE_PACKS.map((pack) => [pack.value.toLowerCase(), pack]))
 
-export const FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS: FirstPartyPortalLanguageOption[] = PORTAL_LANGUAGE_PACKS.map((pack) => ({
-  value: pack.value,
-  label: pack.label,
-  nativeLabel: pack.nativeLabel,
-  dir: pack.dir || 'ltr',
-  type: pack.type || 'expanded',
-}))
+export { FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS }
 
 export function normalizeFirstPartyPortalLanguage(value: unknown): string {
   const key = String(value || '').trim().toLowerCase()

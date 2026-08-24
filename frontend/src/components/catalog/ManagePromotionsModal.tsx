@@ -101,7 +101,14 @@ export type ManagePromotionsModalProps = {
 }
 
 export default function ManagePromotionsModal({ onClose, productOptions = [] }: ManagePromotionsModalProps) {
-  const { notify, user } = useApp() as AppContextCoreValue
+  const { notify, t, user } = useApp() as AppContextCoreValue
+  const copy = (key: string, fallback: string) => {
+    const fullKey = `portalEditor.${key}`
+    const translated = typeof t === 'function' ? t(fullKey) : ''
+    if (translated && translated !== fullKey) return translated
+    const rootTranslated = typeof t === 'function' ? t(key) : ''
+    return rootTranslated && rootTranslated !== key ? rootTranslated : fallback
+  }
   const [promotions, setPromotions] = useState<Promotion[]>([])
   const [loading, setLoading] = useState(true)
   const [editingId, setEditingId] = useState<number | 'new' | null>(null)
@@ -313,7 +320,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
               </label>
 
               <div className="flex flex-col gap-1 text-sm sm:col-span-2">
-                <span className="font-medium text-gray-700 dark:text-gray-300">Image</span>
+                <span className="font-medium text-gray-700 dark:text-gray-300">{copy('image', 'Image')}</span>
                 <div className="flex items-center gap-3">
                   {form.image_path ? (
                     <img
@@ -324,7 +331,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   ) : (
                     <div className="flex h-16 w-24 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-gray-300 dark:border-gray-700">
                       <ImageIcon className="h-5 w-5 text-gray-300 dark:text-gray-600" />
-                      <span className="text-[10px] text-gray-400">No image</span>
+                      <span className="text-[10px] text-gray-400">{copy('noImage', 'No image')}</span>
                     </div>
                   )}
                   <input
@@ -344,7 +351,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                     onClick={() => fileInputRef.current?.click()}
                     className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                   >
-                    {uploadBusy ? `Uploading… ${uploadProgress}%` : form.image_path ? 'Replace image' : 'Upload image'}
+                    {uploadBusy ? `${copy('uploading', 'Uploading...')} ${uploadProgress}%` : form.image_path ? copy('replaceImage', 'Replace image') : copy('uploadImage', 'Upload image')}
                   </button>
                 </div>
               </div>
@@ -546,6 +553,10 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                 >
                   {promo.is_active ? 'Active' : 'Hidden'}
                 </button>
+                {/* Same icon+label-on-large/icon-only-on-small treatment as
+                    the Products detail actions pane (ProductDetailModal.tsx)
+                    -- label visually hidden below `sm:`, kept for screen
+                    readers via the existing aria-label/title. */}
                 <button
                   type="button"
                   onClick={() => startEdit(promo)}
@@ -554,6 +565,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                 >
                   <Pencil className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Edit</span>
                 </button>
                 <button
                   type="button"
@@ -563,6 +575,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
                   className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-medium text-red-600 transition hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Delete</span>
                 </button>
               </div>
             ))}

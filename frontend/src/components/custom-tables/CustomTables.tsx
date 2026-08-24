@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentProps } from 'react'
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useApp, useSync } from '../../AppContext.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -557,7 +558,7 @@ export default function CustomTables() {
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4">
-              <ActionHistoryBar history={typedActionHistory} className="mb-3" />
+              <ActionHistoryBar history={typedActionHistory} className="mb-3" t={t} />
               <div className="card overflow-hidden">
                 {rowsError ? <div className="border-b border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900/30 dark:bg-red-900/20">{rowsError}</div> : null}
                 <div className="overflow-x-auto">
@@ -607,10 +608,10 @@ export default function CustomTables() {
 
       {createModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="fade-in flex max-h-[85vh] w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800">
+          <div className="fade-in flex max-h-modal-85 w-full max-w-lg flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800">
             <div className="flex items-center justify-between border-b border-gray-200 p-5 dark:border-gray-700">
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">Create Custom Table</h2>
-              <button onClick={() => setCreateModal(false)} className="text-2xl text-gray-400 hover:text-gray-600" disabled={savingTable}>x</button>
+              <button type="button" onClick={() => setCreateModal(false)} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600" disabled={savingTable} aria-label={t('close') || 'Close'}><X className="h-4 w-4" /></button>
             </div>
             <div className="page-scroll space-y-4 p-5">
               <div>
@@ -652,7 +653,7 @@ export default function CustomTables() {
                         optionClassName="text-sm"
                         options={COLUMN_TYPES.map((type) => ({ value: type, label: type }))}
                       />
-                      <button onClick={() => removeColumn(index)} className="text-xl text-red-400 hover:text-red-600" disabled={savingTable}>x</button>
+                      <button type="button" onClick={() => removeColumn(index)} className="text-xl text-red-400 hover:text-red-600" disabled={savingTable} aria-label={t('remove') || 'Remove'}>x</button>
                     </div>
                   ))}
                   {newTable.schema.length === 0 ? <p className="rounded-lg border border-dashed border-gray-300 py-3 text-center text-xs text-gray-400 dark:border-gray-600">{t('click_add_column') || 'Click "Add Column" to define your table structure'}</p> : null}
@@ -671,9 +672,9 @@ export default function CustomTables() {
 
       {rowModal && activeTable ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="fade-in w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-800">
-            <h2 className="mb-4 text-lg font-bold text-gray-900 dark:text-white">{rowModal === 'create' ? (t('add_row') || 'Add Row') : (t('edit_row') || 'Edit Row')}</h2>
-            <div className="space-y-3">
+          <div className="fade-in flex max-h-modal-90 w-full max-w-sm flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800">
+            <h2 className="p-6 pb-0 mb-4 text-lg font-bold text-gray-900 dark:text-white">{rowModal === 'create' ? (t('add_row') || 'Add Row') : (t('edit_row') || 'Edit Row')}</h2>
+            <div className="flex-1 space-y-3 overflow-auto px-6">
               {activeSchema.map((column) => (
                 <div key={column.name}>
                   <label htmlFor={`custom-table-row-${column.name}`} className="mb-1 block text-sm font-medium capitalize text-gray-700 dark:text-gray-300">{column.name}</label>
@@ -715,7 +716,7 @@ export default function CustomTables() {
                 </div>
               ))}
             </div>
-            <div className="mt-5 flex gap-3">
+            <div className="flex gap-3 p-6 pt-5">
               <button className="btn-primary flex-1" onClick={handleSaveRow} disabled={savingRow}>
                 {savingRow ? (t('saving') || 'Saving...') : (t('save') || 'Save')}
               </button>

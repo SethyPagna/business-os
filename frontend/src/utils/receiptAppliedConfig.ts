@@ -22,12 +22,19 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
   show_customer_name: true,
   show_customer_phone: true,
   show_customer_address: true,
+  show_customer_membership: true,
   show_item_sku: false,
   show_item_qty: true,
   show_item_unit_price: true,
   show_item_khr: true,
+  show_item_discount: true,
+  show_discount_khr: true,
+  show_membership_discount_khr: true,
+  show_delivery_khr: true,
   show_subtotal: true,
   show_discount: true,
+  show_membership_discount: true,
+  show_membership_points: true,
   show_tax: true,
   show_delivery: true,
   show_total_khr: true,
@@ -51,6 +58,17 @@ export const DEFAULT_RECEIPT_TEMPLATE: NormalizedReceiptTemplate = {
     'header', 'order_info', 'customer', 'delivery', 'items', 'subtotal',
     'discount', 'tax', 'delivery_fee', 'total', 'payment', 'change', 'footer',
   ],
+  show_qr_codes: false,
+  qr_show_portal: true,
+  qr_portal_url: '',
+  qr_portal_label: '',
+  qr_show_social: false,
+  qr_social_links: [],
+  sales_receipt_enabled: false,
+  sales_receipt_aba_account_name: '',
+  sales_receipt_aba_account_number: '',
+  sales_receipt_aba_qr_image: '',
+  sales_receipt_note: 'none',
 }
 
 export const DEFAULT_RECEIPT_PRINT_SETTINGS: ReceiptPrintSettings = {
@@ -82,11 +100,26 @@ function parseObject(value: unknown): Record<string, unknown> {
   return {}
 }
 
+function normalizeQrSocialLinks(value: unknown): NormalizedReceiptTemplate['qr_social_links'] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+    .map((entry, index) => ({
+      id: String(entry.id || `qr-social-${index}`),
+      label: String(entry.label || '').trim(),
+      url: String(entry.url || '').trim(),
+    }))
+    .filter((entry) => entry.url !== '')
+    .slice(0, 8)
+}
+
 export function normalizeReceiptTemplate(value: unknown): NormalizedReceiptTemplate {
-  return {
+  const merged = {
     ...DEFAULT_RECEIPT_TEMPLATE,
     ...parseObject(value),
   }
+  merged.qr_social_links = normalizeQrSocialLinks(merged.qr_social_links)
+  return merged
 }
 
 export function serializeReceiptTemplateValue(value: unknown): string {

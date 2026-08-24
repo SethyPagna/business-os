@@ -9,18 +9,39 @@ const localDbSource = readFileSync(new URL('../src/api/localDb.ts', import.meta.
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
 const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.tsx', import.meta.url), 'utf8')
 const faviconSource = readFileSync(new URL('../src/utils/favicon.ts', import.meta.url), 'utf8')
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const userProfileSource = readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 
-assert.doesNotMatch(
+// The manifest link was previously omitted here specifically because this
+// whole origin sits behind Cloudflare Access, and an unauthenticated first
+// load (or any load where the Access session cookie isn't sent along with
+// the manifest fetch) used to mean the browser's <link rel="manifest">
+// request could resolve to Access's own HTML redirect instead of JSON.
+// Re-added as part of "make PWA installable" work: a same-origin
+// <link rel="manifest"> fetch sends the browser's normal cookies (no
+// crossorigin attribute here, so no anonymous-CORS mode is forced), so an
+// already-authenticated session's manifest request carries the same Access
+// cookie every other in-app asset request already relies on. An
+// unauthenticated fetch failing to parse as a manifest is graceful
+// (browsers silently skip the install prompt on a bad/missing manifest,
+// they don't error the page) rather than a hard breakage. Worth confirming
+// against a real Cloudflare Access deploy before fully trusting this, but
+// nothing here should regress the original concern for a signed-in user.
+assert.match(
   indexSource,
   /rel="manifest"/,
-  'Admin shell should not request a protected manifest behind Cloudflare Access',
+  'Admin shell should request its PWA manifest so install prompts work for signed-in users',
 )
 
-assert.doesNotMatch(
+// The SW deliberately caches manifest.json now (see service-worker.ts's
+// isCacheableStaticPath) as part of the same "make PWA installable" work
+// as the index.html assertion above -- it's a small static same-origin
+// asset like the other entries already listed here, not something that
+// needs to skip the app shell cache.
+assert.match(
   swSource,
   /pathname === '\/manifest\.json'/,
-  'Service worker should not intercept manifest.json as a cacheable static asset',
+  'Service worker should treat manifest.json as a cacheable static asset alongside the icons',
 )
 
 assert.doesNotMatch(
@@ -135,6 +156,30 @@ assert.match(
   faviconSource,
   /url\.origin !== window\.location\.origin/,
   'Same-origin upload favicons should load without anonymous CORS so Cloudflare Access redirects do not become CORS cascades',
+)
+
+assert.match(
+  settingsSource,
+  /ui_app_favicon_fit[\s\S]*ui_app_favicon_zoom[\s\S]*ui_app_favicon_position_x[\s\S]*ui_app_favicon_position_y/,
+  'Settings should expose saved fit, zoom, and focus controls for the Business OS favicon',
+)
+
+assert.match(
+  settingsSource,
+  /createCircularFaviconDataUrl\(source, \{[\s\S]*fit: faviconFit,[\s\S]*zoom: faviconZoom,[\s\S]*positionX: faviconPositionX,[\s\S]*positionY: faviconPositionY/,
+  'Settings favicon preview should use the selected fit, zoom, and focus values',
+)
+
+assert.match(
+  appSource,
+  /const faviconFit = settings\.ui_app_favicon_fit === 'contain' \? 'contain' : 'cover'/,
+  'The live admin tab icon should honor the saved favicon fit',
+)
+
+assert.match(
+  appSource,
+  /createCircularFaviconDataUrl\(iconSource, \{[\s\S]*fit: faviconFit,[\s\S]*zoom: faviconZoom,[\s\S]*positionX: faviconPositionX,[\s\S]*positionY: faviconPositionY/,
+  'The live admin tab icon should honor saved favicon crop settings',
 )
 
 assert.match(

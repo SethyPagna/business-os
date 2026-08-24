@@ -20,6 +20,20 @@ const products = [
 ]
 
 assert.deepEqual(buildVisibleProductIds(products), [1, 2, 0])
+
+// Regression: a merged display row (2+ branch-duplicate rows collapsed by
+// mergeSameDetailRows) must contribute ALL of its __mergedProductIds, not
+// just its own lead `id` -- otherwise selecting/checking such a row never
+// shows as fully selected and the selected count silently drops the
+// non-lead ids (see productSelectionHelpers.ts's buildVisibleProductIds
+// comment for the full bug this guards against).
+const mergedRowProducts = [
+  { id: 10, name: 'Merged', __mergedProductIds: [10, 11, 12] },
+  { id: 20, name: 'Single', __mergedProductIds: [20] },
+  { id: 30, name: 'NoMergeField' },
+]
+assert.deepEqual(buildVisibleProductIds(mergedRowProducts), [10, 11, 12, 20, 30])
+
 assert.deepEqual(normalizePositiveProductIds([1, '2', 0, null, 'bad', -1, 3.5]), [1, 2, 3.5])
 assert.deepEqual(
   normalizePositiveProductIds([{ restoredId: '8' }, { restoredId: 0 }, { restoredId: 'bad' }, { restoredId: 9 }], (entry) => entry.restoredId),

@@ -7,6 +7,7 @@ const productMenuHelpers = readFileSync(new URL('../src/components/products/help
 const productsSurface = readFileSync(new URL('../src/components/products/surfaces/ProductsListSurface.tsx', import.meta.url), 'utf8')
 const posPage = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
 const posFilterPanel = readFileSync(new URL('../src/components/pos/FilterPanel.tsx', import.meta.url), 'utf8')
+const availabilityFilterOptions = readFileSync(new URL('../src/components/shared/AvailabilityFilterOptions.tsx', import.meta.url), 'utf8')
 const posQuickAddModals = readFileSync(new URL('../src/components/pos/POSQuickAddModals.tsx', import.meta.url), 'utf8')
 const apiMethods = readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
 const productReadTransport = readFileSync(new URL('../src/api/productReadTransport.ts', import.meta.url), 'utf8')
@@ -79,8 +80,8 @@ assert.match(
 )
 assert.match(
   productsPage,
-  /getProductFilters\(\{\}\)/,
-  'Products page should load global product filter options instead of shrinking options by the active filters',
+  /const filterMetaQuery = \{[\s\S]*productApi\.getProductFilters\(filterMetaQuery\)/,
+  'Products page should scope product filter options (brand/category/supplier lists) to the currently active filters instead of always requesting the unscoped global set',
 )
 assert.doesNotMatch(
   productsPage,
@@ -124,16 +125,19 @@ assert.doesNotMatch(
 )
 assert.match(
   posPage,
-  /withLoaderTimeout\(\(\) => loadPosProductFilters\(\{\}\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)/,
-  'POS filter panel should receive delayed global filter metadata',
+  /const scopedQuery = \{[\s\S]*withLoaderTimeout\(\(\) => loadPosProductFilters\(scopedQuery\), 'POS product filters', POS_FILTER_META_TIMEOUT_MS\)/,
+  'POS filter panel should receive delayed filter metadata scoped to the currently active filters',
 )
 assert.match(
   posPage,
   /withLoaderTimeout\(\(\) => loadPosCategories\(\), label, POS_CATEGORY_OPTIONS_TIMEOUT_MS\)/,
   'POS filter panel should receive delayed category metadata',
 )
+// Stock/Groups/Branch now render via the shared AvailabilityFilterOptions.tsx
+// (see that file's own comment) rather than inline in FilterPanel.tsx --
+// checking there instead of posFilterPanel for the same guarantee.
 assert.match(
-  posFilterPanel,
+  availabilityFilterOptions,
   /T\('groups', 'Groups'\)/,
   'POS filter panel should name the grouping filter Groups',
 )
@@ -142,10 +146,24 @@ assert.match(
   /label:\s*t\('groups'\) \|\| 'Groups'/,
   'Products filter menu should name the grouping filter Groups',
 )
+// POS used to re-check groupFilter client-side (isParentGroup/isVariantGroup)
+// against `products`, which is only ever the current search-result page. The
+// server (/api/products/search, see buildSearchFilters in
+// cloudflare/src/routes/products.ts) already filters groupState
+// authoritatively across the whole catalog, so a client-side recheck over a
+// single page could see a "group of one" and filter an already-confirmed
+// grouped product back out -- sometimes emptying the grid. Fixed by sending
+// groupState to the server (scopedQuery/productQuery below) and trusting its
+// answer instead of re-filtering client-side.
 assert.match(
   posPage,
-  /\['group', 'groups', 'grouped', 'variant', 'parent'\]\.includes\(groupFilter\)[\s\S]*isParentGroup \|\| isVariantGroup/,
-  'POS group filter should show grouped parent and variant families under Groups',
+  /groupState: groupFilter === 'all' \? '' : groupFilter/,
+  'POS should send the active group filter to the server-authoritative product search/filter-meta queries',
+)
+assert.doesNotMatch(
+  posPage,
+  /isParentGroup \|\| isVariantGroup/,
+  'POS should not reintroduce the removed single-page client-side group recheck that could empty the grid for genuinely grouped products',
 )
 assert.doesNotMatch(
   posPage,

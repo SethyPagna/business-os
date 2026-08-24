@@ -24,7 +24,7 @@ interface ProductImagePlaceholderProps {
 }
 
 interface MarginCardProps {
-  purchaseUsd: number
+  costUsd: number
   sellingUsd: number
   usdSymbol: string
 }
@@ -175,8 +175,8 @@ function ProductImagePlaceholder({ className = '', compact = false }: ProductIma
   )
 }
 
-function MarginCard({ purchaseUsd, sellingUsd, usdSymbol }: MarginCardProps) {
-  const margin = sellingUsd - purchaseUsd
+function MarginCard({ costUsd, sellingUsd, usdSymbol }: MarginCardProps) {
+  const margin = sellingUsd - costUsd
   const pct = sellingUsd > 0 ? (margin / sellingUsd * 100) : 0
   const isProfit = margin >= 0
 
@@ -185,8 +185,8 @@ function MarginCard({ purchaseUsd, sellingUsd, usdSymbol }: MarginCardProps) {
       <p className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Margin Analysis</p>
       <div className="grid grid-cols-3 gap-3 text-center">
         <div>
-          <div className="text-lg font-bold text-red-600">{usdSymbol}{purchaseUsd.toFixed(2)}</div>
-          <div className="text-xs text-gray-500">Purchase</div>
+          <div className="text-lg font-bold text-red-600">{usdSymbol}{costUsd.toFixed(2)}</div>
+          <div className="text-xs text-gray-500">Cost</div>
         </div>
         <div>
           <div className={`text-lg font-bold ${isProfit ? 'text-blue-600' : 'text-yellow-600'}`}>{usdSymbol}{margin.toFixed(2)}</div>

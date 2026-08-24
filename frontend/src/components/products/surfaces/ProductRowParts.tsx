@@ -1,7 +1,4 @@
-import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import type { ReactNode } from 'react'
-import type { PortalMenuItem } from '../../shared/PortalMenu'
-import LazyPortalMenu from '../../shared/LazyPortalMenu'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 
@@ -13,6 +10,7 @@ type ProductLike = {
   id?: string | number
   sku?: string
   barcode?: string
+  supplier?: string
   batches?: unknown
   discount_enabled?: unknown
   discount_type?: unknown
@@ -42,16 +40,6 @@ type ProductDiscountBadgeProps = {
   fmtUSD: MoneyFormatter
   label: string
   overlay?: boolean
-}
-
-type ProductRowActionsProps = {
-  onDetails?: () => void
-  onEdit?: () => void
-  onDelete?: () => void
-  onAddVariant?: () => void
-  onDiscount?: () => void
-  onAdjustStock?: () => void
-  t?: (key: string) => string | undefined
 }
 
 type ProductBatchPreviewProps = {
@@ -89,40 +77,6 @@ export function ProductDiscountBadge({
     <span className={className} title={title}>
       {label} {fmtUSD(promo.applied_price_usd || 0)}
     </span>
-  )
-}
-
-export function ProductRowActions({
-  onDetails,
-  onEdit,
-  onDelete,
-  onAddVariant,
-  onDiscount,
-  onAdjustStock,
-  t,
-}: ProductRowActionsProps) {
-  const label = (key: string, fallback: string) => (typeof t === 'function' ? (t(key) || fallback) : fallback)
-  const extraItems: Array<PortalMenuItem | false | undefined> = [
-    onDiscount && { label: label('discounts', 'Discounts'), onClick: onDiscount, color: 'orange' },
-    onAdjustStock && { label: label('adjust_stock', 'Adjust stock'), onClick: onAdjustStock, color: 'green' },
-  ]
-
-  return (
-    <LazyPortalMenu
-      trigger={(
-        <button type="button" className="three-dot-btn" aria-label={label('actions', 'Open actions menu')}>
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
-      )}
-      items={[
-        onDetails && { label: label('view_details', label('details', 'View Details')), onClick: onDetails },
-        onEdit && { label: label('edit', 'Edit'), onClick: onEdit, color: 'blue' },
-        onAddVariant && { label: label('add_variant', 'Add Variant'), onClick: onAddVariant, color: 'purple' },
-        ...extraItems,
-        onDelete && ('divider' as const),
-        onDelete && { label: label('delete', 'Delete'), onClick: onDelete, color: 'red' },
-      ]}
-    />
   )
 }
 
@@ -180,8 +134,13 @@ export function ProductDetailsCell({
   if (product.sku) {
     detailPills.push({ key: 'sku', label: product.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' })
   }
-  if (product.barcode) {
-    detailPills.push({ key: 'barcode', label: product.barcode, className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' })
+  // Barcode moved out of this cell -- it now sits with brand/category in
+  // the name cell's compactMeta line (desktop table row, see
+  // buildProductRowDisplayState/renderDesktopProductRow) instead of here,
+  // matching Inventory's name-cell tag line. Keeping it here too would
+  // just duplicate it.
+  if (product.supplier) {
+    detailPills.push({ key: 'supplier', label: product.supplier, className: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200' })
   }
 
   return (

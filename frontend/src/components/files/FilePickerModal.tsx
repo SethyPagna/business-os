@@ -249,7 +249,16 @@ export default function FilePickerModal({
 
   if (!open) return null
 
-  const selectedAssets = files.filter((asset) => selectedPaths.includes(asset.public_path || ''))
+  // The picker's own file list isn't paginated (fetchPickerFiles returns
+  // the full search/mediaType-filtered result -- a real library plus a
+  // multi-select session can both run into the hundreds), so checking
+  // membership with `selectedPaths.includes(...)` once per rendered file
+  // was an O(files x selectedPaths) scan on every render, same shape as
+  // the productGrouping.ts fix elsewhere in this project. A Set gives
+  // O(1) membership checks for both the per-file render loop below and
+  // the selectedAssets derivation.
+  const selectedPathSet = new Set(selectedPaths)
+  const selectedAssets = files.filter((asset) => selectedPathSet.has(asset.public_path || ''))
 
   return (
     <Modal title={title} onClose={onClose} wide>
@@ -269,7 +278,7 @@ export default function FilePickerModal({
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {files.map((asset) => {
               const publicPath = asset.public_path || ''
-              const isSelected = selectedPaths.includes(publicPath)
+              const isSelected = selectedPathSet.has(publicPath)
               return (
                 <div key={asset.id} className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
                   <AssetPreview asset={asset} />

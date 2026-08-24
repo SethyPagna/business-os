@@ -1,3 +1,4 @@
+import X from 'lucide-react/dist/esm/icons/x.js'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp as useAppFromContext } from '../../AppContext.tsx'
 import {
@@ -184,21 +185,24 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }: OtpModalP
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-md p-6 fade-in">
+      <div className="flex max-h-modal-90 w-full max-w-md flex-col rounded-2xl bg-white shadow-2xl dark:bg-gray-800 fade-in">
+      <div className="overflow-auto p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-            {mode === 'setup' ? 'Set Up 2FA' : 'Disable 2FA'}
+            {mode === 'setup' ? (tr('otp_setup') || 'Set Up 2FA') : (tr('otp_disable') || 'Disable 2FA')}
           </h2>
           <button
+            type="button"
             onClick={handleClose}
             disabled={loading}
-            className="text-gray-400 hover:text-gray-600 text-2xl w-8 h-8 flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={tr('close') || 'Close'}
+            className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center disabled:cursor-not-allowed disabled:opacity-50"
           >
-            x
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {step === 'loading' && <div className="text-center py-8 text-gray-400">Loading...</div>}
+        {step === 'loading' && <div className="text-center py-8 text-gray-400">{tr('loading') || 'Loading...'}</div>}
 
         {step === 'error' && (
           <div className="text-red-600 bg-red-50 dark:bg-red-900/20 rounded-lg p-3">{error}</div>
@@ -287,6 +291,7 @@ export default function OtpModal({ mode, userId, onClose, onDone, t }: OtpModalP
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   )

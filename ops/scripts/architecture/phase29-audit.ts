@@ -108,12 +108,6 @@ const CHECKS: AuditCheck[] = [
     reports: ['ops/docs/reference/ORGANIZATION-AUDIT.md', 'ops/docs/reference/ORGANIZATION-AUDIT.json'],
   },
   {
-    label: 'Schema audit',
-    command: process.execPath,
-    args: ['ops/scripts/backend/schema-audit.ts'],
-    reports: ['ops/docs/reference/SCHEMA-AUDIT.md', 'ops/docs/reference/SCHEMA-AUDIT.json'],
-  },
-  {
     label: 'Performance/code-flow scan',
     command: process.execPath,
     args: ['ops/scripts/docs/performance-scan.ts'],
@@ -130,18 +124,6 @@ const CHECKS: AuditCheck[] = [
     command: process.execPath,
     args: ['ops/scripts/architecture/runtime-js-inventory.ts'],
     reports: ['ops/docs/reference/RUNTIME-JS-INVENTORY.md', 'ops/docs/reference/RUNTIME-JS-INVENTORY.json'],
-  },
-  {
-    label: 'Docker release guardrail',
-    command: process.execPath,
-    args: ['ops/scripts/verification/verify-docker-release.ts'],
-    reports: ['ops/docs/reference/DOCKER-RELEASE-GUARDRAIL.json'],
-  },
-  {
-    label: 'Runtime dependency guardrail',
-    command: process.execPath,
-    args: ['ops/scripts/verification/verify-runtime-deps.ts'],
-    reports: ['ops/docs/reference/RUNTIME-DEPS-GUARDRAIL.json'],
   },
   {
     label: 'PM2 ecosystem config guardrail',

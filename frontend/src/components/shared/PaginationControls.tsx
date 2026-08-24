@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
-import AppSelect from './AppSelect'
+import PageSizeSelect from './PageSizeSelect'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
@@ -23,6 +23,7 @@ export interface PaginationControlsProps {
   compact?: boolean
   compactPageInput?: boolean
   editablePageInput?: boolean
+  editablePageSizeInput?: boolean
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
@@ -52,6 +53,7 @@ export default function PaginationControls({
   compact = false,
   compactPageInput = false,
   editablePageInput = true,
+  editablePageSizeInput = true,
 }: PaginationControlsProps) {
   const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
   const total = Math.max(0, Number(totalItems || 0))
@@ -64,7 +66,6 @@ export default function PaginationControls({
   const perPageLabel = typeof t === 'function' ? (t('per_page') || 'per page') : 'per page'
   const showingLabel = typeof t === 'function' ? (t('showing') || 'Showing') : 'Showing'
   const [pageDraft, setPageDraft] = useState(String(safePage))
-  const pageSizeSelectOptions = pageSizeOptions.map((option) => ({ value: option, label: option }))
 
   useEffect(() => {
     setPageDraft(String(safePage))
@@ -97,29 +98,37 @@ export default function PaginationControls({
   if (compact) {
     return (
       <div className={`max-w-full rounded-xl border border-slate-200 bg-white/80 px-2 py-1.5 text-xs text-slate-600 shadow-sm dark:border-slate-700 dark:bg-slate-900/70 dark:text-slate-300 ${className}`}>
-        <div className="grid max-w-full grid-cols-[minmax(5.75rem,1fr)_3.25rem_minmax(6.25rem,8.75rem)] items-center gap-1">
+        {/* Per-page selector narrowed to fit a 3-digit value (its own values
+            top out at 999 via PageSizeSelect's custom-input maxValue where
+            callers don't override it) instead of a fixed wide column -- the
+            width that frees up goes to the prev/next buttons below, not to
+            growing the row: same h-7 everywhere, just wider touch targets. */}
+        <div className="grid max-w-full grid-cols-[minmax(5.25rem,1fr)_minmax(3.75rem,4.5rem)_minmax(7.5rem,10rem)] items-center gap-1">
           <span className="inline-flex min-w-0 items-center justify-center overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-slate-50 px-1.5 py-1 font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-100">
             {start.toLocaleString()}-{end.toLocaleString()} / {total.toLocaleString()}
           </span>
-          <AppSelect
-            value={safePageSize}
-            options={pageSizeSelectOptions}
-            onChange={(nextValue) => onPageSizeChange?.(Number(nextValue))}
-            ariaLabel={perPageLabel}
-            className="h-7 w-full min-w-0"
-            buttonClassName="h-7 w-full rounded-full px-1.5 py-0 pl-1.5 pr-1 text-xs font-semibold shadow-none"
-            menuClassName="min-w-[4rem]"
-            optionClassName="text-xs"
-          />
+          <div className="flex min-w-0 items-center gap-1">
+            <PageSizeSelect
+              value={safePageSize}
+              options={pageSizeOptions}
+              onChange={(nextValue) => onPageSizeChange?.(nextValue)}
+              ariaLabel={perPageLabel}
+              allowCustom={editablePageSizeInput}
+              className="h-7 w-full min-w-0"
+              buttonClassName="h-7 w-full rounded-full px-1 py-0 pl-1.5 pr-0.5 text-xs font-semibold shadow-none"
+              menuClassName="min-w-[9rem]"
+              optionClassName="text-xs"
+            />
+          </div>
           <div className="inline-flex min-w-0 items-center overflow-hidden rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-950">
             <button
               type="button"
-              className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 w-9 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={safePage <= 1}
               onClick={() => onPageChange?.(safePage - 1)}
               aria-label="Previous page"
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
+              <ChevronLeft className="h-4 w-4" />
             </button>
             {compactPageInput ? (
               <div className="inline-flex min-w-0 flex-1 items-center justify-center gap-1 px-1 text-[11px] font-semibold text-slate-700 dark:text-slate-100">
@@ -144,12 +153,12 @@ export default function PaginationControls({
             )}
             <button
               type="button"
-              className="inline-flex h-7 w-6 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
+              className="inline-flex h-7 w-9 shrink-0 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:text-slate-300 dark:hover:bg-slate-800"
               disabled={safePage >= totalPages}
               onClick={() => onPageChange?.(safePage + 1)}
               aria-label="Next page"
             >
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -165,13 +174,14 @@ export default function PaginationControls({
       <div className="flex flex-wrap items-center gap-2">
         <label className="inline-flex items-center gap-2">
           <span>{perPageLabel}</span>
-          <AppSelect
+          <PageSizeSelect
             value={safePageSize}
-            options={pageSizeSelectOptions}
-            onChange={(nextValue) => onPageSizeChange?.(Number(nextValue))}
+            options={pageSizeOptions}
+            onChange={(nextValue) => onPageSizeChange?.(nextValue)}
             ariaLabel={perPageLabel}
+            allowCustom={editablePageSizeInput}
             buttonClassName="h-8 min-w-[4.25rem] rounded-lg px-2 py-1 text-xs font-semibold shadow-none"
-            menuClassName="min-w-[4.25rem]"
+            menuClassName="min-w-[10rem]"
             optionClassName="text-xs"
           />
         </label>

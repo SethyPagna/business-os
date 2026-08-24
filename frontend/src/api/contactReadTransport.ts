@@ -39,6 +39,30 @@ const SUPPLIER_READ = {
 
 const readCache = new Map<string, CacheEntry>()
 const inflightReads = new Map<string, Promise<unknown>>()
+// One AbortController per contact table (customers/suppliers/delivery
+// contacts), separate from the per-query `cacheKey` above -- that key is
+// unique per query string on purpose (so distinct searches don't collide),
+// which is exactly why it could never help cancel a superseded request.
+// This map instead tracks "the current in-flight request for this tab's
+// search box", so a new keystroke in e.g. CustomersTab aborts whatever
+// customers request was still in flight rather than leaving it to keep
+// running against the server after the UI has already moved on.
+const searchGroupControllers = new Map<ContactTableName, AbortController>()
+
+function beginContactSearchGroup(tableName: ContactTableName): AbortController {
+  searchGroupControllers.get(tableName)?.abort()
+  const ctrl = new AbortController()
+  searchGroupControllers.set(tableName, ctrl)
+  return ctrl
+}
+
+function endContactSearchGroup(tableName: ContactTableName, ctrl: AbortController): void {
+  if (searchGroupControllers.get(tableName) === ctrl) searchGroupControllers.delete(tableName)
+}
+
+function isAbortError(e: unknown): boolean {
+  return (e as { name?: string } | null)?.name === 'AbortError'
+}
 
 async function readLocalContacts(tableName: ContactTableName): Promise<unknown[]> {
   const { getLocalDb } = await import('./lazyLocalDb.ts')
@@ -102,7 +126,8 @@ function readContacts(config: ContactReadConfig, params: QueryParams = {}): Prom
   const existing = inflightReads.get(cacheKey)
   if (existing) return existing
 
-  const promise = apiFetch('GET', appendQuery(config.endpoint, query))
+  const groupCtrl = beginContactSearchGroup(config.tableName)
+  const promise = apiFetch('GET', appendQuery(config.endpoint, query), undefined, undefined, { signal: groupCtrl.signal })
     .then((data) => {
       setCachedRead(cacheKey, data)
       if (!query) scheduleLateMirror(config, data)
@@ -110,12 +135,19 @@ function readContacts(config: ContactReadConfig, params: QueryParams = {}): Prom
     })
     .catch(async (error) => {
       if (isInvalidSessionError(error)) throw error
+      if (isAbortError(error)) {
+        // Superseded by a newer search in this same tab -- not a real
+        // failure, and reading local data for a query the user has
+        // already moved on from would be pure waste, so just propagate.
+        throw error
+      }
       const localRows = await readLocalContacts(config.tableName)
       setCachedRead(cacheKey, localRows)
       return localRows
     })
     .finally(() => {
       inflightReads.delete(cacheKey)
+      endContactSearchGroup(config.tableName, groupCtrl)
     })
 
   inflightReads.set(cacheKey, promise)

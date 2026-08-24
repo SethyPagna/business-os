@@ -1,15 +1,21 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
 import AppSelect from '../shared/AppSelect.tsx'
+import SearchInput from '../shared/SearchInput'
+import FilterMenu from '../shared/FilterMenu'
 import Modal from '../shared/Modal'
 import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { PERMISSION_DEFS } from './permissionDefinitions'
+import { ROLE_PRESETS } from './rolePresetDefaults'
+import { REVIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
+import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -19,6 +25,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import DeviceApprovals from './DeviceApprovals.tsx'
 import {
   changeUserPassword as changeUserPasswordRequest,
   createRole as createRoleRequest,
@@ -31,11 +38,11 @@ import {
 } from '../../api/userAdminTransport.ts'
 
 type EntityId = number | string
-type UsersTab = 'users' | 'roles'
+type UsersTab = 'users' | 'roles' | 'devices'
 type UsersModal = 'editUser' | 'editRole' | 'resetPw' | 'userDetail' | null
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, tone?: string) => void
-type PermissionState = Record<string, boolean>
+type PermissionState = Record<string, PermissionValue>
 
 interface CurrentUser {
   id?: EntityId | null
@@ -162,6 +169,18 @@ function normalizeRoles(value: unknown): RoleRecord[] {
   return Array.isArray(value) ? value as RoleRecord[] : []
 }
 
+// Preserves the 'review' tier value for REVIEW_TIER_KEYS sections instead
+// of collapsing it to a plain boolean -- normalizePermissionState used to
+// run every value through Boolean(enabled), which silently turned a
+// hand-set 'review' string (e.g. on 'fees', set directly in the DB since
+// this editor didn't offer a tier picker yet) into `true` the moment a
+// role was opened for editing, so saving ANY unrelated change to that
+// role (renaming it, touching a different permission) would silently
+// upgrade Review Required to Full Access. Every other key keeps the old
+// strict-boolean behavior; only a REVIEW_TIER_KEYS key preserves the
+// literal string 'review', matching the backend's own strict
+// interpretation in getPermissionTier() (a 'review' string on any other
+// key is never valid and still collapses to boolean).
 function normalizePermissionState(value: unknown): PermissionState {
   if (typeof value === 'string') {
     try {
@@ -172,7 +191,11 @@ function normalizePermissionState(value: unknown): PermissionState {
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return Object.entries(value as Record<string, unknown>).reduce<PermissionState>((permissions, [key, enabled]) => {
-    permissions[key] = Boolean(enabled)
+    if (enabled === 'review' && REVIEW_TIER_KEYS.has(key)) {
+      permissions[key] = 'review'
+    } else {
+      permissions[key] = Boolean(enabled)
+    }
     return permissions
   }, {})
 }
@@ -247,9 +270,9 @@ const INITIAL_ROLE_FORM: RoleFormState = {
   name: '',
   permissions: {},
 }
-const LazyPermissionEditor = lazy(async () => ({ default: (await import('./PermissionEditor')).default }))
-const LazyUserDetailSheet = lazy(async () => ({ default: (await import('./UserDetailSheet')).default }))
-const LazyUserProfileModal = lazy(async () => ({ default: (await import('./UserProfileModal')).default }))
+const LazyPermissionEditor = lazyRetry(async () => ({ default: (await import('./PermissionEditor')).default }), 'users-permission-editor')
+const LazyUserDetailSheet = lazyRetry(async () => ({ default: (await import('./UserDetailSheet')).default }), 'users-user-detail-sheet')
+const LazyUserProfileModal = lazyRetry(async () => ({ default: (await import('./UserProfileModal')).default }), 'users-user-profile-modal')
 const USERS_LIST_TIMEOUT_MS = 8000
 const ROLES_LIST_TIMEOUT_MS = 8000
 const USER_MUTATION_TIMEOUT_MS = 12000
@@ -327,6 +350,13 @@ export default function Users() {
   const [selectedUser, setSelectedUser] = useState<UserRecord | null>(null)
   const [selectedRole, setSelectedRole] = useState<RoleRecord | null>(null)
   const [search, setSearch] = useState('')
+  // Role/Status filter -- Users was the one remaining list page with a
+  // search box but no FilterMenu at all (found during the Part 124
+  // cross-page consistency audit; every other list page in the app has
+  // one). Mirrors Branches.tsx's status-filter pattern exactly (same
+  // 'all'/'active'/'inactive' values, same FilterMenu section shape).
+  const [roleFilter, setRoleFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [userForm, setUserForm] = useState<UserFormState>(INITIAL_USER_FORM)
   const [roleForm, setRoleForm] = useState<RoleFormState>(INITIAL_ROLE_FORM)
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>({
@@ -365,6 +395,23 @@ export default function Users() {
     if (Number(targetUser.id) === Number(currentUser?.id)) return true
     return !targetUser.has_admin_access
   }
+
+  // Device-approval notifications navigate here with anchor 'devices' (see
+  // routes/notifications.ts's buildDeviceApprovalSection and
+  // AppContext.tsx's navigateTo). Users.tsx can already be mounted when
+  // that navigation happens (pages stay mounted across switches), so a
+  // one-time mount check isn't enough -- listen for the navigation event
+  // too. window.location.hash is already updated by the time this fires,
+  // since navigateTo() pushes the URL before dispatching the event.
+  useEffect(() => {
+    if (!canManage) return
+    const applyHashTab = () => {
+      if (window.location.hash === '#devices') setTab('devices')
+    }
+    applyHashTab()
+    window.addEventListener(APP_NAVIGATION_EVENT, applyHashTab)
+    return () => window.removeEventListener(APP_NAVIGATION_EVENT, applyHashTab)
+  }, [canManage])
 
   const syncChannelName = String(syncChannel?.channel || '')
   const syncTimestamp = Number(syncChannel?.ts || 0)
@@ -540,9 +587,43 @@ export default function Users() {
 
   const filteredUsers = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) return users
-    return users.filter((user) => `${user.name} ${user.username} ${user.phone || ''} ${user.email || ''} ${user.role_name || ''}`.toLowerCase().includes(query))
-  }, [search, users])
+    return users.filter((user) => {
+      if (query && !`${user.name} ${user.username} ${user.phone || ''} ${user.email || ''} ${user.role_name || ''}`.toLowerCase().includes(query)) return false
+      if (roleFilter !== 'all' && String(user.role_id ?? '') !== roleFilter) return false
+      if (statusFilter !== 'all' && Boolean(user.is_active) !== (statusFilter === 'active')) return false
+      return true
+    })
+  }, [search, users, roleFilter, statusFilter])
+  const userFilterActiveCount = (roleFilter !== 'all' ? 1 : 0) + (statusFilter !== 'all' ? 1 : 0)
+  const userFilterSections = useMemo(() => ([
+    {
+      id: 'role',
+      label: tr('role', 'Role'),
+      searchable: roles.length > 6,
+      options: [
+        { id: 'all', label: tr('all', 'All'), active: roleFilter === 'all', onClick: () => setRoleFilter('all') },
+        ...roles.map((role) => ({
+          id: String(role.id),
+          label: role.name || `Role ${role.id}`,
+          active: roleFilter === String(role.id),
+          onClick: () => setRoleFilter(String(role.id)),
+        })),
+      ],
+    },
+    {
+      id: 'status',
+      label: tr('status', 'Status'),
+      options: [
+        { id: 'all', label: tr('all', 'All'), active: statusFilter === 'all', onClick: () => setStatusFilter('all') },
+        { id: 'active', label: tr('active', 'Active'), active: statusFilter === 'active', onClick: () => setStatusFilter('active') },
+        { id: 'inactive', label: tr('inactive', 'Inactive'), active: statusFilter === 'inactive', onClick: () => setStatusFilter('inactive') },
+      ],
+    },
+  ]), [roles, roleFilter, statusFilter, tr])
+  const clearUserFilters = useCallback(() => {
+    setRoleFilter('all')
+    setStatusFilter('all')
+  }, [])
 
   /**
    * 3. Modal Openers
@@ -602,14 +683,21 @@ export default function Users() {
     return Object.keys(value).filter((key) => value[key])
   }
 
+  const getRolePermissionValue = (role: RoleRecord | null | undefined, key: string): PermissionValue => {
+    const value = normalizePermissionState(role?.permissions)
+    return value[key] ?? false
+  }
+
   const getPermissionSummary = (role: RoleRecord): string => {
-    const keys = getRolePermissions(role)
+    const value = normalizePermissionState(role?.permissions)
+    const keys = Object.keys(value).filter((key) => value[key])
     if (!keys.length) return tr('no_permissions', 'No permissions')
     if (keys.includes('all')) return tr('full_access', 'Full access')
     return keys
       .map((key) => {
         const perm = PERMISSION_DEFS.find((item) => item.key === key)
-        return tr(perm?.tKey || key, perm?.label || key)
+        const label = tr(perm?.tKey || key, perm?.label || key)
+        return value[key] === 'review' ? `${label} (${tr('review_required', 'Review Required')})` : label
       })
       .join(', ')
   }
@@ -651,6 +739,10 @@ export default function Users() {
     }
     if (selectedUser && !canManageTargetUser(selectedUser)) {
       notify(tr('cannot_manage_admin_account', 'You cannot modify another admin account.'), 'error')
+      return
+    }
+    if (!selectedUser && !userForm.role_id) {
+      notify(tr('role_required_new_user', 'Choose a role for the new user'), 'error')
       return
     }
     if (!beginSingleAction(saveUserInFlightRef, { blocked: saving })) return
@@ -725,8 +817,8 @@ export default function Users() {
       notify(tr('enter_new_password', 'Enter new password'), 'error')
       return
     }
-    if (newPassword.length < 4) {
-      notify(tr('new_password_min_length', 'Use at least 4 characters for the new password'), 'error')
+    if (newPassword.length < 6) {
+      notify(tr('password_min_6', 'Use at least 6 characters for the new password.'), 'error')
       return
     }
     if (newPassword !== confirmPassword) {
@@ -896,63 +988,86 @@ export default function Users() {
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
-      <div className="mb-4 flex min-w-0 items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <h1 className="flex items-center gap-2 text-xl font-bold text-gray-900 dark:text-white sm:text-2xl">
-            <CircleUserRound className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            {t('users') || 'Users'}
-          </h1>
-          {tab === 'roles' && rolesLoading && !roles.length ? (
-            <div className="mt-1 text-xs text-blue-600 dark:text-blue-300">{tr('loading', 'Loading...')}</div>
-          ) : null}
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            <button type="button" className="btn-secondary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={() => setProfileOpen(true)}>
-              <CircleUserRound className="h-4 w-4" />
-              <span>{tr('profile', 'Profile')}</span>
-            </button>
-          {tab === 'users' && canManage ? <button type="button" className="btn-primary inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={openCreateUser}><UserPlus className="h-4 w-4" /><span>{t('add_user') || 'Add user'}</span></button> : null}
-          {tab === 'roles' && canManage ? <button type="button" className="btn-primary shrink-0 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={openCreateRole}>{t('create_role') || 'Create role'}</button> : null}
-        </div>
-      </div>
-
       {!canManage ? (
           <div className="mb-4 rounded-xl border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-700 dark:border-yellow-700 dark:bg-yellow-900/20 dark:text-yellow-300">
             {tr('users_view_only_note', 'View-only mode for shared users. Account details and OTP can still be managed from your profile button.')}
           </div>
       ) : null}
 
-      <div className="mb-4 flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {[
-          ['users', t('users') || 'Users'],
-          ['roles', t('roles') || 'Roles'],
-        ].map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => setTab(id as UsersTab)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Section tabs share a row with the Profile button (view-scoped
+          controls like Add User/Add Role live in the search row below,
+          since they act on the currently selected tab). */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex gap-1">
+          {[
+            ['users', t('users') || 'Users'],
+            ['roles', t('roles') || 'Roles'],
+            ...(canManage ? [['devices', tr('devices_tab', 'Devices')]] : []),
+          ].map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTab(id as UsersTab)}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium ${tab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="btn-secondary mb-1 inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs sm:text-sm" onClick={() => setProfileOpen(true)}>
+          <CircleUserRound className="h-4 w-4" />
+          <span>{tr('profile', 'Profile')}</span>
+        </button>
       </div>
 
-      <div className="mb-4">
-        <label htmlFor="users-search" className="sr-only">{tr('search_users', 'Search users')}</label>
-        <input
-          id="users-search"
-          name="users_search"
-          aria-label="Search users"
-          autoComplete="off"
-          className="input max-w-sm"
-          placeholder={tr('search_users_placeholder', 'Search users, phone, email, or role')}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-      </div>
+      {tab === 'roles' && rolesLoading && !roles.length ? (
+        <div className="mb-2 text-xs text-blue-600 dark:text-blue-300">{tr('loading', 'Loading...')}</div>
+      ) : null}
 
-      <ActionHistoryBar history={actionHistory} className="mb-4" />
+      {/* Toolbar + search row pin to the top of the page's scroll container
+          while scrolling -- same `sticky top-2` treatment as
+          Products/Inventory/Sales/Returns/Branches/Contacts/AuditLog. This
+          page was the one remaining list page without it (found during a
+          ripple-consistency audit); grouped into the same single sticky
+          wrapper those pages use rather than two independently-sticky
+          siblings. History (bundles Undo/Redo) and the primary Add/Create
+          action still each take an equal share of the toolbar row's full
+          width (flex-1, labels always visible) -- previously only
+          History's wrapper grew to fill the row while the small icon
+          button inside it stayed put, so a wide invisible History control
+          sat crowded right up against Add User/Create role with barely
+          any visual gap. Search box stays on its own line below so it
+          always gets full width to breathe. */}
+      <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
+        <div className="flex min-w-0 items-stretch gap-1.5 overflow-x-auto pt-1">
+          <ActionHistoryBar history={actionHistory} t={t} className="min-w-0 flex-1" showLabel />
+          {tab === 'users' && canManage ? <button type="button" className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" onClick={openCreateUser}><UserPlus className="h-4 w-4 shrink-0" /><span className="truncate">{t('add_user') || 'Add user'}</span></button> : null}
+          {tab === 'roles' && canManage ? <button type="button" className="btn-primary inline-flex h-9 flex-1 items-center justify-center gap-1.5 whitespace-nowrap px-2 text-xs sm:text-sm" onClick={openCreateRole}><span className="truncate">{t('create_role') || 'Create role'}</span></button> : null}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchInput
+            id="users-search"
+            name="users_search"
+            value={search}
+            onChange={setSearch}
+            placeholder={tr('search_users_placeholder', 'Search users, phone, email, or role')}
+          />
+          {/* Filter only applies to the users list (role_id/is_active
+              columns) -- the roles tab renders `roles` directly with no
+              filtering of its own, so the trigger stays hidden there
+              rather than sitting inert. */}
+          {tab === 'users' ? (
+            <FilterMenu
+              label={tr('filters', 'Filters')}
+              activeCount={userFilterActiveCount}
+              sections={userFilterSections}
+              onClear={userFilterActiveCount > 0 ? clearUserFilters : null}
+              mobileIconOnly
+            />
+          ) : null}
+        </div>
+      </div>
 
       {loadError ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300">
@@ -1055,7 +1170,7 @@ export default function Users() {
             )) : null}
           </div>
         </>
-      ) : (
+      ) : tab === 'roles' ? (
         <div className="space-y-3">
           {rolesLoading && !roles.length ? (
             <div className="card p-4 text-sm text-gray-500 dark:text-gray-400">{tr('loading', 'Loading...')}</div>
@@ -1078,6 +1193,7 @@ export default function Users() {
                       {permissionKeys.map((key) => (
                         <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                           {PERMISSION_DEFS.find((item) => item.key === key)?.label || key}
+                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Review Required')})` : ''}
                         </span>
                       ))}
                     </div>
@@ -1093,7 +1209,9 @@ export default function Users() {
             )
           })}
         </div>
-      )}
+      ) : null}
+
+      {tab === 'devices' && canManage ? <DeviceApprovals t={t} notify={notify} /> : null}
 
       {modal === 'userDetail' && selectedUser ? (
         <Suspense fallback={null}>
@@ -1156,7 +1274,7 @@ export default function Users() {
                   buttonClassName="h-10 w-full"
                   menuClassName="min-w-[12rem]"
                   options={[
-                    { value: '', label: t('no_role') || 'No role' },
+                    ...(selectedUser ? [{ value: '', label: t('no_role') || 'No role' }] : [{ value: '', label: tr('choose_role', 'Choose a role') }]),
                     ...roles.map((role) => ({ value: role.id, label: role.name || String(role.id) })),
                   ]}
                 />
@@ -1252,6 +1370,29 @@ export default function Users() {
               <label htmlFor="role-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role_name', 'Role name')}</label>
               <input id="role-name" name="role_name" autoComplete="off" className="input" value={roleForm.name} onChange={(e) => setRoleForm((prev) => ({ ...prev, name: e.target.value }))} />
             </div>
+            {!selectedRole ? (
+              // Only offered when creating a brand-new role -- a one-click
+              // fill for roleForm.permissions, not a locked-in template.
+              // Never shown while editing an existing role, so a preset
+              // click can never silently overwrite hand-tuned permissions
+              // someone already saved.
+              <div>
+                <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('role_preset_label', 'Start from a preset (optional)')}</label>
+                <div className="flex flex-wrap gap-2">
+                  {ROLE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.key}
+                      type="button"
+                      title={tr(preset.descriptionKey, preset.description)}
+                      className="rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-zinc-700 dark:bg-zinc-900 dark:text-gray-300 dark:hover:border-blue-700 dark:hover:bg-blue-900/30 dark:hover:text-blue-300"
+                      onClick={() => setRoleForm((prev) => ({ ...prev, permissions: { ...preset.permissions } }))}
+                    >
+                      {tr(preset.labelKey, preset.label)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('permissions', 'Permissions')}</label>
               <Suspense fallback={<div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">{tr('loading', 'Loading...')}</div>}>

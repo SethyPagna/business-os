@@ -1,0 +1,21 @@
+-- Adds a `gender` column to `customers` so CustomerFormModal.tsx's new
+-- Male/Female/Other/Unspecified dropdown has somewhere to persist to.
+-- routes/contacts.ts's CUSTOMERS.columns allowlist (and importEngine.ts's
+-- classifyContacts/materializeImportChunk CSV import path) already
+-- reference this column name -- this migration was the missing piece
+-- behind that merge, without which every customer create/update carrying
+-- a `gender` field would have 500'd on an unknown-column D1 error.
+--
+-- Nullable, free-text (not an ENUM/CHECK constraint): D1/SQLite has no
+-- native enum type, and the three known values ('male' | 'female' |
+-- 'other') are already enforced at the edges -- CustomerFormModal.tsx's
+-- <select> only offers those three plus '', and importEngine.ts's
+-- normalizeContactGender() normalizes any imported CSV cell down to the
+-- same three values or null. No backfill needed: every existing customer
+-- row simply starts as NULL ("Unspecified"), matching the form's own
+-- blank-option default.
+--
+-- Scoped to `customers` only -- suppliers/delivery_contacts have no
+-- equivalent form field and weren't part of this ask.
+
+ALTER TABLE customers ADD COLUMN gender TEXT;

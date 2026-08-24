@@ -64,12 +64,12 @@ function fallbackGradientFor(id: number): string {
 
 function SkeletonCard() {
   return (
-    <div className="flex min-w-[260px] max-w-[320px] shrink-0 animate-pulse flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900">
-      <div className="h-28 w-full bg-slate-200 dark:bg-slate-800" />
+    <div className="flex min-w-[260px] max-w-[320px] shrink-0 animate-pulse flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white dark:border-neutral-700 dark:bg-neutral-900">
+      <div className="h-28 w-full bg-slate-200 dark:bg-neutral-800" />
       <div className="flex flex-col gap-2 p-3">
-        <div className="h-3 w-16 rounded-full bg-slate-200 dark:bg-slate-800" />
-        <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-800" />
-        <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-800" />
+        <div className="h-3 w-16 rounded-full bg-slate-200 dark:bg-neutral-800" />
+        <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-neutral-800" />
+        <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-neutral-800" />
       </div>
     </div>
   )
@@ -163,10 +163,10 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
       aria-label={copy('announcementStripSection', 'Announcements')}
     >
       {showLeftFade ? (
-        <div className="pointer-events-none absolute inset-y-0 left-1 z-10 w-8 bg-gradient-to-r from-white to-transparent dark:from-slate-950" />
+        <div className="pointer-events-none absolute inset-y-0 left-1 z-10 w-8 bg-gradient-to-r from-white to-transparent dark:from-neutral-950" />
       ) : null}
       {showRightFade ? (
-        <div className="pointer-events-none absolute inset-y-0 right-1 z-10 w-10 bg-gradient-to-l from-white to-transparent dark:from-slate-950" />
+        <div className="pointer-events-none absolute inset-y-0 right-1 z-10 w-10 bg-gradient-to-l from-white to-transparent dark:from-neutral-950" />
       ) : null}
       <div
         ref={scrollRef}
@@ -183,12 +183,12 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
                   type="button"
                   onClick={clickable ? () => handleActivate(promo) : undefined}
                   disabled={!clickable}
-                  className={`group relative flex min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm ring-1 ring-transparent transition-all duration-200 dark:border-slate-700 dark:bg-slate-900 ${
-                    clickable ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lg hover:ring-slate-200 dark:hover:ring-slate-600' : 'cursor-default'
+                  className={`group relative flex min-w-[260px] max-w-[320px] shrink-0 snap-start flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-left shadow-sm ring-1 ring-transparent transition-all duration-200 dark:border-neutral-700 dark:bg-neutral-900 ${
+                    clickable ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-lg hover:ring-slate-200 dark:hover:ring-neutral-600' : 'cursor-default'
                   }`}
                 >
                   {imageUrl ? (
-                    <div className="relative h-28 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+                    <div className="relative h-28 w-full overflow-hidden bg-slate-100 dark:bg-neutral-800">
                       <img
                         src={imageUrl}
                         alt={promo.title}
@@ -212,12 +212,12 @@ export default function PortalPromotionsBanner({ copy, onOpenImage }: PortalProm
                         {promo.badge_text}
                       </span>
                     ) : null}
-                    <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">{promo.title}</div>
+                    <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{promo.title}</div>
                     {promo.subtitle ? (
-                      <div className="line-clamp-2 text-xs text-slate-500 dark:text-slate-400">{promo.subtitle}</div>
+                      <div className="line-clamp-2 text-xs text-slate-500 dark:text-neutral-400">{promo.subtitle}</div>
                     ) : null}
                     {promo.link_type === 'product' && promo.link_product_name ? (
-                      <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-sky-600 transition-transform group-hover:translate-x-0.5 dark:text-sky-400">
+                      <div className="mt-auto flex items-center gap-1 pt-1 text-xs font-medium text-sky-600 transition-transform group-hover:translate-x-0.5 dark:text-amber-400">
                         {copy('portalPromotionsViewProduct', 'View')} {promo.link_product_name}
                         <span aria-hidden="true">→</span>
                       </div>

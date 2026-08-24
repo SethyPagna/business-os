@@ -1,12 +1,22 @@
-import { Suspense, lazy, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+import { fuzzyTextMatches, matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
+import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
+import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
+import Globe from 'lucide-react/dist/esm/icons/globe.js'
 import HelpCircle from 'lucide-react/dist/esm/icons/help-circle.js'
+import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
+import MapPin from 'lucide-react/dist/esm/icons/map-pin.js'
+import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import type { LucideIcon } from 'lucide-react'
 import { useIsPageActive } from '../shared/pageActivity'
+import { clampPage } from '../shared/PaginationControls'
 import { isBrokenLocalizedString, useApp, useSync } from '../../app/AppContextCore.tsx'
 import {
   beginTrackedRequest,
@@ -17,6 +27,7 @@ import {
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
+import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
 import {
   createAboutBlock,
   createPromoItem,
@@ -31,10 +42,16 @@ import {
   getPortalMobileGridClass,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
+  buildPortalPricePresentation,
 } from './portalCatalogDisplay.ts'
+import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
+import { MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import {
+  ALL_PUBLIC_TRANSLATE_OPTIONS,
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
+  FIRST_PARTY_TRANSLATE_LANG_OPTIONS,
+  GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
   isFirstPartyPortalLanguage,
   normalizeFirstPartyPortalLanguage,
 } from './portalLanguageOptions.ts'
@@ -44,6 +61,7 @@ import {
 } from './portalTranslationData.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
+import { buildPortalManifest } from '../../utils/portalManifest.ts'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
@@ -73,20 +91,30 @@ function loadPortalContentI18nModule(): Promise<PortalContentI18nModule> {
   return portalContentI18nModulePromise
 }
 
-const CatalogEditorSurface = lazy(loadCatalogEditorSurface)
-const CatalogProductsSection = lazy(loadCatalogProductsSection)
-const CatalogSecondaryTabs = lazy(loadCatalogSecondaryTabs)
+const CatalogEditorSurface = lazyRetry(loadCatalogEditorSurface, 'catalog-editor-surface')
+const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'catalog-products-section')
+const CatalogSecondaryTabs = lazyRetry(loadCatalogSecondaryTabs, 'catalog-secondary-tabs')
+const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'), 'catalog-page-promotions-banner')
 
 const CATALOG_PORTAL_AI_STATUS_TIMEOUT_MS = 8000
 const CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS = 10000
 const CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
 const CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_FAVICON_TIMEOUT_MS = 8000
+// Fallback used for the browser-tab favicon and the PWA "Add to Home
+// Screen" manifest icon when the business hasn't configured a
+// customer_portal_favicon_image/business logo yet. Without this, an
+// unconfigured portal fell straight through to the shared static
+// /favicon.ico and /manifest.json -- the ADMIN app's generic branding --
+// which is exactly the "wrong PWA icon on the public site" bug. Ships as a
+// real file under /public so it works with zero settings configured; once
+// the business uploads its own logo/favicon in Settings, that always wins
+// (see the `|| DEFAULT_PORTAL_ICON_SRC` fallbacks below).
+const DEFAULT_PORTAL_ICON_SRC = '/leang-cosmetics-icon-512.png'
 const CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS = 25000
 const CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000
 const CATALOG_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
-const CATALOG_PORTAL_REVIEW_TIMEOUT_MS = 12000
 const CATALOG_SUBMISSION_MAX_SCREENSHOTS = 8
 const CATALOG_IMAGE_READ_CONCURRENCY = 2
 const PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
@@ -118,6 +146,8 @@ type PortalConfig = LegacyCatalogRecord & {
   businessLogo?: string
   businessName?: string
   businessPhone?: string
+  contactLinkLabels?: Record<string, string>
+  contactLinks?: Record<string, string>
   exchangeRate?: string | number
   faqItems?: FaqItem[]
   gridColumnsDesktop?: string | number
@@ -128,9 +158,16 @@ type PortalConfig = LegacyCatalogRecord & {
   lowStockThreshold?: string | number
   outOfStockThreshold?: string | number
   priceDisplay?: string
+  productCautionDefault?: string
+  productNeedMoreDetailsDefault?: string
   refreshSeconds?: string | number
   showAbout?: boolean
   showCatalog?: boolean
+  showContactInstagram?: boolean
+  showContactMessenger?: boolean
+  showContactTelegram?: boolean
+  showContactPhone?: boolean
+  showContactWhatsapp?: boolean
   showCover?: boolean
   showEmail?: boolean
   showFacebook?: boolean
@@ -468,6 +505,11 @@ const FAQ_STARTER_TEXT = [
   ['13', 'Can I ask for alternatives if my preferred brand is unavailable?', 'Yes. We can suggest similar products from other brands in stock based on category, concern, and price range.'],
   ['14', 'Can I check whether a product is suitable for oily, dry, or combination skin?', 'Yes. Use the assistant or contact the store with your skin type and concern so recommendations stay closer to your needs.'],
   ['15', 'Do you also carry hair, body, and fragrance products?', 'Yes. The store carries more than just skincare and makeup, so you can also browse hair, body, perfume, and related beauty items when available.'],
+  ['21', 'Do you offer delivery, or is it pickup only?', 'We support delivery in select areas along with in-store pickup. Message the store on Facebook, Instagram, or Telegram with your location so we can confirm delivery options and timing.'],
+  ['22', 'What payment methods do you accept?', 'We accept cash and common mobile payment options in store. For delivery or online orders, contact us directly to confirm which payment method works best for your order.'],
+  ['23', 'What are your store hours?', 'Store hours can vary by branch and public holidays. Please check the branch details on this page or contact us directly for the most current opening hours.'],
+  ['24', 'Do you guarantee that products sold here are 100% authentic?', 'Yes. Leang Cosmetics only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.'],
+  ['25', 'Where can I see current promotions and discounts?', 'Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.'],
 ]
 
 const AI_FAQ_STARTER_TEXT = [
@@ -577,7 +619,6 @@ function writePortalCache(payload: LegacyCatalogRecord): void {
     const lightweightPayload = {
       ...payload,
       products: Array.isArray(payload?.products) ? payload.products.slice(0, PORTAL_CACHE_PRODUCT_LIMIT) : [],
-      reviewItems: Array.isArray(payload?.reviewItems) ? payload.reviewItems.slice(0, 30) : [],
     }
     const serialized = JSON.stringify({
       cachedAt: Date.now(),
@@ -598,12 +639,12 @@ function normalizePortalPath(value: unknown): string {
     .replace(/^\/+/, '')
     .replace(/\/+$/, '')
 
-  return cleaned ? `/${cleaned}` : '/customer-portal'
+  return cleaned ? `/${cleaned}` : '/'
 }
 
 /** Prevent customer portal path overlap with protected backend namespaces. */
 function isReservedPortalPath(value: string): boolean {
-  return value === '/' || value === '/health' || value.startsWith('/api') || value.startsWith('/uploads')
+  return value === '/health' || value.startsWith('/api') || value.startsWith('/uploads')
 }
 
 function getPortalTabs(config: PortalConfig, copy?: CopyFunction | null): PortalTab[] {
@@ -661,6 +702,21 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_show_facebook: !!config.showFacebook,
     customer_portal_show_instagram: !!config.showInstagram,
     customer_portal_show_telegram: !!config.showTelegram,
+    customer_portal_contact_messenger: config.contactLinks?.messenger || '',
+    customer_portal_contact_telegram: config.contactLinks?.telegram || '',
+    customer_portal_contact_whatsapp: config.contactLinks?.whatsapp || '',
+    customer_portal_contact_phone: config.contactLinks?.phone || '',
+    customer_portal_contact_instagram: config.contactLinks?.instagram || '',
+    customer_portal_contact_messenger_label: config.contactLinkLabels?.messenger || 'Messenger',
+    customer_portal_contact_telegram_label: config.contactLinkLabels?.telegram || 'Telegram',
+    customer_portal_contact_whatsapp_label: config.contactLinkLabels?.whatsapp || 'WhatsApp',
+    customer_portal_contact_phone_label: config.contactLinkLabels?.phone || '',
+    customer_portal_contact_instagram_label: config.contactLinkLabels?.instagram || 'Instagram',
+    customer_portal_show_contact_messenger: config.showContactMessenger !== false,
+    customer_portal_show_contact_telegram: config.showContactTelegram !== false,
+    customer_portal_show_contact_whatsapp: !!config.showContactWhatsapp,
+    customer_portal_show_contact_phone: !!config.showContactPhone,
+    customer_portal_show_contact_instagram: !!config.showContactInstagram,
     customer_portal_title: config.businessName || config.title || '',
     customer_portal_title_size: String(config.titleSize ?? 40),
     customer_portal_intro: config.intro || '',
@@ -676,6 +732,13 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_show_about: !!config.showAbout,
     customer_portal_about_title: config.aboutTitle || '',
     customer_portal_about_content: config.aboutContent || '',
+    // Aug 24 request (Part 326 backlog item 3): a single Caution and a
+    // single Need More Details block, set once here and shown on every
+    // product's detail flyout -- not per-product, so these are plain
+    // portal-wide settings keys, same shape as business_tagline/about_
+    // content above, not a products-table column.
+    customer_portal_product_caution_default: config.productCautionDefault || '',
+    customer_portal_product_need_more_details_default: config.productNeedMoreDetailsDefault || '',
     customer_portal_about_blocks: serializeAboutBlocks(config.aboutBlocks || []),
     customer_portal_translations: stringifyPortalTranslations(config.translations || {}),
     customer_portal_hero_gradient_start: config.heroGradientStart || '#0f172a',
@@ -688,6 +751,7 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_show_membership: !!config.showMembership,
     customer_portal_show_prices: !!config.showPrices,
     customer_portal_show_out_of_stock_products: !!config.showOutOfStockProducts,
+    customer_portal_show_stock_status: config.showStockStatus !== false,
     customer_portal_show_product_brand: !!config.showProductBrand,
     customer_portal_show_product_category: !!config.showProductCategory,
     customer_portal_show_product_description: !!config.showProductDescription,
@@ -771,6 +835,25 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     showFacebook: toBoolean(draft.customer_portal_show_facebook, config.showFacebook),
     showInstagram: toBoolean(draft.customer_portal_show_instagram, config.showInstagram),
     showTelegram: toBoolean(draft.customer_portal_show_telegram, config.showTelegram),
+    contactLinks: {
+      messenger: draft.customer_portal_contact_messenger || '',
+      telegram: draft.customer_portal_contact_telegram || '',
+      whatsapp: draft.customer_portal_contact_whatsapp || '',
+      phone: draft.customer_portal_contact_phone || draft.business_phone || '',
+      instagram: draft.customer_portal_contact_instagram || '',
+    },
+    contactLinkLabels: {
+      messenger: String(draft.customer_portal_contact_messenger_label || config.contactLinkLabels?.messenger || 'Messenger').trim() || 'Messenger',
+      telegram: String(draft.customer_portal_contact_telegram_label || config.contactLinkLabels?.telegram || 'Telegram').trim() || 'Telegram',
+      whatsapp: String(draft.customer_portal_contact_whatsapp_label || config.contactLinkLabels?.whatsapp || 'WhatsApp').trim() || 'WhatsApp',
+      phone: String(draft.customer_portal_contact_phone_label || config.contactLinkLabels?.phone || '').trim(),
+      instagram: String(draft.customer_portal_contact_instagram_label || config.contactLinkLabels?.instagram || 'Instagram').trim() || 'Instagram',
+    },
+    showContactMessenger: toBoolean(draft.customer_portal_show_contact_messenger, config.showContactMessenger),
+    showContactTelegram: toBoolean(draft.customer_portal_show_contact_telegram, config.showContactTelegram),
+    showContactWhatsapp: toBoolean(draft.customer_portal_show_contact_whatsapp, config.showContactWhatsapp),
+    showContactPhone: toBoolean(draft.customer_portal_show_contact_phone, config.showContactPhone),
+    showContactInstagram: toBoolean(draft.customer_portal_show_contact_instagram, config.showContactInstagram),
     title: draft.business_name || draft.customer_portal_title || config.businessName || config.title,
     titleSize: Math.min(64, Math.max(28, Math.round(toNumber(draft.customer_portal_title_size, config.titleSize || 40)))),
     intro: draft.customer_portal_intro || config.intro,
@@ -796,12 +879,14 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     showAbout: toBoolean(draft.customer_portal_show_about, config.showAbout),
     aboutTitle: String(draft.customer_portal_about_title || config.aboutTitle || 'About us').trim() || 'About us',
     aboutContent: String(draft.customer_portal_about_content || config.aboutContent || '').trim(),
+    productCautionDefault: String(draft.customer_portal_product_caution_default ?? config.productCautionDefault ?? '').trim(),
+    productNeedMoreDetailsDefault: String(draft.customer_portal_product_need_more_details_default ?? config.productNeedMoreDetailsDefault ?? '').trim(),
     aboutBlocks: normalizeAboutBlocks(draft.customer_portal_about_blocks || config.aboutBlocks || []),
     translations: normalizePortalTranslations(draft.customer_portal_translations || config.translations || {}),
     heroGradientStart: normalizeHexColor(draft.customer_portal_hero_gradient_start, config.heroGradientStart || '#0f172a'),
     heroGradientMid: normalizeHexColor(draft.customer_portal_hero_gradient_mid, config.heroGradientMid || '#14532d'),
     heroGradientEnd: normalizeHexColor(draft.customer_portal_hero_gradient_end, config.heroGradientEnd || '#ea580c'),
-    publicPath: normalizePortalPath(draft.customer_portal_path || config.publicPath || '/customer-portal'),
+    publicPath: normalizePortalPath(draft.customer_portal_path || config.publicPath || '/'),
     language: resolvedLanguage,
     languageSetting,
     translateWidgetEnabled: toBoolean(draft.customer_portal_translate_widget_enabled, config.translateWidgetEnabled),
@@ -809,6 +894,7 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     showMembership: toBoolean(draft.customer_portal_show_membership, config.showMembership),
     showPrices: toBoolean(draft.customer_portal_show_prices, config.showPrices),
     showOutOfStockProducts: toBoolean(draft.customer_portal_show_out_of_stock_products, config.showOutOfStockProducts ?? true),
+    showStockStatus: toBoolean(draft.customer_portal_show_stock_status, config.showStockStatus ?? true),
     showProductBrand: toBoolean(draft.customer_portal_show_product_brand, config.showProductBrand ?? true),
     showProductCategory: toBoolean(draft.customer_portal_show_product_category, config.showProductCategory ?? true),
     showProductDescription: toBoolean(draft.customer_portal_show_product_description, config.showProductDescription ?? true),
@@ -866,7 +952,7 @@ function getStockStatus(product: CatalogProduct, qty: unknown, config: PortalCon
   return 'in_stock'
 }
 
-/** Build unique product gallery list with a max of 5 images. */
+/** Build unique product gallery list with a max of MAX_PRODUCT_GALLERY_IMAGES images. */
 function normalizeProductGallery(product: CatalogProduct | null | undefined): string[] {
   const source = Array.isArray(product?.image_gallery)
     ? product.image_gallery
@@ -878,14 +964,10 @@ function normalizeProductGallery(product: CatalogProduct | null | undefined): st
     if (!value || seen.has(value)) continue
     seen.add(value)
     unique.push(value)
-    if (unique.length >= 5) break
+    if (unique.length >= MAX_PRODUCT_GALLERY_IMAGES) break
   }
   if (!unique.length && product?.image_path) unique.push(String(product.image_path))
   return unique
-}
-
-function normalizePortalProductSearch(value: unknown): string {
-  return String(value || '').normalize('NFC').toLocaleLowerCase('km').trim()
 }
 
 function buildRecommendedProductOption(product: CatalogProduct) {
@@ -898,18 +980,17 @@ function buildRecommendedProductOption(product: CatalogProduct) {
   }
 }
 
+// Routed through fuzzyTextMatches (searchMatch.ts) instead of a plain
+// `haystack.includes(token)` per-word check -- typo/joiner/word-order/
+// diacritic tolerant, same fix as Products/Inventory/POS/portal.ts's own
+// search (see that module's header comment for the full list of cases this
+// covers). The length<2 guard is kept as-is (unrelated to the matching
+// method -- avoids treating a single stray keystroke as a real search).
 function productMatchesRecommendedSearch(product: CatalogProduct, searchTerm: unknown): boolean {
-  const query = normalizePortalProductSearch(searchTerm)
+  const query = String(searchTerm || '').trim()
   if (query.length < 2) return false
-  const tokens = query.split(/[\s,]+/).filter(Boolean)
-  const haystack = normalizePortalProductSearch([
-    product?.name,
-    product?.brand,
-    product?.category,
-    product?.barcode,
-    product?.sku,
-  ].filter(Boolean).join(' '))
-  return tokens.every((token) => haystack.includes(token))
+  const haystack = [product?.name, product?.brand, product?.category, product?.barcode, product?.sku]
+  return fuzzyTextMatches(haystack, query)
 }
 
 /** Format date/time strings robustly for public and editor views. */
@@ -926,7 +1007,7 @@ function formatPortalPrice(usd: unknown, khr: unknown, config: PortalConfig): st
   const exchangeRate = Number(config.exchangeRate || 4100)
   const khrValue = khr != null ? Number(khr || 0) : usdValue * exchangeRate
   const usdText = `$${usdValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  const khrText = `${Math.round(khrValue).toLocaleString('en-US')} KHR`
+  const khrText = `${Math.round(khrValue).toLocaleString('en-US')}៛`
   const display = normalizePriceDisplay(config.priceDisplay)
   if (display === 'KHR') return khrText
   if (display === 'BOTH') return `${usdText} / ${khrText}`
@@ -995,37 +1076,9 @@ function replaceVars(template: unknown, values: Record<string, unknown>): string
   return String(template || '').replace(/\{(\w+)\}/g, (_match: string, key: string) => String(values?.[key] ?? ''))
 }
 
-const FIRST_PARTY_TRANSLATE_LANG_OPTIONS = [
-  { value: 'original', label: 'Original', kind: 'first_party' },
-  ...FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => ({
-    value: option.value,
-    label: option.nativeLabel && option.nativeLabel !== option.label
-      ? `${option.label} - ${option.nativeLabel}`
-      : option.label,
-    kind: 'first_party',
-    dir: option.dir,
-  })),
-]
 const FIRST_PARTY_TRANSLATE_BY_LOWER = new Map(
   FIRST_PARTY_TRANSLATE_LANG_OPTIONS.map((option) => [option.value.toLowerCase(), option.value])
 )
-
-const GOOGLE_TRANSLATE_FALLBACK_OPTIONS = [
-  { value: 'nl', label: 'Dutch' },
-  { value: 'sv', label: 'Swedish' },
-  { value: 'pl', label: 'Polish' },
-  { value: 'cs', label: 'Czech' },
-  { value: 'ro', label: 'Romanian' },
-  { value: 'uk', label: 'Ukrainian' },
-  { value: 'el', label: 'Greek' },
-  { value: 'bn', label: 'Bengali' },
-  { value: 'ta', label: 'Tamil' },
-].map((option) => ({ ...option, kind: 'external' }))
-
-const ALL_PUBLIC_TRANSLATE_OPTIONS = [
-  ...FIRST_PARTY_TRANSLATE_LANG_OPTIONS,
-  ...GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
-]
 
 const PORTAL_TRANSLATE_WIDGET_HOST_ID = 'business-os-portal-translate-widget-host'
 const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
@@ -1100,7 +1153,6 @@ function isDocumentVisible() {
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
-
 const DEFAULT_CONFIG = {
   businessName: '',
   businessPhone: '',
@@ -1117,6 +1169,8 @@ const DEFAULT_CONFIG = {
   intro: '',
   aboutTitle: '',
   aboutContent: '',
+  productCautionDefault: '',
+  productNeedMoreDetailsDefault: '',
   aboutBlocks: [],
   faqTitle: '',
   faqItems: [],
@@ -1132,6 +1186,20 @@ const DEFAULT_CONFIG = {
     instagram: 'Instagram',
     telegram: 'Telegram',
   },
+  contactLinks: {
+    messenger: '',
+    telegram: '',
+    whatsapp: '',
+    phone: '',
+    instagram: '',
+  },
+  contactLinkLabels: {
+    messenger: 'Messenger',
+    telegram: 'Telegram',
+    whatsapp: 'WhatsApp',
+    phone: '',
+    instagram: 'Instagram',
+  },
   translations: {},
   promoItems: [],
   recommendedProductIds: [],
@@ -1140,7 +1208,7 @@ const DEFAULT_CONFIG = {
   aiDisclaimer: '',
   aiProviderId: '',
   aiPrompt: '',
-  publicPath: '/public',
+  publicPath: '/',
   languageSetting: 'auto',
   logoSize: 80,
   logoFit: 'cover',
@@ -1179,6 +1247,11 @@ const DEFAULT_CONFIG = {
   showFacebook: true,
   showInstagram: true,
   showTelegram: true,
+  showContactMessenger: true,
+  showContactTelegram: true,
+  showContactWhatsapp: false,
+  showContactPhone: false,
+  showContactInstagram: false,
   showGoogleMap: true,
   showCatalog: true,
   showMembership: true,
@@ -1186,6 +1259,7 @@ const DEFAULT_CONFIG = {
   showAbout: true,
   showPrices: true,
   showOutOfStockProducts: true,
+  showStockStatus: true,
   showProductBrand: true,
   showProductCategory: true,
   showProductDescription: true,
@@ -1227,7 +1301,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [products, setProducts] = useState<CatalogProduct[]>(() => Array.isArray(cachedPortal?.products) ? cachedPortal.products : [])
   const [portalProductTotal, setPortalProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [portalProductPage, setPortalProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
-  const [portalProductPageSize, setPortalProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || 20) || 20)
+  const [portalProductPageSize, setPortalProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
   const [portalProductInitial, setPortalProductInitial] = useState('all')
   const [portalProductInitials, setPortalProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
   const [portalProductRefreshing, setPortalProductRefreshing] = useState(false)
@@ -1260,14 +1334,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const [loading, setLoading] = useState(() => !(cachedPortal?.config || cachedPortal?.products?.length))
   const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: '', note: '', screenshots: [] })
   const [submissionSaving, setSubmissionSaving] = useState(false)
-  const [reviewItems, setReviewItems] = useState<LegacyCatalogRecord[]>([])
-  const [reviewSavingId, setReviewSavingId] = useState<string | number | null>(null)
   const [aiProviders, setAiProviders] = useState<LegacyCatalogRecord[]>([])
   const [translateReady, setTranslateReady] = useState(false)
   const [translateTarget, setTranslateTarget] = useState(() => readStoredTranslateTargetLocal('en'))
   const [translateApplyState, setTranslateApplyState] = useState('idle')
   const [translateApplyMessage, setTranslateApplyMessage] = useState('')
   const [productGalleryView, setProductGalleryView] = useState<GalleryViewState>({ open: false, title: '', items: [], index: 0 })
+  // Same gap as PublicCatalogPage.tsx's own openProductDetail fix this
+  // session: the admin-side editor preview never wired the product-detail
+  // flyout either, so it could never be checked from the editor's own
+  // preview without switching to the live public page.
+  const [productDetailView, setProductDetailView] = useState<ProductDetailViewState>({ open: false, product: null, gallery: [], status: 'in_stock', pricePresentation: null, showPrices: true })
   const [portalImageView, setPortalImageView] = useState<PortalImageViewState>({ open: false, title: '', images: [], index: 0 })
   const [filePicker, setFilePicker] = useState<FilePickerState>({ open: false, target: null, mediaType: 'image', title: 'Choose file' })
   const [activeEditorSection, setActiveEditorSection] = useState('branding')
@@ -1299,7 +1376,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const previewSectionRef = useRef<HTMLDivElement | null>(null)
   const membershipLookupRequestRef = useRef(0)
   const submissionSavingRef = useRef(false)
-  const reviewSavingRef = useRef(false)
   const assistantRequestRef = useRef(0)
   const assistantStatusRequestRef = useRef(0)
   const assistantStatusKeyRef = useRef('')
@@ -1307,6 +1383,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
   const portalFaviconRequestRef = useRef(0)
+  const portalManifestRequestRef = useRef(0)
   const skipNextBootstrappedProductSearchRef = useRef(false)
   const publicScrollAnchorRef = useRef(0)
   const publicPortalNavRef = useRef<HTMLElement | null>(null)
@@ -1654,40 +1731,23 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     nextMeta: LegacyCatalogRecord,
     nextProducts: CatalogProduct[],
   ) {
-    const [providersResult, reviewResult] = await Promise.allSettled([
-      withLoaderTimeout(
+    try {
+      const providers = await withLoaderTimeout(
         () => getCatalogApi().getAiProviders(),
         'Portal AI providers',
         CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
-      ),
-      withLoaderTimeout(
-        () => getCatalogApi().getPortalSubmissionsForReview(),
-        'Portal review items',
-        CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS,
-      ),
-    ])
-    if (!isPortalLoadCurrent(requestId)) return
-
-    if (providersResult.status === 'fulfilled') {
-      setAiProviders(Array.isArray(providersResult.value?.items) ? providersResult.value.items : [])
+      )
+      if (!isPortalLoadCurrent(requestId)) return
+      setAiProviders(Array.isArray(providers?.items) ? providers.items : [])
+    } catch {
+      if (!isPortalLoadCurrent(requestId)) return
     }
 
-    if (reviewResult.status === 'fulfilled') {
-      const normalizedReviewItems = Array.isArray(reviewResult.value)
-        ? reviewResult.value.map((item) => (
-            item?.status === 'pending' && !Number(item?.reward_points)
-              ? { ...item, reward_points: nextConfig.submissionRewardPoints }
-              : item
-          ))
-        : []
-      setReviewItems(normalizedReviewItems)
-      writePortalCache({
-        config: nextConfig,
-        ...nextMeta,
-        products: nextProducts,
-        reviewItems: normalizedReviewItems,
-      })
-    }
+    writePortalCache({
+      config: nextConfig,
+      ...nextMeta,
+      products: nextProducts,
+    })
   }
 
   async function refreshPortalView({ showSpinner = true, reportError = true } = {}) {
@@ -1754,7 +1814,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       if (catalogPage && typeof catalogPage === 'object') {
         setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
         setPortalProductPage(Number(catalogPage.page || 1) || 1)
-        setPortalProductPageSize(Number(catalogPage.pageSize || 20) || 20)
+        setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
         setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
       }
       setActiveTab((current) => resolveVisibleTab(current, nextConfig))
@@ -1763,7 +1823,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         ...nextMeta,
         products: nextProducts,
         catalog: catalogPage || null,
-        reviewItems: [],
       })
 
       return
@@ -1800,7 +1859,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (catalogPage && typeof catalogPage === 'object') {
       setPortalProductTotal(Number(catalogPage.total || nextProducts.length || 0))
       setPortalProductPage(Number(catalogPage.page || 1) || 1)
-      setPortalProductPageSize(Number(catalogPage.pageSize || 20) || 20)
+      setPortalProductPageSize(Number(catalogPage.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
       setPortalProductInitials(normalizePortalInitialOptions(catalogPage.initials))
     }
     setActiveTab((current) => resolveVisibleTab(current, nextConfig))
@@ -1810,7 +1869,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       ...nextMeta,
       products: nextProducts,
       catalog: catalogPage || null,
-      reviewItems: canEdit ? reviewItems : [],
     })
 
     if (!canEdit) return
@@ -1877,7 +1935,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       brand: brandFilter.join(','),
       category: categoryFilter.join(','),
       branchId: branchFilter.join(','),
-      stockState: stockFilter.join(','),
+      // Ignored server-side too when the setting is off (see
+      // buildPortalProductFilters), but dropping it here as well keeps a
+      // stale selection from ever being sent in the first place.
+      stockState: previewConfig.showStockStatus === false ? '' : stockFilter.join(','),
       initial: portalProductInitial,
     }
 
@@ -1889,11 +1950,23 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       .then((result) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(portalProductsRequestRef, requestId)) return
         const nextItems = Array.isArray(result?.items) ? result.items as CatalogProduct[] : []
+        const nextTotal = Number(result?.total || 0)
+        const responsePage = Number(result?.page || portalProductPage) || 1
+        const responsePageSize = Number(result?.pageSize || portalProductPageSize) || portalProductPageSize
+        // Same out-of-range-page gap as PublicCatalogPage.tsx: the server never
+        // clamps an echoed page number to the real total, so if the catalog
+        // shrank (product deleted, filter change) while this preview sat on a
+        // later page, clamp and re-fetch instead of committing an empty page.
+        const clampedPage = clampPage(responsePage, nextTotal, responsePageSize)
+        if (clampedPage !== responsePage) {
+          setPortalProductPage(clampedPage)
+          return
+        }
         setPortalError('')
         setProducts(nextItems)
-        setPortalProductTotal(Number(result?.total || 0))
-        setPortalProductPage(Number(result?.page || portalProductPage) || 1)
-        setPortalProductPageSize(Number(result?.pageSize || portalProductPageSize) || portalProductPageSize)
+        setPortalProductTotal(nextTotal)
+        setPortalProductPage(responsePage)
+        setPortalProductPageSize(responsePageSize)
         setPortalProductInitials(normalizePortalInitialOptions(result?.initials))
         const nextBrands = Array.isArray(result?.filters?.brands) ? normalizeBrandOptions(result.filters.brands) : brands
         const nextCategories = Array.isArray(result?.filters?.categories)
@@ -1910,12 +1983,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           branches,
           products: nextItems,
           catalog: {
-            page: Number(result?.page || portalProductPage) || 1,
-            pageSize: Number(result?.pageSize || portalProductPageSize) || portalProductPageSize,
-            total: Number(result?.total || 0),
+            page: responsePage,
+            pageSize: responsePageSize,
+            total: nextTotal,
             initials: normalizePortalInitialOptions(result?.initials).length ? normalizePortalInitialOptions(result?.initials) : portalProductInitials,
           },
-          reviewItems: [],
         })
       })
       .catch((error) => {
@@ -1940,6 +2012,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     portalProductPageSize,
     portalSearchQuery,
     previewConfig.showCatalog,
+    previewConfig.showStockStatus,
     portalConfigReady,
     stockFilter,
   ])
@@ -1980,8 +2053,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   useEffect(() => {
     if (!publicView || typeof document === 'undefined') return undefined
     const previousTitle = document.title
-    const titleText = String(previewConfig.businessName || previewConfig.title || 'Customer Portal').trim()
-    document.title = titleText || 'Customer Portal'
+    const titleText = String(previewConfig.businessName || previewConfig.title || 'Leang Cosmetics').trim()
+    document.title = titleText || 'Leang Cosmetics'
 
     const ensureLink = (rel: string) => {
       let linkEl = document.querySelector(`link[rel="${rel}"]`)
@@ -2002,7 +2075,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       ensureLink('apple-touch-icon'),
     ]
 
-    const iconSource = versionedBusinessFavicon || versionedBusinessLogo || ''
+    const iconSource = versionedBusinessFavicon || versionedBusinessLogo || DEFAULT_PORTAL_ICON_SRC
     const faviconOptions = previewConfig.businessFavicon
       ? { fit: 'cover' as const, zoom: 100, positionX: 50, positionY: 50 }
       : {
@@ -2090,6 +2163,102 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     previewConfig.logoPositionX,
     previewConfig.logoPositionY,
     previewConfig.logoZoom,
+    previewConfig.title,
+    versionedBusinessLogo,
+    versionedBusinessFavicon,
+  ])
+
+  // Real gap (see progress.md's public-portal item): the app ships one
+  // static /manifest.json ("Business OS", generic icon) shared by both the
+  // internal admin app and every customer's public storefront -- someone
+  // who "Add to Home Screen"s a business's portal got the ADMIN app's
+  // name/icon, not that business's own branding, because nothing ever
+  // swapped `<link rel="manifest">` the way the effect above already
+  // swaps the favicon/title. Mirrors that effect's own pattern (idle-
+  // callback deferred, tracked-request-guarded, restores the original on
+  // cleanup) so this doesn't compete with it for the same source image.
+  useEffect(() => {
+    if (!publicView || typeof document === 'undefined') return undefined
+    const manifestLinkEl = document.querySelector('link[rel="manifest"]')
+    const previousManifestHref = manifestLinkEl?.getAttribute('href') || ''
+    const appleTitleMetaEl = document.querySelector('meta[name="apple-mobile-web-app-title"]')
+    const previousAppleTitle = appleTitleMetaEl?.getAttribute('content') || ''
+
+    const iconSource = versionedBusinessFavicon || versionedBusinessLogo || DEFAULT_PORTAL_ICON_SRC
+
+    const iconOptions = previewConfig.businessFavicon
+      ? { fit: 'cover' as const, zoom: 100, positionX: 50, positionY: 50 }
+      : {
+          fit: 'cover' as const,
+          zoom: toNumber(previewConfig.logoZoom, 100),
+          positionX: toNumber(previewConfig.logoPositionX, 50),
+          positionY: toNumber(previewConfig.logoPositionY, 50),
+        }
+
+    let manifestIdleId: number | null = null
+    let manifestTimerId: number | null = null
+    let manifestBlobUrl: string | null = null
+    const requestId = beginTrackedRequest(portalManifestRequestRef)
+
+    const applyPortalManifest = () => {
+      withLoaderTimeout(
+        () => import('../../utils/favicon.ts').then(({ createSquareIconDataUrl }) => Promise.all([
+          createSquareIconDataUrl(iconSource, { ...iconOptions, size: 192 }),
+          createSquareIconDataUrl(iconSource, { ...iconOptions, size: 512 }),
+        ])),
+        'Portal manifest icons',
+        CATALOG_PORTAL_FAVICON_TIMEOUT_MS,
+      )
+        .then(([icon192, icon512]) => {
+          if (!aliveRef.current || !isTrackedRequestCurrent(portalManifestRequestRef, requestId)) return
+          if (!icon192 && !icon512) return
+          const manifest = buildPortalManifest({
+            businessName: previewConfig.businessName,
+            title: previewConfig.title,
+            publicPath: previewConfig.publicPath,
+            icon192: icon192 || icon512,
+            icon512: icon512 || icon192,
+          })
+          const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' })
+          manifestBlobUrl = URL.createObjectURL(blob)
+          if (manifestLinkEl) manifestLinkEl.setAttribute('href', manifestBlobUrl)
+          if (appleTitleMetaEl) appleTitleMetaEl.setAttribute('content', manifest.name)
+        })
+        .catch(() => {})
+    }
+
+    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+      manifestIdleId = window.requestIdleCallback(applyPortalManifest, { timeout: 1800 })
+    } else if (typeof window !== 'undefined') {
+      manifestTimerId = window.setTimeout(applyPortalManifest, 900)
+    } else {
+      applyPortalManifest()
+    }
+
+    return () => {
+      if (manifestIdleId != null) window.cancelIdleCallback?.(manifestIdleId)
+      if (manifestTimerId != null) window.clearTimeout(manifestTimerId)
+      invalidateTrackedRequest(portalManifestRequestRef)
+      if (manifestBlobUrl) URL.revokeObjectURL(manifestBlobUrl)
+      if (manifestLinkEl) {
+        if (previousManifestHref) manifestLinkEl.setAttribute('href', previousManifestHref)
+        else manifestLinkEl.removeAttribute('href')
+      }
+      if (appleTitleMetaEl) {
+        if (previousAppleTitle) appleTitleMetaEl.setAttribute('content', previousAppleTitle)
+        else appleTitleMetaEl.removeAttribute('content')
+      }
+    }
+  }, [
+    publicView,
+    previewConfig.businessFavicon,
+    previewConfig.businessLogo,
+    previewConfig.businessName,
+    previewConfig.logoFit,
+    previewConfig.logoPositionX,
+    previewConfig.logoPositionY,
+    previewConfig.logoZoom,
+    previewConfig.publicPath,
     previewConfig.title,
     versionedBusinessLogo,
     versionedBusinessFavicon,
@@ -2205,7 +2374,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     if (!isPageActive || !syncChannel) return undefined
-    if (!['products', 'settings', 'customers', 'sales', 'returns', 'branches', 'categories'].includes(String(syncChannel.channel || ''))) {
+    if (!['products', 'settings', 'customers', 'sales', 'returns', 'branches', 'categories', 'inventory'].includes(String(syncChannel.channel || ''))) {
       return undefined
     }
 
@@ -2264,14 +2433,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   const filteredProducts = useMemo(() => {
     return displayProducts.filter((product) => {
-      const haystack = [
-        product.name,
-        product.category,
-        product.brand,
-        product.description,
-      ].join(' ').toLowerCase()
+      // Routed through matchesSearchTermGroups (searchMatch.ts) instead of a
+      // plain `haystack.includes(term)` check -- typo/joiner/word-order/
+      // diacritic tolerant, same fix as productMatchesRecommendedSearch
+      // above and Products/Inventory/POS's own re-filters. portalSearchTerms
+      // has no AND/OR toggle in this editor preview, so mode stays 'AND'
+      // (unchanged behavior -- every term must match).
+      const haystack = [product.name, product.category, product.brand, product.description]
 
-      if (portalSearchTerms.length > 0 && !portalSearchTerms.every((term) => haystack.includes(term))) return false
+      if (portalSearchTerms.length > 0 && !matchesSearchTermGroups(haystack, portalSearchTerms, 'AND')) return false
       if (categoryFilter.length && !categoryFilter.includes(product.category || '')) return false
       if (brandFilter.length && !brandFilter.includes(product.brand || '')) return false
 
@@ -2280,7 +2450,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const statusBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
       const qty = getBranchQty(product, statusBranch)
       const status = getStockStatus(product, qty, displayConfig)
-      if (stockFilter.length && !stockFilter.includes(status)) return false
+      if (displayConfig.showStockStatus !== false && stockFilter.length && !stockFilter.includes(status)) return false
       if (!displayConfig.showOutOfStockProducts && status === 'out_of_stock') return false
 
       return true
@@ -2293,6 +2463,20 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         ? current.filter((item) => item !== value)
         : [...current, value]
     ))
+  }
+
+  // Batch sibling of toggleFilterValue: applies one checked/unchecked state
+  // to several values in a single update (selecting a whole "Main - Sub"
+  // hierarchical category group from the portal's filter combobox in one
+  // tap, same behavior as Products/Inventory/POS). See
+  // components/shared/CategoryFilterOptions.tsx and PortalFilterCombobox's
+  // onToggleGroup prop.
+  function toggleFilterValues(values: string[], setter: Dispatch<SetStateAction<string[]>>, batch: string[], checked: boolean) {
+    setter((current) => {
+      const wanted = new Set(batch)
+      const kept = current.filter((item) => !wanted.has(item))
+      return checked ? [...kept, ...batch] : kept
+    })
   }
 
   function clearPortalFilters() {
@@ -2637,7 +2821,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         notify(copy('portalUploadPending', 'Wait for media uploads to finish before saving the portal.'), 'error')
         return
       }
-      const normalizedPath = normalizePortalPath(editorDraft.customer_portal_path || '/customer-portal')
+      const normalizedPath = normalizePortalPath(editorDraft.customer_portal_path || '/')
       if (isReservedPortalPath(normalizedPath)) {
         notify(copy('invalidPublicPath', 'Choose a public path outside /api, /uploads, and /health.'), 'error')
         return
@@ -2708,6 +2892,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }))
 
       setEditorSaving(true)
+      // `config` is the last state actually confirmed from the server
+      // (before this save's edits are applied) -- `buildDraft(config)`
+      // reuses the exact same flat-key transform this save's payload below
+      // is built from, so it's a true pre-edit baseline in the same shape.
+      // Passed through so a write-conflict retry can verify no field this
+      // save touches was ACTUALLY changed by someone else before silently
+      // resubmitting -- see settingsTransport.ts's saveSettingsOnce.
+      const baselineSettings = buildDraft(config)
       const result = await saveSettings({
         business_name: editorDraft.business_name || '',
         business_phone: editorDraft.business_phone || '',
@@ -2758,6 +2950,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_show_about: editorDraft.customer_portal_show_about ? 'true' : 'false',
         customer_portal_about_title: String(editorDraft.customer_portal_about_title || '').trim(),
         customer_portal_about_content: String(editorDraft.customer_portal_about_content || '').trim(),
+        customer_portal_product_caution_default: String(editorDraft.customer_portal_product_caution_default || '').trim(),
+        customer_portal_product_need_more_details_default: String(editorDraft.customer_portal_product_need_more_details_default || '').trim(),
         customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
         customer_portal_translations: sanitizedTranslations,
         customer_portal_hero_gradient_start: normalizeHexColor(editorDraft.customer_portal_hero_gradient_start, '#0f172a'),
@@ -2770,6 +2964,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     customer_portal_show_membership: editorDraft.customer_portal_show_membership ? 'true' : 'false',
     customer_portal_show_prices: editorDraft.customer_portal_show_prices ? 'true' : 'false',
     customer_portal_show_out_of_stock_products: editorDraft.customer_portal_show_out_of_stock_products ? 'true' : 'false',
+    customer_portal_show_stock_status: editorDraft.customer_portal_show_stock_status ? 'true' : 'false',
     customer_portal_show_product_brand: editorDraft.customer_portal_show_product_brand ? 'true' : 'false',
     customer_portal_show_product_category: editorDraft.customer_portal_show_product_category ? 'true' : 'false',
     customer_portal_show_product_description: editorDraft.customer_portal_show_product_description ? 'true' : 'false',
@@ -2795,7 +2990,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
-      }) as LegacyCatalogRecord
+      }, { baselineSettings }) as LegacyCatalogRecord
       if (result?.conflict) {
         notify(copy('portalSettingsConflict', 'Portal settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
         return
@@ -2997,39 +3192,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     }
   }
 
-  async function handleReviewSubmission(item: LegacyCatalogRecord, status: string) {
-    if (!beginSingleAction(reviewSavingRef, { blocked: reviewSavingId != null, value: item.id })) return
-
-    try {
-      setReviewSavingId(item.id)
-      await withLoaderTimeout(
-        () => getCatalogApi().reviewPortalSubmission(item.id, {
-          status,
-          reward_points: item.reward_points || 0,
-          review_note: item.review_note || '',
-          userId: user?.id,
-          userName: user?.name,
-        }),
-        'Review portal submission',
-        CATALOG_PORTAL_REVIEW_TIMEOUT_MS,
-      )
-      notify(copy('reviewSaved', 'Review saved.'), 'success')
-      await loadPortal()
-      if (membershipData?.customer?.membership_number) {
-        await refreshMembershipData(membershipData.customer.membership_number, {
-          clearOnMissing: false,
-          label: 'Catalog membership refresh after review',
-          showLoading: false,
-        })
-      }
-    } catch (error) {
-      notify(getCatalogErrorMessage(error, 'Failed to save review'), 'error')
-    } finally {
-      finishSingleAction(reviewSavingRef)
-      setReviewSavingId(null)
-    }
-  }
-
   const shouldLoadMapEmbed = displayConfig.showGoogleMap && (!publicView || activeTab === 'about')
   const mapEmbedUrl = shouldLoadMapEmbed
     ? normalizeGoogleMapsEmbed(displayConfig.googleMapsEmbed || '')
@@ -3059,7 +3221,16 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       label: String(displayConfig.linkLabels?.telegram || copy('telegram', 'Telegram')).trim() || copy('telegram', 'Telegram'),
       value: displayConfig.links?.telegram,
     },
-  ].filter((item) => item.enabled && item.value)
+  // Real bug, found+fixed part 234: Telegram's value was run through the
+  // generic `normalizeExternalUrl` here too (same gap PublicCatalogPage.tsx
+  // had) -- a bare handle like "mystore" doesn't look like a URL/domain to
+  // that function, so it silently dropped to '' and the link never
+  // rendered in the editor's own preview even when correctly configured.
+  // `deriveTelegramLink` is the purpose-built canonicalizer for this field
+  // (bare handle, @handle, or full t.me/telegram.me URL, including group/
+  // channel invite links) -- used here for parity with the live public
+  // page's fix.
+  ].filter((item) => item.enabled && (item.key === 'telegram' ? deriveTelegramLink(item.value || '') : normalizeExternalUrl(item.value))).map((item) => ({ ...item, value: item.key === 'telegram' ? deriveTelegramLink(item.value || '') : normalizeExternalUrl(item.value) }))
 
   const businessFacts = [
     { key: 'phone', enabled: displayConfig.showPhone, label: copy('phone', 'Phone'), value: displayConfig.businessPhone, href: displayConfig.businessPhone ? `tel:${displayConfig.businessPhone}` : '' },
@@ -3067,6 +3238,39 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     { key: 'address', enabled: displayConfig.showAddress, label: copy('address', 'Address'), value: displayConfig.businessAddress, href: normalizeExternalUrl(displayConfig.addressLink) },
   ].filter((item) => item.enabled && item.value)
   const addressFact = businessFacts.find((item) => item.key === 'address')
+
+  // Previously only computed on the live public site (PublicCatalogPage.tsx)
+  // and never passed into CatalogPreviewSurface here -- so the editor's own
+  // preview showed just the language/theme buttons in the header, with no
+  // social/map icons next to them, and no promotions row below the section
+  // tabs at all (promotionsSection was never passed either, further down).
+  const socialIconByKey: Record<string, LucideIcon> = {
+    facebook: Facebook,
+    instagram: Instagram,
+    telegram: Send,
+    website: Globe,
+  }
+  const socialAccentByKey: Record<string, string> = {
+    facebook: 'hover:text-[#1877F2] hover:border-[#1877F2]/40',
+    instagram: 'hover:text-[#E1306C] hover:border-[#E1306C]/40',
+    telegram: 'hover:text-[#26A5E4] hover:border-[#26A5E4]/40',
+    website: 'hover:text-slate-900 dark:hover:text-white',
+  }
+  const headerLinks = [
+    ...socialLinks.map((item) => ({
+      ...item,
+      icon: socialIconByKey[item.key] || ExternalLink,
+      accentClassName: socialAccentByKey[item.key] || '',
+    })),
+    addressFact?.href ? { key: 'map', label: copy('map', 'Map'), value: addressFact.href, icon: MapPin, accentClassName: '' } : null,
+  ].filter(Boolean) as Array<{ key: string; label: string; value: string; icon: LucideIcon; accentClassName: string }>
+
+  const promotionsSection = activeTab === 'products' ? (
+    <Suspense fallback={null}>
+      <PortalPromotionsBanner copy={copy} onOpenImage={openPortalImage} />
+    </Suspense>
+  ) : null
+
   const draftMapEmbedUrl = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
   const redeemSummaryText = replaceVars(
     copy('redeemSummary', 'Minimum {points} points per unit. Available now: {units} unit(s).'),
@@ -3080,7 +3284,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
-  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + stockFilter.length + (portalProductInitial === 'all' ? 0 : 1)
+  const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (previewConfig.showStockStatus === false ? 0 : stockFilter.length) + (portalProductInitial === 'all' ? 0 : 1)
   const selectedStockBranch = branchFilter.length === 1 ? branchFilter[0] : 'all'
   const recommendedProductById = useMemo(() => {
     const map = new Map<number, CatalogProduct>()
@@ -3107,6 +3311,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       .filter((product) => product.id > 0)
   }, [products, recommendedProductSearchTerm])
 
+  const openProductDetail = (product: CatalogProduct) => {
+    const qty = getBranchQty(product, selectedStockBranch)
+    const status = getStockStatus(product, qty, displayConfig)
+    const gallery = normalizeProductGallery(product)
+    const pricePresentation = displayConfig.showPrices
+      ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice)
+      : null
+    setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
+  }
+  const closeProductDetailView = () => setProductDetailView((prev) => ({ ...prev, open: false }))
+
   const catalogTabProps = {
     copy,
     filteredProducts,
@@ -3124,6 +3339,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     categories,
     brands,
     branches,
+    publicView,
     search,
     setSearch,
     filtersOpen,
@@ -3139,6 +3355,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     stockFilter,
     setStockFilter,
     toggleFilterValue,
+    toggleFilterValues,
     previewConfig: displayConfig,
     portalError,
     productGridClass,
@@ -3152,6 +3369,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     getStockStatus,
     normalizeProductGallery,
     openProductGallery,
+    openProductDetail,
     openPortalImage,
     formatPortalPrice,
     replaceVars,
@@ -3166,7 +3384,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       <div>
         <Suspense fallback={(
           <SectionShell title={copy('loadingPortal', 'Loading customer portal...')}>
-            <div className="text-sm text-slate-500">Loading...</div>
+            <div className="text-sm text-slate-500">{copy('loading', 'Loading...')}</div>
           </SectionShell>
         )}>
           <CatalogProductsSection {...catalogTabProps} />
@@ -3301,7 +3519,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       ['portal-section-branding', 'branding', copy('businessInfo', 'Business details')],
       ['portal-section-media', 'media', copy('mediaSection', 'Media')],
       ['portal-section-display', 'display', copy('display', 'Display settings')],
-      ['portal-section-theme', 'about', copy('about', 'About')],
+      ['portal-section-about', 'about', copy('about', 'About')],
       ['portal-section-faq', 'faq', copy('faqSection', 'FAQ editor')],
       ['portal-section-assistant', 'assistant', copy('portalAssistant', 'AI assistant')],
       ['portal-section-publish', 'publish', copy('portalPublishing', 'Publishing')],
@@ -3331,7 +3549,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       generatedPublicUrl,
       getAboutBlockLabel,
       getMediaUploadState,
-      handleReviewSubmission,
       moveAboutBlockBefore,
       movePromoItemBefore,
       navigateTo,
@@ -3350,8 +3567,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       removeAboutBlock,
       removeFaqItem,
       removePromoItem,
-      reviewItems,
-      reviewSavingId,
       savePortalDraft,
       selectedRecommendedProductOptions,
       setActiveEditorSection,
@@ -3360,7 +3575,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       setDragPromoItemId,
       setRecommendedProductSearchInput,
       setRecommendedProductSearchTerm,
-      setReviewItems,
       toNumber,
       toggleRecommendedProduct,
       updateAboutBlock,
@@ -3418,7 +3632,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       fallback={(
         <div
           data-portal-root="true"
-          className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'page-scroll flex-1 overflow-y-auto'}`}
+          // Same fix as CatalogPreviewSurface: this fallback is nested inside the
+          // page's own .page-scroll wrapper (see the !publicView return below), so it
+          // must not declare a second scroll container.
+          className={`${publicView && darkMode ? 'dark ' : ''}${publicView ? 'min-h-screen w-full overflow-visible' : 'w-full'}`}
           style={{
             ...(publicView ? { touchAction: 'pan-y pinch-zoom', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } : {}),
             background: portalBackground,
@@ -3450,8 +3667,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         publicPortalNavRef={publicPortalNavRef as RefObject<HTMLElement>}
         publicPortalNavPinned={publicPortalNavPinned}
         publicPortalNavMetrics={publicPortalNavMetrics}
+        headerLinks={headerLinks}
         catalogSection={renderCatalogSection()}
         secondaryTabSection={renderSecondaryTabSection()}
+        promotionsSection={promotionsSection}
+        productDetailView={productDetailView}
+        closeProductDetailView={closeProductDetailView}
+        productDetailShopName={displayConfig.businessName || displayConfig.title || ''}
+        productDetailCautionDefault={displayConfig.productCautionDefault || ''}
+        productDetailNeedMoreDetailsDefault={displayConfig.productNeedMoreDetailsDefault || ''}
         publicScrollButtonsVisible={publicScrollButtonsVisible}
         scrollPublicPortal={scrollPublicPortal}
         productGalleryView={productGalleryView}

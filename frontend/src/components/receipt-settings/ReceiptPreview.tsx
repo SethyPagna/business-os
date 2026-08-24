@@ -78,6 +78,10 @@ export default function ReceiptPreview({ tpl, settings }: ReceiptPreviewProps) {
     customer_name: 'Sample Customer',
     customer_phone: '+855 12 345 678',
     customer_address: 'Phnom Penh, Cambodia',
+    customer_membership_number: 'MB-2024-0456',
+    membership_discount_usd: 0.25,
+    membership_discount_khr: 0.25 * exchangeRate,
+    membership_points_redeemed: 120,
     exchange_rate: exchangeRate,
     is_delivery: 1,
     delivery_contact_name: 'Delivery Contact',
@@ -99,7 +103,7 @@ export default function ReceiptPreview({ tpl, settings }: ReceiptPreviewProps) {
     change_usd: 0.25,
     change_khr: 0,
     items: [
-      { product_name: 'Coca Cola 330ml', sku: 'SKU001', quantity: 2, applied_price_usd: 1.25, applied_price_khr: 1.25 * exchangeRate },
+      { product_name: 'Coca Cola 330ml', sku: 'SKU001', quantity: 2, price_usd: 1.5, applied_price_usd: 1.25, applied_price_khr: 1.25 * exchangeRate },
       { product_name: 'Water 500ml', sku: 'SKU002', quantity: 1, applied_price_usd: 0.75, applied_price_khr: 0.75 * exchangeRate },
     ],
   }

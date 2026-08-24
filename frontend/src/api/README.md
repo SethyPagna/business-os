@@ -146,10 +146,6 @@ This folder is the browser-side transport layer for Business OS.
   - app bootstrap transport with local, unauthorized, and transient-offline fallbacks
   - keeps stored-session detection, sensitive mirror purge, and local settings bootstrap recovery outside the large domain registry
 
-- `customTablesTransport.ts`
-  - custom table list/create and custom row read/create/update/delete transport
-  - keeps encoded custom table/row path segments and Dexie custom-table fallback outside the large domain registry
-
 - `auditLogTransport.ts`
   - audit log paged reads and retention cleanup transport
   - keeps audit row mirroring, local paged fallback shape, and encoded retention query parameters outside the large domain registry

@@ -1,5 +1,16 @@
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
 
+// Single source of truth for the frontend's per-product image cap --
+// mirrors cloudflare/src/lib/importImageMatch.ts's MAX_IMAGES_PER_PRODUCT
+// (kept as a separate constant since the frontend bundle can't import
+// from the Worker's source tree, but every call site below that used to
+// hardcode `5` now reads this one value instead, so lowering the cap only
+// ever needs to happen in these two places). Lowered from 5 to 3 per
+// explicit user direction -- applies uniformly to every product row,
+// including each "child row"/variant in a group (a variant is just
+// another product row, so it already goes through this exact same cap).
+export const MAX_PRODUCT_GALLERY_IMAGES = 3
+
 interface ProductGalleryRecord {
   image_gallery?: unknown
   image_path?: unknown
@@ -24,7 +35,7 @@ interface ProductLightboxLike {
   [key: string]: unknown
 }
 
-export function normalizeProductGallery(value: unknown, fallback: unknown = null, limit: unknown = 5): string[] {
+export function normalizeProductGallery(value: unknown, fallback: unknown = null, limit: unknown = MAX_PRODUCT_GALLERY_IMAGES): string[] {
   const maxItems = Math.max(0, Number(limit || 0))
   if (!maxItems) return []
 
@@ -55,11 +66,11 @@ export function normalizeProductGallery(value: unknown, fallback: unknown = null
   return list.slice(0, maxItems)
 }
 
-export function getProductGalleryImages(product?: ProductGalleryRecord | null, limit: unknown = 5): string[] {
+export function getProductGalleryImages(product?: ProductGalleryRecord | null, limit: unknown = MAX_PRODUCT_GALLERY_IMAGES): string[] {
   return normalizeProductGallery(product?.image_gallery, product?.image_path || null, limit)
 }
 
-export function buildProductThumbnailState(product?: ProductGalleryRecord | null, limit: unknown = 5): ProductThumbnailState {
+export function buildProductThumbnailState(product?: ProductGalleryRecord | null, limit: unknown = MAX_PRODUCT_GALLERY_IMAGES): ProductThumbnailState {
   const gallery = getProductGalleryImages(product, limit)
   return {
     gallery,

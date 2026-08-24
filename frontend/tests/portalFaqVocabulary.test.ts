@@ -106,4 +106,52 @@ for (const language of firstPartyLanguages) {
   }
 }
 
+// New starter FAQ items (delivery, payment, store hours, authenticity,
+// promotions) added alongside this test -- exercise both the zh-CN exact
+// dictionary path and the vocabulary-substitution fallback path every
+// other first-party language relies on for these five new items.
+const newStarterFaq = [
+  {
+    question: 'Do you offer delivery, or is it pickup only?',
+    answer: 'We support delivery in select areas along with in-store pickup. Message the store on Facebook, Instagram, or Telegram with your location so we can confirm delivery options and timing.',
+  },
+  {
+    question: 'What payment methods do you accept?',
+    answer: 'We accept cash and common mobile payment options in store. For delivery or online orders, contact us directly to confirm which payment method works best for your order.',
+  },
+  {
+    question: 'What are your store hours?',
+    answer: 'Store hours can vary by branch and public holidays. Please check the branch details on this page or contact us directly for the most current opening hours.',
+  },
+  {
+    question: 'Do you guarantee that products sold here are 100% authentic?',
+    answer: 'Yes. Leang Cosmetics only sells authentic products sourced through official channels. If you ever have a concern about a specific item, contact the store directly and we can confirm sourcing details.',
+  },
+  {
+    question: 'Where can I see current promotions and discounts?',
+    answer: 'Check the Promotions section on this page for current offers. New discounts and bundles are added there as they become available, so it is worth checking back regularly.',
+  },
+]
+const newStarterFaqLeakPattern = /\b(delivery|payment|store hours|authentic|promotions|discounts)\b/i
+
+const zhCnLocalized = newStarterFaq.map((item) => ({
+  question: String(localizePortalFaqText(item.question, 'zh-CN')),
+  answer: String(localizePortalFaqText(item.answer, 'zh-CN')),
+}))
+zhCnLocalized.forEach((item, index) => {
+  assert.notEqual(item.question, newStarterFaq[index].question, `zh-CN new FAQ question ${index + 1} should localize`)
+  assert.notEqual(item.answer, newStarterFaq[index].answer, `zh-CN new FAQ answer ${index + 1} should localize`)
+  assert.doesNotMatch(item.answer, newStarterFaqLeakPattern, `zh-CN new FAQ answer ${index + 1} still has key English fragments`)
+})
+
+for (const language of firstPartyLanguages) {
+  newStarterFaq.forEach((item, index) => {
+    const question = String(localizePortalFaqText(item.question, language))
+    const answer = String(localizePortalFaqText(item.answer, language))
+    assert.notEqual(question, item.question, `${language} new FAQ question ${index + 1} should localize`)
+    assert.notEqual(answer, item.answer, `${language} new FAQ answer ${index + 1} should localize`)
+    assert.doesNotMatch(answer, newStarterFaqLeakPattern, `${language} new FAQ answer ${index + 1} still has key English fragments`)
+  })
+}
+
 console.log('PASS portal FAQ vocabulary fallback')

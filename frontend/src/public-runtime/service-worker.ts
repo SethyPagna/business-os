@@ -10,7 +10,7 @@ const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__'
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`
 const APP_SHELL_CACHE = APP_SHELL_VERSION
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`
-const APP_SHELL_URLS = ['/', '/index.html', '/icon.png']
+const APP_SHELL_URLS = ['/', '/index.html', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png']
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox'
 const DB_NAME = 'BusinessOS'
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create'
@@ -363,6 +363,12 @@ function isNeverCachedPath(pathname) {
 function isCacheableStaticPath(pathname) {
   return pathname.startsWith('/assets/')
     || pathname === '/icon.png'
+    || pathname === '/icon-192.png'
+    || pathname === '/icon-512.png'
+    || pathname === '/icon-192-maskable.png'
+    || pathname === '/icon-512-maskable.png'
+    || pathname === '/apple-touch-icon.png'
+    || pathname === '/manifest.json'
     || pathname === '/runtime-noise-guard.js'
     || pathname === '/theme-bootstrap.js'
 }

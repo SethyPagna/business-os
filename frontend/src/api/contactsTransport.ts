@@ -168,8 +168,16 @@ export function bulkImportCustomers(payload: ContactPayload = {}): Promise<unkno
 
 export function downloadCustomerTemplate(): Promise<void> {
   return buildContactCsvTemplate([
-    '_conflict_mode', '_field_rules',
-    'name', 'membership_number', 'phone', 'email', 'address', 'company', 'notes',
+    // gender and created_date added per explicit user direction, so a CSV
+    // exported from another system (which already has a join/signup date
+    // and a gender column) can be imported here without hand-editing
+    // headers first. gender accepts male/female/other (also m/f/o and a
+    // few common synonyms -- see normalizeContactGender on the backend).
+    // created_date only takes effect for a genuinely new customer row (see
+    // classifyContacts' own data.created_at comment) -- it backdates that
+    // customer's join date instead of stamping "now", it never rewrites
+    // an existing matched customer's original join date.
+    'name', 'membership_number', 'phone', 'email', 'address', 'gender', 'created_date', 'notes',
     'contact_label_1', 'contact_name_1', 'contact_phone_1', 'contact_email_1', 'contact_address_1',
     'contact_label_2', 'contact_name_2', 'contact_phone_2', 'contact_email_2', 'contact_address_2',
     'contact_label_3', 'contact_name_3', 'contact_phone_3', 'contact_email_3', 'contact_address_3',
@@ -198,8 +206,12 @@ export function bulkImportSuppliers(payload: ContactPayload = {}): Promise<unkno
 
 export function downloadSupplierTemplate(): Promise<void> {
   return buildContactCsvTemplate([
-    '_conflict_mode', '_field_rules',
-    'name', 'phone', 'email', 'address', 'company', 'contact_person', 'notes',
+    // gender and created_date added for parity with the customer template
+    // (see downloadCustomerTemplate's comment) -- classifyContacts
+    // (importEngine.ts) parses both identically for suppliers as it does
+    // for customers, so a supplier CSV exported from another system can
+    // be imported here without hand-editing headers first.
+    'name', 'phone', 'email', 'address', 'company', 'contact_person', 'gender', 'created_date', 'notes',
     'contact_label_1', 'contact_name_1', 'contact_phone_1', 'contact_email_1', 'contact_address_1',
     'contact_label_2', 'contact_name_2', 'contact_phone_2', 'contact_email_2', 'contact_address_2',
     'contact_label_3', 'contact_name_3', 'contact_phone_3', 'contact_email_3', 'contact_address_3',

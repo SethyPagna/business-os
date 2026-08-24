@@ -50,7 +50,7 @@ function resolveProjectRoot(startDir = __dirname): string {
   let current = path.resolve(startDir)
   while (true) {
     const hasProjectShape =
-      fs.existsSync(path.join(current, 'backend')) &&
+      fs.existsSync(path.join(current, 'cloudflare')) &&
       fs.existsSync(path.join(current, 'frontend')) &&
       fs.existsSync(path.join(current, 'ops'))
     if (hasProjectShape) return current

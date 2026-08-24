@@ -1,13 +1,8 @@
-import { useEffect, useState } from 'react'
-
-export function useDebouncedValue<T>(value: T, delayMs = 180): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebounced(value), delayMs)
-    return () => window.clearTimeout(timer)
-  }, [delayMs, value])
-  return debounced
-}
+// Moved to utils/useDebouncedValue.ts (canonical shared location -- was
+// duplicated here and in POS.tsx, and missing entirely from Inventory.tsx;
+// see that file's comment for the full history). Re-exported so existing
+// `from '../helpers/productPageHelpers'` imports keep working unchanged.
+export { useDebouncedValue } from '../../../utils/useDebouncedValue.ts'
 
 export function parseBrandColorMap(raw: unknown): Record<string, unknown> {
   if (!raw) return {}

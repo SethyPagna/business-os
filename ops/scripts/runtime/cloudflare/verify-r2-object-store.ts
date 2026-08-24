@@ -1,154 +1,102 @@
 #!/usr/bin/env node
 /* eslint-disable no-console */
+// Live R2 verification, ported off the Docker-era S3-compatible SDK check.
+// Uses `wrangler r2 object` directly against the real R2 bucket/binding
+// declared in cloudflare/wrangler.toml, so it exercises the same credentials
+// and account path as an actual `wrangler deploy` — no docker-release.env,
+// no S3 access keys, no backend/ dependency.
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
 const crypto = require('node:crypto')
-const { createRequire } = require('node:module')
+const { spawnSync } = require('node:child_process')
 
 const root = path.resolve(__dirname, '..', '..', '..', '..')
-const requireFromBackend = createRequire(path.join(root, 'backend', 'package.json'))
-const {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-  DeleteObjectCommand,
-  HeadObjectCommand,
-} = requireFromBackend('@aws-sdk/client-s3')
+const cloudflareDir = path.join(root, 'cloudflare')
+const wranglerBin = path.join(cloudflareDir, 'node_modules', '.bin', 'wrangler')
 
-function loadEnvFile(filePath) {
-  if (!fs.existsSync(filePath)) return {}
-  const env = {}
-  const text = fs.readFileSync(filePath, 'utf8')
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('#')) continue
-    const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/)
-    if (!match) continue
-    let value = match[2].trim()
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1)
-    }
-    env[match[1]] = value
+function readBucketNameFromWranglerToml() {
+  const tomlPath = path.join(cloudflareDir, 'wrangler.toml')
+  const text = fs.readFileSync(tomlPath, 'utf8')
+  // Match the bucket_name that follows the first [[r2_buckets]] block whose
+  // binding is ASSETS (the bucket the runtime actually writes uploads to).
+  const blocks = text.split(/\[\[r2_buckets\]\]/g).slice(1)
+  for (const block of blocks) {
+    const bindingMatch = block.match(/binding\s*=\s*"([^"]+)"/)
+    const bucketMatch = block.match(/bucket_name\s*=\s*"([^"]+)"/)
+    if (bindingMatch?.[1] === 'ASSETS' && bucketMatch?.[1]) return bucketMatch[1]
   }
-  return env
+  throw new Error('Could not find an ASSETS r2_buckets binding in cloudflare/wrangler.toml')
 }
 
-function readConfig() {
-  const runtimeEnvPath = path.join(root, 'ops', 'runtime', 'docker-release', 'docker-release.env')
-  const fileEnv = loadEnvFile(runtimeEnvPath)
-  const env = { ...fileEnv, ...process.env }
-  Object.entries(fileEnv).forEach(([name, value]) => {
-    if (!process.env[name] && value) process.env[name] = value
+function runWrangler(args, options = {}) {
+  const useRemote = options.remote !== false
+  const fullArgs = [...args, ...(useRemote ? ['--remote'] : ['--local'])]
+  const result = spawnSync(wranglerBin, fullArgs, {
+    cwd: cloudflareDir,
+    encoding: 'utf8',
+    ...options,
   })
-  const tokenFile = path.join(root, 'ops', 'runtime', 'secrets', 'cloudflare-api-token.txt')
-  if (!process.env.CLOUDFLARE_API_TOKEN_FILE && fs.existsSync(tokenFile)) {
-    process.env.CLOUDFLARE_API_TOKEN_FILE = tokenFile
+  if (result.error) throw result.error
+  if (result.status !== 0) {
+    const detail = (result.stderr || result.stdout || '').trim()
+    throw new Error(`wrangler ${fullArgs.join(' ')} failed (exit ${result.status}): ${detail}`)
   }
-  return {
-    driver: String(env.OBJECT_STORAGE_DRIVER || '').trim().toLowerCase(),
-    endpoint: String(env.S3_ENDPOINT || '').trim(),
-    region: String(env.S3_REGION || 'auto').trim() || 'auto',
-    bucket: String(env.S3_BUCKET || '').trim(),
-    accessKeyId: String(env.S3_ACCESS_KEY_ID || '').trim(),
-    secretAccessKey: String(env.S3_SECRET_ACCESS_KEY || '').trim(),
-    cloudflareApiToken: String(env.CLOUDFLARE_API_TOKEN || '').trim(),
-    cloudflareApiTokenFile: String(env.CLOUDFLARE_API_TOKEN_FILE || process.env.CLOUDFLARE_API_TOKEN_FILE || '').trim(),
+  return result.stdout || ''
+}
+
+function assertWranglerAvailable() {
+  if (fs.existsSync(wranglerBin)) return
+  const result = spawnSync('npx', ['--yes', 'wrangler', '--version'], { encoding: 'utf8' })
+  if (result.status !== 0) {
+    throw new Error('wrangler is not installed in cloudflare/node_modules and npx could not resolve it. Run `npm install` in cloudflare/ first.')
   }
 }
 
-async function bodyToString(body) {
-  if (!body) return ''
-  if (typeof body.transformToString === 'function') return body.transformToString()
-  const chunks = []
-  for await (const chunk of body) chunks.push(Buffer.from(chunk))
-  return Buffer.concat(chunks).toString('utf8')
-}
-
-function isMissingObjectError(error) {
-  const code = String(error?.name || error?.Code || error?.code || '')
-  const status = Number(error?.$metadata?.httpStatusCode || 0)
-  return status === 404 || /NoSuchKey|NotFound/i.test(code)
-}
-
-function isAuthLikeError(error) {
-  const code = String(error?.name || error?.Code || error?.code || '')
-  const status = Number(error?.$metadata?.httpStatusCode || error?.statusCode || error?.status || 0)
-  const message = String(error?.message || '')
-  return status === 401
-    || status === 403
-    || /Unauthorized|Forbidden|Credential access key|InvalidAccessKeyId|SignatureDoesNotMatch/i.test(`${code} ${message}`)
-}
-
-function canUseApiFallback(config) {
-  return Boolean(config.cloudflareApiToken || config.cloudflareApiTokenFile)
-}
-
-async function verifyRuntimeObjectStoreFallback(reason) {
-  console.warn(`R2 S3-compatible check failed (${reason}); trying Cloudflare API fallback used by the runtime.`)
-  const { testObjectStore } = requireFromBackend('./src/objectStore.ts')
-  const result = await testObjectStore()
-  if (!result?.ok) throw new Error('Cloudflare API fallback object-store verification did not return ok')
-  console.log(`R2 Cloudflare API fallback ok: bucket=${result.bucket} endpoint=${result.endpoint}`)
-}
-
-async function main() {
-  const config = readConfig()
-  if (config.driver !== 'r2') {
-    throw new Error(`OBJECT_STORAGE_DRIVER must be r2 for live R2 verification; found ${config.driver || 'empty'}`)
-  }
-  const missing = Object.entries(config)
-    .filter(([key, value]) => !['driver', 'cloudflareApiToken', 'cloudflareApiTokenFile'].includes(key) && !value)
-    .map(([key]) => key)
-  if (missing.length) {
-    throw new Error(`Missing R2 configuration: ${missing.join(', ')}`)
-  }
-
-  const client = new S3Client({
-    region: config.region,
-    endpoint: config.endpoint,
-    forcePathStyle: true,
-    credentials: {
-      accessKeyId: config.accessKeyId,
-      secretAccessKey: config.secretAccessKey,
-    },
-  })
+function main() {
+  assertWranglerAvailable()
+  const bucket = readBucketNameFromWranglerToml()
   const key = `diagnostics/live-r2-check-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.txt`
   const body = `business-os-r2-live-check ${new Date().toISOString()}`
+  const tmpFile = path.join(os.tmpdir(), `r2-live-check-${crypto.randomBytes(4).toString('hex')}.txt`)
+  fs.writeFileSync(tmpFile, body, 'utf8')
 
-  console.log(`R2 live check: bucket=${config.bucket} endpoint=${config.endpoint}`)
+  console.log(`R2 live check: bucket=${bucket} (via wrangler r2 object, --remote)`)
   try {
-    await client.send(new PutObjectCommand({
-      Bucket: config.bucket,
-      Key: key,
-      Body: body,
-      ContentType: 'text/plain; charset=utf-8',
-      Metadata: { purpose: 'business-os-live-check' },
-    }))
+    runWrangler(['r2', 'object', 'put', `${bucket}/${key}`, '--file', tmpFile, '--content-type', 'text/plain; charset=utf-8'])
     console.log(`R2 put ok: ${key}`)
 
-    const read = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: key }))
-    const readText = await bodyToString(read.Body)
+    const downloadPath = `${tmpFile}.download`
+    runWrangler(['r2', 'object', 'get', `${bucket}/${key}`, '--file', downloadPath])
+    const readText = fs.readFileSync(downloadPath, 'utf8')
+    fs.rmSync(downloadPath, { force: true })
     if (readText !== body) throw new Error('R2 readback mismatch')
     console.log('R2 read ok')
 
-    await client.send(new DeleteObjectCommand({ Bucket: config.bucket, Key: key }))
+    runWrangler(['r2', 'object', 'delete', `${bucket}/${key}`])
     console.log('R2 delete ok')
 
+    let stillExists = true
     try {
-      await client.send(new HeadObjectCommand({ Bucket: config.bucket, Key: key }))
-      throw new Error('R2 object still exists after delete')
+      runWrangler(['r2', 'object', 'get', `${bucket}/${key}`, '--file', `${tmpFile}.postdelete`])
+      stillExists = true
     } catch (error) {
-      if (!isMissingObjectError(error)) throw error
+      const message = String(error?.message || '')
+      if (!/does not exist|not found|404/i.test(message)) throw error
+      stillExists = false
+    } finally {
+      fs.rmSync(`${tmpFile}.postdelete`, { force: true })
     }
+    if (stillExists) throw new Error('R2 object still exists after delete')
     console.log('R2 disappearance confirmed')
-  } catch (error) {
-    if (!canUseApiFallback(config) || !isAuthLikeError(error)) throw error
-    await verifyRuntimeObjectStoreFallback(error?.message || error?.name || 'auth error')
-    return
+  } finally {
+    fs.rmSync(tmpFile, { force: true })
   }
 }
 
-main().catch((error) => {
+try {
+  main()
+} catch (error) {
   console.error(`R2 live verification failed: ${error?.message || error}`)
   process.exit(1)
-})
+}

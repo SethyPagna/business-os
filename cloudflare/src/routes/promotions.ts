@@ -2,10 +2,21 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
+import { hasPermission } from '../lib/permissions'
+import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+// Legacy gates every promotions endpoint (including reads) behind the
+// `products` permission -- this Worker only checked requireAuth (any
+// logged-in user), which is a real gap since promotions are customer-
+// facing storefront content any staff account could otherwise rewrite.
+app.use('*', async (c, next) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'products')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  return next()
+})
 
 const LINK_TYPES = new Set(['none', 'product', 'url'])
 
@@ -81,6 +92,7 @@ app.post('/', async (c) => {
   `).run(input)
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'create', 'promotion', insert.lastInsertRowid, { title: input.title })
+  c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'create', id: insert.lastInsertRowid }))
   const created = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([insert.lastInsertRowid])
   return c.json(created)
 })
@@ -113,6 +125,7 @@ app.put('/:id', async (c) => {
   `).run({ ...input, id })
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'promotion', id, { title: input.title })
+  c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'update', id }))
   const updated = await db.prepare('SELECT * FROM promotions WHERE id = ?').get([id])
   return c.json(updated)
 })
@@ -131,6 +144,7 @@ app.put('/reorder/all', async (c) => {
   })))
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'reorder', 'promotion', null, { order })
+  c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'reorder' }))
   const rows = await db.prepare('SELECT * FROM promotions ORDER BY sort_order ASC, id ASC').all()
   return c.json(rows)
 })
@@ -145,6 +159,7 @@ app.delete('/:id', async (c) => {
 
   await db.prepare('DELETE FROM promotions WHERE id = ?').run([id])
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', 'promotion', id, { title: current.title })
+  c.executionCtx.waitUntil(broadcast(c.env, 'promotions', { action: 'delete', id }))
   return c.json({ deleted: true })
 })
 

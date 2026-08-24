@@ -1,4 +1,5 @@
-import { buildCSV, downloadCSV, downloadZipFilesAsync } from '../../utils/csv.ts'
+import { buildCSV, downloadZipFilesAsync } from '../../utils/csv.ts'
+import { downloadXLSX } from '../../utils/xlsxExport.ts'
 import { buildStandaloneReportHtml } from '../../utils/exportReports.tsx'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage.ts'
 import { formatPriceNumber } from '../../utils/pricing.ts'
@@ -280,7 +281,7 @@ export function exportDashboardFull(ctx: DashboardExportContext): void {
     ...buildDashboardOutStockRows(ctx).map((row) => ({ Section: 'Out Of Stock', ...row })),
   ]
   const keys = [...new Set(all.flatMap((row) => Object.keys(row)))]
-  downloadCSV(`dashboard-full-${ctx.exportStamp}.csv`, all.map((row) => Object.fromEntries(keys.map((key) => [key, row[key] ?? '']))))
+  downloadXLSX(`dashboard-full-${ctx.exportStamp}.xlsx`, all.map((row) => Object.fromEntries(keys.map((key) => [key, row[key] ?? '']))))
 }
 
 export function exportDashboardStats(ctx: DashboardExportContext): void {
@@ -308,12 +309,12 @@ export function exportDashboardStats(ctx: DashboardExportContext): void {
       Example: row.Example,
     })),
   ]
-  downloadCSV(`dashboard-stats-${ctx.exportStamp}.csv`, rows)
+  downloadXLSX(`dashboard-stats-${ctx.exportStamp}.xlsx`, rows)
 }
 
 export function exportDashboardKpis(ctx: DashboardExportContext): void {
   if (!hasDashboardExportData(ctx)) return
-  downloadCSV(`dashboard-kpi-${ctx.exportStamp}.csv`, buildDashboardKpiRows(ctx))
+  downloadXLSX(`dashboard-kpi-${ctx.exportStamp}.xlsx`, buildDashboardKpiRows(ctx))
 }
 
 export function exportDashboardSalesChart(ctx: DashboardExportContext): void {
@@ -329,26 +330,26 @@ export function exportDashboardSalesChart(ctx: DashboardExportContext): void {
     Profit_USD: d.profit_usd || 0,
     Tx: d.count || 0,
   }))
-  downloadCSV(`dashboard-sales-${ctx.exportStamp}.csv`, rows)
+  downloadXLSX(`dashboard-sales-${ctx.exportStamp}.xlsx`, rows)
 }
 
 export function exportDashboardTopProducts(ctx: DashboardExportContext): void {
-  downloadCSV(`dashboard-top-products-${ctx.exportStamp}.csv`, buildDashboardTopProductRows(ctx.topList))
+  downloadXLSX(`dashboard-top-products-${ctx.exportStamp}.xlsx`, buildDashboardTopProductRows(ctx.topList))
 }
 
 export function exportDashboardTopCustomers(ctx: DashboardExportContext): void {
   if (!hasDashboardExportData(ctx)) return
-  downloadCSV(`dashboard-top-customers-${ctx.exportStamp}.csv`, buildDashboardTopCustomerRows(ctx))
+  downloadXLSX(`dashboard-top-customers-${ctx.exportStamp}.xlsx`, buildDashboardTopCustomerRows(ctx))
 }
 
 export function exportDashboardPaymentMethods(ctx: DashboardExportContext): void {
   if (!hasDashboardExportData(ctx)) return
-  downloadCSV(`dashboard-payments-${ctx.exportStamp}.csv`, buildDashboardPaymentRows(ctx))
+  downloadXLSX(`dashboard-payments-${ctx.exportStamp}.xlsx`, buildDashboardPaymentRows(ctx))
 }
 
 export function exportDashboardBranches(ctx: DashboardExportContext): void {
   if (!hasDashboardExportData(ctx)) return
-  downloadCSV(`dashboard-branches-${ctx.exportStamp}.csv`, buildDashboardBranchRows(ctx))
+  downloadXLSX(`dashboard-branches-${ctx.exportStamp}.xlsx`, buildDashboardBranchRows(ctx))
 }
 
 export async function exportDashboardPackage(ctx: DashboardExportContext): Promise<void> {

@@ -160,7 +160,12 @@ body.lang-km .input {
     --ui-table-size: 14px;
     --ui-chip-size: 12px;
     --ui-font-weight: normal;
-    --ui-accent: #2563eb;
+    /* Brass/gold, replacing the old blue-600 default (Aug 24 2026 --
+       "clean, neat, professional, expensive", no blue). Every fallback
+       value below (`var(--ui-accent,#2563eb)` etc., now brass) was updated alongside
+       this so a page that never ran the JS that sets this variable inline
+       still renders the new color, not the old blue, as its fallback. */
+    --ui-accent: #9c7a3c;
     --ui-radius: 8px;
     --ui-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Khmer', sans-serif;
     --ui-khmer-font-family: "Noto Sans Khmer", "Khmer OS Siemreap", "Battambang", "Khmer OS", sans-serif;
@@ -172,75 +177,247 @@ body.lang-km .input {
 body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; }
 /* Applied directly via JS below when variable is set */
 
-/* DARK MODE - Claude-inspired dark grey palette
-   Page: #1e1e22  |  Cards: #28282f  |  Sidebar: #17171c
-   Inputs: #313138  |  Borders: #3a3a44  |  Text: #e8e8ed
-*/
-.dark body                   { background-color: #181a20; color: #f1f3f7; }
-.dark .card                  { background-color: #22252c !important; border-color: #3a3f49 !important; box-shadow: 0 8px 22px rgba(0,0,0,0.22) !important; }
-.dark .input                 { background-color: #1d2027 !important; border-color: #4b5563 !important; color: #f1f3f7 !important; }
-.dark .input::placeholder    { color: #9aa4b3 !important; }
-.dark .input:focus           { border-color: var(--ui-accent,#3b82f6) !important; }
-.dark .btn-secondary         { background-color: #242832 !important; color: #e5e9f0 !important; border: 1px solid #515b69 !important; box-shadow: inset 0 0 0 1px rgba(148,163,184,0.06); }
-.dark .btn-secondary:hover   { background-color: #2b303b !important; border-color: #687386 !important; }
-.dark .table-row             { border-color: #3a3f49 !important; }
-.dark .table-row:hover       { background-color: rgba(96, 165, 250, 0.12) !important; }
+/* DARK MODE -- redone (Aug 19 2026 request) to match the public catalog
+   site's palette instead of the app's old bespoke "Claude-inspired"
+   blue-grey one. Traced the public site's actual dark values from
+   `public-portal.css`'s `[data-portal-root='true'].dark` overrides: it's a
+   true (non-blue-tinted) Tailwind `neutral` scale -- bg `#171717`
+   (neutral-900), text `#fafafa`/`#e5e5e5`/`#d4d4d4`/`#a3a3a3`
+   (neutral-50/200/300/400), borders `rgba(82,82,82,0.6)` (neutral-600 at
+   60%) -- not the old palette's navy-leaning `#181a20`/`#22252c`/`#f1f3f7`.
+   Re-expressed as custom properties so every surface below (and any future
+   one) draws from the same source of truth instead of hand-copied hex, the
+   exact drift this file's previous normalization pass (see the removed
+   comment this replaces) had to chase down after the fact. Elevation
+   levels (page / sidebar / card / input) aren't something the flat public
+   portal needs, since it has no stacked panels -- chosen as even steps up
+   from the portal's own `#171717` base so admin surfaces stay legible
+   against each other while still reading as the same neutral family. */
+:root {
+  /* Line-chart data-point "halo" fill -- the ring each point's outer
+     circle is drawn in so it reads as a distinct dot against the line
+     behind it, not the chart's own background necessarily. Was
+     hardcoded `fill="white"` directly in LineChart.tsx with no dark-mode
+     variant, so in dark mode every point (and the whole line, on a
+     single-line chart, once `chartData.length <= 31`) rendered a
+     literal bright-white circle sitting on the dark card -- read as an
+     "unwanted outline/background" on the Revenue Flow chart
+     (user-reported, Aug 23 2026). Default here matches the light-mode
+     card background (white); the .dark override below points it at the
+     same `--dm-card` the chart's own containing `.card` uses, so points
+     blend into dark cards the same way they blend into light ones.
+  */
+  --chart-point-fill: #ffffff;
+}
+:root.dark, .dark {
+  --chart-point-fill: var(--dm-card);
+  --dm-page: #171717;      /* neutral-900 -- matches portal body bg exactly */
+  --dm-sidebar: #141414;   /* one step down -- recessed, like the portal's nav shell */
+  --dm-card: #262626;      /* neutral-800 -- one step up, for elevated panels */
+  --dm-card-hover: #303030;
+  --dm-input: #1f1f1f;     /* recessed, between page and card */
+  --dm-border: rgba(82, 82, 82, 0.6);   /* neutral-600 @ 60%, portal's exact border value */
+  --dm-border-strong: #404040;          /* neutral-700, solid -- for input/table rules that need more contrast than the translucent border */
+  --dm-text: #fafafa;      /* neutral-50, portal's text-slate/gray-900 override */
+  --dm-text-2: #e5e5e5;    /* neutral-200, portal's 800/700/700 override */
+  --dm-text-3: #d4d4d4;    /* neutral-300, portal's 600 override */
+  --dm-text-4: #a3a3a3;    /* neutral-400, portal's 500 override */
+}
+.dark body                   { background-color: var(--dm-page); color: var(--dm-text); }
+.dark .card                  { background-color: var(--dm-card) !important; border-color: var(--dm-border) !important; box-shadow: 0 8px 22px rgba(0,0,0,0.32) !important; }
+.dark .input                 { background-color: var(--dm-input) !important; border-color: var(--dm-border-strong) !important; color: var(--dm-text) !important; }
+.dark .input::placeholder    { color: var(--dm-text-4) !important; }
+.dark .input:focus           { border-color: var(--ui-accent,#c9a34e) !important; }
+.dark .btn-secondary         { background-color: var(--dm-card) !important; color: var(--dm-text-2) !important; border: 1px solid var(--dm-border-strong) !important; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04); }
+.dark .btn-secondary:hover   { background-color: var(--dm-card-hover) !important; border-color: #525252 !important; }
+.dark .table-row             { border-color: var(--dm-border) !important; }
+.dark .table-row:hover       { background-color: rgba(156, 122, 60, 0.14) !important; }
 .dark .table-bordered th,
-.dark .table-bordered td     { border-color: #3a3f49 !important; }
-.dark .table-bordered thead th { background-color: #20242c !important; border-bottom-color: #4b5563 !important; }
-.dark thead tr               { background-color: #20242c !important; }
+.dark .table-bordered td     { border-color: var(--dm-border) !important; }
+.dark .table-bordered thead th { background-color: var(--dm-sidebar) !important; border-bottom-color: var(--dm-border-strong) !important; }
+.dark thead tr               { background-color: var(--dm-sidebar) !important; }
 .dark aside,
 .dark header.md\:hidden,
 .dark nav.md\:hidden {
-  background-color: #191d25 !important;
-  border-color: #343a45 !important;
+  background-color: var(--dm-sidebar) !important;
+  border-color: var(--dm-border) !important;
 }
 /* Sidebar brand header */
-.dark aside > div:first-child { border-color: #343a45 !important; }
+.dark aside > div:first-child { border-color: var(--dm-border) !important; }
 /* Sidebar bottom user strip */
-.dark aside > div:last-child  { border-color: #343a45 !important; }
-.dark .sidebar-item          { color: #d5dae4 !important; }
-.dark .sidebar-item:hover    { background-color: rgba(148, 163, 184, 0.15) !important; color: #ffffff !important; }
+.dark aside > div:last-child  { border-color: var(--dm-border) !important; }
+.dark .sidebar-item          { color: var(--dm-text-2) !important; }
+.dark .sidebar-item:hover    { background-color: rgba(163, 163, 163, 0.15) !important; color: #ffffff !important; }
 .dark .sidebar-item.active   {
-  background-color: rgba(96,165,250,0.20) !important;
-  color: #f4f8ff !important;
-  box-shadow: inset 3px 0 0 #60a5fa, 0 0 0 1px rgba(96,165,250,0.16);
+  background-color: rgba(201,163,78,0.16) !important;
+  color: #f7f0e0 !important;
+  box-shadow: inset 3px 0 0 #c9a34e, 0 0 0 1px rgba(201,163,78,0.14);
 }
-.dark select                 { background-color: #1d2027 !important; color: #f1f3f7 !important; border-color: #4b5563 !important; }
-.dark select option          { background-color: #22252c; color: #f1f3f7; }
+.dark select                 { background-color: var(--dm-input) !important; color: var(--dm-text) !important; border-color: var(--dm-border-strong) !important; }
+.dark select option          { background-color: var(--dm-card); color: var(--dm-text); }
 .dark .col-highlight-green   { background: rgba(16,185,129,0.07) !important; }
 .dark .col-highlight-red     { background: rgba(239,68,68,0.07) !important; }
 .dark .col-highlight-blue    { background: rgba(59,130,246,0.07) !important; }
-.dark ::-webkit-scrollbar-thumb { background: #5b6573; }
-.dark ::-webkit-scrollbar-track { background: #20242c; }
+.dark ::-webkit-scrollbar-thumb { background: #525252; }
+.dark ::-webkit-scrollbar-track { background: var(--dm-sidebar); }
+
+/* Bulk-selection / "N selected" toolbar bar -- the row that sits under a
+   list page's search/filter row, either always-visible with a "Select all"
+   checkbox (Products/Inventory) or appearing once something is checked
+   (Sales/Audit Log/Returns). Every page previously hand-rolled its own
+   border-blue-200/bg-blue-50 wash for this, which read as a loud, cheap
+   "blue card" competing with the page's own accent color rather than a
+   quiet toolbar surface (user-reported, Part 326: "search function,
+   select... rows are having background rectangle card background blue").
+   This is a neutral surface instead -- same family as .card/.btn-secondary
+   -- with the count badge/buttons inside still free to use the accent
+   color as a small, deliberate highlight rather than the whole bar. */
+.bulk-toolbar {
+  background-color: #f8fafc; /* slate-50 */
+  border-color: #e2e8f0 !important; /* slate-200 */
+}
+.dark .bulk-toolbar {
+  background-color: var(--dm-card) !important;
+  border-color: var(--dm-border-strong) !important;
+}
 /* Normalize common gray shades in dark */
-.dark .bg-gray-50, .dark .bg-gray-100:not(.badge-green):not(.badge-red):not(.badge-yellow):not(.badge-blue) { background-color: #22252c !important; }
-.dark [class~="divide-gray-100"] > * { border-color: #3a3f49 !important; }
-.dark [class~="border-gray-100"], .dark [class~="border-gray-200"] { border-color: #3a3f49 !important; }
-.dark .text-gray-900 { color: #f5f8fc !important; }
-.dark .text-gray-800 { color: #e7edf6 !important; }
-.dark .text-gray-700 { color: #d3dbe8 !important; }
-.dark .text-gray-600 { color: #b4c0d0 !important; }
-.dark .text-gray-500 { color: #90a0b5 !important; }
+.dark .bg-gray-50, .dark .bg-gray-100:not(.badge-green):not(.badge-red):not(.badge-yellow):not(.badge-blue) { background-color: var(--dm-card) !important; }
+.dark [class~="divide-gray-100"] > * { border-color: var(--dm-border) !important; }
+.dark [class~="border-gray-100"], .dark [class~="border-gray-200"] { border-color: var(--dm-border) !important; }
+.dark .text-gray-900 { color: var(--dm-text) !important; }
+.dark .text-gray-800 { color: var(--dm-text-2) !important; }
+.dark .text-gray-700 { color: var(--dm-text-2) !important; }
+.dark .text-gray-600 { color: var(--dm-text-3) !important; }
+.dark .text-gray-500 { color: var(--dm-text-4) !important; }
+/* This app's components were built against FOUR different Tailwind grey
+   families (gray, slate, zinc, neutral) interchangeably -- 126 files use at
+   least one of slate/zinc/neutral `dark:` utilities directly. A past pass
+   normalized all four onto the old blue-grey palette; this redo keeps that
+   same normalization technique (still needed -- the underlying component
+   code still mixes families) but points every family at the new neutral
+   custom properties above instead, so the "match the public site" ask
+   covers raw `dark:bg-slate-800` etc. usage too, not just the handful of
+   shared classes (.card/.input/.btn-secondary/.sidebar-item) touched
+   above. Text utilities from these families are still deliberately left
+   alone: their light shades (100-400) are already legible against a dark
+   background on their own merits. */
+/* NOTE: this project's Tailwind build emits the modern `dark:` variant as
+   `.dark\:bg-slate-700:is(.dark *)` (matching the literal `dark:bg-slate-700`
+   class token, active when any ancestor has `.dark`), NOT the older plain
+   `.dark .bg-slate-700` descendant form the `gray` overrides above happen to
+   use (which only catches components using bare `bg-gray-50` with no
+   `dark:` prefix at all). Since the actual slate/zinc/neutral usage found in
+   the audit is almost entirely via the `dark:` prefix, these rules target
+   that exact generated selector shape so they actually match.  Both forms
+   are included per rule (bare class, for the rarer un-prefixed case, and the
+   `dark:`-prefixed `:is(.dark *)` form for the common case) so nothing is
+   missed either way. */
+.dark .bg-slate-50, .dark .bg-slate-100,
+.dark .bg-zinc-50, .dark .bg-zinc-100,
+.dark .bg-neutral-50, .dark .bg-neutral-100,
+.dark\:bg-slate-50:is(.dark *), .dark\:bg-slate-100:is(.dark *),
+.dark\:bg-zinc-50:is(.dark *), .dark\:bg-zinc-100:is(.dark *),
+.dark\:bg-neutral-50:is(.dark *), .dark\:bg-neutral-100:is(.dark *) { background-color: var(--dm-card) !important; }
+.dark .bg-slate-700, .dark .bg-zinc-700, .dark .bg-neutral-700,
+.dark\:bg-slate-700:is(.dark *), .dark\:bg-zinc-700:is(.dark *), .dark\:bg-neutral-700:is(.dark *) { background-color: var(--dm-card-hover) !important; }
+.dark .bg-slate-800, .dark .bg-zinc-800, .dark .bg-neutral-800,
+.dark\:bg-slate-800:is(.dark *), .dark\:bg-zinc-800:is(.dark *), .dark\:bg-neutral-800:is(.dark *) { background-color: var(--dm-input) !important; }
+.dark .bg-slate-900, .dark .bg-zinc-900, .dark .bg-neutral-900,
+.dark\:bg-slate-900:is(.dark *), .dark\:bg-zinc-900:is(.dark *), .dark\:bg-neutral-900:is(.dark *) { background-color: var(--dm-page) !important; }
+.dark .bg-slate-950, .dark .bg-zinc-950,
+.dark\:bg-slate-950:is(.dark *), .dark\:bg-zinc-950:is(.dark *) { background-color: var(--dm-sidebar) !important; }
+.dark .border-slate-600, .dark .border-zinc-600,
+.dark .border-slate-700, .dark .border-zinc-700, .dark .border-neutral-700,
+.dark .border-slate-800, .dark .border-zinc-800,
+.dark\:border-slate-600:is(.dark *), .dark\:border-zinc-600:is(.dark *),
+.dark\:border-slate-700:is(.dark *), .dark\:border-zinc-700:is(.dark *), .dark\:border-neutral-700:is(.dark *),
+.dark\:border-slate-800:is(.dark *), .dark\:border-zinc-800:is(.dark *) { border-color: var(--dm-border) !important; }
+.dark .divide-zinc-800 > *, .dark\:divide-zinc-800:is(.dark *) > * { border-color: var(--dm-border) !important; }
+.dark .hover\:bg-slate-700:hover, .dark .hover\:bg-zinc-700:hover, .dark .hover\:bg-neutral-700:hover,
+.dark\:hover\:bg-slate-700:is(.dark *):hover, .dark\:hover\:bg-zinc-700:is(.dark *):hover, .dark\:hover\:bg-neutral-700:is(.dark *):hover { background-color: var(--dm-card-hover) !important; }
+.dark .hover\:bg-slate-800:hover, .dark .hover\:bg-zinc-800:hover, .dark .hover\:bg-neutral-800:hover,
+.dark\:hover\:bg-slate-800:is(.dark *):hover, .dark\:hover\:bg-zinc-800:is(.dark *):hover, .dark\:hover\:bg-neutral-800:is(.dark *):hover { background-color: var(--dm-card) !important; }
+
+/* Aug 23 2026 -- the real, dominant source of "fonts not well contrasted /
+   not united coloring" in dark mode, found this session by grepping every
+   `dark:text-*` class in `frontend/src`: 1,050+ occurrences across nearly
+   every component in the app use Tailwind's raw `gray`/`slate` text scale
+   (`dark:text-gray-300`, `dark:text-gray-400`, etc.) for ordinary secondary/
+   muted body text in dark mode -- these are Tailwind's *cool-toned* grey
+   families (gray-400 `#9ca3af`, slate-400 `#94a3b8` both have a real blue
+   tint: their blue channel is measurably higher than red/green), not the
+   `neutral` family (`#a3a3a3`, r=g=b exactly) the `--dm-*` token system
+   above is built on. The bg/border overrides above already solved this
+   exact problem for slate/zinc/neutral surfaces back on Aug 19 -- text was
+   simply missed, and since text color is what's actually being read on
+   every single page, this is by far the largest lever for "why does this
+   still read as slightly blue/inconsistent across pages" even after the
+   auth-shell fix above. Deliberately capped at the 100-800 tier: the rare
+   900/950 hits (`dark:text-neutral-950`, `dark:text-slate-900`, etc.) were
+   checked individually first and are a different, correct pattern --
+   near-black text paired with a light `dark:bg-white`/`dark:bg-slate-100`
+   chip for an active/selected pill state, not muted text on the app's dark
+   background -- forcing those to a light color via this rule would have
+   made an active filter chip's own label unreadable, so they're
+   intentionally left untouched. Same reasoning as the comment above this
+   one for why the selector needs both the legacy plain-class form and the
+   `dark\:...:is(.dark *)` form. */
+/* Note: plain (non-`dark:`-prefixed) `.dark .text-gray-900/800/700/600/500`
+   already have their own established rules earlier in this file (the
+   "Normalize common gray shades" block above) -- deliberately NOT
+   redeclared here to avoid two `!important` rules on the same selector
+   silently fighting over source order. Everything below is either the
+   `dark:`-prefixed form (previously uncovered for every family including
+   gray) or a plain-class tier gray's own block doesn't already define. */
+.dark .text-slate-200, .dark .text-zinc-200, .dark .text-neutral-200,
+.dark\:text-gray-100:is(.dark *), .dark\:text-slate-100:is(.dark *), .dark\:text-zinc-100:is(.dark *), .dark\:text-neutral-100:is(.dark *),
+.dark\:text-gray-200:is(.dark *), .dark\:text-slate-200:is(.dark *), .dark\:text-zinc-200:is(.dark *), .dark\:text-neutral-200:is(.dark *) { color: var(--dm-text) !important; }
+.dark .text-slate-300, .dark .text-zinc-300, .dark .text-neutral-300,
+.dark\:text-gray-300:is(.dark *), .dark\:text-slate-300:is(.dark *), .dark\:text-zinc-300:is(.dark *), .dark\:text-neutral-300:is(.dark *) { color: var(--dm-text-2) !important; }
+.dark .text-slate-400, .dark .text-zinc-400, .dark .text-neutral-400,
+.dark\:text-gray-400:is(.dark *), .dark\:text-slate-400:is(.dark *), .dark\:text-zinc-400:is(.dark *), .dark\:text-neutral-400:is(.dark *) { color: var(--dm-text-3) !important; }
+.dark .text-slate-600, .dark .text-zinc-600, .dark .text-neutral-600,
+.dark\:text-gray-500:is(.dark *), .dark\:text-slate-500:is(.dark *), .dark\:text-zinc-500:is(.dark *), .dark\:text-neutral-500:is(.dark *),
+.dark\:text-gray-600:is(.dark *), .dark\:text-slate-600:is(.dark *), .dark\:text-zinc-600:is(.dark *), .dark\:text-neutral-600:is(.dark *) { color: var(--dm-text-4) !important; }
+.dark .text-slate-700, .dark .text-zinc-700, .dark .text-neutral-700,
+.dark\:text-gray-700:is(.dark *), .dark\:text-slate-700:is(.dark *), .dark\:text-zinc-700:is(.dark *), .dark\:text-neutral-700:is(.dark *),
+.dark .text-slate-800, .dark .text-zinc-800, .dark .text-neutral-800,
+.dark\:text-gray-800:is(.dark *), .dark\:text-slate-800:is(.dark *), .dark\:text-zinc-800:is(.dark *), .dark\:text-neutral-800:is(.dark *) { color: var(--dm-text-2) !important; }
+
+/* Aug 23 2026 -- auth/login shell + topbar dark values corrected. These five
+   rules (auth-shell/auth-frame/auth-aside/auth-card/app-topbar) still had the
+   pre-Aug-19 navy "Claude-inspired blue-grey" hex values (#08101b/#0b1422/
+   #13253c, rgba(15,23,42,*) = slate-900, rgba(30,64,175,*) = blue-700) even
+   though every other dark surface in this file was already migrated to the
+   true neutral scale (see the --dm-* block above). `.app-topbar` was also
+   defined TWICE (light+dark, back to back) with two different, conflicting
+   values -- the second definition silently won the cascade and the first
+   was dead code; removed the duplicate rather than leaving an unreachable
+   rule for a future session to trip over. Kept a small, deliberate brand-
+   accent radial on auth-shell/auth-aside (this is the one place in the app
+   where a bit of brand personality on a dark background is appropriate --
+   a login screen, not a data surface) but shrank it and moved it onto the
+   same neutral base as everything else, so it reads as "dark UI with a
+   brand accent" rather than "dark blue app". */
 .app-topbar {
   border-color: #d9e2ec;
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(16px);
 }
 .dark .app-topbar {
-  border-color: #343a45;
-  background: rgba(25, 29, 37, 0.92);
+  border-color: var(--dm-border-strong);
+  background: rgba(20, 20, 20, 0.92);
 }
 .auth-shell {
   background:
-    linear-gradient(135deg, #f8fafc 0%, #eaf2ff 46%, #f3f7ff 100%);
+    linear-gradient(135deg, #f9f8f6 0%, #f3efe6 46%, #f8f6f2 100%);
   color: #111827;
 }
 .dark .auth-shell {
   background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.14), transparent 28%),
-    linear-gradient(140deg, #08101b 0%, #0b1422 52%, #13253c 100%);
-  color: #eef2f7;
+    radial-gradient(circle at top left, rgba(201, 163, 78, 0.08), transparent 32%),
+    linear-gradient(140deg, #101010 0%, #171717 52%, #1c1c1c 100%);
+  color: var(--dm-text);
 }
 .auth-frame {
   border-color: rgba(148, 163, 184, 0.22);
@@ -249,42 +426,42 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   backdrop-filter: blur(20px);
 }
 .dark .auth-frame {
-  border-color: rgba(51, 65, 85, 0.85);
-  background: rgba(2, 8, 23, 0.72);
-  box-shadow: 0 24px 70px rgba(2, 8, 23, 0.5);
+  border-color: var(--dm-border-strong);
+  background: rgba(23, 23, 23, 0.74);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
 }
+/* auth-aside's copy (Login.tsx) is hardcoded to white/white-opacity text
+   regardless of app theme, so this panel always needs to stay dark enough
+   to read against -- it's intentionally the same in light and dark app
+   mode, not a light/.dark pair. Previously a navy-to-royal-blue gradient
+   (rgba(15,23,42)->rgba(30,64,175), i.e. slate-900 to blue-700) -- read as
+   a loud "dark blue" panel and was the user's main login-page complaint
+   (Part 326: "don't use dark blue"). That pass swapped the base gradient to
+   neutral charcoal but left the corner glow itself a residual blue
+   (rgba(37,99,235,*)) -- still read as "ominous" per the user's follow-up
+   (Aug 24 2026). Glow re-tinted to the app's brass accent instead, at a
+   low enough opacity to stay a subtle charcoal-with-brass-glow moment, not
+   a colored panel. */
 .auth-aside {
   background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(30, 64, 175, 0.88));
+    radial-gradient(circle at 12% 8%, rgba(201, 163, 78, 0.14), transparent 42%),
+    linear-gradient(165deg, #1a1a1a 0%, #242424 55%, #1e1e1e 100%);
   padding: 2.75rem;
-}
-.dark .auth-aside {
-  background:
-    linear-gradient(180deg, rgba(8, 15, 27, 0.96), rgba(20, 46, 88, 0.9));
 }
 .auth-card {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 250, 252, 0.92));
 }
 .dark .auth-card {
-  background: linear-gradient(180deg, rgba(2, 8, 23, 0.8), rgba(15, 23, 42, 0.76));
-}
-.app-topbar {
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(226, 232, 240, 0.95);
-  backdrop-filter: blur(12px);
-}
-.dark .app-topbar {
-  background: rgba(15, 23, 42, 0.9);
-  border-color: rgba(51, 65, 85, 0.9);
+  background: linear-gradient(180deg, rgba(23, 23, 23, 0.82), var(--dm-card) 92%);
 }
 .auth-card .input {
   background-color: rgba(255, 255, 255, 0.92);
 }
 .dark .auth-card .input {
-  background-color: rgba(15, 23, 42, 0.92) !important;
+  background-color: rgba(31, 31, 31, 0.92) !important;
 }
-.dark .three-dot-btn { color: #a8b5c8 !important; }
-.dark .three-dot-btn:hover { background-color: #1c2937 !important; color: #f8fbff !important; }
+.dark .three-dot-btn { color: var(--dm-text-3) !important; }
+.dark .three-dot-btn:hover { background-color: var(--dm-card-hover) !important; color: var(--dm-text) !important; }
 
 /* COMPONENT LIBRARY */
 @layer components {
@@ -374,10 +551,38 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   }
   .scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
+  /* Barcode scanner video shell (BarcodeScannerModal.tsx). Was a raw
+     Tailwind `h-[50vh]` arbitrary value -- plain `vh` on mobile Safari/older
+     Chrome measures the viewport WITH the address bar included, not the
+     actually-visible area, so on a short/landscape phone screen the video
+     block could measure taller than what's really visible, pushing the
+     modal's total height past what Modal.tsx's own `max-h-modal-92` (which
+     already correctly falls back to `dvh`) expected -- the two rules were
+     computing against different viewport definitions. This class uses the
+     same vh-then-dvh-override pattern as `.max-h-modal-92` so both agree,
+     and caps against a lower ceiling (46vh vs the old 50vh) with a smaller
+     floor (200px vs 240px) so there's more slack for the header/manual-
+     entry section to still fit above the fold on short screens. */
+  .scanner-video-shell {
+    height: min(46vh, 420px);
+    height: min(46dvh, 420px);
+    min-height: 200px;
+  }
+
   .three-dot-btn {
-    @apply w-8 h-8 flex items-center justify-center rounded-lg
-           text-gray-400 hover:bg-gray-100 dark:hover:bg-zinc-700
-           hover:text-gray-600 dark:hover:text-zinc-200
+    /* Visible at rest (not just on hover) so it reads as its own tappable
+       control next to a row that's already fully clickable -- a hover-only
+       treatment is invisible on touch devices, which have no hover state,
+       so the button used to look like dead space until someone found it
+       by accident. active: gives a pressed-state on touch, matching the
+       row's own feedback. w-9/h-9 keeps the target comfortably tappable
+       (>=36px) without visually dominating a table row. */
+    @apply w-9 h-9 flex items-center justify-center rounded-lg
+           text-gray-500 bg-gray-100/80 dark:bg-zinc-700/60
+           hover:bg-gray-200 dark:hover:bg-zinc-600
+           hover:text-gray-700 dark:hover:text-zinc-100
+           active:bg-gray-300 dark:active:bg-zinc-500
+           ring-1 ring-inset ring-gray-200 dark:ring-zinc-600
            transition-colors flex-shrink-0 text-lg select-none;
   }
 }
@@ -387,11 +592,55 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 ::-webkit-scrollbar-track   { background: transparent; }
 ::-webkit-scrollbar-thumb   { background: #d1d5db; border-radius: 4px; }
 
-/* Safe-area for bottom nav */
+/* Safe-area for bottom nav. Horizontal insets matter here specifically for
+   landscape orientation on notched iPhones -- the notch/Dynamic Island sits
+   on the *side* in landscape, not the top, so a full-width fixed bar with
+   nav buttons flush to the screen edge can end up partly under it without
+   these. (Vertical-only safe-area handling was already thorough elsewhere;
+   horizontal was missing everywhere in the app.) */
 .safe-area-inset-bottom {
   padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
   height: calc(3.55rem + env(safe-area-inset-bottom, 0px));
 }
+
+/* Same reasoning for the fixed mobile top bar (Sidebar.tsx) and any other
+   full-width fixed chrome. */
+.safe-area-inset-x {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* iOS Safari's address bar/toolbar is part of the "100vh" box but not part
+   of what's actually visible -- with #app-root also using overflow:hidden,
+   that gap used to mean real content (including the bottom nav) could sit
+   clipped behind Safari's chrome, worst when the toolbar is expanded.
+   Overriding Tailwind's h-screen/min-h-screen utilities here (after
+   @tailwind utilities, so this wins on source order at equal specificity)
+   fixes every current and future use of those utilities app-wide in one
+   place. 100dvh is invalid in older engines, so the 100vh set first is kept
+   as the fallback there; iOS Safari has supported dvh since 15.4. */
+.h-screen { height: 100vh; height: 100dvh; }
+.min-h-screen { min-height: 100vh; min-height: 100dvh; }
+
+/* Same "100vh" gap as above, but for the modal panels themselves: every
+   modal across the app caps its own height with an arbitrary Tailwind
+   value like `max-h-[92vh]` (can't be caught by the two overrides above,
+   which only match the plain `h-screen`/`min-h-screen` utility classes).
+   On iOS Safari with the address bar expanded, that vh is measured against
+   the LARGER "as if the chrome were hidden" viewport, so the panel can
+   render taller than what's actually visible -- its own sticky footer
+   (Save/Cancel) and rounded bottom corners end up rendered below the
+   visible fold, in the same area the fixed bottom nav bar occupies, which
+   is what read as "the nav bar shows through the modal". Same 92vh-then-
+   92dvh fallback pattern as `.h-screen` above, just as reusable classes
+   since an arbitrary-value utility can't carry two declarations itself. */
+.max-h-modal-90 { max-height: 90vh; max-height: 90dvh; }
+.max-h-modal-92 { max-height: 92vh; max-height: 92dvh; }
+.max-h-modal-80 { max-height: 80vh; max-height: 80dvh; }
+.max-h-modal-85 { max-height: 85vh; max-height: 85dvh; }
+.max-h-modal-88 { max-height: 88vh; max-height: 88dvh; }
 
 /* POS product grid */
 .pos-product-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
@@ -429,9 +678,17 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
   .space-y-4 > * + * { margin-top: 0.75rem; }
 }
 
-/* Bordered tables */
-.table-bordered { border-collapse:collapse; }
-.table-bordered th, .table-bordered td { border:1px solid #e5e7eb; }
+/* Bordered tables -- outline only (the table's own outer edge), horizontal
+   separators between rows, no interior/vertical rules. Previously every
+   th/td got a full 1px border on all four sides, which drew a vertical
+   rule between every column in addition to the outer outline -- exactly
+   what this ask says not to do. th/td now only ever set border-bottom;
+   border-collapse still applies so that bottom rule reads as a single
+   line between rows rather than doubling up. */
+.table-bordered { border-collapse:collapse; border:1px solid #e5e7eb; }
+.dark .table-bordered { border-color:#3f3f46; }
+.table-bordered th, .table-bordered td { border:0; border-bottom:1px solid #e5e7eb; }
+.table-bordered tbody tr:last-child > td { border-bottom:0; }
 .dark .table-bordered th, .dark .table-bordered td { border-color:#3f3f46; }
 .table-bordered thead th { background:#f9fafb; border-bottom:2px solid #d1d5db; }
 .dark .table-bordered thead th { background:#1f1f23; border-bottom-color:#52525b; }
@@ -442,16 +699,16 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
 .col-highlight-blue  { background:rgba(59,130,246,.05); }
 
 /* Accent color overrides */
-.btn-primary { background-color: var(--ui-accent,#2563eb) !important; border-color: color-mix(in srgb, var(--ui-accent,#2563eb) 78%, #0f172a 22%) !important; }
+.btn-primary { background-color: var(--ui-accent,#9c7a3c) !important; border-color: color-mix(in srgb, var(--ui-accent,#9c7a3c) 78%, #0f172a 22%) !important; }
 .btn-primary:hover { filter: brightness(0.94); }
-.btn-secondary:hover { border-color: color-mix(in srgb, var(--ui-accent,#2563eb) 42%, #94a3b8 58%) !important; }
-.sidebar-item.active { color: var(--ui-accent,#2563eb) !important; }
+.btn-secondary:hover { border-color: color-mix(in srgb, var(--ui-accent,#9c7a3c) 42%, #94a3b8 58%) !important; }
+.sidebar-item.active { color: var(--ui-accent,#9c7a3c) !important; }
 
 input:focus, select:focus, textarea:focus {
-  outline-color: var(--ui-accent,#2563eb);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent,#2563eb) 20%, transparent) !important;
+  outline-color: var(--ui-accent,#9c7a3c);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent,#9c7a3c) 20%, transparent) !important;
 }
-input[type="checkbox"]:checked, input[type="radio"]:checked { accent-color: var(--ui-accent,#2563eb); }
+input[type="checkbox"]:checked, input[type="radio"]:checked { accent-color: var(--ui-accent,#9c7a3c); }
 
 select.input,
 select.btn-secondary {
@@ -471,7 +728,7 @@ select.btn-secondary {
 
 select.input:hover,
 select.btn-secondary:hover {
-  border-color: color-mix(in srgb, var(--ui-accent,#2563eb) 38%, #94a3b8 62%) !important;
+  border-color: color-mix(in srgb, var(--ui-accent,#9c7a3c) 38%, #94a3b8 62%) !important;
 }
 
 select.input[multiple],

@@ -35,9 +35,28 @@ type ApiRuntimeError = Error & LooseRecord
 type CacheEntry = { data: any; ts: number }
 type CacheState = { data: any; stale: boolean }
 type InflightWrite = { promise: Promise<any>; startedAt: number }
-type RouteFn<T = any> = () => T | Promise<T>
-type ApiFetchOptions = { skipWriteDedupe?: boolean }
-type RouteOptions = { isWrite?: boolean; raceLocalFallback?: boolean }
+// RouteFn optionally receives the AbortSignal for the search group it was
+// dispatched under (see `searchGroup` on RouteOptions below and
+// `beginSearchGroup`/`endSearchGroup`). Existing zero-arg closures
+// (`() => apiFetch(...)`) remain valid RouteFn values -- TS accepts a
+// function with fewer params wherever one with more (optional) params is
+// expected -- so this is additive and doesn't require touching every
+// existing route() caller, only the ones that opt into a searchGroup.
+type RouteFn<T = any> = (signal?: AbortSignal) => T | Promise<T>
+type ApiFetchOptions = { skipWriteDedupe?: boolean; signal?: AbortSignal }
+type RouteOptions = {
+  isWrite?: boolean
+  raceLocalFallback?: boolean
+  // Opt a read into "only the latest request in this group survives"
+  // semantics: starting a new route() call tagged with the same
+  // searchGroup aborts whatever request is still in flight for that
+  // group. Each distinct search box (products, inventory, POS, each
+  // contacts tab, portal) should pass its own stable group name --
+  // e.g. 'products:search' -- NOT the per-keystroke cache channel
+  // (which already varies per query string and so never groups
+  // anything). See beginSearchGroup/endSearchGroup.
+  searchGroup?: string
+}
 type RequestInitWithBody = RequestInit & { body?: string }
 type RefreshEventDetail = { reason?: string; channel?: string }
 type CallLogEntry = { ts: string; channel: string; source: string; ms: number; ok: boolean }
@@ -67,6 +86,13 @@ const RECONNECT_REFRESH_CHANNELS = [
   'files',
   'audit_log',
   'users',
+  // Was missing entirely -- PATCH /api/roles/:id broadcasts a 'roles'
+  // channel (cloudflare/src/routes/users.ts) but nothing here ever forced
+  // a stale roles list to refresh after a reconnect, matching 'users'
+  // (its sibling entity) rather than being the one broadcast channel this
+  // list silently dropped.
+  'roles',
+  'pendingActions',
 ]
 
 // ?€?€?€ In-memory read cache with request deduplication ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
@@ -262,7 +288,11 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.entity = parsed?.entity || null
   error.reason = parsed?.reason || null
   error.current = parsed?.current || null
-  error.currentSettings = parsed?.currentSettings || null
+  // Older Workers only returned the generic `current` record for a settings
+  // conflict. Prefer the newer, intentionally field-scoped payload, but
+  // retain that compatibility fallback so an in-flight older deployment
+  // cannot turn a recoverable save into a blank/default form.
+  error.currentSettings = parsed?.currentSettings || parsed?.current || null
   error.attempted = parsed?.attempted || null
   error.expectedUpdatedAt = parsed?.expectedUpdatedAt || null
   error.actualUpdatedAt = parsed?.actualUpdatedAt || null
@@ -280,6 +310,44 @@ export function isCloudflareAccessRedirectResponse(response: Response | LooseRec
     return CLOUDFLARE_ACCESS_LOGIN_RE.test(location)
   }
   return false
+}
+
+/**
+ * Detects an error response that almost certainly did not come from this
+ * app. Every route in this codebase returns a JSON body of the shape
+ * `{ success: false, error, code? }` on failure (see authToken, requireAuth,
+ * etc.), so a 401/403/404 with a body that fails to parse as JSON - or that
+ * parses but doesn't look like our error shape - is a strong signal that
+ * something in front of the app (Cloudflare Access without its usual
+ * redirect, a WAF rule, a stale/misrouted edge cache entry) answered
+ * instead. Distinguishing this from a real "your session is invalid"
+ * response matters: the former should never wipe a perfectly good local
+ * session and force a re-login.
+ */
+function looksLikeEdgeInterferenceResponse(status: number, parsed: LooseRecord | null, text: string): boolean {
+  if (![401, 403, 404].includes(status)) return false
+  if (parsed && typeof parsed === 'object') {
+    // Parses as JSON but doesn't look like anything this app's error
+    // middleware would ever emit.
+    return typeof parsed.error !== 'string' && typeof parsed.success === 'undefined'
+  }
+  // Didn't parse as JSON at all. Our API never sends a non-JSON error body,
+  // so any non-empty, non-JSON body (an HTML block page, a plain-text
+  // "404 Not Found", etc.) means this wasn't our app answering.
+  return !!String(text || '').trim()
+}
+
+function createEdgeInterferenceError(path: unknown, status: number): ApiRuntimeError {
+  const error = new Error(
+    'A network or security layer in front of the server blocked this request instead of the app itself. '
+    + 'This usually clears up after a refresh; if it keeps happening, check any edge/proxy access policy in front of this domain.',
+  ) as ApiRuntimeError
+  error.status = status
+  error.code = 'edge_interference'
+  error.path = normalizeApiPath(path)
+  error.reason = 'edge_interference'
+  error.transientGateway = true
+  return error
 }
 
 function createCloudflareAccessError(path: unknown): ApiRuntimeError {
@@ -394,7 +462,15 @@ export function isInvalidSessionError(error: any): boolean {
     error.code === 'invalid_session'
     || error.code === 'cloudflare_access_required'
     || error.reason === 'cloudflare_access_redirect'
-    || (Number(error.status) === 401 && /sign in again|invalid session|cloudflare access/i.test(String(error.message || '')))
+    // The message-text fallback used to only match "sign in again"/
+    // "invalid session"/"cloudflare access" -- none of which appear in
+    // the plain "Not authenticated" text most authenticated routes send
+    // (see lib/auth.ts's requireAuth). Now that requireAuth also sends
+    // `code: 'invalid_session'` this fallback is mostly a safety net for
+    // any other 401 shape, but kept in sync so a differently-worded
+    // backend error ("not authenticated", any casing) still doesn't slip
+    // through unrecognized the way it used to.
+    || (Number(error.status) === 401 && /sign in again|invalid session|not authenticated|cloudflare access/i.test(String(error.message || '')))
   ))
 }
 
@@ -468,14 +544,18 @@ function hasUsableLocalData(value: any): boolean {
   return true
 }
 
-async function tryServerReadWithRetry<T>(serverFn: RouteFn<T>): Promise<T> {
+async function tryServerReadWithRetry<T>(serverFn: RouteFn<T>, signal?: AbortSignal): Promise<T> {
   try {
-    return await serverFn()
+    return await serverFn(signal)
   } catch (error: any) {
+    // A superseded search (newer keystroke took over) isn't a connectivity
+    // problem -- retrying it would just fire yet another request for a
+    // query the user has already moved on from.
+    if (isAbortError(error)) throw error
     if (isTransientGatewayError(error?.status)) throw error
     if (!isConnectivityError(error)) throw error
     await sleep(SYNC.READ_SERVER_RETRY_DELAY_MS)
-    return serverFn()
+    return serverFn(signal)
   }
 }
 
@@ -573,10 +653,27 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
 
   const ctrl  = new AbortController()
   let timedOut = false
+  let externallyAborted = false
   const timer = setTimeout(() => {
     timedOut = true
     ctrl.abort()
   }, timeoutMs)
+  // Thread through a caller-supplied signal (e.g. a per-search-group
+  // controller from route()'s searchGroup option) so a superseded search
+  // request actually stops the underlying fetch instead of just having its
+  // result ignored client-side once it resolves. Two abort sources need to
+  // share one real fetch: the timeout controller above (already fires
+  // ctrl.abort() itself) and this caller signal, which we forward onto the
+  // same ctrl so the fetch below only ever needs to look at one signal.
+  const externalSignal = options.signal
+  const onExternalAbort = () => {
+    externallyAborted = true
+    ctrl.abort()
+  }
+  if (externalSignal) {
+    if (externalSignal.aborted) onExternalAbort()
+    else externalSignal.addEventListener('abort', onExternalAbort, { once: true })
+  }
 
   try {
     const requestInit: RequestInitWithBody = {
@@ -607,6 +704,13 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       if (res.status === 404 && normalizedMethod === 'GET' && isRequiredRuntimeApiPath(path)) {
         throw markApiVersionMismatch(path, res.status)
       }
+      if (looksLikeEdgeInterferenceResponse(res.status, parsed, text)) {
+        const edgeError = createEdgeInterferenceError(path, res.status)
+        // Deliberately does NOT call dispatchUnauthorized: an edge/proxy
+        // layer answering on the app's behalf is not evidence the user's
+        // actual session is invalid, so we shouldn't force a logout for it.
+        throw edgeError
+      }
       const msg  = parsed?.error || text
       const apiError = createApiError(res.status, parsed, text)
       if (typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
@@ -622,10 +726,22 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
     return res.json()
   } catch (e: any) {
     clearTimeout(timer)
+    if (externallyAborted) {
+      // Cancelled because a newer request in the same search group took
+      // over -- not a timeout, not a server/network failure. Keep it
+      // identifiable as an AbortError (route()'s isAbortError checks
+      // e.name) so callers skip retry/local-fallback/health-down logic
+      // that only makes sense for a real failure.
+      const abortError = new Error('Request superseded by a newer search') as ApiRuntimeError
+      abortError.name = 'AbortError'
+      throw abortError
+    }
     if (timedOut || e?.name === 'AbortError') {
       throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`)
     }
     throw e
+  } finally {
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort)
   }
   })()
 
@@ -869,6 +985,32 @@ function clearInflight(channel: string): void {
   delete _inflightStartedAt[channel]
 }
 
+// One AbortController per search group (e.g. 'products:search',
+// 'inventory:search', 'pos:search', 'contacts:customers:search',
+// 'portal:search'), keyed separately from the per-query-string cache
+// `channel` above. The cache channel is intentionally unique per keystroke
+// (so distinct queries don't collide) which is exactly why it could never
+// dedupe/cancel anything across keystrokes -- the search group is the
+// stable identity ("this is the products search box") that a NEW request
+// under the same group should supersede the previous one for.
+const _searchGroupControllers: Record<string, AbortController> = {}
+
+function beginSearchGroup(group: string): AbortController {
+  const previous = _searchGroupControllers[group]
+  if (previous) previous.abort()
+  const ctrl = new AbortController()
+  _searchGroupControllers[group] = ctrl
+  return ctrl
+}
+
+function endSearchGroup(group: string, ctrl: AbortController): void {
+  if (_searchGroupControllers[group] === ctrl) delete _searchGroupControllers[group]
+}
+
+function isAbortError(e: any): boolean {
+  return e?.name === 'AbortError' || e?.code === 20
+}
+
 function hasReusableInflight(channel: string): boolean {
   if (!_inflight[channel]) return false
   const startedAt = _inflightStartedAt[channel] || 0
@@ -1034,14 +1176,18 @@ export async function route<T = any>(
           return _inflight[channel]
         }
 
-        const promise = tryServerReadWithRetry(serverFn).then(result => {
+        const searchGroup = typeof options === 'object' ? options.searchGroup : undefined
+        const groupCtrl = searchGroup ? beginSearchGroup(searchGroup) : null
+        const promise = tryServerReadWithRetry(serverFn, groupCtrl?.signal).then(result => {
           cacheSet(channel, result)
           setServerHealth(true)
           logCall(channel, 'server', Date.now() - t0)
           clearInflight(channel)
+          if (searchGroup && groupCtrl) endSearchGroup(searchGroup, groupCtrl)
           return result
         }).catch(e => {
           clearInflight(channel)
+          if (searchGroup && groupCtrl) endSearchGroup(searchGroup, groupCtrl)
           throw e
         })
         
@@ -1054,6 +1200,16 @@ export async function route<T = any>(
           try {
             return await promise
           } catch (e) {
+            if (isAbortError(e)) {
+              // Superseded by a newer search in the same group -- not a
+              // real failure, so skip noteReadFailure (which would
+              // otherwise wrongly mark the server unhealthy) and skip the
+              // local-fallback read (the caller's own tracked-request-id
+              // check already discards whatever this resolves to, so
+              // reading local data for it would be pure waste).
+              logCall(channel, 'search-superseded', Date.now() - t0, false)
+              throw e
+            }
             if (isApiVersionMismatchError(e)) {
               logCall(channel, 'api-version-mismatch', Date.now() - t0, false)
               throw e
@@ -1063,6 +1219,17 @@ export async function route<T = any>(
               throw e
             }
             noteReadFailure(channel, e, 'local-fallback', t0)
+            if (localFn) {
+              const localResult = await localFn()
+              if (hasUsableLocalData(localResult)) {
+                cacheSet(channel, localResult)
+                logCall(channel, 'local-fallback', Date.now() - t0)
+                return localResult
+              }
+            }
+            // Nothing usable to fall back to -- surface the real failure
+            // instead of silently resolving as an empty-but-successful read.
+            throw e
           }
         }
       }
