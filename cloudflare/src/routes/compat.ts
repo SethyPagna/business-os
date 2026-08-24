@@ -32,19 +32,33 @@ function denyUnless(c: any, ...perms: string[]) {
 // made them 401 unconditionally, not just around login/logout. Guard only
 // the specific paths that actually need a session, matching what each
 // handler further down actually does.
-app.use('/categories*', requireAuth)
-app.use('/units*', requireAuth)
-app.use('/dashboard*', requireAuth)
-app.use('/analytics*', requireAuth)
-app.use('/inventory*', requireAuth)
-app.use('/notifications*', requireAuth)
-app.use('/system*', requireAuth)
-app.use('/returns*', requireAuth)
-app.use('/customers*', requireAuth)
-app.use('/suppliers*', requireAuth)
-app.use('/delivery-contacts*', requireAuth)
-app.use('/import-jobs*', requireAuth)
-app.use('/transfers*', requireAuth)
+//
+// These were written as `app.use('/dashboard*', ...)` -- a bare trailing
+// `*`, which Hono does NOT treat as a wildcard. Verified directly against
+// the bundled Hono: `/categories*` matches neither `/categories` nor
+// `/categories/1`, so all thirteen of these guards were dead code matching
+// nothing, and had been since they were written. Most of the paths below
+// were protected anyway, by an accident of mount order (routes/lookups.ts,
+// contacts.ts, system.ts, notifications.ts, importJobs.ts and friends are
+// all mounted BEFORE this router in index.ts and carry their own gates) or
+// by each handler's own denyUnless()/requireAuth argument -- but
+// `/transfers` was neither, so `GET /api/transfers` returned live
+// stock-transfer rows to a completely unauthenticated caller. Found by
+// probing all 37 routes in this file with no session; it was the only one
+// that answered 200.
+//
+// `/prefix/*` is the form Hono actually matches, and it covers the bare
+// `/prefix` too (also verified). Kept as real guards rather than deleted:
+// they are the defence-in-depth layer that should have caught /transfers
+// on its own instead of relying on another router happening to be mounted
+// first.
+for (const prefix of [
+  '/categories', '/units', '/dashboard', '/analytics', '/inventory',
+  '/notifications', '/system', '/returns', '/customers', '/suppliers',
+  '/delivery-contacts', '/import-jobs', '/transfers',
+]) {
+  app.use(`${prefix}/*`, requireAuth)
+}
 
 const WRITE_SKIP_KEYS = new Set([
   'id', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at',
@@ -765,7 +779,14 @@ app.get('/import-jobs/:id/review', async (c) => {
   return c.json({ items: files || [], conflicts: [], errors: errors || [], warnings: [] })
 })
 
+// Permission gate on top of the requireAuth middleware above: this returns
+// stock-transfer history, the same data routes/inventory.ts and
+// routes/branches.ts gate behind those permissions, so a merely
+// authenticated account (e.g. a cashier-only role) should not read it
+// either. Matches this file's own denyUnless() pattern used by /dashboard.
 app.get('/transfers', async (c) => {
+  const denied = denyUnless(c, 'inventory', 'branches')
+  if (denied) return denied
   const rows = await getDb(c.env).prepare(`
     SELECT st.*, b1.name AS from_name, b2.name AS to_name
     FROM stock_transfers st
