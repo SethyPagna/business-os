@@ -46,15 +46,26 @@ function collectMediaFiles(dirUrl: URL, output: URL[] = []): URL[] {
   return output
 }
 
+// ICON_BUDGET_EXEMPTIONS is written with forward slashes, but path.relative
+// returns the PLATFORM separator -- backslashes on Windows. Without this
+// normalization every exemption silently failed to match on a Windows
+// checkout, so all 8 exempted app icons were reported as budget violations
+// and this whole test failed there while passing on Linux/macOS. Real,
+// confirmed cross-platform bug (reproduced on Windows 11), not a genuine
+// oversized-asset finding.
+function toPosixRelative(fileUrl: URL): string {
+  return path.relative(fileURLToPath(ROOT), fileURLToPath(fileUrl)).split(path.sep).join('/')
+}
+
 const mediaFiles = SOURCE_DIRS.flatMap((dir) => collectMediaFiles(new URL(`${dir}/`, ROOT)))
 const oversizedImages = mediaFiles
   .filter((fileUrl) => IMAGE_EXTENSIONS.has(path.extname(fileUrl.pathname).toLowerCase()))
-  .filter((fileUrl) => !ICON_BUDGET_EXEMPTIONS.has(path.relative(fileURLToPath(ROOT), fileURLToPath(fileUrl))))
+  .filter((fileUrl) => !ICON_BUDGET_EXEMPTIONS.has(toPosixRelative(fileUrl)))
   .map((fileUrl) => ({ fileUrl, bytes: fs.statSync(fileUrl).size }))
   .filter((entry) => entry.bytes > IMAGE_BUDGET_BYTES)
 
 assert.deepEqual(
-  oversizedImages.map((entry) => `${path.relative(fileURLToPath(ROOT), fileURLToPath(entry.fileUrl))} (${entry.bytes} bytes)`),
+  oversizedImages.map((entry) => `${toPosixRelative(entry.fileUrl)} (${entry.bytes} bytes)`),
   [],
   'frontend source images and logos must stay at or below 40KB',
 )
