@@ -9690,3 +9690,135 @@ and column. Everything in the 9-item backlog from Part 333/334 remains open. Ima
 1/Image 2 UI requests (larger product image on public catalog, sticky/responsive
 select-all/search/scan/filter toolbar for smaller and larger screens, PWA-safe on
 iPhone) -- not started this session.
+
+## Part 337 (chat, Aug 25 2026) -- product search narrowed to name/sku/barcode across all four surfaces; three real pre-existing bugs found and fixed (stray migration, Windows-only test failure, unit-review regression risk); FIRST session with a working real build + full green suite
+
+**Environment note, important for reading every prior part's "Not run this
+session" caveat:** this session ran in the user's own local Windows checkout, which
+has `node_modules` installed for BOTH projects, working `better-sqlite3` native
+bindings, and real outbound network access. Every verification prior sessions had to
+substitute for (`check:source`, `verify:public-runtime`, a real `vite build`) actually
+ran here and passed. The long-standing "sandbox rollup-native-binary gap" caveat does
+not apply to this part.
+
+**Ask:** "From now on products search will only search products name and barcode and
+sku... i say this because products name has the brand name already... and for special
+cases like shortcuted, initials etc... like brand e.l.f but name is elf in product
+name... but no need brand search as filters cover all that... so only name and barcode
+and sku... same for pos, inventory, public portal website."
+
+**1. `PRODUCT_SEARCH_COLUMNS` narrowed `['name','sku','barcode','brand','category','unit']`
+-> `['name','sku','barcode']`** (`cloudflare/src/lib/searchMatch.ts`). This constant
+governs the FTS5 column-SET filter for `routes/products.ts` and `routes/inventory.ts`
+(and, via a mirrored literal list, `routes/portal.ts`). Also strictly cheaper for FTS5
+(fewer postings lists to intersect per query), which matters on the metered Workers
+free tier.
+
+**2. Every dependent match path narrowed to agree, server and client, so no layer
+silently disagrees with another:**
+- `routes/products.ts`: `fallbackColumns` (the no-FTS-migration compatibility path)
+  narrowed to name/sku/barcode; `buildShortWordFallbackClause` dropped
+  `p.unit_normalized`; the `buildCompactBrandMatchClause` call **removed entirely**
+  (with its now-unused import).
+- `routes/inventory.ts`: same two changes, same reasoning, plus its unused import.
+- `routes/portal.ts`: `buildFtsMatchExpression` column list narrowed from
+  name/sku/barcode/brand/category to name/sku/barcode; `buildCompactBrandMatchClause`
+  call + import removed; the JS fuzzy-fallback candidate haystack changed from
+  name/brand/category to name/sku/barcode so the typo-tolerant fallback can't match on
+  a column the primary path no longer searches.
+- Frontend client-side re-filters (all four surfaces, each of which re-filters the
+  server's page for instant typing feedback and must not be *stricter* OR *looser*
+  than the server): `productFilterHelpers.ts` (Products), `POS.tsx`, `Inventory.tsx`'s
+  `productHay`, and `CatalogPage.tsx`'s portal-preview filter -- every one narrowed to
+  name/sku/barcode.
+- Brand shorthand ("RT", "elf", "nyx") still resolves, but now against NAME text via
+  the existing `ALIAS_GROUPS`/trigram paths -- which is exactly what the user described
+  ("product name has the brand name already"). `buildCompactBrandMatchClause` itself is
+  deliberately left exported and tested, unused by any route, in case a dedicated
+  brand-search surface ever wants it.
+
+**3. Real regression this change would have caused, found by tracing before shipping
+(not after):** `PRODUCT_SEARCH_COLUMNS`'s own comment documented that `'unit'` was kept
+in scope *specifically* to serve `Products.tsx`'s `handleLookupReviewSelection` -- the
+"which products use this unit" review flow opened from `ManageUnitsModal`, which worked
+by stuffing the unit's name into the free-text search box (no unit filter state existed,
+unlike brand/category). Dropping `'unit'` naively would have broken that flow with no
+error at all, just a permanently empty result page. Fixed properly rather than accepted:
+`Products.tsx` now has its own `unitFilter` state, sent as the `unit` query param that
+`buildSearchFilters`'s generic brand/category/unit/supplier exact-match loop **already
+supported server-side** -- so this needed no new backend endpoint, only wiring. Added to
+`clearAllFilters` and to the load effect's dep array. This closes the exact follow-up
+that constant's own comment had been flagging as still-owed since Part 106.
+
+**4. Real pre-existing bug found and fixed -- the 0037 migration duplicate, AGAIN.**
+Parts 334 and 335 both documented fixing this ("moved the obsolete monolithic
+`migrations/0037_product_search_compact_columns.sql` to `ops/superseded-migrations/`"),
+and Part 335 explicitly noted that Part 334's fix had only *copied* rather than moved it.
+That same stray 315-line original was **still present** in this checkout, so 16 of 38
+backend test scripts died on `duplicate column name: name_normalized` before running a
+single assertion. Verified byte-identical to
+`ops/superseded-migrations/0037_product_search_compact_columns.sql.superseded` (so
+migration history stays fully recoverable) before removing it. Backend suite went
+16-failures -> 0 on that one deletion. Not a deploy-breaking bug (already-applied
+migrations aren't replayed on the live D1), but it broke every fresh-schema boot: the
+whole test suite, any new local DB, any new teammate's first run.
+
+**5. Real pre-existing bug found and fixed -- `assetCompression.test.ts` could never
+pass on Windows.** `ICON_BUDGET_EXEMPTIONS` is written with forward slashes
+(`'public/icon.png'`) but was matched against `path.relative(...)`, which returns the
+PLATFORM separator -- backslashes on Windows. So all 8 deliberately-exempted PWA app
+icons were reported as budget violations and the test hard-failed on any Windows
+checkout while passing on Linux/macOS. This is why the full `npm run test:utils` chain
+could never complete locally. Fixed with a `toPosixRelative` helper normalizing
+separators on both the comparison and the failure message. NOT an oversized-asset
+finding -- the icons are correctly exempt by an explicit Aug 23 product decision.
+
+**6. Tests updated to match intent, not silenced:**
+- `test-portal-search-fts-pure.cjs` rewritten: now asserts brand/category text
+  positively does NOT match (alongside the pre-existing supplier/description/unit
+  exclusions), that name/sku/barcode still do, and that the "RT" alias no longer
+  resolves via brand-only text but still matches a name literally starting with "RT".
+  Seed data deliberately no longer restates the brand inside the name (the old fixture
+  used "MAC Matte Lipstick" with brand "MAC", which would have masked the very thing
+  being tested).
+- `test-search-brand-compact-pure.cjs`: header rewritten to state plainly that it now
+  exercises a primitive **no live route calls**. Two assertions were also found to be
+  simply WRONG once the harness could actually run (the 0037 bug above meant this file
+  had never completed a run): typing the brand WITH its own dots ("e.l.f"/"E.l.f")
+  tokenizes to three 1-character words, all filtered out by
+  `buildCompactBrandMatchClause`'s own `length >= 2` gate, so it matches nothing via
+  brand -- the un-punctuated "elf"/"ELF" spelling is the path that actually works.
+  Documented as a real, narrow limitation rather than asserted away; not fixed in
+  `searchMatch.ts` because no live route calls that function anymore.
+- `productSearchPagination.test.ts`: the `product?.unit` assertion (which encoded the
+  OLD contract) inverted into a `doesNotMatch` guard covering all five now-excluded
+  fields, plus a new assertion that the unit-review handoff uses `setUnitFilter`.
+
+**Verified, all real, this session -- no substitutions:**
+- Frontend `tsc --noEmit` clean. Backend `tsc --noEmit` clean.
+- **38/38 backend `.cjs` test scripts pass** (was 22/38 on arrival, due to item 4).
+- **Full `npm run test:utils` chain passes end to end** -- including `check:source`
+  (362 source files parsed) and `verify:public-runtime`, both of which prior sessions
+  had to skip, plus all ~110 individual test files.
+- **A real `vite build` succeeds** (built in 14.32s) -- the first actual production
+  build verification in many sessions.
+
+**Not done -- remaining backlog (unchanged this session):** bulk-delete UX parity repro,
+Import UI 4-section redesign, Contacts dedup/conflict view (still ambiguous, still
+needs clarification), alpha-rail repro, public FAQ defaults, Fees UI merge, Add-Sale
+wizard UI, Image 1/Image 2 (larger public-catalog product image, sticky/responsive
+toolbar), permissions per-action/per-button audit, nightly library image checkup.
+
+---
+## Checkpoint — Aug 25, 2026 (session: Part 337, search scope narrowing)
+
+**Changed this session:**
+- `cloudflare/src/lib/searchMatch.ts` -- `PRODUCT_SEARCH_COLUMNS` narrowed to name/sku/barcode.
+- `cloudflare/src/routes/{products,inventory,portal}.ts` -- all dependent match paths narrowed to agree; `buildCompactBrandMatchClause` calls + imports removed; portal fuzzy-fallback haystack narrowed.
+- `frontend/src/components/products/helpers/productFilterHelpers.ts`, `frontend/src/components/pos/POS.tsx`, `frontend/src/components/inventory/Inventory.tsx`, `frontend/src/components/catalog/CatalogPage.tsx` -- client-side re-filter haystacks narrowed to match.
+- `frontend/src/components/products/Products.tsx` -- new `unitFilter` state + `unit` query param + `clearAllFilters` wiring; `handleLookupReviewSelection` uses it instead of free-text search.
+- `cloudflare/migrations/0037_product_search_compact_columns.sql` -- **deleted** (stray duplicate, byte-identical copy preserved in `ops/superseded-migrations/`).
+- `frontend/tests/assetCompression.test.ts` -- Windows path-separator fix.
+- `cloudflare/scripts/test-portal-search-fts-pure.cjs`, `cloudflare/scripts/test-search-brand-compact-pure.cjs`, `frontend/tests/productSearchPagination.test.ts` -- assertions updated to the new contract.
+
+**Verification:** frontend + backend `tsc --noEmit` clean; **38/38** backend `.cjs` scripts pass; **full `npm run test:utils` chain green end to end** (incl. `check:source` + `verify:public-runtime`); **real `vite build` succeeds**. No substituted/skipped verification this session.
