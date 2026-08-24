@@ -16,7 +16,6 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import {
-  buildCompactBrandMatchClause,
   buildFtsMatchExpression,
   buildHybridMatchClause,
   buildIssueStateClauses,
@@ -383,11 +382,12 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
-  // A search term in play takes over the primary sort order (relevance:
-  // name match first, then sku/barcode, then brand/category -- see
-  // buildSearchFilters' matchRankSql) with the caller's chosen sort
-  // demoted to a tiebreaker; with no search term there's no relevance to
-  // rank by, so the plain name/created-date order applies as before.
+  // A search term in play takes over the primary sort order (relevance,
+  // weighted across the name/sku/barcode columns actually in scope --
+  // see buildSearchFilters' matchRankSql and PRODUCT_SEARCH_COLUMNS'S own
+  // comment in lib/searchMatch.ts) with the caller's chosen sort demoted to
+  // a tiebreaker; with no search term there's no relevance to rank by, so
+  // the plain name/created-date order applies as before.
   const effectiveFamilyOrderSql = matchRankSql ? `match_rank ASC, ${familyOrderSql}` : familyOrderSql
 
   const selectColumns = `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
@@ -486,7 +486,7 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     // still work rather than return a 500 while migration catch-up runs.
     const fallbackColumns = titleOnly
       ? ['p.name']
-      : ['p.name', 'p.sku', 'p.barcode', 'p.brand', 'p.category', 'p.unit', 'p.supplier']
+      : ['p.name', 'p.sku', 'p.barcode']
     const allWords = searchTermGroups.flat()
     const wordClauses = allWords.map((word, index) => {
       const key = `fallbackSearch${index}`
@@ -499,13 +499,11 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     // groups/AND-OR/alias-candidates map onto FTS5 MATCH syntax, and
     // migrations/0018_products_fts.sql for why this replaced a
     // REPLACE()-chain-wrapped LIKE scan across 8 columns per row.
-    // Scoped to PRODUCT_SEARCH_COLUMNS (name/sku/barcode/brand/category/unit)
-    // rather than left unscoped across all 8 products_fts columns -- closes
-    // the "search bar doesn't need supplier, description, unit" gap for the
-    // everyday typed-into-a-product-search-box case (see that constant's own
-    // comment in lib/searchMatch.ts for the full reasoning, including why
-    // 'unit' specifically is kept rather than dropped alongside supplier/
-    // description).
+    // Scoped to PRODUCT_SEARCH_COLUMNS (name/sku/barcode only) -- see that
+    // constant's own comment in lib/searchMatch.ts for the full reasoning
+    // (brand/category/unit/supplier/description are all noise for a typed
+    // product search box and are already reachable via their own filter
+    // dropdowns or, for unit, its own exact-match review filter).
     const ftsMatch = buildFtsMatchExpression(searchTermGroups, searchMode, titleOnly ? 'name' : PRODUCT_SEARCH_COLUMNS)
     // buildTrigramMatchExpression/products_fts_code (migrations/
     // 0019_products_fts_code.sql) covers the real gap ftsMatch alone
@@ -604,20 +602,20 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
     // like this one could skip the REPLACE chain entirely) -- switching to
     // those precomputed columns with alreadyNormalizedCols=true removes the
     // nesting here exactly the way it already does for brand.
-    const shortWordMatch = buildShortWordFallbackClause(searchTermGroups, searchMode, ['p.name_normalized', 'p.unit_normalized'], params, 'shortw', true)
+    // Scoped to name_normalized only now (unit dropped along with unit
+    // leaving PRODUCT_SEARCH_COLUMNS -- see that constant's own comment):
+    // unit is no longer a free-text search dimension, it has its own
+    // exact-match review filter instead.
+    const shortWordMatch = buildShortWordFallbackClause(searchTermGroups, searchMode, ['p.name_normalized'], params, 'shortw', true)
     if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback -- closes the "e.l.f." class of
-    // gap FTS/trigram can't reach (see buildCompactBrandMatchClause's own
-    // comment in lib/searchMatch.ts): a brand punctuated down to
-    // single-letter tokens can never be found via prefix matching, no
-    // matter how the customer types it. Not gated on titleOnly (brand is
-    // never in scope for a name-only search) or on word length the way
-    // shortWordMatch is -- "elf" is 3 characters, not under the <3 gate,
-    // and is exactly the reported case.
-    if (!titleOnly) {
-      const brandMatch = buildCompactBrandMatchClause(searchTermGroups, searchMode, params, 'brandc')
-      if (brandMatch) matchClauses.push(brandMatch)
-    }
+    // Compact-brand substring fallback intentionally NOT called here
+    // anymore -- brand is no longer a free-text search dimension (see
+    // PRODUCT_SEARCH_COLUMNS's own comment in lib/searchMatch.ts): product
+    // names already carry the brand in this catalog, and brandFilter
+    // already covers the exact-brand-lookup case. buildCompactBrandMatchClause
+    // itself is untouched (still exported, still covers the portal's own
+    // needs -- actually also removed there, see portal.ts) in case a future
+    // dedicated brand-search surface needs it again.
     // Partial multi-word fallback -- only ever engages for a genuinely
     // long typed query (4+ words in one comma-group), see
     // buildPartialWordMatchClause's own comment for why that keeps the

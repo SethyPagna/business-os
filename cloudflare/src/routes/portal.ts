@@ -10,7 +10,7 @@ import { detectBufferKind } from '../lib/uploadSecurity'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse, getPortalAiUsageStatus } from '../lib/portalAi'
 import { MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
-import { buildCompactBrandMatchClause, buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -1229,18 +1229,18 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     // see inventory.ts's comment). expandAliasCandidates (RT/NYX/BH/OFRA
     // shorthand) is folded into buildFtsMatchExpression itself now,
     // rather than expanded into separate LIKE clauses here.
-    // Column set widened from ['name','brand','category'] to also include
-    // sku/barcode: a shopper on the storefront scanning or typing a
-    // product's barcode/SKU is exactly the "second-most-used search
-    // dimension after name" case PRODUCT_SEARCH_COLUMNS documents for the
-    // staff-facing surfaces, and there's no reason the public portal should
-    // be the one place that doesn't resolve it. Still deliberately excludes
-    // 'unit' -- that column only exists to serve Products.tsx's internal
-    // "which products use this unit" admin workflow (see
-    // PRODUCT_SEARCH_COLUMNS's own comment), which has no portal
-    // equivalent -- and still excludes supplier/description, same
-    // "search bar doesn't need them" reasoning as the staff-facing pages.
-    const ftsMatch = buildFtsMatchExpression([searchTerms], 'AND', ['name', 'sku', 'barcode', 'brand', 'category'])
+    // Column set narrowed to name/sku/barcode only, matching
+    // PRODUCT_SEARCH_COLUMNS on the staff-facing surfaces (products.ts/
+    // inventory.ts) -- brand/category dropped per the same reasoning that
+    // constant's own comment documents: product names already carry the
+    // brand in this catalog, and the storefront's own brand/category filter
+    // chips (below, the `for (const field of ['brand', 'category'])` loop)
+    // already cover exact brand/category lookup. sku/barcode stay in scope
+    // -- a shopper scanning or typing a product's barcode/SKU is exactly the
+    // "second-most-used search dimension after name" case. 'unit' was never
+    // in scope here (no portal equivalent of the admin unit-review
+    // workflow), unaffected by this change.
+    const ftsMatch = buildFtsMatchExpression([searchTerms], 'AND', ['name', 'sku', 'barcode'])
     const matchClauses: string[] = []
     if (ftsMatch) {
       params.portalFtsQuery = ftsMatch
@@ -1290,15 +1290,9 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
     // columns.sql and products.ts's own comment on this exact fix).
     const shortWordMatch = buildShortWordFallbackClause([searchTerms], 'AND', ['p.name_normalized'], params, 'portalShortw', true)
     if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback -- same "e.l.f." gap products.ts/
-    // inventory.ts close (see buildCompactBrandMatchClause's own comment
-    // in lib/searchMatch.ts), applied here too since this is the
-    // highest-traffic search surface and a shopper typing "elf" deserves
-    // the same result staff already get. Unconditional (no titleOnly
-    // concept on the portal -- brand is already in this endpoint's own
-    // ftsMatch column list above).
-    const brandMatch = buildCompactBrandMatchClause([searchTerms], 'AND', params, 'portalBrandc')
-    if (brandMatch) matchClauses.push(brandMatch)
+    // Compact-brand substring fallback intentionally NOT called here
+    // anymore -- brand dropped from ftsMatch's own column list above, same
+    // reasoning (see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
     // Partial multi-word fallback -- same long-name gap products.ts/
     // inventory.ts close (see buildPartialWordMatchClause's own comment).
     // Scoped to name only, same reasoning as those two.
@@ -1442,21 +1436,22 @@ app.get('/catalog/products/search', async (c) => {
   // customers, so it's the one place typo tolerance matters most. Only
   // runs when the strict SQL-folded search found literally nothing for a
   // real query -- the common case never pays this extra pair of queries.
-  // Scoped to name/brand/category, matching this endpoint's existing
-  // (narrower-than-admin) searchable field set.
+  // Scoped to name/sku/barcode, matching this endpoint's own ftsMatch
+  // column list above (brand/category dropped for the same reasoning --
+  // see PRODUCT_SEARCH_COLUMNS's comment in lib/searchMatch.ts).
   if (total === 0 && filters.searchTerms.length) {
     const fallbackBaseWhere = initialClause ? [...filters.baseWhere, initialClause] : filters.baseWhere
     const candidateRows = await db.prepare(`
-      SELECT p.id AS id, p.name AS name, p.brand AS brand, p.category AS category
+      SELECT p.id AS id, p.name AS name, p.sku AS sku, p.barcode AS barcode
       FROM products p
       ${joinSql}
       WHERE ${fallbackBaseWhere.join(' AND ')}
       ORDER BY p.id ASC
       LIMIT ${PORTAL_FUZZY_FALLBACK_CANDIDATE_LIMIT}
-    `).all<{ id: number; name: string; brand: string; category: string }>(params)
+    `).all<{ id: number; name: string; sku: string; barcode: string }>(params)
     const candidates = candidateRows.map((row) => ({
       id: row.id,
-      haystack: [row.name, row.brand, row.category].filter(Boolean).join(' '),
+      haystack: [row.name, row.sku, row.barcode].filter(Boolean).join(' '),
     }))
     const fuzzyIds = runFuzzyFallbackMatch(candidates, filters.searchTerms, 'AND').slice(0, PORTAL_FUZZY_FALLBACK_MATCH_CAP)
     if (fuzzyIds.length) {

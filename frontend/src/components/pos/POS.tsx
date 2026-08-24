@@ -1710,10 +1710,13 @@ export default function POS() {
       // back a product the server didn't send for this page/query -- so it
       // must stay at least as permissive as the server's own match set, not
       // stricter (this is why it's substring/fuzzy on the same
-      // name+sku+barcode+brand+category+supplier+description+unit haystack,
-      // matching the server's column set, rather than a narrower check).
+      // name+sku+barcode haystack, matching the server's PRODUCT_SEARCH_COLUMNS,
+      // rather than a narrower check). Narrowed from the old wider
+      // brand/category/supplier/description/unit set per an explicit
+      // request -- see PRODUCT_SEARCH_COLUMNS's own comment in
+      // cloudflare/src/lib/searchMatch.ts for the full reasoning.
       if (searchTerms.length > 0) {
-        const hay = [p.name, p.sku, p.barcode, p.category, p.brand, p.supplier, p.description, p.unit]
+        const hay = [p.name, p.sku, p.barcode]
         if (!matchesSearchTermGroups(hay, searchTerms, searchMode)) return false
       }
 

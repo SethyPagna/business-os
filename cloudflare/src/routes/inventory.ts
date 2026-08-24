@@ -9,7 +9,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
-import { buildCompactBrandMatchClause, buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, expandAliasCandidates, normalizedHaystackSql, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
+import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, expandAliasCandidates, normalizedHaystackSql, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError } from '../lib/productBatches'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
@@ -202,19 +202,17 @@ function appendInventoryProductFilters(query: InventoryFilterQuery) {
     // doesn't run the ~78-level nested REPLACE() chain per column for
     // every sub-3-character word (see migration 0037_product_search_
     // compact_columns.sql and products.ts's own comment on this exact fix).
-    const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, ['p.name_normalized', 'p.unit_normalized'], params, 'shortw', true)
+    // Scoped to name_normalized only -- unit dropped along with unit
+    // leaving PRODUCT_SEARCH_COLUMNS (see that constant's own comment in
+    // lib/searchMatch.ts): unit has its own exact-match filter now instead
+    // of being a free-text search dimension.
+    const shortWordMatch = buildShortWordFallbackClause(termGroups, mode, ['p.name_normalized'], params, 'shortw', true)
     if (shortWordMatch) matchClauses.push(shortWordMatch)
-    // Compact-brand substring fallback -- same "e.l.f." gap and identical
-    // wiring as products.ts's buildSearchFilters (see that file's own
-    // comment and buildCompactBrandMatchClause's comment in
-    // lib/searchMatch.ts). Inventory's own search bar hits this same
-    // products table/brand column, so it needs the same fix -- not gated
-    // on titleOnly for the same reason products.ts isn't (brand is never
-    // in scope for a name-only search anyway).
-    if (!titleOnly) {
-      const brandMatch = buildCompactBrandMatchClause(termGroups, mode, params, 'brandc')
-      if (brandMatch) matchClauses.push(brandMatch)
-    }
+    // Compact-brand substring fallback intentionally NOT called here
+    // anymore -- brand is no longer a free-text search dimension (see
+    // PRODUCT_SEARCH_COLUMNS's own comment in lib/searchMatch.ts): names
+    // already carry the brand in this catalog, and the brand filter
+    // dropdown already covers exact-brand lookup.
     // Partial multi-word fallback -- same long-name gap and identical
     // wiring as products.ts (see buildPartialWordMatchClause's own
     // comment in lib/searchMatch.ts). Scoped to name only, same reasoning.
