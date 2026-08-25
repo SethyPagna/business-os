@@ -58,22 +58,19 @@ type FileUploadPayload = {
   compressOptions?: CompressImageOptions
 }
 
-// Library-specific compression budget -- content/reference images shown
-// as small grid thumbnails on the Library page don't need the same
-// 150KB/2560px headroom a full-bleed product photo or promo banner does.
-// Tightened again (Part 324, chat) per explicit "compress images more"
-// feedback on top of Part 309's original halving -- 1200px/70KB/40KB is
-// still comfortably above what a thumbnail actually needs to look sharp
-// at grid size, with the compression plan's existing quality-step-down
-// (buildCompressionPlan) doing the real work of hitting these tighter
-// caps rather than this just being a smaller ceiling nothing reaches.
-// App icons in public/ are a separate, exempted path (Part 300) and
-// never go through this at all.
-export const LIBRARY_IMAGE_COMPRESS_OPTIONS: CompressImageOptions = {
-  maxDimension: 1200,
-  maxBytes: 70 * 1024,
-  targetBytes: 40 * 1024,
-}
+// The Library page used to carry its OWN, much tighter budget
+// (1200px/70KB/40KB) on the reasoning that grid thumbnails don't need
+// full-bleed headroom. That is why library objects were landing around 70KB
+// while everything else used a different budget entirely -- two competing
+// definitions of "compressed enough" for one library, and the tighter one
+// applied to the images the user actually looks at most.
+//
+// There is now ONE budget for every stored image (the 300-350KB band in
+// utils/imageCompression.ts's DEFAULT_COMPRESS_OPTIONS), so the Library no
+// longer overrides anything. Kept as an explicit named export rather than
+// deleted so FilesPage.tsx's call site still reads as a deliberate choice,
+// and so a future page-specific budget has an obvious place to live.
+export const LIBRARY_IMAGE_COMPRESS_OPTIONS: CompressImageOptions = {}
 
 type AvatarUploadPayload = {
   file?: File

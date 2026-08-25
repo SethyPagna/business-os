@@ -34,24 +34,32 @@ export const DEFAULT_COMPRESS_OPTIONS: Required<Pick<CompressImageOptions, 'maxD
   maxDimension: 2560,
   quality: 0.92,
   minSavingsRatio: 0.05,
-  // Hard per-image cap, per explicit request (chat, Aug 25 2026): every
-  // uploaded image should land at or under 180KB. 140KB is the soft
-  // target -- compression stops as soon as an attempt is comfortably
-  // under that, without walking the full plan down to the worst case.
-  // 180KB is the ceiling nothing should cross except a source image
-  // that's already so detail-dense it can't get smaller without dropping
-  // below MIN_DIMENSION_FLOOR/the lowest quality step -- in that rare
-  // case the smallest achievable result still ships (still much smaller
-  // than an uncompressed original), rather than silently giving up and
-  // sending the full-size file. cloudflare/src/routes/{products,files,users}.ts
-  // has a server-side safety-net cap that rejects an image that skipped
-  // compression entirely (e.g. the 'data:' bug fixed this session in
-  // productImageUploadTransport.ts) -- that's the backstop for uploads
-  // that never even attempted this plan, not for the rare detail-dense
-  // source described above.
-  maxBytes: 180 * 1024,
-  targetBytes: 140 * 1024,
+  // THE BAND: land between 300KB and 350KB. 350KB is a hard ceiling nothing
+  // may cross; 300KB is a floor, because landing far below the cap throws
+  // away image quality for storage nobody asked to save.
+  //
+  // The previous 180KB/140KB pair (and the Library page's even tighter
+  // 70KB/40KB override) were not the real problem on their own -- the
+  // SELECTION RULE was. The encode loop kept the SMALLEST blob it had seen
+  // and stopped at the soft target, and the plan only ever steps DOWN in
+  // quality and dimension. So the result was structurally biased toward the
+  // bottom of the budget: an image that could have been a crisp 340KB was
+  // shipped as a soft 70KB.
+  //
+  // Because the plan is monotonically decreasing, the FIRST attempt that
+  // fits under maxBytes is by construction the LARGEST one that fits -- so
+  // the loop now stops there instead of continuing to shrink. A result
+  // below targetBytes therefore means the source genuinely could not
+  // produce more bytes at full quality and full dimension (a small or very
+  // flat image), not that the algorithm gave up early.
+  maxBytes: 350 * 1024,
+  targetBytes: 300 * 1024,
 }
+
+/** Hard ceiling for any stored image, in bytes. Nothing may exceed this. */
+export const IMAGE_SIZE_CEILING_BYTES = DEFAULT_COMPRESS_OPTIONS.maxBytes
+/** Desired floor. Landing below this is acceptable ONLY when the source cannot produce more. */
+export const IMAGE_SIZE_FLOOR_BYTES = DEFAULT_COMPRESS_OPTIONS.targetBytes
 
 const COMPRESSIBLE_MIME = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp'])
 
@@ -262,11 +270,22 @@ export async function compressImageFile(file: File, options: CompressImageOption
 
       const blob = await canvasToBlob(canvas, outputMime, step.quality)
       if (!blob) continue
+      // The plan walks from highest quality/largest dimension downward, so
+      // sizes decrease monotonically. That makes the FIRST attempt at or
+      // under the ceiling the LARGEST one that fits -- i.e. the best quality
+      // available within budget -- so take it and stop.
+      //
+      // This used to keep whichever blob was SMALLEST and stop at the soft
+      // target, which walked past perfectly good results to ship the most
+      // degraded one the plan produced. That is why stored images sat far
+      // below their budget.
+      if (blob.size <= opts.maxBytes) {
+        best = { blob, mime: outputMime, ext: outputExt }
+        break
+      }
+      // Still over the ceiling: hold the smallest seen so far purely as a
+      // fallback for a detail-dense source that never gets under it.
       if (!best || blob.size < best.blob.size) best = { blob, mime: outputMime, ext: outputExt }
-      // Soft target reached -- stop walking the plan, no need to chase
-      // the hard cap's worst-case (lower quality/smaller dimension) once
-      // this attempt is already comfortably under budget.
-      if (blob.size <= opts.targetBytes) break
     }
     if ('close' in source && typeof (source as ImageBitmap).close === 'function') (source as ImageBitmap).close()
     // Same backing-store release as above, for the last canvas the loop
