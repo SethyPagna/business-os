@@ -149,6 +149,10 @@ interface ReturnSection {
 }
 
 interface AppContextValue {
+  // Per-action gate (utils/permissionActions.ts) -- the same table the
+  // admin permission editor renders, so a control's visibility here always
+  // matches what an admin was shown when granting the tier.
+  can: (permissionKey: string, actionKey: string) => boolean
   t: (key: string) => string
   fmtUSD: (value: number | string | null | undefined) => string
   fmtKHR: (value: number | string | null | undefined) => string
@@ -247,7 +251,14 @@ function getInitialReturnPageSize(): number {
 }
 
 export default function Returns() {
-  const { t, fmtUSD, fmtKHR, notify, user } = useApp()
+  const { can, t, fmtUSD, fmtKHR, notify, user } = useApp()
+  // Editing a return reverses and re-applies batch restocking against live
+  // stock, so routes/returns.ts blocks it outright for the Review Required
+  // tier (PATCH /:id) rather than queueing it -- see utils/permissionActions.ts.
+  // Without this check the Edit button rendered for a review-tier user and
+  // returned 403 on click. Creating a return is deliberately NOT gated here:
+  // that tier is allowed to create directly, and the route has no extra check.
+  const canEditReturn = can('returns', 'edit')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
   const cleanFallback = useCallback((fallbackEn: string, fallbackKm?: string): string => {
     const candidate = fallbackKm || fallbackEn
@@ -1011,7 +1022,7 @@ export default function Returns() {
           <ReturnDetailModal
             ret={detailRet}
             onClose={() => setDetailRet(null)}
-            onEdit={normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
+            onEdit={canEditReturn && normalizeScope(detailRet.return_scope) === CUSTOMER_SCOPE ? () => handleOpenEdit(detailRet) : undefined}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
           />

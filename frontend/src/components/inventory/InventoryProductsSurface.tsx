@@ -95,7 +95,12 @@ type InventoryProductsSurfaceProps = {
   initialMobileInventorySections?: InventorySection[]
   inventoryProductSections: InventorySection[]
   loading: boolean
-  openAdjust: (product: InventoryProductRow) => void
+  // Optional: Inventory.tsx passes undefined when the signed-in role's
+  // permission tier cannot adjust stock (routes/inventory.ts blocks
+  // POST /adjust outright for Review Required rather than queueing it).
+  // An omitted handler removes the button instead of rendering one that
+  // 403s on click. See utils/permissionActions.ts.
+  openAdjust?: (product: InventoryProductRow) => void
   selectedProductIds: Set<number>
   // Long-press-to-select-mode, same pattern as Products.tsx (part 77/190):
   // checkboxes only render once selectionModeActive is true, and a plain
@@ -480,9 +485,11 @@ export default function InventoryProductsSurface({
                               <InventoryDiscountBadge product={p} fmtUSD={fmtUSD} t={t} />
                               <InventoryBatchPreview product={p} branchId={branchFilter} t={t} compact />
                             </div>
-                            <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold leading-none text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-400 dark:hover:bg-blue-500/15 dark:hover:text-blue-200">
-                              {t('adjust')}
-                            </button>
+                            {openAdjust ? (
+                              <button onClick={(event) => { event.stopPropagation(); openAdjust(p) }} className="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold leading-none text-slate-700 shadow-sm transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:border-blue-400 dark:hover:bg-blue-500/15 dark:hover:text-blue-200">
+                                {t('adjust')}
+                              </button>
+                            ) : null}
                           </div>
                           </div>
                         </div>
@@ -706,9 +713,11 @@ export default function InventoryProductsSurface({
                                 <td className="hidden px-3 py-1 text-right xl:table-cell"><span className="text-xs font-medium text-orange-600 dark:text-orange-400">{fmtUSD(netCogs)}</span></td>
                                 <td className="hidden px-3 py-1 xl:table-cell"><div className={`text-right text-xs font-medium ${profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmtUSD(profit)}</div></td>
                                 <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
-                                  <button onClick={() => openAdjust(p)} className="rounded px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 hover:underline dark:text-blue-400 dark:hover:bg-blue-900/20">
-                                    {t('adjust')}
-                                  </button>
+                                  {openAdjust ? (
+                                    <button onClick={() => openAdjust(p)} className="rounded px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50 hover:underline dark:text-blue-400 dark:hover:bg-blue-900/20">
+                                      {t('adjust')}
+                                    </button>
+                                  ) : null}
                                 </td>
                               </tr>
                             )

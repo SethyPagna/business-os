@@ -62,6 +62,10 @@ interface AppUser {
 }
 
 interface AppContextValue {
+  // Per-action gate (utils/permissionActions.ts) -- the same table the
+  // admin permission editor renders, so a control's visibility here always
+  // matches what an admin was shown when granting the tier.
+  can: (permissionKey: string, actionKey: string) => boolean
   t: TranslateFunction
   user?: AppUser | null
   notify: NotifyFunction
@@ -269,7 +273,13 @@ function formatTransferDate(rawValue: string | null | undefined): string {
 }
 
 export default function Branches() {
-  const { t, user, notify, fmtUSD } = useApp()
+  const { can, t, user, notify, fmtUSD } = useApp()
+  // Transferring stock moves real quantities against live state, so
+  // routes/branches.ts blocks it outright for the Review Required tier
+  // (POST /transfer and /transfer-bulk) instead of queueing it -- see
+  // utils/permissionActions.ts. Add/edit/delete DO queue for that tier, so
+  // they stay available; only transfer is withheld.
+  const canTransferStock = can('branches', 'transfer')
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('branches')
   const branchApi = useMemo(() => getBranchApi(), [])
@@ -925,15 +935,17 @@ export default function Branches() {
               <span>{tr('delete', 'Delete')} ({selectedCount})</span>
             </button>
           ) : null}
-          <button
-            className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
-            onClick={() => setModal('transfer')}
-            title={tr('transfer', 'Transfer')}
-            aria-label={tr('transfer', 'Transfer')}
-          >
-            <ArrowRightLeft className="h-4 w-4 shrink-0" />
-            <span className="truncate">{tr('transfer', 'Transfer')}</span>
-          </button>
+          {canTransferStock ? (
+            <button
+              className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-2 text-xs font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300 sm:text-sm"
+              onClick={() => setModal('transfer')}
+              title={tr('transfer', 'Transfer')}
+              aria-label={tr('transfer', 'Transfer')}
+            >
+              <ArrowRightLeft className="h-4 w-4 shrink-0" />
+              <span className="truncate">{tr('transfer', 'Transfer')}</span>
+            </button>
+          ) : null}
           <button
             className="inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-2 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-blue-700 hover:border-blue-800 sm:text-sm"
             onClick={() => { setSelected(null); setModal('form') }}
@@ -1161,7 +1173,7 @@ export default function Branches() {
                               {' | '}
                               {tr('branch_stock_value', 'Value')}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
                             </span>
-                            <button onClick={() => setModal('transfer')} className="text-xs text-blue-500 hover:underline">
+                            <button onClick={() => setModal('transfer')} disabled={!canTransferStock} className="text-xs text-blue-500 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:disabled:text-slate-500">
                               {tr('transfer_stock_link', 'Transfer stock')}
                             </button>
                           </div>

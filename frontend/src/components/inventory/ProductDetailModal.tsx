@@ -56,7 +56,11 @@ interface InventoryProduct {
 interface ProductDetailModalProps {
   product?: InventoryProduct | null
   onClose: () => void
-  onAdjust: ProductAction
+  // Both optional: Inventory.tsx passes undefined for whichever the
+  // signed-in role's permission tier cannot perform, and an omitted
+  // handler removes the button entirely rather than showing one that
+  // 403s on click. See utils/permissionActions.ts.
+  onAdjust?: ProductAction
   onTransfer?: ProductAction
   onViewHistory?: ProductAction
   onManageBatches?: ProductAction
@@ -296,26 +300,30 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
             modal uses for the same action, so the two pages read
             consistently. */}
         <div className="grid grid-cols-2 flex-shrink-0 gap-1.5 border-t border-gray-200 p-3 dark:border-gray-700 sm:grid-cols-4 sm:gap-2">
-          <button
-            type="button"
-            onClick={() => { onClose(); onAdjust(p) }}
-            className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
-            aria-label={T('adjust_stock', 'Adjust Stock')}
-            title={T('adjust_stock', 'Adjust Stock')}
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5 flex-shrink-0" />
-            <span className="hidden truncate sm:inline">{T('adjust_stock', 'Adjust Stock')}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => { onClose(); onTransfer?.(p) }}
-            className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
-            aria-label={T('transfer', 'Transfer')}
-            title={T('transfer', 'Transfer')}
-          >
-            <ArrowRightLeft className="h-3.5 w-3.5 flex-shrink-0" />
-            <span className="hidden truncate sm:inline">{T('transfer', 'Transfer')}</span>
-          </button>
+          {onAdjust ? (
+            <button
+              type="button"
+              onClick={() => { onClose(); onAdjust(p) }}
+              className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              aria-label={T('adjust_stock', 'Adjust Stock')}
+              title={T('adjust_stock', 'Adjust Stock')}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="hidden truncate sm:inline">{T('adjust_stock', 'Adjust Stock')}</span>
+            </button>
+          ) : null}
+          {onTransfer ? (
+            <button
+              type="button"
+              onClick={() => { onClose(); onTransfer(p) }}
+              className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1 py-2.5 text-xs leading-tight sm:text-sm"
+              aria-label={T('transfer', 'Transfer')}
+              title={T('transfer', 'Transfer')}
+            >
+              <ArrowRightLeft className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="hidden truncate sm:inline">{T('transfer', 'Transfer')}</span>
+            </button>
+          ) : null}
           {onManageBatches ? (
             <button
               type="button"

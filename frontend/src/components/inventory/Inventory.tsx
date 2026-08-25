@@ -205,6 +205,10 @@ type SectionOption = {
 }
 
 type InventoryAppContext = {
+  // Per-action gate (utils/permissionActions.ts) -- the same table the admin
+  // permission editor renders, so a control's visibility here always matches
+  // what an admin was shown when granting the tier.
+  can: (permissionKey: string, actionKey: string) => boolean
   t: Translator
   user?: LegacyInventoryRecord | null
   notify: (message: string, type?: string) => void
@@ -488,7 +492,16 @@ const RFID_SECTION_OPTIONS = [
 ]
 
 export default function Inventory() {
-  const { t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp() as InventoryAppContext
+  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol } = useApp() as InventoryAppContext
+  // Every stock-moving action here mutates live batch/stock state that could
+  // go stale between a Review Required user's request and an admin's
+  // approval, so routes/inventory.ts blocks them outright for that tier
+  // rather than queueing them (POST /adjust, /transfer, /move-row and the
+  // dated-stock-count routes all 403) -- see utils/permissionActions.ts.
+  // Editing the saved reasons list is the one Inventory write that DOES
+  // queue, so it is deliberately not gated here.
+  const canAdjustStock = can('inventory', 'adjust')
+  const canTransferStock = can('inventory', 'transfer')
   const { syncChannel } = useSync() as InventorySyncContext
   const isActive = useIsPageActive('inventory')
   const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
@@ -3701,7 +3714,7 @@ export default function Inventory() {
             isInventorySelectionScopeFullySelected={isInventorySelectionScopeFullySelected}
             isInventorySelectionScopePartiallySelected={isInventorySelectionScopePartiallySelected}
             loading={loading && isProductsFirstLoad}
-            openAdjust={openAdjust}
+            openAdjust={canAdjustStock ? openAdjust : undefined}
             selectedProductIds={selectedProductIds}
             selectionModeActive={selectionModeActive}
             getInventoryLongPressState={getInventoryLongPressState}
@@ -3903,8 +3916,8 @@ export default function Inventory() {
           <ProductDetailModal
             product={detailProduct}
             onClose={() => setDetailProduct(null)}
-            onAdjust={openAdjust}
-            onTransfer={openTransfer}
+            onAdjust={canAdjustStock ? openAdjust : undefined}
+            onTransfer={canTransferStock ? openTransfer : undefined}
             onViewHistory={fetchProductHistoryPreview}
             onManageBatches={openManageBatches}
             fmtUSD={fmtUSD}
