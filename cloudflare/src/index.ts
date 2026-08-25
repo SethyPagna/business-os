@@ -29,6 +29,7 @@ import feesRoute from './routes/fees'
 import reviewQueueRoute from './routes/reviewQueue'
 import { createSyncRoute } from './routes/sync'
 import { ensureCoreDataInvariantsOnce } from './lib/coreDataInvariants'
+import { reportError } from './lib/errorReporting'
 import { serveObject } from './lib/r2'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { maybeRunScheduledBackup } from './lib/backup'
@@ -39,6 +40,11 @@ export type Env = {
   DB: D1Database
   ASSETS: R2Bucket
   CACHE: KVNamespace
+  // Sentry DSN. Optional: absent means reporting is simply skipped, so a
+  // local or misconfigured environment behaves exactly as before rather
+  // than failing. Set in wrangler.toml [vars] -- a DSN is a public
+  // ingest key by design, not a secret.
+  SENTRY_DSN?: string
   IMPORT_QUEUE: Queue
   MEDIA_QUEUE: Queue
   // Optional (wrangler.toml [[queues.producers]] binding) -- see
@@ -110,6 +116,24 @@ const app = new Hono<{ Bindings: Env }>()
 // a bare string.
 app.onError((error, c) => {
   console.error('[worker] unhandled error', c.req.method, c.req.path, error)
+  // Reported through waitUntil, never awaited: the response must not wait on
+  // a third-party POST, and on the free plan's 10ms CPU budget it must not
+  // consume the request's own allowance. reportError never throws, so this
+  // cannot turn one failure into two -- see lib/errorReporting.ts.
+  //
+  // c.req.path, not the full URL: a URL carries the query string, which is
+  // where search terms and membership lookups live.
+  c.executionCtx?.waitUntil(reportError(c.env.SENTRY_DSN, error, {
+    source: 'worker',
+    location: c.req.path,
+    method: c.req.method,
+    // No release/role here on purpose: this handler's Hono context has no
+    // typed Variables, so `user` is genuinely unavailable at this point,
+    // and there is no build-revision var to read. Reporting a real null
+    // beats inventing a field that would silently always be empty.
+    release: null,
+    role: null,
+  }))
   return c.json({
     success: false,
     error: 'Something went wrong processing that request. Please try again.',

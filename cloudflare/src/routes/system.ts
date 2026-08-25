@@ -11,10 +11,47 @@ import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PR
 import { createCloudflareBackup, createSectionBackup } from '../lib/backup'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
+import { reportError } from '../lib/errorReporting'
+import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
 app.use('*', requireAuth)
+
+// Browser-side crash reporting. The frontend does NOT hold the Sentry DSN
+// and does not talk to Sentry directly: the DSN stays out of the browser
+// bundle, and PII scrubbing happens in exactly one place (lib/errorReporting)
+// rather than being implemented twice and drifting apart.
+//
+// Behind requireAuth like the rest of this router, which also means it is
+// not an open relay for anyone to push events into the project's quota.
+// Rate-limited per user on top of that, because a crash loop in one browser
+// tab could otherwise burn the whole Sentry allowance in a minute.
+app.post('/client-error', async (c) => {
+  const user = c.get('user')
+  const clientKey = String(user?.id || getClientIp(c.req.raw))
+  const limit = await checkRateLimit(c.env, 'client_error', clientKey, 20, 60_000)
+  // Deliberately 200, not 429: this endpoint reports a crash that ALREADY
+  // happened. Handing the browser an error here would mean the error
+  // handler itself now has an error to handle.
+  if (!limit.allowed) return c.json({ success: true, reported: false, reason: 'rate_limited' })
+
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const message = String(body?.message || '').slice(0, 1000)
+  if (!message) return c.json({ success: true, reported: false, reason: 'empty' })
+
+  const error = new Error(message)
+  if (body?.stack) error.stack = String(body.stack).slice(0, 4000)
+  const reported = await reportError(c.env.SENTRY_DSN, error, {
+    source: 'browser',
+    // A page id, never a URL -- a URL carries the query string, which is
+    // where search terms and membership lookups live.
+    location: String(body?.page || '').slice(0, 120) || null,
+    release: null,
+    role: user?.role_code || null,
+  })
+  return c.json({ success: true, reported })
+})
 
 function denyUnlessBackupPermission(c: any) {
   const user = c.get('user')

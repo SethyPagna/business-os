@@ -70,6 +70,10 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': permissions,
   '../lib/dataIntegrity': { runDataIntegrityCheck: async () => ({}) },
+  // Error reporting is fire-and-forget and irrelevant to reset logic --
+  // stubbed so this test never reaches the network.
+  '../lib/errorReporting': { reportError: async () => false },
+  '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
   '../lib/r2': {
     listObjects: async () => [],
     deleteObject: async (_bucket, key) => { deletedObjectKeys.push(key) },

@@ -161,6 +161,32 @@ interface AppContextValue {
   clearSyncError?: () => void
 }
 
+
+// Sends a browser crash to our own Worker, which forwards it to Sentry.
+//
+// Deliberately uses bare fetch rather than the app's api layer: that layer
+// retries, dispatches auth events and can itself throw -- all reasonable for
+// real requests, all wrong for the last thing that runs after a page has
+// already crashed. Every failure mode here ends in silence on purpose.
+async function reportClientCrash(error: Error, pageId: string): Promise<void> {
+  try {
+    await fetch('/api/system/client-error', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        message: String(error?.message || error).slice(0, 1000),
+        stack: String(error?.stack || '').slice(0, 4000),
+        // The page id, never location.href -- a URL carries the query
+        // string, which is where search terms and membership lookups live.
+        page: pageId,
+      }),
+    })
+  } catch {
+    // Intentionally silent. See the docstring above.
+  }
+}
+
 interface PageErrorBoundaryProps {
   pageId: string
   children: ReactNode
@@ -1018,6 +1044,12 @@ class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBound
     // Page-level crashes should be isolated to the current route, not the
     // entire shell, while still leaving a useful console breadcrumb.
     console.error(`[PageErrorBoundary] Page "${this.props.pageId}" crashed:`, error.message, info.componentStack)
+    // Also report it. Posted to our own Worker, not to Sentry directly:
+    // the DSN stays out of the browser bundle and PII scrubbing lives in
+    // one place server-side. Fire-and-forget with its own catch, because a
+    // failure to REPORT a crash must never become a second crash inside
+    // the handler that is already dealing with one.
+    void reportClientCrash(error, this.props.pageId)
     if (shouldAttemptPublicDomRecovery(this.props.pageId, error) && typeof window !== 'undefined') {
       window.location.reload()
     }

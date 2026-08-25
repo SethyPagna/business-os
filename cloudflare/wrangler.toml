@@ -173,6 +173,18 @@ BUSINESS_OS_ORGANIZATION_SLUG = "leangcosmetics"
 # the organization in the database never stuck. Setting it here is what makes
 # the rename permanent.
 BUSINESS_OS_ORGANIZATION_NAME = "LeangCosmetics"
+
+# Sentry ingest DSN. A DSN is a PUBLIC key by design -- it only permits
+# writing events into this one project, never reading them -- so it belongs
+# in [vars] and not in `wrangler secret`. Absent means reporting is simply
+# skipped, so a local run behaves exactly as it did before this existed.
+SENTRY_DSN = "https://3a7ba49248bf45b90262cdc5709df9c1@o4511967341903872.ingest.us.sentry.io/4511973058543616"
+
+# Sender address for password-reset and verification email. lib/verification.ts
+# requires BOTH this and RESEND_API_KEY; with either missing, email is silently
+# skipped with only a console warning. Must be on a Resend domain whose DNS is
+# verified -- see progress.md's connected-services table.
+RESEND_FROM_EMAIL = "no-reply@leangcosmetics.dpdns.org"
 # Password-reset emails (lib/verification.ts) are sent via Resend. This
 # must be a verified sender/domain on the Resend account, e.g.
 # "Leang Cosmetics <no-reply@leangcosmetics.dpdns.org>". The API key is a
