@@ -22,14 +22,29 @@ import {
 
 const OAUTH_PENDING_TTL_MS = 30 * 60 * 1000
 
-// Same bundled static asset + fallback name the public catalog side
-// already uses (PublicCatalogPage.tsx's DEFAULT_PUBLIC_PORTAL_ICON,
-// portalManifest.ts's DEFAULT_PORTAL_MANIFEST_NAME) -- this app is a
-// single-tenant Leang Cosmetics deployment, so the admin sign-in page's
-// default branding should match, not fall back to the generic internal
-// "Business OS" name/icon. See the brandLogo/brandName state below.
-const DEFAULT_LOGIN_LOGO_SRC = '/leang-cosmetics-icon-512.png'
-const DEFAULT_LOGIN_BRAND_NAME = 'Leang Cosmetics'
+// Admin sign-in is Business OS branding; the storefront is Leang Cosmetics.
+//
+// This REVERSES an earlier decision recorded here, at explicit request
+// (Aug 25 2026): "business-os logo for admin page, default... leang
+// cosmetics logo, wire to everything business logo, public website logo,
+// favicon and the pwa logo for public website". The previous version
+// defaulted this page to the storefront icon on the reasoning that a
+// single-tenant deployment should look like the merchant everywhere. The
+// two brands are now deliberately split by AUDIENCE instead: staff signing
+// into the admin app see the product they are signing into, customers see
+// the shop. It also removes a visible inconsistency -- this page already
+// rendered the heading "Business OS" above the pink storefront icon.
+//
+// Only the DEFAULT changes. A merchant logo configured in settings still
+// wins, via the brandLogo/brandName state below.
+//
+// The storefront's own defaults are untouched and must stay Leang
+// Cosmetics: PublicCatalogPage.tsx's DEFAULT_PUBLIC_PORTAL_ICON (the live
+// customer site, its favicon and its PWA icon) and CatalogPage.tsx's
+// DEFAULT_PORTAL_ICON_SRC (the admin-side preview OF that customer site).
+// tests/brandIcons.test.ts pins the whole split.
+const DEFAULT_LOGIN_LOGO_SRC = '/icon-512.png'
+const DEFAULT_LOGIN_BRAND_NAME = 'Business OS'
 
 type IdValue = string | number
 type TranslateFunction = (key: string) => string | undefined
