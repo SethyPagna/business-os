@@ -12,7 +12,7 @@ import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
-import PaginationControls, { clampPage } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
@@ -334,7 +334,7 @@ export default function AuditLog() {
   const [userFilter, setUserFilter] = useState('all')
   const [auditUsers, setAuditUsers] = useState<AuditUserOption[]>([])
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [totalLogs, setTotalLogs] = useState(0)
   const [groupMode, setGroupMode] = useState<AuditGroupMode>('time')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')

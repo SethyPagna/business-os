@@ -16,7 +16,7 @@ import FilterMenu from '../shared/FilterMenu'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
-import PaginationControls, { clampPage, paginateItems } from '../shared/PaginationControls'
+import PaginationControls, { clampPage, paginateItems, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -242,7 +242,7 @@ export default function Sales() {
   const [salesGroupMode, setSalesGroupMode] = useState<SalesGroupMode>('time')
   const [salesSortDirection, setSalesSortDirection] = useState<SortDirection>('desc')
   const [salesPage, setSalesPage] = useState(1)
-  const [salesPageSize, setSalesPageSize] = useState(50)
+  const [salesPageSize, setSalesPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [collapsedSalesSections, setCollapsedSalesSections] = useState<Set<string>>(() => new Set())
   const [historyReady, setHistoryReady] = useState(false)
   const selectAllRef = useRef<HTMLInputElement>(null)

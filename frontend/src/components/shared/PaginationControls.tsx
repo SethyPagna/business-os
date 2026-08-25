@@ -6,6 +6,26 @@ import PageSizeSelect from './PageSizeSelect'
 
 export const PAGE_SIZE_OPTIONS: number[] = [20, 50, 100]
 
+// The default row count for every list in the admin app.
+//
+// Was written as PAGE_SIZE_OPTIONS[1] -- an index into the options array,
+// which made "the default" and "the middle option" the same fact by
+// accident: reordering or inserting an option would silently move the
+// default. It is now its own named constant, so the two can change
+// independently.
+//
+// 20 rather than 50 by request: 50 rows is a long scroll on a phone and a
+// heavier query for a catalogue this size. Anyone who wants more can still
+// pick 50 or 100 from the selector, and that choice is echoed back by the
+// server and kept.
+export const DEFAULT_PAGE_SIZE = 20
+
+// POS is the one deliberate exception. A cashier is scanning through a grid
+// of product cards looking for the next item rather than reading rows, so
+// paging every 20 interrupts the actual task. 30 keeps that flow while
+// staying well under the old 50.
+export const POS_DEFAULT_PAGE_SIZE = 30
+
 type Translate = (key: string) => string | undefined
 
 type NumericInput = number | string | null | undefined
@@ -27,14 +47,14 @@ export interface PaginationControlsProps {
 }
 
 export function clampPage(page: NumericInput, totalItems: NumericInput, pageSize: NumericInput): number {
-  const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
+  const safePageSize = Math.max(1, Number(pageSize || DEFAULT_PAGE_SIZE))
   const totalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalItems || 0)) / safePageSize))
   return Math.max(1, Math.min(totalPages, Number(page || 1)))
 }
 
-export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 1, pageSize: NumericInput = PAGE_SIZE_OPTIONS[1]): T[] {
+export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 1, pageSize: NumericInput = DEFAULT_PAGE_SIZE): T[] {
   const list = Array.isArray(items) ? items : []
-  const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
+  const safePageSize = Math.max(1, Number(pageSize || DEFAULT_PAGE_SIZE))
   const safePage = clampPage(page, list.length, safePageSize)
   const start = (safePage - 1) * safePageSize
   return list.slice(start, start + safePageSize)
@@ -42,7 +62,7 @@ export function paginateItems<T>(items: readonly T[] = [], page: NumericInput = 
 
 export default function PaginationControls({
   page = 1,
-  pageSize = PAGE_SIZE_OPTIONS[1],
+  pageSize = DEFAULT_PAGE_SIZE,
   totalItems = 0,
   onPageChange,
   onPageSizeChange,
@@ -55,7 +75,7 @@ export default function PaginationControls({
   editablePageInput = true,
   editablePageSizeInput = true,
 }: PaginationControlsProps) {
-  const safePageSize = Math.max(1, Number(pageSize || PAGE_SIZE_OPTIONS[1]))
+  const safePageSize = Math.max(1, Number(pageSize || DEFAULT_PAGE_SIZE))
   const total = Math.max(0, Number(totalItems || 0))
   const totalPages = Math.max(1, Math.ceil(total / safePageSize))
   const safePage = clampPage(page, total, safePageSize)

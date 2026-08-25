@@ -4,12 +4,20 @@ import PageSizeSelect from '../shared/PageSizeSelect'
 
 const CATALOG_PAGE_SIZE_OPTIONS = [20, 50, 100]
 // The preset list's display order is ascending (20/50/100) and unrelated to
-// which one is the actual default -- CATALOG_PAGE_SIZE_OPTIONS[0] used to be
-// read as "the default" by every fallback below, which quietly pinned the
-// default to 20 (the smallest preset) rather than the org-wide "default page
-// size is 50" decision (Part 151). Split the two concerns: options stay
-// ascending for display, CATALOG_DEFAULT_PAGE_SIZE is the actual default.
-export const CATALOG_DEFAULT_PAGE_SIZE = 50
+// which one is the actual default. Keeping those two concerns separate still
+// matters -- reading OPTIONS[0] as "the default" is how this drifted before,
+// and it would drift again the moment someone reorders the presets.
+//
+// The VALUE reverses Part 151's org-wide "default page size is 50" at
+// explicit request (Aug 25 2026): "for the public website also do 20 per
+// page". 50 product cards is a long scroll on a phone, and this is the
+// storefront -- the surface most likely to be opened on one. Recorded rather
+// than quietly overwritten, since Part 151 was a deliberate decision.
+//
+// Matches DEFAULT_PAGE_SIZE in shared/PaginationControls.tsx (the admin
+// side) and the server-side fallback in routes/portal.ts, so a page load
+// that omits pageSize gets the same 20 from either end.
+export const CATALOG_DEFAULT_PAGE_SIZE = 20
 
 type NumericInput = number | string | null | undefined
 type Translate = (key: string) => string | undefined

@@ -1365,7 +1365,10 @@ app.get('/catalog/products/search', async (c) => {
   // here to the public portal's own search endpoint per Part 202 -- this
   // used to default to 20, out of step with every other page's default and
   // with buildPortalCatalog's own bootstrap-snapshot size below).
-  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize || '50', 10) || 50))
+  // 20, matching CATALOG_DEFAULT_PAGE_SIZE on the storefront -- a request
+  // that omits pageSize must get the same page the client would have asked
+  // for, or the first load differs from every later one.
+  const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize || '20', 10) || 20))
   const offset = (page - 1) * pageSize
 
   // Targeted key lookup (not the full loadSettingsMap scan) since this runs

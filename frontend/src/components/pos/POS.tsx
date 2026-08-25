@@ -32,7 +32,7 @@ import {
 } from '../../constants'
 import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
-import PaginationControls from '../shared/PaginationControls'
+import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
@@ -578,7 +578,7 @@ export default function POS() {
   const [filterOpen,      setFilterOpen]      = useState(false)
 
   const [productPage, setProductPage] = useState(1)
-  const [productPageSize, setProductPageSize] = useState(50)
+  const [productPageSize, setProductPageSize] = useState(POS_DEFAULT_PAGE_SIZE)
   const [productTotal, setProductTotal] = useState(0)
   const [productFilterMeta, setProductFilterMeta] = useState<ProductFilterMeta>({ brands: [], suppliers: [], initials: [] })
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)

@@ -8,6 +8,7 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
+import { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import type { QueryParams } from '../../api/query.ts'
@@ -256,7 +257,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
   const [loadError, setLoadError] = useState('')
   const [bulkActionBusy, setBulkActionBusy] = useState(false)
   const [customerPage, setCustomerPage] = useState(1)
-  const [customerPageSize, setCustomerPageSize] = useState(50)
+  const [customerPageSize, setCustomerPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [customerTotal, setCustomerTotal] = useState(0)
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')

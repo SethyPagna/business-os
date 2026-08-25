@@ -15,7 +15,7 @@ import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.t
 import Modal from '../shared/Modal'
 import SearchInput from '../shared/SearchInput'
 import FilterMenu, { type FilterOption } from '../shared/FilterMenu'
-import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
+import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   beginTrackedRequest,
@@ -90,7 +90,7 @@ function formatFeeDate(value: string | null | undefined): string {
   return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: PAGE_SIZE_OPTIONS[1], offset: 0, summary: [] }
+const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: DEFAULT_PAGE_SIZE, offset: 0, summary: [] }
 
 export default function FeesPage() {
   const { getPermissionTier, t, notify, fmtUSD, fmtKHR } = useApp()
@@ -123,7 +123,7 @@ export default function FeesPage() {
   const [branchFilter, setBranchFilter] = useState('')
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_OPTIONS[1])
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
 
   const [modal, setModal] = useState<FeeModal>(null)
   const [selected, setSelected] = useState<FeeRecord | null>(null)

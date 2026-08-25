@@ -19,7 +19,7 @@ import AppSelect from '../shared/AppSelect'
 import PageSizeSelect from '../shared/PageSizeSelect'
 import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
-import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
+import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import ProductsListSurface from './surfaces/ProductsListSurface'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
@@ -633,7 +633,7 @@ function ProductsFullEditor() {
   // stays the default.
   const [searchMode, setSearchMode] = useState<SearchMode>('AND')
   const [productPage, setProductPage] = useState(1)
-  const [productPageSize, setProductPageSize] = useState(50)
+  const [productPageSize, setProductPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [productPageDraft, setProductPageDraft] = useState('1')
   const [productTotal, setProductTotal] = useState(0)
   const [productFilterMeta, setProductFilterMeta] = useState<ProductFilterMeta>({ brands: [], categories: [], suppliers: [], initials: [] })
@@ -1921,7 +1921,7 @@ function ProductsFullEditor() {
     page: productPage,
     total: productTotal,
     pageSize: productPageSize,
-    fallbackPageSize: PAGE_SIZE_OPTIONS[1],
+    fallbackPageSize: DEFAULT_PAGE_SIZE,
     pending: loading && !loadedOnceRef.current,
     pendingLabel: tr('loading', 'Loading'),
   }), [loading, productPage, productPageSize, productTotal, tr])

@@ -4,7 +4,7 @@ import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Modal from '../shared/Modal'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
-import PaginationControls, { paginateItems } from '../shared/PaginationControls'
+import PaginationControls, { paginateItems, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
@@ -266,7 +266,7 @@ export function ContactTable<T extends ContactRow>({
 }: ContactTableProps<T>) {
   const selectAllRef = useRef<HTMLInputElement | null>(null)
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(50)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const usingControlledPagination = Number.isFinite(Number(controlledPage)) && Number.isFinite(Number(controlledPageSize))
   const activePage = usingControlledPagination ? Number(controlledPage) : page
   const activePageSize = usingControlledPagination ? Number(controlledPageSize) : pageSize

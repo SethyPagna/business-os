@@ -33,7 +33,7 @@ import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import PageSizeSelect from '../shared/PageSizeSelect'
-import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage } from '../shared/PaginationControls'
+import PaginationControls, { PAGE_SIZE_OPTIONS, clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
@@ -575,7 +575,7 @@ export default function Inventory() {
   // IssuesFilterOptions.tsx and searchMatch.ts's ISSUE_STATE_KEYS.
   const [issueFilter,   setIssueFilter]   = useState('all')
   const [inventoryProductPage, setInventoryProductPage] = useState(1)
-  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(50)
+  const [inventoryProductPageSize, setInventoryProductPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [inventoryProductPageDraft, setInventoryProductPageDraft] = useState('1')
   const [inventoryProductTotal, setInventoryProductTotal] = useState(0)
   const [inventoryProductsLoaded, setInventoryProductsLoaded] = useState(false)
@@ -2524,7 +2524,7 @@ export default function Inventory() {
     ?? visibleInventoryStats.membershipDiscountUsd,
   )
   const totalProfit   = totalRevenue - totalCOGS
-  const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || PAGE_SIZE_OPTIONS[1]))
+  const inventoryProductSafePageSize = Math.max(1, Number(inventoryProductPageSize || DEFAULT_PAGE_SIZE))
   const inventoryProductSafePage = clampPage(inventoryProductPage, totalProducts, inventoryProductSafePageSize)
   const inventoryProductTotalPages = Math.max(1, Math.ceil(Math.max(0, Number(totalProducts || 0)) / inventoryProductSafePageSize))
 
