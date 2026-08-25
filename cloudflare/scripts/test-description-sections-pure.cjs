@@ -153,6 +153,41 @@ check('classifyProducts routes imported descriptions through the whitelist', () 
   )
 })
 
+// ---------------------------------------------------------------------------
+// Brand / Category / Shop's Product Name are dropped for a DIFFERENT reason
+// than an unrecognised block: the app already holds those values in real
+// columns and every display surface wires them in from there. Importing a
+// supplier's prose copy would store the value twice, let the two drift, and
+// spend description bytes on every row of an 8,700-row file for text nothing
+// reads.
+// ---------------------------------------------------------------------------
+check("Brand, Category and Shop's Product Name are dropped -- they are auto-wired from real columns", () => {
+  const result = sanitizeImportedDescription([
+    '"Brand": Abercrombie',
+    '"Category": Fragrance - Perfume',
+    '"Shop\'s Product Name": Abercrombie Authantic 10ml',
+    '"Ingredients": Alcohol Denat.',
+  ].join('\n'))
+  assert.ok(!/Abercrombie/.test(result.text), 'the brand block must not reach the description')
+  assert.ok(!/Fragrance/.test(result.text), 'the category block must not reach the description')
+  assert.ok(!/Authantic/.test(result.text), "the shop's name block must not reach the description")
+  assert.ok(/Alcohol Denat\./.test(result.text), 'a real section either side still survives')
+})
+
+check('auto-wired labels are reported separately from genuinely unknown ones', () => {
+  const result = sanitizeImportedDescription('"Brand": X\n"Vendor SKU": ZZ-9\n"Ingredients": Water')
+  assert.deepEqual(result.autoWired, ['Brand'], 'Brand is expected, not suspicious')
+  assert.deepEqual(result.ignored, ['Vendor SKU'], 'only genuinely unknown labels belong in ignored')
+})
+
+check('auto-wired label spellings are tolerated (plural, possessive, missing apostrophe)', () => {
+  for (const label of ['Brands', 'Categories', 'Shops Product Name', 'Shop Product Name', 'Product Name']) {
+    const result = sanitizeImportedDescription(`"${label}": something\n"Ingredients": Water`)
+    assert.equal(result.ignored.length, 0, `${label} should be classified as auto-wired, not unknown`)
+    assert.equal(result.autoWired.length, 1, `${label} should be recorded as auto-wired`)
+  }
+})
+
 fs.rmSync(tmpDir, { recursive: true, force: true })
 console.log(`\n${passed} check(s) passed.`)
 if (process.exitCode) console.log('SOME CHECKS FAILED')

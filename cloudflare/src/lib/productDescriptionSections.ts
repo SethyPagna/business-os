@@ -60,6 +60,27 @@ for (const key of SECTION_ORDER) {
   for (const alias of LABEL_ALIASES[key]) ALIAS_LOOKUP.set(alias, key)
 }
 
+// Labels that are dropped for a DIFFERENT reason than the rest: the app
+// already holds this data in a real column, and every display surface wires
+// it in from there.
+//
+// The portal's product detail renders Category and Brand from the
+// `categories`/`brands` columns and the shop's name from `products.name`.
+// Importing a supplier's prose copy of the same thing would store the value
+// twice, let the two drift apart, and cost description bytes on every row of
+// an 8,700-row file for text nothing reads.
+//
+// Kept separate from the unrecognised bucket so `ignored` stays meaningful:
+// an unrecognised label is something the operator may want to look at, while
+// these are expected and correct to drop. Reporting them as "ignored" would
+// make the signal useless on exactly the file this rule exists for.
+const AUTO_WIRED_LABELS = new Set([
+  'brand', 'brands',
+  'category', 'categories',
+  "shop's product name", 'shops product name', 'shop product name', 'shop name',
+  'product name',
+])
+
 /**
  * Reduces a label to its comparable form: strips surrounding quotes, a
  * trailing question mark, and any non-alphanumeric noise, then collapses
@@ -88,6 +109,12 @@ export type SanitizedDescription = {
   kept: ImportDescriptionSectionKey[]
   /** Raw labels that were recognised as headings but are not on the whitelist. */
   ignored: string[]
+  /**
+   * Labels dropped because the app already stores that value in a real
+   * column and wires it in (Brand, Category, Shop's Product Name). Reported
+   * separately from `ignored` because these are expected, not suspicious.
+   */
+  autoWired: string[]
 }
 
 /**
@@ -100,11 +127,12 @@ export type SanitizedDescription = {
  */
 export function sanitizeImportedDescription(raw: unknown): SanitizedDescription {
   const source = String(raw ?? '').replace(/\r\n/g, '\n').trim()
-  if (!source) return { text: '', kept: [], ignored: [] }
+  if (!source) return { text: '', kept: [], ignored: [], autoWired: [] }
 
   const lines = source.split('\n')
   const collected = new Map<ImportDescriptionSectionKey, string[]>()
   const ignored: string[] = []
+  const autoWired: string[] = []
   const leading: string[] = []
 
   // null while still in the pre-heading intro; a key while inside an accepted
@@ -128,7 +156,11 @@ export function sanitizeImportedDescription(raw: unknown): SanitizedDescription 
         // just because it had no label we understood.
         current = 'skip'
         const original = match[1].trim()
-        if (original && !ignored.includes(original)) ignored.push(original)
+        if (AUTO_WIRED_LABELS.has(label)) {
+          if (original && !autoWired.includes(original)) autoWired.push(original)
+        } else if (original && !ignored.includes(original)) {
+          ignored.push(original)
+        }
       }
       continue
     }
@@ -168,5 +200,5 @@ export function sanitizeImportedDescription(raw: unknown): SanitizedDescription 
     kept.unshift('introduction')
   }
 
-  return { text: parts.join('\n\n'), kept, ignored }
+  return { text: parts.join('\n\n'), kept, ignored, autoWired }
 }
