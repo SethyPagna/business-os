@@ -192,19 +192,88 @@ export async function listCloudflareBackups(env: Env) {
   return items.sort((a, b) => String(b.uploaded || '').localeCompare(String(a.uploaded || '')))
 }
 
+// --- streaming backup writer ------------------------------------------
+//
+// The backup used to build ONE object holding every row of every table and
+// then JSON.stringify it:
+//
+//   for (const table of BACKUP_TABLES) {
+//     const result = await env.DB.prepare(`SELECT * FROM ...`).all()
+//     tables[table] = { columns, rows }
+//   }
+//   await env.ASSETS.put(key, JSON.stringify(payload))
+//
+// On a real catalogue that is tens of thousands of rows -- products alone
+// carry long multi-line descriptions -- held as JS objects AND again as one
+// serialized string. A Worker has a hard 128MB ceiling, and this crossed it:
+//
+//   POST /api/system/reset-data - Exceeded Memory Limit
+//   X [ERROR] Error: Worker exceeded memory limit.
+//
+// That is why EVERY reset failed, not just one mode: a fresh backup is a
+// hard prerequisite in front of the delete, so the reset never got as far as
+// deleting anything. Manual backups of a database this size were failing for
+// the same reason.
+//
+// The output format is byte-for-byte the same JSON document, so restore and
+// every existing backup file keep working -- only how it is produced
+// changed. Two bounds:
+//   - rows are read a page at a time (TABLE_PAGE_SIZE), never a whole table
+//   - JSON is written into an R2 multipart upload and flushed once a part
+//     is big enough, so at most one part is ever in memory
+const TABLE_PAGE_SIZE = 500
+
+// R2 requires every part except the last to be at least 5MB. 6MB gives
+// headroom over that floor while keeping peak memory small.
+const MIN_R2_PART_BYTES = 6 * 1024 * 1024
+
+class R2StreamWriter {
+  private parts: R2UploadedPart[] = []
+  private buffer: string[] = []
+  private bufferBytes = 0
+  private readonly encoder = new TextEncoder()
+
+  constructor(private readonly upload: R2MultipartUpload) {}
+
+  async write(text: string): Promise<void> {
+    if (!text) return
+    this.buffer.push(text)
+    // Measured in BYTES, not characters -- R2's part floor is bytes, and
+    // this payload is full of non-ASCII (Khmer product names, currency
+    // symbols) where the two differ by up to 3x.
+    this.bufferBytes += this.encoder.encode(text).byteLength
+    if (this.bufferBytes >= MIN_R2_PART_BYTES) await this.flush()
+  }
+
+  private async flush(): Promise<void> {
+    if (!this.buffer.length) return
+    const body = this.buffer.join('')
+    this.buffer = []
+    this.bufferBytes = 0
+    const part = await this.upload.uploadPart(this.parts.length + 1, body)
+    this.parts.push(part)
+  }
+
+  async finish(): Promise<void> {
+    await this.flush()
+    await this.upload.complete(this.parts)
+  }
+
+  async abort(): Promise<void> {
+    // Without this an interrupted run leaves an incomplete multipart upload
+    // holding storage in the bucket indefinitely.
+    try {
+      await this.upload.abort()
+    } catch (_) {
+      // Nothing useful to do if the abort itself fails.
+    }
+  }
+}
+
 export async function createCloudflareBackup(env: Env, source: 'manual' | 'scheduled' = 'manual') {
   const createdAt = new Date().toISOString()
-  const tables: BackupPayload['tables'] = {}
   let rowCount = 0
-
-  for (const table of BACKUP_TABLES) {
-    if (!(await tableExists(env, table))) continue
-    const columns = await tableColumns(env, table)
-    const result = await env.DB.prepare(`SELECT * FROM ${qid(table)}`).all<Record<string, unknown>>()
-    const rows = result.results || []
-    tables[table] = { columns, rows }
-    rowCount += rows.length
-  }
+  let tableCount = 0
 
   const assets = await listAssets(env)
   const backupName = `business-os-cloudflare-${stamp(new Date(createdAt))}`
@@ -267,28 +336,77 @@ export async function createCloudflareBackup(env: Env, source: 'manual' | 'sched
     if (toCopy.length) await setAssetCopyCursor(env, toCopy[toCopy.length - 1].key)
   }
 
-  const payload: BackupPayload = {
-    format: 'business-os-cloudflare-backup',
-    formatVersion: 1,
-    createdAt,
-    source,
-    runtime: 'cloudflare-workers',
-    tables,
-    r2: { bucket: 'business-os-assets', assets, assetsPrefix, copiedKeys, assetCopyProgress },
-    summary: {
-      tableCount: Object.keys(tables).length,
+  const key = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`
+  const format = 'business-os-cloudflare-backup'
+
+  const upload = await env.ASSETS.createMultipartUpload(key, {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { source, createdAt, format },
+  })
+  const writer = new R2StreamWriter(upload)
+
+  try {
+    // Same document as before, emitted in order rather than assembled.
+    await writer.write(`{"format":${JSON.stringify(format)},"formatVersion":1,`)
+    await writer.write(`"createdAt":${JSON.stringify(createdAt)},`)
+    await writer.write(`"source":${JSON.stringify(source)},`)
+    await writer.write('"runtime":"cloudflare-workers","tables":{')
+
+    for (const table of BACKUP_TABLES) {
+      if (!(await tableExists(env, table))) continue
+      const columns = await tableColumns(env, table)
+      await writer.write(`${tableCount ? ',' : ''}${JSON.stringify(table)}:{"columns":${JSON.stringify(columns)},"rows":[`)
+      tableCount += 1
+
+      // Paged so a single large table is never fully resident. Ordered by
+      // rowid so paging is stable -- without an ORDER BY, SQLite may return
+      // rows in a different order between pages and a row could be emitted
+      // twice or skipped.
+      let offset = 0
+      let rowsInTable = 0
+      for (;;) {
+        const page = await env.DB
+          .prepare(`SELECT * FROM ${qid(table)} ORDER BY rowid LIMIT ? OFFSET ?`)
+          .bind(TABLE_PAGE_SIZE, offset)
+          .all<Record<string, unknown>>()
+        const rows = page.results || []
+        if (!rows.length) break
+        for (const row of rows) {
+          await writer.write(`${rowsInTable ? ',' : ''}${JSON.stringify(row)}`)
+          rowsInTable += 1
+        }
+        if (rows.length < TABLE_PAGE_SIZE) break
+        offset += TABLE_PAGE_SIZE
+      }
+      rowCount += rowsInTable
+      await writer.write(']}')
+    }
+
+    await writer.write('},"r2":')
+    await writer.write(JSON.stringify({ bucket: 'business-os-assets', assets, assetsPrefix, copiedKeys, assetCopyProgress }))
+    await writer.write(',"summary":')
+    await writer.write(JSON.stringify({
+      tableCount,
       rowCount,
       assetCount: assets.length,
       assetsBackedUp: copiedKeys.length,
       assetsSkipped: Math.max(0, assets.length - copiedKeys.length),
-    },
+    }))
+    await writer.write('}')
+    await writer.finish()
+  } catch (error) {
+    await writer.abort()
+    throw error
   }
-  const key = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`
-  await env.ASSETS.put(key, JSON.stringify(payload), {
-    httpMetadata: { contentType: 'application/json; charset=utf-8' },
-    customMetadata: { source, createdAt, format: payload.format },
-  })
-  return { key, name: key.slice(CLOUDFLARE_BACKUP_PREFIX.length), createdAt, summary: payload.summary }
+
+  const summary = {
+    tableCount,
+    rowCount,
+    assetCount: assets.length,
+    assetsBackedUp: copiedKeys.length,
+    assetsSkipped: Math.max(0, assets.length - copiedKeys.length),
+  }
+  return { key, name: key.slice(CLOUDFLARE_BACKUP_PREFIX.length), createdAt, summary }
 }
 
 // Lightweight backup for /reset-section (system.ts): dumps ONLY the small

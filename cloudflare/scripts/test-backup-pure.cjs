@@ -70,6 +70,7 @@ for (const fn of [createCloudflareBackup, restoreCloudflareBackup, pruneCloudfla
 //   SELECT name FROM sqlite_master WHERE type = ? AND name = ?  (tableExists)
 //   PRAGMA table_info("table")                                  (tableColumns)
 //   SELECT * FROM "table"                                       (read all rows)
+//   SELECT * FROM "table" ORDER BY rowid LIMIT ? OFFSET ?       (paged read)
 //   DELETE FROM "table"  /  INSERT INTO "table" (...) VALUES (...) (restore, via .batch)
 // ---------------------------------------------------------------------
 function makeFakeD1(schema) {
@@ -87,6 +88,15 @@ function makeFakeD1(schema) {
     if ((m = sql.match(/^SELECT \* FROM "([^"]+)"$/))) {
       const table = schema[m[1]]
       return { all: () => ({ results: table ? table.rows.slice() : [] }) }
+    }
+    // Paged read, used by the streamed backup writer. Real paging is what
+    // keeps a large table from ever being fully resident, so the fake has
+    // to honour LIMIT/OFFSET rather than returning everything -- otherwise
+    // a writer that ignored its own paging would still pass here.
+    if ((m = sql.match(/^SELECT \* FROM "([^"]+)" ORDER BY rowid LIMIT \? OFFSET \?$/))) {
+      const table = schema[m[1]]
+      const [limit, offset] = values
+      return { all: () => ({ results: table ? table.rows.slice(offset, offset + limit) : [] }) }
     }
     if ((m = sql.match(/^DELETE FROM "([^"]+)"$/))) {
       const table = schema[m[1]]
@@ -157,6 +167,35 @@ function makeFakeR2(seed = {}) {
     },
     async put(key, data, opts) {
       store.set(key, { body: data, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: String(data ?? '').length, uploaded: new Date() })
+    },
+    // Multipart support, added when createCloudflareBackup moved off a
+    // single put() of one giant JSON string (which was exceeding the
+    // Worker's 128MB memory limit on a real catalogue) onto a streamed
+    // upload. Parts are concatenated in the order complete() is given
+    // them -- the real R2 orders by partNumber, and asserting that here
+    // would catch a writer that numbered its parts wrongly.
+    async createMultipartUpload(key, opts) {
+      const parts = new Map()
+      return {
+        key,
+        uploadId: `upload-${key}`,
+        async uploadPart(partNumber, body) {
+          parts.set(partNumber, String(body ?? ''))
+          return { partNumber, etag: `etag-${partNumber}` }
+        },
+        async complete(uploaded) {
+          const body = uploaded
+            .map((part) => part.partNumber)
+            .sort((a, b) => a - b)
+            .map((n) => parts.get(n) ?? '')
+            .join('')
+          store.set(key, { body, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: body.length, uploaded: new Date() })
+          return { key, etag: 'etag-complete' }
+        },
+        async abort() {
+          parts.clear()
+        },
+      }
     },
     async delete(key) {
       store.delete(key)
