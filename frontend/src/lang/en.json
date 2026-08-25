@@ -1514,6 +1514,7 @@
   "image_skipped": "image skipped",
   "image_upload_failed": "Image upload failed",
   "images": "Images",
+  "images_managed_on_group": "Photos belong to the whole group, not to this row. Add or change them from the group title above the rows. Give this row its own name to make it a separate product with its own photos.",
   "images_optional": "Images (optional)",
   "img": "Img",
   "img_rule_1": "Filename must match product name exactly (e.g. Coffee Latte.jpg)",

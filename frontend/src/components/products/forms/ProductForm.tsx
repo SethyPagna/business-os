@@ -406,6 +406,37 @@ export default function ProductForm({
       .some((candidate) => Number(candidate?.id || 0) !== currentProductId
         && String(candidate?.name || '').trim().toLowerCase() === name)
   }, [groupCandidates, initialForm.name, currentProductId])
+  // A group is ONE product to the customer, so it carries ONE set of photos.
+  // The owner is the lowest-id row sharing the name -- the same "first row
+  // wins" tie-break the identity rule uses everywhere else, so every surface
+  // independently agrees on which row that is without needing a stored flag.
+  //
+  // Child rows therefore do not get their own uploader: the Choose File /
+  // Take Photo / Open Files controls are hidden for them and the group's
+  // images are managed from the group title instead (Products.tsx's
+  // renderGroupActions "Add image", which opens THIS form for the lead).
+  // Without that, three sibling rows could each hold three different photos
+  // and the group header would show whichever row happened to be lead --
+  // the other six silently invisible.
+  //
+  // Renaming a child out of the group makes it a standalone product, at
+  // which point this recomputes and it regains its own uploader. That falls
+  // out of name-based grouping rather than needing its own code path, which
+  // is exactly why the name is the group axis.
+  const groupImageOwnerId = useMemo(() => {
+    if (!isGroupedProduct || !currentProductId) return null
+    const name = String(initialForm.name || '').trim().toLowerCase()
+    const ids = (Array.isArray(groupCandidates) ? groupCandidates : [])
+      .filter((candidate) => String(candidate?.name || '').trim().toLowerCase() === name)
+      .map((candidate) => Number(candidate?.id || 0))
+      .filter((id) => id > 0)
+    ids.push(currentProductId)
+    return Math.min(...ids)
+  }, [groupCandidates, initialForm.name, currentProductId, isGroupedProduct])
+  // True when this row is a CHILD of a name group: the group owns the photos
+  // and this row is not the owner.
+  const imagesOwnedByGroupLead = groupImageOwnerId != null && groupImageOwnerId !== currentProductId
+
   // Unlocked only for this open/edit session -- resets on every tab-reset
   // (see the effect below), never persisted, so reopening the form always
   // starts locked again for a still-grouped product.
@@ -766,8 +797,22 @@ export default function ProductForm({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{tr('upload_image', 'Upload Image', 'បង្ហោះរូបភាព')}</p>
-              <p className="text-xs text-gray-400">{imageList.length}/{MAX_PRODUCT_GALLERY_IMAGES}</p>
+              {imagesOwnedByGroupLead ? null : <p className="text-xs text-gray-400">{imageList.length}/{MAX_PRODUCT_GALLERY_IMAGES}</p>}
             </div>
+            {imagesOwnedByGroupLead ? (
+              /* Child row of a name group: the group is one product to the
+                 customer and carries one set of photos, managed from the
+                 group title. Explaining that here beats hiding the section
+                 outright -- otherwise the uploader simply vanishes with no
+                 reason given, which reads as a bug. */
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                {tr(
+                  'images_managed_on_group',
+                  'Photos belong to the whole group, not to this row. Add or change them from the group title above the rows. Give this row its own name to make it a separate product with its own photos.',
+                  'រូបភាពជាកម្មសិទ្ធិរបស់ក្រុមទាំងមូល មិនមែនជួរនេះទេ។ សូមបន្ថែម ឬប្តូរពីចំណងជើងក្រុមខាងលើ។ ដាក់ឈ្មោះផ្សេងឲ្យជួរនេះ ដើម្បីធ្វើឲ្យវាក្លាយជាផលិតផលដាច់ដោយឡែក ដែលមានរូបភាពផ្ទាល់ខ្លួន។',
+                )}
+              </p>
+            ) : (
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-secondary text-sm" onClick={addImages} disabled={saving || imageUploading}>
                 {imageUploading ? tr('uploading', 'Uploading...', 'កំពុងបង្ហោះ...') : tr('choose_file', 'Choose File', 'ជ្រើសរើសឯកសារ')}
@@ -779,7 +824,8 @@ export default function ProductForm({
                 {tr('open_files', 'Open Files', 'បើកឯកសារ') || tr('files', 'Files', 'ឯកសារ')}
               </button>
             </div>
-            {imageList.length ? (
+            )}
+            {imageList.length && !imagesOwnedByGroupLead ? (
               <>
                 {imageList.length > 1 ? (
                   <p className="text-[11px] text-gray-400">

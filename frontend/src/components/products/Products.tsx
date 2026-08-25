@@ -74,7 +74,7 @@ import {
 import {
   buildProductLightboxGalleryInput,
   buildProductLightboxState,
-  buildProductThumbnailState,
+  buildGroupThumbnailState, buildProductThumbnailState,
   normalizeProductGallery,
   updateProductLightboxIndex,
 } from './helpers/productGalleryHelpers.ts'
@@ -3094,7 +3094,7 @@ function ProductsFullEditor() {
   // the smaller w-10 h-10, and this header sits inline next to the group
   // title/chevron rather than as its own block, so it stays compact there).
   const renderGroupThumbnail = useCallback((group: { rows?: ProductRecord[]; leadProduct?: ProductRecord }) => {
-    const state = buildProductThumbnailState(group.leadProduct)
+    const state = buildGroupThumbnailState(group.rows, group.leadProduct)
     return state.hasImage
       ? <ProductImg src={state.thumbnail} alt={String(group.leadProduct?.name || group.rows?.[0]?.name || '')} className="h-14 w-14 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in sm:h-8 sm:w-8 sm:rounded-lg dark:bg-slate-800" onClick={(event) => { event.stopPropagation(); openLightbox(state.gallery, 0, String(group.leadProduct?.name || group.rows?.[0]?.name || '')) }} />
       : <ProductImagePlaceholder className="h-14 w-14 rounded-xl sm:h-8 sm:w-8 sm:rounded-lg" compact />

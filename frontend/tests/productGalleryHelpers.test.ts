@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {
+  buildGroupThumbnailState,
   buildProductThumbnailState,
   buildProductLightboxGalleryInput,
   buildProductLightboxState,
@@ -148,5 +149,47 @@ assert.deepEqual(
 )
 
 assert.equal(updateProductLightboxIndex(null, 1), null, 'lightbox index update preserves null state')
+
+
+// ---------------------------------------------------------------------------
+// buildGroupThumbnailState -- a group is one product carrying one set of
+// photos, owned by its lead row. But imported data routinely leaves the photo
+// on a NON-lead row: the importer attaches each image to the row it matched,
+// while which row ends up lead is decided by id. Reading the lead alone showed
+// a grey placeholder for groups that demonstrably had a photo, with no way to
+// reach it -- data present but invisible.
+// ---------------------------------------------------------------------------
+
+assert.equal(
+  buildGroupThumbnailState([{ id: 2, image_path: '/child.jpg' }], { id: 1, image_path: '/lead.jpg' }).thumbnail,
+  '/lead.jpg',
+  'the lead row owns the group photo and wins whenever it has one',
+)
+
+assert.equal(
+  buildGroupThumbnailState(
+    [{ id: 1, image_path: null }, { id: 2, image_path: '/child.jpg' }],
+    { id: 1, image_path: null },
+  ).thumbnail,
+  '/child.jpg',
+  'a photo on any member row must still be shown, never left invisible',
+)
+
+assert.equal(
+  buildGroupThumbnailState(
+    [{ id: 1, image_path: null }, { id: 2, image_path: '' }],
+    { id: 1, image_path: null },
+  ).hasImage,
+  false,
+  'reports no image only when genuinely no row has one',
+)
+
+assert.equal(buildGroupThumbnailState(null, null).hasImage, false, 'a null row list is safe')
+assert.equal(buildGroupThumbnailState([], undefined).hasImage, false, 'an empty group is safe')
+assert.equal(
+  buildGroupThumbnailState([null, undefined], null).hasImage,
+  false,
+  'null entries inside the row list are skipped rather than throwing',
+)
 
 console.log('productGalleryHelpers tests passed')

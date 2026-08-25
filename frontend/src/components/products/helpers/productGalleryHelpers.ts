@@ -79,6 +79,36 @@ export function buildProductThumbnailState(product?: ProductGalleryRecord | null
   }
 }
 
+/**
+ * Thumbnail for a whole name-group.
+ *
+ * A group is ONE product to the customer and carries one set of photos,
+ * owned by the group's lead row (lowest id -- the same "first row wins"
+ * tie-break the identity rule uses elsewhere). But a group assembled from
+ * imported data can easily have its photo sitting on a NON-lead row: the
+ * importer attaches each image to the row it matched, and which row ends up
+ * lead is decided by id, not by who has a picture.
+ *
+ * Reading the lead alone therefore showed a grey placeholder for groups that
+ * demonstrably had a photo, with no way to reach it -- data present but
+ * invisible. Falling back to the first member that actually has one fixes
+ * that without changing who OWNS the images: uploads still go to the lead.
+ */
+export function buildGroupThumbnailState(
+  rows?: readonly (ProductGalleryRecord | null | undefined)[] | null,
+  lead?: ProductGalleryRecord | null,
+  limit: unknown = MAX_PRODUCT_GALLERY_IMAGES,
+): ProductThumbnailState {
+  const leadState = buildProductThumbnailState(lead, limit)
+  if (leadState.hasImage) return leadState
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (!row) continue
+    const state = buildProductThumbnailState(row, limit)
+    if (state.hasImage) return state
+  }
+  return leadState
+}
+
 export function resolveProductImageUrl(src: unknown): string {
   const raw = String(src || '').trim()
   if (!raw) return ''
