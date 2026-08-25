@@ -227,7 +227,11 @@ type ProductFilterMeta = {
   initials: ProductFilterInitial[]
 }
 
-type BulkEditForm = Record<string, string | number | undefined> & {
+// `boolean` is in the index signature for the relative price-adjustment
+// controls below (which fields to move, whether to skip unpriced products) --
+// they are checkboxes, and coercing them to 'true'/'false' strings here
+// would just move the parsing somewhere less obvious.
+type BulkEditForm = Record<string, string | number | boolean | undefined> & {
   action?: string
   branchId?: EntityId | ''
   brand?: string
@@ -235,6 +239,8 @@ type BulkEditForm = Record<string, string | number | undefined> & {
   low_stock_threshold?: string | number
   cost_price_khr?: string | number
   cost_price_usd?: string | number
+  purchase_price_khr?: string | number
+  purchase_price_usd?: string | number
   qty?: string | number
   selling_price_khr?: string | number
   selling_price_usd?: string | number
@@ -242,6 +248,14 @@ type BulkEditForm = Record<string, string | number | undefined> & {
   special_price_usd?: string | number
   supplier?: string
   unit?: string
+  // Relative price adjustment (see runBulkProductPriceAdjustment).
+  adjust_direction?: string
+  adjust_amount?: string | number
+  adjust_currency?: string
+  adjust_selling?: boolean
+  adjust_special?: boolean
+  adjust_cost?: boolean
+  adjust_skip_zero?: boolean
 }
 
 type BulkAddModalState = {
@@ -2508,6 +2522,127 @@ function ProductsFullEditor() {
     }
   }, [actionHistory, bulkActionBusy, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleCount, selectedVisibleIds, snapshotProductsByIds, user?.id, user?.name])
 
+  // Relative price change ("add $1 to all of these"), as opposed to
+  // runBulkProductUpdates above which writes the SAME value to every
+  // selected row. Each product's new price depends on its own current one,
+  // so the payload differs per row and this cannot reuse that function.
+  //
+  // The count in the confirmation is the number of products that will
+  // ACTUALLY change, not the number selected -- the two differ whenever
+  // "skip products priced 0" is on, or a decrease leaves a price already at
+  // 0 untouched, and confirming "update 40 products" before changing 12
+  // would be a lie.
+  const runBulkProductPriceAdjustment = useCallback(async () => {
+    if (!selectedVisibleIds.length || bulkActionBusy) return
+    const {
+      buildProductBulkPriceAdjustments,
+      buildProductBulkUpdatePayload,
+    } = await loadProductWriteHelpers()
+
+    const fields: string[] = []
+    if (bulkEditForm.adjust_selling !== false) {
+      fields.push(bulkEditForm.adjust_currency === 'khr' ? 'selling_price_khr' : 'selling_price_usd')
+    }
+    if (bulkEditForm.adjust_special) {
+      fields.push(bulkEditForm.adjust_currency === 'khr' ? 'special_price_khr' : 'special_price_usd')
+    }
+    if (bulkEditForm.adjust_cost) {
+      fields.push(bulkEditForm.adjust_currency === 'khr' ? 'purchase_price_khr' : 'purchase_price_usd')
+    }
+
+    const selected = selectedVisibleIds
+      .map((id) => productsById.get(Number(id)))
+      .filter(Boolean) as ProductRecord[]
+
+    const adjustments = buildProductBulkPriceAdjustments(selected, {
+      direction: bulkEditForm.adjust_direction === 'decrease' ? 'decrease' : 'increase',
+      amount: bulkEditForm.adjust_amount,
+      fields: fields as never,
+      skipZeroPriced: !!bulkEditForm.adjust_skip_zero,
+    })
+
+    if (!adjustments.length) {
+      notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
+      return
+    }
+    const verb = bulkEditForm.adjust_direction === 'decrease'
+      ? tr('bulk_price_decrease', 'Decrease')
+      : tr('bulk_price_increase', 'Increase')
+    if (!window.confirm(`${verb} prices on ${adjustments.length} product${adjustments.length === 1 ? '' : 's'}?`)) return
+
+    const adjustedIds = adjustments.map((entry) => entry.id)
+    const snapshots = snapshotProductsByIds(adjustedIds)
+    setBulkActionBusy(true)
+    let done = 0
+    let failed = 0
+    try {
+      const updateRun = await runConcurrentTasks<{ id: number; updates: Record<string, unknown> }, number>(
+        adjustments,
+        async (entry: { id: number; updates: Record<string, unknown> }) => {
+          const current = productsById.get(entry.id)
+          const result = await runProductWriteMutation(
+            () => productApi.updateProduct(
+              entry.id,
+              buildProductBulkUpdatePayload(entry.updates, current, { id: user?.id, name: user?.name }),
+            ),
+            'Bulk price adjustment',
+          )
+          if (result?.success === false) throw new Error(result.error || 'Failed to update product')
+          return entry.id
+        },
+      )
+      const { done: completedCount, failed: failedCount, failedIds } = summarizeProductRun(updateRun)
+      done = completedCount
+      failed = failedCount
+      setSelectedIds(new Set(failedIds))
+      setBulkEditMode(null)
+      setBulkEditForm({})
+
+      // Same pinning as the sibling bulk update: a price change can move a
+      // row out of an active price-based filter, and it shouldn't vanish
+      // mid-review.
+      const updatesById = new Map(adjustments.map((entry) => [entry.id, entry.updates]))
+      for (const snapshot of snapshots) {
+        const snapshotId = Number(snapshot?.id || 0)
+        if (!snapshotId || failedIds.includes(snapshotId)) continue
+        pinnedEditedProductsRef.current.set(snapshotId, { ...snapshot, ...(updatesById.get(snapshotId) || {}) } as ProductRecord)
+      }
+      await load(true)
+
+      const restoredSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
+      if (done > 0 && restoredSnapshots.length) {
+        actionHistory.pushAction({
+          label: `${verb} prices on ${done} product${done === 1 ? '' : 's'}`,
+          undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo price adjustment'),
+          redo: async () => {
+            const redoRun = await runConcurrentTasks<ProductRecord, void>(restoredSnapshots, async (snapshot: ProductRecord) => {
+              const snapshotId = Number(snapshot?.id || 0)
+              const entryUpdates = updatesById.get(snapshotId)
+              if (!snapshotId || !entryUpdates) return
+              const current = productsById.get(snapshotId)
+              const result = await runProductWriteMutation(
+                () => productApi.updateProduct(
+                  snapshotId,
+                  buildProductBulkUpdatePayload(entryUpdates, current, { id: user?.id, name: user?.name }, snapshot?.updated_at),
+                ),
+                'Redo price adjustment',
+              )
+              if (result?.success === false) throw new Error(result.error || 'Failed to reapply price adjustment')
+            })
+            if (redoRun.failures.length) throw (redoRun.failures[0]?.error || new Error('Failed to reapply price adjustment'))
+            await load(true)
+          },
+        })
+      }
+      notify(
+        failed ? `Updated ${done} products, ${failed} failed` : `Updated ${done} products`,
+        failed ? 'warning' : 'success',
+      )
+    } finally {
+      setBulkActionBusy(false)
+    }
+  }, [actionHistory, bulkActionBusy, bulkEditForm, load, notify, productsById, restoreProductSnapshots, runProductWriteMutation, selectedVisibleIds, snapshotProductsByIds, tr, user?.id, user?.name])
+
   const productFilterSections = useMemo(() => buildProductFilterSections({
     availabilitySection: buildAvailabilityFilterSection({
       t,
@@ -3332,6 +3467,88 @@ function ProductsFullEditor() {
             const { buildProductBulkPricingUpdates } = await loadProductWriteHelpers()
             await runBulkProductUpdates(buildProductBulkPricingUpdates(bulkEditForm))
           }}>Apply to {selectedVisibleCount} products</button>
+
+          {/* Relative adjustment, kept in the same panel as the absolute
+              "set every price to X" fields above but visually separated,
+              because the two are easy to confuse and one of them flattens a
+              mixed catalogue to a single value. The wording states which is
+              which rather than relying on the person inferring it. */}
+          <div className="mt-4 border-t border-gray-200 pt-3 dark:border-zinc-700">
+            <p className="mb-2 text-xs font-medium text-gray-600 dark:text-gray-300">
+              {tr('bulk_price_adjust_title', 'Or raise / lower prices by an amount')}
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">{tr('bulk_price_direction', 'Direction')}</label>
+                <AppSelect
+                  ariaLabel={tr('bulk_price_direction', 'Direction')}
+                  className="text-xs"
+                  value={String(bulkEditForm.adjust_direction || 'increase')}
+                  options={[
+                    { value: 'increase', label: tr('bulk_price_increase', 'Increase') },
+                    { value: 'decrease', label: tr('bulk_price_decrease', 'Decrease') },
+                  ]}
+                  onChange={(value) => setBulkEditForm((f) => ({ ...f, adjust_direction: value }))}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">{tr('bulk_price_amount', 'Amount')}</label>
+                <input
+                  className="input w-24 py-1 text-xs"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={String(bulkEditForm.adjust_amount ?? '')}
+                  onChange={(e) => setBulkEditForm((f) => ({ ...f, adjust_amount: e.target.value }))}
+                  placeholder="0.00"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500">{tr('currency', 'Currency')}</label>
+                <AppSelect
+                  ariaLabel={tr('currency', 'Currency')}
+                  className="text-xs"
+                  value={String(bulkEditForm.adjust_currency || 'usd')}
+                  options={[
+                    { value: 'usd', label: 'USD' },
+                    { value: 'khr', label: 'KHR' },
+                  ]}
+                  onChange={(value) => setBulkEditForm((f) => ({ ...f, adjust_currency: value }))}
+                />
+              </div>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+              {([
+                ['adjust_selling', tr('selling_price', 'Selling price'), true],
+                ['adjust_special', tr('special_price', 'Special price'), false],
+                ['adjust_cost', tr('cost_price', 'Cost price'), false],
+              ] as const).map(([key, label, defaultOn]) => (
+                <label key={key} className="inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={bulkEditForm[key] === undefined ? defaultOn : !!bulkEditForm[key]}
+                    onChange={(e) => setBulkEditForm((f) => ({ ...f, [key]: e.target.checked }))}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <label className="mt-2 inline-flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+              <input
+                type="checkbox"
+                checked={!!bulkEditForm.adjust_skip_zero}
+                onChange={(e) => setBulkEditForm((f) => ({ ...f, adjust_skip_zero: e.target.checked }))}
+              />
+              {tr('bulk_price_skip_zero', 'Skip products priced 0 (not yet priced)')}
+            </label>
+            <button
+              disabled={bulkActionBusy}
+              className="btn-secondary mt-3 block px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={runBulkProductPriceAdjustment}
+            >
+              {tr('bulk_price_apply_adjustment', 'Apply adjustment')}
+            </button>
+          </div>
         </div>
       )}
 
