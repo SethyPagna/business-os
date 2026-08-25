@@ -23,7 +23,8 @@ left to do":
 | [Decisions made](#decisions-made) | Settled questions — do not relitigate | Before proposing a design change |
 | [Environment notes](#environment-notes) | What can actually be run, and where | Before claiming anything is verified |
 | [Open](#open) | The live backlog | To pick up work |
-| [Request batch — Aug 25 2026](#request-batch--aug-25-2026-part-341) | Newest asks, with the import-data constraints that bound them | Before starting any of those items |
+| [Request batch — Aug 25 2026](#request-batch--aug-25-2026-part-341) | Earlier asks, with the import-data constraints that bound them | Before starting any of those items |
+| [Request batch — second (Part 342)](#request-batch--aug-25-2026-second-batch-part-342) | **The live tracker.** Every outstanding ask, flagged | Every session, to pick the next item |
 | [Older completed work](#older-completed-work) | Condensed index of finished items | To check if something is already done |
 
 **Ending a session**, do all three:
@@ -2729,6 +2730,94 @@ different assets and must not be shared.
 `BUSINESS_OS_ADMIN_URL`). The icon split itself is not done: `frontend/public/` currently
 carries both a generic `icon-*.png` set and a `leang-cosmetics-icon-*.png` set, and the
 manifest/favicon wiring needs checking to confirm which surface serves which.
+
+## Request batch — Aug 25 2026, second batch (Part 342)
+
+Flags: 🔴 blocked / needs a decision · 🟠 in progress · 🟡 open · 🟢 done · ⚪ deferred by request
+
+Every item below is verbatim-traceable to a request. Nothing here is invented scope. When
+an item is done, the flag changes and the Part that did it is named — this list is the
+tracker, so it must not be rewritten into vagueness.
+
+### Deploy / tooling
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 1 | `full-automation` died at "Install dependencies (frontend)" with EPERM on rollup's `.node` | 🟢 Part 342 | Cause was a dev server holding the binary, not antivirus/permissions. Retry uses `npm install` (reconciles in place) instead of `npm ci` (deletes first). Reproduced and verified both ways. |
+| 2 | Commit every change with a clear explanation; many small commits, never one big one | 🟢 standing | Being followed. Listed here so it stays a rule, not a habit. |
+
+### Login / auth
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 3 | "Reset with OTP" belongs inside Forgot password (ask admin / reset personally with OTP) | 🟡 | One entry point, then choose a method. |
+| 4 | Remove "Needs an account created by your admin." | 🟡 | |
+| 5 | Remove "Sign in to continue" | 🟡 | |
+| 6 | Put the logo and "Business OS" side by side for better spacing | 🟡 | |
+| 7 | Login accepts username, name, phone, or email | 🟡 | Field already says this; confirm the backend actually resolves all four. |
+| 8 | Device-approval screen shows two shield icons and says "Waiting for device approval" twice | 🟡 | Both redundancies confirmed in the screenshot. |
+
+### Public customer accounts — decided this batch
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 9 | **Phone-number login only** | 🟡 | Supersedes the earlier open question. |
+| 10 | Auto-generate a membership ID when the phone is not already present | 🟡 | |
+| 11 | If the phone already exists, the customer must contact an admin | 🟡 | This is the answer to the 448-shared-phones problem: collisions are handled by a human, not by the login form. |
+| 12 | No SMS available — verify via Gmail/email, Telegram, or the membership ID | 🟡 | Telegram login must be free. |
+| 13 | Import review will surface phone uniqueness so it can be cleaned up first | 🟡 | User is doing this pass themselves. |
+
+Measured constraints that still apply (see the previous batch for the full numbers):
+0% of the 5,549 customers have an email, 0% have a membership number, 89.9% have a phone,
+and **448 phone numbers are shared across 978 customers**.
+
+### Permissions
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 14 | Custom permission combinations, validated before saving, with a reason given when invalid | 🟡 | Must reject an incoherent combination rather than silently saving it. |
+| 15 | Every button/action works and updates app-wide — not blocked in some areas | 🟠 | Products/Inventory/Branches/Returns wired (Parts 339, 341). **Fees and Contacts still open.** |
+| 16 | Some actions have multiple code paths; all must be integrated | 🟡 | Named: stats, product stock movements, audit. A write through one path must show up in all of them. |
+| 17 | Review Required: pending visible to the user; approve applies + notifies; deny keeps the record, shows the reason, allows resubmit | 🟠 | Backend done and verified (Part 341). **UI and the notify-on-decision half are not built.** |
+
+### Stats / data
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 18 | Redo the stats: an even number of them, easier to scan | 🟡 | |
+| 19 | Update the search-scope help text — search is now name + barcode/SKU only | 🟡 | Behaviour shipped earlier; the on-screen description still describes the old wider scope. |
+| 20 | Bulk price adjustment: add/subtract a fixed amount across products, USD or KHR, selling price only, optionally skipping products priced 0 | 🟡 | Must be correct and complete, not a partial helper. |
+| 21 | Batches: multiple batches, view, edit, batch date | 🟡 | |
+| 22 | Imports, deletes and products all working, production-grade | 🟡 | |
+
+### Khmer translations
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 23 | Make the Khmer clearer and shorter; check every key | 🟡 | |
+| 24 | Remove keys that are no longer used, and confirm the rest are actually current | 🟡 | Needs a real usage sweep, not a spot check. |
+
+### POS
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 25 | Standalone and group products must be UI-friendly, with valid and complete option choice: barcode, branch, child variants, batch | 🟡 | |
+
+### UI
+
+| # | Item | Flag | Notes |
+|---|---|---|---|
+| 26 | Profile modal redesign: name/details on the avatar's row; larger buttons on one row; click the avatar to view it, with the actions beneath the image; no separate upload entry point | 🟡 | Carried over from the previous batch, restated. |
+| 27 | Portal editor "Contact us" working | 🟡 | Carried over, restated. |
+| 28 | Promotions/discounts, Canva-like editing with templates | ⚪ | **Explicitly pushed back in the order this batch.** Not dropped. |
+
+### Standing rules restated this batch
+
+- Keep every earlier request tracked here so none is forgotten.
+- Commit per change with a clear explanation.
+- "Fully productional" is the bar: no half-wired paths.
+
+---
 
 ## Part 341 (Aug 25 2026) — organization pin, brand icons, two real auth/permission bugs, submitter side of the review queue
 
