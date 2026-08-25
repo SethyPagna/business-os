@@ -175,7 +175,7 @@ export default function ProductDetailModal({
   const batchDateRaw = String((latestBatch && (latestBatch.received_at || latestBatch.created_at)) || p.created_at || '')
   const batchDateParsed = batchDateRaw ? new Date(batchDateRaw.includes('T') ? batchDateRaw : `${batchDateRaw}Z`) : null
   const formattedBatchDate = batchDateParsed && !Number.isNaN(batchDateParsed.getTime())
-    ? batchDateParsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+    ? batchDateParsed.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' })
     : ''
   const latestBatchLotCode = String(latestBatch?.lot_code || '')
   const copyBarcode = () => {
@@ -253,8 +253,12 @@ export default function ProductDetailModal({
             deleted block below this div) -- actions live in the same
             right-hand column at every size now, so there's no longer a
             second, differently-shaped action surface to keep in sync. */}
-        <div className="grid min-h-0 flex-1 grid-cols-2">
-          <div className="min-h-0 space-y-2.5 overflow-auto p-4 border-r border-gray-200 dark:border-gray-700">
+        {/* The actions column is sized to its content rather than taking
+            half the width. grid-cols-2 gave two or three buttons the same
+            room as every product detail combined, which is what made them
+            read as over-wide with too much space around them. */}
+        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_auto]">
+          <div className="min-h-0 space-y-2.5 overflow-auto p-4">
           {/* Short label:value rows (Barcode/Supplier/Stock/Expiry) laid
               out 2-per-row instead of one full-width row each -- per the
               explicit "make it as column" ask: a product with every one of
@@ -344,8 +348,8 @@ export default function ProductDetailModal({
           {/* Margin used to have its own grid column next to Cost, putting
               it in a third place instead of alongside the two prices it's
               derived from -- per the Aug 22 2026 ask, folded into the
-              Selling Price row (where it reads as "this is what selling at
-              X over cost gets you") instead of its own separate slot. Cost
+              Selling Price row -- and has since been moved back out to its
+              own row again, see the comment below Selling Price. Cost
               kept as its own full-width row, same treatment as Selling
               Price below it, instead of the old 2-column grid pairing
               (which only had one real member left once Margin moved). */}
@@ -367,12 +371,23 @@ export default function ProductDetailModal({
           <Row label={T('label_selling_price', 'Selling Price')}>
             <span className="text-base font-semibold text-green-600">{fmtUSD(sellingUsd)}</span>
             {sellingKhr > 0 ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(sellingKhr)}</span> : null}
-            {purchaseUsd > 0 && sellingUsd > 0 ? (
-              <span className={`ml-2 text-xs font-medium ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>
-                ({T('label_margin', 'Margin')} {fmtUSD(marginUsd)} / {marginPct.toFixed(1)}%)
-              </span>
-            ) : null}
           </Row>
+          {/* Margin is its own row again (Aug 25 2026: "margin should be
+              another row instead of continuing from selling price"), which
+              REVERSES the Aug 22 change that folded it inline. Inline, it
+              ran on from the price as a parenthetical and the two figures
+              read as one wrapping sentence -- particularly once a KHR price
+              sat between them. As a labelled row it lines up with Cost and
+              Selling Price above it, so all three read down the same
+              column. */}
+          {purchaseUsd > 0 && sellingUsd > 0 ? (
+            <Row label={T('label_margin', 'Margin')}>
+              <span className={`font-medium ${marginUsd >= 0 ? 'text-blue-600' : 'text-yellow-600'}`}>
+                {fmtUSD(marginUsd)}
+              </span>
+              <span className="ml-2 text-xs text-gray-400">{marginPct.toFixed(1)}%</span>
+            </Row>
+          ) : null}
           {(specialUsd > 0 || specialKhr > 0) ? (
             <Row label={T('special_price', 'Special Price')}>
               <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
@@ -483,7 +498,7 @@ export default function ProductDetailModal({
             screen readers via aria-label + a title tooltip) below `sm` so
             three buttons keep fitting the narrow half of a phone-width
             split without truncating into illegibility. */}
-        <aside className="flex min-h-0 flex-col justify-center border-l border-gray-200 bg-slate-50/70 p-2.5 dark:border-gray-700 dark:bg-slate-900/30 sm:p-4">
+        <aside className="flex min-h-0 w-28 flex-col justify-center border-l border-gray-200 bg-slate-50/70 p-2.5 dark:border-gray-700 dark:bg-slate-900/30 sm:w-40 sm:p-4">
           <div className="mb-2 hidden sm:block">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{T('actions', 'Actions')}</p>
           </div>
@@ -491,7 +506,7 @@ export default function ProductDetailModal({
             {onAddVariant ? (
               <button
                 type="button"
-                className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1.5 py-1.5 text-xs sm:text-sm"
+                className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-3 py-1.5 text-xs sm:text-sm"
                 onClick={onAddVariant}
                 aria-label={T('add_variant', 'Add variant')}
                 title={T('add_variant', 'Add variant')}
@@ -503,7 +518,7 @@ export default function ProductDetailModal({
             {onAdjustStock ? (
               <button
                 type="button"
-                className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-1.5 py-1.5 text-xs sm:text-sm"
+                className="btn-secondary flex w-full items-center justify-center gap-1.5 truncate px-3 py-1.5 text-xs sm:text-sm"
                 onClick={onAdjustStock}
                 aria-label={T('adjust_stock', 'Adjust stock')}
                 title={T('adjust_stock', 'Adjust stock')}
@@ -514,7 +529,7 @@ export default function ProductDetailModal({
             ) : null}
             <button
               type="button"
-              className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-1.5 py-1.5 text-xs sm:text-sm"
+              className="btn-primary flex w-full items-center justify-center gap-1.5 truncate px-3 py-1.5 text-xs sm:text-sm"
               onClick={onEdit}
               aria-label={T('edit', 'Edit')}
               title={T('edit', 'Edit')}
