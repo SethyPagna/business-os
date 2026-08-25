@@ -2828,6 +2828,18 @@ and **448 phone numbers are shared across 978 customers**.
 
 **Guard added:** `tests/langKeyIntegrity.test.ts` — the packs must hold the same key set, every bare `t('key')` must resolve, no blank strings. It deliberately does *not* fail on `tr('key', 'Fallback')`, which degrades correctly; those 196 are reported as a coverage number instead, so the test stays worth reading.
 
+### Fourth batch — Aug 25 2026 (Part 344)
+
+| Item | Flag | Notes |
+|---|---|---|
+| Two tooltips on one info hint | 🟢 | My bug: `InfoHint` set a native `title` **and** rendered a panel, so the browser drew its own tooltip alongside. `title` removed; `aria-describedby` still carries the text to screen readers. |
+| "ERR Not authenticated" after idle | 🟢 | Root cause found: sessions were issued with a FIXED `expires_at` and never renewed, so one died at a wall-clock moment set at login regardless of use. Only `last_seen_at` was touched — activity recorded but never acted on. Now renews past halfway; verified live 2026-09-04 → 2026-09-24, and confirmed a fresh session is *not* rewritten per request. |
+| Contacts per-action gating | 🟢 | delete + bulk-delete withheld (routes 403 them). Edit deliberately kept — it is `limited`, not `block`: the write lands but the server keeps only `name`. |
+| Fees per-action gating | 🟢 | Opposite treatment, on purpose. Nothing on Fees is blocked, so controls stay and the delete buttons read "Delete (needs approval)". Hiding them would remove a capability the person has. |
+| Image auto-wire / `_1` `_2` rename | 🟢 already built | `buildAutoRenamePlan` already names matches `product_1`, `product_2`; `stripTrailingIndex` in the matcher means an already-renamed image still matches its product, so re-running does not duplicate wiring. Group-title matching depends on what the caller passes as candidates — not yet confirmed end to end. |
+
+**Still open from this batch:** Add/Sale reshaped to the Dated-Stock-Reconciliation flow (column mapping → review → apply, with batch choice on sale and create-then-sell for products that exist only in the file); import/delete CPU-limit work; POS variant/batch options; batch editing; profile modal; portal Contact-us; custom permission validation; review-queue UI; stats redesign.
+
 ### Environment gotcha worth knowing before testing any write locally
 
 `api/http.ts`'s `route()` **blocks every write** when no sync-server URL is
