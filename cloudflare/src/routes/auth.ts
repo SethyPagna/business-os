@@ -129,14 +129,61 @@ app.post('/login', async (c) => {
   }
 
   const db = getDb(c.env)
-  const user = await db.prepare(`
+
+  // The sign-in field is labelled "Username, name, email, or phone" and has
+  // been for a long time, but this query only ever matched `u.username` --
+  // so signing in with a name, an email address or a phone number failed
+  // with "Invalid username or password", which reads as a wrong password
+  // rather than an unsupported identifier. Real, confirmed mismatch between
+  // what the UI promises and what the server accepts.
+  //
+  // Resolution order is deliberate. `username` is checked on its own first
+  // and wins outright: it is the only column with a uniqueness constraint,
+  // so an exact username match can never be ambiguous, and a person whose
+  // username happens to equal someone else's *name* must still get their
+  // own account.
+  //
+  // The other three are matched together, and only accepted when they
+  // identify EXACTLY ONE account. `name` in particular is not unique in
+  // this database (staff share display names), and logging somebody into
+  // the wrong account because two people are both called "Dara" would be a
+  // far worse failure than asking them to use their username. An ambiguous
+  // identifier therefore falls through to the same generic failure below as
+  // a non-existent one -- deliberately identical, so the response cannot be
+  // used to discover which names or phone numbers are shared.
+  const identifier = String(body.username ?? '').trim()
+  const identifierLower = identifier.toLowerCase()
+  const identifierPhone = identifier.replace(/[^\d+]/g, '')
+
+  const SELECT_LOGIN_USER = `
     SELECT u.id, u.username, u.name, u.password, u.organization_id, u.role_id, u.permissions, u.is_active, u.otp_enabled, u.otp_secret,
            r.code AS role_code, r.permissions AS role_permissions
     FROM users u
     LEFT JOIN roles r ON r.id = u.role_id
-    WHERE lower(u.username) = lower(@username) AND u.deleted_at IS NULL
+  `
+  type LoginUserRow = { id: number; username: string; name: string; password: string; organization_id: number | null; role_id: number | null; permissions: string; is_active: number; otp_enabled: number; otp_secret: string | null; role_code: string | null; role_permissions: string | null }
+
+  let user = await db.prepare(`
+    ${SELECT_LOGIN_USER}
+    WHERE lower(u.username) = lower(@identifier) AND u.deleted_at IS NULL
     LIMIT 1
-  `).get<{ id: number; username: string; name: string; password: string; organization_id: number | null; role_id: number | null; permissions: string; is_active: number; otp_enabled: number; otp_secret: string | null; role_code: string | null; role_permissions: string | null }>({ username: body.username })
+  `).get<LoginUserRow>({ identifier })
+
+  if (!user) {
+    // LIMIT 2, not 1: the second row is what tells us the identifier is
+    // ambiguous. Fetching only one would silently pick an arbitrary account.
+    const candidates = await db.prepare(`
+      ${SELECT_LOGIN_USER}
+      WHERE u.deleted_at IS NULL
+        AND (
+          lower(trim(COALESCE(u.email, ''))) = @identifierLower
+          OR (@identifierPhone <> '' AND COALESCE(u.phone_lookup, '') = @identifierPhone)
+          OR lower(trim(COALESCE(u.name, ''))) = @identifierLower
+        )
+      LIMIT 2
+    `).all<LoginUserRow>({ identifierLower, identifierPhone })
+    if (candidates && candidates.length === 1) user = candidates[0]
+  }
 
   const userLimitKey = `user:${body.username.trim().toLowerCase()}`
   const userLimit = await checkRateLimit(c.env, 'auth:login_user', userLimitKey, LOGIN_USER_LIMIT_MAX, LOGIN_USER_LIMIT_WINDOW_MS)
