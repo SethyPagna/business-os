@@ -62,14 +62,40 @@ await runTest('mergeSameDetailRows combines branch_stock quantities for the same
   assert.deepEqual(rows[0].branch_stock, [{ branch_id: 1, branch_name: 'Main', quantity: 7 }])
 })
 
-await runTest('mergeSameDetailRows keeps rows separate when a real detail differs', () => {
+await runTest('mergeSameDetailRows keeps rows separate when a DETAIL differs (barcode)', () => {
   const rows = mergeSameDetailRows([
-    { id: 1, name: 'Gloss Nude', selling_price_usd: 8, stock_quantity: 1 },
-    { id: 2, name: 'Gloss Nude', selling_price_usd: 9, stock_quantity: 1 },
+    { id: 1, name: 'Gloss Nude', barcode: '111', stock_quantity: 1 },
+    { id: 2, name: 'Gloss Nude', barcode: '222', stock_quantity: 1 },
   ])
   assert.equal(rows.length, 2)
   assert.deepEqual(rows.map((row) => row.id), [1, 2])
   assert.deepEqual(rows.map((row) => row.__mergedRowCount), [1, 1])
+})
+
+await runTest('mergeSameDetailRows keeps rows separate when a DETAIL differs (cost)', () => {
+  // Cost is real money actually spent and must never be silently replaced
+  // by another row's figure -- so it splits, exactly like barcode.
+  const rows = mergeSameDetailRows([
+    { id: 1, name: 'Gloss Nude', cost_price_usd: 4, stock_quantity: 1 },
+    { id: 2, name: 'Gloss Nude', cost_price_usd: 5, stock_quantity: 1 },
+  ])
+  assert.equal(rows.length, 2)
+  assert.deepEqual(rows.map((row) => row.id), [1, 2])
+})
+
+await runTest('mergeSameDetailRows MERGES a selling/special price difference and keeps the highest', () => {
+  // Selling and special price are what we plan to charge, adjustable for
+  // sales/POS -- not what the item is. Two rows for one article at two
+  // hoped-for prices are one product, and the merged row must never show a
+  // price below what one of the merged rows expected to charge.
+  const rows = mergeSameDetailRows([
+    { id: 1, name: 'Gloss Nude', selling_price_usd: 8, special_price_usd: 7.5, stock_quantity: 1 },
+    { id: 2, name: 'Gloss Nude', selling_price_usd: 9, special_price_usd: 6.0, stock_quantity: 1 },
+  ])
+  assert.equal(rows.length, 1)
+  assert.equal(rows[0].__mergedRowCount, 2)
+  assert.equal(rows[0].selling_price_usd, 9, 'highest selling price wins')
+  assert.equal(rows[0].special_price_usd, 7.5, 'each price field resolves independently to its own highest')
 })
 
 await runTest('mergeSameDetailRows ignores id/created_at/updated_at/client_request_id/image_gallery when comparing rows', () => {

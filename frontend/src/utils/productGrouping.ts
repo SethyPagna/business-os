@@ -1,4 +1,5 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
+import { productIdentitySignature, resolveMergedPricing } from './productDetailRule.ts'
 
 type ProductId = number
 
@@ -87,44 +88,24 @@ export interface ProductGroupRow extends ProductRecord {
 // Fields intentionally left out of the "is this the same product, just at a
 // different branch" comparison. Two rows differing ONLY in these fields are
 // considered the same underlying product and get merged into a single
-// display row (see mergeSameDetailRows below):
-//  - id / created_at / updated_at: bookkeeping, not a real-world detail.
-//  - stock_quantity / branch_stock / rfid_confirmed_qty: exactly the
-//    per-branch data that's supposed to differ -- that's the whole reason
-//    two rows exist. Combined into the merged row's own branch_stock/
-//    stock_quantity instead of being compared.
-//  - client_request_id: import/dedupe bookkeeping from whichever request
-//    created the row, not a product attribute.
-//  - image_gallery: derived read-side data (product_images join), not a
-//    stored column -- image_path (the real stored field) is still compared.
-const ROW_MERGE_IGNORED_FIELDS = new Set([
-  'id',
-  'created_at',
-  'updated_at',
-  'stock_quantity',
-  'branch_stock',
-  'rfid_confirmed_qty',
-  'client_request_id',
-  'image_gallery',
-])
-
-function normalizeSignatureValue(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : ''
-  if (typeof value === 'string') return value.trim()
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
-  }
-}
-
+// Two rows are the SAME product when they share a name group AND their
+// DETAILS match. Details are barcode + cost, and nothing else -- see
+// utils/productDetailRule.ts for the full rule and the reasoning.
+//
+// This used to build a signature from EVERY field on the row minus a
+// seven-item ignore list, which quietly made unit, category, brand,
+// supplier, description, sku, thresholds, discount fields and expiry all
+// behave as identity: two rows for one product that differed only in, say,
+// supplier rendered as two separate rows forever. It also disagreed with
+// the backend, which was matching on name+cost+selling+barcode at the same
+// moment. Both now delegate to the one rule module.
+//
+// Branch and stock are deliberately absent from the signature: per-branch
+// quantity is exactly what is SUPPOSED to differ between the merged rows,
+// and it is combined into the merged row's branch_stock/stock_quantity
+// below rather than compared.
 function buildRowMergeSignature(item: ProductRecord): string {
-  return Object.keys(item)
-    .filter((key) => !ROW_MERGE_IGNORED_FIELDS.has(key))
-    .sort()
-    .map((key) => `${key}=${normalizeSignatureValue(item[key])}`)
-    .join('\u0001')
+  return productIdentitySignature(item as Record<string, unknown>)
 }
 
 function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unknown; branch_name: unknown; quantity: number }> {
@@ -186,6 +167,11 @@ export function mergeSameDetailRows(items: ProductRecord[] = []): ProductGroupRo
     return {
       ...lead,
       id: lead.id,
+      // Selling and special price are not identity, so merged rows CAN
+      // disagree on them -- the highest of each wins, so the display never
+      // shows a lower price than one of the merged rows expected to charge.
+      // Same rule the server applies on import merges.
+      ...resolveMergedPricing(cluster as Record<string, unknown>[]),
       stock_quantity: stockTotal,
       branch_stock: branchStock,
       __mergedProductIds: mergedProductIds,

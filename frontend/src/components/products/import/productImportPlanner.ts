@@ -57,20 +57,22 @@ const IMAGE_FIELDS = new Set([
   'image_conflict_mode',
 ])
 
+// The DETAIL fields, matching utils/productDetailRule.ts exactly: barcode +
+// cost, and nothing else.
+//
+// This list used to also contain sku, category, brand, unit, description,
+// supplier, selling price and special price -- so changing a supplier or a
+// unit forked a "variant", and two rows for one article at two hoped-for
+// prices were planned as different products. It disagreed with the backend
+// (which was matching on name+cost+selling+barcode) AND with the frontend's
+// own display merge, which compared every field. `purchase_price_*` was
+// also the wrong cost column: import and the manual form only ever write
+// `cost_price_*`, so that pair sat at 0 on every real row and contributed
+// nothing.
 const DETAIL_FIELDS = [
-  'sku',
   'barcode',
-  'category',
-  'brand',
-  'unit',
-  'description',
-  'supplier',
-  'selling_price_usd',
-  'selling_price_khr',
-  'special_price_usd',
-  'special_price_khr',
-  'purchase_price_usd',
-  'purchase_price_khr',
+  'cost_price_usd',
+  'cost_price_khr',
 ]
 
 const TEXT_CORRUPTION_FIELDS = [

@@ -51,50 +51,60 @@ await runTest('same product name and same details but different branch, no barco
   assert.equal(analysis.summary.mergeCount, 1)
 })
 
-await runTest('same product name, no barcode, but a real detail difference still plans a variant', () => {
-  // Same name/sku, but a different brand (and it's not just branch) -- this
-  // must still become a variant/new row, not a silent stock merge. Price
-  // differences alone are NOT a detail difference (see the "price changes"
-  // test above) -- only branch, sku, barcode, category, brand, unit,
-  // description, and supplier participate in the merge/variant signature.
+await runTest('same product name and a different BRAND still merges -- brand is not a detail', () => {
+  // Details are barcode + cost only (utils/productDetailRule.ts). Brand,
+  // category, unit, supplier, sku and description are descriptive fields,
+  // not identity: the same article relabelled is still the same article.
+  // This assertion is inverted from what it used to be, when brand DID fork
+  // a variant -- that definition disagreed with both the backend matcher
+  // and the frontend's own display merge.
   const analysis = analyzeProductImportRows([
     { name: 'Serum', sku: 'S-1', brand: 'Acme', branch: 'Branch B', stock_quantity: '3' },
   ], [
     { id: 10, name: 'Serum', sku: 'S-1', brand: 'Other Brand', branch: 'Branch A', stock_quantity: 1 },
   ])
 
-  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
-  assert.equal(analysis.rows[0]._parent_id, 10)
-  assert.equal(analysis.summary.variantCount, 1)
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
 })
 
-await runTest('same product name and different details plans variant creation', () => {
+await runTest('same product name with different sku/price/supplier still merges -- none are details', () => {
   const analysis = analyzeProductImportRows([
     { name: 'Serum', sku: 'S-2', selling_price_usd: '15', supplier: 'Supplier B', stock_quantity: '2' },
   ], [
     { id: 10, name: 'Serum', sku: 'S-1', selling_price_usd: 12, supplier: 'Supplier A', created_at: '2026-01-01' },
   ])
 
-  assert.equal(analysis.rows[0]._planned_action, 'create_variant')
-  assert.equal(analysis.rows[0]._parent_id, 10)
-  assert.equal(analysis.summary.variantCount, 1)
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
 })
 
-await runTest('same product name but a different price (no branch involved) plans a variant, not a silent merge', () => {
-  // Confirmed intended behavior: prices are part of the "same details"
-  // signature. A price difference is a real product difference (e.g. a
-  // different size/config sharing a name), not something to silently
-  // fold into existing stock -- only branch is allowed to differ for the
-  // merge shortcut.
+await runTest('same product name and a different COST plans a separate child row', () => {
+  // Cost is what was actually spent. It is a detail precisely so it can
+  // never be silently replaced by another row's figure.
   const analysis = analyzeProductImportRows([
-    { name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '15', purchase_price_usd: '8', discount_percent: '10', stock_quantity: '2' },
+    { name: 'Serum', cost_price_usd: '9', stock_quantity: '2' },
   ], [
-    { id: 10, name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: 12, purchase_price_usd: 6, discount_percent: 0 },
+    { id: 10, name: 'Serum', cost_price_usd: 6, created_at: '2026-01-01' },
   ])
 
   assert.equal(analysis.rows[0]._planned_action, 'create_variant')
   assert.equal(analysis.rows[0]._parent_id, 10)
   assert.equal(analysis.summary.variantCount, 1)
+})
+
+await runTest('same name + same barcode + same cost merges even when the SELLING price differs', () => {
+  // Selling and special price are what we plan to charge and are adjusted
+  // for sales/POS -- not what the item is. Same barcode and same cost means
+  // the same product, so this folds into existing stock and the highest
+  // price wins. Inverted from the old rule, which treated any price change
+  // as a different product and forked ~700 duplicate rows out of a real
+  // catalog.
+  const analysis = analyzeProductImportRows([
+    { name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: '15', cost_price_usd: '6', discount_percent: '10', stock_quantity: '2' },
+  ], [
+    { id: 10, name: 'Serum', sku: 'S-1', barcode: 'BC-1', selling_price_usd: 12, cost_price_usd: 6, discount_percent: 0 },
+  ])
+
+  assert.equal(analysis.rows[0]._planned_action, 'merge_stock')
 })
 
 await runTest('malformed existing product rows do not crash import analysis', () => {
@@ -128,10 +138,13 @@ await runTest('different product name with same SKU or barcode becomes editable 
 })
 
 await runTest('same product name with same barcode still exposes identifier handling', () => {
+  // Different cost keeps these apart (cost is a detail), so the shared
+  // barcode still has to be surfaced as an identifier conflict rather than
+  // silently duplicated onto two rows.
   const analysis = analyzeProductImportRows([
-    { name: 'Serum', barcode: 'BC-1', selling_price_usd: '15', supplier: 'Supplier B', stock_quantity: '2' },
+    { name: 'Serum', barcode: 'BC-1', cost_price_usd: '9', supplier: 'Supplier B', stock_quantity: '2' },
   ], [
-    { id: 20, name: 'Serum', barcode: 'BC-1', selling_price_usd: 12.01, supplier: 'Supplier A', created_at: '2026-01-01' },
+    { id: 20, name: 'Serum', barcode: 'BC-1', cost_price_usd: 6, supplier: 'Supplier A', created_at: '2026-01-01' },
   ])
 
   assert.equal(analysis.rows[0]._planned_action, 'create_variant')
@@ -186,13 +199,27 @@ await runTest('duplicate imported same-name rows avoid unsafe temporary row ids'
     { name: 'Cream', sku: 'C-2', selling_price_usd: '4.001', stock_quantity: '2' },
   ], [])
 
-  // Row 1 is an exact detail match for row 0 (same sku, same price, no
-  // barcode) so it merges into row 0's stock; row 2 has a different sku and
-  // price, so it's a genuine variant. The actual regression this test
-  // guards (no unsafe 'row:N' temp ids below) is unaffected either way.
-  assert.deepEqual(analysis.rows.map((row) => row._planned_action), ['new', 'merge_stock', 'create_variant'])
+  // All three rows share a name and have no barcode and no cost, so under
+  // the identity rule (details = barcode + cost, see
+  // utils/productDetailRule.ts) they are ONE product: sku and selling price
+  // are not details. Rows 1 and 2 therefore merge into row 0's stock. The
+  // actual regression this test guards (no unsafe 'row:N' temp ids below)
+  // is unaffected either way.
+  assert.deepEqual(analysis.rows.map((row) => row._planned_action), ['new', 'merge_stock', 'merge_stock'])
   assert.equal(analysis.rows.some((row) => String(row._parent_id || '').startsWith('row:')), false)
   assert.equal(analysis.rows.some((row) => String(row._target_product_id || '').startsWith('row:')), false)
+})
+
+await runTest('a differing DETAIL (barcode or cost) still plans a separate child row', () => {
+  const analysis = analyzeProductImportRows([
+    { name: 'Cream', barcode: 'BC-1', selling_price_usd: '3', stock_quantity: '1' },
+    { name: 'Cream', barcode: 'BC-2', selling_price_usd: '3', stock_quantity: '1' },
+    { name: 'Cream', barcode: 'BC-1', cost_price_usd: '9', stock_quantity: '1' },
+  ], [])
+  const actions = analysis.rows.map((row) => row._planned_action)
+  assert.equal(actions[0], 'new')
+  assert.notEqual(actions[1], 'merge_stock', 'a different barcode must not merge -- barcode is a detail')
+  assert.notEqual(actions[2], 'merge_stock', 'a different cost must not merge -- cost is a detail')
 })
 
 await runTest('same imported name groups rows into detail subgroups for review', () => {
