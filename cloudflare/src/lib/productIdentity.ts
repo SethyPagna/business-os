@@ -29,6 +29,10 @@ export type ProductIdentityRow = {
   cost_price_khr: number | null
   selling_price_usd: number | null
   selling_price_khr: number | null
+  // Not part of the identity comparison -- carried so merge-duplicates can
+  // move a duplicate's primary image onto the canonical row instead of
+  // orphaning it on a row it is about to deactivate.
+  image_path?: string | null
 }
 
 // Finds another ACTIVE product row that is genuinely the same item as
@@ -117,7 +121,7 @@ export type ProductDuplicateGroup = {
 export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductDuplicateGroup[]> {
   const rows = await db
     .prepare(`
-      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, name_key
+      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, image_path, name_key
       FROM products
       WHERE is_active = 1 AND COALESCE(is_group, 0) = 0
       ORDER BY name_key ASC, id ASC

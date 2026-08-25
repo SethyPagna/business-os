@@ -1342,6 +1342,21 @@ app.post('/merge-duplicates', async (c) => {
       const dupBatchRows = await db
         .prepare('SELECT id, batch_key FROM product_batches WHERE variant_product_id = @id')
         .all<{ id: number; batch_key: string }>({ id: dup.id })
+      // Images were the one thing this merge silently threw away: branch_stock,
+      // inventory_movements and product_batches were all carried over, but the
+      // duplicate's gallery (product_images) and its image_path were left
+      // attached to a row that is about to be deactivated -- so a photo the
+      // duplicate carried and the canonical didn't simply vanished from the
+      // catalog. That breaks the standing rule that images follow a product
+      // through a rename or a regroup.
+      const dupImageRows = await db
+        .prepare('SELECT image_path, sort_order FROM product_images WHERE product_id = @id ORDER BY sort_order ASC, id ASC')
+        .all<{ image_path: string; sort_order: number | null }>({ id: dup.id })
+      const canonicalImageRows = await db
+        .prepare('SELECT image_path FROM product_images WHERE product_id = @id')
+        .all<{ image_path: string }>({ id: canonicalId })
+      const canonicalImagePaths = new Set(canonicalImageRows.map((r) => String(r.image_path)))
+      let nextCanonicalImageOrder = canonicalImageRows.length
 
       const statements: Array<{ sql: string; params?: Record<string, unknown> }> = []
       for (const row of stockRows) {
@@ -1368,6 +1383,32 @@ app.post('/merge-duplicates', async (c) => {
         })
       }
       statements.push({ sql: 'DELETE FROM branch_stock WHERE product_id = @id', params: { id: dup.id } })
+
+      // Move any gallery image the canonical doesn't already have, appended
+      // after the canonical's own so its existing order is preserved. Deduped
+      // by path, since two duplicates of one product very often reference the
+      // same stored object.
+      let imagesMovedThisDup = 0
+      for (const image of dupImageRows) {
+        const imagePath = String(image.image_path || '')
+        if (!imagePath || canonicalImagePaths.has(imagePath)) continue
+        canonicalImagePaths.add(imagePath)
+        statements.push({
+          sql: 'INSERT INTO product_images (product_id, image_path, sort_order) VALUES (@canonicalId, @path, @order)',
+          params: { canonicalId, path: imagePath, order: nextCanonicalImageOrder },
+        })
+        nextCanonicalImageOrder += 1
+        imagesMovedThisDup += 1
+      }
+      statements.push({ sql: 'DELETE FROM product_images WHERE product_id = @id', params: { id: dup.id } })
+      // A canonical with no primary image adopts the duplicate's, so a merge
+      // can only ever add imagery, never remove it.
+      statements.push({
+        sql: `UPDATE products SET image_path = COALESCE(NULLIF(image_path, ''), @dupImagePath), updated_at = CURRENT_TIMESTAMP
+              WHERE id = @canonicalId AND @dupImagePath IS NOT NULL AND @dupImagePath != ''`,
+        params: { canonicalId, dupImagePath: dup.image_path ?? null },
+      })
+
       statements.push({ sql: 'UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { id: dup.id } })
 
       // batch_key has a UNIQUE(variant_product_id, batch_key) index, so a
@@ -1423,6 +1464,9 @@ app.post('/merge-duplicates', async (c) => {
         mergedIntoProductName: canonicalName,
         batchesMoved: batchesMovedThisDup,
         batchesFoldedIntoExistingLot: batchesFoldedThisDup,
+        // Recorded so a merge that moved imagery is visible in the audit log
+        // rather than being an invisible side effect.
+        imagesMoved: imagesMovedThisDup,
       })
 
       mergedIds.push(dup.id)
