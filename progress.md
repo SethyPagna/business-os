@@ -2943,6 +2943,144 @@ user was still the previous account.
 
 ---
 
+## Part 346 (Aug 25 2026) — POS unblocked, two money bugs, and ONE product identity rule
+
+### The POS "No Data Found" root cause
+
+Two independent defects combined; either alone produced the symptom.
+
+1. `isImageOnlyUser()` (`routes/products.ts:93`) decided "this user's only route into
+   product data is the restricted image-only role" from the **`products` tier alone**.
+   A cashier granted `{pos, sales}` **plus `products_image_only`** matched, so every
+   catalog row was stripped to `IMAGE_ONLY_BASE_FIELDS`.
+2. `is_active` is not in that allowlist, and POS's `applyCatalogProducts` filtered rows
+   with a bare truthy `p?.is_active` — reading an **absent** column as "archived". Every
+   row was dropped.
+
+Result: HTTP 200, no error banner, so POS fell through to the bare "No data found" while
+the pagination count and A–Z rail (separate unrestricted queries) still showed real
+numbers. Admins were exempt via `isAdminControlUser`, which is why only employees hit it.
+
+Both fixed — they are different failure classes and can regress independently.
+`pos`/`sales`/`inventory` access now disqualifies the image-only restriction (selling
+requires price, stock and branch data by definition, which `productWrites.ts`'s docstring
+already *claimed* the function enforced), and POS hides a row only on an explicit
+`is_active === 0/false`.
+
+**Caveat, stated plainly:** this was diagnosed from source, not from the affected role's
+actual permission set. If the employee role does **not** carry `products_image_only`, the
+fix still stands but the diagnosis needs re-opening.
+
+### Two money bugs, both in the same inline arithmetic
+
+- **Delivery fee never reached the recorded total.** The cart charged
+  `afterDiscount + tax + customerFee` and printed it on the receipt; the server recorded
+  `subtotal - discount - membershipDiscount + tax`, no fee term — the fee scalars were
+  computed further down the handler and were not in scope at total time. Every delivery
+  sale stored a total **below what was collected**, and the gap flowed into `change_usd`,
+  the Sales page, `salesAnalytics` and loyalty accrual.
+- **KHR-only sales invented a USD tender.** `Number(body.amount_paid_usd) || totalUsd`
+  read a legitimate `0` as "not supplied" and substituted the whole total, plus roughly a
+  second full total as change.
+
+The arithmetic now lives in `lib/saleTotals.ts` as a pure, directly-tested function.
+Both bugs were invisible to every existing test *because* the math could only be reached
+through a live request. Writing the test caught a third bug in the fix itself:
+`Number(null) === 0`, so a naive `Number.isFinite` check would have recorded a real
+payment as zero — "absent" is now detected before coercion.
+
+### A failed lot lookup no longer reads as "there are no lots"
+
+`batchesTransport` passed `() => ({ productIds: [] })` / `() => ({ batches: [] })` as
+`route()`'s local fallback, and `hasUsableLocalData` counts any non-empty object as
+usable — so a 403/500/timeout **resolved as a successful empty result and was cached**.
+Every batch-tracked product looked untracked, the lot picker never appeared, and
+batch-tracked stock sold **with no lot chosen**, bypassing FIFO/expiry silently.
+
+Both reads now propagate failures. POS keeps prior knowledge, flags the failure, routes
+every product through the detail sheet, and shows a retry banner; the sheet renders a
+real error instead of "No lots available". A deliberate availability-for-correctness
+trade: refusing a sale beats selling the wrong lot.
+
+### ONE product identity rule
+
+The rule existed in **five** places and all five disagreed. Now one module,
+`lib/productDetailRule.ts`, duplicated verbatim into `frontend/src/utils/` (the packages
+share no npm package) with `productDetailRuleParity.test.ts` failing the moment they
+differ.
+
+**DETAILS = barcode + cost.** A different barcode is a different article; a different
+cost is real money actually spent and must never be silently replaced. Either makes a
+child row inside the name group.
+
+**Selling and special price are NOT details** — they are what we plan to charge and are
+adjusted for sales/POS. Rows differing only in them are one product, and on merge the
+**highest** of each wins, so a merge can never drop a product below a price one of the
+merged rows expected to charge.
+
+**Batches stay separate**: they record WHEN stock arrived so older stock sells first, not
+what it cost.
+
+Fixed along the way:
+
+- `productIdentity.ts` compared `purchase_price_*` — columns import and the manual form
+  **never** write, so they sat at 0 and the cost half of every transfer/merge comparison
+  was a silent no-op. Fixing it made the typechecker surface two callers feeding those
+  columns in (`branches.ts`'s transfer query, and `inventory.ts`'s `resolveAddStockTarget`,
+  whose `sameAsSelf` short-circuit could therefore never fire).
+- Name groups are now the paging/stats unit. `familyPagination`/`familyStockStats` keyed
+  on `COALESCE(parent.id, p.id)` — `parent_id` chains only — and import never writes
+  `parent_id`, so "20 per page" silently meant "20 rows".
+- A branch created part-way through an import was invisible to every product created
+  before it (per-chunk branch snapshot). Measured: exactly one product on the real file.
+
+### Census against the real 8,727-row file
+
+Run through the real parser + `classifyProducts` + real migrations
+(`scripts/harness/run_product_census.cjs`):
+
+| Measure | Result |
+|---|---|
+| rows in | 8,727 — every row accounted for, 0 errors |
+| products out | 6,684 |
+| name groups | 5,915 (754 multi-row, largest 7 rows) |
+| identical-detail duplicates remaining | **0** |
+| missing product × branch stock rows | **0** |
+
+**The census had to be fixed before it could be trusted.** A first version omitted
+`runImportApply`'s in-batch signature dedupe and branch seeding, and reported ~2,000
+phantom duplicate groups that the real import never creates. It now models the real
+pipeline and reads the detail rule from the real module, so it cannot measure a different
+rule than the code applies.
+
+**What the data changed:** the first decision was "details = barcode + selling + special
++ cost". The census showed **681 of 754 child-row groups existed ONLY because cost
+differed** — the same product bought twice at different prices. That was put back to the
+user with the numbers, and the rule was revised to the current one.
+
+### Verification (all really run)
+
+| Check | Result |
+|---|---|
+| `cloudflare` `tsc --noEmit` | clean |
+| `frontend` `tsc --noEmit` | clean |
+| Backend `test-*.cjs` | **48 / 48 pass** (41 before; 3 new suites added) |
+| `frontend` `npm run test:utils` | green end to end |
+| Real `vite build` | succeeds (~28s) |
+| Product census vs the real CSV | 0 losses, 0 duplicates, 0 missing branch rows |
+
+### Still open from this batch
+
+- POS group-option display and picking (the "multiple pricings" UI request).
+- Rename does not regroup; `merge-duplicates` still orphans images.
+- No auto-merge flag/filter yet.
+- Image compression 300–350KB band, cron audit, browser backfill.
+- Import CPU efficiency (whole-CSV re-decode per window; sales re-partition per chunk).
+- Portal pagination counts unmerged rows; portal A–Z initials ignore the out-of-stock toggle.
+- Backup **restore** still loads the whole document into memory.
+
+---
+
 ## Part 341 (Aug 25 2026) — organization pin, brand icons, two real auth/permission bugs, submitter side of the review queue
 
 Six commits, all pushed. Two of them fix bugs that were breaking the app for real users
