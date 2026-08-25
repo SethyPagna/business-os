@@ -2,7 +2,7 @@ import { useState } from 'react'
 import InfoHint from '../shared/InfoHint.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
 import { REVIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
-import { actionsForKey, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
+import { actionOverrideKey, actionsForKey, isActionOverriddenOff, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
 type Tier = 'full' | 'review' | 'none'
@@ -219,6 +219,23 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   // and 'review' sets the literal string 'review' that
   // getPermissionTierFromMap()/getPermissionTier() (frontend and backend,
   // kept in sync) and lib/reviewGate.ts's maybeQueueForReview() branch on.
+  // Switches ONE action off for this role, or hands it back to the tier.
+  //
+  // Stored as an explicit `false` under a `section:action` key rather than
+  // by deleting anything, because absent and false must mean different
+  // things here: absent is "the tier decides", false is "an admin decided".
+  // Handing it back therefore DELETES the key rather than writing `true` --
+  // otherwise a later tier change would be silently overridden by a stale
+  // `true` nobody remembers setting.
+  const toggleActionOverride = (permissionKey: string, actionKey: string) => {
+    const overrideKey = actionOverrideKey(permissionKey, actionKey)
+    const next: PermissionState = { ...perms }
+    if (next[overrideKey] === false) delete next[overrideKey]
+    else next[overrideKey] = false
+    delete next.all
+    onChange(next)
+  }
+
   const setTier = (key: string, tier: Tier) => {
     const next: PermissionState = { ...perms }
     if (tier === 'none') delete next[key]
@@ -405,17 +422,46 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                           <div className="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
                             {translate('perm_actions_heading', 'Buttons and actions on this page')}
                           </div>
+                          {/* Each row is now a real control, not a readout.
+                              The tier sets the baseline; clicking a row
+                              switches that single action OFF for this role,
+                              and clicking again hands it back to the tier.
+                              Deliberately one-way: an override can only
+                              REMOVE what the tier granted, never add what it
+                              withheld -- see permissionActions.ts for why
+                              that is what makes it safe to enforce. A row
+                              the tier already blocks is therefore inert. */}
                           <ul className="grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
                             {actionsForKey(permission.key).map((action) => {
-                              const meta = outcomeMeta(outcomeAt(action, tier))
+                              const tierOutcome = outcomeAt(action, tier)
+                              const overriddenOff = isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)
+                              const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)
+                              const canToggle = tierOutcome !== 'block'
                               return (
-                                <li key={action.key} className="flex items-center justify-between gap-2 px-1 py-0.5">
-                                  <span className="min-w-0 truncate text-xs text-gray-600 dark:text-gray-300">
-                                    {translate(action.tKey, action.label)}
-                                  </span>
-                                  <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${meta.className}`}>
-                                    {meta.label}
-                                  </span>
+                                <li key={action.key}>
+                                  <button
+                                    type="button"
+                                    disabled={!canToggle}
+                                    aria-pressed={!overriddenOff}
+                                    onClick={() => toggleActionOverride(permission.key, action.key)}
+                                    title={canToggle
+                                      ? (overriddenOff
+                                        ? translate('perm_action_restore', 'Switched off for this role. Click to hand it back to the tier.')
+                                        : translate('perm_action_switch_off', 'Click to switch this single action off for this role.'))
+                                      : translate('perm_action_tier_blocked', 'Already blocked by the selected tier.')}
+                                    className={`flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition-colors ${
+                                      canToggle
+                                        ? 'hover:bg-gray-100 dark:hover:bg-zinc-800'
+                                        : 'cursor-default opacity-60'
+                                    }`}
+                                  >
+                                    <span className={`min-w-0 truncate text-xs ${overriddenOff ? 'text-gray-400 line-through dark:text-gray-500' : 'text-gray-600 dark:text-gray-300'}`}>
+                                      {translate(action.tKey, action.label)}
+                                    </span>
+                                    <span className={`flex-shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${meta.className}`}>
+                                      {overriddenOff ? translate('perm_action_off', 'Off') : meta.label}
+                                    </span>
+                                  </button>
                                 </li>
                               )
                             })}

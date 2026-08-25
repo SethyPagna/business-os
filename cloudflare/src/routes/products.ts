@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { cachedJsonResponse, getVersion, bumpVersion } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getPermissionTier, getMergedPermissions } from '../lib/permissions'
+import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions } from '../lib/permissions'
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
@@ -893,7 +893,7 @@ app.get('/filters', async (c) => {
 
 app.post('/', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') === 'none') {
+  if (getActionTier(user, 'products', 'add') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
@@ -974,7 +974,7 @@ app.put('/:id', async (c) => {
   // the products surface -- no other page's permission is consulted, which is
   // the same page-independence the read path now has.
   const isImageOnlyEdit = isImageOnlyRead(user, 'products') && isImageOnlyWritePayload(body)
-  if (getPermissionTier(user, 'products') === 'none' && !isImageOnlyEdit) {
+  if (getActionTier(user, 'products', 'edit') === 'none' && !isImageOnlyEdit) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 
@@ -1040,7 +1040,7 @@ app.put('/:id', async (c) => {
 
 app.delete('/:id', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') === 'none') {
+  if (getActionTier(user, 'products', 'delete') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const id = c.req.param('id')
@@ -1139,7 +1139,7 @@ app.delete('/:id', async (c) => {
 // error telling them why, not a silently-wrong partial behavior.
 app.post('/bulk-delete-jobs', async (c) => {
   const user = c.get('user')
-  const tier = getPermissionTier(user, 'products')
+  const tier = getActionTier(user, 'products', 'bulk_delete')
   if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   if (tier === 'review') {
     return c.json({ error: 'Bulk delete requires Full access for Products. Ask an admin, or delete a smaller selection through the normal review flow.' }, 403)
@@ -1263,7 +1263,7 @@ app.post('/variant', async (c) => {
 // stay easy to reason about independently.
 app.get('/merge-duplicates/preview', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -1341,7 +1341,7 @@ app.get('/merge-duplicates/preview', async (c) => {
 
 app.post('/merge-duplicates', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -1570,7 +1570,7 @@ app.post('/merge-duplicates', async (c) => {
 // than implying a false "went out of stock" history.
 app.get('/zero-quantity-candidates', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  if (getActionTier(user, 'products', 'zero_qty_cleanup') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -1668,7 +1668,7 @@ app.get('/zero-quantity-candidates', async (c) => {
 // with a reason instead of force-deleted.
 app.post('/zero-quantity-delete', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  if (getActionTier(user, 'products', 'zero_qty_cleanup') !== 'full') {
     return c.json({ success: false, error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
@@ -1747,7 +1747,7 @@ function normalizeLookupKey(value: unknown): string {
 
 app.post('/lookups/replace', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  if (getActionTier(user, 'products', 'manage_lookups') !== 'full') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>

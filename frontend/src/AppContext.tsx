@@ -14,7 +14,7 @@ import { isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
 import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
-import { actionAllowed } from './utils/permissionActions.ts'
+import { actionAllowed, isActionOverriddenOff } from './utils/permissionActions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
@@ -1968,10 +1968,23 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   // just differs (queued for approval / narrowed to the fields they may
   // edit). Call outcomeAt() directly when a caller needs to tell those
   // apart -- e.g. to label a button "Submit for approval" instead of "Save".
+  // The fifth argument applies any per-action override an admin set in the
+  // permissions editor (`{ "products:delete": false }`). It can only ever
+  // REMOVE an action the tier granted, never add one it withheld -- see
+  // utils/permissionActions.ts for why one-way is what makes it safe to
+  // enforce on the server. The same rule runs in
+  // cloudflare/src/lib/permissions.ts's getActionTier, so a control hidden
+  // here is genuinely refused by the API rather than merely hidden.
   const can = useCallback((permissionKey: string, actionKey: string): boolean => {
     if (!user) return false
-    return actionAllowed(permissionKey, actionKey, getPermissionTier(permissionKey), hasPermission)
-  }, [user, getPermissionTier, hasPermission])
+    return actionAllowed(
+      permissionKey,
+      actionKey,
+      getPermissionTier(permissionKey),
+      hasPermission,
+      (section, action) => isActionOverriddenOff(getPermissions(), section, action),
+    )
+  }, [user, getPermissionTier, hasPermission, getPermissions])
 
   const canAccessPage = useCallback((pageId: string) => {
     if (!user) return false

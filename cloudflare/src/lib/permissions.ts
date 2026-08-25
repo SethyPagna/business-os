@@ -155,6 +155,68 @@ export function isReviewRequired(user: PermissionUser, key: string | null | unde
 }
 
 // ---------------------------------------------------------------------------
+// Per-ACTION overrides
+// ---------------------------------------------------------------------------
+// A tier answers "how much of Products may this role touch". An admin
+// frequently wants the next level down -- "everything except Delete", "no
+// Export" -- without inventing a whole new tier for each combination.
+//
+// An override is stored alongside the ordinary keys under a namespaced
+// `section:action` key, e.g. `{ products: true, "products:delete": false }`.
+// Older records simply have none, and unknown keys were always ignored, so
+// this is backward compatible in both directions.
+//
+// DELIBERATELY ONE-WAY: an override can only ever REMOVE an action the tier
+// already granted. It can never grant one the tier withholds.
+//
+// That is not timidity, it is what keeps this safe to enforce. Widening
+// would mean every route learning to accept "your tier says no, but an
+// override says yes", and any route that forgot would silently disagree
+// with the UI -- the app would show a button that 403s, or worse, gate a
+// write in the UI that the API still performs. Narrowing has no such
+// failure mode: a route that has not yet been wired is simply no MORE
+// permissive than it was before this existed, which is exactly the
+// direction a permission bug should fail in.
+//
+// `isAdminControlUser` is checked first and is never narrowed -- an admin
+// locking themselves out of their own controls via a stray override would
+// be unrecoverable from inside the app.
+
+/** Storage key for one action override. */
+export function actionOverrideKey(section: string, action: string): string {
+  return `${String(section || '').trim().toLowerCase()}:${String(action || '').trim().toLowerCase()}`
+}
+
+/**
+ * True when this role has explicitly had `section:action` switched off.
+ *
+ * Only an explicit `false` counts. An absent key, `true`, or any other
+ * value means "no opinion" and leaves the tier's own answer standing --
+ * so a typo in an override key can never accidentally block something.
+ */
+export function isActionBlocked(user: PermissionUser, section: string, action: string): boolean {
+  if (isAdminControlUser(user)) return false
+  const permissions = getMergedPermissions(user)
+  return permissions[actionOverrideKey(section, action)] === false
+}
+
+/**
+ * The single call a route should make when it wants both the tier answer
+ * and any per-action narrowing applied: returns the effective tier for THIS
+ * action, which is the section tier unless the action has been switched
+ * off, in which case it is 'none'.
+ *
+ * Using this in place of getPermissionTier() at an action's own route keeps
+ * the existing 'none' -> 403 / 'review' -> queue branches working unchanged;
+ * the route does not need to learn a new outcome shape.
+ */
+export function getActionTier(user: PermissionUser, section: string, action: string): PermissionTier {
+  const tier = getPermissionTier(user, section)
+  if (tier === 'none') return 'none'
+  return isActionBlocked(user, section, action) ? 'none' : tier
+}
+
+// ---------------------------------------------------------------------------
 // Action-history permission/sensitivity mapping, ported verbatim (data
 // only, no Node dependencies) from backend/src/permissions.ts. Used by
 // routes/actionHistory.ts to decide who can read/record/undo a given

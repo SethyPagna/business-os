@@ -209,8 +209,13 @@ export function actionAllowed(
   actionKey: string,
   tier: PermissionTierValue,
   hasKey: (key: string) => boolean = () => false,
+  isBlocked: (permissionKey: string, actionKey: string) => boolean = () => false,
 ): boolean {
   const action = actionsForKey(permissionKey).find((entry) => entry.key === actionKey)
+  // A per-action override switched off by an admin wins over everything
+  // else -- checked BEFORE the missing-row fallback below so that an
+  // override on an action this table does not model still takes effect.
+  if (isBlocked(permissionKey, actionKey)) return false
   // An action with no row defined is not silently denied -- that would
   // turn a typo in a call site into an invisible permission bug. Fall back
   // to the plain tier check: anything but 'none' may proceed.
@@ -218,4 +223,39 @@ export function actionAllowed(
   if (outcomeAt(action, tier) === 'block') return false
   if (action.requiresKey && !hasKey(action.requiresKey)) return false
   return true
+}
+
+// ---------------------------------------------------------------------------
+// Per-action overrides -- mirrors cloudflare/src/lib/permissions.ts exactly.
+// ---------------------------------------------------------------------------
+// Stored alongside the ordinary keys under a namespaced `section:action`
+// key, e.g. `{ products: true, "products:delete": false }`. Unknown keys
+// were always ignored, so older records and older clients both cope.
+//
+// ONE-WAY BY DESIGN: an override can only REMOVE an action the tier already
+// granted, never add one it withholds. Widening would require every route
+// to accept "your tier says no but an override says yes", and any route
+// that forgot would silently disagree with the UI -- showing a button that
+// 403s, or gating a write in the UI that the API still performs. Narrowing
+// cannot fail that way: an unwired route is simply no more permissive than
+// before, which is the direction a permission bug should fail in.
+
+/** Storage key for one action override. Must match the backend's. */
+export function actionOverrideKey(section: string, action: string): string {
+  return `${String(section || '').trim().toLowerCase()}:${String(action || '').trim().toLowerCase()}`
+}
+
+/**
+ * True when `section:action` has been explicitly switched off for this
+ * permission map. Only an explicit `false` counts -- an absent key or any
+ * other value leaves the tier's own answer standing, so a typo in an
+ * override key can never accidentally block something.
+ */
+export function isActionOverriddenOff(
+  permissions: Record<string, unknown> | null | undefined,
+  section: string,
+  action: string,
+): boolean {
+  if (!permissions) return false
+  return permissions[actionOverrideKey(section, action)] === false
 }
