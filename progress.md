@@ -2750,12 +2750,12 @@ tracker, so it must not be rewritten into vagueness.
 
 | # | Item | Flag | Notes |
 |---|---|---|---|
-| 3 | "Reset with OTP" belongs inside Forgot password (ask admin / reset personally with OTP) | 🟡 | One entry point, then choose a method. |
-| 4 | Remove "Needs an account created by your admin." | 🟡 | |
-| 5 | Remove "Sign in to continue" | 🟡 | |
-| 6 | Put the logo and "Business OS" side by side for better spacing | 🟡 | |
-| 7 | Login accepts username, name, phone, or email | 🟡 | Field already says this; confirm the backend actually resolves all four. |
-| 8 | Device-approval screen shows two shield icons and says "Waiting for device approval" twice | 🟡 | Both redundancies confirmed in the screenshot. |
+| 3 | "Reset with OTP" belongs inside Forgot password (ask admin / reset personally with OTP) | 🟢 Part 342 | One entry point, then choose a method. Ask-admin hint lives there too. |
+| 4 | Remove "Needs an account created by your admin." | 🟢 Part 342 | Its information moved into the recovery screen, where it is actionable. |
+| 5 | Remove "Sign in to continue" | 🟢 Part 342 | |
+| 6 | Put the logo and "Business OS" side by side for better spacing | 🟢 Part 342 | |
+| 7 | Login accepts username, name, phone, or email | 🟢 Part 342 | **It did not.** The query matched only `username`; the other three failed as "invalid password". Now resolved with username-wins precedence and an exactly-one-match rule for the rest. |
+| 8 | Device-approval screen shows two shield icons and says "Waiting for device approval" twice | 🟢 Part 342 | The card header rendered its own copy of both. |
 
 ### Public customer accounts — decided this batch
 
@@ -2785,8 +2785,8 @@ and **448 phone numbers are shared across 978 customers**.
 | # | Item | Flag | Notes |
 |---|---|---|---|
 | 18 | Redo the stats: an even number of them, easier to scan | 🟡 | |
-| 19 | Update the search-scope help text — search is now name + barcode/SKU only | 🟡 | Behaviour shipped earlier; the on-screen description still describes the old wider scope. |
-| 20 | Bulk price adjustment: add/subtract a fixed amount across products, USD or KHR, selling price only, optionally skipping products priced 0 | 🟡 | Must be correct and complete, not a partial helper. |
+| 19 | Update the search-scope help text — search is now name + barcode/SKU only | 🟢 Part 342 | Products/Inventory/portal updated, EN + KM. Sales/Returns left alone on purpose — their search really does still match brand. |
+| 20 | Bulk price adjustment: add/subtract a fixed amount across products, USD or KHR, selling price only, optionally skipping products priced 0 | 🟢 Part 342 | Pure engine + UI. Clamps at 0, rounds per currency, skip-zero applies per field, confirmation counts rows that will really change. Verified in the browser against D1. |
 | 21 | Batches: multiple batches, view, edit, batch date | 🟡 | |
 | 22 | Imports, deletes and products all working, production-grade | 🟡 | |
 
@@ -2810,6 +2810,25 @@ and **448 phone numbers are shared across 978 customers**.
 | 26 | Profile modal redesign: name/details on the avatar's row; larger buttons on one row; click the avatar to view it, with the actions beneath the image; no separate upload entry point | 🟡 | Carried over from the previous batch, restated. |
 | 27 | Portal editor "Contact us" working | 🟡 | Carried over, restated. |
 | 28 | Promotions/discounts, Canva-like editing with templates | ⚪ | **Explicitly pushed back in the order this batch.** Not dropped. |
+
+### Environment gotcha worth knowing before testing any write locally
+
+`api/http.ts`'s `route()` **blocks every write** when no sync-server URL is
+configured, and `ensureBootstrapServerUrl()` returns `''` **by design** on the Vite dev
+server (`localhost:5173`). So with `localStorage` cleared, no write of any kind succeeds
+there — the UI simply appears to do nothing, with no console error.
+
+This cost real time in Part 342: a new bulk action looked broken, and so did the
+pre-existing one next to it. Neither was. Fix for local testing:
+
+```js
+localStorage.setItem('businessos_sync_server', window.location.origin)
+```
+
+Related, same class: a control that fails the *same way* as the change under test is
+evidence about the environment, not about the change. Part 341 lost time to the mirror
+image of this — an "admin sees it too" control that failed because the app's persisted
+user was still the previous account.
 
 ### Standing rules restated this batch
 
