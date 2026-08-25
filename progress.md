@@ -55,6 +55,62 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ---
 
+## Task board
+
+**Every task carries a status here and is updated as it moves.** Requested Aug 25 2026 so
+state is visible at a glance instead of inferred from prose further down this file.
+
+Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
+
+### Blocking / production
+
+| Task | Status | Notes |
+|---|---|---|
+| Data reset fails — "Exceeded Memory Limit" | done, awaiting deploy | Cause was NOT the reset code: a full backup runs as a hard prerequisite in front of every reset, and it loaded every row of ~34 tables into memory then stringified it. Now paged + streamed to R2. Needs a deploy to take effect. |
+| Organization must lock to LeangCosmetics | done, awaiting deploy | `ensureCoreDataInvariants` hardcoded the name and rewrote it **on every request**, so any rename reverted. Now configured via `BUSINESS_OS_ORGANIZATION_NAME`/`_SLUG`. Only applies once deployed against remote D1. |
+| POS / sales not working — options, batch pick, click-to-pick | in progress | Reported repeatedly. Highest-value remaining functional item. |
+| Image compression: hard 350KB cap, as close to it as possible, all library objects, re-verified every 6h | in progress | Currently overshooting low (~70KB) and many objects still MB-sized. |
+
+### Import
+
+| Task | Status | Notes |
+|---|---|---|
+| Add/Sale absorbs Dated Stock Reconciliation (batch-choice-on-sale, create-then-sell) | not started | Largest remaining piece; needs its own run. |
+| Image auto-wire as a **button**, not automatic | not started | Wanted mainly for delete-and-reimport. Matching + `_1`/`_2` rename already exist. |
+| Import/delete stay inside CPU limits while staying fast and 1:1 after review | not started | |
+
+### Products page
+
+| Task | Status | Notes |
+|---|---|---|
+| Barcode first, on the same row as category and brand | done | Row meta line and detail header. |
+| Prices + stock merged onto one row (default display) | not started | |
+| Large-screen row alignment — no indentation vs the category rail | not started | |
+| Sticky toolbar (search / select-all) gap on scroll | not started | Products show through the gap. |
+| Batch format + click-to-open float-expand in the flyout | not started | |
+| Flyout: divider, margin row, action-button width | done | Divider was two stacked 1px borders. |
+| Thumbnail opening gallery **and** detail together | done | Not reproduced live — no product has a real uploaded image locally. |
+
+### Cross-cutting
+
+| Task | Status | Notes |
+|---|---|---|
+| mm/dd/yyyy everywhere | done | Locale pinned to `en-US`; `undefined` follows the viewer's machine and renders dd/mm/yyyy in most non-US locales. |
+| Items per page: 20 default, POS 30, public 20 | done | Both client and server for the storefront. |
+| Fast loading, accuracy, efficiency | not started | Needs a measured pass, not guesswork. |
+| Session "ERR Not authenticated" after idle | done, awaiting deploy | Sessions never renewed; fixed expiry set at login. |
+| Contacts / Fees per-action permission gating | done | Opposite treatments — block means hide, queue/limited means keep and explain. |
+| Khmer sweep + raw-key rendering | done | 40 keys rendered as raw keys because `t()` returns the key on a miss, making `|| 'fallback'` dead code. |
+
+### Deferred by request
+
+| Task | Status |
+|---|---|
+| Promotions / discounts, Canva-like template editor | deferred |
+| Public customer accounts (phone-only login, membership ID) | deferred — identity decisions recorded |
+
+---
+
 ## Current status
 
 **As of Part 341 (Aug 25 2026).** Verification below was really run in a local Windows
