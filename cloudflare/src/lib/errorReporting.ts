@@ -148,6 +148,59 @@ function buildEnvelope(message: string, stack: string | null, context: ErrorRepo
   return `${header}\n${itemHeader}\n${JSON.stringify(event)}\n`
 }
 
+// ---------------------------------------------------------------------------
+// Deduplication -- the thing that actually protects the quota
+// ---------------------------------------------------------------------------
+// The Sentry free plan allows 5,000 errors/month. The realistic way to burn
+// that is not many DIFFERENT errors, it is one error firing in a loop: a
+// broken query hit by every POS poll, or a render crash that retries. A few
+// hundred identical events tell you nothing the first one did not.
+//
+// Sentry groups events into issues, and issues do not count -- but every
+// EVENT does. So collapsing repeats has to happen before sending, not after.
+//
+// Two independent limits, because they fail differently:
+//   - identical errors collapse for DEDUPE_WINDOW_MS
+//   - a hard ceiling per isolate catches a storm of *distinct* errors, which
+//     dedupe alone would happily forward one by one
+//
+// State is isolate-local on purpose. KV is the obvious place to put a
+// counter and would be the wrong one: the free plan allows 1,000 KV writes
+// PER DAY and one write per second per key, so a shared counter would hit
+// its own limit long before Sentry's, and would add a KV round trip to every
+// error. A Worker isolate is short-lived, so this under-counts across
+// isolates -- which is the safe direction, and the DSN-side rate limit
+// (100/hour, set on the key itself) is the real ceiling behind it. Events
+// dropped there do not count against the quota at all.
+const DEDUPE_WINDOW_MS = 5 * 60 * 1000
+const MAX_TRACKED_FINGERPRINTS = 100
+const MAX_EVENTS_PER_ISOLATE = 50
+
+const recentlySent = new Map<string, number>()
+let isolateEventCount = 0
+
+/** Exposed for tests; also lets a long-lived context reset between runs. */
+export function resetReportingState(): void {
+  recentlySent.clear()
+  isolateEventCount = 0
+}
+
+function shouldSend(fingerprint: string, now: number): boolean {
+  if (isolateEventCount >= MAX_EVENTS_PER_ISOLATE) return false
+  const lastSent = recentlySent.get(fingerprint)
+  if (lastSent != null && now - lastSent < DEDUPE_WINDOW_MS) return false
+  // Bound the map so a stream of unique fingerprints cannot grow it without
+  // limit. Dropping the oldest entry is enough -- this is a cache, and a
+  // wrongly-evicted fingerprint costs one duplicate event, not correctness.
+  if (recentlySent.size >= MAX_TRACKED_FINGERPRINTS) {
+    const oldest = recentlySent.keys().next().value
+    if (oldest !== undefined) recentlySent.delete(oldest)
+  }
+  recentlySent.set(fingerprint, now)
+  isolateEventCount += 1
+  return true
+}
+
 /**
  * Sends one error to Sentry. Never throws and never rejects: a reporter that
  * fails while handling an error would turn one failure into two, and it is
@@ -167,6 +220,10 @@ export async function reportError(
   try {
     const message = error instanceof Error ? error.message : String(error ?? 'Unknown error')
     const stack = error instanceof Error ? error.stack || null : null
+    // Fingerprint on message + where it happened, NOT the stack: a stack can
+    // carry line offsets that differ between otherwise identical failures,
+    // which would defeat the whole point.
+    if (!shouldSend(`${context.source}|${context.location || ''}|${message}`, Date.now())) return false
     const response = await fetch(parsed.envelopeUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-sentry-envelope' },

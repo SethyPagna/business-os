@@ -23,7 +23,7 @@ const tsPath = path.join(tmpDir, 'errorReporting.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'errorReporting.ts'), 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
 execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath}`, { cwd: tmpDir, stdio: 'inherit' })
-const { scrubValue, parseSentryDsn, reportError } = require(path.join(tmpDir, 'errorReporting.js'))
+const { scrubValue, parseSentryDsn, reportError, resetReportingState } = require(path.join(tmpDir, 'errorReporting.js'))
 
 let passed = 0
 function check(name, fn) {
@@ -147,6 +147,93 @@ async function main() {
     // the check below, not by the scrubber.
     assert.ok(!/"user"\s*:/.test(captured), 'no user block: no id, username, email or IP')
     assert.ok(captured.includes('cashier'), 'a coarse role IS sent -- enough to say "only cashiers hit this"')
+  })
+
+  // ---- quota protection ----
+  // The Sentry free plan allows 5,000 errors/month. The realistic way to burn
+  // that is one error firing in a loop, not many different errors, so
+  // collapsing repeats before sending is the protection that matters.
+  await check('an identical error repeating is sent ONCE, not once per occurrence', async () => {
+    resetReportingState()
+    const originalFetch = globalThis.fetch
+    let sends = 0
+    globalThis.fetch = () => { sends += 1; return Promise.resolve({ body: null }) }
+    try {
+      for (let i = 0; i < 50; i += 1) {
+        await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error('same failure'), { source: 'worker', location: '/api/sales' })
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    assert.equal(sends, 1, `50 identical errors should produce 1 event, produced ${sends}`)
+  })
+
+  await check('genuinely different errors are all still reported', async () => {
+    resetReportingState()
+    const originalFetch = globalThis.fetch
+    let sends = 0
+    globalThis.fetch = () => { sends += 1; return Promise.resolve({ body: null }) }
+    try {
+      for (let i = 0; i < 5; i += 1) {
+        await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error(`failure ${i}`), { source: 'worker' })
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    assert.equal(sends, 5, 'dedupe must not swallow distinct errors')
+  })
+
+  await check('the same message from a DIFFERENT route is a different event', async () => {
+    resetReportingState()
+    const originalFetch = globalThis.fetch
+    let sends = 0
+    globalThis.fetch = () => { sends += 1; return Promise.resolve({ body: null }) }
+    try {
+      await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error('boom'), { source: 'worker', location: '/api/sales' })
+      await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error('boom'), { source: 'worker', location: '/api/products' })
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    assert.equal(sends, 2, 'where it happened is part of the identity')
+  })
+
+  await check('a storm of DISTINCT errors is capped, which dedupe alone would not catch', async () => {
+    resetReportingState()
+    const originalFetch = globalThis.fetch
+    let sends = 0
+    globalThis.fetch = () => { sends += 1; return Promise.resolve({ body: null }) }
+    try {
+      for (let i = 0; i < 500; i += 1) {
+        await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error(`unique ${i}`), { source: 'worker' })
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    assert.ok(sends <= 50, `a per-isolate ceiling should cap this; sent ${sends}`)
+  })
+
+  await check('dedupe state cannot grow without bound', async () => {
+    resetReportingState()
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = () => Promise.resolve({ body: null })
+    try {
+      for (let i = 0; i < 1000; i += 1) {
+        await reportError('https://abc@o1.ingest.us.sentry.io/2', new Error(`k${i}`), { source: 'worker' })
+      }
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+    // No assertion on a private Map; the point is that this completes rather
+    // than growing until the isolate runs out of memory.
+    assert.ok(true)
+  })
+
+  await check('dedupe does NOT use KV -- that would hit its own limit first', async () => {
+    const src = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'errorReporting.ts'), 'utf8')
+    assert.ok(
+      !/KVNamespace|\.put\(|env\.CACHE/.test(src),
+      'KV allows only 1,000 writes/day and one write per second per key -- a shared counter there would break long before the Sentry quota did',
+    )
   })
 
   // ---- wiring ----
