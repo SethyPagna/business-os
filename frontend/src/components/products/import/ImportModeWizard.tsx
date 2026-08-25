@@ -18,14 +18,24 @@
 //   sub-option cards, and the info-toolkit + template + upload area
 //   updates live in the same section below -- no separate "next step" to
 //   reach the template, no page break between choosing and seeing it.
-// - Add-Sale is now its own top-level mode (previously a General
-//   sub-option) since its shape is different: instead of picking ONE of
-//   several fixed sub-options, it presents a set of independently
-//   selectable toggles (link to a sale, attach a customer, include
-//   discount, include fee, supply cost price in file). Each toggle
-//   updates the template's column list and note live -- this is the
-//   "select/unselect updates the information, template, upload
-//   accordingly" behavior asked for.
+// - Add-Sale is its own top-level mode, and covers MORE than sales: one
+//   file creates/updates products, moves stock, AND records sales. Its
+//   copy says so, because "Add-Sale" alone reads as sales-only and people
+//   were hunting elsewhere for the add-product/add-stock import.
+//   Its options are two questions rather than five checkboxes:
+//     * how rows relate -- each row alone / grouped into one sale by a
+//       sale label / linked by day. `date` is a required base column
+//       because it is what lets the importer order a stock arrival before
+//       a sale of the same product on the same day.
+//     * where cost price comes from -- in the file, or decided at review.
+//   Customer, discount and fee are NOT separate toggles any more. They
+//   come with whichever sale-linking mode is chosen and may be left
+//   blank, because they describe one ordinary transaction (a customer
+//   bought something, possibly with a discount and a delivery fee) and
+//   making someone tick three more boxes to say so was busywork.
+// - Every option's explanation lives behind an InfoHint (hover or tap)
+//   rather than printed under its card, so a list of modes reads as a
+//   list of choices instead of a wall of text.
 // - One screen, one Continue/Upload action -- the old 2-step
 //   choose -> template flow (and its StepDots) is gone; everything that
 //   used to be step 2 (info toolkit card, template columns, "not built
@@ -50,6 +60,7 @@ import { useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
+import InfoHint from '../../shared/InfoHint'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Columns3 from 'lucide-react/dist/esm/icons/columns-3.js'
@@ -57,12 +68,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import Link2 from 'lucide-react/dist/esm/icons/link.js'
-import Users from 'lucide-react/dist/esm/icons/users.js'
-import Percent from 'lucide-react/dist/esm/icons/percent.js'
-import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Coins from 'lucide-react/dist/esm/icons/coins.js'
-import CheckSquare from 'lucide-react/dist/esm/icons/check-square.js'
-import Square from 'lucide-react/dist/esm/icons/square.js'
 import UploadCloud from 'lucide-react/dist/esm/icons/upload-cloud.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import Modal from '../../shared/Modal'
@@ -261,73 +267,85 @@ const REPLACE_OPTIONS: OptionDef[] = [
   },
 ]
 
-// Add-Sale's own set of independently selectable toggles. Unlike
-// General/Replace (pick exactly one fixed option), Add-Sale always
-// imports the same base shape (name, barcode, branch, stock_qty,
-// selling_price) and these toggles layer optional columns on top --
-// each one flips its own columns in/out of the template shown below,
-// live.
-const ADD_SALE_BASE_COLUMNS = ['name', 'barcode', 'branch', 'stock_qty', 'selling_price']
+// Add-Sale covers three things in one file, not just sales: it creates or
+// updates PRODUCTS, moves STOCK, and records SALES. The mode's own copy says
+// so, because "Add-Sale" on its own reads as sales-only and people were
+// looking elsewhere for the add-product/add-stock import.
+//
+// `date` is a base column, not optional. It is what makes the whole thing
+// orderable: the importer has to know whether a stock arrival happened
+// before or after a sale on the same product, otherwise a sale can be
+// applied against stock that had not been received yet.
+const ADD_SALE_BASE_COLUMNS = ['name', 'barcode', 'branch', 'date', 'stock_qty', 'selling_price']
 
-interface AddSaleToggleDef {
-  id: 'cost_price' | 'link_sale' | 'customer' | 'discount' | 'fee'
+// How rows relate to each other. Exactly one of these is always active --
+// they are mutually exclusive readings of the same file, not independent
+// switches.
+type RowLinkMode = 'per_row' | 'one_sale' | 'by_day'
+
+// Customer, discount and fee used to be three separate toggles sitting
+// beside "link rows into one sale". They are folded into the sale-linking
+// modes now, because they are not independent choices -- a sale exists
+// because a customer bought something, and that sale may carry a per-row
+// discount, a whole-receipt discount, a delivery fee or another fee. Asking
+// someone to tick three more boxes to describe one ordinary transaction was
+// busywork. The columns simply come with the template and may be left blank.
+const SALE_DETAIL_COLUMNS = ['customer_name', 'customer_phone', 'membership_number', 'discount', 'fee']
+
+interface RowLinkDef {
+  id: RowLinkMode
   icon: ComponentTypeIcon
   label: string
   description: string
   columns: string[]
 }
 
-const ADD_SALE_TOGGLES: AddSaleToggleDef[] = [
+const ROW_LINK_MODES: RowLinkDef[] = [
   {
-    id: 'cost_price',
-    icon: Coins,
-    label: 'Supply cost price in file',
-    description: "Off: cost price is resolved from a matching existing product. On: this file's own cost_price column is used instead.",
-    columns: ['cost_price'],
+    id: 'per_row',
+    icon: Layers,
+    label: 'Each row on its own',
+    description: 'No grouping. Every row is handled independently -- a product/stock row on its own, or a single-item sale.',
+    columns: [],
   },
   {
-    id: 'link_sale',
+    id: 'one_sale',
     icon: Link2,
-    label: 'Link rows into one sale',
-    description: 'Rows sharing the same "action" label become line items of one sales receipt. Left off, every row is its own reconciliation-flagged sale.',
-    columns: ['action (sale1, sale2...)'],
+    label: 'Group rows into one sale',
+    description: 'Rows sharing a sale label become one receipt. Three rows all marked sale1 are one sale with three items; sale2 is the next receipt. Customer, discount and fee columns come with this and can be left blank.',
+    columns: ['sale (sale1, sale2...)', ...SALE_DETAIL_COLUMNS],
   },
   {
-    id: 'customer',
-    icon: Users,
-    label: 'Attach a customer',
-    description: 'Link each sale to a customer by name/phone, or by membership number.',
-    columns: ['customer_name', 'customer_phone', 'membership_number'],
-  },
-  {
-    id: 'discount',
-    icon: Percent,
-    label: 'Include discount',
-    description: 'Apply a per-row discount to the sale.',
-    columns: ['discount'],
-  },
-  {
-    id: 'fee',
-    icon: Receipt,
-    label: 'Include fee',
-    description: 'Apply a per-row fee to the sale.',
-    columns: ['fee'],
+    id: 'by_day',
+    icon: CalendarClock,
+    label: 'Link rows by day',
+    description: "Rows are grouped by date and read in a sensible order within each day: new products first, then stock arrivals, then sales. A sale is never applied against stock that hadn't arrived yet. Customer, discount and fee columns come with this too.",
+    columns: SALE_DETAIL_COLUMNS,
   },
 ]
+
+// Cost price applies to every linking mode, which is why it is a separate
+// choice rather than another toggle in the list above. Either the file
+// carries it, or it is decided on the review screen after upload -- both are
+// legitimate, and which one you want does not depend on how rows are linked.
+type CostPriceSource = 'file' | 'review'
 
 // Reveal-on-select: an option's full description only renders once it's
 // the active one -- same pattern this session also applied to
 // Backup.tsx/ResetData.tsx's own tier pickers -- keeps every unselected
 // card to one line so a screen with several options doesn't read as
 // text-heavy.
+// Description lives behind an InfoHint rather than printed under the card.
+// Every option used to render a full sentence or two inline, which made a
+// list of three or four modes read as a wall of text before the reader had
+// picked anything. The label is what you scan; the explanation is what you
+// ask for. Applied to every mode and sub-mode on this screen.
 function OptionCard({
   active, dangerous, icon: Icon, title, description, onClick,
 }: { active: boolean; dangerous?: boolean; icon: ComponentTypeIcon; title: string; description: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left transition ${
+    <div
+      className={`flex w-full items-center gap-3 rounded-xl border-2 p-3 transition ${
         active
           ? dangerous
             ? 'border-red-500 bg-red-50 dark:border-red-500 dark:bg-red-950/30'
@@ -335,46 +353,19 @@ function OptionCard({
           : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600'
       }`}
     >
-      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${dangerous ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
-      <span className="min-w-0">
-        <span className="block text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</span>
-        {active ? <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{description}</span> : null}
-      </span>
-    </button>
+      {/* The card is a <div> wrapping a full-width <button> rather than one
+          big <button>, because the InfoHint inside is itself a button and
+          nesting buttons is invalid HTML -- React renders it, but the inner
+          control becomes unreliable to click. */}
+      <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+        <Icon className={`h-4 w-4 shrink-0 ${dangerous ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400'}`} />
+        <span className="block truncate text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</span>
+      </button>
+      <InfoHint text={description} label={`About ${title}`} />
+    </div>
   )
 }
 
-// Add-Sale's own toggle row: a checkbox-style card, several can be
-// active at once (unlike OptionCard, which is single-select within its
-// group).
-function ToggleCard({
-  active, icon: Icon, title, description, onClick,
-}: { active: boolean; icon: ComponentTypeIcon; title: string; description: string; onClick: () => void }) {
-  const CheckIcon = active ? CheckSquare : Square
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex w-full items-start gap-3 rounded-xl border-2 p-3 text-left transition ${
-        active
-          ? 'border-emerald-500 bg-emerald-50 dark:border-emerald-500 dark:bg-emerald-950/30'
-          : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600'
-      }`}
-    >
-      <CheckIcon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-400 dark:text-slate-500'}`} />
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400 dark:text-slate-500" />
-      <span className="min-w-0">
-        <span className="block text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</span>
-        <span className="mt-0.5 block text-xs text-slate-500 dark:text-slate-400">{description}</span>
-      </span>
-    </button>
-  )
-}
-
-// The info-toolkit + template + upload section shared by all three
-// modes -- always sits directly under whichever mode/option is
-// currently selected, on the same screen (no separate step to reach
-// it).
 // Sections 3-5 of the screen, in the order the layout spec fixes them:
 //
 //   3. Template download   -- changes with the selected mode AND options
@@ -497,13 +488,8 @@ export default function ImportModeWizard({ onClose, onDone, t, products = [], br
   const [topMode, setTopMode] = useState<TopMode>('general')
   const [generalSubOption, setGeneralSubOption] = useState<GeneralSubOption>('add_update')
   const [replaceSubOption, setReplaceSubOption] = useState<ReplaceSubOption>('columns')
-  const [addSaleToggles, setAddSaleToggles] = useState<Record<AddSaleToggleDef['id'], boolean>>({
-    cost_price: false,
-    link_sale: false,
-    customer: false,
-    discount: false,
-    fee: false,
-  })
+  const [rowLinkMode, setRowLinkMode] = useState<RowLinkMode>('per_row')
+  const [costPriceSource, setCostPriceSource] = useState<CostPriceSource>('review')
   const [launchedModal, setLaunchedModal] = useState<'none' | 'add_update' | 'dated_reconciliation' | 'add_sale'>('none')
 
   if (launchedModal === 'add_update') {
@@ -531,10 +517,6 @@ export default function ImportModeWizard({ onClose, onDone, t, products = [], br
   const selectedGeneral = GENERAL_OPTIONS.find((option) => option.id === generalSubOption) || GENERAL_OPTIONS[0]
   const selectedReplace = REPLACE_OPTIONS.find((option) => option.id === replaceSubOption) || REPLACE_OPTIONS[0]
 
-  function toggleAddSale(id: AddSaleToggleDef['id']) {
-    setAddSaleToggles((prev) => ({ ...prev, [id]: !prev[id] }))
-  }
-
   function handleUpload() {
     if (topMode === 'general') {
       setLaunchedModal(generalSubOption === 'dated_reconciliation' ? 'dated_reconciliation' : 'add_update')
@@ -546,52 +528,68 @@ export default function ImportModeWizard({ onClose, onDone, t, products = [], br
     // instead), so there's nothing else to launch here.
   }
 
+  const activeLink = ROW_LINK_MODES.find((mode) => mode.id === rowLinkMode) || ROW_LINK_MODES[0]
+  const linksIntoSales = rowLinkMode !== 'per_row'
+
   const addSaleColumns = [
     ...ADD_SALE_BASE_COLUMNS,
-    ...ADD_SALE_TOGGLES.filter((toggle) => addSaleToggles[toggle.id]).flatMap((toggle) => toggle.columns),
+    ...activeLink.columns,
+    ...(costPriceSource === 'file' ? ['cost_price'] : []),
   ]
-  const addSaleActiveCount = ADD_SALE_TOGGLES.filter((toggle) => addSaleToggles[toggle.id]).length
-  const addSaleNote = addSaleActiveCount > 0
-    ? `${addSaleActiveCount} optional field group${addSaleActiveCount === 1 ? '' : 's'} selected -- the template above updates as you select/unselect them. Minimum required fields are always included.`
-    : 'Minimum fields only, shown above. Select any toggle below to add its columns to the template.'
 
-  // The DOWNLOADED header row for Add-Sale. Derived from the same live
-  // toggle state as the chips above, so what you download always matches
-  // what the screen just said you would get. Kept separate from
-  // addSaleColumns because two of those chips are descriptive rather than
-  // literal -- 'action (sale1, sale2...)' is a real column called `action`,
-  // and a header row containing the parenthetical would not import.
+  const addSaleNote = linksIntoSales
+    ? `${activeLink.label} -- the template below carries the sale columns for this mode. Any of them may be left blank.`
+    : 'Each row stands alone. Add the sale columns by choosing one of the linking modes above.'
+
+  // Downloaded header row. Two of the chips above are descriptive rather
+  // than literal -- 'sale (sale1, sale2...)' is a column called `sale` --
+  // so the real names are mapped here.
   const addSaleTemplateHeaders = [
     ...ADD_SALE_BASE_COLUMNS,
-    ...ADD_SALE_TOGGLES
-      .filter((toggle) => addSaleToggles[toggle.id])
-      .flatMap((toggle) => (toggle.id === 'link_sale' ? ['action'] : toggle.columns)),
+    ...activeLink.columns.map((col) => (col.startsWith('sale (') ? 'sale' : col)),
+    ...(costPriceSource === 'file' ? ['cost_price'] : []),
   ]
 
   const addSaleHowItReads = [
-    'Every row creates or updates a product AND records a sale of it, in one pass.',
-    'Products are matched by barcode first, then name -- unmatched rows create a new product.',
-    'branch decides which branch the stock leaves, and which branch the sale is recorded against.',
-    ...(addSaleToggles.link_sale
-      ? ['Rows sharing the same action value (sale1, sale2...) are combined into ONE receipt with several line items.']
-      : ['With "Link rows into one sale" off, each row becomes its own separate sale.']),
-    ...(addSaleToggles.customer
-      ? ['A customer is matched by membership number first, then phone, then name. No match creates a new customer.']
+    'Every row can create or update a PRODUCT, move STOCK, and record a SALE -- all three, in one file.',
+    'Products are matched by barcode first, then name. No match creates a new product.',
+    'branch decides which branch the stock moves in and which branch the sale belongs to.',
+    'date orders the work. Within a date, new products are created first, then stock arrivals, then sales -- so a sale is never applied against stock that had not arrived yet.',
+    ...(rowLinkMode === 'one_sale'
+      ? ['Rows sharing a sale label become ONE receipt: three rows marked sale1 are one sale with three items.']
       : []),
-    ...(addSaleToggles.cost_price
-      ? ["cost_price is taken from this file, overriding whatever the matched product already has."]
-      : ['cost_price is taken from the matched existing product, since it is not in this file.']),
+    ...(rowLinkMode === 'by_day'
+      ? ['Rows are grouped by date. Everything sold on a day is treated as that day\'s sales, tagged with the day and its item count.']
+      : []),
+    ...(rowLinkMode === 'per_row'
+      ? ['With no linking, a row with stock_qty but no selling_price is a stock arrival, and a row with a selling_price is a single-item sale.']
+      : []),
+    ...(linksIntoSales
+      ? ['customer_name / customer_phone / membership_number attach a customer when filled. Membership number wins, then phone, then name.']
+      : []),
+    ...(linksIntoSales
+      ? ['discount and fee may be set per row, or once on the first row of a sale to apply to the whole receipt.']
+      : []),
+    costPriceSource === 'file'
+      ? 'cost_price comes from this file and overrides whatever the matched product has.'
+      : 'cost price is not in this file -- you choose it on the review screen after uploading, or it is taken from the matched product.',
   ]
 
   const addSaleGuidelines = [
-    'name, barcode, branch, stock_qty and selling_price are always required.',
-    'selling_price is the price the item actually SOLD at, which may differ from the catalogue price.',
-    'Prices and quantities are plain numbers -- no currency symbols.',
-    ...(addSaleToggles.link_sale
-      ? ['Put the same action label on every row of one receipt (sale1 on all its lines, sale2 on the next).']
+    'name, barcode, branch and date are always required. stock_qty and selling_price depend on what the row is doing.',
+    'selling_price is what the item actually SOLD for, which may differ from the catalogue price.',
+    'Leave a column blank when it does not apply -- blank is meaningful here and is never treated as 0.',
+    ...(rowLinkMode === 'one_sale'
+      ? ['Put the same sale label on every line of one receipt (sale1 on all its lines, sale2 on the next).']
       : []),
-    ...(addSaleToggles.discount || addSaleToggles.fee
-      ? ['Leave discount/fee blank on rows that have none, rather than entering 0.']
+    ...(rowLinkMode === 'by_day'
+      ? ['One date per row. Rows do not need to be sorted -- the importer orders them itself.']
+      : []),
+    ...(linksIntoSales
+      ? ['Customer, discount and fee are optional. A sale with none of them filled in is perfectly valid.']
+      : []),
+    ...(costPriceSource === 'file'
+      ? ['cost_price is per row, matching the stock arriving on that row -- useful when a batch was bought at a different price.']
       : []),
   ]
 
@@ -700,28 +698,60 @@ export default function ImportModeWizard({ onClose, onDone, t, products = [], br
         <div className="space-y-4">
           <div className="mb-1 flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-xs text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Minimum fields: name, barcode, branch, stock quantity, selling price. Select any of the optional fields below to add them to this import.</span>
+            <span>
+              One file that adds products, moves stock and records sales together.
+              Required on every row: name, barcode, branch, date.
+            </span>
           </div>
-          <div className="space-y-2">
-            {ADD_SALE_TOGGLES.map((toggle) => (
-              <ToggleCard
-                key={toggle.id}
-                active={addSaleToggles[toggle.id]}
-                icon={toggle.icon}
-                title={toggle.label}
-                description={toggle.description}
-                onClick={() => toggleAddSale(toggle.id)}
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              How rows relate to each other
+            </p>
+            <div className="space-y-2">
+              {ROW_LINK_MODES.map((mode) => (
+                <OptionCard
+                  key={mode.id}
+                  active={rowLinkMode === mode.id}
+                  icon={mode.icon}
+                  title={mode.label}
+                  description={mode.description}
+                  onClick={() => setRowLinkMode(mode.id)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Cost price
+            </p>
+            <div className="space-y-2">
+              <OptionCard
+                active={costPriceSource === 'review'}
+                icon={Coins}
+                title="Decide after upload"
+                description="No cost_price column. On the review screen you set it, or it is taken from the matched existing product. Best when the file came from somewhere that does not know your costs."
+                onClick={() => setCostPriceSource('review')}
               />
-            ))}
+              <OptionCard
+                active={costPriceSource === 'file'}
+                icon={Coins}
+                title="Cost price is in the file"
+                description="Adds a cost_price column, applied per row. Use this when different batches were bought at different prices, since each row carries the cost of the stock arriving on it."
+                onClick={() => setCostPriceSource('file')}
+              />
+            </div>
           </div>
+
           <TemplateUploadInfo
-            title="Add & Link to Sales template"
+            title="Add products, stock & sales template"
             columns={addSaleColumns}
             note={addSaleNote}
             built
             onUploadClick={handleUpload}
             headers={addSaleTemplateHeaders}
-            filename="add-sale-template.csv"
+            filename="add-stock-sale-template.csv"
             howItReads={addSaleHowItReads}
             guidelines={addSaleGuidelines}
           />
