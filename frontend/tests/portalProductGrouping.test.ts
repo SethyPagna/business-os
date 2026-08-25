@@ -39,8 +39,18 @@ await runTest('collapsePortalProductGroups keeps the highest-priced variant to r
     { id: 3, name: 'Rose Serum 30ml', selling_price_usd: 15 },
   ]
   const result = collapsePortalProductGroups(products)
-  assert.equal(result[0].id, 2)
+  assert.equal(result.length, 1, 'one card for the name group')
+  // The PRICE is what matters here, and it is still the highest of the three:
+  // the storefront must never advertise below what some variant charges.
   assert.equal(result[0].selling_price_usd, 22)
+  // The representative id is now the canonical (lowest) row rather than
+  // whichever row happened to be dearest. These three share a name and have
+  // no barcode and no cost, so under the identity rule they are ONE product,
+  // and mergeSameDetailRows collapses them before this function sees them --
+  // carrying the highest price forward via resolveMergedPricing. Previously
+  // they stayed three rows and this picked the dearest one; same price on
+  // screen, but the id now identifies a real product rather than a duplicate.
+  assert.equal(result[0].id, 1)
 })
 
 await runTest('collapsePortalProductGroups leaves distinct product names alone', () => {
