@@ -130,15 +130,94 @@ Invoke-Step "Remove known stray files" {
 # the failure only surfaced two steps later at typecheck). Falls back to
 # `npm install` if there's no lockfile yet. Skippable with
 # BUSINESS_OS_SKIP_INSTALL=1 for a repeat run against an already-fresh install.
+# A dev server running against this same checkout will hold an open handle on
+# a native .node binary (rollup's rollup.win32-x64-msvc.node is the one that
+# actually bites), and Windows refuses to unlink a file that is in use. `npm
+# ci` deletes node_modules wholesale before reinstalling, so it hits that
+# first and dies with:
+#
+#   npm error code EPERM ... unlink '...\@rollup\rollup-win32-x64-msvc\rollup.win32-x64-msvc.node'
+#
+# The message blames antivirus or permissions, which sends you looking in
+# entirely the wrong place -- the real cause is almost always a `vite` or
+# `wrangler dev` (workerd) process still running from earlier. Rather than
+# fail the whole release on it, stop those processes first, and if an EPERM
+# still happens, say plainly what it means instead of leaving npm's
+# misleading advice as the last word.
+function Stop-LocalDevServers {
+  $stopped = @()
+  # workerd is `wrangler dev`'s actual runtime process and outlives the
+  # wrangler wrapper, so it has to be named explicitly.
+  foreach ($name in @('workerd')) {
+    $procs = Get-Process -Name $name -ErrorAction SilentlyContinue
+    foreach ($p in $procs) {
+      try { Stop-Process -Id $p.Id -Force -ErrorAction Stop; $stopped += "$name (pid $($p.Id))" } catch {}
+    }
+  }
+  # Node processes are only stopped when their command line shows they are a
+  # dev server for THIS repo -- never a blanket `Stop-Process node`, which
+  # would kill unrelated editors, language servers and any other project.
+  #
+  # Best-effort by design: Win32_Process.CommandLine reads as empty for
+  # processes this session cannot inspect (confirmed on this machine -- every
+  # node.exe came back with a null command line under a normal, non-elevated
+  # shell), in which case this loop correctly stops nothing rather than
+  # guessing. That is fine: the retry below does not depend on it. Verified
+  # with a dev server deliberately left running -- `npm ci` fails EPERM on
+  # esbuild.exe, while `npm install` completes with exit 0 and downgrades the
+  # same EPERM to a non-fatal `npm warn cleanup`.
+  $nodeProcs = Get-CimInstance Win32_Process -Filter "Name = 'node.exe'" -ErrorAction SilentlyContinue
+  foreach ($p in $nodeProcs) {
+    $cmd = [string]$p.CommandLine
+    if (-not $cmd) { continue }
+    $isDevServer = $cmd -match 'wrangler|\bvite\b'
+    $isThisRepo  = $cmd -like "*$Root*"
+    if ($isDevServer -and $isThisRepo) {
+      try { Stop-Process -Id $p.ProcessId -Force -ErrorAction Stop; $stopped += "node (pid $($p.ProcessId))" } catch {}
+    }
+  }
+  if ($stopped.Count -gt 0) {
+    Write-Host "  stopped local dev server(s) holding node_modules: $($stopped -join ', ')" -ForegroundColor DarkYellow
+    # Windows releases the handles asynchronously; without this the very next
+    # unlink can still fail.
+    Start-Sleep -Seconds 3
+  }
+}
+
 function Install-Deps($Dir, $Label) {
   Invoke-Step "Install dependencies ($Label)" {
     Push-Location $Dir
-    if (Test-Path (Join-Path $Dir 'package-lock.json')) {
-      npm ci --no-audit --no-fund
-    } else {
-      npm install --no-audit --no-fund
+    try {
+      if (Test-Path (Join-Path $Dir 'package-lock.json')) {
+        npm ci --no-audit --no-fund
+      } else {
+        npm install --no-audit --no-fund
+      }
+      if ($LASTEXITCODE -ne 0) {
+        # One retry, after clearing the usual culprit. `npm install` rather
+        # than `npm ci` for the retry: it reconciles an existing tree in
+        # place instead of deleting it first, so it does not need to unlink
+        # the very file that was locked.
+        Write-Host "  npm exited $LASTEXITCODE -- checking for local dev servers holding node_modules..." -ForegroundColor DarkYellow
+        Stop-LocalDevServers
+        npm install --no-audit --no-fund
+        if ($LASTEXITCODE -ne 0) {
+          throw @"
+npm could not update node_modules in $Dir.
+
+If the error above is EPERM on a .node file, something still has that file
+open. npm's own message suggests antivirus or permissions, but the usual
+cause is a dev server running against this same folder -- `npm run dev`
+(vite) or `wrangler dev` (workerd) in another terminal, or a preview started
+by an editor. Close those and run this again.
+
+To skip installing entirely on a repeat run: set BUSINESS_OS_SKIP_INSTALL=1
+"@
+        }
+      }
+    } finally {
+      Pop-Location
     }
-    Pop-Location
   }
 }
 
