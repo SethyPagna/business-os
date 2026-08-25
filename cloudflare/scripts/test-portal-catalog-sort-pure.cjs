@@ -71,6 +71,13 @@ const searchMatch = loadReal('lib/searchMatch.ts')
 
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
+  // Caching is transparent to what this test asserts (sort order), so the
+  // producer is invoked directly -- exercising the real Cache API here would
+  // test Workers, not this route's SQL.
+  '../lib/cache': {
+    cachedJsonResponse: async (_req, _ctx, _version, _ttl, producer) => producer(),
+    getVersionWithFallback: async () => '0',
+  },
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/permissions': { hasPermission: () => true },
   '../lib/audit': { audit: async () => {} },

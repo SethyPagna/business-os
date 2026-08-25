@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -410,10 +411,31 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
     LIMIT @pageSize
   `).all({ pageSize })
   const itemsWithBranchStock = await attachPortalBranchStock(env, (items || []) as Array<Record<string, unknown>>)
+  // Two things were wrong here, and both made the storefront's A-Z rail
+  // disagree with what the page below it actually shows.
+  //
+  // 1. `is_active = 1` instead of visibleFilter. The merchant's
+  //    "hide out-of-stock products" setting was ignored, so letters counted
+  //    products the shopper could never reach -- and the rail then CHANGED
+  //    the moment they searched, because the search path
+  //    (/catalog/products/search) already builds its initials through
+  //    buildPortalProductFilters correctly. Same bug the comment above
+  //    visibleFilter says was fixed for meta and catalog; initials was
+  //    missed.
+  //
+  // 2. COUNT(*) counts ROWS, but a name group is one product everywhere
+  //    else -- it is one card on the storefront, one row in admin, and one
+  //    unit of pagination. Counting rows made the rail claim more products
+  //    under a letter than the grid could possibly render.
+  //
+  // name_key is the trigger-maintained lower(trim(name)) column from
+  // migration 0010, so this groups exactly the way the rest of the app does
+  // and uses the existing index rather than a fresh expression.
   const initials = await db.prepare(`
-    SELECT upper(substr(trim(name), 1, 1)) AS value, COUNT(*) AS count
-    FROM products
-    WHERE is_active = 1 AND trim(COALESCE(name, '')) <> ''
+    SELECT upper(substr(trim(p.name), 1, 1)) AS value,
+           COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
+    FROM products p
+    WHERE ${visibleFilter} AND trim(COALESCE(p.name, '')) <> ''
     GROUP BY value
     ORDER BY value ASC
   `).all<{ value: string; count: number }>()
@@ -438,26 +460,62 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
 // original's full field set. Disclosed here and in MIGRATION.md, not
 // silently partial: FAQ, about blocks, translations, AI settings, and
 // membership/points config are not included in this response.
+// ---------------------------------------------------------------------------
+// Public read caching
+// ---------------------------------------------------------------------------
+// Nothing on this router was cached: every storefront page load ran the full
+// settings + meta + catalog query set against D1. With ~10,000 products and
+// real visitor traffic that is the single largest avoidable load in the app,
+// and it scales with visitors rather than with data changes.
+//
+// These use the Workers Cache API (via cachedJsonResponse), NOT KV, and the
+// distinction matters. KV *reads* are generous at 100,000/day, but populating
+// a KV cache entry costs a WRITE, and writes are capped at 1,000/day -- with
+// per-PoP cache misses that budget disappears fast, which is exactly the
+// ceiling lib/quotaGuard.ts exists to protect. The Cache API has no
+// comparable daily write cap: it is the same HTTP cache every Worker already
+// has, keyed by request URL.
+//
+// Safe to share between visitors because every endpoint below is
+// unauthenticated and returns nothing visitor-specific. Membership lookup and
+// the submission endpoints are deliberately NOT cached for that reason.
+//
+// Keyed on the products cache version, so any product/stock/price mutation
+// invalidates the whole storefront at once through the same bumpVersion path
+// admin already uses -- no separate invalidation to keep in sync.
+const PORTAL_CONFIG_TTL_SECONDS = 60
+const PORTAL_CATALOG_TTL_SECONDS = 30
+
+async function portalCacheVersion(c: { env: Env }): Promise<string> {
+  return getVersionWithFallback(c.env, 'products')
+}
+
 app.get('/config', async (c) => {
-  const settings = await loadSettingsMap(c.env)
-  return c.json(buildPortalConfig(settings, c.env))
+  const version = await portalCacheVersion(c)
+  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
+    const settings = await loadSettingsMap(c.env)
+    return buildPortalConfig(settings, c.env)
+  }))
 })
 
 app.get('/bootstrap', async (c) => {
-  const settings = await loadSettingsMap(c.env)
-  const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
-  const [meta, catalog] = await Promise.all([
-    buildPortalMeta(c.env, showOutOfStockProducts),
-    buildPortalCatalog(c.env, showOutOfStockProducts),
-  ])
-  return c.json({
-    config: buildPortalConfig(settings, c.env),
-    meta,
-    catalog,
-    products: catalog.items,
-    reviewItems: [],
-    promotions: { items: [] },
-  })
+  const version = await portalCacheVersion(c)
+  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
+    const settings = await loadSettingsMap(c.env)
+    const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
+    const [meta, catalog] = await Promise.all([
+      buildPortalMeta(c.env, showOutOfStockProducts),
+      buildPortalCatalog(c.env, showOutOfStockProducts),
+    ])
+    return {
+      config: buildPortalConfig(settings, c.env),
+      meta,
+      catalog,
+      products: catalog.items,
+      reviewItems: [],
+      promotions: { items: [] },
+    }
+  }))
 })
 
 // GET /catalog/meta and GET /catalog/products -- previously only reachable
@@ -468,14 +526,20 @@ app.get('/bootstrap', async (c) => {
 // logic needed -- both reuse the same buildPortalMeta/buildPortalCatalog
 // helpers /bootstrap above already calls.
 app.get('/catalog/meta', async (c) => {
-  const settings = await loadSettingsMap(c.env)
-  const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
-  return c.json(await buildPortalMeta(c.env, showOutOfStockProducts))
+  const version = await portalCacheVersion(c)
+  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
+    const settings = await loadSettingsMap(c.env)
+    const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
+    return buildPortalMeta(c.env, showOutOfStockProducts)
+  }))
 })
 app.get('/catalog/products', async (c) => {
-  const settings = await loadSettingsMap(c.env)
-  const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
-  return c.json(await buildPortalCatalog(c.env, showOutOfStockProducts))
+  const version = await portalCacheVersion(c)
+  return c.json(await cachedJsonResponse(c.req.raw, c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
+    const settings = await loadSettingsMap(c.env)
+    const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
+    return buildPortalCatalog(c.env, showOutOfStockProducts)
+  }))
 })
 
 // GET /ai/status -- whether the portal's AI shopping assistant is turned
@@ -1357,7 +1421,11 @@ export function buildPortalProductFilters(query: Record<string, string>, allowSt
   return { where, joins, params, stockExpr, baseWhere, searchTerms, matchRankSql }
 }
 
-app.get('/catalog/products/search', async (c) => {
+// The storefront's highest-traffic endpoint, and the one that scales with
+// visitors rather than with catalog size. Search results are high-cardinality
+// (every distinct query string is its own key), which is precisely the shape
+// cachedJsonResponse's own docstring says the Cache API suits and KV does not.
+async function runPortalProductSearch(c: { env: Env; req: { query(): Record<string, string> } }) {
   const db = getDb(c.env)
   const query = c.req.query()
   const page = Math.max(1, Number.parseInt(query.page || '1', 10) || 1)
@@ -1493,8 +1561,13 @@ app.get('/catalog/products/search', async (c) => {
   // specifically because an unscoped alphabet bar shows non-zero counts
   // for letters that have zero real matches once filters are applied.
   const { where: initialsWhere, joins: initialsJoins, params: initialsParams } = buildPortalProductFilters({ ...query, initial: 'all' }, allowStockStateFilter, showOutOfStockProducts)
+  // Counts name GROUPS, not rows -- a group renders as ONE card on the
+  // storefront, so counting rows would promise more products under a letter
+  // than the grid can possibly show. Matches buildPortalCatalog's rail above
+  // and loadProductFilters' rail in admin.
   const initials = await db.prepare(`
-    SELECT upper(substr(trim(p.name), 1, 1)) AS value, COUNT(*) AS count
+    SELECT upper(substr(trim(p.name), 1, 1)) AS value,
+           COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
     FROM products p
     ${initialsJoins.join('\n')}
     WHERE ${initialsWhere.join(' AND ')} AND trim(COALESCE(p.name, '')) <> ''
@@ -1502,14 +1575,25 @@ app.get('/catalog/products/search', async (c) => {
     ORDER BY value ASC
   `).all<{ value: string; count: number }>(initialsParams)
 
-  return c.json({
+  return {
     items: itemsWithBranchStock,
     total,
     page,
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     initials: initials || [],
-  })
+  }
+}
+
+app.get('/catalog/products/search', async (c) => {
+  const version = await portalCacheVersion(c)
+  return c.json(await cachedJsonResponse(
+    c.req.raw,
+    c.executionCtx,
+    version,
+    PORTAL_CATALOG_TTL_SECONDS,
+    () => runPortalProductSearch(c),
+  ))
 })
 
 export default app
