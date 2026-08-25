@@ -42,6 +42,10 @@ type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: unknown, type?: string, duration?: number) => void
 
 interface FeesAppContextValue {
+  // Tier-aware read (utils/permissions.ts). Fees needs the TIER rather than
+  // a per-action boolean, because nothing here is blocked -- it needs to
+  // know whether a delete will queue, not whether it is allowed.
+  getPermissionTier: (key: string) => string
   t: TranslateFn
   notify: NotifyFn
   fmtUSD: (value: unknown) => string
@@ -89,7 +93,17 @@ function formatFeeDate(value: string | null | undefined): string {
 const EMPTY_RESULT: FeeListResult = { fees: [], total: 0, limit: PAGE_SIZE_OPTIONS[1], offset: 0, summary: [] }
 
 export default function FeesPage() {
-  const { t, notify, fmtUSD, fmtKHR } = useApp()
+  const { getPermissionTier, t, notify, fmtUSD, fmtKHR } = useApp()
+  // Fees is the one section where NOTHING is blocked for the Review
+  // Required tier -- add and edit apply directly, and delete goes to the
+  // approval queue rather than 403ing (routes/fees.ts's
+  // maybeQueueForReview). So hiding controls here, the way Products /
+  // Inventory / Branches / Returns / Contacts do, would be wrong: the
+  // person genuinely can press every one of them.
+  //
+  // What they need instead is to know that deleting will not take effect
+  // immediately. Labelling the outcome is the whole job on this page.
+  const feesNeedsApproval = getPermissionTier('fees') === 'review'
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('fees')
   const tr = useCallback((key: string, fallback: string): string => {
@@ -465,8 +479,8 @@ export default function FeesPage() {
                           type="button"
                           onClick={() => handleDelete(fee)}
                           disabled={deletingId === fee.id}
-                          aria-label={tr('delete', 'Delete')}
-                          title={tr('delete', 'Delete')}
+                          aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
+                          title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
                           className="rounded-full p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
@@ -502,7 +516,7 @@ export default function FeesPage() {
                     <button type="button" onClick={() => openEdit(fee)} aria-label={tr('edit', 'Edit')} className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700">
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <button type="button" onClick={() => handleDelete(fee)} disabled={deletingId === fee.id} aria-label={tr('delete', 'Delete')} className="rounded-full p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
+                    <button type="button" onClick={() => handleDelete(fee)} disabled={deletingId === fee.id} aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')} className="rounded-full p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>

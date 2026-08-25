@@ -54,6 +54,10 @@ interface AppUser {
 }
 
 interface AppContextValue {
+  // Per-action gate (utils/permissionActions.ts) -- the same table the
+  // admin permission editor renders, so a control's visibility here always
+  // matches what an admin was shown when granting the tier.
+  can: (permissionKey: string, actionKey: string) => boolean
   user?: AppUser | null
 }
 
@@ -348,7 +352,17 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
 }
 
 function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabProps) {
-  const { user } = useApp()
+  const { can, user } = useApp()
+  // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
+  // the Review Required tier rather than queueing them, so those controls
+  // are withheld instead of rendered and then failing on click. Add stays
+  // available (that tier may create directly) and edit stays available but
+  // is narrowed server-side to the name column only -- see
+  // utils/permissionActions.ts, where edit is 'limited' rather than
+  // 'block'.
+  const canDeleteContact = can('contacts', 'delete')
+  const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
@@ -895,7 +909,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               {tr('retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 ? (
+          {selectedIds.size > 0 && canBulkDeleteContacts ? (
             <button
               className="btn-secondary whitespace-nowrap text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -993,7 +1007,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             <td className="cursor-pointer px-4 py-2 text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{supplier.gender ? tr(supplier.gender, supplier.gender) : tr('unspecified', 'Unspecified')}</td>
             <td className="cursor-pointer px-4 py-2 text-xs text-gray-500" onClick={() => { setSelected(supplier); setModal('detail') }}>{fmtDateTime24(supplier.created_at)}</td>
             <td className="px-2 py-2 text-right" onClick={(event) => event.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
+              <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(supplier) : undefined} />
             </td>
           </tr>
           )
@@ -1052,7 +1066,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
               {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
             </div>
             <div onClick={(event) => event.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={() => handleDelete(supplier)} />
+              <ThreeDotMenu onDetails={() => { setSelected(supplier); setModal('detail') }} onEdit={() => { setSelected(supplier); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(supplier) : undefined} />
             </div>
           </div>
           )
@@ -1091,7 +1105,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
             ]
           })()}
           onEdit={() => setModal('form')}
-          onDelete={() => handleDelete(selected)}
+          onDelete={canDeleteContact ? () => handleDelete(selected) : undefined}
           onClose={() => { setModal(null); setSelected(null) }}
           t={t}
         />

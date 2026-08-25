@@ -987,6 +987,7 @@
   "delete_duplicate_hint": "Permanently delete this record (no merge)",
   "delete_fee_confirm": "Delete this fee record? This cannot be undone.",
   "delete_import": "Delete import",
+  "delete_needs_approval": "Delete (needs approval)",
   "delete_payment_method": "Delete Payment Method",
   "delete_row": "Delete Row",
   "delete_saved_reason_confirm": "Delete this saved reason?",

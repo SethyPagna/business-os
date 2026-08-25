@@ -987,6 +987,7 @@
   "delete_duplicate_hint": "លុបជាអចិន្ត្រៃយ៍ (មិនបញ្ចូលគ្នា)",
   "delete_fee_confirm": "លុបកំណត់ត្រាកម្រៃថ្លៃសេវានេះមែនទេ? សកម្មភាពនេះមិនអាចត្រឡប់វិញបានទេ។",
   "delete_import": "លុបការនាំចូល",
+  "delete_needs_approval": "លុប (ត្រូវការការអនុម័ត)",
   "delete_payment_method": "លុបវិធីបង់ប្រាក់",
   "delete_row": "លុបជួរ",
   "delete_saved_reason_confirm": "លុបហេតុផលដែលបានរក្សាទុកនេះមែនទេ?",

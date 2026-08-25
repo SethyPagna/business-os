@@ -55,6 +55,10 @@ interface AppUser {
 }
 
 interface AppContextValue {
+  // Per-action gate (utils/permissionActions.ts) -- the same table the
+  // admin permission editor renders, so a control's visibility here always
+  // matches what an admin was shown when granting the tier.
+  can: (permissionKey: string, actionKey: string) => boolean
   user?: AppUser | null
 }
 
@@ -418,7 +422,17 @@ function OptionsBadge({ raw }: { raw: unknown }) {
 
 // ?€?€ DeliveryTab ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
 function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabProps) {
-  const { user } = useApp()
+  const { can, user } = useApp()
+  // routes/contacts.ts 403s DELETE and POST /bulk-delete-jobs outright for
+  // the Review Required tier rather than queueing them, so those controls
+  // are withheld instead of rendered and then failing on click. Add stays
+  // available (that tier may create directly) and edit stays available but
+  // is narrowed server-side to the name column only -- see
+  // utils/permissionActions.ts, where edit is 'limited' rather than
+  // 'block'.
+  const canDeleteContact = can('contacts', 'delete')
+  const canBulkDeleteContacts = can('contacts', 'bulk_delete')
+
   const { syncChannel } = useSync()
   const loadRequestRef = useRef(0)
   const loadedOnceRef = useRef(false)
@@ -932,7 +946,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               {tr('retry', 'Retry')}
             </button>
           ) : null}
-          {selectedIds.size > 0 && (
+          {selectedIds.size > 0 && canBulkDeleteContacts && (
             <button
               className="btn-secondary text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleBulkDelete}
@@ -1024,7 +1038,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
             <td className="px-4 py-2 text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{contact.gender ? tr(contact.gender, contact.gender) : tr('unspecified', 'Unspecified')}</td>
             <td className="px-4 py-2 text-xs text-gray-500 cursor-pointer" onClick={() => { setSelected(contact); setModal('detail') }}>{fmtDateTime24(contact.created_at)}</td>
             <td className="px-2 py-2 text-right" onClick={e => e.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={() => handleDelete(contact)} />
+              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(contact) : undefined} />
             </td>
           </tr>
           )
@@ -1081,7 +1095,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               {options.length ? <div className="mt-0.5 text-xs text-blue-500">{options.length} contact option{options.length !== 1 ? 's' : ''}</div> : null}
             </div>
             <div onClick={e => e.stopPropagation()}>
-              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={() => handleDelete(contact)} />
+              <ThreeDotMenu onDetails={() => { setSelected(contact); setModal('detail') }} onEdit={() => { setSelected(contact); setModal('form') }} onDelete={canDeleteContact ? () => handleDelete(contact) : undefined} />
             </div>
           </div>
           )
@@ -1111,7 +1125,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               [t('col_added')||'Added', fmtDateTime24(selected.created_at)],
             ]
           })()}
-          onEdit={() => setModal('form')} onDelete={() => handleDelete(selected)} onClose={() => { setModal(null); setSelected(null) }} t={t} />
+          onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t} />
       )}
     </div>
   )
