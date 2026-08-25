@@ -3412,7 +3412,6 @@ ${inventoryReturnsFormulaText}`,
                 type="button"
                 className="flex min-w-0 max-w-full flex-col items-start text-left"
                 onClick={() => setStatDetail(stat as StatDetail)}
-                title={undefined}
               >
                 <div className="mb-0.5 pr-5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
                 <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>

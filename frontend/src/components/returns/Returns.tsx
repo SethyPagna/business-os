@@ -15,6 +15,7 @@ import { fmtTime } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
+import InfoHint from '../shared/InfoHint.tsx'
 import PaginationControls, { paginateItems } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -248,6 +249,33 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record
 
 function getInitialReturnPageSize(): number {
   return 50
+}
+
+
+type ReturnStatTileProps = {
+  label: string
+  value: ReactNode
+  color: string
+  /** What this figure means, and what clicking it filters to. */
+  info: string
+  active: boolean
+  onClick: () => void
+}
+
+// These tiles are also the scope's type FILTER -- clicking one narrows the
+// list below -- which nothing on screen previously said. The hint carries
+// that, and `active` gives the currently-applied filter a visible ring so
+// the list and the tiles can never look out of sync.
+function ReturnStatTile({ label, value, color, info, active, onClick }: ReturnStatTileProps) {
+  return (
+    <div className={`card relative min-w-[7.5rem] flex-1 px-3 py-2 text-left transition ${active ? 'ring-2 ring-blue-400 dark:ring-blue-500/60' : ''}`}>
+      <InfoHint className="absolute right-0 top-0" label={label} text={info} />
+      <button type="button" className="block w-full text-left focus:outline-none" onClick={onClick} aria-pressed={active}>
+        <div className="pr-4 text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+        <div className={`text-sm font-bold ${color}`}>{value}</div>
+      </button>
+    </div>
+  )
 }
 
 export default function Returns() {
@@ -875,37 +903,65 @@ export default function Returns() {
 
       {scope === CUSTOMER_SCOPE ? (
         <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('total_refunded', 'Total Refunded')} onClick={() => setTypeFilter('all')}>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('total_refunded', 'Total Refunded')}</div>
-            <div className="text-sm font-bold text-orange-700 dark:text-orange-400">{fmtUSD(customerStats.refundedUsd)}</div>
-          </button>
-          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('restocked', 'Restocked')} onClick={() => setTypeFilter('restock')}>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('restocked', 'Restocked')}</div>
-            <div className="text-sm font-bold text-green-700 dark:text-green-400">{customerStats.restockCount}</div>
-          </button>
-          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('written_off', 'Written Off')} onClick={() => setTypeFilter('writeoff')}>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('written_off', 'Written Off')}</div>
-            <div className="text-sm font-bold text-red-600 dark:text-red-400">{customerStats.writeoffCount}</div>
-          </button>
-          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('refund_only', 'Refund Only')} onClick={() => setTypeFilter('refund')}>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('refund_only', 'Refund Only')}</div>
-            <div className="text-sm font-bold text-blue-600 dark:text-blue-400">{customerStats.refundOnlyCount}</div>
-          </button>
+          <ReturnStatTile
+            label={tr('total_refunded', 'Total Refunded')}
+            value={fmtUSD(customerStats.refundedUsd)}
+            color="text-orange-700 dark:text-orange-400"
+            info={tr('returns_info_total_refunded', 'Money paid back to customers across every return in this list. Click to clear the type filter and show all returns.')}
+            active={typeFilter === 'all'}
+            onClick={() => setTypeFilter('all')}
+          />
+          <ReturnStatTile
+            label={tr('restocked', 'Restocked')}
+            value={customerStats.restockCount}
+            color="text-green-700 dark:text-green-400"
+            info={tr('returns_info_restocked', 'Returns where the item came back in sellable condition and went back into stock. Click to show only these.')}
+            active={typeFilter === 'restock'}
+            onClick={() => setTypeFilter('restock')}
+          />
+          <ReturnStatTile
+            label={tr('written_off', 'Written Off')}
+            value={customerStats.writeoffCount}
+            color="text-red-600 dark:text-red-400"
+            info={tr('returns_info_written_off', 'Returns where the item could not be resold, so it was removed from stock as a loss. Click to show only these.')}
+            active={typeFilter === 'writeoff'}
+            onClick={() => setTypeFilter('writeoff')}
+          />
+          <ReturnStatTile
+            label={tr('refund_only', 'Refund Only')}
+            value={customerStats.refundOnlyCount}
+            color="text-blue-600 dark:text-blue-400"
+            info={tr('returns_info_refund_only', 'Returns where money was paid back but no item came in, so stock is unchanged. Click to show only these.')}
+            active={typeFilter === 'refund'}
+            onClick={() => setTypeFilter('refund')}
+          />
         </div>
       ) : (
         <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
-          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('return_to_supplier', 'Return to Supplier')} onClick={() => setTypeFilter('all')}>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('return_to_supplier', 'Return to Supplier')}</div>
-            <div className="text-sm font-bold text-gray-800 dark:text-gray-200">{supplierStats.count}</div>
-          </button>
-          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('supplier_compensation', 'Compensation')} onClick={() => setTypeFilter('refund')}>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('supplier_compensation', 'Compensation')}</div>
-            <div className="text-sm font-bold text-emerald-700 dark:text-emerald-400">{fmtUSD(supplierStats.compensationUsd)}</div>
-          </button>
-          <button type="button" className="card min-w-[7.5rem] flex-1 px-3 py-2 text-left" title={tr('business_loss', 'Business loss')} onClick={() => setTypeFilter('credit')}>
-            <div className="text-[10px] uppercase tracking-wide text-gray-400">{tr('business_loss', 'Business loss')}</div>
-            <div className="text-sm font-bold text-rose-600 dark:text-rose-400">{fmtUSD(supplierStats.lossUsd)}</div>
-          </button>
+          <ReturnStatTile
+            label={tr('return_to_supplier', 'Return to Supplier')}
+            value={supplierStats.count}
+            color="text-gray-800 dark:text-gray-200"
+            info={tr('returns_info_supplier_count', 'How many cases you sent back to a supplier. Click to clear the type filter and show all of them.')}
+            active={typeFilter === 'all'}
+            onClick={() => setTypeFilter('all')}
+          />
+          <ReturnStatTile
+            label={tr('supplier_compensation', 'Compensation')}
+            value={fmtUSD(supplierStats.compensationUsd)}
+            color="text-emerald-700 dark:text-emerald-400"
+            info={tr('returns_info_supplier_compensation', 'Money or credit the supplier gave back for goods you returned. Click to show only compensated cases.')}
+            active={typeFilter === 'refund'}
+            onClick={() => setTypeFilter('refund')}
+          />
+          <ReturnStatTile
+            label={tr('business_loss', 'Business loss')}
+            value={fmtUSD(supplierStats.lossUsd)}
+            color="text-rose-600 dark:text-rose-400"
+            info={tr('returns_info_business_loss', 'What the returned goods cost you that the supplier did NOT cover. This is money the shop absorbs. Click to show only these.')}
+            active={typeFilter === 'credit'}
+            onClick={() => setTypeFilter('credit')}
+          />
         </div>
       )}
 

@@ -9,6 +9,7 @@ import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
+import InfoHint from '../shared/InfoHint.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import FilterMenu from '../shared/FilterMenu'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -239,16 +240,22 @@ function isTransferRecord(value: unknown): value is StockTransfer {
 }
 
 function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:text-slate-100', onClick }: BranchStatTileProps) {
+  const detailText = String(detail || '')
+  // The explanation used to be a `title` attribute, i.e. the browser's own
+  // black tooltip: unreadable on touch (no hover), unstyleable, and slow to
+  // appear. It now goes through the shared InfoHint, which opens on hover AND
+  // tap. The tile becomes a container with the clickable region inside it,
+  // because InfoHint is a <button> and a button nested in a button is invalid
+  // HTML -- the browser drops one, silently breaking either the hint or the
+  // drill-down.
   return (
-    <button
-      type="button"
-      className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-left shadow-sm transition hover:border-blue-200 hover:bg-blue-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-gray-700 dark:bg-gray-800/70 dark:hover:border-blue-900 dark:hover:bg-blue-950/20"
-      title={String(detail || label || '')}
-      onClick={onClick}
-    >
-      <div className="truncate text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 sm:text-[11px]">{label}</div>
-      <div className={`mt-0.5 truncate text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
-    </button>
+    <div className="relative min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-left shadow-sm transition focus-within:ring-2 focus-within:ring-blue-500/30 hover:border-blue-200 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-800/70 dark:hover:border-blue-900 dark:hover:bg-blue-950/20">
+      {detailText ? <InfoHint className="absolute right-0 top-0" label={String(label || '')} text={detailText} /> : null}
+      <button type="button" className="block w-full min-w-0 text-left focus:outline-none" onClick={onClick}>
+        <div className="truncate pr-4 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 sm:text-[11px]">{label}</div>
+        <div className={`mt-0.5 truncate text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
+      </button>
+    </div>
   )
 }
 
