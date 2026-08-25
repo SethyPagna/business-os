@@ -1075,6 +1075,14 @@ export default function POS() {
           sort: 'name_asc',
           include: 'branch_stock,images,family',
           metadata: '0',
+          // Which page is asking. The server gates each surface on that
+          // page's OWN permission and only applies the Products-page
+          // image-only field restriction to the products surface -- so a
+          // Products-page display permission can no longer reach POS. See
+          // routes/products.ts's parseProductReadSurface. Declaring a surface
+          // cannot escalate: without the `pos` permission this is refused
+          // outright rather than silently downgraded.
+          surface: 'pos',
         } satisfies QueryParams
         const metadataScope = JSON.stringify([
           productQuery.branchId, productQuery.brand, productQuery.category,

@@ -85,31 +85,68 @@ export {
   seedBranchStockForNewProduct, seedInitialBatchForNewProduct,
 }
 
-// True only for a user whose ONE route into product data is the
-// `products_image_only` restricted role -- i.e. they have no real
-// `products` tier of their own. A user who also holds full/review
-// `products` access never gets restricted here, even if `products_image_only`
-// happens to also be set on their role/user record.
+// ---------------------------------------------------------------------------
+// Surface-scoped product reads
+// ---------------------------------------------------------------------------
+// /search and /bootstrap are shared endpoints: the Products page, POS and
+// Inventory all read products through them. That sharing is fine -- what was
+// NOT fine was applying a PRODUCTS-PAGE display restriction
+// (`products_image_only`, which exists so a photo-uploader sees pictures and
+// not pricing) to every caller regardless of which page was asking. A cashier
+// granted {pos, sales} plus `products_image_only` had every catalog row
+// stripped to five fields, and POS came back empty. Reported as "for
+// employees and other roles, i enter pos, and it says No Data Found", and
+// correctly pushed back on as "these are two separate pages -- why is a
+// Products image-upload permission affecting POS?".
 //
-// `pos`, `sales` and `inventory` count as "real product access" too, and
-// leaving them out was a genuine bug, not a nuance: this used to check the
-// `products` tier ALONE, so a cashier role granted {pos, sales} plus
-// `products_image_only` (a natural way to say "let the cashier see product
-// photos") had every catalog row stripped to IMAGE_ONLY_BASE_FIELDS. That
-// list has no `is_active`, and POS.tsx's applyCatalogProducts filters on
-// exactly that field -- so the whole grid came back empty with HTTP 200 and
-// no error, rendering a bare "No data found" while the pagination count and
-// A-Z rail (computed from unrestricted queries) still looked correct.
-// Reported as "for employees and other roles, i enter pos, and it says No
-// Data Found". Selling requires prices, stock and branch data by definition,
-// so a user who can operate POS/Sales/Inventory can never be an image-only
-// user -- which is what productWrites.ts's own docstring on
-// restrictToImageOnlyFields already claimed this function did.
-function isImageOnlyUser(user: SessionUser): boolean {
+// So the caller now says which SURFACE it is reading for, and each surface is
+// gated by its own page permission:
+//
+//   pos       -> requires `pos`;        never field-restricted.
+//   inventory -> requires `inventory`;  never field-restricted.
+//   products  -> requires `products` OR `products_image_only`; field-restricted
+//                only for the image-only case.
+//
+// Declaring a surface can never ESCALATE: a caller claiming `surface=pos`
+// without the `pos` permission is refused outright rather than quietly
+// downgraded, so this is a scoping mechanism, not a trust boundary hole.
+// The default stays `products`, so any caller that predates this parameter
+// behaves exactly as the Products page always did.
+export type ProductReadSurface = 'products' | 'pos' | 'inventory'
+
+export function parseProductReadSurface(raw: unknown): ProductReadSurface {
+  const value = String(raw ?? '').trim().toLowerCase()
+  if (value === 'pos') return 'pos'
+  if (value === 'inventory') return 'inventory'
+  return 'products'
+}
+
+/** Null when allowed; an error message when this user may not read that surface. */
+export function productSurfaceDenialReason(user: SessionUser, surface: ProductReadSurface): string | null {
+  if (surface === 'pos') {
+    return hasPermission(user, 'pos') || hasPermission(user, 'sales')
+      ? null
+      : 'You do not have permission to use POS'
+  }
+  if (surface === 'inventory') {
+    return getPermissionTier(user, 'inventory') !== 'none'
+      ? null
+      : 'You do not have permission to view Inventory'
+  }
+  return getPermissionTier(user, 'products') !== 'none' || hasPermission(user, 'products_image_only')
+    ? null
+    : 'You do not have permission to view Products'
+}
+
+// The image-only field restriction is a PRODUCTS-PAGE concern and applies on
+// that surface only. Whether the user happens to hold `pos` or `inventory` is
+// irrelevant here now -- those surfaces are simply never restricted, which is
+// what makes the pages genuinely independent instead of relying on this
+// predicate remembering to exclude every other page's permission.
+function isImageOnlyRead(user: SessionUser, surface: ProductReadSurface): boolean {
+  if (surface !== 'products') return false
   if (!hasPermission(user, 'products_image_only')) return false
-  if (getPermissionTier(user, 'products') !== 'none') return false
-  if (getPermissionTier(user, 'inventory') !== 'none') return false
-  return !hasPermission(user, 'pos') && !hasPermission(user, 'sales')
+  return getPermissionTier(user, 'products') === 'none'
 }
 
 function restrictListPayloadForImageOnly<T extends { items?: unknown }>(payload: T, user: SessionUser): T {
@@ -799,19 +836,25 @@ async function searchProductsWithIndexFallback(env: Env, query: Record<string, s
 app.get('/search', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
+  const surface = parseProductReadSurface(query.surface)
+  const denial = productSurfaceDenialReason(user, surface)
+  if (denial) return c.json({ error: denial }, 403)
 
   const version = await getVersion(c.env.CACHE, 'products')
   const payload = await cachedJsonResponse(c.req.raw, c.executionCtx, version, 20, async () => {
     return searchProductsWithIndexFallback(c.env, query)
   })
 
-  return c.json(isImageOnlyUser(user) ? restrictListPayloadForImageOnly(payload as { items?: unknown }, user) : payload)
+  return c.json(isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(payload as { items?: unknown }, user) : payload)
 })
 
 app.get('/', async (c) => {
   const user = c.get('user')
+  const surface = parseProductReadSurface(c.req.query('surface'))
+  const denial = productSurfaceDenialReason(user, surface)
+  if (denial) return c.json({ error: denial }, 403)
   const payload = await searchProductsPayload(c.env, { page: '1', pageSize: '100' })
-  const items = isImageOnlyUser(user)
+  const items = isImageOnlyRead(user, surface)
     ? payload.items.map((item) => restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)))
     : payload.items
   return c.json(items)
@@ -820,6 +863,9 @@ app.get('/', async (c) => {
 app.get('/bootstrap', async (c) => {
   const query = c.req.query()
   const user = c.get('user')
+  const surface = parseProductReadSurface(query.surface)
+  const denial = productSurfaceDenialReason(user, surface)
+  if (denial) return c.json({ error: denial }, 403)
   const db = getDb(c.env)
   // POS.tsx's loadCatalogData() reads this endpoint's response as
   // { items, ..., branches, filters, initials } and only treats branch
@@ -837,7 +883,7 @@ app.get('/bootstrap', async (c) => {
     loadProductFilters(c.env, query),
     db.prepare('SELECT * FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC').all(),
   ])
-  const restrictedProducts = isImageOnlyUser(user) ? restrictListPayloadForImageOnly(products as { items?: unknown }, user) : products
+  const restrictedProducts = isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(products as { items?: unknown }, user) : products
   return c.json({ ...restrictedProducts, filters, initials: filters.initials, branches: branchRows })
 })
 
@@ -924,14 +970,17 @@ app.put('/:id', async (c) => {
   // write (isImageOnlyWritePayload) -- e.g. a request that also tried to
   // sneak in a cost_price_usd change alongside image_path still hits the
   // tier==='none' 403 below, same as any other field this role can't touch.
-  const isImageOnlyEdit = isImageOnlyUser(user) && isImageOnlyWritePayload(body)
+  // A product WRITE always comes from the Products page, so it is judged on
+  // the products surface -- no other page's permission is consulted, which is
+  // the same page-independence the read path now has.
+  const isImageOnlyEdit = isImageOnlyRead(user, 'products') && isImageOnlyWritePayload(body)
   if (getPermissionTier(user, 'products') === 'none' && !isImageOnlyEdit) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 
   // Image-only edits are never queued for review -- 'review' tier and this
   // restricted role are mutually exclusive access shapes (see
-  // isImageOnlyUser's comment), so maybeQueueForReview would just be a
+  // isImageOnlyRead's comment), so maybeQueueForReview would just be a
   // guaranteed no-op for this branch; skipping it here avoids a pointless
   // call and keeps this branch's control flow easy to audit on its own.
   if (!isImageOnlyEdit) {
