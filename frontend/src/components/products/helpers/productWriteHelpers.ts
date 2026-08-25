@@ -336,6 +336,103 @@ export function buildProductBulkPricingUpdates(form: ProductBulkForm = {}): Prod
   return updates
 }
 
+// --- relative price adjustment ("raise everything by $1") -----------------
+//
+// buildProductBulkPricingUpdates above SETS every selected product to the
+// same absolute price. That is the wrong tool for "add $1 to all of these":
+// it would flatten a catalogue of differently-priced products to one value.
+// This computes a PER-PRODUCT update instead, since each result depends on
+// that product's own current price.
+//
+// Deliberate decisions, each of which is a way this can go wrong quietly:
+//
+//   - Only the fields named in `fields` are touched. "Selling price only"
+//     has to mean only that -- a helper that also nudged cost price would
+//     silently change every margin in the catalogue.
+//   - `skipZeroPriced` exists because a 0 usually means "not priced yet",
+//     not "free". Adding $1 to those would invent a price for products
+//     nobody has priced, which is worse than skipping them.
+//   - Results are clamped at 0. A decrease bigger than the current price
+//     would otherwise produce a negative price, which is never a real
+//     intent and would corrupt totals downstream.
+//   - Money is rounded to 2 decimals for USD and to whole units for KHR
+//     (riel has no minor unit in practice here), so repeated adjustments
+//     cannot accumulate floating-point dust.
+//   - A product whose every targeted field is skipped yields NO update at
+//     all, rather than an empty write. That keeps the "changed N products"
+//     count honest and avoids pointless round trips.
+
+export type BulkPriceField =
+  | 'selling_price_usd'
+  | 'selling_price_khr'
+  | 'special_price_usd'
+  | 'special_price_khr'
+  | 'purchase_price_usd'
+  | 'purchase_price_khr'
+
+export interface BulkPriceAdjustment {
+  /** 'increase' adds, 'decrease' subtracts. */
+  direction: 'increase' | 'decrease'
+  /** Always a positive magnitude; `direction` carries the sign. */
+  amount: unknown
+  /** Which price columns to move. Empty means nothing is changed. */
+  fields: readonly BulkPriceField[]
+  /**
+   * Leave a product alone when the field being adjusted is currently 0.
+   * A 0 in this catalogue means "not priced yet" far more often than it
+   * means "free".
+   */
+  skipZeroPriced?: boolean
+}
+
+export interface BulkPriceAdjustmentResult {
+  id: number
+  updates: ProductUpdates
+}
+
+function roundMoney(value: number, field: BulkPriceField): number {
+  if (field.endsWith('_khr')) return Math.round(value)
+  return Math.round(value * 100) / 100
+}
+
+export function buildProductBulkPriceAdjustments(
+  products: ProductRecord[] = [],
+  adjustment: BulkPriceAdjustment,
+): BulkPriceAdjustmentResult[] {
+  const magnitude = Math.abs(toFiniteNumber(adjustment?.amount, 0))
+  const fields = adjustment?.fields || []
+  // A zero amount is a no-op, not a write of the same value back.
+  if (!magnitude || !fields.length) return []
+  const delta = adjustment.direction === 'decrease' ? -magnitude : magnitude
+
+  const results: BulkPriceAdjustmentResult[] = []
+  for (const product of products) {
+    const id = Number(product?.id || 0)
+    if (!Number.isFinite(id) || id <= 0) continue
+
+    const updates: ProductUpdates = {}
+    for (const field of fields) {
+      const current = normalizePriceValue(product?.[field])
+      if (adjustment.skipZeroPriced && current === 0) continue
+      const next = roundMoney(Math.max(0, current + delta), field)
+      // Skip a field the adjustment does not actually move -- e.g. a
+      // decrease against a price already at 0.
+      if (next === current) continue
+      updates[field] = next
+    }
+    if (Object.keys(updates).length) results.push({ id, updates })
+  }
+  return results
+}
+
+/** How many products a given adjustment would actually change. For preview text. */
+export function countProductBulkPriceAdjustments(
+  products: ProductRecord[] = [],
+  adjustment: BulkPriceAdjustment,
+): number {
+  return buildProductBulkPriceAdjustments(products, adjustment).length
+}
+
 export function getDefaultProductRestoreBranchId(branches: BranchRecord[] = []): number {
   const defaultBranch = branches.find((branch) => branch?.is_default) || branches[0] || {}
   const branchId = Number(defaultBranch?.id || 0)
