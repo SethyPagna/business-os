@@ -122,6 +122,77 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 
 ---
 
+## Open work — ORDERED
+
+*Rebuilt Aug 26 2026 (Part 348) at the user's request: "update the still open with
+these and order them". Top of the list is next. Order follows the user's own stated
+priority — per-action permissions, then imports, then backlog audits, then the rest.*
+
+### 1 — Per-action permission picking, professional UI
+
+| # | Task | Status |
+|---|---|---|
+| 1.1 | **Admin picks individual ACTIONS, not just section tiers.** `utils/permissionActions.ts` already models per-action outcomes and the editor already *displays* a read-only breakdown; the missing half is making each action directly selectable and persisting a per-action override. | not started |
+| 1.2 | **Editor UI: professional, clean, classic, smart.** Beyond the Part 347 sizing fix — real visual hierarchy, sections that read at a glance, related controls compacted onto one row where space allows, no wall of tiny chips. | not started |
+
+### 2 — Imports (finish)
+
+| # | Task | Status |
+|---|---|---|
+| 2.1 | Add/Sale absorbs Dated Stock Reconciliation (batch-choice-on-sale, create-then-sell). Largest single piece. | not started |
+| 2.2 | Import **review / resolve screen** finished — explicitly added to scope by the user. | not started |
+| 2.3 | Image auto-wire as a **button**, not automatic (wanted mainly for delete-and-reimport). Matching + `_1`/`_2` rename already exist. | not started |
+| 2.4 | Import/delete stay inside CPU limits while staying fast and 1:1 after review. Known hot spots: `fetchCsvText` re-decodes the whole CSV **every** materialize window (~87× for 8,727 rows); sales import re-reads + re-partitions the entire file **every chunk** (~58× per phase); products chunk-state JSON grows to one entry per row and is parsed + re-serialised every chunk. | not started |
+
+### 3 — Image quality and the 300–350KB band
+
+| # | Task | Status |
+|---|---|---|
+| 3.1 | **Land every image in 300–350KB, and prove it.** Today: global default 180KB max / 140KB target, Library overridden to **70KB/40KB** (`api/fileTransport.ts:72-76`) — that is the ~70KB being seen. The search is also structurally biased low: it keeps the **smallest** blob rather than the largest under the cap (`imageCompression.ts:265`), stops at the *soft* target (`:269`), and only ever steps **down** (`:112-124`). Needs a two-sided search with a real floor, not just a bigger ceiling. | not started |
+| 3.2 | **WebP/AVIF encode** with quality 80–85. 30–50% smaller at the same visual quality, which is what buys back the headroom to sit at 300–350KB instead of shrinking dimensions. Needs an encoder-support probe + a JPEG/PNG fallback. | not started |
+| 3.3 | **Quality-preserving resize.** The blurring is a resampling artefact: a single-step canvas downscale of a large image aliases badly. Fix with stepped/half-scale downscaling and a sharpening pass, so a big photo stays crisp the way a zip of the same file does. | not started |
+| 3.4 | **Manual image-quality tool** — per-image controls to re-encode, adjust sharpening, and preview before/after against the 300–350KB band. | not started |
+| 3.5 | **6h cron R2 audit + browser backfill.** Cron exists (`wrangler.toml`) but runs only backup/drive-sync/audit-retention. No backfill over existing objects has ever existed — that is why MB-sized objects persist. `MEDIA_QUEUE` is dead code: no `optimize-image` branch and **no producer anywhere**. | not started |
+
+### 4 — Public site and portal
+
+| # | Task | Status |
+|---|---|---|
+| 4.1 | Top bar: **remove the logo**; split social links to one side and language + light/dark to the other. | not started |
+| 4.2 | **Stale cache of embedded sites** on the public site — reproduce, then scope. | not started |
+| 4.3 | **Google Translate for languages** instead of hand-maintained packs. Must be fast, must not corrupt layout or Khmer text, must degrade safely when the service is unreachable — the current packs are the fallback, not the casualty. | not started |
+| 4.4 | Portal pagination counts **unmerged** rows: the server paginates at 50 before the browser merges duplicates, so the pager promises pages that do not exist. | not started |
+
+### 5 — Library
+
+| # | Task | Status |
+|---|---|---|
+| 5.1 | Click an image to open **details**: what is using it (which products/rows it is wired to), edit, and rewire. | not started |
+
+### 6 — Cloudflare free tier, used properly
+
+| # | Task | Status |
+|---|---|---|
+| 6.1 | **Already in place** — recorded so it is not "added" twice: KV namespace `de5f3b41c7264e4582077176fd0c1fe8` is bound as `CACHE` (`wrangler.toml:43-45`, the exact id supplied), and the Workers Cache API is already used by `cachedJsonResponse` (`lib/cache.ts:51`). Only `preview_id` for local dev is missing. | mostly done |
+| 6.2 | Audit real headroom against the free limits and use them deliberately: **D1** 5M row reads/day + 100k writes/day (import writes are the risk), **R2** 10GB + free egress (the compression band matters here), **KV** 100k reads/day but only **1k writes/day and 1 write/sec/key** — a hot counter in KV would break, so audit every KV write path. Prefer Cache API for high-cardinality reads, KV for small hot config. | not started |
+
+### 7 — Identity rule, remaining
+
+| # | Task | Status |
+|---|---|---|
+| 7.1 | **Rename does not regroup.** A renamed product does not re-merge into its new name group or re-split the old one. `name_key` is trigger-maintained so the *flag* is right, but nothing reconciles the rows. | not started |
+| 7.2 | **Auto-merge flag + filter** so the user can see what merged automatically. No column exists yet; `ImportWarningKind` has no products-side auto-merge kind. | not started |
+| 7.3 | Description whitelist: also ignore **Brand / Category / Shop's Product Name** blocks — auto-wired from real columns, so importing them duplicates data. | not started |
+
+### 8 — Correctness carried over
+
+| # | Task | Status |
+|---|---|---|
+| 8.1 | **Backup restore still loads the whole document into memory** (`backup.ts:574` `object.json()`, then one statement per row). The write path was fixed and streamed; its mirror was not, so a database big enough to have caused the original OOM will OOM restoring its own backup. | not started |
+| 8.2 | Edit form does not auto-move sections back to Details — reported as a bug; not yet reproduced, may need to know which sections. | not started |
+
+---
+
 ## Current status
 
 **As of Part 341 (Aug 25 2026).** Verification below was really run in a local Windows
