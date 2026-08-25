@@ -56,9 +56,12 @@ export default function InfoHint({ text, label, className }: InfoHintProps) {
         aria-label={label}
         aria-expanded={open}
         aria-describedby={open ? panelId : undefined}
-        // Native title as a third path: it still works if JS state is
-        // somehow out of step, and gives desktop users the OS tooltip.
-        title={text}
+        // Deliberately NO `title` attribute. It was here as a belt-and-braces
+        // fallback, but the browser renders its own tooltip from it on hover
+        // -- so hovering produced TWO overlapping panels saying the same
+        // thing. The custom panel is the one that works on touch and can be
+        // styled, so it wins; aria-describedby carries the same text to
+        // screen readers without drawing anything.
         onClick={(event) => {
           // These sit inside clickable option cards; opening the hint must
           // not also select the option.
