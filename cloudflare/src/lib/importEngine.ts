@@ -4054,7 +4054,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // No ExecutionContext available here -- await directly rather than
       // waitUntil. This runs inside queue.ts's queue consumer, not an HTTP
       // response path, so there's no early-return race to avoid.
-      await bumpVersion(env.CACHE, 'products').catch(() => {})
+      await bumpVersion(env, 'products').catch(() => {})
       await broadcast(env, job.type === 'sales' ? 'sales' : job.type === 'inventory' ? 'inventory' : 'products', { action: 'import', jobId }).catch(() => {})
     } else if (CONTACT_IMPORT_CHANNEL[job.type]) {
       await broadcast(env, CONTACT_IMPORT_CHANNEL[job.type], { action: 'import', jobId }).catch(() => {})

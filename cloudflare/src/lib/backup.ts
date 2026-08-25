@@ -556,12 +556,41 @@ export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_
 export async function maybeRunScheduledBackup(env: Env) {
   const backups = await listCloudflareBackups(env)
   const newest = backups[0]?.uploaded ? Date.parse(backups[0].uploaded) : 0
+
+  // Retention runs FIRST, and unconditionally.
+  //
+  // It used to run only after a new backup was successfully created, which
+  // meant it did not run at all in the two cases that matter most:
+  //
+  //   1. The skip path below returned early, so a 6-hourly cron that found a
+  //      5-hour-old backup pruned nothing.
+  //   2. createCloudflareBackup threw -- and it threw for a long time with
+  //      "Exceeded Memory Limit" on a large database. Every one of those
+  //      failures also silently skipped retention.
+  //
+  // The observable result was old backups piling up in R2 forever despite
+  // CLOUDFLARE_BACKUP_KEEP being 2, quietly consuming the 10 GB free tier
+  // and taking the copied-asset folders with them.
+  //
+  // Keeping the newest N is a decision about what is already stored; it does
+  // not depend on whether today's backup succeeded, so it must not be gated
+  // on that. Failing to prune must also never prevent a backup, hence the
+  // catch: running low on retention is recoverable, having no backup is not.
+  let retention: { kept: unknown[]; removed: string[] } | null = null
+  try {
+    retention = await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
+  } catch (error) {
+    console.error('[backup] retention pass failed', error)
+  }
+
   if (newest && Date.now() - newest < 5.5 * 60 * 60 * 1000) {
-    return { skipped: true, reason: 'recent-backup-exists', latest: backups[0] }
+    return { skipped: true, reason: 'recent-backup-exists', latest: backups[0], retention }
   }
   const backup = await createCloudflareBackup(env, 'scheduled')
-  const retention = await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
-  return { skipped: false, backup, retention }
+  // Second pass: the backup just written is now the newest, so this is what
+  // drops what has become the (N+1)th.
+  const finalRetention = await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
+  return { skipped: false, backup, retention: finalRetention }
 }
 
 async function loadBackup(env: Env, source: string): Promise<{ key: string; payload: BackupPayload }> {

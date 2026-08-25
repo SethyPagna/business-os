@@ -264,7 +264,7 @@ app.post('/reset-data', async (c) => {
         c.executionCtx.waitUntil(broadcast(c.env, 'sales', { action: 'reset', mode }))
         c.executionCtx.waitUntil(broadcast(c.env, 'returns', { action: 'reset', mode }))
       }
-      c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+      c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
       const keptParts = []
       if (!includeSales) keptParts.push('sales, returns')
@@ -409,7 +409,7 @@ app.post('/reset-data', async (c) => {
       c.executionCtx.waitUntil(broadcast(c.env, 'customers', { action: 'reset', mode }))
       c.executionCtx.waitUntil(broadcast(c.env, 'suppliers', { action: 'reset', mode }))
     }
-    c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
     return c.json({
       success: true,
@@ -506,7 +506,7 @@ app.post('/reset-section', async (c) => {
 
     if (config.broadcastChannel) {
       c.executionCtx.waitUntil(broadcast(c.env, config.broadcastChannel, { action: 'reset', section }))
-      c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, config.broadcastChannel))
+      c.executionCtx.waitUntil(bumpVersion(c.env, config.broadcastChannel))
     }
 
     return c.json({

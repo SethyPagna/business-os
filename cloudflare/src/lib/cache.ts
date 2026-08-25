@@ -1,3 +1,6 @@
+import type { Env } from '../index'
+import { getDb } from './db'
+import { consumeQuota } from './quotaGuard'
 // Runtime cache, replacing backend/src/runtimeCache.ts's Redis-backed
 // short-TTL read-through cache (getOrSetJson / deleteByPrefix) with Workers
 // KV.
@@ -95,8 +98,25 @@ export async function cachedJsonResponse<T>(
 // write that should invalidate product-search caches; every read key
 // automatically becomes a new, uncached key once that happens, and the old
 // entries just expire on their own TTL.
+// KV first, because it is sub-millisecond at the edge and 100,000 reads/day
+// is generous. A MISS falls through to D1, which is what makes the fallback
+// below work: once the KV key is removed, every reader lands on D1 without
+// any of them needing to know why.
 export async function getVersion(kv: KVNamespace, namespace: string): Promise<string> {
   return (await kv.get(`v:${namespace}`)) || '0'
+}
+
+export async function getVersionWithFallback(env: Env, namespace: string): Promise<string> {
+  const fromKv = await env.CACHE.get(`v:${namespace}`)
+  if (fromKv != null) return fromKv
+  try {
+    const row = await getDb(env)
+      .prepare(`SELECT version FROM cache_versions WHERE namespace = @namespace`)
+      .get<{ version: number }>({ namespace })
+    return String(row?.version ?? 0)
+  } catch {
+    return '0'
+  }
 }
 
 export async function versionedKey(kv: KVNamespace, namespace: string, suffix: string): Promise<string> {
@@ -104,9 +124,63 @@ export async function versionedKey(kv: KVNamespace, namespace: string, suffix: s
   return `${namespace}:${version}:${suffix}`
 }
 
-export async function bumpVersion(kv: KVNamespace, namespace: string): Promise<void> {
+/**
+ * Advances a cache version so every existing cached key for that namespace
+ * becomes unreachable.
+ *
+ * Takes `Env` rather than a bare KVNamespace because it now has to make a
+ * budget decision, and that needs D1.
+ *
+ * KV's free ceiling is 1,000 writes/day -- two orders of magnitude below
+ * D1's -- and this function is called from 31 mutation sites, all writing the
+ * SAME key, which KV additionally caps at one write per second. So a busy day
+ * exhausts the budget, and an exhausted budget makes this fail SILENTLY: the
+ * version stops advancing, cachedJsonResponse keeps serving the old payload,
+ * and the shop is shown stale stock and prices with nothing indicating it.
+ * A quota ceiling becomes a correctness bug.
+ *
+ * The fallback is therefore not "skip the bump" -- that IS the bug. It is to
+ * move the counter to D1, which has 100,000 writes/day, no per-key ceiling,
+ * and strong consistency (which cache invalidation actually wants; KV is
+ * eventually consistent). Crossing over deletes the KV key exactly once, and
+ * from then on readers fall through to D1 on a plain miss, so no further KV
+ * writes are needed at all for that namespace.
+ */
+export async function bumpVersion(env: Env, namespace: string): Promise<void> {
   const versionKey = `v:${namespace}`
-  const current = Number((await kv.get(versionKey)) || '0')
-  // No TTL on the version key itself -- it's tiny and needs to persist.
-  await kv.put(versionKey, String(current + 1))
+  const budget = await consumeQuota(env, 'kv_write', 1)
+
+  if (budget.zone === 'critical' || budget.zone === 'exhausted') {
+    await bumpVersionInD1(env, namespace)
+    // One delete, once, to hand reads over to D1 permanently for this
+    // namespace. Deletes draw on their own daily allowance, not the write
+    // one, and this happens once per namespace rather than per bump.
+    await env.CACHE.delete(versionKey).catch(() => {})
+    return
+  }
+
+  try {
+    const current = Number((await env.CACHE.get(versionKey)) || '0')
+    // No TTL on the version key itself -- it's tiny and needs to persist.
+    await env.CACHE.put(versionKey, String(current + 1))
+  } catch {
+    // A KV write can fail for reasons the budget did not predict (the real
+    // limit reached before our count did, a per-key write collision). Never
+    // let that leave the version un-advanced, or the cache goes stale.
+    await bumpVersionInD1(env, namespace)
+    await env.CACHE.delete(versionKey).catch(() => {})
+  }
+}
+
+async function bumpVersionInD1(env: Env, namespace: string): Promise<void> {
+  try {
+    await getDb(env).prepare(`
+      INSERT INTO cache_versions (namespace, version, updated_at)
+      VALUES (@namespace, 1, CURRENT_TIMESTAMP)
+      ON CONFLICT(namespace)
+      DO UPDATE SET version = version + 1, updated_at = CURRENT_TIMESTAMP
+    `).run({ namespace })
+  } catch (error) {
+    console.error('[cache] could not advance version in D1', namespace, error)
+  }
 }

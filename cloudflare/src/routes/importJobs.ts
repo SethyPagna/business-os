@@ -486,7 +486,7 @@ app.patch('/:id/images/assign-existing', async (c) => {
   }
   await db.batch(statements)
 
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   await auditImportEvent(c, 'import_job_image_assign_existing', id, job, job, { source: 'api', fileId, productId, productName: product.name })
   return c.json({ success: true, productId, imagePath: publicPath, originalName: newName })

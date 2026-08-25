@@ -954,7 +954,7 @@ app.post('/', async (c) => {
     const gallery = await syncProductImageGallery(c.env, id as number, body.image_gallery)
     if (item) (item as Record<string, unknown>).image_gallery = gallery
   }
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
   return c.json({ item, id, success: true })
 })
@@ -1033,7 +1033,7 @@ app.put('/:id', async (c) => {
     const gallery = await syncProductImageGallery(c.env, id, body.image_gallery)
     ;(item as Record<string, unknown>).image_gallery = gallery
   }
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id }))
   return c.json({ item: isImageOnlyEdit ? restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)) : item, success: true })
 })
@@ -1115,7 +1115,7 @@ app.delete('/:id', async (c) => {
   }
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'delete', 'product', Number(id), { name: existing?.name ?? null, reason })
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'delete', id }))
   return c.json({ success: true, changes: result.changes })
 })
@@ -1220,7 +1220,7 @@ app.post('/variant', async (c) => {
   await seedBranchStockForNewProduct(c.env, id as number, branchId, initialQty)
   await seedInitialBatchForNewProduct(c.env, id as number, branchId, initialQty)
 
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
   return c.json({ item: await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id }), id, success: true })
 })
@@ -1535,7 +1535,7 @@ app.post('/merge-duplicates', async (c) => {
     groupSummaries.push({ canonicalId, canonicalName, mergedIds, mergedNames })
   }
 
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'update' }))
   return c.json({ success: true, mergedGroups: groups.length, mergedProducts: mergedProductsCount, groups: groupSummaries })
@@ -1723,7 +1723,7 @@ app.post('/zero-quantity-delete', async (c) => {
         productName: row?.name ?? null,
       })
     }
-    c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+    c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
     c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'delete' }))
   }
 
@@ -1794,7 +1794,7 @@ app.post('/lookups/replace', async (c) => {
     to: normalizedTarget || null,
     updated_count: updatedCount,
   })
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   return c.json({ success: true, updatedCount })
 })
 
@@ -1956,7 +1956,7 @@ app.post('/upload-image', async (c) => {
   const asset = await db.prepare(`SELECT * FROM file_assets WHERE id = @id`).get({ id: insert.lastInsertRowid })
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'upload', 'product_image', insert.lastInsertRowid, { original_name: originalName })
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   return c.json({
     success: true,

@@ -587,7 +587,7 @@ app.post('/', async (c) => {
   // immediately instead of waiting out the TTL -- this write path deducts
   // products.stock_quantity above but wasn't bumping the version, so a
   // browsed-then-cached product list could show pre-sale stock for up to 20s.
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   return c.json({
     id: saleId,
@@ -773,7 +773,7 @@ app.patch('/:id/status', async (c) => {
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', id, { oldStatus, newStatus: saleStatus })
   // Same cache-invalidation reasoning as POST / above -- a status change
   // here can deduct or restore stock.
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
   return c.json(updated || { id: Number(id), sale_status: saleStatus })

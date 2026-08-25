@@ -132,7 +132,7 @@ app.post('/', async (c) => {
     lot_code: lotCode,
   })
   c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env.CACHE, 'products'),
+    bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_received', productId, branchId }),
     broadcast(c.env, 'products', { action: 'update', id: productId }),
   ]))
@@ -255,7 +255,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'batch_quantity_correction', 'product_batch', batchId, { branch_id: branchId, quantity, previous_quantity: previousQuantity })
   c.executionCtx.waitUntil(Promise.all([
-    bumpVersion(c.env.CACHE, 'products'),
+    bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_updated', batchId }),
     broadcast(c.env, 'products', { action: 'update', id: batch.productId }),
   ]))

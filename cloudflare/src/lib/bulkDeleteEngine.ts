@@ -263,7 +263,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
   // the broadcast payload carries the full id list so connected clients
   // can drop exactly the deleted rows locally instead of a full refetch.
   const succeededIds = allIds.filter((id) => !failedIds.includes(id))
-  await bumpVersion(env.CACHE, config.cacheKey)
+  await bumpVersion(env, config.cacheKey)
   await broadcast(env, config.cacheKey, { action: 'bulk-delete', ids: succeededIds, jobId })
 }
 

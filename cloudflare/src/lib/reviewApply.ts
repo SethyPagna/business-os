@@ -112,7 +112,7 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer) => {
     await syncProductImageGallery(env, id as number, body.image_gallery)
   }
   await audit(env, reviewer.id, reviewer.name, 'create', 'product', id as number, null)
-  await bumpVersion(env.CACHE, 'products')
+  await bumpVersion(env, 'products')
   await broadcast(env, 'products', { action: 'create', id })
 })
 
@@ -130,7 +130,7 @@ registerApplier('products', 'update', 'product', async (env, row, reviewer) => {
     await syncProductImageGallery(env, id, body.image_gallery)
   }
   await audit(env, reviewer.id, reviewer.name, 'update', 'product', id, null)
-  await bumpVersion(env.CACHE, 'products')
+  await bumpVersion(env, 'products')
   await broadcast(env, 'products', { action: 'update', id })
 })
 
@@ -169,7 +169,7 @@ registerApplier('products', 'delete', 'product', async (env, row, reviewer) => {
     })
   }
   await audit(env, reviewer.id, reviewer.name, 'delete', 'product', id, { name: existing?.name ?? null, reason })
-  await bumpVersion(env.CACHE, 'products')
+  await bumpVersion(env, 'products')
   await broadcast(env, 'products', { action: 'delete', id })
 })
 

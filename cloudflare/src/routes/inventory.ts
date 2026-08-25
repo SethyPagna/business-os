@@ -1433,7 +1433,7 @@ app.post('/adjust', async (c) => {
   await audit(c.env, user?.id ?? null, user?.name ?? null, originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: targetProductId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   // NOTE: every other route file in this app replies `{ success: true, ... }`
   // on success (see products.ts, branches.ts, etc). This endpoint used to
   // reply with a bare `{}` -- the write went through and the DB was
@@ -1578,7 +1578,7 @@ app.post('/dated-stock-count/apply', async (c) => {
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'dated_stock_count_import' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   return c.json({ success: true, ...result })
 })
@@ -1640,7 +1640,7 @@ app.post('/transfer', async (c) => {
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'transfer' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'transfer', id: productId }))
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
   return c.json({ success: true, fromBranchId, toBranchId, quantity })
 })
@@ -1711,7 +1711,7 @@ app.post('/move-row', async (c) => {
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'move', 'stock', sourceProductId, { toProductId: destinationProductId, quantity, branchId, reason })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update' }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'move_row' }))
-  c.executionCtx.waitUntil(bumpVersion(c.env.CACHE, 'products'))
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   // See the matching note in /adjust above -- same missing-`success`-field bug.
   return c.json({ success: true, sourceProductId, destinationProductId, branchId, quantity })
 })
