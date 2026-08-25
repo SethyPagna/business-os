@@ -120,7 +120,7 @@ export default function UserDetailSheet({ user, roles, canManage, onEdit, onRese
                 return (
                   <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                     {translateLabel(t, perm?.tKey || key, perm?.label || key)}
-                    {permissions[key] === 'review' ? ` (${translateLabel(t, 'review_required', 'Review Required')})` : ''}
+                    {permissions[key] === 'review' ? ` (${translateLabel(t, 'review_required', 'Partial Access')})` : ''}
                   </span>
                 )
               })}

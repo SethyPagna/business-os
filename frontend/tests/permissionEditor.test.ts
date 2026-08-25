@@ -72,14 +72,30 @@ assert.deepEqual(
   'permissionDefinitions.ts tier:true keys and utils/permissions.ts REVIEW_TIER_KEYS have drifted apart',
 )
 
-console.log('PASS PermissionEditor renders a None/Review Required/Full Access tier picker for REVIEW_TIER_KEYS permissions, kept in sync with permissionDefinitions.ts')
+console.log('PASS PermissionEditor renders a None/Partial Access/Full Access tier picker for REVIEW_TIER_KEYS permissions, kept in sync with permissionDefinitions.ts')
 
-// `i`-tooltip-per-row explanation, same pattern InventoryMovementsSurface.tsx
-// already uses (Info icon + title/aria-label), not a new tooltip mechanism.
-assert.match(source, /from 'lucide-react\/dist\/esm\/icons\/info\.js'/)
+// Per-row explanation, now through the shared InfoHint rather than a 4x4
+// button carrying a `title`. The old affordance was the browser's own black
+// tooltip: it does not open on tap at all, so on a touch device the
+// explanation was simply unreachable, and the target was well under the
+// minimum comfortable hit size. InfoHint opens on hover AND tap and
+// deliberately carries no `title`, so there is no second overlapping panel.
+assert.match(source, /import InfoHint from '\.\.\/shared\/InfoHint\.tsx'/)
 assert.match(source, /reviewDescriptionFor/)
-assert.match(source, /title=\{reviewDescriptionFor\(permission\)\}/)
-assert.match(source, /aria-label=\{reviewDescriptionFor\(permission\)\}/)
+assert.match(source, /text=\{reviewDescriptionFor\(permission\)\}/)
+assert.doesNotMatch(
+  source,
+  /title=\{reviewDescriptionFor\(permission\)\}/,
+  'the tier explanation must not also be a native title tooltip -- that is the black duplicate',
+)
+
+// The tier picker is the primary control on this screen; it was px-2.5/py-1
+// text-xs, which is what "very tiny various buttons" referred to.
+assert.match(
+  source,
+  /min-w-\[5\.5rem\] px-3 py-2 text-sm font-semibold/,
+  'tier buttons should be comfortably sized rather than text-xs',
+)
 assert.match(definitions, /reviewTKey\?:\s*string/)
 assert.match(definitions, /reviewDescription\?:\s*string/)
 assert.match(definitions, /reviewTKey:\s*'perm_fees_review_desc'/)
@@ -89,7 +105,7 @@ for (const key of ['review_required_generic_desc', 'perm_fees_review_desc']) {
   assert.ok(km[key], `Khmer tier tooltip text missing: ${key}`)
 }
 
-console.log('PASS PermissionEditor shows an info tooltip per tiered permission explaining exactly what Review Required restricts for that section')
+console.log('PASS PermissionEditor shows an info hint per tiered permission explaining exactly what Partial Access restricts for that section')
 
 // Dashboard permission gate (previously PAGE_PERMISSIONS['dashboard'] was
 // null -- any authenticated user, any role, could view it, and there was

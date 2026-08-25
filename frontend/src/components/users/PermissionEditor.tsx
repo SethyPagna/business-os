@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import Info from 'lucide-react/dist/esm/icons/info.js'
+import InfoHint from '../shared/InfoHint.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
 import { REVIEW_TIER_KEYS, type PermissionValue } from '../../utils/permissions.ts'
 import { actionsForKey, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
@@ -321,7 +321,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                   const tier = tierOf(perms[permission.key])
                   const tierOptions: { value: Tier; label: string }[] = [
                     { value: 'none', label: translate('none', 'None') },
-                    { value: 'review', label: translate('review_required', 'Review Required') },
+                    { value: 'review', label: translate('review_required', 'Partial Access') },
                     { value: 'full', label: translate('label_full_access', 'Full Access') },
                   ]
                   return (
@@ -340,14 +340,11 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                               and BulkImportModal.tsx's "Information" toggle --
                               the two call sites in the app that already put
                               Info first rather than last. */}
-                          <button
-                            type="button"
-                            className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 transition hover:border-blue-200 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-blue-800 dark:hover:text-blue-300"
-                            title={reviewDescriptionFor(permission)}
-                            aria-label={reviewDescriptionFor(permission)}
-                          >
-                            <Info className="h-3 w-3" />
-                          </button>
+                          <InfoHint
+                            className="flex-shrink-0"
+                            label={labelFor(permission)}
+                            text={reviewDescriptionFor(permission)}
+                          />
                           {labelFor(permission)}
                         </span>
                         {sensitive ? (
@@ -366,7 +363,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                               key={option.value}
                               onClick={() => setTier(permission.key, option.value)}
                               aria-pressed={tier === option.value}
-                              className={`px-2.5 py-1 text-xs font-medium transition-colors ${index > 0 ? 'border-l border-gray-200 dark:border-zinc-700' : ''} ${
+                              className={`min-w-[5.5rem] px-3 py-2 text-sm font-semibold transition-colors ${index > 0 ? 'border-l border-gray-200 dark:border-zinc-700' : ''} ${
                                 tier === option.value
                                   ? option.value === 'review'
                                     ? 'bg-amber-500 text-white'
@@ -441,7 +438,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                 const exclusivity = permission.exclusiveWithTier
                 const blockedByTier = !!exclusivity && !active && tierOf(perms[exclusivity]) !== 'none'
                 const blockedTierLabel = blockedByTier
-                  ? (tierOf(perms[exclusivity as string]) === 'review' ? translate('review_required', 'Review Required') : translate('label_full_access', 'Full Access'))
+                  ? (tierOf(perms[exclusivity as string]) === 'review' ? translate('review_required', 'Partial Access') : translate('label_full_access', 'Full Access'))
                   : ''
                 return (
                   <button

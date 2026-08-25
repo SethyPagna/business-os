@@ -697,7 +697,7 @@ export default function Users() {
       .map((key) => {
         const perm = PERMISSION_DEFS.find((item) => item.key === key)
         const label = tr(perm?.tKey || key, perm?.label || key)
-        return value[key] === 'review' ? `${label} (${tr('review_required', 'Review Required')})` : label
+        return value[key] === 'review' ? `${label} (${tr('review_required', 'Partial Access')})` : label
       })
       .join(', ')
   }
@@ -1193,7 +1193,7 @@ export default function Users() {
                       {permissionKeys.map((key) => (
                         <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
                           {PERMISSION_DEFS.find((item) => item.key === key)?.label || key}
-                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Review Required')})` : ''}
+                          {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Partial Access')})` : ''}
                         </span>
                       ))}
                     </div>
