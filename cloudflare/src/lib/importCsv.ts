@@ -117,18 +117,42 @@ export type DelimitedRowsWindow = {
 // already spreads out the classify/write cost (migration 0011), instead of
 // paying the whole file's parse cost again on every single chunk the way
 // parseCsvRows-via-fetchDecidedRows used to.
+// `sourceIsComplete` says whether `source` is the WHOLE remaining file or
+// merely a slice of it.
+//
+// It matters because of the trailing-row flush at the bottom of this
+// function: at end of text we emit whatever is half-parsed as a final row.
+// That is correct for a file whose last line has no newline, and
+// catastrophic for a slice that simply got cut mid-row -- the truncated row
+// would be written to import_job_source_rows as though it were complete,
+// losing every field after the cut, with no error raised anywhere.
+//
+// Defaults to true, so every caller written before byte-ranged reads existed
+// behaves exactly as it always did. A caller reading ranges passes false for
+// every slice except the one that genuinely reaches EOF, and gets back a
+// `nextIndex` pointing at the start of the incomplete row, to be re-read
+// with the next slice.
 export function parseDelimitedRowsWindow(
   source: string,
   delimiter: string,
   startIndex: number,
   startInQuotes: boolean,
   maxRows: number,
+  sourceIsComplete = true,
 ): DelimitedRowsWindow {
   const rows: string[][] = []
   let row: string[] = []
   let current = ''
   let inQuotes = startInQuotes
   let index = startIndex
+  // Index just past the last row that ended with a real terminator -- the
+  // last position we KNOW is a clean row boundary. Only consulted when
+  // sourceIsComplete is false.
+  let lastCompleteIndex = startIndex
+  // Quote state as it stood at lastCompleteIndex. Resuming from that offset
+  // must resume with the quote state that applied THERE, not whatever we
+  // happened to reach part-way into the row we are about to abandon.
+  let lastCompleteInQuotes = startInQuotes
 
   for (; index < source.length; index += 1) {
     if (rows.length >= maxRows) break
@@ -155,12 +179,25 @@ export function parseDelimitedRowsWindow(
       if (hasDelimitedRowContent(row)) rows.push(row)
       row = []
       current = ''
+      // `index` still points AT the terminator here; the loop's own
+      // `index += 1` moves past it, so the clean boundary is index + 1.
+      lastCompleteIndex = index + 1
+      lastCompleteInQuotes = inQuotes
       continue
     }
     current += char
   }
 
-  const done = index >= source.length
+  const exhausted = index >= source.length
+  // A slice that ran out mid-row is NOT done: rewind to the last clean row
+  // boundary and let the caller re-read from there with more bytes. Without
+  // this, the flush below would turn a cut-off row into a silently truncated
+  // one -- the single most dangerous thing that can happen in an importer,
+  // because it looks like success.
+  if (exhausted && !sourceIsComplete) {
+    return { rows, nextIndex: lastCompleteIndex, nextInQuotes: lastCompleteInQuotes, done: false }
+  }
+  const done = exhausted
   if (done) {
     // Flush a trailing row with no final newline, same as parseDelimitedRows
     // does at EOF. If we stopped early because we hit maxRows instead, there

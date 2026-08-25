@@ -594,6 +594,63 @@ async function fetchCsvText(env: Env, jobId: string): Promise<{ text: string; fi
   return { text: await object.text(), fileName: file.original_name || 'import.csv' }
 }
 
+// How many bytes one materialize window pulls from R2.
+//
+// Sized so a window comfortably contains far more than
+// MATERIALIZE_ROWS_PER_CHUNK rows: the real file averages ~290 bytes/row, so
+// 256 KB holds roughly 900 rows against a 100-row budget. Overshooting is
+// nearly free (the unread remainder is simply not parsed and the next window
+// re-reads from the exact byte where this one stopped), whereas undershooting
+// costs an extra round trip, so the bias is deliberately generous.
+const MATERIALIZE_WINDOW_BYTES = 256 * 1024
+
+// Reads ONE byte range of the job's CSV instead of the whole object.
+//
+// This is the fix for the dominant CPU cost of importing a large file.
+// fetchCsvText above pulls the entire object and calls `.text()` on it,
+// which is a full UTF-8 decode of the whole file -- real synchronous CPU
+// proportional to total size. ensureSourceRowsMaterialized called it once
+// per WINDOW, so a 2.5 MB / 8,727-row file was fetched and decoded ~87
+// times to parse itself once, on a Worker whose entire budget is 10ms per
+// invocation.
+//
+// A range read decodes only the slice being parsed. A trailing partial
+// multi-byte character at the end of the range decodes to U+FFFD, which is
+// harmless here precisely BECAUSE of the sourceIsComplete guard: any such
+// character sits inside the final, incomplete row, which the parser now
+// refuses to emit and leaves to be re-read from its true byte offset.
+async function fetchCsvRange(
+  env: Env,
+  jobId: string,
+  offset: number,
+  length: number,
+): Promise<{ text: string; fileName: string; totalSize: number; bytesRead: number } | null> {
+  const db = getDb(env)
+  const file = await db
+    .prepare(`SELECT * FROM import_job_files WHERE job_id = @job_id AND kind = 'csv' ORDER BY id DESC LIMIT 1`)
+    .get<{ stored_path: string; original_name: string }>({ job_id: jobId })
+  if (!file) return null
+  const object = await env.ASSETS.get(file.stored_path, { range: { offset, length } })
+  if (!object) return null
+  const buffer = await object.arrayBuffer()
+  // `size` on a ranged result is the FULL object size, which is what decides
+  // whether this slice reaches EOF.
+  const totalSize = Number((object as { size?: number }).size ?? 0)
+  return {
+    text: new TextDecoder('utf-8').decode(buffer),
+    fileName: file.original_name || 'import.csv',
+    totalSize,
+    bytesRead: buffer.byteLength,
+  }
+}
+
+const CSV_BYTE_ENCODER = new TextEncoder()
+
+/** Byte length of a decoded prefix -- converts a char offset back to bytes. */
+function byteLengthOf(text: string): number {
+  return CSV_BYTE_ENCODER.encode(text).length
+}
+
 // ---------------------------------------------------------------------------
 // Materialization: parses the job's CSV into import_job_source_rows ONCE per
 // job, in small resumable windows, so analyze/apply never need to re-fetch
@@ -605,6 +662,15 @@ async function fetchCsvText(env: Env, jobId: string): Promise<{ text: string; fi
 
 type MaterializeState = {
   charOffset: number
+  // Byte offset of charOffset within the stored CSV.
+  //
+  // charOffset alone is not enough to resume from a RANGED read: for UTF-8
+  // (and this catalog is full of Khmer, which is 3 bytes per character) a
+  // character offset and a byte offset are different numbers, and R2 ranges
+  // are expressed in bytes. Tracked alongside rather than replacing
+  // charOffset so an in-flight job written by the previous build still
+  // resumes correctly -- see ensureSourceRowsMaterialized's fallback.
+  byteOffset?: number
   inQuotes: boolean
   headers: string[] | null
   rawRowIndex: number // total raw CSV rows consumed so far (header + every data/blank row) -- gives each persisted row its true original CSV line number, matching parseCsvRows' `index + 1`
@@ -650,7 +716,7 @@ const MATERIALIZE_ROWS_PER_CHUNK = 100
 async function getMaterializeState(db: D1Compat, jobId: string): Promise<{ state: MaterializeState; done: boolean }> {
   const row = await db.prepare(`SELECT materialize_state_json, materialize_done FROM import_jobs WHERE id = @id`)
     .get<{ materialize_state_json: string | null; materialize_done: number }>({ id: jobId })
-  let state: MaterializeState = { charOffset: 0, inQuotes: false, headers: null, rawRowIndex: 0, rowsWritten: 0, delimiter: ',' }
+  let state: MaterializeState = { charOffset: 0, byteOffset: 0, inQuotes: false, headers: null, rawRowIndex: 0, rowsWritten: 0, delimiter: ',' }
   try {
     if (row?.materialize_state_json) state = { ...state, ...JSON.parse(row.materialize_state_json) }
   } catch { /* keep default -- treat as not-yet-started */ }
@@ -686,18 +752,69 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   const { state, done } = await getMaterializeState(db, jobId)
   if (done) return false
 
-  const csv = await fetchCsvText(env, jobId)
+  // A job that began materializing under the previous build has a
+  // charOffset but no byteOffset. Deriving one would need the whole file
+  // decoded, which is exactly the cost being removed, so instead such a job
+  // restarts materialization from the top: import_job_source_rows is
+  // rewritten by sequence anyway, and re-parsing is cheap next to getting a
+  // resumed offset wrong. Only affects jobs mid-materialize across a deploy.
+  if (state.byteOffset == null) {
+    if (state.charOffset !== 0) {
+      await db.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
+    }
+    state.byteOffset = 0
+    state.charOffset = 0
+    state.inQuotes = false
+    state.headers = null
+    state.rawRowIndex = 0
+    state.rowsWritten = 0
+  }
+
+  // Read ONE range rather than the whole object. `windowStart` is a byte
+  // offset into the STORED file, which is why the BOM has to be handled by
+  // byte count below rather than by stripping the decoded string on every
+  // window -- stripping mid-file would shift every subsequent offset.
+  let windowBytes = MATERIALIZE_WINDOW_BYTES
+  let csv = await fetchCsvRange(env, jobId, state.byteOffset, windowBytes)
   if (!csv) throw new Error('No CSV file uploaded for this job')
 
-  if (state.charOffset === 0 && !state.headers) {
-    state.delimiter = detectCsvDelimiter(csv.text)
+  let source = csv.text
+  let bomBytes = 0
+  if (state.byteOffset === 0) {
+    const stripped = stripBom(source)
+    // stripBom removes the U+FEFF character; as UTF-8 that is 3 bytes, and
+    // the byte cursor has to account for them or every later range is
+    // misaligned by three.
+    bomBytes = byteLengthOf(source) - byteLengthOf(stripped)
+    source = stripped
+    if (!state.headers) state.delimiter = detectCsvDelimiter(source)
   }
-  // stripBom is only valid to apply at offset 0 -- see
-  // parseDelimitedRowsWindow's comment on why every window of one run must
-  // scan against the SAME (already-stripped) string, offsets included.
-  const source = state.charOffset === 0 ? stripBom(csv.text) : csv.text
 
-  const window = parseDelimitedRowsWindow(source, state.delimiter, state.charOffset, state.inQuotes, MATERIALIZE_ROWS_PER_CHUNK)
+  // True only when this slice genuinely reaches the end of the object. When
+  // false the parser must not flush a trailing partial row -- see
+  // parseDelimitedRowsWindow's sourceIsComplete.
+  let reachedEof = state.byteOffset + csv.bytesRead >= csv.totalSize
+  let window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, MATERIALIZE_ROWS_PER_CHUNK, reachedEof)
+
+  // A single row longer than the whole window would parse to zero rows and
+  // the job would never advance. Widen and retry rather than spin: real
+  // exports do contain enormous description cells, and a silent stall is
+  // far worse than one extra read.
+  while (!window.rows.length && !reachedEof) {
+    windowBytes *= 4
+    const wider = await fetchCsvRange(env, jobId, state.byteOffset, windowBytes)
+    if (!wider) break
+    csv = wider
+    source = state.byteOffset === 0 ? stripBom(csv.text) : csv.text
+    reachedEof = state.byteOffset + csv.bytesRead >= csv.totalSize
+    window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, MATERIALIZE_ROWS_PER_CHUNK, reachedEof)
+  }
+
+  // The parser reports a CHARACTER offset into this slice; the cursor we
+  // persist is a BYTE offset into the file. They differ for any non-ASCII
+  // content, and this catalog is full of Khmer.
+  const consumedBytes = byteLengthOf(source.slice(0, window.nextIndex))
+  const nextByteOffset = state.byteOffset + bomBytes + consumedBytes
 
   let rawRows = window.rows
   let rawIndex = state.rawRowIndex
@@ -751,6 +868,10 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   }
   if (statements.length) await runD1BatchInChunks(db, statements)
 
+  // The byte cursor is what the next range read resumes from. charOffset is
+  // still tracked because it is what the parser speaks, but it is now an
+  // offset within a SLICE, so it is only meaningful together with byteOffset.
+  state.byteOffset = nextByteOffset
   state.charOffset = window.nextIndex
   state.inQuotes = window.nextInQuotes
   state.rawRowIndex = rawIndex
