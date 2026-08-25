@@ -248,6 +248,34 @@ app.post('/login', async (c) => {
       organizationId: user.organization_id,
       roleId: user.role_id,
       permissions: user.permissions,
+      // role_code / role_permissions were queried above but never returned
+      // here, unlike GET /me and GET /bootstrap which both include them.
+      //
+      // Real, reproduced consequence: most users hold NO permissions of
+      // their own -- `users.permissions` is `{}` and every grant comes from
+      // their role (the built-in admin is exactly this: `{}` on the user,
+      // `{"all":true}` on the role). The frontend merges the two
+      // (AppContext's getMergedPermissionsRaw), so a user object missing
+      // role_permissions resolves to NO permissions at all: the nav
+      // collapses to the two unpermissioned pages, and every gated control
+      // disappears.
+      //
+      // That was normally masked because the app re-fetches GET
+      // /auth/bootstrap right after login and overwrites the user with the
+      // complete row. It is NOT masked whenever that follow-up cannot run:
+      // appBootstrapTransport falls back to a purely local bootstrap
+      // (readStoredUser) when no sync-server URL resolves -- which is the
+      // default on the Vite dev server, and also the offline path -- and
+      // then the login payload IS the session user for the rest of it.
+      // Reproduced live: signing in as `admin` against the dev server left
+      // an app showing only Notes and Library, with the profile chip
+      // reading "No role".
+      //
+      // Returning them here makes the login response self-sufficient and
+      // consistent with /me and /bootstrap, so no caller depends on a
+      // follow-up request to become correctly authorized.
+      role_code: user.role_code,
+      role_permissions: user.role_permissions,
     },
     sessionExpiresAt: session.expiresAt,
   })
