@@ -19,6 +19,7 @@ import { calculateProductDiscount } from '../../utils/pricing.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
+import InfoHint from '../shared/InfoHint.tsx'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import FilterMenu from '../shared/FilterMenu'
@@ -2671,7 +2672,6 @@ export default function Inventory() {
     transactions: tr('transactions', 'Transactions'),
     returnsCount: tr('returns_count', 'Returns'),
     refunded: tr('total_refunded', 'Refunded'),
-    formula: tr('formula', 'Formula'),
     taxPlusDelivery: `${tr('tax_collected', 'Tax')} + ${tr('delivery_fees', 'Delivery')}`,
   }
   const lowShortLabel = tr('low_stock_short', 'Low')
@@ -2691,6 +2691,9 @@ export default function Inventory() {
     {
       id: 'products',
       label: inventoryStatLabels.products,
+      info: `${tr('inventory_info_products', 'How many products you carry. A group of same-name items counts as ONE product here, the same way it appears as one row in the list below.')}
+
+${inventoryThresholdFormulaText}`,
       value: statsValue(totalProducts),
       cls: 'text-gray-800 dark:text-gray-200',
       sub: stockStatsLoaded
@@ -2708,24 +2711,28 @@ export default function Inventory() {
         { label: inventoryStatLabels.healthy, value: healthyCount },
         { label: inventoryStatLabels.lowStock, value: lowStockCount },
         { label: inventoryStatLabels.outOfStock, value: outStockCount },
-        { label: inventoryStatLabels.formula, value: inventoryThresholdFormulaText },
       ],
     },
     {
       id: 'stock-value',
       label: inventoryStatLabels.stockValue,
+      info: `${tr('inventory_info_stock_value', 'What the stock you are holding right now cost you to buy. Not what it will sell for.')}
+
+${inventoryStockValueFormulaText}`,
       value: statsValue(fmtUSD(totalValue)),
       cls: 'text-blue-700 dark:text-blue-300',
         sub: matchStockShortLabel,
       details: [
         { label: inventoryStatLabels.stockValue, value: fmtUSD(totalValue) },
         { label: inventoryStatLabels.products, value: totalProducts },
-        { label: inventoryStatLabels.formula, value: inventoryStockValueFormulaText },
       ],
     },
     {
       id: 'net-sold',
       label: inventoryStatLabels.netSold,
+      info: `${tr('inventory_info_net_sold', 'How many items actually left the shop: everything sold, minus anything customers brought back.')}
+
+${inventoryNetSoldFormulaText}`,
       value: statsValue(totalQtySold),
       cls: 'text-purple-700 dark:text-purple-300',
         sub: afterReturnsShortLabel,
@@ -2733,43 +2740,33 @@ export default function Inventory() {
         { label: inventoryStatLabels.netSold, value: totalQtySold },
         { label: inventoryStatLabels.returnsCount, value: returnStats?.count ?? 0 },
         { label: tr('items', 'Returned items'), value: returnStats?.items ?? 0 },
-        { label: inventoryStatLabels.formula, value: inventoryNetSoldFormulaText },
       ],
     },
     {
       id: 'revenue',
       label: inventoryStatLabels.revenue,
+      info: `${tr('inventory_info_revenue', 'Money taken from customers, after refunds are subtracted.')}
+
+${inventoryRevenueFormulaText}`,
       value: statsValue(fmtUSD(totalRevenue)),
       cls: 'text-emerald-600 dark:text-emerald-400',
         sub: afterRefundsShortLabel,
       details: [
         { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
         { label: inventoryStatLabels.refunded, value: fmtUSD(returnStats?.refund_usd || 0) },
-        { label: inventoryStatLabels.formula, value: inventoryRevenueFormulaText },
       ],
     },
     {
       id: 'cogs',
       label: inventoryStatLabels.cogs,
+      info: `${tr('inventory_info_cogs', 'What the items you sold originally cost you to buy.')}
+
+${inventoryCogsFormulaText}`,
       value: statsValue(fmtUSD(totalCOGS)),
       cls: 'text-orange-600 dark:text-orange-400',
       sub: inventoryStatLabels.costOfGoodsSold,
       details: [
         { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
-        { label: inventoryStatLabels.formula, value: inventoryCogsFormulaText },
-      ],
-    },
-    {
-      id: 'gross-profit',
-      label: inventoryStatLabels.grossProfit,
-      value: statsValue(fmtUSD(totalProfit)),
-      cls: totalProfit >= 0 ? 'text-blue-700 dark:text-blue-300' : 'text-red-600 dark:text-red-400',
-      sub: totalRevenue > 0 ? `${((totalProfit / totalRevenue) * 100).toFixed(1)}% ${marginShortLabel}` : marginShortLabel,
-      details: [
-        { label: inventoryStatLabels.grossProfit, value: fmtUSD(totalProfit) },
-        { label: inventoryStatLabels.revenue, value: fmtUSD(totalRevenue) },
-        { label: inventoryStatLabels.cogs, value: fmtUSD(totalCOGS) },
-        { label: inventoryStatLabels.formula, value: inventoryProfitFormulaText },
       ],
     },
   ]
@@ -2777,6 +2774,9 @@ export default function Inventory() {
     {
       id: 'discounts',
       label: inventoryStatLabels.discounts,
+      info: `${tr('inventory_info_discounts', 'Money given away as discounts: shop discounts plus member points redeemed.')}
+
+${inventoryDiscountFormulaText}`,
       value: statsValue(fmtUSD(totalStoreDiscounts + totalMembershipDiscounts)),
       cls: 'text-amber-600 dark:text-amber-400',
       border: 'border-amber-400',
@@ -2788,7 +2788,6 @@ export default function Inventory() {
             { label: tr('store_discounts', 'Store discounts'), value: fmtUSD(totalStoreDiscounts) },
             { label: tr('membership_discounts', 'Membership discounts'), value: fmtUSD(totalMembershipDiscounts) },
             { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
-            { label: inventoryStatLabels.formula, value: inventoryDiscountFormulaText },
           ],
         },
       ],
@@ -2796,6 +2795,9 @@ export default function Inventory() {
     {
       id: 'fees',
       label: inventoryStatLabels.feesCollected,
+      info: `${tr('inventory_info_fees', 'Extra charges collected on top of the price: tax and delivery fees.')}
+
+${inventoryFeesFormulaText}`,
       value: fmtUSD((taxDelivery.tax || 0) + (taxDelivery.delivery || 0)),
       cls: 'text-indigo-600 dark:text-indigo-400',
       border: 'border-indigo-400',
@@ -2807,7 +2809,6 @@ export default function Inventory() {
             { label: inventoryStatLabels.taxCollected, value: fmtUSD(taxDelivery.tax || 0) },
             { label: inventoryStatLabels.deliveryFees, value: fmtUSD(taxDelivery.delivery || 0) },
             { label: inventoryStatLabels.transactions, value: taxDelivery.deliveryCount || 0 },
-            { label: inventoryStatLabels.formula, value: inventoryFeesFormulaText },
           ],
         },
       ],
@@ -2815,6 +2816,9 @@ export default function Inventory() {
     {
       id: 'returns',
       label: inventoryStatLabels.returns,
+      info: `${tr('inventory_info_returns', 'Items sent back: by customers to you, and by you to suppliers.')}
+
+${inventoryReturnsFormulaText}`,
       value: (returnStats?.count ?? 0) + (returnStats?.supplier_count ?? 0),
       cls: 'text-orange-600 dark:text-orange-400',
       border: 'border-orange-400',
@@ -2835,7 +2839,6 @@ export default function Inventory() {
             { label: t('supplier_returns') || 'Supplier returns', value: returnStats?.supplier_count ?? 0 },
             { label: t('supplier_compensation') || 'Compensation', value: fmtUSD(returnStats?.supplier_compensation_usd || 0) },
             { label: t('business_loss') || 'Business loss', value: fmtUSD(returnStats?.supplier_loss_usd || 0) },
-            { label: t('formula') || 'Formula', value: inventoryReturnsFormulaText },
           ],
         },
       ],
@@ -3386,21 +3389,40 @@ export default function Inventory() {
       {showInventoryStats ? (
       <>
         <div className="mb-2 grid grid-cols-2 items-start gap-1.5 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-8">
+          {/* The card is a plain container with the clickable area INSIDE it,
+              rather than the whole card being a <button>. InfoHint is itself a
+              <button>, and a button nested in a button is invalid HTML -- the
+              browser drops one of them, which silently breaks either the hint
+              or the drill-down. The hint therefore sits as a sibling of the
+              clickable region, in the corner, where it also cannot be hit by
+              accident while reaching for the card. */}
           {inventoryStatCards.map((stat) => (
-            <button
+            <div
               key={stat.id}
-              type="button"
-              className={`card flex min-h-[3.85rem] min-w-0 flex-col items-start self-start px-2.5 py-1.5 text-left transition hover:ring-2 hover:ring-blue-200 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
-              onClick={() => setStatDetail(stat as StatDetail)}
+              className={`card relative flex min-h-[3.85rem] min-w-0 flex-col items-start self-start px-2.5 py-1.5 text-left transition focus-within:ring-2 focus-within:ring-blue-200 hover:ring-2 hover:ring-blue-200 dark:focus-within:ring-blue-800/50 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
             >
-              <div className="mb-0.5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
-              <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
-              {stat.sub ? (
-                <div className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">
-                  {stat.sub}
-                </div>
+              {stat.info ? (
+                <InfoHint
+                  className="absolute right-0.5 top-0.5"
+                  label={`${String(stat.label)} - ${tr('what_this_means', 'what this means')}`}
+                  text={String(stat.info)}
+                />
               ) : null}
-            </button>
+              <button
+                type="button"
+                className="flex min-w-0 max-w-full flex-col items-start text-left"
+                onClick={() => setStatDetail(stat as StatDetail)}
+                title={undefined}
+              >
+                <div className="mb-0.5 pr-5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
+                <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
+                {stat.sub ? (
+                  <div className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">
+                    {stat.sub}
+                  </div>
+                ) : null}
+              </button>
+            </div>
           ))}
       </div>
       </>

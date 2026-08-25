@@ -84,7 +84,11 @@ export default function InfoHint({ text, label, className }: InfoHintProps) {
           // right-0 so it never runs off the right edge of a narrow card,
           // and pointer-events-none so it cannot swallow the click that is
           // heading for the option underneath it.
-          className="pointer-events-none absolute right-0 top-6 z-50 w-64 rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          // whitespace-pre-line so a hint can carry more than one paragraph.
+          // Callers pass a plain-English meaning, a blank line, then how the
+          // figure is calculated; without this the two run together into one
+          // undifferentiated block of prose.
+          className="pointer-events-none absolute right-0 top-6 z-50 w-64 whitespace-pre-line rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
         >
           {text}
         </span>
