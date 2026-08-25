@@ -15,13 +15,15 @@
 // actually do, instead of showing (and then 403'ing on) controls for
 // fields this role can't see or touch.
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import { useApp } from '../../AppContext'
 import SearchInput from '../shared/SearchInput'
+import ScanSearchButton from '../shared/ScanSearchButton'
+import FilterMenu from '../shared/FilterMenu'
 import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationControls'
 import Modal from '../shared/Modal'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
@@ -50,6 +52,8 @@ interface ImageOnlyProduct {
   category?: string | null
   brand?: string | null
   stock_quantity?: number | string | null
+  low_stock_threshold?: number | string | null
+  out_of_stock_threshold?: number | string | null
 }
 
 interface ImageOnlyApp {
@@ -168,7 +172,74 @@ export default function ProductsImageOnlyView() {
   // renders from) -- no new data fetch, no new permission surface, purely
   // a way to read the full value of what's already on screen.
   const [detailsProduct, setDetailsProduct] = useState<ImageOnlyProduct | null>(null)
+  // Filter dimensions are offered ONLY where this role may already see the
+  // value on the row itself. Offering a category filter to someone without
+  // category visibility would hand them the whole taxonomy through the
+  // filter list -- precisely the data the permission withholds.
+  const [categoryFilter, setCategoryFilter] = useState('all')
+  const [brandFilter, setBrandFilter] = useState('all')
+  const [filterOptions, setFilterOptions] = useState<{ categories: string[]; brands: string[] }>({ categories: [], brands: [] })
   const requestIdRef = useRef(0)
+
+  useEffect(() => {
+    if (!showCategory && !showBrand) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const module = await import('../../api/productReadTransport.ts')
+        const raw = await module.getProductFilters({}) as { categories?: unknown; brands?: unknown }
+        if (cancelled) return
+        const list = (value: unknown): string[] => (Array.isArray(value) ? value.map((v) => String(v)).filter(Boolean) : [])
+        setFilterOptions({ categories: list(raw?.categories), brands: list(raw?.brands) })
+      } catch {
+        // A missing filter list is not worth an error banner on a page whose
+        // job is uploading photos -- the menu simply does not appear.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [showCategory, showBrand])
+
+  const activeFilterCount = (categoryFilter !== 'all' ? 1 : 0) + (brandFilter !== 'all' ? 1 : 0)
+  const clearFilters = useCallback(() => {
+    setCategoryFilter('all')
+    setBrandFilter('all')
+    setPage(1)
+  }, [])
+
+  const filterSections = useMemo(() => {
+    const sections = []
+    if (showCategory && filterOptions.categories.length) {
+      sections.push({
+        id: 'category',
+        label: t('category') || 'Category',
+        options: [
+          { id: 'all', label: t('all') || 'All', active: categoryFilter === 'all', onClick: () => { setCategoryFilter('all'); setPage(1) } },
+          ...filterOptions.categories.map((value) => ({
+            id: value,
+            label: value,
+            active: categoryFilter === value,
+            onClick: () => { setCategoryFilter(value); setPage(1) },
+          })),
+        ],
+      })
+    }
+    if (showBrand && filterOptions.brands.length) {
+      sections.push({
+        id: 'brand',
+        label: t('brand') || 'Brand',
+        options: [
+          { id: 'all', label: t('all') || 'All', active: brandFilter === 'all', onClick: () => { setBrandFilter('all'); setPage(1) } },
+          ...filterOptions.brands.map((value) => ({
+            id: value,
+            label: value,
+            active: brandFilter === value,
+            onClick: () => { setBrandFilter(value); setPage(1) },
+          })),
+        ],
+      })
+    }
+    return sections
+  }, [showCategory, showBrand, filterOptions, categoryFilter, brandFilter, t])
 
   const load = useCallback(async () => {
     const requestId = requestIdRef.current + 1
@@ -177,7 +248,13 @@ export default function ProductsImageOnlyView() {
     setLoadError(null)
     try {
       const module = await loadReadModule()
-      const payload = await module.searchProducts({ q: search, page, pageSize })
+      const payload = await module.searchProducts({
+        q: search,
+        page,
+        pageSize,
+        category: categoryFilter === 'all' ? '' : categoryFilter,
+        brand: brandFilter === 'all' ? '' : brandFilter,
+      })
       if (requestIdRef.current !== requestId) return
       const { items: rows, total: rowTotal } = normalizeRows(payload)
       setItems(rows)
@@ -257,13 +334,31 @@ export default function ProductsImageOnlyView() {
         </p>
       </div>
 
-      <div className="mb-3 flex gap-2">
+      <div className="mb-3 flex items-center gap-2">
         <SearchInput
           id="products-image-only-search"
           value={search}
           onChange={setSearch}
           placeholder={t('search') || 'Search'}
         />
+        {/* Labelled, not icon-only. In a row of small square controls a bare
+            camera icon is easy to miss, and a scanner nobody finds is the
+            same as not having one -- this is the button people reach for
+            mid-scan. */}
+        <ScanSearchButton onDetected={setSearch} t={t} showLabel />
+        {/* Only offered for the dimensions this role may actually see. A
+            category filter for someone not granted category visibility would
+            hand them the whole taxonomy through the filter list -- the exact
+            data the permission withholds on the row itself. */}
+        {filterSections.length ? (
+          <FilterMenu
+            label={t('filter') || 'Filter'}
+            activeCount={activeFilterCount}
+            sections={filterSections}
+            onClear={activeFilterCount ? clearFilters : null}
+            mobileIconOnly
+          />
+        ) : null}
       </div>
 
       {loadError ? (
@@ -298,7 +393,15 @@ export default function ProductsImageOnlyView() {
             if (showBarcode && product.barcode) metaParts.push(String(product.barcode))
             if (showCategory && product.category) metaParts.push(String(product.category))
             if (showBrand && product.brand) metaParts.push(String(product.brand))
-            if (showStock) metaParts.push(`${t('stock') || 'Stock'}: ${Number(product.stock_quantity || 0)}`)
+            // Stock deliberately does NOT join metaParts any more: a bare
+            // number in a grey run of text says nothing about whether the
+            // number is a problem. It renders as its own coloured pill below.
+            const stockQty = Number(product.stock_quantity || 0)
+            const stockTone = stockQty <= Number(product.out_of_stock_threshold ?? 0)
+              ? 'bg-red-50 text-red-700 ring-red-100 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900/60'
+              : stockQty <= Number(product.low_stock_threshold ?? 10)
+                ? 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60'
+                : 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900/60'
             return (
               // UI polish (this session): a saving row now gets a visible
               // ring + its thumbnail dims under a centered spinner, instead
@@ -335,14 +438,25 @@ export default function ProductsImageOnlyView() {
                 >
                   <p className="truncate text-sm font-medium text-gray-800 dark:text-gray-100">{product.name}</p>
                   {showPrice ? (
+                    // Named, not a bare figure. A number on its own next to a
+                    // product could as easily be cost or a promotional price;
+                    // this role has no other pricing on screen to infer from.
                     <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                      <span className="text-gray-400 dark:text-gray-500">{t('selling_price') || 'Selling price'}: </span>
                       {fmtUSD(product.selling_price_usd)}
                       {Number(product.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(product.selling_price_khr)}` : ''}
                     </p>
                   ) : null}
-                  {showMetaRow && metaParts.length > 0 ? (
-                    <p className="truncate text-xs text-gray-400 dark:text-gray-500">{metaParts.join(' · ')}</p>
-                  ) : null}
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    {showMetaRow && metaParts.length > 0 ? (
+                      <span className="truncate text-xs text-gray-400 dark:text-gray-500">{metaParts.join(' · ')}</span>
+                    ) : null}
+                    {showStock ? (
+                      <span className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ${stockTone}`}>
+                        {t('stock') || 'Stock'}: {stockQty}
+                      </span>
+                    ) : null}
+                  </div>
                   {isSaving ? (
                     <p className="text-xs text-blue-500 dark:text-blue-400">{t('uploading') || 'Uploading...'}</p>
                   ) : null}
@@ -441,7 +555,7 @@ export default function ProductsImageOnlyView() {
               </div>
               {showPrice ? (
                 <div className="flex justify-between gap-3 py-2">
-                  <dt className="text-gray-500 dark:text-gray-400">{t('price') || 'Price'}</dt>
+                  <dt className="text-gray-500 dark:text-gray-400">{t('selling_price') || 'Selling price'}</dt>
                   <dd className="text-right text-gray-800 dark:text-gray-100">
                     {fmtUSD(detailsProduct.selling_price_usd)}
                     {Number(detailsProduct.selling_price_khr || 0) > 0 ? ` · ${fmtKHR(detailsProduct.selling_price_khr)}` : ''}
@@ -469,7 +583,19 @@ export default function ProductsImageOnlyView() {
               {showStock ? (
                 <div className="flex justify-between gap-3 py-2">
                   <dt className="text-gray-500 dark:text-gray-400">{t('stock') || 'Stock'}</dt>
-                  <dd className="text-right text-gray-800 dark:text-gray-100">{Number(detailsProduct.stock_quantity || 0)}</dd>
+                  <dd className="text-right">
+                    {(() => {
+                      const qty = Number(detailsProduct.stock_quantity || 0)
+                      const tone = qty <= Number(detailsProduct.out_of_stock_threshold ?? 0)
+                        ? 'bg-red-50 text-red-700 ring-red-100 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900/60'
+                        : qty <= Number(detailsProduct.low_stock_threshold ?? 10)
+                          ? 'bg-amber-50 text-amber-700 ring-amber-100 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900/60'
+                          : 'bg-emerald-50 text-emerald-700 ring-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900/60'
+                      return (
+                        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ${tone}`}>{qty}</span>
+                      )
+                    })()}
+                  </dd>
                 </div>
               ) : null}
             </dl>

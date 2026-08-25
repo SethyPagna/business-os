@@ -3396,6 +3396,7 @@
   "saving_image": "Saving image...",
   "saving_label": "Saving…",
   "saving_pdf": "Saving PDF...",
+  "scan": "Scan",
   "scan_barcode": "Scan Barcode",
   "scan_failed": "Unable to start camera scanning right now.",
   "scan_fallback_active": "Using compatibility scan mode for this browser.",

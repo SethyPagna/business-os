@@ -15,6 +15,15 @@ interface ScanSearchButtonProps {
   /** Compact icon-only button to sit flush against a search input, matching
    * the existing FilterMenu/SearchModeToggle button sizing in these rows. */
   className?: string
+  /**
+   * Render the word "Scan" beside the icon instead of the icon alone.
+   *
+   * The icon-only form is easy to miss on a page whose other controls are
+   * also small squares -- a scanner button that nobody finds is the same as
+   * not having one. Opt-in rather than default so existing toolbars, which
+   * are laid out around a 40px square, are untouched.
+   */
+  showLabel?: boolean
 }
 
 /**
@@ -29,7 +38,7 @@ interface ScanSearchButtonProps {
  * gives up the room. Pass `className` to override on a per-page basis if
  * a specific row needs to match older sizing.
  */
-export default function ScanSearchButton({ onDetected, t, title, className = '' }: ScanSearchButtonProps) {
+export default function ScanSearchButton({ onDetected, t, title, className = '', showLabel = false }: ScanSearchButtonProps) {
   const [open, setOpen] = useState(false)
   const label = title || t('scan_barcode') || 'Scan barcode'
 
@@ -46,9 +55,17 @@ export default function ScanSearchButton({ onDetected, t, title, className = '' 
         onClick={() => setOpen(true)}
         title={label}
         aria-label={label}
-        className={`inline-flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-white text-gray-600 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300 ${className}`.trim()}
+        className={`inline-flex h-10 flex-shrink-0 items-center justify-center gap-1.5 rounded-lg border font-medium transition-colors ${
+          showLabel
+            // Given a label it stops being a neutral square and reads as the
+            // primary action it is -- accented border and text, not another
+            // grey icon in a row of grey icons.
+            ? 'border-blue-300 bg-blue-50 px-3 text-sm text-blue-700 hover:border-blue-400 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
+            : 'w-10 border-gray-300 bg-white text-gray-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300'
+        } ${className}`.trim()}
       >
         <ScanLine className="h-5 w-5" />
+        {showLabel ? <span>{t('scan') || 'Scan'}</span> : null}
       </button>
       {open ? (
         <Suspense fallback={null}>

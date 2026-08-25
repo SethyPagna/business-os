@@ -300,7 +300,12 @@ export const IMAGE_ONLY_OPTIONAL_FIELDS: Record<string, readonly string[]> = {
   products_image_only_show_barcode: ['barcode'],
   products_image_only_show_category: ['category'],
   products_image_only_show_brand: ['brand'],
-  products_image_only_show_stock: ['stock_quantity'],
+  // low_stock_threshold rides along with stock rather than being its own
+  // permission: it is not independently interesting, and without it a stock
+  // figure cannot be coloured -- "12 in stock" says nothing about whether 12
+  // is healthy or nearly out. Granting stock visibility without the number
+  // that gives it meaning would be a distinction with no use.
+  products_image_only_show_stock: ['stock_quantity', 'low_stock_threshold', 'out_of_stock_threshold'],
 }
 
 /**
