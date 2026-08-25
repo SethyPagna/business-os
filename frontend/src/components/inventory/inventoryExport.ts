@@ -116,7 +116,7 @@ function getMovementVolumeRows(groups: AnyRecord[], movementTimeMode: string): A
     if (!date) return
     const period = movementTimeMode === 'year'
       ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-      : date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit' })
     const current = map.get(period) || { period, count: 0, quantity: 0, total_cost_usd: 0 }
     current.count += Number(group.items?.length || 0)
     current.quantity += Number(group.totalQuantity || 0)

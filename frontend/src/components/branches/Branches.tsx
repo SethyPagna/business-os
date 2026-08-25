@@ -262,10 +262,10 @@ function formatTransferDate(rawValue: string | null | undefined): string {
     : `${rawValue.replace(' ', 'T')}Z`
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return 'N/A'
-  return date.toLocaleString(undefined, {
+  return date.toLocaleString('en-US', {
     year: 'numeric',
-    month: 'short',
-    day: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,

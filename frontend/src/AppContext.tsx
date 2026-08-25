@@ -2071,11 +2071,11 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const formatDateTime = useCallback((value: unknown, options: Intl.DateTimeFormatOptions = {}): string => {
     const date = normalizeDateInput(value)
     if (!date) return '--'
-    return date.toLocaleString(undefined, {
+    return date.toLocaleString('en-US', {
       hour12: false,
       year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
       second: '2-digit',

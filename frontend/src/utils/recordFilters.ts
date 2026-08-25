@@ -56,10 +56,10 @@ export function getTimeParts(value: unknown): TimeParts {
     month,
     day,
     yearLabel: String(year),
-    monthLabel: parsed.toLocaleString(undefined, { month: 'long', year: 'numeric' }),
+    monthLabel: parsed.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
     monthKey: `${year}-${String(month).padStart(2, '0')}`,
     dayKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
-    dayLabel: parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }),
+    dayLabel: parsed.toLocaleDateString('en-US', { year: 'numeric', month: '2-digit', day: '2-digit' }),
   }
 }
 

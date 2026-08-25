@@ -33,13 +33,21 @@ export function fmtTime(raw: TimestampInput): string {
   try {
     const date = new Date(normalized)
     if (Number.isNaN(date.getTime())) return '—'
-    return date.toLocaleString(undefined, {
+    // mm/dd/yyyy, not "Aug 22, 2026". The whole app uses one numeric date
+    // format by request (Aug 25 2026: "all date format uses mm/dd/yyyy
+    // throughout app"), so a short-month form here would be the odd one out
+    // wherever it sits next to a date rendered by fmtDate/fmtDateTime24.
+    // `en-US` is passed explicitly rather than `undefined`: the locale
+    // default follows the VIEWER's machine, which would render dd/mm/yyyy
+    // for a Khmer or European locale -- silently swapping day and month
+    // rather than failing, which is the worst kind of date bug.
+    return date.toLocaleString('en-US', {
       year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-      hour12: false,
+      hourCycle: 'h23',
       timeZone: BUSINESS_TIME_ZONE,
     })
   } catch {
@@ -58,10 +66,12 @@ export function fmtDate(raw: TimestampInput): string {
   try {
     const date = new Date(normalized)
     if (Number.isNaN(date.getTime())) return '—'
-    return date.toLocaleDateString(undefined, {
+    // See fmtTime above for why this is numeric and why the locale is
+    // pinned to en-US rather than left to the viewer's machine.
+    return date.toLocaleDateString('en-US', {
       year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
       timeZone: BUSINESS_TIME_ZONE,
     })
   } catch {

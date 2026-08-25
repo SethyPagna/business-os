@@ -168,10 +168,10 @@ export function formatDate(dateStr: unknown): string {
   const raw = String(dateStr)
   try {
     const iso = raw.includes('T') ? raw : `${raw}Z`
-    return new Date(iso).toLocaleDateString(undefined, {
+    return new Date(iso).toLocaleDateString('en-US', {
       year: 'numeric',
-      month: 'short',
-      day: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
       timeZone: BUSINESS_TIME_ZONE,
     })
   } catch {
