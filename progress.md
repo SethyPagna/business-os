@@ -122,6 +122,55 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 
 ---
 
+## Connected services — measured Aug 26 2026 (Part 349)
+
+*Every row below was probed live through its MCP connection, not read off a config
+file. "Wired into the app" means the running Worker/frontend actually uses it.*
+
+| Service | Reachable | Wired into the app | Measured state |
+|---|---|---|---|
+| **Cloudflare** | yes | **yes, fully** | D1 `business-os` = **185 MB of the 5 GB** free limit. R2 `business-os-assets` (the only bucket, and the only one `wrangler.toml` needs). KV `de5f3b41c7264e4582077176fd0c1fe8` titled `CACHE` — the exact id supplied, already bound. |
+| **Cloudinary** | yes | **no** | Free plan, **completely unused — 0 storage, 0 transformations, 0 bandwidth**, 25 credits/month. Limits: image ≤10 MB, ≤25 M pixels. |
+| **Resend** | yes | **partly** | One domain, `leangcosmetics.crane-qilin.ts.net`, status **`not_started`** — i.e. DNS never verified, so **nothing can actually send**. It is also a Tailscale `.ts.net` name, not `leangcosmetics.dpdns.org`. Compounding it, `RESEND_FROM_EMAIL` is missing from `wrangler.toml` entirely, and `lib/verification.ts:82` needs both it and the API key. Two independent blockers. |
+| **Sentry** | yes | **no** | Org `ungsethypagna` exists with **zero projects**. Nothing in `cloudflare/src` or `frontend/src` references Sentry. |
+| **Google Drive** | yes | **yes** | Already the backup sync target. |
+| Firecrawl / Exa / Figma / Mobbin | yes | n/a | Development-time tools, not app runtime. |
+
+### Cloudflare + Cloudinary: split, do not merge
+
+The honest sizing, because the free tiers decide this:
+
+- **R2 stays the store of record.** 10 GB and **zero egress**, and it is already the
+  upload target. Cloudinary's free tier is **25 credits/month**, where one credit is
+  roughly 1 GB of storage *or* 1 GB of bandwidth *or* 1,000 transformations. With up to
+  3 images across ~6,700 products, using Cloudinary as primary storage would exhaust the
+  plan on storage alone. It is not a storage substitute.
+- **Cloudinary is worth exactly one thing here: it can do what the Worker cannot.**
+  Measured earlier: the Worker has **no image processing at all**, which is why the
+  300–350 KB backfill has no server-side path today. Cloudinary's `transform-asset`
+  does quality-preserving resize and WebP/AVIF encode. Used *only* for the one-off
+  backfill of existing MB-sized objects, the transformation cost is trivial —
+  ~2,000 objects is ~2 credits.
+- **New uploads should not touch Cloudinary.** Encoding WebP/AVIF at quality 80–85 in
+  the browser is free, needs no service, keeps the 100%-free-egress property, and is
+  the approach that actually fixes the root cause. Cloudinary would add a per-upload
+  dependency and a metered cost for something the client can already do.
+
+So: **client-side encode for the ongoing path, Cloudinary for the historical backfill,
+R2 for storage.** That is the split, and it keeps everything inside free tiers.
+
+### What needs an account change before it can work
+
+These modify third-party accounts, so they are listed rather than done:
+
+1. **Resend** — add and verify `leangcosmetics.dpdns.org` (the current domain is a
+   Tailscale name and is unverified), then set `RESEND_FROM_EMAIL` in `wrangler.toml`.
+   Until both are true, password-reset email silently does nothing.
+2. **Sentry** — create a project under `ungsethypagna` and wire the SDK. Currently the
+   only error signal is whatever reaches the browser console.
+
+---
+
 ## Open work — ORDERED
 
 *Rebuilt Aug 26 2026 (Part 348) at the user's request: "update the still open with
