@@ -123,9 +123,13 @@ assert.deepEqual(rowState.compactMeta, [
   { key: 'category', label: 'Skin', color: '#123456' },
 ])
 
-// Regression: barcode joins brand/category in compactMeta (desktop row's
-// name-cell tag line, see Products.tsx's renderDesktopProductRow) instead
-// of staying only in the separate Details-column pill list.
+// Barcode joins brand/category on the desktop row's name-cell tag line
+// (Products.tsx's renderDesktopProductRow) rather than staying only in the
+// separate Details-column pill list -- and it comes FIRST. It is the field
+// people scan for when identifying a row; brand and category are broad
+// groupings they have usually already filtered by, so leading with those
+// buried the one value unique to the product. Order is asserted, not just
+// membership, because the order IS the requirement here.
 const rowStateWithBarcode = buildProductRowDisplayState({
   id: 2,
   brand: 'Acme',
@@ -137,9 +141,26 @@ const rowStateWithBarcode = buildProductRowDisplayState({
   getBrandColor: () => '#abcdef',
 })
 assert.deepEqual(rowStateWithBarcode.compactMeta, [
+  { key: 'barcode', label: '0123456789012', className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' },
   { key: 'brand', label: 'Acme', color: '#abcdef' },
   { key: 'category', label: 'Skin', color: '#123456' },
-  { key: 'barcode', label: '0123456789012', className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' },
+])
+assert.equal(rowStateWithBarcode.compactMeta[0].key, 'barcode', 'barcode must lead the meta line')
+
+// A product with no barcode still renders brand/category cleanly -- the
+// filter(Boolean) must not leave a hole where the barcode would have been.
+const rowStateNoBarcode = buildProductRowDisplayState({
+  id: 3,
+  brand: 'Acme',
+  category: 'Skin',
+  stock_quantity: 8,
+}, {
+  catMap: { Skin: { color: '#123456' } },
+  getBrandColor: () => '#abcdef',
+})
+assert.deepEqual(rowStateNoBarcode.compactMeta, [
+  { key: 'brand', label: 'Acme', color: '#abcdef' },
+  { key: 'category', label: 'Skin', color: '#123456' },
 ])
 assert.equal(rowState.promotion.active, true)
 assert.equal(rowState.promotion.applied_price_usd, 15)

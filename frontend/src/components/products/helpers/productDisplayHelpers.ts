@@ -187,14 +187,16 @@ export function buildProductRowDisplayState(product: ProductRecord, {
   const selectedBranchName = branchFilter !== 'all' ? branchNameById.get(String(branchFilter)) : ''
   const branchSummaryLabel = branchFilter === 'all' ? getBranchSummaryLabel(product) : ''
   const compactMeta = [
+    // Barcode FIRST, then brand and category. It is the field people scan
+    // for when identifying a row -- brand and category are broad groupings
+    // they have usually already filtered by, so leading with them buried
+    // the one value that is unique to the product. (Requested Aug 25 2026:
+    // "barcode show in default display same row with category and brand,
+    // placed first".) Still one shared line, matching
+    // InventoryProductsSurface.tsx's own name-cell tag line.
+    product?.barcode ? { key: 'barcode', label: product.barcode, className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' } : null,
     product?.brand ? { key: 'brand', label: product.brand, color: getBrandColor(product.brand) } : null,
     product?.category ? { key: 'category', label: product.category, color: catMap[String(product.category)]?.color } : null,
-    // Barcode sits alongside brand/category here (desktop table only,
-    // see renderDesktopProductRow) instead of buried in the separate
-    // Details column pill list -- matches InventoryProductsSurface.tsx's
-    // name-cell tag line, which already puts brand/category/barcode on
-    // one line together.
-    product?.barcode ? { key: 'barcode', label: product.barcode, className: 'bg-sky-50 font-mono text-sky-700 dark:bg-sky-900/30 dark:text-sky-200' } : null,
   ].filter(Boolean)
   // Short single-word badge text everywhere (matches Inventory/Branches'
   // stat-tile labels) -- these _short keys already exist in en/km.json,

@@ -228,14 +228,21 @@ export default function ProductDetailModal({
                   the whole line or overflowing -- title attr keeps the
                   full value available on hover/long-press. */}
               <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {p.category ? <span className="max-w-[110px] truncate" title={p.category}>{p.category}</span> : null}
-                {p.brand ? <span className="max-w-[110px] truncate" title={p.brand}>&middot; {p.brand}</span> : null}
+                {/* Barcode leads this line ("in view details barcode show
+                    first"). It is the identifier someone opens a product to
+                    check or copy; category and brand are groupings they
+                    already knew from the list they came from. The middot
+                    separator moves onto the FOLLOWING items so the line
+                    never opens with a stray dot when a product has no
+                    barcode or SKU. */}
                 {p.barcode ? (
                   <button type="button" className="max-w-[140px] truncate font-mono underline-offset-2 hover:text-blue-600 hover:underline" onClick={copyBarcode} title={T('copy_barcode', 'Copy barcode')}>
                     {p.barcode}
                   </button>
                 ) : null}
                 {p.sku ? <span className="max-w-[100px] truncate font-mono" title={p.sku}>{p.sku}</span> : null}
+                {p.category ? <span className="max-w-[110px] truncate" title={p.category}>{p.barcode || p.sku ? '· ' : ''}{p.category}</span> : null}
+                {p.brand ? <span className="max-w-[110px] truncate" title={p.brand}>&middot; {p.brand}</span> : null}
               </div>
             </div>
           </div>
