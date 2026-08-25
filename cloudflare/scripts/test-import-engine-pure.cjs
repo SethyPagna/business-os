@@ -80,6 +80,21 @@ salesStatusWrapper(salesStatusModuleObj.exports, require, salesStatusModuleObj, 
 // pure -- no D1/Env -- and importEngine.ts delegates every identity decision
 // to it, so it must be the real transpiled module here, not a stub, or every
 // create-vs-merge assertion below would be testing nothing.
+// productDescriptionSections.ts owns the import description whitelist (only
+// five section labels come through; anything else is dropped). Pure -- no
+// D1/Env -- so load the real module: stubbing it would make every imported
+// description come back undefined.
+const productDescriptionSectionsSourcePath = path.join(__dirname, '..', 'src', 'lib', 'productDescriptionSections.ts')
+const { outputText: productDescriptionSectionsOutputText } = ts.transpileModule(fs.readFileSync(productDescriptionSectionsSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'productDescriptionSections.ts',
+})
+const productDescriptionSectionsModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', productDescriptionSectionsOutputText)(
+  productDescriptionSectionsModuleObj.exports, require, productDescriptionSectionsModuleObj,
+  productDescriptionSectionsSourcePath, path.dirname(productDescriptionSectionsSourcePath),
+)
+
 const productDetailRuleSourcePath = path.join(__dirname, '..', 'src', 'lib', 'productDetailRule.ts')
 const { outputText: productDetailRuleOutputText } = ts.transpileModule(fs.readFileSync(productDetailRuleSourcePath, 'utf8'), {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
@@ -117,6 +132,7 @@ const productBatchesModuleObj = { exports: {} }
 const productBatchesWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', productBatchesOutputText)
 function requireForProductBatches(request) {
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
+  if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports
   return require(request)
 }
@@ -179,6 +195,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './batchCode') {
     return batchCodeModuleObj.exports // real module -- importEngine.ts's own lot_code derivation calls into it
+  }
+  if (request === './productDescriptionSections') {
+    return productDescriptionSectionsModuleObj.exports // real module -- owns the import description whitelist
   }
   if (request === './productDetailRule') {
     return productDetailRuleModuleObj.exports // real module -- owns the identity rule importEngine delegates to

@@ -24,6 +24,7 @@
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
 import { normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedPricing } from './productDetailRule'
+import { sanitizeImportedDescription } from './productDescriptionSections'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
 // bakes the reviewer's per-row choice (IMPORT_DECISION_OPTIONS) directly
@@ -1067,7 +1068,14 @@ export async function classifyProducts(
       // when the CSV has none do we assemble one from the named
       // Introduction/Official Product Name/Features & Benefits/Who is
       // it for?/Ingredients columns (see buildDescriptionFromColumns).
-      description: str(row.description) || buildDescriptionFromColumns(row) || null,
+      // Only the five whitelisted sections survive an import; any other
+      // `"Something":` block in the cell is dropped rather than imported.
+      // See lib/productDescriptionSections.ts for why (supplier boilerplate
+      // no display surface knows how to render), and note that Caution /
+      // Need More Details are deliberately NOT importable -- those are
+      // portal-wide defaults authored in the Customer Portal editor, and a
+      // supplier's wording must not silently override the shop's own.
+      description: sanitizeImportedDescription(str(row.description) || buildDescriptionFromColumns(row)).text || null,
       brand: brandParts[0] || null,
       brands: brandParts.length ? dedupeJoin(brandParts) : null,
       supplier: str(row.supplier) || null,
