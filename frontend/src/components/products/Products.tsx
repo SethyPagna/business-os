@@ -2783,7 +2783,15 @@ function ProductsFullEditor() {
         </td>
         <td className="px-3 py-2">
           {thumbnailState.hasImage
-            ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-10 w-10 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }} />
+            ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-10 w-10 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
+                // Stopping only the CLICK left the row still opening its
+                // detail flyout behind the lightbox: the row's long-press
+                // handlers bind mousedown/touchstart (utils/longPress.ts),
+                // which fire before click and drive their own onClick on
+                // release. Tapping a thumbnail therefore opened the gallery
+                // AND the detail at once. Stop the gesture at its start.
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()} />
             : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
         </td>
         <td className="px-3 py-2">
@@ -2975,7 +2983,15 @@ function ProductsFullEditor() {
           {indented ? null : (
             <div className="relative flex-shrink-0">
               {thumbnailState.hasImage
-                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-14 w-14 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }} />
+                ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-14 w-14 rounded-xl bg-slate-50 object-contain p-0.5 cursor-zoom-in dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
+                // Stopping only the CLICK left the row still opening its
+                // detail flyout behind the lightbox: the row's long-press
+                // handlers bind mousedown/touchstart (utils/longPress.ts),
+                // which fire before click and drive their own onClick on
+                // release. Tapping a thumbnail therefore opened the gallery
+                // AND the detail at once. Stop the gesture at its start.
+                onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()} />
                 : <ProductImagePlaceholder className="h-14 w-14 rounded-xl" />}
               <ProductDiscountBadge product={p} promotion={promotion} fmtUSD={fmtUSD} label={tr('discounts', 'Discounts')} overlay />
             </div>

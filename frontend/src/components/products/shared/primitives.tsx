@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { MouseEventHandler } from 'react'
+import type { MouseEventHandler, TouchEventHandler } from 'react'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
@@ -16,6 +16,14 @@ interface ProductImgProps {
   alt?: string
   className?: string
   onClick?: MouseEventHandler<HTMLImageElement>
+  // A clickable thumbnail usually sits inside a row that has its OWN
+  // press handling (long-press to enter select mode, tap to open the
+  // detail -- see utils/longPress.ts). Those bind mousedown/touchstart,
+  // which fire BEFORE click, so an onClick that only stops click
+  // propagation does not stop the row from also reacting. Exposing the
+  // press events lets a caller stop the gesture at its start.
+  onMouseDown?: MouseEventHandler<HTMLImageElement>
+  onTouchStart?: TouchEventHandler<HTMLImageElement>
 }
 
 interface ProductImagePlaceholderProps {
@@ -80,7 +88,7 @@ function parseNumericInput(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-function ProductImg({ src, alt = '', className, onClick }: ProductImgProps) {
+function ProductImg({ src, alt = '', className, onClick, onMouseDown, onTouchStart }: ProductImgProps) {
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const imageRequestRef = useRef(0)
@@ -157,6 +165,8 @@ function ProductImg({ src, alt = '', className, onClick }: ProductImgProps) {
       alt={alt}
       className={className}
       onClick={onClick}
+      onMouseDown={onMouseDown}
+      onTouchStart={onTouchStart}
       onError={() => {
         markBrokenProductImage(safeSrc)
         setFailed(true)
