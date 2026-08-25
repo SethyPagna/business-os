@@ -90,8 +90,26 @@ export {
 // `products` tier of their own. A user who also holds full/review
 // `products` access never gets restricted here, even if `products_image_only`
 // happens to also be set on their role/user record.
+//
+// `pos`, `sales` and `inventory` count as "real product access" too, and
+// leaving them out was a genuine bug, not a nuance: this used to check the
+// `products` tier ALONE, so a cashier role granted {pos, sales} plus
+// `products_image_only` (a natural way to say "let the cashier see product
+// photos") had every catalog row stripped to IMAGE_ONLY_BASE_FIELDS. That
+// list has no `is_active`, and POS.tsx's applyCatalogProducts filters on
+// exactly that field -- so the whole grid came back empty with HTTP 200 and
+// no error, rendering a bare "No data found" while the pagination count and
+// A-Z rail (computed from unrestricted queries) still looked correct.
+// Reported as "for employees and other roles, i enter pos, and it says No
+// Data Found". Selling requires prices, stock and branch data by definition,
+// so a user who can operate POS/Sales/Inventory can never be an image-only
+// user -- which is what productWrites.ts's own docstring on
+// restrictToImageOnlyFields already claimed this function did.
 function isImageOnlyUser(user: SessionUser): boolean {
-  return getPermissionTier(user, 'products') === 'none' && hasPermission(user, 'products_image_only')
+  if (!hasPermission(user, 'products_image_only')) return false
+  if (getPermissionTier(user, 'products') !== 'none') return false
+  if (getPermissionTier(user, 'inventory') !== 'none') return false
+  return !hasPermission(user, 'pos') && !hasPermission(user, 'sales')
 }
 
 function restrictListPayloadForImageOnly<T extends { items?: unknown }>(payload: T, user: SessionUser): T {

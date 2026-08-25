@@ -198,7 +198,10 @@ type ProductRecord = Record<string, unknown> & {
   id: string | number
   image_gallery?: string | string[]
   image_path?: string
-  is_active?: boolean
+  // D1 stores this as INTEGER 0/1, so it arrives as a number over the wire
+  // even though `boolean` alone type-checked -- the mismatch is why the
+  // `is_active !== 0` guard below needs the wider type to be honest.
+  is_active?: boolean | number
   is_group?: boolean
   low_stock_threshold?: string | number
   name: string
@@ -925,8 +928,23 @@ export default function POS() {
     return t('products') || 'products'
   }, [hasProductDiscoveryQuery, stockFilter, t])
 
+  // A row is hidden only when the server explicitly says it is inactive.
+  // `is_active === undefined` means "the response didn't carry that column",
+  // NOT "this product is archived" -- every product list endpoint already
+  // filters `WHERE p.is_active = 1` server-side (routes/products.ts), so
+  // anything that arrives here is active by construction and a missing
+  // column must not be read as a business value.
+  //
+  // The old `.filter((p) => p?.is_active)` conflated the two and silently
+  // emptied the entire grid whenever a response omitted the column -- which
+  // is exactly what a field-restricted role produced (restrictToImageOnly-
+  // Fields strips everything outside its allowlist, and `is_active` isn't in
+  // it). HTTP 200, no error banner, so POS fell through to the bare "No data
+  // found" empty state while the pagination count and A-Z rail still showed
+  // real numbers. Reported as "for employees and other roles, i enter pos,
+  // and it says No Data Found".
   const applyCatalogProducts = useCallback((prods: ProductRecord[]) => {
-    setProducts(Array.isArray(prods) ? prods.filter((product) => product?.is_active) : [])
+    setProducts(Array.isArray(prods) ? prods.filter((product) => product && product.is_active !== 0 && product.is_active !== false) : [])
   }, [])
 
   const applyCategoryOptions = useCallback((cats: unknown[]) => {

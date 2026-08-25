@@ -55,7 +55,9 @@ type ProductRecord = Record<string, unknown> & {
   id: string | number
   image_gallery?: string | string[]
   image_path?: string
-  is_active?: boolean
+  // Kept in step with POS.tsx's own ProductRecord (these are two parallel
+  // declarations of the same wire shape): D1 sends INTEGER 0/1, not a bool.
+  is_active?: boolean | number
   is_group?: boolean
   low_stock_threshold?: string | number
   name: string
