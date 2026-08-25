@@ -2840,6 +2840,21 @@ and **448 phone numbers are shared across 978 customers**.
 
 **Still open from this batch:** Add/Sale reshaped to the Dated-Stock-Reconciliation flow (column mapping → review → apply, with batch choice on sale and create-then-sell for products that exist only in the file); import/delete CPU-limit work; POS variant/batch options; batch editing; profile modal; portal Contact-us; custom permission validation; review-queue UI; stats redesign.
 
+### Fifth batch — Aug 25 2026 (Part 345)
+
+| Item | Flag | Notes |
+|---|---|---|
+| Items per page: 20 default, POS 30, public 20 | 🟢 | Two named constants replace `PAGE_SIZE_OPTIONS[1]`, which made "the default" and "the middle option" the same fact by accident. Storefront changed on BOTH ends (client + `routes/portal.ts`) so a pageSize-less request matches. Reverses Part 151's org-wide 50 — recorded in-code. |
+| mm/dd/yyyy throughout | 🟢 | 13 inline formatters + the 2 shared ones. **The real risk was the locale, not the pattern:** every call passed `undefined`, i.e. follow the viewer's machine, and most non-US locales render dd/mm/yyyy — so `08/09/2026` would have silently meant Sept 8 on a Khmer device and Aug 9 on a US one. Now pinned to `en-US`. Going numeric is what would have exposed this: `Aug` is unambiguous, `08` is not. |
+| Flyout divider "too large" | 🟢 | It was **two** adjacent 1px borders (panel `border-r` + aside `border-l`), not one thick one. |
+| Margin on its own row | 🟢 | Reverses the Aug 22 change that folded it inline. Recorded, and the stale comment updated rather than left contradicting the code. |
+| Action buttons too wide | 🟢 | Layout was `grid-cols-2`, so 2–3 buttons got as much width as every product detail combined. Now `[minmax(0,1fr)_auto]` with a fixed narrow actions column. |
+| Thumbnail opens gallery **and** detail | 🟢 | `stopPropagation()` on click was doing nothing: the row's long-press binds mousedown/touchstart, which fire first and drive their own onClick on release. Now stopped at gesture start. **Not reproduced live** — no product has a real uploaded image locally, so the placeholder renders instead of a clickable `<img>`. |
+
+**Still open from this batch:** Dated Stock Reconciliation moved into Add/Sale and renamed; Add/Sale batch-choice-on-sale and create-then-sell; image auto-wire as a **button** (not automatic); batch format in the flyout + click-to-expand batch view; barcode first in list rows and detail; prices+stock merged to one row in the default list display; large-screen row/category alignment; settings tab-icon image wiring; two receipt print options with 80×50 fitting all fields; sticky-toolbar gap on scroll; mobile alphabetical rail.
+
+**Also reported, not yet investigated:** `Write blocked - server unavailable ... (operation: data:reset)`.
+
 ### Environment gotcha worth knowing before testing any write locally
 
 `api/http.ts`'s `route()` **blocks every write** when no sync-server URL is
