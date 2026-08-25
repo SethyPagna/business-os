@@ -4,6 +4,8 @@ import ArrowLeft from 'lucide-react/dist/esm/icons/arrow-left.js'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
 import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
+import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
@@ -282,6 +284,7 @@ export default function Login() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [otp, setOtp] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [otpRequired, setOtpRequired] = useState(false)
   const [pendingUserId, setPendingUserId] = useState<IdValue | null>(null)
   const [deviceApprovalPending, setDeviceApprovalPending] = useState(false)
@@ -1076,7 +1079,7 @@ export default function Login() {
                 id="login-username"
                 name="username"
                 ref={usernameRef}
-                className="input"
+                className="input h-11"
                 type="text"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
@@ -1091,22 +1094,36 @@ export default function Login() {
                 <LockKeyhole className="h-4 w-4 text-gray-400" />
                 <span>{t('password')}</span>
               </label>
-              <input
-                id="login-password"
-                name="password"
-                className="input"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder={tr('password', 'Password')}
-                required
-                autoComplete="current-password"
-              />
+              {/* pr-11 keeps the typed value clear of the reveal button --
+                  without it a long password runs underneath the icon. */}
+              <div className="relative">
+                <input
+                  id="login-password"
+                  name="password"
+                  className="input h-11 pr-11"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  placeholder={tr('password', 'Password')}
+                  required
+                  autoComplete="current-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-lg text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-200"
+                  aria-label={showPassword ? tr('hide_password', 'Hide password') : tr('show_password', 'Show password')}
+                  title={showPassword ? tr('hide_password', 'Hide password') : tr('show_password', 'Show password')}
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
             </div>
 
             {error ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
 
-            <button className="btn-primary w-full py-3 text-base" type="submit" disabled={loading}>
+            <button className="btn-primary h-11 w-full" type="submit" disabled={loading}>
               {loading ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />

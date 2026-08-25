@@ -4032,5 +4032,7 @@
   "bulk_price_amount": "Amount",
   "bulk_price_skip_zero": "Skip products priced 0 (not yet priced)",
   "bulk_price_apply_adjustment": "Apply adjustment",
-  "bulk_price_no_change": "Nothing to change with those settings"
+  "bulk_price_no_change": "Nothing to change with those settings",
+  "show_password": "Show password",
+  "hide_password": "Hide password"
 }
