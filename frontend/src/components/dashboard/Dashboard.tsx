@@ -1088,6 +1088,7 @@ export default function Dashboard() {
   const periodKpis = useMemo(() => ([
       {
         id: 'products',
+        info: translateOr('dash_info_products', "How many products you carry. A group of same-name items counts as ONE product, matching how the Products list pages them."),
         label: translateOr('products', 'Products'),
         value: summary?.product_count || 0,
         sub: `${lowStockCount} ${lowShortLabel} | ${outOfStockCount} ${outShortLabel}`,
@@ -1101,6 +1102,7 @@ export default function Dashboard() {
     },
     {
       id: 'stock-value',
+      info: translateOr('dash_info_stock_value', "What the stock you are holding right now cost you to buy. Not what it will sell for."),
       label: translateOr('stock_value', 'Stock value'),
       value: fmtUSD(aStockValue),
       color: 'text-cyan-600',
@@ -1108,11 +1110,11 @@ export default function Dashboard() {
       details: [
         { label: translateOr('stock_value', 'Stock value'), value: fmtUSD(aStockValue) },
         { label: translateOr('products_total', 'Products'), value: summary?.product_count || 0 },
-        { label: translateOr('formula', 'Formula'), value: stockValueFormulaText },
       ],
     },
     {
       id: 'revenue',
+      info: translateOr('dash_info_revenue', "Money actually kept from sales in this period: gross sales, minus discounts and refunds."),
       label: translateOr('revenue', 'Revenue'),
       value: fmtUSD(aRevenue),
       sub: `${grossShortLabel} ${fmtUSD(aGrossSales)}`,
@@ -1125,14 +1127,11 @@ export default function Dashboard() {
         { label: translateOr('total_refunded', 'Refunds'), value: fmtUSD(aRefundUsd) },
         { label: translateOr('tax_collected', 'Tax'), value: fmtUSD(aTax) },
         { label: translateOr('delivery_fees', 'Delivery fees'), value: fmtUSD(aDelivery) },
-        { label: translateOr('formula', 'Formula'), value: revenueFormulaText },
-        { label: translateOr('example', 'Example'), value: revenueExampleText },
-        { label: translateOr('collected_total', 'Collected total'), value: collectedFormulaText },
-        { label: translateOr('collected_example', 'Collected example'), value: collectedExampleText },
       ],
     },
     {
       id: 'discounts',
+      info: translateOr('dash_info_discounts', "Money given away in this period: shop discounts plus member points redeemed."),
       label: translateOr('discounts_combined', 'Discounts'),
       value: fmtUSD(aDiscounts),
       sub: `${storeShortLabel} ${fmtUSD(aStoreDiscounts)} | ${memberShortLabel} ${fmtUSD(aMemberDiscounts)}`,
@@ -1141,21 +1140,21 @@ export default function Dashboard() {
         { label: translateOr('discounts', 'Discounts'), value: fmtUSD(aDiscounts) },
         { label: translateOr('store_discounts', 'Store discounts'), value: fmtUSD(aStoreDiscounts) },
         { label: translateOr('membership_discounts', 'Membership discounts'), value: fmtUSD(aMemberDiscounts) },
-        { label: translateOr('formula', 'Formula'), value: storeDiscountFormulaText },
       ],
     },
     {
       id: 'cogs',
+      info: translateOr('dash_info_cogs', "What the items you sold in this period originally cost you to buy."),
       label: translateOr('cogs', 'COGS'),
       value: fmtUSD(aCost),
       color: 'text-red-600',
       details: [
         { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
-        { label: translateOr('formula', 'Formula'), value: cogsFormulaText },
       ],
     },
     {
       id: 'profit',
+      info: translateOr('dash_info_profit', "What is left after subtracting what the goods cost you from what you kept."),
       label: translateOr('gross_profit', 'Gross Profit'),
       value: fmtUSD(aProfit),
       color: aProfit >= 0 ? 'text-blue-600' : 'text-red-600',
@@ -1166,11 +1165,11 @@ export default function Dashboard() {
         { label: translateOr('cogs', 'COGS'), value: fmtUSD(aCost) },
         { label: translateOr('store_paid_delivery', 'Store-paid delivery'), value: fmtUSD(aStoreDelivery) },
         { label: translateOr('profit_margin', 'Profit margin'), value: aRevenue > 0 ? `${((aProfit / aRevenue) * 100).toFixed(2)}%` : '0.00%' },
-        { label: translateOr('formula', 'Formula'), value: profitFormulaText },
       ],
     },
     {
       id: 'transactions',
+      info: translateOr('dash_info_transactions', "How many completed sales happened in this period."),
       label: translateOr('transactions', 'Transactions'),
       value: aTxCount,
       sub: `${translateOr('avg_short', 'Avg')} ${fmtUSD(aAvgOrder)}/${saleShortLabel}`,
@@ -1178,11 +1177,11 @@ export default function Dashboard() {
       details: [
         { label: translateOr('transactions', 'Transactions'), value: aTxCount },
         { label: translateOr('avg_order_value', 'Avg order'), value: fmtUSD(aAvgOrder) },
-        { label: translateOr('formula', 'Formula'), value: avgOrderFormulaText },
       ],
     },
     {
       id: 'returns',
+      info: translateOr('dash_info_returns', "Items customers brought back in this period, and what you refunded for them."),
       label: translateOr('returns_count', 'Returns'),
       value: aReturns,
       color: aReturns > 0 ? 'text-orange-600' : 'text-gray-500',
@@ -1193,7 +1192,6 @@ export default function Dashboard() {
         { label: translateOr('items', 'Items'), value: aItemsRet },
         { label: translateOr('supplier_returns', 'Supplier returns'), value: aSupplierReturns },
         { label: translateOr('business_loss', 'Business loss'), value: fmtUSD(aSupplierLossUsd) },
-        { label: translateOr('formula', 'Formula'), value: returnsFormulaText },
       ],
     },
   ]), [
@@ -1486,6 +1484,8 @@ export default function Dashboard() {
                   sub={kpi.sub}
                   color={kpi.color}
                   trend={kpi.trend}
+                  info={(kpi as { info?: string }).info}
+                  infoLabel={`${String(kpi.label)} - ${translateOr('what_this_means', 'what this means')}`}
                   onClick={() => setKpiDetail(kpi)}
                   className={isLastOddCard ? 'col-span-2 sm:col-span-1' : ''}
                 />
