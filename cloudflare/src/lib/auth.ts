@@ -193,7 +193,88 @@ export async function getSessionUser<E extends { Bindings: Env } = { Bindings: E
     db.prepare('UPDATE user_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE token_hash = ?').run([tokenHash]),
   )
 
+  c.executionCtx.waitUntil(slideSessionExpiry(c, tokenHash))
+
   return row
+}
+
+// How much of a session's life has to be gone before it is renewed. Half is
+// a deliberate middle: renewing on every request would mean an UPDATE plus a
+// Set-Cookie on every single call, and renewing only near the very end
+// leaves almost no margin for a client that is briefly offline.
+const SESSION_SLIDE_AFTER_FRACTION = 0.5
+
+/**
+ * Extend a live session that is past halfway through its life.
+ *
+ * Sessions were issued with a FIXED expiry and never renewed, so a session
+ * died at a wall-clock moment decided at login regardless of whether the
+ * person was in the middle of using the app. That is the reported
+ * "'Not authenticated' shows up randomly after leaving it idle, and
+ * sometimes I have to log in again": nothing had gone wrong, the window had
+ * simply ended.
+ *
+ * The chosen duration now means "stay signed in for N days OF INACTIVITY"
+ * rather than "N days from login", which is what people already assume it
+ * means and what the wording ("Keep me signed in for 30 days") implies.
+ *
+ * The original TTL is recovered from `expires_at - created_at` rather than
+ * stored, so this needs no migration and no change to createSession.
+ *
+ * Runs inside waitUntil, so it never adds latency to the request that
+ * triggered it, and failure is harmless -- the session simply keeps its
+ * current expiry and gets another chance on the next request.
+ */
+async function slideSessionExpiry<E extends { Bindings: Env } = { Bindings: Env }>(
+  c: Context<E>,
+  tokenHash: string,
+): Promise<void> {
+  try {
+    const db = getDb(c.env)
+    const session = await db.prepare(
+      'SELECT created_at, expires_at FROM user_sessions WHERE token_hash = ? LIMIT 1',
+    ).get<{ created_at: string; expires_at: string }>([tokenHash])
+    if (!session?.created_at || !session?.expires_at) return
+
+    // SQLite's CURRENT_TIMESTAMP writes "YYYY-MM-DD HH:MM:SS" (UTC, no
+    // zone marker). Date.parse treats that as LOCAL time in some runtimes,
+    // which would skew every comparison here, so the marker is added when
+    // it is missing rather than trusting the default parse.
+    const asUtc = (value: string): number => {
+      const text = String(value).trim()
+      const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(text)
+        ? text.replace(' ', 'T')
+        : `${text.replace(' ', 'T')}Z`
+      return Date.parse(normalized)
+    }
+
+    const createdAt = asUtc(session.created_at)
+    const expiresAt = asUtc(session.expires_at)
+    if (!Number.isFinite(createdAt) || !Number.isFinite(expiresAt)) return
+
+    const ttlMs = expiresAt - createdAt
+    if (ttlMs <= 0) return
+
+    const now = Date.now()
+    const remaining = expiresAt - now
+    if (remaining > ttlMs * (1 - SESSION_SLIDE_AFTER_FRACTION)) return
+
+    // Never shorten, and never push past the cookie's own ceiling.
+    const nextExpiry = Math.min(now + ttlMs, now + MAX_COOKIE_AGE_MS)
+    if (nextExpiry <= expiresAt) return
+    const nextExpiryIso = new Date(nextExpiry).toISOString()
+
+    await db.prepare(
+      'UPDATE user_sessions SET expires_at = @expires_at WHERE token_hash = @token_hash AND revoked_at IS NULL',
+    ).run({ expires_at: nextExpiryIso, token_hash: tokenHash })
+
+    // The cookie carries its own expiry, so it has to move too -- otherwise
+    // the browser drops it while the server-side row is still valid.
+    const token = getCookie(c, SESSION_COOKIE_NAME)
+    if (token) setSessionCookie(c, token, nextExpiryIso)
+  } catch (_) {
+    // Best effort by design: see this function's own comment.
+  }
 }
 
 export async function revokeSession<E extends { Bindings: Env } = { Bindings: Env }>(c: Context<E>): Promise<void> {
