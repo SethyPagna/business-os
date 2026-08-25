@@ -60,6 +60,11 @@ export type Env = {
   // preference with a fallback rather than a hard requirement. Optional:
   // unset behaves exactly as before.
   BUSINESS_OS_ORGANIZATION_SLUG?: string
+  // Display name for that same organization. Read by
+  // lib/coreDataInvariants.ts, which used to hardcode 'Business OS' and
+  // rewrite it on every run -- so renaming the org in the database was
+  // silently undone. Optional: unset keeps the historical default.
+  BUSINESS_OS_ORGANIZATION_NAME?: string
   // Optional secret (wrangler secret put APP_ENCRYPTION_KEY) used to encrypt
   // AI provider API keys at rest. See cloudflare/src/lib/secretCrypto.ts --
   // without it, keys are stored in plaintext, matching how the Node backend

@@ -168,6 +168,11 @@ BUSINESS_OS_ADMIN_URL = "https://admin.leangcosmetics.dpdns.org"
 # first organization row rather than failing -- a stale value here can
 # never lock anyone out. Change this if the organization is ever renamed.
 BUSINESS_OS_ORGANIZATION_SLUG = "leangcosmetics"
+# Display name for that organization. Previously hardcoded to "Business OS"
+# in lib/coreDataInvariants.ts, which rewrote it on every run -- so renaming
+# the organization in the database never stuck. Setting it here is what makes
+# the rename permanent.
+BUSINESS_OS_ORGANIZATION_NAME = "LeangCosmetics"
 # Password-reset emails (lib/verification.ts) are sent via Resend. This
 # must be a verified sender/domain on the Resend account, e.g.
 # "Leang Cosmetics <no-reply@leangcosmetics.dpdns.org>". The API key is a

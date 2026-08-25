@@ -142,22 +142,55 @@ async function tryFastPath(
 export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvariants> {
   const db = getDb(env)
 
-  const orgName = 'Business OS'
-  const orgSlug = 'business-os'
-  const publicId = 'org_business_os'
+  // The organization's identity is CONFIGURED, not hardcoded.
+  //
+  // This used to force `name = 'Business OS'` on every run, including an
+  // explicit UPDATE over any existing row. That made the name unfixable:
+  // renaming the organization in the database worked until the next request
+  // ran these invariants, which silently renamed it straight back. It is the
+  // direct cause of the reported "the lock organization is LeangCosmetics
+  // not Business OS" surviving a rename, and of that class of fix appearing
+  // to "break again and again" -- the fix was being reverted by code, not by
+  // anyone touching it.
+  //
+  // Defaults preserve the old values exactly, so a deployment that sets
+  // nothing behaves as before.
+  const orgName = String(env.BUSINESS_OS_ORGANIZATION_NAME || '').trim() || 'Business OS'
+  const orgSlug = String(env.BUSINESS_OS_ORGANIZATION_SLUG || '').trim().toLowerCase() || 'business-os'
+  const publicId = `org_${orgSlug.replace(/-/g, '_')}`
+
+  // The identity this code shipped with before it was configurable. An
+  // existing deployment's row still carries it, so it has to be matchable --
+  // otherwise configuring a new slug would not rename that row, it would
+  // insert a SECOND organization beside it and the login screen would start
+  // offering a choice between them.
+  const LEGACY_SLUG = 'business-os'
+  const LEGACY_PUBLIC_ID = 'org_business_os'
 
   const fastPathResult = await tryFastPath(db, orgName, orgSlug, publicId)
   if (fastPathResult) return fastPathResult
 
+  // Prefer the configured identity; fall back to the legacy one so an
+  // existing organization is adopted and renamed in place.
   const existingOrg = await db.prepare(`
-    SELECT id FROM organizations WHERE public_id = @publicId OR slug = @slug
-    ORDER BY CASE WHEN public_id = @publicId THEN 0 ELSE 1 END, id ASC LIMIT 1
-  `).get<{ id: number }>({ publicId, slug: orgSlug })
+    SELECT id FROM organizations
+    WHERE public_id = @publicId OR slug = @slug
+       OR public_id = @legacyPublicId OR slug = @legacySlug
+    ORDER BY CASE WHEN public_id = @publicId THEN 0 WHEN slug = @slug THEN 1 ELSE 2 END, id ASC
+    LIMIT 1
+  `).get<{ id: number }>({ publicId, slug: orgSlug, legacyPublicId: LEGACY_PUBLIC_ID, legacySlug: LEGACY_SLUG })
 
   let organizationId: number
   if (existingOrg?.id) {
-    await db.prepare(`UPDATE organizations SET name = @name, is_active = 1, setup_enabled = 0 WHERE id = @id`)
-      .run({ name: orgName, id: existingOrg.id })
+    // slug/public_id move with the name. Without that, an adopted legacy row
+    // would be renamed but keep slug 'business-os', so
+    // BUSINESS_OS_ORGANIZATION_SLUG would still match nothing and
+    // routes/organizations.ts's pin would go on falling back to first-by-id.
+    await db.prepare(`
+      UPDATE organizations
+      SET name = @name, slug = @slug, public_id = @publicId, is_active = 1, setup_enabled = 0
+      WHERE id = @id
+    `).run({ name: orgName, slug: orgSlug, publicId, id: existingOrg.id })
     organizationId = existingOrg.id
   } else {
     const inserted = await db.prepare(`
