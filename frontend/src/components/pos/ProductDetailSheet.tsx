@@ -243,6 +243,9 @@ export default function ProductDetailSheet({
   // sheet opens, same as branch/barcode above.
   const [batches, setBatches] = useState<ProductBatch[]>([])
   const [batchesLoading, setBatchesLoading] = useState(false)
+  // Non-empty when the lot lookup FAILED, as opposed to succeeding with no
+  // lots. The two must not render the same way -- see the fetch below.
+  const [batchesError, setBatchesError] = useState('')
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null)
   const [batchPage, setBatchPage] = useState(0)
   useEffect(() => {
@@ -372,10 +375,23 @@ export default function ProductDetailSheet({
     if (resolvedBranchId == null) { setBatches([]); setBatchesLoading(false); return }
     let cancelled = false
     setBatchesLoading(true)
+    setBatchesError('')
     getProductBatches(resolvedProduct.id, resolvedBranchId).then((res) => {
       if (cancelled) return
       setBatches(Array.isArray(res?.batches) ? res.batches : [])
-    }).catch(() => { if (!cancelled) setBatches([]) }).finally(() => { if (!cancelled) setBatchesLoading(false) })
+      setBatchesError('')
+    }).catch((error: unknown) => {
+      // A failed lot fetch is NOT "this product has no lots here". The old
+      // `catch(() => setBatches([]))` rendered the two identically, so a
+      // 403/500/timeout showed the definitive-sounding "No lots available
+      // at this branch" and the cashier had no way to tell the difference.
+      // Record the error so the picker can say so and keep the sale
+      // blocked -- selling batch-tracked stock without a lot is worse than
+      // refusing the sale.
+      if (cancelled) return
+      setBatches([])
+      setBatchesError(error instanceof Error && error.message ? error.message : 'Could not load lots')
+    }).finally(() => { if (!cancelled) setBatchesLoading(false) })
     return () => { cancelled = true }
   }, [isBatchTracked, resolvedProduct?.id, resolvedBranchId])
   // A Branch/Barcode change can resolve to a different (or differently-
@@ -559,6 +575,8 @@ export default function ProductDetailSheet({
                       <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">{posCopy('3. Batch', '3. Batch')}</div>
                       {batchesLoading ? (
                         <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'Loading lots…')}</div>
+                      ) : batchesError ? (
+                        <div className="text-xs font-medium text-red-500">{batchesError}</div>
                       ) : batches.length === 0 ? (
                         <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'No lots available at this branch')}</div>
                       ) : (
@@ -614,6 +632,8 @@ export default function ProductDetailSheet({
                 </div>
                 {batchesLoading ? (
                   <div className="text-xs text-gray-400">{posCopy('Loading lots…', 'Loading lots…')}</div>
+                ) : batchesError ? (
+                  <div className="text-xs font-medium text-red-500">{batchesError}</div>
                 ) : batches.length === 0 ? (
                   <div className="text-xs text-gray-400">{posCopy('No lots available at this branch', 'No lots available at this branch')}</div>
                 ) : (

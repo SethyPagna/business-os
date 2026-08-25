@@ -383,6 +383,14 @@ function StockAdjustBranchRow({ row, productId, unit, isGroupProduct, onChange, 
     // off removeStockFromBatch's InsufficientBatchStockError server-side.
     getProductBatches(productId, row.branchId, row.type === 'remove')
       .then((res) => { if (!cancelled) setBatchOptions(res?.batches || []) })
+      // Needed for the same reason as InventoryStockModals.tsx's picker:
+      // getProductBatches now propagates failures instead of resolving them
+      // as an empty list, so an unhandled rejection would escape here.
+      .catch((error: unknown) => {
+        if (cancelled) return
+        console.error('[BranchStockAdjuster] batch options load failed:', error)
+        setBatchOptions([])
+      })
       .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- productId is stable per row, branchId is fixed per row

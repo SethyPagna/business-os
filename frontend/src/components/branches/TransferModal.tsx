@@ -294,8 +294,13 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
         if (cancelled) return
         setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
       })
-      .catch(() => {
-        if (!cancelled) setTrackedBatchProductIds(new Set())
+      .catch((error: unknown) => {
+        // Do NOT collapse a failed lookup into "nothing is batch-tracked" --
+        // that would drop the lot picker from a transfer that genuinely
+        // needs one, moving stock without recording which lot left. Keep
+        // whatever was last known and log the failure instead. Same
+        // reasoning as POS.tsx's own tracked-ids effect.
+        if (!cancelled) console.error('[TransferModal] batch tracking lookup failed:', error)
       })
     return () => {
       cancelled = true

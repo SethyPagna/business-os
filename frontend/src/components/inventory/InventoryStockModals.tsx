@@ -191,6 +191,16 @@ export default function InventoryStockModals({
     // since topping one back up is a normal receipt.
     getProductBatches(adjustTargetId, adjustBranchId, adjustForm.type === 'remove')
       .then((res) => { if (!cancelled) setBatchOptions(res?.batches || []) })
+      // getProductBatches no longer resolves a failed request as an empty
+      // list (see batchesTransport.ts), so this needs a real handler --
+      // without one a 403/500 here would surface as an unhandled rejection.
+      // An empty option list is the honest fallback for a picker, but the
+      // failure is logged rather than swallowed silently.
+      .catch((error: unknown) => {
+        if (cancelled) return
+        console.error('[Inventory] batch options load failed:', error)
+        setBatchOptions([])
+      })
       .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
   }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type])

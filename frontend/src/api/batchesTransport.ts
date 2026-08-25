@@ -53,7 +53,17 @@ export function getTrackedBatchProductIds(branchId?: number | string | null): Pr
     // branch's tracked-id list would be replayed for all the others.
     `batches:tracked-product-ids:${scope}`,
     () => apiFetch('GET', `/api/batches/tracked-product-ids${query}`),
-    () => ({ productIds: [] }),
+    // NO local fallback, deliberately. Supplying `() => ({ productIds: [] })`
+    // here looked harmless but was a correctness hole: http.ts's
+    // hasUsableLocalData counts ANY non-empty object as usable data (it only
+    // special-cases `items`/`rows`), so a 403/500/timeout resolved as a
+    // SUCCESSFUL empty list and was written into the read cache. Every
+    // batch-tracked product then looked untracked, the lot picker never
+    // appeared, and batch-tracked stock was sold with no lot chosen --
+    // bypassing FIFO/expiry silently, with nothing on screen. Letting the
+    // error propagate lets callers tell "nothing is tracked" apart from "we
+    // don't know what's tracked", which are opposite situations.
+    undefined,
     { raceLocalFallback: false },
   )
 }
@@ -75,7 +85,13 @@ export function getProductBatches(productId: number | string, branchId: number |
     // shown ANOTHER product's lots, which is worse than showing none.
     `batches:list:${productId}:${branchId}:${onlyAvailable ? 1 : 0}`,
     () => apiFetch('GET', `/api/batches?${params.toString()}`),
-    () => ({ batches: [] }),
+    // NO local fallback -- same reasoning as getTrackedBatchProductIds
+    // above. `() => ({ batches: [] })` turned any failure into a cached
+    // "this product has no lots at this branch", which reads on screen as a
+    // definitive answer ("No lots available at this branch") when in truth
+    // the request never succeeded. Callers must be able to distinguish the
+    // two, so the error propagates.
+    undefined,
     { raceLocalFallback: false },
   )
 }
