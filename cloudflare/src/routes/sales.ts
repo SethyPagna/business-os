@@ -9,6 +9,7 @@ import { getSalesTotals } from '../lib/salesAnalytics'
 import { decrementBatchStockStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { buildLikeAliasClause, tokenizeSearchTermGroups } from '../lib/searchMatch'
+import { computeSaleTotals, round2 } from '../lib/saleTotals'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -55,15 +56,11 @@ type SaleItemInput = {
 
 type NormalizedItem = Omit<SaleItemInput, 'branch_id'> & { product_id: number; quantity: number; branch_id: number | null }
 
-// Same rounding convention as the original: currency math stays in plain
-// floats (this schema stores REAL, not fixed-point), rounded to cents/riel
-// only at display time -- ported as-is rather than "improved", since
-// changing money-rounding behavior silently is exactly the kind of change
-// that should be a deliberate, separately-reviewed decision, not a side
-// effect of a platform migration.
-function round2(n: number): number {
-  return Math.round((n + Number.EPSILON) * 100) / 100
-}
+// round2 now lives in lib/saleTotals.ts alongside the sale money math that
+// depends on it, and is imported above -- one definition, so the route and
+// the extracted totals can never round differently. Convention is unchanged:
+// currency math stays in plain floats (this schema stores REAL, not
+// fixed-point) and is rounded to cents/riel only at display time.
 
 // Idempotency (client_request_id dedupe), same pattern as returns.ts: the
 // sales table already has the column + a unique index
@@ -322,15 +319,32 @@ app.post('/', async (c) => {
   const discountUsd = round2(Number(body.discount_usd) || 0)
   const discountKhr = round2(Number(body.discount_khr) || discountUsd * exchangeRate)
   const taxUsd = round2(Number(body.tax_usd) || 0)
-  // Membership discount now actually reduces the recorded total -- previously
-  // dropped, so a points-redeemed sale recorded a total higher than what the
-  // customer actually paid (see the comment on the body type above).
-  const totalUsd = round2(subtotalUsd - discountUsd - membershipDiscountUsd + taxUsd)
-  const totalKhr = Math.round(totalUsd * exchangeRate)
-  const amountPaidUsd = Number(body.amount_paid_usd) || totalUsd
-  const amountPaidKhr = Number(body.amount_paid_khr) || 0
-  const changeUsd = round2(amountPaidUsd + amountPaidKhr / exchangeRate - totalUsd)
-  const changeKhr = Math.round(changeUsd * exchangeRate)
+
+  // Delivery scalars are resolved here, above the totals, because the
+  // customer-paid portion of the fee is PART of the total. They used to be
+  // computed further down next to the delivery_contacts lookup and so were
+  // simply unavailable at total time -- see lib/saleTotals.ts for the two
+  // bugs that caused and why this arithmetic now lives in one pure,
+  // directly-tested function instead of inline here.
+  const isDelivery = Boolean(body.is_delivery)
+  const deliveryFeeUsd = round2(Number(body.delivery_fee_usd) || 0)
+  const deliveryFeeKhr = Math.round(Number(body.delivery_fee_khr) || deliveryFeeUsd * exchangeRate)
+  const deliveryFeePaidBy = String(body.delivery_fee_paid_by || 'customer')
+
+  // Membership discount reduces the recorded total (previously dropped, so a
+  // points-redeemed sale recorded more than the customer actually paid).
+  const { totalUsd, totalKhr, amountPaidUsd, amountPaidKhr, changeUsd, changeKhr } = computeSaleTotals({
+    subtotalUsd,
+    discountUsd,
+    membershipDiscountUsd,
+    taxUsd,
+    isDelivery,
+    deliveryFeeUsd,
+    deliveryFeePaidBy,
+    exchangeRate,
+    rawAmountPaidUsd: body.amount_paid_usd,
+    rawAmountPaidKhr: body.amount_paid_khr,
+  })
   const paymentDetails = Array.isArray(body.payment_details)
     ? body.payment_details
       .slice(0, 12)
@@ -347,9 +361,9 @@ app.post('/', async (c) => {
   const paymentMethod = Array.from(new Set(effectivePaymentDetails.map((detail) => detail.method))).join(' + ')
   const receiptNumber = body.receipt_number?.trim() || `RCP-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`
 
-  const isDelivery = Boolean(body.is_delivery)
-  const deliveryFeeUsd = round2(Number(body.delivery_fee_usd) || 0)
-  const deliveryFeeKhr = Math.round(Number(body.delivery_fee_khr) || deliveryFeeUsd * exchangeRate)
+  // isDelivery / deliveryFeeUsd / deliveryFeeKhr / deliveryFeePaidBy are
+  // computed with the totals above, since the customer-paid portion is part
+  // of the sale total. Only the contact lookup (real I/O) stays here.
   let deliveryContact: { id: number; name: string | null; phone: string | null; area: string | null; address: string | null } | null = null
   if (isDelivery && body.delivery_contact_id) {
     deliveryContact = await db.prepare('SELECT id, name, phone, area, address FROM delivery_contacts WHERE id = ?').get([body.delivery_contact_id]) || null
@@ -417,7 +431,9 @@ app.post('/', async (c) => {
       delivery_contact_address: deliveryContact?.address || deliveryContact?.area || null,
       delivery_fee_usd: isDelivery ? deliveryFeeUsd : 0,
       delivery_fee_khr: isDelivery ? deliveryFeeKhr : 0,
-      delivery_fee_paid_by: body.delivery_fee_paid_by || 'customer',
+      // Same resolved value the total was computed from -- re-deriving it
+      // here would let the stored payer disagree with the charged total.
+      delivery_fee_paid_by: deliveryFeePaidBy,
       sale_status: saleStatus,
     })
   const saleId = saleInsert.lastInsertRowid
