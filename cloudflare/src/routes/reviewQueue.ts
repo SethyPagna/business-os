@@ -8,6 +8,7 @@ import {
   getPendingAction,
   markPendingActionApproved,
   markPendingActionRejected,
+  resubmitPendingAction,
   type PendingActionStatus,
 } from '../lib/pendingActions'
 import { applyApprovedPendingAction, NoReviewApplierError } from '../lib/reviewApply'
@@ -44,6 +45,68 @@ import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
+
+// --- submitter's own view (NO `review` permission required) ---------------
+//
+// These two routes are declared BEFORE the `review` gate below, and that
+// ordering is the whole point: a Review Required user must be able to
+// follow the requests THEY submitted -- see them sitting pending, read why
+// one was turned down, and ask again -- without holding `review`, which
+// would let them approve other people's writes, including their own.
+//
+// Both scope strictly to the session's own user id. Neither takes a user id
+// from the request, and the resubmit guard is part of the UPDATE's WHERE
+// clause rather than a read-then-write check (see resubmitPendingAction),
+// so another person's row is not merely hidden here, it is unreachable.
+
+app.get('/mine', async (c) => {
+  const user = c.get('user')
+  const statusParam = c.req.query('status')
+  const status = (statusParam === 'approved' || statusParam === 'rejected' || statusParam === 'open')
+    ? (statusParam as PendingActionStatus)
+    : 'all'
+  // Defaults to 'all' rather than 'open' (the reviewer list's default): the
+  // submitter's question is "what happened to my requests?", and the
+  // rejected ones -- the only place the reviewer's reason is visible -- are
+  // exactly the rows they most need to see.
+  const rows = await listPendingActions(c.env, { status, requestedBy: Number(user.id) })
+  return c.json({ success: true, data: rows })
+})
+
+app.post('/:id/resubmit', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isFinite(id)) return c.json({ error: 'Invalid id' }, 400)
+  const user = c.get('user')
+
+  let payloadJson: string | null = null
+  let summary: string | null = null
+  try {
+    const body = await c.req.json<{ payload?: unknown; summary?: string }>()
+    // An edited payload is optional: resubmitting unchanged ("please look
+    // again") is legitimate, e.g. when the rejection was a misunderstanding.
+    if (body && Object.prototype.hasOwnProperty.call(body, 'payload') && body.payload !== undefined) {
+      payloadJson = JSON.stringify(body.payload)
+    }
+    summary = typeof body?.summary === 'string' ? body.summary : null
+  } catch {
+    payloadJson = null
+  }
+
+  const ok = await resubmitPendingAction(c.env, id, { requestedBy: Number(user.id), payloadJson, summary })
+  // One response for "not yours", "doesn't exist" and "not in a rejected
+  // state" -- distinguishing them would confirm the existence of other
+  // people's rows to someone probing ids.
+  if (!ok) return c.json({ error: 'That request is not yours, or is not awaiting resubmission.' }, 404)
+
+  const row = await getPendingAction(c.env, id)
+  await audit(c.env, user.id, user.name || user.username, 'resubmit', 'pending_action', id, row)
+  // Same channel the approve/reject handlers broadcast on, so an admin with
+  // the Review page open sees it return to their queue without a refresh.
+  await broadcast(c.env, 'pendingActions', { id, status: 'open' })
+  return c.json({ success: true, data: row })
+})
+
+// --- reviewer routes (Full Access to `review` only) -----------------------
 app.use('*', async (c, next) => {
   const user = c.get('user')
   if (!hasPermission(user, 'review')) return c.json({ error: 'Forbidden' }, 403)

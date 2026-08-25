@@ -82,6 +82,16 @@ export async function createPendingAction(env: Env, input: CreatePendingActionIn
 export interface ListPendingActionsOptions {
   status?: PendingActionStatus | 'all'
   section?: string | null
+  /**
+   * Restrict to the rows this user submitted.
+   *
+   * This is what lets a Review Required user follow their OWN requests --
+   * see the "pending"/"changes not approved" list they get -- without
+   * holding the `review` permission, which would let them see (and act on)
+   * everyone else's queue. The route that uses it never takes this id from
+   * the request; it reads it off the session.
+   */
+  requestedBy?: number | null
 }
 
 export async function listPendingActions(env: Env, options: ListPendingActionsOptions = {}): Promise<PendingActionRow[]> {
@@ -96,6 +106,10 @@ export async function listPendingActions(env: Env, options: ListPendingActionsOp
   if (options.section) {
     clauses.push('section = @section')
     params.section = options.section
+  }
+  if (options.requestedBy != null) {
+    clauses.push('requested_by = @requestedBy')
+    params.requestedBy = options.requestedBy
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''
   const rows = await db.prepare(`
@@ -158,4 +172,46 @@ export async function countOpenPendingActions(env: Env): Promise<number> {
   const db = getDb(env)
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM pending_actions WHERE status = 'open'`).get<{ n: number }>()
   return row?.n ?? 0
+}
+
+/**
+ * Put a rejected request back in front of the reviewers, optionally with a
+ * revised payload.
+ *
+ * A rejection is deliberately NOT a delete: the row stays, carrying the
+ * reviewer's reason, so the submitter can read why, fix the problem and ask
+ * again. This reopens that same row rather than creating a second one, so
+ * the request keeps one identity through however many rounds it takes --
+ * `reject_reason` is cleared (it belonged to the round just superseded) but
+ * the audit log retains every transition.
+ *
+ * Guarded on BOTH `id` and `requested_by` in the UPDATE itself, not by a
+ * read-then-write check, so one person can never reopen another's rejected
+ * request even by guessing an id -- and only from 'rejected', so this can
+ * never resurrect something already approved and applied.
+ */
+export async function resubmitPendingAction(
+  env: Env,
+  id: number,
+  input: { requestedBy: number; payloadJson?: string | null; summary?: string | null },
+): Promise<boolean> {
+  const db = getDb(env)
+  const result = await db.prepare(`
+    UPDATE pending_actions
+    SET status = 'open',
+        reviewed_by = NULL,
+        reviewed_by_name = NULL,
+        reviewed_at = NULL,
+        reject_reason = NULL,
+        payload_json = COALESCE(@payload_json, payload_json),
+        summary = COALESCE(@summary, summary),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND requested_by = @requested_by AND status = 'rejected'
+  `).run({
+    id,
+    requested_by: input.requestedBy,
+    payload_json: input.payloadJson ?? null,
+    summary: input.summary ?? null,
+  })
+  return result.changes > 0
 }
