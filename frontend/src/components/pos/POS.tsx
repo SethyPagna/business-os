@@ -1987,10 +1987,19 @@ export default function POS() {
   }, [])
 
 // Cart mutations
-  function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection) {
-    const assignedBranchId = primaryBranchFilterId != null
-      ? primaryBranchFilterId
-      : pickBestBranchId(product)
+  function addToCart(product: ProductRecord, priceMode = 'selling', batchSelection?: BatchSelection, branchIdOverride?: string | number | null) {
+    // An explicit branch from the detail sheet WINS. The sheet resolves its
+    // own branch for the Branch step, the stock figure and the lot list, so
+    // re-deriving a different one here (highest-stock, or the branch filter)
+    // meant the line could be booked against a branch the cashier never saw
+    // -- the "displayed stock doesn't match the option I chose" report, and
+    // the cause of lots being attached to the wrong branch.
+    const overrideBranchId = branchIdOverride == null || branchIdOverride === ''
+      ? null
+      : Number(branchIdOverride)
+    const assignedBranchId = overrideBranchId != null && Number.isFinite(overrideBranchId)
+      ? overrideBranchId
+      : (primaryBranchFilterId != null ? primaryBranchFilterId : pickBestBranchId(product))
     const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
       usdToKhr: (value: unknown, rate: unknown) => CURRENCY.usdToKhr(Number(value || 0), Number(rate || 0)),
     })

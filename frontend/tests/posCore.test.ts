@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {
+import { buildVariantOptionLabels,
   buildPosFilterMeta,
   buildProductsById,
   buildVariantChildrenByParentId,
@@ -260,3 +260,63 @@ await runTest('computeExpiryStatus classifies expired, expiring-soon, and ok dat
 if (failed > 0) {
   process.exitCode = 1
 }
+
+// ---------------------------------------------------------------------------
+// buildVariantOptionLabels -- how a cashier tells rows in one name group apart
+// ---------------------------------------------------------------------------
+// Regression guard for a display bug the identity rule made reachable: the
+// POS option step used to be hardcoded to "Barcode" and printed
+// variant.barcode on every pill. Details are barcode + cost, so two rows in
+// one group can share a barcode and differ only in cost -- which rendered as
+// two IDENTICAL pills with nothing to choose between them, and picking the
+// wrong one books the sale against the wrong cost.
+await runTest('buildVariantOptionLabels labels by barcode when barcodes differ', () => {
+  const result = buildVariantOptionLabels([
+    { id: 1, barcode: 'AAA', cost_price_usd: 5 },
+    { id: 2, barcode: 'BBB', cost_price_usd: 5 },
+  ] as never)
+  assert.equal(result.stepTitle, 'Barcode')
+  assert.equal(result.byId.get('1')?.label, 'AAA')
+  assert.equal(result.byId.get('2')?.label, 'BBB')
+  assert.equal(result.byId.get('1')?.hint, null, 'no hint needed when only barcode varies')
+})
+
+await runTest('buildVariantOptionLabels labels by COST when the barcode is shared', () => {
+  // The exact case that produced two identical pills.
+  const result = buildVariantOptionLabels([
+    { id: 1, barcode: 'SAME', cost_price_usd: 28 },
+    { id: 2, barcode: 'SAME', cost_price_usd: 29.04 },
+  ] as never, (v) => `$${v.toFixed(2)}`)
+  assert.equal(result.stepTitle, 'Cost')
+  assert.equal(result.byId.get('1')?.label, '$28.00')
+  assert.equal(result.byId.get('2')?.label, '$29.04')
+  assert.notEqual(result.byId.get('1')?.label, result.byId.get('2')?.label, 'pills must never be identical')
+})
+
+await runTest('buildVariantOptionLabels shows barcode plus a cost hint when BOTH differ', () => {
+  const result = buildVariantOptionLabels([
+    { id: 1, barcode: 'AAA', cost_price_usd: 70 },
+    { id: 2, barcode: 'BBB', cost_price_usd: 96 },
+  ] as never, (v) => `$${v.toFixed(2)}`)
+  assert.equal(result.stepTitle, 'Barcode')
+  assert.equal(result.byId.get('2')?.label, 'BBB')
+  assert.equal(result.byId.get('2')?.hint, '$96.00')
+})
+
+await runTest('buildVariantOptionLabels still yields distinct labels when nothing varies', () => {
+  const result = buildVariantOptionLabels([
+    { id: 7, barcode: '', cost_price_usd: 0 },
+    { id: 8, barcode: '', cost_price_usd: 0 },
+  ] as never)
+  assert.equal(result.stepTitle, 'Option')
+  assert.notEqual(
+    result.byId.get('7')?.label, result.byId.get('8')?.label,
+    'identical rows must still be told apart rather than rendering as silent duplicates',
+  )
+})
+
+await runTest('buildVariantOptionLabels tolerates empty/invalid input', () => {
+  const result = buildVariantOptionLabels([] as never)
+  assert.equal(result.byId.size, 0)
+  assert.equal(result.stepTitle, 'Option')
+})

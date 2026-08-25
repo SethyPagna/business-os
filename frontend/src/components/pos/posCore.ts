@@ -350,3 +350,80 @@ export function findMatchingCartLineIndex(cart: readonly ProductRecord[] = [], {
     && Number((item as { batch_id?: unknown })?.batch_id || 0) === Number(batchId || 0)
   ))
 }
+
+// ---------------------------------------------------------------------------
+// Group option labels
+// ---------------------------------------------------------------------------
+
+export type VariantOptionLabel = {
+  /** Primary text on the pill -- what actually tells this row apart. */
+  label: string
+  /** Secondary text, shown smaller, when a second detail also differs. */
+  hint: string | null
+}
+
+export type VariantOptionLabelSet = {
+  /** Heading for the option step, naming what the choice is actually between. */
+  stepTitle: 'Barcode' | 'Cost' | 'Option'
+  byId: Map<string, VariantOptionLabel>
+}
+
+function optionCents(value: unknown): number {
+  return Math.round((Number(value) || 0) * 100)
+}
+
+function optionBarcode(value: unknown): string {
+  return String(value ?? '').trim()
+}
+
+/**
+ * Works out how to label each row inside one name group so a cashier can
+ * actually tell the options apart.
+ *
+ * This exists because the option step used to hardcode "Barcode" and print
+ * `variant.barcode` on every pill. Under the identity rule (details =
+ * barcode + cost) two rows in a group can share a barcode and differ only
+ * in cost -- which rendered as TWO IDENTICAL PILLS with nothing to choose
+ * between them. That is the "display shows different data than the options
+ * actually are" problem, and picking the wrong one books the sale against
+ * the wrong cost.
+ *
+ * So: look at what genuinely varies across the candidates and label by
+ * that. Barcode varies -> show barcodes. Only cost varies -> show costs.
+ * Both vary -> show the barcode with the cost as a hint. Neither varies
+ * (rows that differ only by branch, which the display merge normally
+ * collapses) -> fall back to the row's own name/id so the pills are still
+ * distinguishable rather than silently identical.
+ */
+export function buildVariantOptionLabels(
+  candidates: readonly ProductRecord[] = [],
+  formatCost: (value: number) => string = (value) => `$${value.toFixed(2)}`,
+): VariantOptionLabelSet {
+  const rows = Array.isArray(candidates) ? candidates : []
+  const barcodes = new Set(rows.map((row) => optionBarcode(row?.barcode)))
+  const costs = new Set(rows.map((row) => optionCents((row as { cost_price_usd?: unknown })?.cost_price_usd)))
+  const barcodeVaries = barcodes.size > 1
+  const costVaries = costs.size > 1
+
+  const byId = new Map<string, VariantOptionLabel>()
+  for (const row of rows) {
+    const barcode = optionBarcode(row?.barcode)
+    const cost = Number((row as { cost_price_usd?: unknown })?.cost_price_usd) || 0
+    let label: string
+    let hint: string | null = null
+    if (barcodeVaries) {
+      label = barcode || String(row?.sku || '') || 'No barcode'
+      if (costVaries) hint = formatCost(cost)
+    } else if (costVaries) {
+      label = formatCost(cost)
+    } else {
+      label = barcode || String(row?.sku || '') || `#${row?.id ?? '?'}`
+    }
+    byId.set(String(row?.id), { label, hint })
+  }
+
+  const stepTitle: VariantOptionLabelSet['stepTitle'] = barcodeVaries
+    ? 'Barcode'
+    : (costVaries ? 'Cost' : 'Option')
+  return { stepTitle, byId }
+}

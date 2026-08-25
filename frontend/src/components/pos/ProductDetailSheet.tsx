@@ -9,7 +9,7 @@ import { getProductBatches } from '../../api/batchesTransport.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildProductBranchSummaryLabel } from '../products/helpers/productDisplayHelpers.ts'
-import { computeExpiryStatus } from './posCore.ts'
+import { buildVariantOptionLabels, computeExpiryStatus } from './posCore.ts'
 import ProductImage from './ProductImage'
 
 type ProductGroupMeta = {
@@ -196,7 +196,14 @@ interface ProductDetailSheetProps {
   getPrimaryProductImage: (product: ProductRecord) => string
   getVariantChoices: (product: ProductRecord) => ProductRecord[]
   hasVariantChoices: (product: ProductRecord) => boolean
-  onAddToCart: (product: ProductRecord, priceMode?: PriceMode, batchSelection?: BatchSelection) => void
+  // branchId is the branch the sheet's own Branch step resolved to. It has to
+  // travel with the add: POS's addToCart otherwise re-derives a branch of its
+  // own (highest-stock, or the branch filter), which is routinely a DIFFERENT
+  // branch from the one whose stock and lots the cashier was just looking at.
+  // That mismatch showed up as "the stock displayed doesn't match the option I
+  // picked", and booked lots against the wrong branch -- caught only as a 409
+  // server-side, after the sale was committed.
+  onAddToCart: (product: ProductRecord, priceMode?: PriceMode, batchSelection?: BatchSelection, branchId?: string | number | null) => void
   onClose: () => void
   onOpenImageLightbox: (product: ProductRecord, index: number) => void
 }
@@ -219,7 +226,6 @@ export default function ProductDetailSheet({
   onClose,
   onOpenImageLightbox,
 }: ProductDetailSheetProps) {
-  const stock = getDisplayStock(product)
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
   const groupMeta = product.__groupMeta || null
@@ -326,6 +332,10 @@ export default function ProductDetailSheet({
     return getDisplayStock(variant)
   }
 
+  // What actually tells these rows apart -- drives both the step heading and
+  // each pill's text. See posCore.ts's buildVariantOptionLabels.
+  const variantOptionLabels = buildVariantOptionLabels(candidatePool, (value) => fmtUSD(value))
+
   const barcodePageCount = Math.max(1, Math.ceil(candidatePool.length / VARIANT_CHOICES_PAGE_SIZE))
   const clampedBarcodePage = Math.min(barcodePage, barcodePageCount - 1)
   const pagedCandidates = candidatePool.slice(
@@ -417,6 +427,15 @@ export default function ProductDetailSheet({
   const batchSelectionRequired = isBatchTracked
   const batchReadyToSell = !batchSelectionRequired || (selectedBatch != null && Number(selectedBatch.quantity || 0) > 0)
 
+  // The ONE stock number this sheet shows. Colour and value both read it, so
+  // they can never disagree: a picked lot's own remaining quantity, else the
+  // lot total when a lot must be picked, else the resolved row's stock at the
+  // resolved branch.
+  const displayedStock = selectedBatch
+    ? Number(selectedBatch.quantity || 0)
+    : (batchSelectionRequired ? batchStockTotal : effectiveVariantStock)
+
+
   const buildBatchSelection = (): BatchSelection | undefined => {
     if (!batchSelectionRequired || !selectedBatch) return undefined
     return {
@@ -428,7 +447,7 @@ export default function ProductDetailSheet({
   }
 
   const closeAfterAdd = (nextProduct: ProductRecord, priceMode: PriceMode) => {
-    onAddToCart(nextProduct, priceMode, buildBatchSelection())
+    onAddToCart(nextProduct, priceMode, buildBatchSelection(), effectiveBranchId)
     onClose()
   }
 
@@ -471,7 +490,13 @@ export default function ProductDetailSheet({
           {promotion.active ? (
             <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'Discounts')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
           ) : null}
-          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${stock <= 0 ? 'text-red-600' : stock <= (asNumber(product.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{selectedBatch ? Number(selectedBatch.quantity || 0) : batchSelectionRequired ? batchStockTotal : stock} {product.unit}</span></div>
+          {/* One stock number, for the row and branch that Steps 1-2 actually
+              resolved to -- the same figure the option pills show and the same
+              one the Add buttons enforce. This used to read getDisplayStock(product),
+              a product-level number that could be scoped to a DIFFERENT branch than
+              the one on screen, which is what "display shows different data than the
+              actual stock in the options" was describing. */}
+          <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_stock') || 'Stock'}</span><span className={`font-bold ${displayedStock <= 0 ? 'text-red-600' : displayedStock <= (asNumber(product.low_stock_threshold) || 10) ? 'text-yellow-600' : 'text-green-600'}`}>{displayedStock} {product.unit}</span></div>
           {/* Branch-aware zero-stock display (this session): the Stock row
               above is the single branch-resolved number (see
               getDisplayStock's own comment for why it's scoped to one
@@ -481,7 +506,7 @@ export default function ProductDetailSheet({
               full per-branch picker below; for a standalone product, name
               every tracked branch's own quantity here instead of leaving
               the cashier to guess. */}
-          {!groupProduct && stock <= 0 && Array.isArray(product.branch_stock) && product.branch_stock.length > 1 ? (
+          {!groupProduct && displayedStock <= 0 && Array.isArray(product.branch_stock) && product.branch_stock.length > 1 ? (
             <div className="flex gap-3"><span className="w-24 flex-shrink-0" /><span className="text-xs text-gray-400">{buildProductBranchSummaryLabel(product)}</span></div>
           ) : null}
           {/* Flat (non-batch) expiry date -- only meaningful when this
@@ -525,14 +550,29 @@ export default function ProductDetailSheet({
                 </div>
               ) : null}
 
+              {/* The option step is labelled by whatever actually DIFFERS between
+                  these rows, not hardcoded to "Barcode". Under the identity rule
+                  (details = barcode + cost) two rows in one name group can share a
+                  barcode and differ only in cost -- which used to render as two
+                  identical pills with nothing to choose between them, and picking
+                  the wrong one books the sale against the wrong cost. See
+                  posCore.ts's buildVariantOptionLabels. */}
               <div className="mb-3">
-                <div className="mb-1.5 text-[11px] font-semibold text-gray-400 dark:text-gray-500">
-                  {branchOptions.length ? posCopy('2. Barcode', '2. Barcode') : posCopy('Barcode', 'Barcode')}
+                <div className="mb-1.5 flex items-baseline justify-between gap-2">
+                  <span className="text-[11px] font-semibold text-gray-400 dark:text-gray-500">
+                    {branchOptions.length
+                      ? `2. ${posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}`
+                      : posCopy(variantOptionLabels.stepTitle, variantOptionLabels.stepTitle)}
+                  </span>
+                  <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                    {candidatePool.length} {posCopy('options', 'options')}
+                  </span>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
                   {pagedCandidates.map((variant) => {
                     const variantStock = getVariantStockForBranch(variant, effectiveBranchId)
                     const variantOut = variantStock <= asNumber(variant.out_of_stock_threshold)
+                    const optionLabel = variantOptionLabels.byId.get(String(variant.id))
                     return (
                       <button
                         key={variant.id}
@@ -541,8 +581,11 @@ export default function ProductDetailSheet({
                         onClick={() => setSelectedVariantId(String(variant.id))}
                       >
                         {variant.__variantLabel ? <span className="mr-1 opacity-75">{variant.__variantLabel}</span> : null}
-                        <span className="font-mono">{variant.barcode || variant.sku || posCopy('No barcode', 'No barcode')}</span>
-                        {variantOut ? <span className="ml-1 text-[10px] font-normal opacity-75">({posCopy('Out', 'Out')})</span> : null}
+                        <span className="font-mono">{optionLabel?.label || posCopy('No barcode', 'No barcode')}</span>
+                        {optionLabel?.hint ? <span className="ml-1 text-[10px] font-normal opacity-75">{optionLabel.hint}</span> : null}
+                        <span className="ml-1 text-[10px] font-normal opacity-75">
+                          {variantOut ? `(${posCopy('Out', 'Out')})` : `· ${variantStock}`}
+                        </span>
                       </button>
                     )
                   })}
@@ -661,16 +704,16 @@ export default function ProductDetailSheet({
               </div>
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <button className="btn-primary flex-1" disabled={stock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {stock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'Pick a lot first') : `${posCopy('Regular', 'Regular')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+              <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'Pick a lot first') : `${posCopy('Regular', 'Regular')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>
               {promotion.active ? (
-                <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={stock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
+                <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
                   {product.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
                 </button>
               ) : null}
               {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
-                <button className="btn-secondary flex-1" disabled={stock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'special')}>
+                <button className="btn-secondary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'special')}>
                   {posCopy('Special', 'Special')} {fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}
                 </button>
               ) : null}
