@@ -199,6 +199,9 @@ function loadModule(name) {
   const moduleObj = { exports: {} }
   const requireShim = (request) => {
     if (request === './db') return { getDb: (env) => env.DB }
+    // Analytics Engine is a no-op without a binding, which is exactly what a
+    // test env has -- stubbed so this never depends on the real dataset.
+    if (request === './analytics') return { recordAnalytics: () => {} }
     if (request === './quotaGuard') return loadModule('quotaGuard.ts')
     if (request === '../index') return {}
     return require(request)

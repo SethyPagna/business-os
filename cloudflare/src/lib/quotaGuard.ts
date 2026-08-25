@@ -34,6 +34,7 @@
 
 import type { Env } from '../index'
 import { getDb } from './db'
+import { recordAnalytics } from './analytics'
 
 export type QuotaResource = 'kv_write' | 'r2_class_a'
 
@@ -66,6 +67,10 @@ const LIMITS: Record<QuotaResource, QuotaLimit> = {
 // slightly ahead of the recorded one.
 const WARN_RATIO = 0.7
 const CRITICAL_RATIO = 0.9
+
+// Last zone reported per resource, isolate-local -- enough to collapse a
+// storm of identical transitions without any shared state to coordinate.
+const lastReportedZone = new Map<QuotaResource, QuotaZone>()
 
 export function windowKeyFor(window: 'day' | 'month', now = new Date()): string {
   const iso = now.toISOString()
@@ -127,7 +132,20 @@ export async function consumeQuota(env: Env, resource: QuotaResource, amount = 1
     const row = await db
       .prepare(`SELECT used FROM quota_usage WHERE resource = @resource AND window_key = @windowKey`)
       .get<{ used: number }>({ resource, windowKey })
-    return buildStatus(resource, Number(row?.used || 0))
+    const status = buildStatus(resource, Number(row?.used || 0))
+    // Only the moment a zone CHANGES, not every consumption. The point is to
+    // be able to answer "when did we start running out" without writing a
+    // data point on every mutation -- and Analytics Engine is the only store
+    // here where recording it does not itself consume a scarce budget.
+    if (status.zone !== 'ok' && status.zone !== lastReportedZone.get(resource)) {
+      lastReportedZone.set(resource, status.zone)
+      recordAnalytics(env, {
+        kind: 'quota_zone',
+        labels: [resource, status.zone, windowKey],
+        values: [status.used, status.limit],
+      })
+    }
+    return status
   } catch {
     return { ...buildStatus(resource, 0), zone: 'ok', allowed: true }
   }

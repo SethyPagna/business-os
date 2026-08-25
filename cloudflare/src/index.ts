@@ -45,6 +45,9 @@ export type Env = {
   // than failing. Set in wrangler.toml [vars] -- a DSN is a public
   // ingest key by design, not a secret.
   SENTRY_DSN?: string
+  // Analytics Engine. Optional: absent means recordAnalytics is a no-op, so
+  // a local run behaves exactly as it did before the binding existed.
+  Business_OS_Analytics?: AnalyticsEngineDataset
   IMPORT_QUEUE: Queue
   MEDIA_QUEUE: Queue
   // Optional (wrangler.toml [[queues.producers]] binding) -- see

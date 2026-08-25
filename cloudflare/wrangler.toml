@@ -40,6 +40,16 @@ migrations_dir = "migrations"
 binding = "ASSETS"
 bucket_name = "business-os-assets"
 
+# Analytics Engine. Free with Workers, and the only place in this stack where
+# writing an observation is genuinely cheap: it does not draw on D1's row
+# budget, KV's 1,000 writes/day, or R2 operations. That makes it the right
+# home for high-frequency signals that would be reckless to store anywhere
+# else -- see lib/analytics.ts for what is actually recorded and, more
+# importantly, what deliberately is not.
+[[analytics_engine_datasets]]
+binding = "Business_OS_Analytics"
+dataset = "Business_OS_Analytics"
+
 [[kv_namespaces]]
 binding = "CACHE"
 id = "de5f3b41c7264e4582077176fd0c1fe8"
