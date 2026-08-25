@@ -24,6 +24,34 @@
 // paging unit.
 import type { D1Compat } from './db'
 
+/**
+ * The key that decides which rows belong to the same product family.
+ *
+ * NAME is the grouping axis, not `parent_id`. That is the permanent product
+ * rule ("all same name is grouped"; a differing barcode or price makes a
+ * child row inside that group, not a separate standalone), and until now
+ * this helper contradicted it: a family was `COALESCE(parent.id, p.id)`,
+ * i.e. `parent_id` chains ONLY. Since CSV import never writes `parent_id`
+ * (it is set only by the hand-made Variant modal), essentially every real
+ * group in this catalog was invisible here -- same-name rows each consumed
+ * their own page slot and counted as separate families, so "20 per page"
+ * silently meant "20 rows" rather than "20 products". `routes/products.ts`'s
+ * expandSearchResultsToNameSiblings exists as a post-query patch for the
+ * same gap, and only runs when a search term is present.
+ *
+ * Uses `name_key` -- the trigger-maintained, indexed `lower(trim(name))`
+ * column from migration 0010 -- rather than recomputing `lower(trim(name))`
+ * inline, so this stays an indexed column read instead of an unindexed
+ * expression over every product row. That is the same O(n) vs O(n^2)
+ * concern migration 0010 was written to solve.
+ *
+ * The parent's key wins when there is one, so a hand-made `parent_id`
+ * variant family still groups under its parent even if a child was named
+ * differently. Rows with a blank name fall back to an id-scoped key so they
+ * stay separate instead of all collapsing into one nameless mega-family.
+ */
+export const FAMILY_ROOT_KEY_SQL = `COALESCE(NULLIF(COALESCE(parent.name_key, p.name_key), ''), 'id:' || COALESCE(parent.id, p.id))`
+
 export interface FamilyPaginationOptions {
   db: D1Compat
   // Column list for the SELECT, using the `p.` alias, e.g.
@@ -110,7 +138,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     ? `,
     family_members AS (
       SELECT ${opts.selectColumns},
-             COALESCE(parent.id, p.id) AS __family_root_id
+             ${FAMILY_ROOT_KEY_SQL} AS __family_root_id
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
       ${opts.joinSql}
@@ -120,7 +148,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
   return `
     WITH matched AS (
       SELECT ${opts.selectColumns},
-             COALESCE(parent.id, p.id) AS __family_root_id,
+             ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
              p.created_at AS __created_at${matchRankSelect}
       FROM products p

@@ -17,7 +17,8 @@
 //
 // This helper re-derives those same four counts (+ stock quantity/value)
 // the same way paginateProductFamilies derives `total`: group rows into
-// families by COALESCE(parent.id, p.id), one row per family toward the
+// families by FAMILY_ROOT_KEY_SQL (name_key, see familyPagination.ts --
+// NAME is the grouping axis, not parent_id), one row per family toward the
 // count. Stock status is then rolled up per family using a documented
 // "best status wins" rule -- a family counts as in_stock if ANY member has
 // healthy stock, low_stock if none are healthy but at least one still has
@@ -31,6 +32,7 @@
 // if a family somehow has no other members, so a family is never dropped
 // from the count entirely.
 import type { D1Compat } from './db'
+import { FAMILY_ROOT_KEY_SQL } from './familyPagination'
 
 export interface FamilyStockStatsOptions {
   db: D1Compat
@@ -63,7 +65,7 @@ export async function getFamilyStockStats(opts: FamilyStockStatsOptions): Promis
   const row = await db.prepare(`
     WITH matched AS (
       SELECT
-        COALESCE(parent.id, p.id) AS family_root_id,
+        ${FAMILY_ROOT_KEY_SQL} AS family_root_id,
         COALESCE(p.is_group, 0) AS is_group,
         COALESCE(p.parent_id, 0) AS parent_id,
         ${qtyExpr} AS qty,

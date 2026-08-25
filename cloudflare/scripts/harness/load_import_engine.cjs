@@ -42,41 +42,47 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', importNu
   importNumbersModuleObj.exports, require, importNumbersModuleObj, importNumbersSourcePath, path.dirname(importNumbersSourcePath),
 )
 
-// salesStatus.ts is pure (no D1/Env dependency, per its own file comment)
-// and productBatches.ts's statement-builder exports are pure too (its only
-// import is a type-only `D1Compat`, erased by transpilation) -- load both
-// for real rather than stubbing them out, same as test-import-engine-pure.cjs
-// already does, or classifySales/incrementBatchStockStatement would come
-// back undefined instead of the actual validation/statement logic.
-const salesStatusSourcePath = path.join(LIB_DIR, 'salesStatus.ts')
-const salesStatusSource = fs.readFileSync(salesStatusSourcePath, 'utf8')
-const { outputText: salesStatusOutputText } = ts.transpileModule(salesStatusSource, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  fileName: 'salesStatus.ts',
-})
-const salesStatusModuleObj = { exports: {} }
-new Function('exports', 'require', 'module', '__filename', '__dirname', salesStatusOutputText)(
-  salesStatusModuleObj.exports, require, salesStatusModuleObj, salesStatusSourcePath, path.dirname(salesStatusSourcePath),
-)
+// Several of importEngine.ts's siblings are genuinely pure -- no D1/Env
+// dependency, only type-only imports that transpilation erases -- so they are
+// loaded for REAL rather than stubbed, exactly as test-import-engine-pure.cjs
+// does. Stubbing them would hand back `undefined` for the actual validation,
+// statement-building and batch-code logic instead of exercising it.
+//
+// Extracted into one loader because this used to be the same eight-line
+// block copy-pasted per module, and every time importEngine.ts gained a new
+// pure sibling the harness died with a bare "Cannot find module" until
+// somebody pasted a sixth copy. Adding one now means adding one line below.
+function loadPureLib(name) {
+  const libPath = path.join(LIB_DIR, `${name}.ts`)
+  const { outputText: libOutput } = ts.transpileModule(fs.readFileSync(libPath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: `${name}.ts`,
+  })
+  const libModule = { exports: {} }
+  new Function('exports', 'require', 'module', '__filename', '__dirname', libOutput)(
+    libModule.exports, require, libModule, libPath, path.dirname(libPath),
+  )
+  return libModule.exports
+}
 
-const productBatchesSourcePath = path.join(LIB_DIR, 'productBatches.ts')
-const productBatchesSource = fs.readFileSync(productBatchesSourcePath, 'utf8')
-const { outputText: productBatchesOutputText } = ts.transpileModule(productBatchesSource, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  fileName: 'productBatches.ts',
-})
-const productBatchesModuleObj = { exports: {} }
-new Function('exports', 'require', 'module', '__filename', '__dirname', productBatchesOutputText)(
-  productBatchesModuleObj.exports, require, productBatchesModuleObj, productBatchesSourcePath, path.dirname(productBatchesSourcePath),
-)
+// Specifiers that resolve to a real, pure sibling module. Resolved LAZILY
+// and memoized: these modules require each other (productBatches imports
+// batchCode), so they have to be loaded while the Module._load patch below
+// is already installed -- building them eagerly, before the patch, made the
+// nested require fall through to the real filesystem and fail on a .ts path.
+const PURE_LIB_SPECIFIERS = ['./salesStatus', './productBatches', './batchCode', './searchMatch']
+const pureLibCache = new Map()
+function getPureLib(specifier) {
+  if (!pureLibCache.has(specifier)) pureLibCache.set(specifier, loadPureLib(specifier.replace('./', '')))
+  return pureLibCache.get(specifier)
+}
 
 const stubbable = new Set(['../index', './db', './importCsv', './contactOptions', './cache', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './importImageMatch') return imageMatchModuleObj.exports
   if (request === './importNumbers') return importNumbersModuleObj.exports
-  if (request === './salesStatus') return salesStatusModuleObj.exports
-  if (request === './productBatches') return productBatchesModuleObj.exports
+  if (PURE_LIB_SPECIFIERS.includes(request)) return getPureLib(request)
   if (stubbable.has(request)) return {}
   return originalLoad.call(this, request, parent, isMain)
 }

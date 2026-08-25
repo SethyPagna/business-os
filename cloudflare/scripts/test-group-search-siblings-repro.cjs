@@ -187,10 +187,16 @@ async function testNameSiblingExpansion() {
   // Search matches ONLY the 'B' branch row's barcode -- the reported bug's
   // exact shape: no parent_id relationship at all, just same normalized
   // name. Simulate what searchProductsPayload does: paginateProductFamilies
-  // WITHOUT the parent_id opt-in (this group has no parent_id, so that
-  // fix alone can't help it -- each duplicate row is already its own
-  // one-row "family" as far as familyPagination.ts is concerned), then
-  // expandSearchResultsToNameSiblings as the second pass.
+  // This group has no parent_id. That USED to mean each duplicate row was
+  // its own one-row "family" as far as familyPagination.ts was concerned,
+  // so only the barcode-matched row came back and
+  // expandSearchResultsToNameSiblings had to drag the siblings in as a
+  // second pass. familyPagination now groups by name_key (see
+  // FAMILY_ROOT_KEY_SQL) -- NAME is the grouping axis, matching the
+  // permanent product rule -- so the SQL layer returns the whole name group
+  // on its own and the group counts as ONE page slot. The expansion pass is
+  // therefore redundant here, and must be idempotent rather than
+  // duplicating rows.
   const paged = await paginateProductFamilies({
     db: dbShim,
     selectColumns,
@@ -204,11 +210,12 @@ async function testNameSiblingExpansion() {
     familyMemberBaseWhereSql: 'p.is_active = 1',
   })
   const beforeExpansion = paged.items.map((r) => r.sku).sort()
-  assert.deepStrictEqual(beforeExpansion, ['BPS-B'], `expected only the matched duplicate row before expansion, got ${JSON.stringify(beforeExpansion)}`)
+  assert.deepStrictEqual(beforeExpansion, ['BPS-A', 'BPS-B', 'BPS-C'], `same-name siblings should come back from the query itself, got ${JSON.stringify(beforeExpansion)}`)
+  assert.strictEqual(paged.total, 1, `a name group must count as ONE family/page slot, got ${paged.total}`)
 
   const expanded = await expandSearchResultsToNameSiblings(paged.items)
   const afterExpansion = expanded.map((r) => r.sku).sort()
-  assert.deepStrictEqual(afterExpansion, ['BPS-A', 'BPS-B', 'BPS-C'], `expected all 3 same-name siblings after expansion, got ${JSON.stringify(afterExpansion)}`)
+  assert.deepStrictEqual(afterExpansion, ['BPS-A', 'BPS-B', 'BPS-C'], `expansion must be idempotent, not duplicate rows, got ${JSON.stringify(afterExpansion)}`)
 }
 
 // ---- Test D: control -- unrelated product never pulled in -------------
