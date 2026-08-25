@@ -68,7 +68,7 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 |---|---|---|
 | Data reset fails — "Exceeded Memory Limit" | done, awaiting deploy | Cause was NOT the reset code: a full backup runs as a hard prerequisite in front of every reset, and it loaded every row of ~34 tables into memory then stringified it. Now paged + streamed to R2. Needs a deploy to take effect. |
 | Organization must lock to LeangCosmetics | done, awaiting deploy | `ensureCoreDataInvariants` hardcoded the name and rewrote it **on every request**, so any rename reverted. Now configured via `BUSINESS_OS_ORGANIZATION_NAME`/`_SLUG`. Only applies once deployed against remote D1. |
-| POS / sales not working — options, batch pick, click-to-pick | in progress | Reported repeatedly. Highest-value remaining functional item. |
+| POS / sales not working — options, batch pick, click-to-pick | done | Two causes. (1) A FLAT product produced no branch options at all (the sheet iterated `variants`, which is empty for non-groups), so the lot query had no branch and was fed an empty list. (2) route()'s read cache is keyed by channel string alone, and `batches:list` was constant — every product shared one cached lot list, which once warm would show ANOTHER product's lots. Verified end to end: both lots list, block clears, cart $37.00 → $55.50 with the lot recorded. |
 | Image compression: hard 350KB cap, as close to it as possible, all library objects, re-verified every 6h | in progress | Currently overshooting low (~70KB) and many objects still MB-sized. |
 
 ### Import
