@@ -4022,5 +4022,7 @@
   "zip_unreadable": "The ZIP file could not be read; no images were extracted from it.",
   "zoom": "Zoom",
   "zoom_in": "Zoom in",
-  "zoom_out": "Zoom out"
+  "zoom_out": "Zoom out",
+  "reset_other_ways": "Other ways to get back in",
+  "reset_ask_admin_hint": "No email or authenticator? Ask your admin to reset it for you."
 }

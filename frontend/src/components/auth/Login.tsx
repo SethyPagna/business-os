@@ -921,22 +921,32 @@ export default function Login() {
             </div>
           </aside>
           <div className="auth-card p-5 sm:p-7 lg:p-8">
-        <div className="mb-7 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl text-white shadow-lg overflow-hidden" style={{ backgroundColor: 'var(--ui-accent, #9c7a3c)', boxShadow: '0 10px 24px rgba(156,122,60,0.28)' }}>
-            {otpRequired || deviceApprovalPending ? (
-              <ShieldCheck className="h-7 w-7" />
-            ) : (
-              <img src={brandLogo} alt="" className="h-full w-full object-cover" loading="eager" decoding="async" />
-            )}
+        {/* Logo and wordmark sit on ONE row rather than stacked, which
+            reclaims the vertical space the stacked version spent on a
+            14x14 block above a heading. "Sign in to continue" is gone with
+            it: on a page whose only content is a sign-in form it restated
+            the obvious, and the two remaining subtitles are the ones that
+            carry real information (2FA, or which device state you are in).
+
+            The device-approval subtitle is deliberately NOT repeated here
+            -- that flow renders its own heading below, and showing the same
+            sentence twice on one short screen was the reported redundancy. */}
+        <div className="mb-7">
+          <div className="flex items-center justify-center gap-3">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg overflow-hidden" style={{ backgroundColor: 'var(--ui-accent, #9c7a3c)', boxShadow: '0 10px 24px rgba(156,122,60,0.28)' }}>
+              {otpRequired ? (
+                <ShieldCheck className="h-6 w-6" />
+              ) : (
+                <img src={brandLogo} alt="" className="h-full w-full object-cover" loading="eager" decoding="async" />
+              )}
+            </div>
+            <h1 className="text-2xl font-bold leading-tight text-gray-900 dark:text-white">{brandName}</h1>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{brandName}</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {deviceApprovalPending
-              ? tr('device_approval_pending_title', 'Waiting for device approval')
-              : otpRequired
-              ? tr('two_factor_authentication', 'Two-Factor Authentication')
-              : tr('sign_in_to_continue', 'Sign in to continue')}
-          </p>
+          {otpRequired ? (
+            <p className="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">
+              {tr('two_factor_authentication', 'Two-Factor Authentication')}
+            </p>
+          ) : null}
         </div>
 
         {!otpRequired && !deviceApprovalPending && !showOtpReset && !showEmailReset && !recoveryAccessToken ? (
@@ -1126,42 +1136,36 @@ export default function Login() {
                   loading={oauthLoading === 'google'}
                   onClick={() => handleStartOauth('google')}
                 />
-                <p className="text-center text-[11px] text-gray-400 dark:text-gray-500">
-                  {tr('oauth_local_account_hint', 'Needs an account created by your admin.')}
-                </p>
               </div>
             ) : null}
 
-            <div className="grid gap-2 sm:grid-cols-2">
-              <button
-                type="button"
-                className="w-full text-sm text-primary-700 hover:text-primary-800 dark:text-primary-300"
-                onClick={() => {
-                  setShowEmailReset(true)
-                  setShowOtpReset(false)
-                  setRecoveryAccessToken('')
-                  setError('')
-                  setResetInfo('')
-                  setResetIdentifier(username || '')
-                }}
-              >
-                {tr('reset_password_with_email', 'Forgot password?')}
-              </button>
-              <button
-                type="button"
-                className="w-full text-sm text-primary-700 hover:text-primary-800 dark:text-primary-300"
-                onClick={() => {
-                  setShowOtpReset(true)
-                  setShowEmailReset(false)
-                  setRecoveryAccessToken('')
-                  setError('')
-                  setResetInfo('')
-                  setResetIdentifier(username || '')
-                }}
-              >
-                {tr('reset_password_with_otp', 'Reset with OTP')}
-              </button>
-            </div>
+            {/* One recovery entry point, not two side by side. "Reset with
+                OTP" is a METHOD of recovering a password, not a separate
+                thing to want, so it now lives inside the Forgot password
+                screen alongside the email route and the contact-an-admin
+                route -- see the reset panel below. Two peer buttons made
+                the person choose a mechanism before they had said what
+                they wanted.
+
+                The "Needs an account created by your admin." line under the
+                Google button is gone too: it read as a warning about the
+                sign-in method rather than the useful statement it was
+                trying to be, and the same information is now presented
+                where it is actionable, in the recovery screen. */}
+            <button
+              type="button"
+              className="w-full text-sm text-primary-700 hover:text-primary-800 dark:text-primary-300"
+              onClick={() => {
+                setShowEmailReset(true)
+                setShowOtpReset(false)
+                setRecoveryAccessToken('')
+                setError('')
+                setResetInfo('')
+                setResetIdentifier(username || '')
+              }}
+            >
+              {tr('reset_password_with_email', 'Forgot password?')}
+            </button>
 
           </form>
         ) : null}
@@ -1184,6 +1188,37 @@ export default function Login() {
             <button className="btn-primary w-full py-3 text-base" type="button" disabled={loading} onClick={handleResetWithEmail}>
               {loading ? tr('sending_reset_email', 'Sending reset email...') : tr('send_reset_email', 'Send reset email')}
             </button>
+
+            {/* The other two ways out, offered here rather than as peer
+                buttons on the sign-in form: this is the point at which the
+                person has said "I can't get in", so it is the point at
+                which the choice of method is meaningful. Email above is the
+                default because it needs nothing but the account; OTP only
+                works if an authenticator was already set up; and asking an
+                admin is the honest fallback when neither applies (this is
+                also where the old "needs an account created by your admin"
+                line belonged). */}
+            <div className="space-y-2 border-t border-gray-200 pt-4 dark:border-slate-700">
+              <p className="text-center text-xs text-gray-500 dark:text-gray-400">
+                {tr('reset_other_ways', 'Other ways to get back in')}
+              </p>
+              <button
+                type="button"
+                className="w-full text-sm text-primary-700 hover:text-primary-800 dark:text-primary-300"
+                onClick={() => {
+                  setShowOtpReset(true)
+                  setShowEmailReset(false)
+                  setRecoveryAccessToken('')
+                  setError('')
+                  setResetInfo('')
+                }}
+              >
+                {tr('reset_password_with_otp', 'Reset with OTP')}
+              </button>
+              <p className="text-center text-xs text-gray-400 dark:text-gray-500">
+                {tr('reset_ask_admin_hint', 'No email or authenticator? Ask your admin to reset it for you.')}
+              </p>
+            </div>
 
             <ModeBackButton label={tr('back_to_login', 'Back to login')} onClick={closeAuxMode} />
           </div>
@@ -1332,6 +1367,11 @@ export default function Login() {
 
         {deviceApprovalPending ? (
           <div className="space-y-5">
+            {/* One shield, one heading. The card header above used to render
+                its own ShieldCheck and repeat this exact title, so this
+                screen showed the same icon twice and the same sentence
+                twice -- both reported. The header now stays on the brand
+                logo for this flow and leaves the state to this block. */}
             <div className="text-center">
               <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400">
                 <ShieldCheck className="h-7 w-7" />
