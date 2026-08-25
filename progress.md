@@ -2811,6 +2811,23 @@ and **448 phone numbers are shared across 978 customers**.
 | 27 | Portal editor "Contact us" working | 🟡 | Carried over, restated. |
 | 28 | Promotions/discounts, Canva-like editing with templates | ⚪ | **Explicitly pushed back in the order this batch.** Not dropped. |
 
+### Third batch — Aug 25 2026 (Part 343)
+
+| Item | Flag | Notes |
+|---|---|---|
+| Login button taller than the fields | 🟢 | `.input` is 40px; the button stacked `py-3 text-base` on `.btn-primary`'s own `py-2`. All three are h-11 now — measured 44/44/44. |
+| Password reveal (eye / eye-off) | 🟢 | Toggles type, aria-label flips, `tabIndex={-1}` keeps it out of the tab path between password and submit. |
+| Login-page Khmer | 🟢 | Real defect found: "Forgot password?" still read "reset password again via email", describing the two-button layout from before OTP was folded in. 531 → 339 Khmer characters on that screen. |
+| Import UI: merge into one page, ordered | 🟢 | Already one page; the gaps were that there was **no template download at all** (only descriptive chips) and the order was info→upload. Now template → upload → info, with real per-mode downloadable headers. |
+| Add-Sale doesn't mention add product/stock | 🟢 | It always did both; only the copy was sales-only. `date` promoted to a required base column so arrivals can be ordered before sales. |
+| Add-Sale options collapsed | 🟢 | Five toggles → two questions (how rows relate / where cost price comes from). Customer, discount and fee now ride along with any sale-linking mode and may be left blank. |
+| Option detail behind hover/hold | 🟢 | New `InfoHint` (hover **and** tap, since touch has no hover). Applied to General, Replace and Add-Sale. |
+| Raw translation keys rendering in the UI | 🟢 | 40 keys absent from both packs. Cause: `t('key') \|\| 'Fallback'` — `t()` returns the KEY on a miss, which is truthy, so the fallback is dead code. Contacts duplicates showed literal `keep_this_one` / `merging`. |
+| Khmer sweep | 🟢 | Packs were healthier than expected: 0 missing/extra keys, only 2 layout-overflow risks, and all 34 "untranslated" are correctly English (brand names, SKU, RFID, font names). |
+| Unused-key cleanup | 🟠 | ~640 keys have no reference anywhere. Script written and dry-run only — **not applied yet**, since deleting 19% of the pack deserves its own verified pass. |
+
+**Guard added:** `tests/langKeyIntegrity.test.ts` — the packs must hold the same key set, every bare `t('key')` must resolve, no blank strings. It deliberately does *not* fail on `tr('key', 'Fallback')`, which degrades correctly; those 196 are reported as a coverage number instead, so the test stays worth reading.
+
 ### Environment gotcha worth knowing before testing any write locally
 
 `api/http.ts`'s `route()` **blocks every write** when no sync-server URL is
