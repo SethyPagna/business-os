@@ -23,6 +23,7 @@
 // UPDATE (this session, correcting the paragraph above -- it had gone
 // stale and was actively misleading, having sent a full trace down a path
 // that turned out to already be built): products import DOES have a real
+import { normalizeProductGroupName, productDetailSignature, productIdentitySignature, resolveMergedPricing } from './productDetailRule'
 // per-row mode system now, just via a different channel than
 // decisionsByRowNumber/policy_json -- BulkImportModal.tsx's review step
 // bakes the reviewer's per-row choice (IMPORT_DECISION_OPTIONS) directly
@@ -576,15 +577,10 @@ export function resolveRowImagePath(
   return fuzzyFallback || null
 }
 
-function normalizeProductGroupName(value: unknown): string {
-  return String(value || '').trim().replace(/\s+/g, ' ').toLowerCase()
-}
-
-// Cents-level tolerance -- avoids false "differs" from float rounding on
-// values that round-tripped through CSV text and normalizeImportMoney.
-function moneyEq(a: unknown, b: unknown): boolean {
-  return Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.005
-}
+// normalizeProductGroupName now comes from lib/productDetailRule.ts (see the
+// import at the top of this file) -- it is the same trim/collapse/lowercase
+// rule, but owning one copy means the grouping key here can never drift from
+// the one transfers, merge-duplicates and the Products page use.
 
 async function fetchCsvText(env: Env, jobId: string): Promise<{ text: string; fileName: string } | null> {
   const db = getDb(env)
@@ -1308,20 +1304,33 @@ export async function classifyProducts(
     // off a second, disconnected product row that only coincidentally
     // shared a name with the first, one per branch that ever imported it.
     // A real two-branch export (the whole catalog listed once per branch)
-    // reproduced this exactly: same name/cost/price/barcode, second
-    // branch's row created a sibling product instead of adding branch_stock
-    // to the first. Dropping the branch check means this fallback now only
-    // asks "is this genuinely the same product" (name+cost+price+barcode);
-    // whichever branch the row named just gets its own branch_stock entry
-    // on that single product via the existing update-path write below.
+    // reproduced this exactly: same name and details, second branch's row
+    // created a sibling product instead of adding branch_stock to the
+    // first. Dropping the branch check means this fallback now only asks
+    // "is this genuinely the same product" -- same name group, same DETAILS
+    // (barcode + cost, see lib/productDetailRule.ts); whichever branch the
+    // row named just gets its own branch_stock entry on that single product
+    // via the existing update-path write below.
     if (!match) {
       const candidates = byName.get(normalizeProductGroupName(name)) || []
+      const incomingDetails = productDetailSignature(data as Record<string, unknown>)
       for (const candidate of candidates) {
-        const costOk = moneyEq(candidate.cost_price_usd, data.cost_price_usd as number) && moneyEq(candidate.cost_price_khr, data.cost_price_khr as number)
-        const priceOk = moneyEq(candidate.selling_price_usd, data.selling_price_usd as number) && moneyEq(candidate.selling_price_khr, data.selling_price_khr as number)
-        const barcodeOk = lower(candidate.barcode) === lower(barcode)
-        if (costOk && priceOk && barcodeOk) { match = candidate; break }
+        if (productDetailSignature(candidate as unknown as Record<string, unknown>) === incomingDetails) { match = candidate; break }
       }
+    }
+
+    // Selling and special price are NOT identity (see productDetailRule.ts):
+    // they are what we plan to charge, not what the item is. When this row
+    // merges into an existing product and the two disagree, the HIGHEST of
+    // each wins -- merging must never quietly drop a product below a price
+    // one of the merged rows expected to charge. Applied before the changes
+    // diff and before the write, so the reviewer sees the value that will
+    // actually be stored.
+    if (match) {
+      Object.assign(data, resolveMergedPricing([
+        match as unknown as Record<string, unknown>,
+        data,
+      ]))
     }
 
     // Reconcile the "Details" field-rule preset (see applyProductDetailFieldRules'
@@ -2542,21 +2551,14 @@ type ImportChunkState = {
 // Preview-only counterpart to productImportRowSignature, used solely by
 // runImportAnalyze's cross-chunk dedup pass above -- NOT a replacement for
 // productImportRowSignature, which runImportApply still uses as the source
-// of truth once ids are real. Same fields (name+barcode+cost+price, no
-// branch -- see classifyProducts' fallback comment for why branch isn't
-// part of "same product"), kept as a separate function only because analyze
-// makes no writes and never resolves a pending new branch name to a real id
-// the way apply does, so it takes a plain Record instead of the narrower
-// ProductImportSignatureInput apply already has a real branch_id for.
+// of truth once ids are real. Identical rule to productImportRowSignature
+// (both delegate to productIdentitySignature), kept as a separate function
+// only because analyze makes no writes and never resolves a pending new
+// branch name to a real id the way apply does, so it takes a plain Record
+// instead of the narrower ProductImportSignatureInput apply already has a
+// real branch_id for.
 function previewProductSignature(d: Record<string, unknown>): string {
-  return [
-    normalizeProductGroupName(str(d.name)),
-    lower(str(d.barcode)),
-    Math.round((Number(d.cost_price_usd) || 0) * 100),
-    Math.round((Number(d.cost_price_khr) || 0) * 100),
-    Math.round((Number(d.selling_price_usd) || 0) * 100),
-    Math.round((Number(d.selling_price_khr) || 0) * 100),
-  ].join('\u0001')
+  return productIdentitySignature(d)
 }
 
 async function getChunkState(db: D1Compat, jobId: string): Promise<{ cursor: number; state: ImportChunkState }> {
@@ -2896,6 +2898,33 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
 // -- don't produce two rows for what should be one branch. Names are
 // deduped case-insensitively among themselves too, preserving whichever
 // casing appeared first in the file.
+// Gives every already-existing active product an explicit 0 row at a
+// just-created branch.
+//
+// Without this, a branch created part-way through an import is invisible to
+// every product created before it: runImportApply seeds "all other active
+// branches at 0" from a branch list loaded once per chunk, so a product
+// written in chunk 1 never learns about a branch that first appeared in
+// chunk 5. Measured on a real 8,727-row file, which names three branches:
+// exactly one product -- the very first row -- ended up with no row for the
+// last branch to be created. Small, but it violates "auto creates for all
+// standalone and child rows, no exceptions", and a product with no
+// branch_stock row is invisible to any branch-filtered POS/Inventory view
+// rather than showing an honest 0.
+//
+// Mirrors routes/branches.ts's identical back-fill on the manual
+// create-branch path; awaited rather than fire-and-forget because an import
+// is already a background job and a partially-seeded catalog is exactly the
+// silent partial write the project's rules forbid.
+async function backfillBranchStockForNewBranch(db: D1Compat, branchId: number): Promise<void> {
+  await db.prepare(`
+    INSERT INTO branch_stock (product_id, branch_id, quantity)
+    SELECT p.id, @branchId, 0 FROM products p
+    WHERE p.is_active = 1
+      AND NOT EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = p.id AND bs.branch_id = @branchId)
+  `).run({ branchId })
+}
+
 async function resolveAndCreateBranches(db: D1Compat, actionable: ImportRowResult[]): Promise<void> {
   const pendingNames = new Map<string, string>() // lower(name) -> first-seen-casing name
   let needsDefault = false
@@ -2916,6 +2945,7 @@ async function resolveAndCreateBranches(db: D1Compat, actionable: ImportRowResul
     }
     const inserted = await db.prepare(`INSERT INTO branches (name, is_active) VALUES (@name, 1)`).run({ name })
     resolvedByLowerName.set(lowerName, inserted.lastInsertRowid)
+    await backfillBranchStockForNewBranch(db, inserted.lastInsertRowid)
   }
 
   let defaultBranchId: number | null = null
@@ -2926,6 +2956,7 @@ async function resolveAndCreateBranches(db: D1Compat, actionable: ImportRowResul
     } else {
       const inserted = await db.prepare(`INSERT INTO branches (name, is_default, is_active) VALUES ('Main Branch', 1, 1)`).run()
       defaultBranchId = inserted.lastInsertRowid
+      await backfillBranchStockForNewBranch(db, defaultBranchId)
     }
   }
 
@@ -2972,14 +3003,7 @@ export type ProductImportSignatureInput = {
 // entry via the normal update-path write once the second row resolves to
 // the first's pre-allocated id below), not two products.
 export function productImportRowSignature(d: ProductImportSignatureInput): string {
-  return [
-    normalizeProductGroupName(str(d.name)),
-    lower(str(d.barcode)),
-    Math.round((Number(d.cost_price_usd) || 0) * 100),
-    Math.round((Number(d.cost_price_khr) || 0) * 100),
-    Math.round((Number(d.selling_price_usd) || 0) * 100),
-    Math.round((Number(d.selling_price_khr) || 0) * 100),
-  ].join('\u0001')
+  return productIdentitySignature(d)
 }
 
 // The catch blocks in runImportAnalyze/runImportApply below record the

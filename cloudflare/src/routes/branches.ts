@@ -304,9 +304,9 @@ app.post('/transfer', async (c) => {
 
   const db = getDb(c.env)
   const product = await db.prepare(`
-    SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr
+    SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr
     FROM products WHERE id = @id
-  `).get<{ id: number; name: string; barcode: string | null; purchase_price_usd: number | null; purchase_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null }>({ id: productId })
+  `).get<{ id: number; name: string; barcode: string | null; cost_price_usd: number | null; cost_price_khr: number | null; selling_price_usd: number | null; selling_price_khr: number | null }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const fromStock = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId').get<{ quantity: number }>({ productId, branchId: fromBranchId })
   const available = fromStock ? Number(fromStock.quantity) || 0 : 0

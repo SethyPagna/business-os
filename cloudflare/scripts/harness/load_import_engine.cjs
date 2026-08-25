@@ -70,7 +70,7 @@ function loadPureLib(name) {
 // batchCode), so they have to be loaded while the Module._load patch below
 // is already installed -- building them eagerly, before the patch, made the
 // nested require fall through to the real filesystem and fail on a .ts path.
-const PURE_LIB_SPECIFIERS = ['./salesStatus', './productBatches', './batchCode', './searchMatch']
+const PURE_LIB_SPECIFIERS = ['./salesStatus', './productBatches', './batchCode', './searchMatch', './productDetailRule']
 const pureLibCache = new Map()
 function getPureLib(specifier) {
   if (!pureLibCache.has(specifier)) pureLibCache.set(specifier, loadPureLib(specifier.replace('./', '')))

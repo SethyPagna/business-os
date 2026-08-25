@@ -75,6 +75,22 @@ salesStatusWrapper(salesStatusModuleObj.exports, require, salesStatusModuleObj, 
 // receiveBatchStock now derives lot_code/batch_key through it (dateToBatchCode/
 // normalizeToIsoDate), so it needs to be the real transpiled module wherever
 // productBatches.ts itself gets loaded below, not an empty stub.
+// lib/productDetailRule.ts owns THE product identity rule (details =
+// barcode + cost; selling/special resolved by taking the highest). It is
+// pure -- no D1/Env -- and importEngine.ts delegates every identity decision
+// to it, so it must be the real transpiled module here, not a stub, or every
+// create-vs-merge assertion below would be testing nothing.
+const productDetailRuleSourcePath = path.join(__dirname, '..', 'src', 'lib', 'productDetailRule.ts')
+const { outputText: productDetailRuleOutputText } = ts.transpileModule(fs.readFileSync(productDetailRuleSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'productDetailRule.ts',
+})
+const productDetailRuleModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', productDetailRuleOutputText)(
+  productDetailRuleModuleObj.exports, require, productDetailRuleModuleObj, productDetailRuleSourcePath, path.dirname(productDetailRuleSourcePath),
+)
+const { resolveMergedPricing } = productDetailRuleModuleObj.exports
+
 const batchCodeSourcePath = path.join(__dirname, '..', 'src', 'lib', 'batchCode.ts')
 const batchCodeSource = fs.readFileSync(batchCodeSourcePath, 'utf8')
 const { outputText: batchCodeOutputText } = ts.transpileModule(batchCodeSource, {
@@ -100,6 +116,7 @@ const { outputText: productBatchesOutputText } = ts.transpileModule(productBatch
 const productBatchesModuleObj = { exports: {} }
 const productBatchesWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', productBatchesOutputText)
 function requireForProductBatches(request) {
+  if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports
   return require(request)
 }
@@ -162,6 +179,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './batchCode') {
     return batchCodeModuleObj.exports // real module -- importEngine.ts's own lot_code derivation calls into it
+  }
+  if (request === './productDetailRule') {
+    return productDetailRuleModuleObj.exports // real module -- owns the identity rule importEngine delegates to
   }
   if (request === './importNumbers') {
     return importNumbersModuleObj.exports // real module -- classifySales actually calls into it
@@ -236,21 +256,55 @@ assert.strictEqual(
   'same name/price/cost/barcode at a DIFFERENT branch must still be merged into one product',
 )
 
-// -- Test 5: different selling price -> must NOT merge (a real price
-// difference means these are not confidently the same product/listing).
+// -- Test 5: different SELLING price -> MUST merge. Selling and special
+// price are not identity (see lib/productDetailRule.ts): they are what we
+// plan to charge, adjustable for sales/POS, not what the item IS. Two rows
+// for one article at two hoped-for prices are one product. This inverts an
+// earlier assertion that treated a price difference as a different product,
+// which forked ~700 duplicate rows out of a real catalog.
 const rowF = { ...rowA, selling_price_usd: 3.49 }
-assert.notStrictEqual(
+assert.strictEqual(
   productImportRowSignature(rowA),
   productImportRowSignature(rowF),
-  'a real price difference must NOT be merged',
+  'a selling-price difference alone must still merge -- price is not identity',
 )
 
-// -- Test 6: different barcode -> must NOT merge.
+// -- Test 5b: special price is likewise not identity.
+const rowF2 = { ...rowA, special_price_usd: 2.99 }
+assert.strictEqual(
+  productImportRowSignature(rowA),
+  productImportRowSignature(rowF2),
+  'a special-price difference alone must still merge',
+)
+
+// -- Test 5c: when rows DO merge and disagree on price, the HIGHEST wins --
+// merging must never drop a product below a price one of the merged rows
+// expected to charge.
+{
+  const merged = resolveMergedPricing([
+    { selling_price_usd: 3.49, special_price_usd: 2.00 },
+    { selling_price_usd: 2.99, special_price_usd: 2.75 },
+  ])
+  assert.strictEqual(merged.selling_price_usd, 3.49, 'highest selling price must win a merge')
+  assert.strictEqual(merged.special_price_usd, 2.75, 'each price field resolves independently to its own highest')
+}
+
+// -- Test 6: different barcode -> must NOT merge. Barcode is a detail.
 const rowG = { ...rowA, barcode: '8801234567890' }
 assert.notStrictEqual(
   productImportRowSignature(rowA),
   productImportRowSignature(rowG),
   'rows with different barcodes must NOT be merged',
+)
+
+// -- Test 7: different COST -> must NOT merge. Cost is a detail: it is what
+// was actually spent to buy the item, real money out, and must never be
+// silently replaced by another row's figure.
+const rowH = { ...rowA, cost_price_usd: 99.5 }
+assert.notStrictEqual(
+  productImportRowSignature(rowA),
+  productImportRowSignature(rowH),
+  'rows with different cost prices must NOT be merged -- cost is a detail',
 )
 
 console.log('PASS productImportRowSignature merges true in-batch duplicates and keeps genuinely different rows apart')

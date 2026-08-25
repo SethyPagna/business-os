@@ -50,8 +50,19 @@ async function resolveBranchId(db, pendingName) {
   const existing = await db.prepare(`SELECT id FROM branches WHERE lower(name) = @name`).get({ name: key })
   if (existing) { branchIdByName.set(key, existing.id); return existing.id }
   const inserted = await db.prepare(`INSERT INTO branches (name, is_default, is_active) VALUES (@name, 0, 1)`).run({ name: String(pendingName) })
-  branchIdByName.set(key, inserted.meta.last_row_id)
-  return inserted.meta.last_row_id
+  const newBranchId = inserted.meta.last_row_id
+  // Mirrors importEngine.ts's backfillBranchStockForNewBranch: a branch
+  // created part-way through an import must give every ALREADY-created
+  // product an explicit 0 row, or those products are invisible to any
+  // branch-filtered view instead of showing an honest zero.
+  await db.prepare(`
+    INSERT INTO branch_stock (product_id, branch_id, quantity)
+    SELECT p.id, @branchId, 0 FROM products p
+    WHERE p.is_active = 1
+      AND NOT EXISTS (SELECT 1 FROM branch_stock bs WHERE bs.product_id = p.id AND bs.branch_id = @branchId)
+  `).run({ branchId: newBranchId })
+  branchIdByName.set(key, newBranchId)
+  return newBranchId
 }
 
 // Same write shape as run_real_xlsx.cjs's applyChunk (which mirrors
@@ -110,16 +121,16 @@ async function applyChunk(db, results) {
   }
 }
 
-/** The DECIDED detail set: barcode + selling + special + cost. Nothing else. */
-function detailSignature(row) {
-  const money = (v) => Math.round((Number(v) || 0) * 100)
-  return [
-    String(row.barcode || '').trim().toLowerCase(),
-    money(row.selling_price_usd), money(row.selling_price_khr),
-    money(row.special_price_usd), money(row.special_price_khr),
-    money(row.cost_price_usd), money(row.cost_price_khr),
-  ].join('|')
-}
+// THE detail set, read from the real rule module so this census can never
+// measure a different rule than the code applies: barcode + cost.
+const detailRulePath = path.join(__dirname, '..', '..', 'src', 'lib', 'productDetailRule.ts')
+const { outputText: detailRuleOut } = ts.transpileModule(fs.readFileSync(detailRulePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'productDetailRule.ts',
+})
+const detailRuleModule = { exports: {} }
+new Function('exports', 'require', 'module', detailRuleOut)(detailRuleModule.exports, require, detailRuleModule)
+const detailSignature = detailRuleModule.exports.productDetailSignature
 
 async function main() {
   const csvPath = process.argv[2]

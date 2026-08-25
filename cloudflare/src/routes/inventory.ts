@@ -1072,8 +1072,10 @@ function mirrorCostFields(usd: number, khr: number) {
 // that used to require the separate Move Stock modal (quick-create a
 // destination row, then move quantity onto it). Applies the exact same
 // identity rule findIdentityMatch already uses for transfers/import/
-// merge-duplicates: same name_key + cost + selling price + barcode is one
-// row; anything else is a different row. Returns the product id stock
+// merge-duplicates (lib/productDetailRule.ts): same name group + same
+// DETAILS (barcode + cost) is one row; anything else is a different row.
+// Selling and special price are deliberately not part of that -- they are
+// what we plan to charge, not what the item is. Returns the product id stock
 // should actually be added to -- either an existing sibling row that
 // already matches the edited pricing, the source row itself (pricing
 // wasn't actually different from what it already had), or a brand-new
@@ -1094,14 +1096,19 @@ async function resolveAddStockTarget(
     id: source.id,
     name: source.name,
     barcode: overrides.barcode,
-    purchase_price_usd: overrides.costUsd,
-    purchase_price_khr: overrides.costKhr,
+    cost_price_usd: overrides.costUsd,
+    cost_price_khr: overrides.costKhr,
     selling_price_usd: overrides.sellingUsd,
     selling_price_khr: overrides.sellingKhr,
   }
 
-  const sameAsSelf = moneyEq(overrides.costUsd, source.purchase_price_usd)
-    && moneyEq(overrides.costKhr, source.purchase_price_khr)
+  // cost_price_*, not purchase_price_*: the latter is a legacy pair that only
+  // mirrorCostFields ever populates, so it sits at its 0 default on every
+  // import-created and Add/Edit-form-created product. Comparing it here meant
+  // this short-circuit could never fire for those rows -- the same
+  // always-zero-column mistake lib/productIdentity.ts carried.
+  const sameAsSelf = moneyEq(overrides.costUsd, source.cost_price_usd)
+    && moneyEq(overrides.costKhr, source.cost_price_khr)
     && moneyEq(overrides.sellingUsd, source.selling_price_usd)
     && moneyEq(overrides.sellingKhr, source.selling_price_khr)
     && moneyEq(overrides.specialUsd, source.special_price_usd)

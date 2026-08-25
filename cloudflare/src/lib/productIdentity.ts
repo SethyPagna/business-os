@@ -1,39 +1,32 @@
 import type { D1Compat } from './db'
+import { productDetailSignature, normalizeProductGroupName } from './productDetailRule'
 
-// Same "is this genuinely the same real-world product" identity rule
-// classifyProducts (CSV import, importEngine.ts) uses to decide whether an
-// incoming row is the same product or a genuinely different one that
-// happens to share a name -- see that file's byName/cost/price/barcode
-// fallback comment for the full reasoning. Extracted here so branch
-// transfers (routes/branches.ts) can apply the identical rule at
-// transfer time: products is a single global table, branch_stock is the
-// only per-branch thing that exists, so "same name + same cost + same
-// price + same barcode" is what makes two rows the same product no matter
-// which route (import or transfer) is the one that noticed it.
+// Applies THE product identity rule (lib/productDetailRule.ts) at branch-
+// transfer, add-stock and merge-duplicates time, so those paths reach the
+// same verdict CSV import does.
+//
+// This file used to spell the rule out itself, and got it wrong in a way
+// nothing caught: it compared `purchase_price_usd/khr`, but import and the
+// manual Add/Edit form only ever write `cost_price_usd/khr`. Those columns
+// default to 0 (migrations/0001_init.sql), so for every import-created or
+// form-created product the cost half of the comparison was `0 === 0` -- a
+// silent no-op. Two products with genuinely different costs were reported
+// as mergeable duplicates. Delegating to the shared rule fixes that and
+// means the definition can only ever be changed in one place.
 
-function lower(value: unknown): string {
-  return String(value ?? '').trim().toLowerCase()
-}
-
-// Mirrors products.name_key exactly (migration 0010: `lower(trim(name))`,
-// NOT normalizeProductGroupName's extra internal-whitespace collapse) so
-// the query below can use the existing idx_products_name_key_pg index
-// instead of a fresh unindexed lower(trim(name)) expression -- the same
-// O(n) vs. O(n^2) concern migration 0010 itself exists to avoid.
 function nameKeyOf(value: unknown): string {
-  return String(value ?? '').trim().toLowerCase()
-}
-
-function moneyEq(a: unknown, b: unknown): boolean {
-  return Math.round((Number(a) || 0) * 100) === Math.round((Number(b) || 0) * 100)
+  return normalizeProductGroupName(value)
 }
 
 export type ProductIdentityRow = {
   id: number
   name: string | null
   barcode: string | null
-  purchase_price_usd: number | null
-  purchase_price_khr: number | null
+  // The columns import and the manual form actually write. `purchase_price_*`
+  // is a legacy pair that stays at its 0 default on every real row, which is
+  // why comparing it here was a no-op -- see the note at the top of this file.
+  cost_price_usd: number | null
+  cost_price_khr: number | null
   selling_price_usd: number | null
   selling_price_khr: number | null
 }
@@ -55,17 +48,14 @@ export async function findIdentityMatch(
   if (!nameKey) return null
   const candidates = await db
     .prepare(`
-      SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr
+      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr
       FROM products
       WHERE id != @id AND name_key = @nameKey AND is_active = 1
       ORDER BY id ASC
     `)
     .all<ProductIdentityRow>({ id: source.id, nameKey })
   for (const candidate of candidates) {
-    const costOk = moneyEq(candidate.purchase_price_usd, source.purchase_price_usd) && moneyEq(candidate.purchase_price_khr, source.purchase_price_khr)
-    const priceOk = moneyEq(candidate.selling_price_usd, source.selling_price_usd) && moneyEq(candidate.selling_price_khr, source.selling_price_khr)
-    const barcodeOk = lower(candidate.barcode) === lower(source.barcode)
-    if (costOk && priceOk && barcodeOk) return candidate
+    if (productDetailSignature(candidate) === productDetailSignature(source)) return candidate
   }
   return null
 }
@@ -86,7 +76,7 @@ export async function findIdentityMatches(
   nameKeys.forEach((key, i) => { params[`nk${i}`] = key })
   const candidates = await db
     .prepare(`
-      SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr, name_key
+      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, name_key
       FROM products
       WHERE name_key IN (${placeholders}) AND is_active = 1
       ORDER BY id ASC
@@ -103,10 +93,7 @@ export async function findIdentityMatches(
     const pool = candidatesByNameKey.get(nameKey) || []
     for (const candidate of pool) {
       if (candidate.id === source.id) continue
-      const costOk = moneyEq(candidate.purchase_price_usd, source.purchase_price_usd) && moneyEq(candidate.purchase_price_khr, source.purchase_price_khr)
-      const priceOk = moneyEq(candidate.selling_price_usd, source.selling_price_usd) && moneyEq(candidate.selling_price_khr, source.selling_price_khr)
-      const barcodeOk = lower(candidate.barcode) === lower(source.barcode)
-      if (costOk && priceOk && barcodeOk) { result.set(source.id, candidate); break }
+      if (productDetailSignature(candidate) === productDetailSignature(source)) { result.set(source.id, candidate); break }
     }
   }
   return result
@@ -130,7 +117,7 @@ export type ProductDuplicateGroup = {
 export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductDuplicateGroup[]> {
   const rows = await db
     .prepare(`
-      SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr, name_key
+      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, name_key
       FROM products
       WHERE is_active = 1 AND COALESCE(is_group, 0) = 0
       ORDER BY name_key ASC, id ASC
@@ -154,13 +141,7 @@ export async function findDuplicateProductGroups(db: D1Compat): Promise<ProductD
     // assuming every same-name row belongs together.
     const buckets = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
     for (const candidate of candidates) {
-      const bucketKey = [
-        Math.round((Number(candidate.purchase_price_usd) || 0) * 100),
-        Math.round((Number(candidate.purchase_price_khr) || 0) * 100),
-        Math.round((Number(candidate.selling_price_usd) || 0) * 100),
-        Math.round((Number(candidate.selling_price_khr) || 0) * 100),
-        lower(candidate.barcode),
-      ].join('|')
+      const bucketKey = productDetailSignature(candidate)
       if (!buckets.has(bucketKey)) buckets.set(bucketKey, [])
       buckets.get(bucketKey)!.push(candidate)
     }
