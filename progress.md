@@ -56,7 +56,7 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Current status
 
-**As of Part 340 (Aug 25 2026).** Verification below was really run in a local Windows
+**As of Part 341 (Aug 25 2026).** Verification below was really run in a local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes).
 
@@ -64,9 +64,9 @@ checkout with full `node_modules`, working `better-sqlite3`, and network access 
 |---|---|
 | `frontend` `tsc --noEmit` | clean |
 | `cloudflare` `tsc --noEmit` | clean |
-| Backend `test-*.cjs` scripts | **38 / 38 pass** |
+| Backend `test-*.cjs` scripts | **41 / 41 pass** |
 | Frontend `npm run test:utils` (full chain, incl. `check:source` + `verify:public-runtime`) | green |
-| Real `vite build` | succeeds (~14s) |
+| Real `vite build` | succeeds (~16s) |
 | `wrangler d1 migrations apply --local` | all 49 apply cleanly |
 
 **Version control:** the project is now a real git repository, pushed to
@@ -2688,12 +2688,18 @@ stubbed before any new work — the same "looks-wired-but-isn't" class this proj
 finding. Note the import data: 93.6% of products carry a `special_price_usd`, so
 special-price handling is already load-bearing and must not regress.
 
-### 5. 🟡 Per-action permission wiring — the remaining five pages
+### 5. 🟢 Per-action permission wiring — Inventory/Branches/Returns DONE (Part 341); Fees/Contacts open
 
-Part 339 built the per-action table (`utils/permissionActions.ts`) and wired **Products
-only**. Inventory, Branches, Returns, Fees and Contacts have their action rows defined and
-tested but their toolbars do not yet read `can()`. Until they do, those pages still render
-controls that 403 on click.
+Part 339 wired **Products**; Part 341 wired **Inventory, Branches and Returns**, gating
+only what those routes actually block for the review tier (adjust/transfer, transfer +
+transfer-bulk, and edit respectively) and deliberately leaving the actions that *queue*
+available. Verified in the browser both directions.
+
+**Still open: Fees and Contacts.** Fees is a different shape and must not be gated the
+same way -- nothing on it is blocked at review tier (delete queues), so the work there is
+*labelling* ("this will need approval"), not hiding. Contacts has genuinely blocked
+actions (delete, bulk-delete, merge) plus a `limited` edit that needs a narrowed form
+rather than a hidden button.
 
 ### 6. 🟡 Backup — Google Drive round-trip, auto-delete, free-tier safety
 
@@ -2723,6 +2729,141 @@ different assets and must not be shared.
 `BUSINESS_OS_ADMIN_URL`). The icon split itself is not done: `frontend/public/` currently
 carries both a generic `icon-*.png` set and a `leang-cosmetics-icon-*.png` set, and the
 manifest/favicon wiring needs checking to confirm which surface serves which.
+
+## Part 341 (Aug 25 2026) — organization pin, brand icons, two real auth/permission bugs, submitter side of the review queue
+
+Six commits, all pushed. Two of them fix bugs that were breaking the app for real users
+and had never been reported as such.
+
+### Fixed: an admin who signed in lost every permission
+
+`POST /api/auth/login` queried `r.code` and `r.permissions` and returned neither, unlike
+`GET /auth/me` and `GET /auth/bootstrap` which both include them.
+
+That matters because **most users hold no permissions of their own** — `users.permissions`
+is `{}` and every grant comes from the role. The built-in admin is exactly that shape:
+`{}` on the user, `{"all":true}` on the role. `AppContext.getMergedPermissionsRaw` merges
+the two, so a user object without `role_permissions` resolves to *no permissions at all*.
+
+Normally masked, because the app re-fetches `/auth/bootstrap` right after login and
+overwrites the user. **Not** masked whenever that follow-up cannot run:
+`appBootstrapTransport` falls back to a purely local bootstrap (`readStoredUser`) when no
+sync-server URL resolves, and `ensureBootstrapServerUrl` returns `''` **by design on the
+Vite dev server**. The offline path hits the same fallback.
+
+Reproduced live before fixing: signing in as `admin` produced an app whose entire
+navigation was **Notes and Library**, profile chip reading "No role". After the fix, the
+same sign-in yields Dashboard, POS, Products, Inventory, Branches, Sales, Returns, Fees,
+Contacts, Users, Review, Audit Log.
+
+### Fixed: Review Required users could never see their own requests
+
+Every route on `routes/reviewQueue.ts` sat behind `hasPermission(user, 'review')`. A
+Review Required user by definition does not hold `review`, so they got 403 on all of it:
+submit a change and never see it again — no pending list, no way to read why something was
+refused, no way to ask again. The reviewer half (list, approve-and-apply,
+reject-with-reason) already worked.
+
+Added `GET /api/review/mine` and `POST /api/review/:id/resubmit`, declared **before** the
+`review` gate so they are reachable by the users they exist for. Scoping is enforced in
+SQL rather than by a read-then-write check: resubmit guards on `requested_by` inside the
+UPDATE's WHERE clause, so another person's row is unreachable rather than merely hidden,
+and only `rejected` may transition to `open`, so an already-applied change can never be
+resurrected. Resubmitting reopens the **same row**, clearing the superseded reason while
+the audit log retains every transition — a rejection is never a delete.
+
+Verified end to end against a local Worker with two real sessions:
+
+| Call | As | Result |
+|---|---|---|
+| `GET /api/review` | review-tier | **403** |
+| `GET /api/review/mine` | review-tier | **200**, exactly their 2 rows incl. the admin's reason, not the admin's row |
+| resubmit another user's row | review-tier | **404** |
+| resubmit an already-open row | review-tier | **404** |
+| resubmit own rejected row | review-tier | **200**, back to open, reason cleared, `created_at` preserved |
+| `GET /api/review?status=open` | admin | the revised request is back in the queue |
+
+### Organization pinned explicitly
+
+`BUSINESS_OS_ORGANIZATION_SLUG` (`wrangler.toml`, set to `leangcosmetics`) replaces
+"first organization by id", which was correct only by accident of there being one row.
+Deliberately a preference with a fallback: an unmatched slug falls back to the old
+behaviour rather than returning null, so a stale config value can never lock anyone out.
+Verified both branches live. Creating organizations was already impossible (no write
+endpoints, `organizationCreationEnabled: false`) and is now covered by source guards.
+
+### Brand icons regenerated, split by audience
+
+Both source logos are 1254×1254 PNGs drawn as a rounded square **on opaque black with no
+alpha** — shipping them as-is puts black corners on every favicon and home-screen icon.
+`ops/scripts/assets/generate-app-icons.mjs` finds the true artwork bounds (sharp's
+`trim()` keys off one corner pixel and is fooled by the glow on the Leang logo), cuts the
+corners to real transparency, and emits every size `index.html` and `manifest.json`
+reference. `--check` re-renders and diffs, for CI.
+
+Three kinds rather than one resize: **rounded** (transparent corners, favicons/"any"),
+**flat** (apple-touch-icon only — iOS ignores transparency and composites onto black), and
+**maskable** (artwork inset to 78% on a full-bleed brand background, so the launcher's mask
+only crops flat colour). `favicon.ico` is built by hand since sharp cannot write ICO;
+verified the container parses with three real PNG payloads. 41KB → 9KB.
+
+Admin sign-in now defaults to the **Business OS** logo. This **reverses** a decision
+previously recorded in `Login.tsx` (default to the storefront icon because the deployment
+is single-tenant), at explicit request. The split is now by audience: staff sign into the
+product, customers see the shop. It also removed a visible inconsistency — that page
+already rendered the heading "Business OS" above the pink storefront icon.
+
+### Per-action permission gating: Inventory, Branches, Returns
+
+Part 339 built the action table and wired Products only. Gated **only what the routes
+actually block** for the review tier, not everything:
+
+- **Inventory** — `adjust`, `transfer` (both 403 outright; they mutate live batch/stock
+  state that could go stale between request and approval). `edit_reasons` *queues*, so it
+  stays available.
+- **Branches** — `transfer`, `transfer-bulk`. add/edit/delete all queue, so they stay.
+- **Returns** — `edit` (reverses and re-applies batch restocking). Creating is allowed.
+
+Verified both directions against a seeded product: admin sees the row's Adjust button;
+the review-tier user sees no Adjust or Transfer anywhere. A runtime probe on the
+review-tier session returned exactly what the action table specifies — `view` true,
+`edit_reasons` true, `adjust` false, `transfer` false.
+
+**Method note worth keeping:** the first control run was invalid. Signing in as admin via
+`fetch()` left the app's *persisted* user as the review-tier account, so "admin sees no
+Adjust either" looked like a regression in the change under test. It was not — chasing it
+is what surfaced the login/`role_permissions` bug above. A control that fails should be
+suspected before the change is.
+
+### Verification (all really run)
+
+| Check | Result |
+|---|---|
+| `frontend` `tsc --noEmit` | clean |
+| `cloudflare` `tsc --noEmit` | clean |
+| Backend `test-*.cjs` | **41 / 41 pass** |
+| Frontend `npm run test:utils` | green |
+| Real `vite build` | succeeds (15.8s) |
+
+Also: frontend `node_modules` was found wiped mid-session (11 stray dirs, no `typescript`)
+and reinstalled.
+
+### Not done — still open from this batch
+
+- **Profile modal redesign** (name/details onto the avatar row, larger single-row buttons,
+  click-avatar-to-view with actions beneath, no separate upload entry point).
+- **Portal editor "Contact us"** — not audited.
+- **Promotions/discounts** — the Canva-like template/editor ask is untouched; still needs
+  the wired-vs-stubbed audit noted in the Aug 25 request batch before any new work.
+- **Stories/posts + comments**, **public website accounts** — unchanged, and public
+  accounts remain blocked on the identity decision recorded in the request batch (no
+  customer has an email; 448 phone numbers are shared across 978 customers).
+- A test account (`reviewtest`, id 900) and a seeded product (id 5001) now exist in the
+  **local** D1 only, along with approved `trusted_devices` rows added to get past the
+  device-approval gate for curl. Local passwords for `admin`/`reviewtest` were reset for
+  testing. None of this touches the remote database.
+
+---
 
 ## Older completed work
 
