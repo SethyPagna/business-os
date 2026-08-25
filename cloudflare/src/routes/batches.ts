@@ -17,7 +17,25 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', async (c, next) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'inventory')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  // Receiving or correcting batch stock is a stock adjustment, so WRITES
+  // stay behind 'inventory', same as routes/inventory.ts.
+  //
+  // READS cannot. The POS calls GET /tracked-product-ids on load to learn
+  // which products need the lot picker instead of a one-tap add, and GET /
+  // to list a product's lots once one is tapped. A cashier holding only
+  // 'pos' was getting 403 on both, and the frontend treats that failure as
+  // "no product is batch-tracked" (a deliberate non-blocking fallback) --
+  // so the picker never appeared and the cashier sold batch-tracked stock
+  // WITHOUT choosing a lot. Silent, and wrong in the worst direction: it
+  // quietly bypasses FIFO/expiry selection rather than failing visibly.
+  //
+  // Reading which lots exist is not a privileged action -- it is strictly
+  // less than the product/price data 'pos' already grants.
+  const isRead = c.req.method === 'GET'
+  const allowed = isRead
+    ? (hasPermission(user, 'inventory') || hasPermission(user, 'pos') || hasPermission(user, 'sales'))
+    : hasPermission(user, 'inventory')
+  if (!allowed) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 })
 
