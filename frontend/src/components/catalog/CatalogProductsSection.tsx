@@ -429,7 +429,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               name="product_search"
               autoComplete="off"
               className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-neutral-100"
-              placeholder={copy('searchPlaceholder', 'Search by name, barcode/sku, brand, or category')}
+              placeholder={copy('searchPlaceholder', 'Search by name, barcode, or SKU')}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />

@@ -528,7 +528,7 @@ function CatalogEditorSurfaceContent() {
                       className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-100"
                       value={recommendedProductSearchInput}
                       onChange={(event) => setRecommendedProductSearchInput(event.target.value)}
-                      placeholder={copy('searchPlaceholder', 'Search by name, barcode/sku, brand, or category')}
+                      placeholder={copy('searchPlaceholder', 'Search by name, barcode, or SKU')}
                       autoComplete="off"
                     />
                   </div>

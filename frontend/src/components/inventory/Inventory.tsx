@@ -3594,7 +3594,7 @@ export default function Inventory() {
               value={search}
               onChange={handleSearchChange}
               placeholder={tab === 'products'
-                ? tr('search_terms_placeholder', 'Search divide by comma, any order: name, barcode/sku, brand, category')
+                ? tr('search_terms_placeholder', 'Search divide by comma, any order: name, barcode, SKU')
                 : tab === 'rfid'
                   ? tr('search_rfid_placeholder', 'Search RFID sessions, EPC / TID, reader, or product mapping')
                   : `${t('search') || 'Search'} ${t('movements') || 'Movements'}`}
