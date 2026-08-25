@@ -261,7 +261,16 @@ export default function ProductDetailSheet({
   // grey out a branch pill when nothing in this product is carried there --
   // see pillClass's `outOfStock` param.
   const branchStockTotals = new Map<string, number>()
-  for (const variant of variants) {
+  // `variants` is EMPTY for a flat product -- getVariantChoices only returns
+  // rows for a group (__groupChoices) or a parent with variant children. So
+  // iterating it alone meant a flat product produced no branch options at
+  // all, which left effectiveBranchId null, which left the lot picker with
+  // nothing to query. That is the reported "batch pick not working": a
+  // batch-tracked flat product showed "No lots available at this branch"
+  // and "Pick a lot first" refused the add, while the API had two lots for
+  // it. Falling back to the product's own row makes a flat product behave
+  // like a one-row group, which is what it is.
+  for (const variant of variants.length ? variants : [product]) {
     for (const entry of Array.isArray(variant.branch_stock) ? variant.branch_stock : []) {
       const id = entry?.branch_id
       if (id == null) continue
@@ -340,7 +349,21 @@ export default function ProductDetailSheet({
   // re-resolve every time Branch/Barcode change, exactly like the price
   // buttons below already do.
   const resolvedProduct = groupProduct ? effectiveVariant : product
-  const resolvedBranchId = groupProduct ? effectiveBranchId : (activeBranchId ?? product.branch_id ?? null)
+  // A flat product used to resolve to `activeBranchId ?? product.branch_id`.
+  // Both are routinely null: `activeBranchId` is null whenever the cashier
+  // has not picked a branch filter (the normal case), and `branch_id` is not
+  // a column on products at all -- per-branch stock lives in `branch_stock`.
+  // The effect below then short-circuits on `resolvedBranchId == null` and
+  // force-feeds the picker an empty list, so a batch-tracked product showed
+  // "No lots available at this branch" and "Pick a lot first" blocked the
+  // add. A cashier could not sell ANY batch-tracked product without first
+  // selecting a branch filter -- reproduced with two real lots present.
+  //
+  // `effectiveBranchId` is the same branch the sheet already resolved for
+  // its own Branch step (built from this product's own branch_stock), so
+  // using it here keeps the lot list and the branch shown on screen in
+  // agreement instead of deriving the branch twice by different rules.
+  const resolvedBranchId = effectiveBranchId
   const isBatchTracked = resolvedProduct != null && (trackedBatchProductIds?.has(Number(resolvedProduct.id)) ?? false)
   useEffect(() => {
     if (!isBatchTracked || resolvedProduct == null) { setBatches([]); return }

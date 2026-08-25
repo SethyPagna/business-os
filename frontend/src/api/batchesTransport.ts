@@ -44,9 +44,14 @@ export type BatchSelection = {
 // the POS to decide which products need the batch-picker instead of a
 // one-tap add.
 export function getTrackedBatchProductIds(branchId?: number | string | null): Promise<{ productIds: number[] }> {
-  const query = branchId != null && branchId !== 'all' ? `?branchId=${encodeURIComponent(String(branchId))}` : ''
+  const scope = branchId != null && branchId !== 'all' ? String(branchId) : 'all'
+  const query = scope === 'all' ? '' : `?branchId=${encodeURIComponent(scope)}`
   return route(
-    'batches:tracked-product-ids',
+    // The branch is part of the cache key. route()'s read cache is keyed by
+    // the channel string ALONE (see http.ts's cacheGetStale), so a constant
+    // channel makes every branch share one cached answer -- the first
+    // branch's tracked-id list would be replayed for all the others.
+    `batches:tracked-product-ids:${scope}`,
     () => apiFetch('GET', `/api/batches/tracked-product-ids${query}`),
     () => ({ productIds: [] }),
     { raceLocalFallback: false },
@@ -59,7 +64,16 @@ export function getProductBatches(productId: number | string, branchId: number |
   const params = new URLSearchParams({ productId: String(productId), branchId: String(branchId) })
   if (onlyAvailable) params.set('onlyAvailable', '1')
   return route(
-    'batches:list',
+    // Product, branch and the onlyAvailable flag ALL belong in the cache
+    // key. route()'s read cache is keyed by the channel string alone, so a
+    // constant 'batches:list' meant every product in the catalogue shared
+    // one cached lot list: the first product's answer was replayed for the
+    // next one, and an empty result cached before any batches existed stuck
+    // permanently. That is the reported "batch pick not working" -- the POS
+    // lot picker showed "No lots available at this branch" while the
+    // request beside it returned two lots, and once warm it would have
+    // shown ANOTHER product's lots, which is worse than showing none.
+    `batches:list:${productId}:${branchId}:${onlyAvailable ? 1 : 0}`,
     () => apiFetch('GET', `/api/batches?${params.toString()}`),
     () => ({ batches: [] }),
     { raceLocalFallback: false },
