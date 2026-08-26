@@ -80,33 +80,45 @@ export function buildProductThumbnailState(product?: ProductGalleryRecord | null
 }
 
 /**
- * Thumbnail for a whole name-group.
+ * Thumbnail + gallery for a whole name-group.
  *
- * A group is ONE product to the customer and carries one set of photos,
- * owned by the group's lead row (lowest id -- the same "first row wins"
- * tie-break the identity rule uses elsewhere). But a group assembled from
- * imported data can easily have its photo sitting on a NON-lead row: the
- * importer attaches each image to the row it matched, and which row ends up
- * lead is decided by id, not by who has a picture.
+ * A group is ONE product to the customer and carries ONE set of photos. But
+ * a group assembled from imported data can have photos scattered across
+ * SEVERAL of its member rows: the importer attaches each image to whichever
+ * row its filename matched, and which row ends up "lead" (lowest id) is
+ * decided by id, not by who has a picture.
  *
- * Reading the lead alone therefore showed a grey placeholder for groups that
- * demonstrably had a photo, with no way to reach it -- data present but
- * invisible. Falling back to the first member that actually has one fixes
- * that without changing who OWNS the images: uploads still go to the lead.
+ * So the group's photo set is the UNION of every member's images -- lead
+ * first so its photos lead the gallery -- deduped and capped at the normal
+ * per-product limit. This is what makes the child rows correctly show
+ * nothing: every member's photo already appears on the group header, so a
+ * child cannot be hiding one the group does not show. Previously this
+ * returned only the FIRST member that had any images, which orphaned every
+ * other member's photo -- present in the data, invisible on screen, and
+ * exactly the "images in child rows that aren't on the group title" report.
+ *
+ * Display-only. Who OWNS the images (the lead row, for upload) is a
+ * separate question handled by the write path.
  */
 export function buildGroupThumbnailState(
   rows?: readonly (ProductGalleryRecord | null | undefined)[] | null,
   lead?: ProductGalleryRecord | null,
   limit: unknown = MAX_PRODUCT_GALLERY_IMAGES,
 ): ProductThumbnailState {
-  const leadState = buildProductThumbnailState(lead, limit)
-  if (leadState.hasImage) return leadState
-  for (const row of Array.isArray(rows) ? rows : []) {
-    if (!row) continue
-    const state = buildProductThumbnailState(row, limit)
-    if (state.hasImage) return state
+  const maxItems = Math.max(0, Number(limit || 0))
+  const ordered: (ProductGalleryRecord | null | undefined)[] = [lead, ...(Array.isArray(rows) ? rows : [])]
+  const gallery: string[] = []
+  const seen = new Set<string>()
+  for (const row of ordered) {
+    if (!row || gallery.length >= maxItems) continue
+    for (const path of getProductGalleryImages(row, maxItems)) {
+      if (seen.has(path)) continue
+      seen.add(path)
+      gallery.push(path)
+      if (gallery.length >= maxItems) break
+    }
   }
-  return leadState
+  return { gallery, hasImage: gallery.length > 0, thumbnail: gallery[0] || '' }
 }
 
 export function resolveProductImageUrl(src: unknown): string {

@@ -39,14 +39,26 @@ const SELECT_COL_WIDTH = '2rem'
 const IMAGE_COL_WIDTH = '3.5rem'
 /** Padding between the image column and the start of any title text. */
 export const ROW_TEXT_GUTTER = 'px-2'
-/** How far a grouped child row's name sits right of its group's title. */
-export const CHILD_ROW_INDENT = 'pl-4'
+/**
+ * A grouped child row's name cell, indented a nudge right of its group's
+ * title rather than sharing the exact rail. `pl-6` (1.5rem) is one step
+ * past the name column's own `px-2` gutter, and `pr-2` supplies the right
+ * padding the base gutter otherwise would -- written as its own left+right
+ * pair, NOT `px-2 pl-6`, because two competing padding-left utilities
+ * resolve by stylesheet order, not class order, which is a silent coin
+ * flip. This class fully replaces ROW_TEXT_GUTTER for a child row.
+ */
+export const CHILD_ROW_INDENT = 'pl-6 pr-2'
 /**
  * The columns a full-width row spans past the image column. Kept next to
  * the <colgroup> below because the two have to agree: 2 leading cells plus
  * this must equal the table's column count.
  */
 const FULL_WIDTH_ROW_SPAN = 6
+/** The category band spans one column further LEFT than the group header:
+ *  its label sits on the image column (above the thumbnails), so it covers
+ *  the image column plus the 6 trailing ones. */
+const CATEGORY_BAND_SPAN = 7
 
 type Translate = (key: string) => string | undefined
 type TranslateWithFallback = (key: string, fallback: string, khmerFallback?: string) => string
@@ -283,11 +295,15 @@ export default function ProductsListSurface({
                   return (
                     <Fragment key={section.id}>
                       {/* Real cells in the table's own columns, not a
-                          colSpan with its own padding: the label then sits
-                          in the SAME column as every product name below
-                          it, whatever width the browser gives that column.
-                          The band still reads as full width -- the
-                          background is on the <tr>. */}
+                          colSpan with its own padding -- see the geometry
+                          note at the top of this file. The category label
+                          lands on the IMAGE column (directly above the
+                          thumbnails), NOT the name column: a category names
+                          a shelf of pictured products, so it reads against
+                          the pictures. Group titles and product names sit
+                          one column further right, on the name rail. The
+                          band still reads full width -- the background is
+                          on the <tr>. */}
                       <tr className="bg-slate-100/90 dark:bg-slate-800/80">
                         <td className="px-2 py-2">
                           {selectionModeActive ? (
@@ -303,8 +319,7 @@ export default function ProductsListSurface({
                             />
                           ) : null}
                         </td>
-                        <td className="px-2 py-2" />
-                        <td colSpan={FULL_WIDTH_ROW_SPAN} className={`${ROW_TEXT_GUTTER} py-2`}>
+                        <td colSpan={CATEGORY_BAND_SPAN} className={`${ROW_TEXT_GUTTER} py-2`}>
                           <div className="flex items-center justify-between gap-3">
                             <span className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
                               <span className="truncate">{section.label}</span>

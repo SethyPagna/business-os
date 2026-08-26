@@ -152,18 +152,45 @@ assert.equal(updateProductLightboxIndex(null, 1), null, 'lightbox index update p
 
 
 // ---------------------------------------------------------------------------
-// buildGroupThumbnailState -- a group is one product carrying one set of
-// photos, owned by its lead row. But imported data routinely leaves the photo
-// on a NON-lead row: the importer attaches each image to the row it matched,
-// while which row ends up lead is decided by id. Reading the lead alone showed
-// a grey placeholder for groups that demonstrably had a photo, with no way to
-// reach it -- data present but invisible.
+// buildGroupThumbnailState -- a group is one product carrying ONE set of
+// photos, but imported data routinely scatters them across several member
+// rows (the importer attaches each image to the row its filename matched).
+// The group's photo set is the UNION of every member's images, lead first,
+// deduped, capped -- so no member's photo is ever orphaned, which is what
+// lets the child rows correctly show nothing.
 // ---------------------------------------------------------------------------
 
 assert.equal(
   buildGroupThumbnailState([{ id: 2, image_path: '/child.jpg' }], { id: 1, image_path: '/lead.jpg' }).thumbnail,
   '/lead.jpg',
-  'the lead row owns the group photo and wins whenever it has one',
+  'the lead row leads the gallery, so its photo is the thumbnail',
+)
+
+assert.deepEqual(
+  buildGroupThumbnailState(
+    [{ id: 1, image_path: '/lead.jpg' }, { id: 2, image_path: '/child.jpg' }],
+    { id: 1, image_path: '/lead.jpg' },
+  ).gallery,
+  ['/lead.jpg', '/child.jpg'],
+  'the gallery is the UNION of every member row -- a photo on a child is NOT hidden, it joins the group set',
+)
+
+assert.deepEqual(
+  buildGroupThumbnailState(
+    [{ id: 1, image_path: '/a.jpg' }, { id: 2, image_path: '/a.jpg' }, { id: 3, image_path: '/b.jpg' }],
+    { id: 1, image_path: '/a.jpg' },
+  ).gallery,
+  ['/a.jpg', '/b.jpg'],
+  'the same photo on two rows appears once -- deduped across members',
+)
+
+assert.equal(
+  buildGroupThumbnailState(
+    Array.from({ length: 6 }, (_, i) => ({ id: i + 1, image_path: `/p${i}.jpg` })),
+    { id: 1, image_path: '/p0.jpg' },
+  ).gallery.length,
+  3,
+  'the union is still capped at the per-product limit (3), not the member count',
 )
 
 assert.equal(

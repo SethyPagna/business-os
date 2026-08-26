@@ -2885,12 +2885,12 @@ function ProductsFullEditor() {
                 onTouchStart={(e) => e.stopPropagation()} />
             : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
         </td>
-        {/* One shared left rail with the category band and the group title
-            (see ProductsListSurface's geometry constants). A grouped CHILD
-            row adds CHILD_ROW_INDENT and nothing else -- enough to read as
-            "inside the group", instead of the ~120px offset the fixed
-            column widths used to produce for every row. */}
-        <td className={`${ROW_TEXT_GUTTER} py-2 ${indented ? CHILD_ROW_INDENT : ''}`}>
+        {/* Name rail (col 3): a standalone or group-title row uses the
+            shared ROW_TEXT_GUTTER; a grouped CHILD row swaps it for
+            CHILD_ROW_INDENT -- a small nudge right of the group title. The
+            category band sits one column LEFT of this, on the image rail
+            (see ProductsListSurface's geometry note). */}
+        <td className={`${indented ? CHILD_ROW_INDENT : ROW_TEXT_GUTTER} py-2`}>
           {/* Name cell previously forced align-top on the <td> itself, so
               a row with no meta pills (the common case) sat pinned to the
               top of the row instead of vertically centered like every

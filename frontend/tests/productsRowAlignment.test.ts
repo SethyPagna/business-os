@@ -72,9 +72,23 @@ runTest("the full-width rows use REAL cells in the table's own columns, never a 
     0,
     'a colSpan=8 row re-declares the column geometry and will drift again -- span the trailing columns only',
   )
-  const spans = surface.match(/<td colSpan=\{FULL_WIDTH_ROW_SPAN\}/g) || []
-  assert.strictEqual(spans.length, 2, `the category band and the group header must each span the trailing columns, found ${spans.length}`)
+  // The group header spans the trailing columns (title on the NAME rail);
+  // the category band spans one column further LEFT (label on the IMAGE
+  // rail). Two different spans on purpose -- see the next test.
+  assert.match(surface, /<td colSpan=\{FULL_WIDTH_ROW_SPAN\}/, 'the group header must span the trailing columns via FULL_WIDTH_ROW_SPAN')
+  assert.match(surface, /<td colSpan=\{CATEGORY_BAND_SPAN\}/, 'the category band must span from the image column via CATEGORY_BAND_SPAN')
   assert.match(surface, /const FULL_WIDTH_ROW_SPAN = 6/)
+  assert.match(surface, /const CATEGORY_BAND_SPAN = 7/)
+})
+
+runTest('the category band sits on the IMAGE rail, one column left of the group title', () => {
+  // The revised target (user, Aug 26): a category names a shelf of
+  // pictured products, so its label reads against the pictures, not the
+  // names. CATEGORY_BAND_SPAN must therefore be exactly one MORE than
+  // FULL_WIDTH_ROW_SPAN -- the extra column it eats is the image column.
+  const categorySpan = Number(surface.match(/const CATEGORY_BAND_SPAN = (\d+)/)![1])
+  const groupSpan = Number(surface.match(/const FULL_WIDTH_ROW_SPAN = (\d+)/)![1])
+  assert.strictEqual(categorySpan - groupSpan, 1, 'the category band must cover exactly one more column (the image column) than the group header')
 })
 
 runTest('the column percentages sum to 100%, so table-fixed has nothing to redistribute', () => {
@@ -93,8 +107,8 @@ runTest('the column percentages sum to 100%, so table-fixed has nothing to redis
 runTest('a product row uses the shared gutter for its name, so it lands on the same rail', () => {
   assert.match(
     products,
-    /<td className=\{`\$\{ROW_TEXT_GUTTER\} py-2 \$\{indented \? CHILD_ROW_INDENT : ''\}`\}>/,
-    "the name cell must use ROW_TEXT_GUTTER -- a literal px-3 here is what put names off the group title's rail",
+    /<td className=\{`\$\{indented \? CHILD_ROW_INDENT : ROW_TEXT_GUTTER\} py-2`\}>/,
+    "the name cell must pick ROW_TEXT_GUTTER or CHILD_ROW_INDENT -- a literal px-3 here is what put names off the group title's rail",
   )
   assert.match(products, /import ProductsListSurface, \{ CHILD_ROW_INDENT, ROW_TEXT_GUTTER \}/)
 })
@@ -102,8 +116,8 @@ runTest('a product row uses the shared gutter for its name, so it lands on the s
 runTest('a grouped child row is indented only slightly, and only when it is actually in a group', () => {
   // The ask was "a bit spacing", not the ~120px the column widths used to
   // produce for every row regardless of grouping.
-  const indent = surface.match(/export const CHILD_ROW_INDENT = 'pl-(\d+)'/)
-  assert.ok(indent, 'CHILD_ROW_INDENT must be a plain pl-N literal so Tailwind emits it')
+  const indent = surface.match(/export const CHILD_ROW_INDENT = 'pl-(\d+) pr-\d+'/)
+  assert.ok(indent, 'CHILD_ROW_INDENT must be a plain pl-N pr-N literal (not px-* + pl-*, which resolve by stylesheet order) so Tailwind emits it and it does not conflict')
   assert.ok(Number(indent![1]) <= 6, `a child indent of pl-${indent![1]} is a step, not a nudge`)
   // `indented` is only ever true for a row inside a rendered group header.
   assert.match(surface, /renderDesktopProductRow\(product, \{ indented: showGroupRow \}\)/)
