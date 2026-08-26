@@ -962,7 +962,11 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                   {tr('organization', 'Organization')}
                 </ProfileSectionButton>
               </div>
-              <ActionHistoryBar history={actionHistory} t={t} />
+              {/* align="right" so the history menu + its hover preview open
+                  INWARD from the bar's right edge instead of spilling off
+                  the modal's right side, and flex-shrink-0 so the scrollable
+                  section nav beside it can't squeeze it (11.22). */}
+              <ActionHistoryBar history={actionHistory} t={t} align="right" className="flex-shrink-0" />
             </div>
 
             {activeSection === 'personal' ? (
