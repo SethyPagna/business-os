@@ -133,20 +133,47 @@ async function optimizeWithCloudflare(env: Env, source: ArrayBuffer): Promise<Op
   return { ok: false, provider: 'cloudflare', reason: 'could_not_reach_ceiling' }
 }
 
+/**
+ * Cloudinary's signature: SHA-1 of the sorted params plus the API secret.
+ *
+ * Signed rather than an unsigned preset, deliberately. An unsigned preset is
+ * a public endpoint anyone who learns the cloud name can upload through, and
+ * it needs dashboard setup to exist at all. Signing keeps the credential in
+ * `wrangler secret` and leaves nothing publicly writable.
+ */
+async function cloudinarySignature(params: Record<string, string>, apiSecret: string): Promise<string> {
+  const toSign = Object.keys(params)
+    .sort()
+    .map((key) => `${key}=${params[key]}`)
+    .join('&')
+  const digest = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(toSign + apiSecret))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 async function optimizeWithCloudinary(env: Env, source: ArrayBuffer, fileName: string): Promise<OptimizeResult> {
   const cloudName = String(env.CLOUDINARY_CLOUD_NAME || '').trim()
-  const preset = String(env.CLOUDINARY_UPLOAD_PRESET || '').trim()
-  if (!cloudName || !preset) return { ok: false, provider: 'cloudinary', reason: 'not_configured' }
+  const apiKey = String(env.CLOUDINARY_API_KEY || '').trim()
+  const apiSecret = String(env.CLOUDINARY_API_SECRET || '').trim()
+  if (!cloudName || !apiKey || !apiSecret) return { ok: false, provider: 'cloudinary', reason: 'not_configured' }
 
   try {
-    // Unsigned upload with an eager transform, so the optimised derivative
-    // comes back in one round trip rather than upload-then-fetch.
+    const timestamp = String(Math.floor(Date.now() / 1000))
+    // q_auto:good sits in the same perceptual place as the 80-85 range used
+    // above; f_auto lets Cloudinary pick AVIF/WebP by capability; c_limit
+    // never upscales, so a small source is left at its own size.
+    const transformation = `c_limit,w_${IMAGE_MAX_DIMENSION}/q_auto:good/f_auto`
+    // Only the params Cloudinary signs -- file and api_key are excluded from
+    // the signature by its own spec, and including them makes every upload
+    // fail with an opaque 401.
+    const signed: Record<string, string> = { timestamp, transformation }
+    const signature = await cloudinarySignature(signed, apiSecret)
+
     const form = new FormData()
     form.append('file', new Blob([source]), fileName || 'image')
-    form.append('upload_preset', preset)
-    // q_auto:good sits in the same perceptual place as the 80-85 range used
-    // above; f_auto lets Cloudinary pick AVIF/WebP by capability.
-    form.append('transformation', `c_limit,w_${IMAGE_MAX_DIMENSION}/q_auto:good/f_auto`)
+    form.append('api_key', apiKey)
+    form.append('timestamp', timestamp)
+    form.append('transformation', transformation)
+    form.append('signature', signature)
 
     const upload = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: 'POST', body: form })
     if (!upload.ok) return { ok: false, provider: 'cloudinary', reason: `upload_failed_${upload.status}` }

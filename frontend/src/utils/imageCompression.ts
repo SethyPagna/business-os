@@ -261,7 +261,7 @@ function extnameOf(fileName: string): string {
  * whether that particular image happened to compress well -- invisible and
  * unpredictable from the person uploading it.
  */
-export function renameFileIfRequested(file: File, renameTo: string | undefined): File {
+export function renameFileIfRequested(file: File, renameTo: string | undefined, position = 1): File {
   if (!renameTo) return file
   const ext = (extnameOf(file.name) || '.jpg').toLowerCase()
   const safeBase = renameTo
@@ -271,7 +271,16 @@ export function renameFileIfRequested(file: File, renameTo: string | undefined):
     .replace(/[\s-]*-[\s-]*/g, '-')
     .replace(/^[\s-]+|[\s-]+$/g, '')
     .slice(0, 150) || 'image'
-  const fileName = `${safeBase}${ext}`
+  // ALWAYS indexed, matching buildImageDisplayName on the Worker side.
+  //
+  // This used to emit a bare "<Product Name>.jpg", so one product could end
+  // up with a file named bare and the next named _2 -- and which you got
+  // depended on WHICH ROUTE did the renaming. One shape now: every stored
+  // image is `<Product Name>_<n>`, so sorting is correct by name alone and a
+  // second image is purely additive rather than renaming the first. Matching
+  // still folds a trailing index back, so both spellings resolve to the same
+  // product on re-import.
+  const fileName = `${safeBase}_${Math.max(1, Math.floor(position))}${ext}`
   if (fileName === file.name) return file
   return new File([file], fileName, { type: file.type, lastModified: file.lastModified })
 }

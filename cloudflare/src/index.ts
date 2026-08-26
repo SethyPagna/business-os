@@ -57,7 +57,10 @@ export type Env = {
   // transformations are spent. Absent means that rung of the ladder is
   // skipped -- see lib/imagePipeline.ts.
   CLOUDINARY_CLOUD_NAME?: string
-  CLOUDINARY_UPLOAD_PRESET?: string
+  // Signed uploads: the secret lives in `wrangler secret`, never in [vars],
+  // and nothing publicly writable is created on the Cloudinary side.
+  CLOUDINARY_API_KEY?: string
+  CLOUDINARY_API_SECRET?: string
   IMPORT_QUEUE: Queue
   MEDIA_QUEUE: Queue
   // Optional (wrangler.toml [[queues.producers]] binding) -- see

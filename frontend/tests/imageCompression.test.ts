@@ -60,15 +60,23 @@ console.log('PASS imageCompression pure helpers (dimensions, renaming, format ga
 // failure) -- every path that used to bail out with the untouched original
 // file needs this applied too, not just the "compression succeeded" branch.
 const original = new File([new Uint8Array([1, 2, 3])], 'IMG_00987.JPG', { type: 'image/jpeg' })
+// Indexed, matching the Worker's buildImageDisplayName. Previously this
+// emitted a bare name, so one product could end up with a file named bare and
+// the next named _2 -- and which you got depended on WHICH ROUTE renamed it.
 const renamed = renameFileIfRequested(original, 'Coca-Cola 330ml')
-assert.equal(renamed.name, 'Coca-Cola 330ml.jpg', 'renames the file to the product name, keeping the original extension (lowercased), without re-encoding')
+assert.equal(renamed.name, 'Coca-Cola 330ml_1.jpg', 'renames to the product name plus its index, keeping the original extension (lowercased), without re-encoding')
+assert.equal(
+  renameFileIfRequested(original, 'Coca-Cola 330ml', 2).name,
+  'Coca-Cola 330ml_2.jpg',
+  'a later sibling takes its own index rather than renaming the first',
+)
 assert.equal(renamed.type, 'image/jpeg', 'preserves the original mime type when only renaming')
 assert.equal(renamed.size, original.size, 'preserves the original bytes when only renaming (no re-encode)')
 
 const untouched = renameFileIfRequested(original, undefined)
 assert.equal(untouched, original, 'returns the exact same File instance when no rename target is given')
 
-const alreadyNamed = new File([new Uint8Array([1])], 'Coca-Cola 330ml.jpg', { type: 'image/jpeg' })
+const alreadyNamed = new File([new Uint8Array([1])], 'Coca-Cola 330ml_1.jpg', { type: 'image/jpeg' })
 assert.equal(renameFileIfRequested(alreadyNamed, 'Coca-Cola 330ml'), alreadyNamed, 'is a no-op when the file already has the target name')
 
 console.log('PASS imageCompression renameFileIfRequested fallback path')
