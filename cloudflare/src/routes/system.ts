@@ -14,6 +14,19 @@ import { bumpVersion } from '../lib/cache'
 import { reportError } from '../lib/errorReporting'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 
+// Each R2 delete is its own subrequest, and a Worker invocation has a
+// hard ceiling on how many it may make. A catalog of ~6,700 products with
+// up to three images each is ~20,000 objects, so firing them all off at
+// once (which is what a single Promise.all over the whole list did) blows
+// that ceiling and takes the whole request down AFTER the database delete
+// has already committed -- the worst possible place to fail.
+//
+// So the deletes are capped and, crucially, REPORTED: whatever is left
+// over is stated in the response rather than being silently treated as
+// deleted. Those objects are no longer referenced by any product row, so
+// they surface in the Library and can be removed there.
+const MAX_IMAGE_DELETES_PER_RESET = 200
+
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
 app.use('*', requireAuth)
@@ -140,11 +153,62 @@ app.post('/reset-data', async (c) => {
   const user = c.get('user')
 
   if (mode === 'products') {
+    // ONE list, used for both the backup and the delete. Deriving them
+    // separately is how a scoped backup ends up unable to undo the reset
+    // it was taken for, so the toggles extend this array and both steps
+    // read it.
+    //
+    // Table list + ordering for the base set lives in
+    // lib/coreDataInvariants.ts's PRODUCTS_RESET_TABLES (also what the
+    // regression test runs against), not duplicated here.
+    const tablesToClear: string[] = [...PRODUCTS_RESET_TABLES]
+
+    // Optional add-on: movement/audit trail. Off by default (kept) --
+    // all three tables already store their own product_name/branch_name
+    // snapshot, so they stay accurate and readable even after the
+    // product row is gone.
+    if (includeMovements) {
+      tablesToClear.push('inventory_movements', 'stock_row_moves', 'stock_transfers')
+    }
+
+    // Optional add-on: sales & returns. Off by default (kept) -- same
+    // denormalization reasoning (product_name/applied_price/cost_price
+    // all stored at time of sale), so Dashboard/Sales stats stay accurate
+    // whether or not this toggle is used. Allocation tables are listed
+    // first since they reference sale_items/return_items.
+    if (includeSales) {
+      tablesToClear.push(
+        'return_item_batch_allocations',
+        'sale_item_batch_allocations',
+        'return_items',
+        'returns',
+        'sale_items',
+        'sales',
+      )
+    }
+
+    tablesToClear.push('action_history')
+
     // Hard prerequisite, not a checkbox: a fresh backup must actually
     // succeed before any delete runs. If this throws, the whole request
     // aborts here -- nothing below has touched the database yet.
+    //
+    // SCOPED to the tables this reset will actually clear, not the whole
+    // database. The full createCloudflareBackup walks all ~34 backup
+    // tables and lists every object in the R2 bucket, and running that in
+    // front of the reset is what produced the reported
+    // `POST /api/system/reset-data - Exceeded CPU Limit`: the request died
+    // inside the backup, before touching any data, so the reset never ran
+    // at all. /reset-section hit the identical wall and was fixed the
+    // identical way; this mode was simply missed.
+    //
+    // Correctness is not traded for the speed: a backup covering exactly
+    // what is about to be deleted is precisely what is needed to undo it,
+    // and restore already handles a partial table set (see
+    // createSectionBackup's own comment). What it does NOT cover is the
+    // rest of the database -- which this reset does not touch either.
     try {
-      await createCloudflareBackup(c.env, 'manual')
+      await createSectionBackup(c.env, tablesToClear, 'manual')
     } catch (error) {
       return c.json({
         success: false,
@@ -173,47 +237,7 @@ app.post('/reset-data', async (c) => {
         imageKeysToDelete = sanitizeMediaList(rawPaths).map((p) => p.replace(/^\/+/, ''))
       }
 
-      const productResetStatements: Array<{ sql: string }> = [
-        // Live inventory tied to products -- not snapshotted anywhere,
-        // meaningless once the product is gone, so these always follow
-        // the product regardless of any keep/delete toggle. Table list +
-        // ordering lives in lib/coreDataInvariants.ts's
-        // PRODUCTS_RESET_TABLES (also what the regression test runs
-        // against), not duplicated here.
-        ...PRODUCTS_RESET_TABLES.map((table) => ({ sql: `DELETE FROM "${table}"` })),
-      ]
-
-      // Optional add-on: movement/audit trail. Off by default (kept) --
-      // all three tables already store their own product_name/branch_name
-      // snapshot, so they stay accurate and readable even after the
-      // product row above is gone.
-      if (includeMovements) {
-        productResetStatements.push(
-          { sql: 'DELETE FROM inventory_movements' },
-          { sql: 'DELETE FROM stock_row_moves' },
-          { sql: 'DELETE FROM stock_transfers' },
-        )
-      }
-
-      // Optional add-on: sales & returns. Off by default (kept) -- same
-      // denormalization reasoning (product_name/applied_price/cost_price
-      // all stored at time of sale), so Dashboard/Sales stats stay
-      // accurate whether or not this toggle is used. Allocation tables
-      // deleted first since they reference sale_items/return_items.
-      if (includeSales) {
-        productResetStatements.push(
-          { sql: 'DELETE FROM return_item_batch_allocations' },
-          { sql: 'DELETE FROM sale_item_batch_allocations' },
-          { sql: 'DELETE FROM return_items' },
-          { sql: 'DELETE FROM returns' },
-          { sql: 'DELETE FROM sale_items' },
-          { sql: 'DELETE FROM sales' },
-        )
-      }
-
-      productResetStatements.push({ sql: 'DELETE FROM action_history' })
-
-      await db.batch(productResetStatements)
+      await db.batch(tablesToClear.map((table) => ({ sql: `DELETE FROM "${table}"` })))
       // Deliberately NOT touched by either toggle: customers, suppliers,
       // delivery_contacts, custom_fields, import job history, and every
       // settings/user/branch/category/unit table.
@@ -233,20 +257,23 @@ app.post('/reset-data', async (c) => {
       // a partial R2 failure here never rolls back or fails the D1 delete
       // that already succeeded, it's just reported back to the caller.
       const imageDeleteErrors: string[] = []
+      let imagesDeleted = 0
+      const imagesOverCap = Math.max(0, imageKeysToDelete.length - MAX_IMAGE_DELETES_PER_RESET)
       if (includeImages && imageKeysToDelete.length) {
-        await Promise.all(imageKeysToDelete.map(async (key) => {
+        for (const key of imageKeysToDelete.slice(0, MAX_IMAGE_DELETES_PER_RESET)) {
           try {
             await deleteObject(c.env.ASSETS, key)
+            imagesDeleted += 1
           } catch (error) {
             imageDeleteErrors.push(`${key}: ${(error as Error).message || 'unknown error'}`)
           }
-        }))
+        }
       }
 
       const productResetLabelParts = ['products, batches, and branch/batch stock deleted']
       if (includeMovements) productResetLabelParts.push('movement/audit history deleted')
       if (includeSales) productResetLabelParts.push('sales and returns deleted')
-      if (includeImages) productResetLabelParts.push(`${imageKeysToDelete.length} image file(s) deleted`)
+      if (includeImages) productResetLabelParts.push(`${imagesDeleted} image file(s) deleted`)
 
       await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, {
         label: `Products reset - ${productResetLabelParts.join('; ')}`,
@@ -254,7 +281,8 @@ app.post('/reset-data', async (c) => {
         includeMovements,
         includeSales,
         includeImages,
-        imageFilesDeleted: includeImages ? imageKeysToDelete.length : undefined,
+        imageFilesDeleted: includeImages ? imagesDeleted : undefined,
+        imageFilesLeftOverCap: imagesOverCap || undefined,
         imageDeleteErrors: imageDeleteErrors.length || undefined,
       })
 
@@ -275,7 +303,7 @@ app.post('/reset-data', async (c) => {
 
       return c.json({
         success: true,
-        message: `Products reset complete - products, batches, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imageKeysToDelete.length} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (D1 data was still updated correctly).` : ''}`,
+        message: `Products reset complete - products, batches, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
       })
     } catch (error) {
       return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)

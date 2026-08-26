@@ -80,18 +80,41 @@ const systemRoute = loadReal('routes/system.ts', {
   },
   '../lib/coreDataInvariants': coreDataInvariants,
   '../lib/backup': {
-    // Real prerequisite under test: mode='products' must call this BEFORE
-    // touching any data, and abort cleanly if it throws. Tracked via a
-    // module-level flag so tests can assert call order/failure handling.
+    // Real prerequisite under test: every mode must call one of these
+    // BEFORE touching any data, and abort cleanly if it throws. Tracked
+    // via module-level flags so tests can assert call order, failure
+    // handling, and -- for the products mode -- WHICH tables the backup
+    // was scoped to.
     createCloudflareBackup: async () => { backupCallLog.push('called'); if (backupShouldFail) throw new Error('simulated backup failure'); return { name: 'fake-backup' } },
+    // mode='products' uses the scoped backup instead: the full one walks
+    // every backup table and lists the whole R2 bucket, which is what
+    // produced the reported `Exceeded CPU Limit` before the reset could
+    // run at all.
+    createSectionBackup: async (_env, tables) => {
+      backupCallLog.push('called')
+      sectionBackupTables = [...tables]
+      if (backupShouldFail) throw new Error('simulated backup failure')
+      return { name: 'fake-section-backup' }
+    },
   },
   '../lib/media': media,
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
 })
 
+// Every table any products-mode toggle can clear. Written out here rather
+// than imported so this test fails if the route quietly starts clearing
+// something new without it being noticed.
+const ALL_RESET_CANDIDATE_TABLES = [
+  'product_images', 'rfid_tags', 'branch_batch_stock', 'product_batches', 'branch_stock', 'products',
+  'inventory_movements', 'stock_row_moves', 'stock_transfers',
+  'return_item_batch_allocations', 'sale_item_batch_allocations', 'return_items', 'returns', 'sale_items', 'sales',
+  'action_history',
+]
+
 let backupCallLog = []
 let backupShouldFail = false
+let sectionBackupTables = null
 
 const app = systemRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
@@ -154,6 +177,7 @@ function seed() {
   deletedObjectKeys = []
   backupCallLog = []
   backupShouldFail = false
+  sectionBackupTables = null
 }
 
 let passed = 0
@@ -212,6 +236,41 @@ async function main() {
     assert.ok(/backup/i.test(json.error || ''), `error message should mention the backup failure, got: ${json.error}`)
     assert.strictEqual(backupCallLog.length, 1, 'backup must have been attempted')
     assert.strictEqual(count('products'), 1, 'products must be UNCHANGED when the pre-reset backup fails -- this is the whole point of the prerequisite')
+  })
+
+  // The failure a scoped backup can introduce, guarded directly: a backup
+  // that misses a table the reset then clears is a backup that cannot undo
+  // the reset it was taken for. The route derives both lists from one
+  // array precisely so these two can never drift.
+  await check('mode=products backs up EXACTLY the tables it is about to clear -- no table is deleted without being backed up first', async () => {
+    for (const toggles of [{}, { includeMovements: true }, { includeSales: true }, { includeMovements: true, includeSales: true }]) {
+      seed()
+      const before = new Map()
+      for (const table of ALL_RESET_CANDIDATE_TABLES) before.set(table, count(table))
+
+      await req('POST', '/reset-data', { mode: 'products', ...toggles })
+
+      assert.ok(Array.isArray(sectionBackupTables), `the scoped backup must have been called for toggles ${JSON.stringify(toggles)}`)
+      const backedUp = new Set(sectionBackupTables)
+      for (const table of ALL_RESET_CANDIDATE_TABLES) {
+        const wasCleared = before.get(table) > 0 && count(table) === 0
+        if (wasCleared) {
+          assert.ok(backedUp.has(table), `${table} was cleared by toggles ${JSON.stringify(toggles)} but was NOT in the scoped backup -- the backup could not undo this reset`)
+        }
+      }
+    }
+  })
+
+  await check('the scoped backup for mode=products does not quietly widen into a full-database dump', async () => {
+    seed()
+    await req('POST', '/reset-data', { mode: 'products' })
+    // The point of scoping: the expensive tables a full backup walks
+    // (and the reason the request exceeded the CPU limit) must not be in
+    // a default products backup, because a default products reset does
+    // not touch them.
+    for (const table of ['sales', 'sale_items', 'inventory_movements', 'customers', 'audit_logs']) {
+      assert.ok(!sectionBackupTables.includes(table), `${table} must not be in a default products-reset backup -- that reset does not delete it`)
+    }
   })
 
   await check('mode=products keeps stored image files by default', async () => {

@@ -3103,7 +3103,7 @@
   "reset_products_deleted": "All products, product batches, branch/batch stock, product images",
   "reset_products_deleted_movements": "all inventory movements and stock transfers",
   "reset_products_deleted_sales": "all sales and returns",
-  "reset_products_desc": "Deletes all products, their batches, and their branch stock and images. Sales, returns, movements, customers, and suppliers are kept by default — pick more below if you want those cleared too. Takes a fresh backup first.",
+  "reset_products_desc": "Deletes all products, their batches, and their branch stock. The image FILES stay in your Library — but each product loses its link to its photo, so after re-importing use Auto-wire images to reconnect them. Sales, returns, movements, customers, and suppliers are kept by default — pick more below if you want those cleared too. Takes a fresh backup first.",
   "reset_products_kept": "Sales, returns, inventory movements, customers, suppliers, contacts, settings, users, branches",
   "reset_products_kept_base": "customers, suppliers, contacts, settings, users, branches",
   "reset_products_label": "Products Only Reset",

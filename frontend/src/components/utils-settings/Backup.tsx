@@ -293,8 +293,11 @@ const LazyFactoryReset = lazyRetry(async () => {
 // step up, 'factory' (everything, unrecoverable) is last. See this
 // section's own render comment for why this tier layer exists.
 const MAINTENANCE_TIERS: Array<{ id: 'section' | 'data' | 'factory'; icon: ComponentType<{ className?: string }>; labelKey: string; label: string; hintKey: string; hint: string }> = [
-  { id: 'section', icon: RotateCcw, labelKey: 'maintenance_tier_section', label: 'Section Reset', hintKey: 'maintenance_tier_section_hint', hint: 'Clear one contact-type section (customers, suppliers, delivery contacts, or audit log) on its own.' },
-  { id: 'data', icon: Trash2, labelKey: 'maintenance_tier_data', label: 'Data Reset', hintKey: 'maintenance_tier_data_hint', hint: 'Sales-only, Products-only, or a full data reset -- users, roles, branches, and settings are kept.' },
+  // Products moved from the Data Reset tier into this one: it clears one
+  // page's data, which is what this tier is for, and sitting next to two
+  // whole-database operations is what made it hard to find.
+  { id: 'section', icon: RotateCcw, labelKey: 'maintenance_tier_section', label: 'Page Reset', hintKey: 'maintenance_tier_section_hint', hint: 'Clear one page on its own -- products, customers, suppliers, delivery contacts, or the audit log. Everything else is kept.' },
+  { id: 'data', icon: Trash2, labelKey: 'maintenance_tier_data', label: 'Data Reset', hintKey: 'maintenance_tier_data_hint', hint: 'Sales-only or a full data reset -- these span the whole database. Users, roles, branches, and settings are kept.' },
   { id: 'factory', icon: ShieldAlert, labelKey: 'maintenance_tier_factory', label: 'Factory Reset', hintKey: 'maintenance_tier_factory_hint', hint: 'Deletes everything and returns the app to factory defaults. The most dangerous option here, and unrecoverable.' },
 ]
 

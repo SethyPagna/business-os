@@ -271,18 +271,49 @@ class R2StreamWriter {
 }
 
 export async function createCloudflareBackup(env: Env, source: 'manual' | 'scheduled' = 'manual') {
+  return writeBackupDocument(env, { tables: BACKUP_TABLES, includeAssets: true, source })
+}
+
+/**
+ * The one backup writer. Streams the manifest straight to R2 a page at a
+ * time, so no table is ever fully resident in the Worker's memory and the
+ * document is never assembled as a single string.
+ *
+ * `tables` is what makes a scoped backup possible: pass every BACKUP_TABLE
+ * for a full backup, or just the tables a reset is about to delete for a
+ * scoped one. `includeAssets` covers the other half of the cost -- listing
+ * and byte-copying R2 objects -- which only a full backup needs.
+ *
+ * Both scopes go through this function on purpose. The scoped backup used
+ * to be a separate, simpler implementation that read whole tables with a
+ * bare `SELECT *` and JSON.stringify'd them in memory; that was fine for
+ * the 1-2 tiny tables it was written for, and would have reintroduced the
+ * original out-of-memory failure the moment it was pointed at `products`.
+ */
+async function writeBackupDocument(
+  env: Env,
+  options: { tables: readonly string[]; includeAssets: boolean; source: 'manual' | 'scheduled' },
+) {
+  const { tables, includeAssets, source } = options
   const createdAt = new Date().toISOString()
   let rowCount = 0
   let tableCount = 0
 
-  const assets = await listAssets(env)
+  const assets = includeAssets ? await listAssets(env) : []
   const backupName = `business-os-cloudflare-${stamp(new Date(createdAt))}`
   const assetsPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/assets/`
 
   let copiedKeys: string[] = []
   let assetCopyProgress: BackupPayload['r2']['assetCopyProgress']
 
-  if (env.BACKUP_QUEUE) {
+  if (!includeAssets) {
+    // A scoped backup lists and copies nothing from R2. Skipping the
+    // bucket listAssets() call and the per-asset get()+put() pairs is
+    // itself a meaningful part of the CPU and subrequest cost a scoped
+    // backup exists to avoid, and none of the tables a scoped backup
+    // covers owns an R2 object that the manifest would need.
+    assetCopyProgress = { nextIndex: 0, complete: true }
+  } else if (env.BACKUP_QUEUE) {
     // Queue-driven path (Part 122): copy the first cap's worth against a
     // snapshot of `assets` fixed at the top of THIS run (not the no-queue
     // fallback's cross-run rotating cursor below -- that cursor is only
@@ -352,7 +383,7 @@ export async function createCloudflareBackup(env: Env, source: 'manual' | 'sched
     await writer.write(`"source":${JSON.stringify(source)},`)
     await writer.write('"runtime":"cloudflare-workers","tables":{')
 
-    for (const table of BACKUP_TABLES) {
+    for (const table of tables) {
       if (!(await tableExists(env, table))) continue
       const columns = await tableColumns(env, table)
       await writer.write(`${tableCount ? ',' : ''}${JSON.stringify(table)}:{"columns":${JSON.stringify(columns)},"rows":[`)
@@ -409,62 +440,33 @@ export async function createCloudflareBackup(env: Env, source: 'manual' | 'sched
   return { key, name: key.slice(CLOUDFLARE_BACKUP_PREFIX.length), createdAt, summary }
 }
 
-// Lightweight backup for /reset-section (system.ts): dumps ONLY the small
-// number of tables that section actually deletes, with no R2 asset listing
-// or copying at all. Added because the full createCloudflareBackup above
-// -- a `SELECT *` + JSON-serialize pass over all ~34 BACKUP_TABLES (sales,
-// sale_items, inventory_movements, audit_logs, etc.) plus a full bucket
-// listAssets() -- was being run synchronously in front of every single
-// customers/suppliers/delivery_contacts/audit_log reset, even though that
-// reset only ever touches 1-2 small tables. On a store with real sales
-// history this genuinely exceeded the Worker's CPU-time limit (user-
-// reported: `POST /api/system/reset-section - Exceeded CPU Limit`, whole
-// request failing with no data changed) -- the backup step meant to make
-// the reset SAFE was actually what was crashing it. `restoreCloudflareBackup`
-// above already only deletes+restores whichever tables are present in
-// `payload.tables` and treats `r2.copiedKeys`/`assetsPrefix` as optional,
-// so a manifest with just these tables and an empty asset list restores
-// correctly with the exact same code path -- no restore-side changes
-// needed. Same manifest format/prefix as a full backup, so it still shows
-// up in `listCloudflareBackups` and is restorable from the same UI.
+// Scoped backup: dumps ONLY the tables a given reset is about to delete,
+// with no R2 asset listing or copying at all.
+//
+// It exists because the full createCloudflareBackup above -- a pass over
+// all ~34 BACKUP_TABLES (sales, sale_items, inventory_movements,
+// audit_logs, ...) plus a full bucket listAssets() -- was being run
+// synchronously in front of resets that only touch a few tables, and on a
+// store with real history that genuinely exceeded the Worker's CPU-time
+// limit: the backup meant to make the reset SAFE was what crashed it.
+// Reported first for /reset-section, then again for /reset-data's
+// products mode ("Exceeded CPU Limit", whole request failing, no data
+// changed).
+//
+// `restoreCloudflareBackup` above already deletes+restores only whichever
+// tables are present in `payload.tables` and treats `r2.copiedKeys`/
+// `assetsPrefix` as optional, so a manifest with a subset of tables and an
+// empty asset list restores correctly through the exact same code path --
+// no restore-side changes needed. Same manifest format/prefix as a full
+// backup, so it still lists in `listCloudflareBackups` and is restorable
+// from the same UI.
+//
+// The caller is responsible for passing EVERY table its reset will delete:
+// a scoped backup that misses one is a backup that cannot undo the reset
+// it was taken for. routes/system.ts derives both lists from the same
+// place for exactly that reason.
 export async function createSectionBackup(env: Env, tables: readonly string[], source: 'manual' | 'scheduled' = 'manual') {
-  const createdAt = new Date().toISOString()
-  const backupTables: BackupPayload['tables'] = {}
-  let rowCount = 0
-
-  for (const table of tables) {
-    if (!(await tableExists(env, table))) continue
-    const columns = await tableColumns(env, table)
-    const result = await env.DB.prepare(`SELECT * FROM ${qid(table)}`).all<Record<string, unknown>>()
-    const rows = result.results || []
-    backupTables[table] = { columns, rows }
-    rowCount += rows.length
-  }
-
-  const backupName = `business-os-cloudflare-${stamp(new Date(createdAt))}`
-  const assetsPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/assets/`
-
-  const payload: BackupPayload = {
-    format: 'business-os-cloudflare-backup',
-    formatVersion: 1,
-    createdAt,
-    source,
-    runtime: 'cloudflare-workers',
-    tables: backupTables,
-    // No asset listing/copying for a section backup -- the sections this
-    // covers (customers/suppliers/delivery_contacts/audit_log) don't carry
-    // their own R2 assets the way products do, and skipping the bucket
-    // listAssets() call is itself a meaningful chunk of the CPU/subrequest
-    // cost this function exists to avoid.
-    r2: { bucket: 'business-os-assets', assets: [], assetsPrefix, copiedKeys: [], assetCopyProgress: { nextIndex: 0, complete: true } },
-    summary: { tableCount: Object.keys(backupTables).length, rowCount, assetCount: 0, assetsBackedUp: 0, assetsSkipped: 0 },
-  }
-  const key = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`
-  await env.ASSETS.put(key, JSON.stringify(payload), {
-    httpMetadata: { contentType: 'application/json; charset=utf-8' },
-    customMetadata: { source, createdAt, format: payload.format },
-  })
-  return { key, name: key.slice(CLOUDFLARE_BACKUP_PREFIX.length), createdAt, summary: payload.summary }
+  return writeBackupDocument(env, { tables, includeAssets: false, source })
 }
 
 // Queue consumer entry point (called from queue.ts's handleBackupQueue for
