@@ -40,6 +40,8 @@ function trim(value: unknown): string {
 
 async function getSettings(env: Env, keys: string[]): Promise<Record<string, string>> {
   const db = getDb(env)
+  // sql-bound-params: bounded by construction -- every caller passes a
+  // fixed, hard-coded list of setting keys.
   const placeholders = keys.map(() => '?').join(',')
   const rows = await db.prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`).all<{ key: string; value: string }>(keys)
   return Object.fromEntries((rows || []).map((r) => [r.key, r.value]))

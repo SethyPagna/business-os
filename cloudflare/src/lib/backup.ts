@@ -622,6 +622,9 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
     const liveColumns = new Set(await tableColumns(env, table))
     const columns = tableBackup.columns.filter((column) => liveColumns.has(column))
     if (!columns.length) continue
+    // sql-bound-params: bounded by construction -- one parameter per
+    // COLUMN, and one statement per row (the row count is handled by
+    // chunkSize below), so this cannot reach D1's 100-parameter limit.
     const placeholders = columns.map(() => '?').join(', ')
     const sql = `INSERT INTO ${qid(table)} (${columns.map(qid).join(', ')}) VALUES (${placeholders})`
     for (const row of tableBackup.rows || []) {

@@ -157,6 +157,8 @@ app.get('/', async (c) => {
   if (!types.length) return c.json({ success: true, jobs: [] })
   await reapStalledImportJobs(c.env)
   const limit = Math.min(200, Math.max(1, Number.parseInt(c.req.query('limit') || '50', 10) || 50))
+  // sql-bound-params: bounded by construction -- permittedTypes() returns
+  // a subset of the fixed import-type enum, never a per-row list.
   const placeholders = types.map(() => '?').join(', ')
   // fileName: the job's own source file (the CSV that was uploaded), not
   // an image asset -- used by the Dashboard's "Recent imports" card so it

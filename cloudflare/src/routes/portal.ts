@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
@@ -331,23 +332,31 @@ async function attachPortalBranchStock(env: Env, products: Array<Record<string, 
   const ids = Array.from(new Set(products.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!ids.length) return products
   const db = getDb(env)
-  const placeholders = ids.map((_, i) => `@id${i}`).join(',')
-  const params: Record<string, unknown> = {}
-  ids.forEach((id, i) => { params[`id${i}`] = id })
-  const rows = await db.prepare(`
-    SELECT bs.product_id AS product_id, b.id AS branch_id, b.name AS branch_name, COALESCE(bs.quantity, 0) AS quantity
-    FROM branches b
-    LEFT JOIN branch_stock bs ON bs.branch_id = b.id AND bs.product_id IN (${placeholders})
-    WHERE b.is_active = 1
-    ORDER BY b.is_default DESC, b.id ASC
-  `).all<{ product_id: number | null; branch_id: number; branch_name: string; quantity: number }>(params)
+  // Chunked for D1's 100-bound-parameter ceiling, and branches read once
+  // instead of per chunk -- see routes/products.ts's attachBranchStock,
+  // which this is the portal-side port of and which took GET /api/products
+  // down in production with exactly this unbounded `IN (...)`.
+  const branchRows = await db.prepare(`
+    SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
+  `).all<{ id: number; name: string }>()
+  const stockRows = await selectInChunks(ids, 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`
+      SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity
+      FROM branch_stock
+      WHERE product_id IN (${sql})
+    `).all<{ product_id: number; branch_id: number; quantity: number }>(params)
+  })
+  const quantityByProductBranch = new Map<string, number>()
+  for (const row of stockRows) quantityByProductBranch.set(`${row.product_id}:${row.branch_id}`, row.quantity)
 
   const byProduct = new Map<number, Array<{ branch_id: number; branch_name: string; quantity: number }>>()
-  for (const id of ids) byProduct.set(id, [])
-  for (const row of rows) {
-    if (!row.product_id) continue
-    if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, [])
-    byProduct.get(row.product_id)!.push({ branch_id: row.branch_id, branch_name: row.branch_name, quantity: row.quantity })
+  for (const id of ids) {
+    byProduct.set(id, branchRows.map((branch) => ({
+      branch_id: branch.id,
+      branch_name: branch.name,
+      quantity: quantityByProductBranch.get(`${id}:${branch.id}`) || 0,
+    })))
   }
   return products.map((product) => ({
     ...product,
@@ -643,13 +652,14 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
   const items = products || []
   if (!items.length) return items
 
+  // Up to 500 rows come back from the query above -- five times D1's
+  // whole per-statement bound-parameter budget.
   const ids = items.map((product) => Number(product.id))
-  const placeholders = ids.map(() => '?').join(',')
-  const imageRows = await db.prepare(`
+  const imageRows = await selectInChunks(ids, 0, (chunk) => db.prepare(`
     SELECT product_id, image_path FROM product_images
-    WHERE product_id IN (${placeholders})
+    WHERE product_id IN (${chunk.map(() => '?').join(',')})
     ORDER BY sort_order ASC, id ASC
-  `).all<{ product_id: number; image_path: string }>(ids)
+  `).all<{ product_id: number; image_path: string }>(chunk))
 
   const imageMap = new Map<number, string[]>()
   for (const row of imageRows || []) {
@@ -1526,13 +1536,15 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     }))
     const fuzzyIds = runFuzzyFallbackMatch(candidates, filters.searchTerms, 'AND').slice(0, PORTAL_FUZZY_FALLBACK_MATCH_CAP)
     if (fuzzyIds.length) {
+      // Inlined as literals rather than bound: this list is capped at 500
+      // (PORTAL_FUZZY_FALLBACK_MATCH_CAP) against a D1 limit of 100 bound
+      // parameters, and neither of the two queries below survives being
+      // chunked -- one is a COUNT(*) over the whole list, the other a
+      // LIMIT/OFFSET page through it. The ids are row ids this handler
+      // just read back from D1, and inlineIntegerIds throws on anything
+      // that is not a safe integer, so no user input reaches the SQL text.
       const fuzzyParams: Record<string, unknown> = { ...params }
-      const idPlaceholders = fuzzyIds.map((id, index) => {
-        const key = `fuzzyId${index}`
-        fuzzyParams[key] = id
-        return `@${key}`
-      })
-      const fuzzyWhereSql = `WHERE ${[...fallbackBaseWhere, `p.id IN (${idPlaceholders.join(', ')})`].join(' AND ')}`
+      const fuzzyWhereSql = `WHERE ${[...fallbackBaseWhere, `p.id IN (${inlineIntegerIds(fuzzyIds)})`].join(' AND ')}`
       const fuzzyTotalRow = await db.prepare(`SELECT COUNT(*) AS count FROM products p ${joinSql} ${fuzzyWhereSql}`).get<{ count: number }>(fuzzyParams)
       total = fuzzyTotalRow?.count || 0
       items = await db.prepare(`

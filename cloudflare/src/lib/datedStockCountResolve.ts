@@ -37,6 +37,7 @@
 //   making unattended; those rows come back in `unresolved` for a human
 //   to resolve, not silently dropped or guessed.
 import type { D1Compat } from './db'
+import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -178,19 +179,24 @@ export async function resolveDatedStockCountRows(
   const barcodes = [...new Set(candidates.map((r) => lower(r.barcode)).filter(Boolean))]
   const names = [...new Set(candidates.map((r) => lower(r.productName)).filter(Boolean))]
 
+  // Each of these lists is one column of an uploaded spreadsheet, so all
+  // three are unbounded -- chunked to stay inside D1's 100-bound-parameter
+  // limit (lib/sqlBinding.ts).
   const bySku = new Map<string, number>()
   if (skus.length) {
-    const inClause = skus.map((_, i) => `@s${i}`).join(', ')
-    const params = Object.fromEntries(skus.map((s, i) => [`s${i}`, s]))
-    const productRows = await db.prepare(`SELECT id, sku FROM products WHERE lower(sku) IN (${inClause})`).all<{ id: number; sku: string }>(params)
+    const productRows = await selectInChunks(skus, 0, (chunk) => {
+      const { sql, params } = buildInClause('s', chunk)
+      return db.prepare(`SELECT id, sku FROM products WHERE lower(sku) IN (${sql})`).all<{ id: number; sku: string }>(params)
+    })
     for (const p of productRows) bySku.set(lower(p.sku), Number(p.id))
   }
 
   const byBarcode = new Map<string, number[]>() // multiple ids = ambiguous, mirrors importEngine.ts's own barcode-collision handling
   if (barcodes.length) {
-    const inClause = barcodes.map((_, i) => `@b${i}`).join(', ')
-    const params = Object.fromEntries(barcodes.map((b, i) => [`b${i}`, b]))
-    const productRows = await db.prepare(`SELECT id, barcode FROM products WHERE lower(barcode) IN (${inClause})`).all<{ id: number; barcode: string }>(params)
+    const productRows = await selectInChunks(barcodes, 0, (chunk) => {
+      const { sql, params } = buildInClause('b', chunk)
+      return db.prepare(`SELECT id, barcode FROM products WHERE lower(barcode) IN (${sql})`).all<{ id: number; barcode: string }>(params)
+    })
     for (const p of productRows) {
       const key = lower(p.barcode)
       const bucket = byBarcode.get(key)
@@ -201,9 +207,10 @@ export async function resolveDatedStockCountRows(
 
   const byName = new Map<string, number[]>() // also tracked as multi -- an exact name match can legitimately collide (e.g. same product name across branches/variants), same "don't silently guess" rule as barcode
   if (names.length) {
-    const inClause = names.map((_, i) => `@n${i}`).join(', ')
-    const params = Object.fromEntries(names.map((n, i) => [`n${i}`, n]))
-    const productRows = await db.prepare(`SELECT id, name FROM products WHERE lower(name) IN (${inClause})`).all<{ id: number; name: string }>(params)
+    const productRows = await selectInChunks(names, 0, (chunk) => {
+      const { sql, params } = buildInClause('n', chunk)
+      return db.prepare(`SELECT id, name FROM products WHERE lower(name) IN (${sql})`).all<{ id: number; name: string }>(params)
+    })
     for (const p of productRows) {
       const key = lower(p.name)
       const bucket = byName.get(key)
@@ -266,9 +273,10 @@ export async function resolveDatedStockCountRows(
   const priceById = new Map<number, { usd: number; khr: number }>()
   const matchedProductIds = [...new Set(matched.map((m) => m.productId))]
   if (matchedProductIds.length) {
-    const inClause = matchedProductIds.map((_, i) => `@p${i}`).join(', ')
-    const params = Object.fromEntries(matchedProductIds.map((id, i) => [`p${i}`, id]))
-    const priceRows = await db.prepare(`SELECT id, selling_price_usd, selling_price_khr FROM products WHERE id IN (${inClause})`).all<{ id: number; selling_price_usd: number | null; selling_price_khr: number | null }>(params)
+    const priceRows = await selectInChunks(matchedProductIds, 0, (chunk) => {
+      const { sql, params } = buildInClause('p', chunk)
+      return db.prepare(`SELECT id, selling_price_usd, selling_price_khr FROM products WHERE id IN (${sql})`).all<{ id: number; selling_price_usd: number | null; selling_price_khr: number | null }>(params)
+    })
     for (const p of priceRows) priceById.set(Number(p.id), { usd: Number(p.selling_price_usd ?? 0), khr: Number(p.selling_price_khr ?? 0) })
   }
 

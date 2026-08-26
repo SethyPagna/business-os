@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { selectInChunks } from '../lib/sqlBinding'
 import { sanitizeMediaList } from '../lib/media'
 import type { Env } from '../index'
 
@@ -41,8 +42,9 @@ app.get('/products', async (c) => {
     return c.json([])
   }
 
+  // Chunked reads: D1 refuses a statement with more than 100 bound
+  // parameters, and this list is every product in the catalog response.
   const productIds = products.map((p) => p.id)
-  const placeholders = productIds.map(() => '?').join(',')
 
   // The original does this per-product-per-branch join with a Postgres-only
   // json_agg(json_build_object(...)) FILTER (WHERE ...) aggregate in one
@@ -53,14 +55,14 @@ app.get('/products', async (c) => {
   // app-side group instead, for consistency with the rest of this
   // migration's style (products.ts, sales.ts, portal.ts all do the same).
   const branches = await db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, lower(name) ASC').all<{ id: number; name: string }>()
-  const stockRows = await db.prepare(`SELECT product_id, branch_id, quantity FROM branch_stock WHERE product_id IN (${placeholders})`).all<{ product_id: number; branch_id: number; quantity: number }>(productIds)
+  const stockRows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT product_id, branch_id, quantity FROM branch_stock WHERE product_id IN (${chunk.map(() => '?').join(',')})`).all<{ product_id: number; branch_id: number; quantity: number }>(chunk))
   const stockByProduct = new Map<number, Map<number, number>>()
   for (const row of stockRows) {
     if (!stockByProduct.has(row.product_id)) stockByProduct.set(row.product_id, new Map())
     stockByProduct.get(row.product_id)!.set(row.branch_id, row.quantity)
   }
 
-  const imageRows = await db.prepare(`SELECT product_id, image_path FROM product_images WHERE product_id IN (${placeholders}) ORDER BY sort_order ASC, id ASC`).all<{ product_id: number; image_path: string }>(productIds)
+  const imageRows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT product_id, image_path FROM product_images WHERE product_id IN (${chunk.map(() => '?').join(',')}) ORDER BY sort_order ASC, id ASC`).all<{ product_id: number; image_path: string }>(chunk))
   const imagesByProduct = new Map<number, string[]>()
   for (const row of imageRows) {
     if (!imagesByProduct.has(row.product_id)) imagesByProduct.set(row.product_id, [])

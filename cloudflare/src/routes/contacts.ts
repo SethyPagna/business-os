@@ -1,5 +1,6 @@
 import { Hono, type Context, type Next } from 'hono'
 import { getDb } from '../lib/db'
+import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier, isAdminControlUser } from '../lib/permissions'
@@ -260,15 +261,10 @@ function conflictResult(error: unknown) {
 // rows (no `page`/`pageSize` query params -> withPoints() runs against every
 // row) blew past that cap with `D1_ERROR: too many SQL variables ... :
 // SQLITE_ERROR` and took the whole `GET /customers` request down with it.
-// Batch the id list into chunks under the limit and merge the results.
-const D1_MAX_BOUND_PARAMS = 90
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = []
-  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size))
-  return chunks
-}
-
+// Batch the id list into chunks under the limit and merge the results --
+// via lib/sqlBinding.ts's chunkForBinding, which is the one place that
+// limit is written down now (this file and notifications.ts each carried
+// their own copy of the constant and the chunker).
 async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promise<Map<number, ReturnType<typeof summarizePoints>>> {
   const result = new Map<number, ReturnType<typeof summarizePoints>>()
   if (customerIds.length === 0) return result
@@ -276,7 +272,7 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   const db = getDb(env)
   const settings = await loadSettingsMap(env)
   const config = buildPortalConfig(settings, env)
-  const idChunks = chunkArray(customerIds, D1_MAX_BOUND_PARAMS)
+  const idChunks = chunkForBinding(customerIds)
 
   const salesRows: Array<{ customer_id: number; sale_status: string | null; total_usd: number; total_khr: number; membership_points_redeemed: number }> = []
   const returnRows: Array<{ customer_id: number; status: string | null; total_refund_usd: number; total_refund_khr: number }> = []
@@ -357,7 +353,7 @@ async function computeContactHistorySummaryMap(
   const result = new Map<number, ContactHistorySummary>()
   if (!ids.length) return result
   const db = getDb(env)
-  const idChunks = chunkArray(ids, D1_MAX_BOUND_PARAMS)
+  const idChunks = chunkForBinding(ids)
 
   if (table === 'customers') {
     const pointsMap = await computeCustomerPointsMap(env, ids)

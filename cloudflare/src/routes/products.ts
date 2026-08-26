@@ -8,6 +8,7 @@ import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions }
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
+import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
@@ -273,28 +274,46 @@ async function attachBranchStock(env: Env, products: Array<Record<string, unknow
   const ids = Array.from(new Set(products.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!ids.length) return products
   const db = getDb(env)
-  const placeholders = ids.map((_, i) => `@id${i}`).join(',')
-  const params: Record<string, unknown> = {}
-  ids.forEach((id, i) => { params[`id${i}`] = id })
-  const rows = await db.prepare(`
-    SELECT bs.product_id AS product_id, b.id AS branch_id, b.name AS branch_name, COALESCE(bs.quantity, 0) AS quantity
-    FROM branches b
-    LEFT JOIN branch_stock bs ON bs.branch_id = b.id AND bs.product_id IN (${placeholders})
-    WHERE b.is_active = 1
-    ORDER BY b.is_default DESC, b.id ASC
-  `).all<{ product_id: number | null; branch_id: number; branch_name: string; quantity: number }>(params)
+  // One `IN (...)` over every product on the page is exactly what took
+  // GET /api/products down in production ("too many SQL variables at
+  // offset 415" -- the 101st placeholder of this very query). A page is
+  // 20 FAMILIES, and a family expands to every same-name row, so the id
+  // count is unbounded no matter how small pageSize is. See sqlBinding.ts.
+  //
+  // Branch rows are read once and joined in JS rather than re-selected per
+  // chunk: `branches` is a handful of rows and repeating them per chunk
+  // would multiply reads for no gain.
+  const branches = await db.prepare(`
+    SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
+  `).all<{ id: number; name: string }>()
+  const stockRows = await selectInChunks(ids, 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`
+      SELECT product_id, branch_id, COALESCE(quantity, 0) AS quantity
+      FROM branch_stock
+      WHERE product_id IN (${sql})
+    `).all<{ product_id: number; branch_id: number; quantity: number }>(params)
+  })
 
-  const byProduct = new Map<number, Array<{ branch_id: number; branch_name: string; quantity: number }>>()
-  for (const id of ids) byProduct.set(id, [])
-  for (const row of rows) {
-    if (!row.product_id) continue
-    if (!byProduct.has(row.product_id)) byProduct.set(row.product_id, [])
-    byProduct.get(row.product_id)!.push({ branch_id: row.branch_id, branch_name: row.branch_name, quantity: row.quantity })
+  const quantityByProductBranch = new Map<string, number>()
+  for (const row of stockRows) {
+    quantityByProductBranch.set(`${row.product_id}:${row.branch_id}`, row.quantity)
   }
-  return products.map((product) => ({
-    ...product,
-    branch_stock: byProduct.get(Number(product.id)) || [],
-  }))
+  // Every active branch is listed for every product, present in
+  // branch_stock or not -- that is what the previous LEFT JOIN produced,
+  // and Products.tsx's branch column reads a missing branch as "no data"
+  // rather than "zero".
+  return products.map((product) => {
+    const productId = Number(product.id)
+    return {
+      ...product,
+      branch_stock: branches.map((branch) => ({
+        branch_id: branch.id,
+        branch_name: branch.name,
+        quantity: quantityByProductBranch.get(`${productId}:${branch.id}`) || 0,
+      })),
+    }
+  })
 }
 
 // Same read-side gap as attachBranchStock originally had, but for images:
@@ -314,15 +333,17 @@ async function attachImageGallery(env: Env, products: Array<Record<string, unkno
   const ids = Array.from(new Set(products.map((p) => Number(p.id)).filter((id) => Number.isFinite(id) && id > 0)))
   if (!ids.length) return products
   const db = getDb(env)
-  const placeholders = ids.map((_, i) => `@id${i}`).join(',')
-  const params: Record<string, unknown> = {}
-  ids.forEach((id, i) => { params[`id${i}`] = id })
-  const rows = await db.prepare(`
-    SELECT product_id, image_path
-    FROM product_images
-    WHERE product_id IN (${placeholders})
-    ORDER BY sort_order ASC, id ASC
-  `).all<{ product_id: number; image_path: string }>(params)
+  // Same unbounded-`IN` hazard as attachBranchStock above; sort order is
+  // per product, so chunking cannot reorder a product's own images.
+  const rows = await selectInChunks(ids, 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`
+      SELECT product_id, image_path
+      FROM product_images
+      WHERE product_id IN (${sql})
+      ORDER BY sort_order ASC, id ASC
+    `).all<{ product_id: number; image_path: string }>(params)
+  })
 
   const byProduct = new Map<number, string[]>()
   for (const row of rows) {
@@ -376,24 +397,26 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
   if (!namesByKey.size) return items
 
   const db = getDb(env)
-  const keys = [...namesByKey.keys()]
-  const placeholders = keys.map((_, i) => `@name${i}`).join(', ')
-  const params: Record<string, unknown> = {}
-  keys.forEach((key, i) => { params[`name${i}`] = key })
-
-  const siblingRows = await db.prepare(`
-    SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
-           p.selling_price_usd, p.selling_price_khr,
-           p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
-           p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
-           p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
-           p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
-           p.discount_badge_color, p.discount_starts_at, p.discount_ends_at,
-           p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at
-    FROM products p
-    WHERE p.is_active = 1
-      AND lower(trim(p.name)) IN (${placeholders})
-  `).all<Record<string, unknown>>(params)
+  // pageSize is clamped to 100, and 100 names is already D1's entire
+  // bound-parameter budget -- one more and this is the same crash
+  // attachBranchStock hit. Chunked rather than capped: dropping names
+  // would silently hide the siblings this whole function exists to find.
+  const siblingRows = await selectInChunks([...namesByKey.keys()], 0, (chunk) => {
+    const { sql, params } = buildInClause('name', chunk)
+    return db.prepare(`
+      SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
+             p.selling_price_usd, p.selling_price_khr,
+             p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
+             p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
+             p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
+             p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
+             p.discount_badge_color, p.discount_starts_at, p.discount_ends_at,
+             p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at
+      FROM products p
+      WHERE p.is_active = 1
+        AND lower(trim(p.name)) IN (${sql})
+    `).all<Record<string, unknown>>(params)
+  })
 
   const extras = (Array.isArray(siblingRows) ? siblingRows : []).filter((row) => {
     const id = Number(row.id)
@@ -1416,20 +1439,21 @@ app.get('/merge-duplicates/preview', async (c) => {
   const previewGroups = await Promise.all(
     groups.map(async (group) => {
       const duplicateIds = group.duplicates.map((d) => d.id)
-      const placeholders = duplicateIds.map((_, i) => `@id${i}`).join(', ')
-      const idParams: Record<string, unknown> = {}
-      duplicateIds.forEach((id, i) => { idParams[`id${i}`] = id })
 
-      const stockRows = duplicateIds.length
-        ? await db
-            .prepare(`SELECT product_id, branch_id, quantity FROM branch_stock WHERE product_id IN (${placeholders})`)
-            .all<{ product_id: number; branch_id: number; quantity: number }>(idParams)
-        : []
-      const batchCountRows = duplicateIds.length
-        ? await db
-            .prepare(`SELECT variant_product_id, COUNT(*) AS cnt FROM product_batches WHERE variant_product_id IN (${placeholders}) AND is_active = 1 GROUP BY variant_product_id`)
-            .all<{ variant_product_id: number; cnt: number }>(idParams)
-        : []
+      const stockRows = await selectInChunks(duplicateIds, 0, (chunk) => {
+        const { sql, params } = buildInClause('id', chunk)
+        return db
+          .prepare(`SELECT product_id, branch_id, quantity FROM branch_stock WHERE product_id IN (${sql})`)
+          .all<{ product_id: number; branch_id: number; quantity: number }>(params)
+      })
+      // GROUP BY is per variant_product_id, so a chunked count is still a
+      // complete count for each product -- no cross-chunk re-aggregation.
+      const batchCountRows = await selectInChunks(duplicateIds, 0, (chunk) => {
+        const { sql, params } = buildInClause('id', chunk)
+        return db
+          .prepare(`SELECT variant_product_id, COUNT(*) AS cnt FROM product_batches WHERE variant_product_id IN (${sql}) AND is_active = 1 GROUP BY variant_product_id`)
+          .all<{ variant_product_id: number; cnt: number }>(params)
+      })
       const batchCountByProductId = new Map<number, number>(batchCountRows.map((r) => [r.variant_product_id, Number(r.cnt) || 0]))
 
       const branchQtyById = new Map<number, number>()
@@ -1811,19 +1835,21 @@ app.post('/zero-quantity-delete', async (c) => {
     return c.json({ success: false, error: 'No product ids provided' }, 400)
   }
 
-  const placeholders = ids.map((_, i) => `@id${i}`).join(', ')
-  const idParams: Record<string, unknown> = {}
-  ids.forEach((id, i) => { idParams[`id${i}`] = id })
-
-  const rows = await db
-    .prepare(`
-      SELECT p.id, p.name, p.stock_quantity AS cachedQuantity, COALESCE(SUM(bs.quantity), 0) AS liveQuantity
-      FROM products p
-      LEFT JOIN branch_stock bs ON bs.product_id = p.id
-      WHERE p.id IN (${placeholders}) AND p.is_active = 1
-      GROUP BY p.id
-    `)
-    .all<{ id: number; name: string | null; cachedQuantity: number; liveQuantity: number }>(idParams)
+  // `ids` comes straight from the request body and is deliberately
+  // unbounded (the zero-quantity sweep selects thousands at a time).
+  // GROUP BY p.id keeps each row's aggregate whole within its chunk.
+  const rows = await selectInChunks(ids, 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db
+      .prepare(`
+        SELECT p.id, p.name, p.stock_quantity AS cachedQuantity, COALESCE(SUM(bs.quantity), 0) AS liveQuantity
+        FROM products p
+        LEFT JOIN branch_stock bs ON bs.product_id = p.id
+        WHERE p.id IN (${sql}) AND p.is_active = 1
+        GROUP BY p.id
+      `)
+      .all<{ id: number; name: string | null; cachedQuantity: number; liveQuantity: number }>(params)
+  })
   const rowById = new Map(rows.map((row) => [row.id, row]))
 
   const deletedIds: number[] = []
@@ -1908,17 +1934,20 @@ app.post('/lookups/replace', async (c) => {
   }
 
   const db = getDb(c.env)
-  const params: Record<string, unknown> = {}
-  fromLookups.forEach((value, index) => { params[`from${index}`] = value })
-  const inClause = fromLookups.map((_, index) => `@from${index}`).join(', ')
-  if (normalizedTarget) params.target = normalizedTarget
-  const result = await db.prepare(`
-    UPDATE products
-    SET ${field} = ${normalizedTarget ? '@target' : 'NULL'}, updated_at = CURRENT_TIMESTAMP
-    WHERE lower(trim(COALESCE(${field}, ''))) IN (${inClause})
-      AND is_active = 1
-  `).run(params)
-  const updatedCount = Number(result.changes || 0)
+  // `@target` is bound in the same statement, so it costs one of the 100
+  // slots the `IN` list is competing for -- hence reservedParams = 1.
+  let updatedCount = 0
+  for (const chunk of chunkForBinding(fromLookups, normalizedTarget ? 1 : 0)) {
+    const { sql, params } = buildInClause('from', chunk)
+    if (normalizedTarget) params.target = normalizedTarget
+    const result = await db.prepare(`
+      UPDATE products
+      SET ${field} = ${normalizedTarget ? '@target' : 'NULL'}, updated_at = CURRENT_TIMESTAMP
+      WHERE lower(trim(COALESCE(${field}, ''))) IN (${sql})
+        AND is_active = 1
+    `).run(params)
+    updatedCount += Number(result.changes || 0)
+  }
 
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'lookup_replace', 'product', null, {
     type,

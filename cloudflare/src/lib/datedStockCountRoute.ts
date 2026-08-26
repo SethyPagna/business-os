@@ -14,6 +14,7 @@
 // gaps progress.md's open item on this feature already lists as separate,
 // unbuilt work (the frontend upload/review UI's job).
 import type { D1Compat } from './db'
+import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
 import {
   computeDatedStockCountPlan,
@@ -68,12 +69,21 @@ export async function buildDatedStockCountPlan(
 ): Promise<{ plan: StockCountPlan } | { error: string; status: 400 | 404 }> {
   const productIds = [...new Set(entries.map((e) => e.productId))]
   const branchIds = [...new Set(entries.map((e) => e.branchId))]
-  const pIn = productIds.map((_, i) => `@p${i}`).join(', ')
-  const bIn = branchIds.map((_, i) => `@b${i}`).join(', ')
-  const pParams = Object.fromEntries(productIds.map((id, i) => [`p${i}`, id]))
-  const bParams = Object.fromEntries(branchIds.map((id, i) => [`b${i}`, id]))
+  // D1 refuses any statement with more than 100 bound parameters, and a
+  // dated stock count is a spreadsheet import -- `productIds` is however
+  // many rows the file had. Branch ids stay whole (a business has a
+  // handful of branches) and are counted as reserved parameters wherever
+  // the two lists share a statement; the product list is what gets
+  // chunked. See lib/sqlBinding.ts.
+  const branchList = buildInClause('b', branchIds)
+  const bIn = branchList.sql
+  const bParams = branchList.params
+  const productChunks = chunkForBinding(productIds, branchIds.length + 1)
 
-  const productRows = await db.prepare(`SELECT id, name FROM products WHERE id IN (${pIn})`).all<{ id: number; name: string }>(pParams)
+  const productRows = await selectInChunks(productIds, 0, (chunk) => {
+    const { sql, params } = buildInClause('p', chunk)
+    return db.prepare(`SELECT id, name FROM products WHERE id IN (${sql})`).all<{ id: number; name: string }>(params)
+  })
   const branchRows = await db.prepare(`SELECT id, name FROM branches WHERE id IN (${bIn})`).all<{ id: number; name: string }>(bParams)
 
   const productById = new Map(productRows.map((p) => [Number(p.id), p.name]))
@@ -98,15 +108,20 @@ export async function buildDatedStockCountPlan(
   // this is scoped to `reason = DATED_STOCK_COUNT_REASON`, not every
   // movement on these rows.
   const pairKeys = new Set(entries.map((e) => `${e.productId}:${e.branchId}`))
-  const priorMovementRows = await db.prepare(
-    `SELECT id, product_id AS productId, branch_id AS branchId, quantity, movement_type AS movementType, created_at AS createdAt
-     FROM inventory_movements
-     WHERE reason = @reason AND product_id IN (${pIn}) AND branch_id IN (${bIn})`,
-  ).all<{ id: number; productId: number; branchId: number; quantity: number; movementType: string; createdAt: string }>({
-    reason: DATED_STOCK_COUNT_REASON,
-    ...pParams,
-    ...bParams,
-  })
+  const priorMovementRows: Array<{ id: number; productId: number; branchId: number; quantity: number; movementType: string; createdAt: string }> = []
+  for (const chunk of productChunks) {
+    const { sql: pIn, params: pParams } = buildInClause('p', chunk)
+    const rows = await db.prepare(
+      `SELECT id, product_id AS productId, branch_id AS branchId, quantity, movement_type AS movementType, created_at AS createdAt
+       FROM inventory_movements
+       WHERE reason = @reason AND product_id IN (${pIn}) AND branch_id IN (${bIn})`,
+    ).all<{ id: number; productId: number; branchId: number; quantity: number; movementType: string; createdAt: string }>({
+      reason: DATED_STOCK_COUNT_REASON,
+      ...pParams,
+      ...bParams,
+    })
+    priorMovementRows.push(...rows)
+  }
   // This same importer's own batch-level provenance for those prior
   // movements (migration 0035) -- needed so reconstructBatchBaseline can
   // reverse only ITS OWN prior batch effects on a rerun, not just its
@@ -116,11 +131,12 @@ export async function buildDatedStockCountPlan(
   const priorMovementIds = priorMovementRows.map((row) => Number(row.id))
   const batchActionsByMovementId = new Map<number, { batchId: number; quantity: number }[]>()
   if (priorMovementIds.length) {
-    const mIn = priorMovementIds.map((_, i) => `@m${i}`).join(', ')
-    const mParams = Object.fromEntries(priorMovementIds.map((id, i) => [`m${i}`, id]))
-    const batchActionRows = await db.prepare(
-      `SELECT movement_id AS movementId, batch_id AS batchId, quantity FROM dated_stock_count_batch_actions WHERE movement_id IN (${mIn})`,
-    ).all<{ movementId: number; batchId: number; quantity: number }>(mParams)
+    const batchActionRows = await selectInChunks(priorMovementIds, 0, (chunk) => {
+      const { sql: mIn, params: mParams } = buildInClause('m', chunk)
+      return db.prepare(
+        `SELECT movement_id AS movementId, batch_id AS batchId, quantity FROM dated_stock_count_batch_actions WHERE movement_id IN (${mIn})`,
+      ).all<{ movementId: number; batchId: number; quantity: number }>(mParams)
+    })
     for (const row of batchActionRows) {
       const key = Number(row.movementId)
       const bucket = batchActionsByMovementId.get(key)
@@ -141,9 +157,14 @@ export async function buildDatedStockCountPlan(
       batchActions: batchActionsByMovementId.get(Number(row.id)),
     }))
 
-  const stockRows = await db.prepare(
-    `SELECT product_id AS productId, branch_id AS branchId, quantity FROM branch_stock WHERE product_id IN (${pIn}) AND branch_id IN (${bIn})`,
-  ).all<{ productId: number; branchId: number; quantity: number }>({ ...pParams, ...bParams })
+  const stockRows: Array<{ productId: number; branchId: number; quantity: number }> = []
+  for (const chunk of productChunks) {
+    const { sql: pIn, params: pParams } = buildInClause('p', chunk)
+    const rows = await db.prepare(
+      `SELECT product_id AS productId, branch_id AS branchId, quantity FROM branch_stock WHERE product_id IN (${pIn}) AND branch_id IN (${bIn})`,
+    ).all<{ productId: number; branchId: number; quantity: number }>({ ...pParams, ...bParams })
+    stockRows.push(...rows)
+  }
   const currentStock: CurrentStock[] = stockRows
     .filter((row) => pairKeys.has(`${row.productId}:${row.branchId}`))
     .map((row) => ({ productId: Number(row.productId), branchId: Number(row.branchId), quantity: Number(row.quantity) || 0 }))
@@ -154,17 +175,21 @@ export async function buildDatedStockCountPlan(
   // appear in `entries`, same as computeDatedStockCountPlan's own
   // batchesByKey grouping already does; simpler to overfetch by product
   // here than to re-derive which branch each batch matters at.
-  const batchRows = await db.prepare(
-    `SELECT id, variant_product_id AS productId, received_at AS receivedAt FROM product_batches WHERE variant_product_id IN (${pIn}) AND is_active = 1`,
-  ).all<{ id: number; productId: number; receivedAt: string | null }>(pParams)
+  const batchRows = await selectInChunks(productIds, 0, (chunk) => {
+    const { sql: pIn, params: pParams } = buildInClause('p', chunk)
+    return db.prepare(
+      `SELECT id, variant_product_id AS productId, received_at AS receivedAt FROM product_batches WHERE variant_product_id IN (${pIn}) AND is_active = 1`,
+    ).all<{ id: number; productId: number; receivedAt: string | null }>(pParams)
+  })
   const batchIds = batchRows.map((b) => Number(b.id))
   let existingBatches: ExistingBatchState[] = []
   if (batchIds.length) {
-    const btIn = batchIds.map((_, i) => `@bt${i}`).join(', ')
-    const btParams = Object.fromEntries(batchIds.map((id, i) => [`bt${i}`, id]))
-    const batchStockRows = await db.prepare(
-      `SELECT batch_id AS batchId, branch_id AS branchId, quantity FROM branch_batch_stock WHERE batch_id IN (${btIn})`,
-    ).all<{ batchId: number; branchId: number; quantity: number }>(btParams)
+    const batchStockRows = await selectInChunks(batchIds, 0, (chunk) => {
+      const { sql: btIn, params: btParams } = buildInClause('bt', chunk)
+      return db.prepare(
+        `SELECT batch_id AS batchId, branch_id AS branchId, quantity FROM branch_batch_stock WHERE batch_id IN (${btIn})`,
+      ).all<{ batchId: number; branchId: number; quantity: number }>(btParams)
+    })
     const batchById = new Map(batchRows.map((b) => [Number(b.id), b]))
     existingBatches = batchStockRows
       .filter((row) => pairKeys.has(`${batchById.get(Number(row.batchId))?.productId}:${row.branchId}`))

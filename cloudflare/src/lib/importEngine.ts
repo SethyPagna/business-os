@@ -54,6 +54,7 @@ import { sanitizeImportedDescription } from './productDescriptionSections'
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
+import { buildInClause, chunkForBinding } from './sqlBinding'
 import {
   parseCsvRows,
   parseDelimitedRowsWindow,
@@ -2725,17 +2726,16 @@ async function applyCrossChunkProductDedupe(
 
   // One indexed lookup for this window's signatures, not the whole ledger.
   const seen = new Map<string, number>()
-  const signatures = [...wanted]
-  const LOOKUP_CHUNK = 100
-  for (let i = 0; i < signatures.length; i += LOOKUP_CHUNK) {
-    const slice = signatures.slice(i, i + LOOKUP_CHUNK)
-    const placeholders = slice.map((_, index) => `@s${index}`).join(', ')
-    const params: Record<string, unknown> = { id: jobId }
-    slice.forEach((value, index) => { params[`s${index}`] = value })
+  // 100 signatures plus @job_id is 101 bound parameters -- one over D1's
+  // hard limit, so the old hand-rolled chunk size failed on its FIRST
+  // chunk against real D1 (better-sqlite3, which the import harness runs
+  // on, allows 32k and hid it). chunkForBinding is told about @id.
+  for (const slice of chunkForBinding([...wanted], 1)) {
+    const { sql, params } = buildInClause('s', slice)
     const rows = await db.prepare(`
       SELECT signature, row_number FROM import_job_row_signatures
-      WHERE job_id = @id AND signature IN (${placeholders})
-    `).all<{ signature: string; row_number: number }>(params)
+      WHERE job_id = @id AND signature IN (${sql})
+    `).all<{ signature: string; row_number: number }>({ ...params, id: jobId })
     for (const row of rows) seen.set(row.signature, Number(row.row_number))
   }
 
@@ -2997,15 +2997,19 @@ async function readSalesGroupWindow(
   `).all<{ group_key: string; first_seq: number }>({ id: jobId, limit, cursor })
   if (!keyRows.length) return []
 
-  const placeholders = keyRows.map((_, index) => `@k${index}`).join(', ')
-  const params: Record<string, unknown> = { id: jobId }
-  keyRows.forEach((row, index) => { params[`k${index}`] = row.group_key })
-  const dataRows = await db.prepare(`
-    SELECT ${SALES_GROUP_KEY_SQL} AS group_key, data_json
-    FROM import_job_source_rows
-    WHERE job_id = @id AND ${SALES_GROUP_KEY_SQL} IN (${placeholders})
-    ORDER BY sequence ASC
-  `).all<{ group_key: string; data_json: string }>(params)
+  // `limit` is ROWS_PER_IMPORT_CHUNK (150), so this list is always over
+  // D1's 100-parameter ceiling on its own -- chunked, with @id reserved.
+  const dataRows: Array<{ group_key: string; data_json: string }> = []
+  for (const slice of chunkForBinding(keyRows.map((row) => row.group_key), 1)) {
+    const { sql, params } = buildInClause('k', slice)
+    const chunkRows = await db.prepare(`
+      SELECT ${SALES_GROUP_KEY_SQL} AS group_key, data_json
+      FROM import_job_source_rows
+      WHERE job_id = @id AND ${SALES_GROUP_KEY_SQL} IN (${sql})
+      ORDER BY sequence ASC
+    `).all<{ group_key: string; data_json: string }>({ ...params, id: jobId })
+    dataRows.push(...chunkRows)
+  }
 
   // Seed in key order first so a group with no rows cannot reorder the
   // window, then fill -- rows arrive in sequence order, so line items keep
@@ -3034,16 +3038,13 @@ async function readRowImagePaths(
   const rowNumbers = rows.map((row) => Number(row._rowNumber)).filter((n) => Number.isFinite(n))
   if (!rowNumbers.length) return undefined
   const found = new Map<number, string>()
-  const LOOKUP_CHUNK = 200
-  for (let i = 0; i < rowNumbers.length; i += LOOKUP_CHUNK) {
-    const slice = rowNumbers.slice(i, i + LOOKUP_CHUNK)
-    const placeholders = slice.map((_, index) => `@r${index}`).join(', ')
-    const params: Record<string, unknown> = { id: jobId }
-    slice.forEach((value, index) => { params[`r${index}`] = value })
+  // Was 200 per chunk -- twice D1's whole per-statement parameter budget.
+  for (const slice of chunkForBinding(rowNumbers, 1)) {
+    const { sql, params } = buildInClause('r', slice)
     const matched = await db.prepare(`
       SELECT row_number, image_path FROM import_job_image_matches
-      WHERE job_id = @id AND row_number IN (${placeholders})
-    `).all<{ row_number: number; image_path: string }>(params)
+      WHERE job_id = @id AND row_number IN (${sql})
+    `).all<{ row_number: number; image_path: string }>({ ...params, id: jobId })
     for (const row of matched) found.set(Number(row.row_number), String(row.image_path))
   }
   return found

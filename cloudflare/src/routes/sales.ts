@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { hasPermission, hasAnyPermission } from '../lib/permissions'
@@ -175,11 +176,13 @@ app.post('/', async (c) => {
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
+  // Chunked for D1's 100-bound-parameter ceiling. A POS cart rarely has
+  // 100 distinct products, but a wholesale/imported sale does, and the
+  // failure mode is a rejected checkout, not a degraded one.
   const productIds = [...new Set(normalized.map((i) => i.product_id))]
-  const placeholders = productIds.map(() => '?').join(',')
-  const products = await db
-    .prepare(`SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id IN (${placeholders})`)
-    .all<{ id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(productIds)
+  const products = await selectInChunks(productIds, 0, (chunk) => db
+    .prepare(`SELECT id, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number; cost_price_khr: number }>(chunk))
   const productMap = new Map(products.map((p) => [p.id, p]))
 
   // D1's batch() is atomic but cannot branch mid-batch (see lib/db.ts) --
@@ -203,10 +206,10 @@ app.post('/', async (c) => {
     const productIdsForBranch = [...new Set(
       stockCheckItems.filter((item) => item.branch_id === branchId).map((item) => item.product_id),
     )]
-    const branchPlaceholders = productIdsForBranch.map(() => '?').join(',')
-    const stockRows = await db
-      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${branchPlaceholders})`)
-      .all<{ product_id: number; quantity: number }>([branchId, ...productIdsForBranch])
+    // reservedParams = 1 for the `branch_id = ?` bound alongside the list.
+    const stockRows = await selectInChunks(productIdsForBranch, 1, (chunk) => db
+      .prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = ? AND product_id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ product_id: number; quantity: number }>([branchId, ...chunk]))
     stockByBranch.set(branchId, new Map(stockRows.map((row) => [row.product_id, row.quantity])))
   }
   for (const item of stockCheckItems) {
@@ -225,10 +228,9 @@ app.post('/', async (c) => {
   const batchCheckItems = stockCheckItems.filter((item) => item.batch_id)
   if (batchCheckItems.length) {
     const batchIds = [...new Set(batchCheckItems.map((item) => item.batch_id as number))]
-    const batchPlaceholders = batchIds.map(() => '?').join(',')
-    const batchStockRows = await db
-      .prepare(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${batchPlaceholders})`)
-      .all<{ batch_id: number; branch_id: number; quantity: number }>(batchIds)
+    const batchStockRows = await selectInChunks(batchIds, 0, (chunk) => db
+      .prepare(`SELECT batch_id, branch_id, quantity FROM branch_batch_stock WHERE batch_id IN (${chunk.map(() => '?').join(',')})`)
+      .all<{ batch_id: number; branch_id: number; quantity: number }>(chunk))
     const batchStockMap = new Map(batchStockRows.map((row) => [`${row.batch_id}:${row.branch_id}`, row.quantity]))
     for (const item of batchCheckItems) {
       const available = batchStockMap.get(`${item.batch_id}:${item.branch_id}`) || 0
@@ -1059,28 +1061,33 @@ app.get('/', async (c) => {
 
   if (sales.length === 0) return c.json([])
 
+  // `limit` above allows up to 500 sales, and D1 refuses a statement with
+  // more than 100 bound parameters -- the Sales page's own list read was
+  // one `?limit=101` away from the same crash GET /api/products hit.
   const saleIds = sales.map((s) => s.id)
-  const placeholders = saleIds.map(() => '?').join(',')
 
-  const itemRows = await db.prepare(`
+  const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
     SELECT si.*, b.name AS branch_name
     FROM sale_items si
     LEFT JOIN branches b ON b.id = si.branch_id
-    WHERE si.sale_id IN (${placeholders})
+    WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
     ORDER BY si.id ASC
-  `).all<{ sale_id: number; [key: string]: unknown }>(saleIds)
+  `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
   const itemsBySale = new Map<number, unknown[]>()
   for (const row of itemRows) {
     if (!itemsBySale.has(row.sale_id)) itemsBySale.set(row.sale_id, [])
     itemsBySale.get(row.sale_id)!.push(row)
   }
 
-  const refundRows = await db.prepare(`
+  // GROUP BY sale_id, and every row for one sale lands in the chunk that
+  // holds that sale's id -- so a chunked aggregate is still a complete
+  // aggregate per sale, with no cross-chunk re-summing needed.
+  const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
     SELECT sale_id, COUNT(*) AS return_count, COALESCE(SUM(total_refund_usd), 0) AS refund_usd, COALESCE(SUM(total_refund_khr), 0) AS refund_khr
     FROM returns
-    WHERE sale_id IN (${placeholders}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+    WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
     GROUP BY sale_id
-  `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(saleIds)
+  `).all<{ sale_id: number; return_count: number; refund_usd: number; refund_khr: number }>(chunk))
   const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r]))
 
   const payload = sales.map((sale) => {
@@ -1153,15 +1160,14 @@ app.get('/stats', async (c) => {
   const revenueSaleIds = rows
     .filter((r) => !['cancelled', 'awaiting_payment'].includes(r.sale_status || 'completed'))
     .map((r) => r.id)
-  const placeholders = revenueSaleIds.map(() => '?').join(',')
-  const refundRows = revenueSaleIds.length
-    ? await db.prepare(`
-        SELECT sale_id, COALESCE(SUM(total_refund_usd), 0) AS refund_usd
-        FROM returns
-        WHERE sale_id IN (${placeholders}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
-        GROUP BY sale_id
-      `).all<{ sale_id: number; refund_usd: number }>(revenueSaleIds)
-    : []
+  // This list is EVERY matching sale (no LIMIT on the query above), so it
+  // is unbounded by construction -- chunked, per-sale aggregate.
+  const refundRows = await selectInChunks(revenueSaleIds, 0, (chunk) => db.prepare(`
+    SELECT sale_id, COALESCE(SUM(total_refund_usd), 0) AS refund_usd
+    FROM returns
+    WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+    GROUP BY sale_id
+  `).all<{ sale_id: number; refund_usd: number }>(chunk))
   const refundBySale = new Map(refundRows.map((r) => [r.sale_id, r.refund_usd || 0]))
   const rowsById = new Map(rows.map((r) => [r.id, r]))
 
@@ -1266,22 +1272,20 @@ app.get('/export', async (c) => {
   }
 
   const saleIds = sales.map((s) => s.id)
-  const placeholders = saleIds.map(() => '?').join(',')
   // Cancelled sales are kept in the detail rows and the by-status
   // breakdown (so the report can show they happened), but excluded from
   // revenue/COGS/top-products, same convention as "active" vs "cancelled"
   // elsewhere in this file (e.g. STOCK_DEDUCTED_STATUSES above).
   const activeSales = sales.filter((s) => s.sale_status !== 'cancelled')
   const activeSaleIds = activeSales.map((s) => s.id)
-  const activePlaceholders = activeSaleIds.map(() => '?').join(',')
 
   const refundRows = activeSaleIds.length
-    ? await db.prepare(`
+    ? await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
         SELECT sale_id, COALESCE(SUM(total_refund_usd), 0) AS refund_usd
         FROM returns
-        WHERE sale_id IN (${placeholders}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
+        WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
         GROUP BY sale_id
-      `).all<{ sale_id: number; refund_usd: number }>(saleIds)
+      `).all<{ sale_id: number; refund_usd: number }>(chunk))
     : []
   const refundsBySale = new Map(refundRows.map((r) => [r.sale_id, r.refund_usd || 0]))
 
@@ -1298,14 +1302,32 @@ app.get('/export', async (c) => {
 
   const byProduct: Array<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }> = []
   if (activeSaleIds.length) {
-    const productRows = await db.prepare(`
+    // The only aggregate here that chunking really does change: a product
+    // can appear in sale_items rows spread across several chunks, and
+    // `ORDER BY ... LIMIT 100` per chunk would rank partial sums. So the
+    // per-chunk groups are re-summed per product, and only then ranked and
+    // truncated -- the top-100 is computed over the whole period, exactly
+    // as the single-statement version did.
+    const chunkRows = await selectInChunks(activeSaleIds, 0, (chunk) => db.prepare(`
       SELECT product_id, product_name, COALESCE(SUM(quantity), 0) AS qty_sold, COALESCE(SUM(total_usd), 0) AS revenue_usd
       FROM sale_items
-      WHERE sale_id IN (${activePlaceholders})
+      WHERE sale_id IN (${chunk.map(() => '?').join(',')})
       GROUP BY product_id, product_name
-      ORDER BY revenue_usd DESC
-      LIMIT 100
-    `).all<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>(activeSaleIds)
+    `).all<{ product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>(chunk))
+    const totalsByProduct = new Map<string, { product_id: number | null; product_name: string | null; qty_sold: number; revenue_usd: number }>()
+    for (const row of chunkRows) {
+      const key = `${row.product_id ?? 'null'}:${row.product_name ?? ''}`
+      const running = totalsByProduct.get(key)
+      if (running) {
+        running.qty_sold += Number(row.qty_sold) || 0
+        running.revenue_usd += Number(row.revenue_usd) || 0
+      } else {
+        totalsByProduct.set(key, { product_id: row.product_id, product_name: row.product_name, qty_sold: Number(row.qty_sold) || 0, revenue_usd: Number(row.revenue_usd) || 0 })
+      }
+    }
+    const productRows = [...totalsByProduct.values()]
+      .sort((a, b) => b.revenue_usd - a.revenue_usd)
+      .slice(0, 100)
     byProduct.push(...productRows.map((r) => ({ ...r, qty_sold: round2(r.qty_sold), revenue_usd: round2(r.revenue_usd) })))
   }
 

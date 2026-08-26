@@ -27,6 +27,7 @@
 // interactive /adjust route already uses for a non-batch-tracked
 // product.
 import type { D1Compat } from './db'
+import { buildInClause, chunkForBinding } from './sqlBinding'
 import type { StockCountPlan, StockCountPlanMovement } from './datedStockCountImport'
 import { receiveBatchStock, removeStockAcrossBatches } from './productBatches'
 
@@ -101,16 +102,17 @@ export async function applyDatedStockCountPlan(
 ): Promise<ApplyDatedStockCountPlanResult> {
   if (plan.movementsToDelete.length) {
     // D1/SQLite has no array bind -- build the IN(...) list as its own
-    // positional-safe placeholders rather than a single array param.
-    const placeholders = plan.movementsToDelete.map((_, i) => `@id${i}`).join(', ')
-    const params: Record<string, unknown> = {}
-    plan.movementsToDelete.forEach((id, i) => { params[`id${i}`] = id })
-    await db.prepare(`DELETE FROM inventory_movements WHERE id IN (${placeholders})`).run(params)
-    // No FK cascade (migration 0035's own comment) -- this importer owns
-    // both tables, so it deletes a superseded movement's provenance rows
-    // itself, same "delete what you own" step this DELETE already does
-    // for the movement row.
-    await db.prepare(`DELETE FROM dated_stock_count_batch_actions WHERE movement_id IN (${placeholders})`).run(params)
+    // positional-safe placeholders rather than a single array param, and
+    // split it so no one statement exceeds D1's 100-parameter limit.
+    for (const chunk of chunkForBinding(plan.movementsToDelete)) {
+      const { sql, params } = buildInClause('id', chunk)
+      await db.prepare(`DELETE FROM inventory_movements WHERE id IN (${sql})`).run(params)
+      // No FK cascade (migration 0035's own comment) -- this importer owns
+      // both tables, so it deletes a superseded movement's provenance rows
+      // itself, same "delete what you own" step this DELETE already does
+      // for the movement row.
+      await db.prepare(`DELETE FROM dated_stock_count_batch_actions WHERE movement_id IN (${sql})`).run(params)
+    }
   }
 
   const batchTrackedGroupKeys = new Set<string>()

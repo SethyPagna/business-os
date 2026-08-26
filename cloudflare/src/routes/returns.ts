@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getPermissionTier } from '../lib/permissions'
@@ -146,10 +147,10 @@ async function fetchSaleItemBatchInfo(
   const map = new Map<number, { batch_id: number | null; batch_label: string | null; batch_expiry_date: string | null }>()
   const ids = [...new Set(saleItemIds)].filter((id) => Number.isFinite(id) && id > 0)
   if (!ids.length) return map
-  const placeholders = ids.map(() => '?').join(',')
-  const rows = await db
-    .prepare(`SELECT id, batch_id, batch_label, batch_expiry_date FROM sale_items WHERE id IN (${placeholders})`)
-    .all<{ id: number; batch_id: number | null; batch_label: string | null; batch_expiry_date: string | null }>(ids)
+  // Chunked for D1's 100-bound-parameter ceiling (see lib/sqlBinding.ts).
+  const rows = await selectInChunks(ids, 0, (chunk) => db
+    .prepare(`SELECT id, batch_id, batch_label, batch_expiry_date FROM sale_items WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; batch_id: number | null; batch_label: string | null; batch_expiry_date: string | null }>(chunk))
   for (const row of rows) map.set(row.id, { batch_id: row.batch_id ?? null, batch_label: row.batch_label ?? null, batch_expiry_date: row.batch_expiry_date ?? null })
   return map
 }
@@ -330,8 +331,7 @@ app.get('/', async (c) => {
   if (!includeItems || returns.length === 0) return c.json(returns)
 
   const ids = returns.map((r) => r.id)
-  const placeholders = ids.map(() => '?').join(',')
-  const itemRows = await db.prepare(`SELECT * FROM return_items WHERE return_id IN (${placeholders}) ORDER BY return_id ASC, id ASC`).all<{ return_id: number; [key: string]: unknown }>(ids)
+  const itemRows = await selectInChunks(ids, 0, (chunk) => db.prepare(`SELECT * FROM return_items WHERE return_id IN (${chunk.map(() => '?').join(',')}) ORDER BY return_id ASC, id ASC`).all<{ return_id: number; [key: string]: unknown }>(chunk))
   const itemsByReturn = new Map<number, unknown[]>()
   for (const row of itemRows) {
     if (!itemsByReturn.has(row.return_id)) itemsByReturn.set(row.return_id, [])
@@ -404,8 +404,7 @@ app.post('/', async (c) => {
   const productIds = [...new Set(body.items.map((i) => Number(i.product_id)).filter((id) => Number.isFinite(id) && id > 0))]
   const productMap = new Map<number, { id: number; name: string; cost_price_usd: number; cost_price_khr: number }>()
   if (productIds.length > 0) {
-    const placeholders = productIds.map(() => '?').join(',')
-    const rows = await db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id IN (${placeholders})`).all<typeof productMap extends Map<number, infer V> ? V : never>(productIds)
+    const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<typeof productMap extends Map<number, infer V> ? V : never>(chunk))
     for (const row of rows) productMap.set(row.id, row)
   }
 
@@ -682,8 +681,7 @@ app.post('/supplier', async (c) => {
   const productIds = [...new Set(body.items.map((i) => Number(i.product_id)))]
   const productNameMap = new Map<number, string>()
   if (productIds.length) {
-    const placeholders = productIds.map(() => '?').join(',')
-    const rows = await db.prepare(`SELECT id, name FROM products WHERE id IN (${placeholders})`).all<{ id: number; name: string }>(productIds)
+    const rows = await selectInChunks(productIds, 0, (chunk) => db.prepare(`SELECT id, name FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<{ id: number; name: string }>(chunk))
     for (const row of rows) productNameMap.set(row.id, row.name)
   }
 

@@ -68,6 +68,8 @@ function loadReal(relPath) {
 // datedStockCountResolve.ts's only real relative import is ./batchCode
 // (self-contained, no further relative imports of its own).
 const relMap = {
+  './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
+  './sqlBinding.ts': () => loadReal('lib/sqlBinding.ts'),
   './batchCode': () => loadReal('lib/batchCode.ts'),
   './batchCode.ts': () => loadReal('lib/batchCode.ts'),
 }

@@ -73,6 +73,8 @@ function loadReal(relPath) {
 // contained (no further relative imports of their own, confirmed by
 // reading them), so no other stubs are needed here.
 const relMap = {
+  './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
+  './sqlBinding.ts': () => loadReal('lib/sqlBinding.ts'),
   './batchCode': () => loadReal('lib/batchCode.ts'),
   './batchCode.ts': () => loadReal('lib/batchCode.ts'),
   './datedStockCountImport': () => loadReal('lib/datedStockCountImport.ts'),

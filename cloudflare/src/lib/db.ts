@@ -47,13 +47,30 @@ function translate(sql: string, params: BindParams): { sql: string; values: unkn
 // query) are deterministic and will fail again identically on retry, so
 // this only retries errors whose message looks infrastructure-related, and
 // only once, after a short delay.
-const TRANSIENT_D1_ERROR_PATTERN = /network|timeout|timed out|internal error|too many|busy|reset|ECONNRESET|fetch failed|D1_ERROR/i
+const TRANSIENT_D1_ERROR_PATTERN = /network|timeout|timed out|internal error|too many requests|busy|reset|ECONNRESET|fetch failed|D1_ERROR/i
+
+// Checked BEFORE the transient pattern, because D1 prefixes essentially
+// every error it surfaces with `D1_ERROR:` -- which the pattern above
+// matches -- so without this list a bad column name, a constraint
+// violation or an over-long parameter list was retried once, doubling its
+// CPU cost inside a Worker that is already fighting a CPU limit, and
+// arriving at the identical failure. These messages come from SQLite
+// itself and are deterministic by definition: the same statement with the
+// same bindings fails the same way every time.
+//
+// `too many SQL variables` is the specific one that motivated this: it is
+// D1's 100-bound-parameter limit (see lib/sqlBinding.ts), and the old
+// bare `too many` alternative in the pattern above classified it as
+// transient. `too many requests` -- rate limiting -- really is transient
+// and is kept.
+const DETERMINISTIC_SQL_ERROR_PATTERN = /too many SQL variables|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input/i
 
 async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    if (DETERMINISTIC_SQL_ERROR_PATTERN.test(message)) throw error
     if (!TRANSIENT_D1_ERROR_PATTERN.test(message)) throw error
     await new Promise((resolve) => setTimeout(resolve, 200))
     return run()

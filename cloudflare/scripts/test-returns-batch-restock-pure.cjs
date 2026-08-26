@@ -91,6 +91,9 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 
 const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/db': { getDb: () => db },
+  // Real, pure -- its chunking is what keeps these reads inside D1's
+  // 100-bound-parameter limit, so a stub would test the stub.
+  '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': permissions,

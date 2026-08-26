@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb, toDbBool } from '../lib/db'
+import { buildInClause, selectInChunks } from '../lib/sqlBinding'
 import type { D1Compat } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
@@ -483,17 +484,23 @@ app.post('/transfer-bulk', async (c) => {
   }
 
   const db = getDb(c.env)
+  // A transfer can carry any number of lines, so both product lookups are
+  // chunked to stay inside D1's 100-bound-parameter limit; @branchId is
+  // reserved out of the stock query's budget.
   const productIds = items.map((item) => item.productId)
-  const idPlaceholders = productIds.map((_, i) => `@id${i}`).join(', ')
-  const idParams: Record<string, unknown> = {}
-  productIds.forEach((id, i) => { idParams[`id${i}`] = id })
 
   const [products, stockRows, fromBranch, toBranch] = await Promise.all([
-    db.prepare(`
-      SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr
-      FROM products WHERE id IN (${idPlaceholders})
-    `).all<ProductIdentityRow>(idParams),
-    db.prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = @branchId AND product_id IN (${idPlaceholders})`).all<{ product_id: number; quantity: number }>({ ...idParams, branchId: fromBranchId }),
+    selectInChunks(productIds, 0, (chunk) => {
+      const { sql, params } = buildInClause('id', chunk)
+      return db.prepare(`
+        SELECT id, name, barcode, purchase_price_usd, purchase_price_khr, selling_price_usd, selling_price_khr
+        FROM products WHERE id IN (${sql})
+      `).all<ProductIdentityRow>(params)
+    }),
+    selectInChunks(productIds, 1, (chunk) => {
+      const { sql, params } = buildInClause('id', chunk)
+      return db.prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = @branchId AND product_id IN (${sql})`).all<{ product_id: number; quantity: number }>({ ...params, branchId: fromBranchId })
+    }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
     db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
   ])
@@ -535,14 +542,17 @@ app.post('/transfer-bulk', async (c) => {
   const batchById = new Map<number, { id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>()
   if (batchItems.length) {
     const batchIds = [...new Set(batchItems.map((item) => item.batchId))]
-    const batchPlaceholders = batchIds.map((_, i) => `@bid${i}`).join(', ')
-    const batchParams: Record<string, unknown> = {}
-    batchIds.forEach((id, i) => { batchParams[`bid${i}`] = id })
     const [batchRows, batchStockRows] = await Promise.all([
-      db.prepare(`SELECT id, variant_product_id, lot_code, expiry_date, notes FROM product_batches WHERE id IN (${batchPlaceholders}) AND is_active = 1`)
-        .all<{ id: number; variant_product_id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>(batchParams),
-      db.prepare(`SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = @branchId AND batch_id IN (${batchPlaceholders})`)
-        .all<{ batch_id: number; quantity: number }>({ ...batchParams, branchId: fromBranchId }),
+      selectInChunks(batchIds, 0, (chunk) => {
+        const { sql, params } = buildInClause('bid', chunk)
+        return db.prepare(`SELECT id, variant_product_id, lot_code, expiry_date, notes FROM product_batches WHERE id IN (${sql}) AND is_active = 1`)
+          .all<{ id: number; variant_product_id: number; lot_code: string | null; expiry_date: string | null; notes: string | null }>(params)
+      }),
+      selectInChunks(batchIds, 1, (chunk) => {
+        const { sql, params } = buildInClause('bid', chunk)
+        return db.prepare(`SELECT batch_id, quantity FROM branch_batch_stock WHERE branch_id = @branchId AND batch_id IN (${sql})`)
+          .all<{ batch_id: number; quantity: number }>({ ...params, branchId: fromBranchId })
+      }),
     ])
     const batchRowById = new Map(batchRows.map((row) => [row.id, row]))
     const batchStockById = new Map(batchStockRows.map((row) => [row.batch_id, Number(row.quantity) || 0]))

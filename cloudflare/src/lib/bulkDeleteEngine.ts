@@ -30,6 +30,7 @@
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
+import { chunkForBinding, selectInChunks } from './sqlBinding'
 import { runD1BatchInChunks } from './importEngine'
 import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
@@ -64,12 +65,21 @@ interface EntityConfig {
 // Exported (alongside ENTITY_CONFIGS below) purely so
 // test-bulk-delete-engine-pure.cjs can exercise the real logic without a
 // live D1 -- both are pure/data, no Env or D1Compat needed to call them.
-export function buildCoreDeleteStatement(config: EntityConfig, chunk: number[]): D1Statement {
-  const placeholders = chunk.map(() => '?').join(',')
-  if (config.deleteMode === 'hard') {
-    return { sql: `DELETE FROM ${config.table} WHERE ${config.idColumn} IN (${placeholders})`, params: chunk as unknown as Record<string, unknown> }
-  }
-  return { sql: `UPDATE ${config.table} SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE ${config.idColumn} IN (${placeholders})`, params: chunk as unknown as Record<string, unknown> }
+// Returns one statement per D1-sized slice of `chunk`, not one statement
+// for the whole chunk: BULK_DELETE_CHUNK_SIZE is a CPU-budget number (500),
+// while D1 refuses any single statement carrying more than 100 bound
+// parameters, so a 500-id `IN (...)` threw `too many SQL variables` and
+// runBulkDeleteJob's catch recorded all 500 ids as *failed deletes* --
+// a silent, total failure that looked like a partial one. The slices go
+// into the same db.batch(), so the chunk is still one atomic unit.
+export function buildCoreDeleteStatements(config: EntityConfig, chunk: number[]): D1Statement[] {
+  return chunkForBinding(chunk).map((slice) => {
+    const placeholders = slice.map(() => '?').join(',')
+    if (config.deleteMode === 'hard') {
+      return { sql: `DELETE FROM ${config.table} WHERE ${config.idColumn} IN (${placeholders})`, params: slice as unknown as Record<string, unknown> }
+    }
+    return { sql: `UPDATE ${config.table} SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE ${config.idColumn} IN (${placeholders})`, params: slice as unknown as Record<string, unknown> }
+  })
 }
 
 const NO_EXTRA_STATEMENTS = async () => []
@@ -82,18 +92,21 @@ export const ENTITY_CONFIGS: Record<BulkDeleteEntityType, EntityConfig> = {
     cacheKey: 'products',
     deleteMode: 'soft',
     buildExtraStatements: async (db, ids, reason, user) => {
-      const placeholders = ids.map(() => '?').join(',')
       // Same movement-logging rule as the single-delete route: one
       // inventory_movements row per branch that still had stock, so the
       // movement history isn't silently missing what a bulk delete removed.
-      const stockRows = await db.prepare(`
-        SELECT bs.product_id AS productId, bs.branch_id AS branchId, bs.quantity AS quantity,
-               p.name AS productName, b.name AS branchName
-        FROM branch_stock bs
-        LEFT JOIN products p ON p.id = bs.product_id
-        LEFT JOIN branches b ON b.id = bs.branch_id
-        WHERE bs.product_id IN (${placeholders}) AND bs.quantity > 0
-      `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null }>(ids)
+      // Chunked for the same reason buildCoreDeleteStatements is.
+      const stockRows = await selectInChunks(ids, 0, (slice) => {
+        const placeholders = slice.map(() => '?').join(',')
+        return db.prepare(`
+          SELECT bs.product_id AS productId, bs.branch_id AS branchId, bs.quantity AS quantity,
+                 p.name AS productName, b.name AS branchName
+          FROM branch_stock bs
+          LEFT JOIN products p ON p.id = bs.product_id
+          LEFT JOIN branches b ON b.id = bs.branch_id
+          WHERE bs.product_id IN (${placeholders}) AND bs.quantity > 0
+        `).all<{ productId: number; branchId: number; quantity: number; productName: string | null; branchName: string | null }>(slice)
+      })
       return stockRows.map((row) => ({
         sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at)
               VALUES (@productId, @productName, @branchId, @branchName, 'delete', @quantity, @reason, @userId, @userName, CURRENT_TIMESTAMP)`,
@@ -223,9 +236,9 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       // per id -- this is the core of why this is fast at 10k+ scale.
       // Soft (products) vs hard (customers/suppliers/delivery_contacts)
       // decided by config.deleteMode -- see buildCoreDeleteStatement.
-      const deleteStatement = buildCoreDeleteStatement(config, chunk)
+      const deleteStatements = buildCoreDeleteStatements(config, chunk)
       const extraStatements = await config.buildExtraStatements(db, chunk, job.reason, user)
-      await runD1BatchInChunks(db, [deleteStatement, ...extraStatements])
+      await runD1BatchInChunks(db, [...deleteStatements, ...extraStatements])
 
       // One audit_logs row per deleted id, batched together with everything
       // above rather than going through audit()'s per-call session lookup --

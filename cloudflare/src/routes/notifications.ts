@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
+import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission } from '../lib/permissions'
 
@@ -25,15 +26,8 @@ app.use('*', requireAuth)
 // any shop with enough customers-with-sales history blew past the cap
 // with `D1_ERROR: too many SQL variables ... : SQLITE_ERROR` and took
 // the whole `/notifications/summary` request down with it. Chunk the id
-// list into batches under the limit and merge, same pattern as contacts.ts.
-const D1_MAX_BOUND_PARAMS = 90
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = []
-  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size))
-  return chunks
-}
-
+// list into batches under the limit and merge, via lib/sqlBinding.ts's
+// shared chunkForBinding (contacts.ts uses the same helper).
 const NOTIFICATION_SETTING_KEYS = [
   'notifications_inventory_enabled',
   'notifications_sales_enabled',
@@ -312,7 +306,7 @@ async function buildLoyaltySection(env: Env, threshold: number): Promise<Notific
   ])
   if (!customerIds.size) return null
 
-  const idChunks = chunkArray([...customerIds], D1_MAX_BOUND_PARAMS)
+  const idChunks = chunkForBinding([...customerIds])
   const customerRows: Array<{ id: number; name: string }> = []
   for (const idChunk of idChunks) {
     const placeholders = idChunk.map(() => '?').join(',')

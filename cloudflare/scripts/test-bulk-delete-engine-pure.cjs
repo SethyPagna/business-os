@@ -1,6 +1,6 @@
 // Standalone unit tests for the pure, database-free pieces of
 // src/lib/bulkDeleteEngine.ts:
-//   - buildCoreDeleteStatement (soft vs hard delete SQL/params per entity)
+//   - buildCoreDeleteStatements (soft vs hard delete SQL/params per entity)
 //   - ENTITY_CONFIGS (shape/consistency of every registered entity type)
 //
 // Same reasoning as test-import-engine-pure.cjs's own header: no D1/
@@ -32,11 +32,26 @@ const { outputText } = ts.transpileModule(source, {
   fileName: 'bulkDeleteEngine.ts',
 })
 
+// Loads a sibling lib/*.ts for real (transpiled) rather than stubbing it --
+// used for './sqlBinding', whose chunking IS part of what these tests
+// assert, so a stub would test the stub.
+function loadRealLib(relName) {
+  const libPath = path.join(__dirname, '..', 'src', 'lib', `${relName}.ts`)
+  const { outputText: libOut } = ts.transpileModule(fs.readFileSync(libPath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: `${relName}.ts`,
+  })
+  const libModule = { exports: {} }
+  new Function('exports', 'require', 'module', libOut)(libModule.exports, require, libModule)
+  return libModule.exports
+}
+
 // Stub require: only './db', './importEngine', './cache', and
 // '../durable-objects/broadcastHub' are ever requested by the transpiled
 // output (Env/D1Compat/BroadcastChannel are type-only imports, elided by
 // the transpiler) -- anything else falls through to the real require.
 function stubRequire(id) {
+  if (id === './sqlBinding') return loadRealLib('sqlBinding')
   if (id === './db') return { getDb: () => { throw new Error('getDb should not be called by these pure tests') } }
   if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('runD1BatchInChunks should not be called by these pure tests') } }
   if (id === './cache') return { bumpVersion: async () => { throw new Error('bumpVersion should not be called by these pure tests') } }
@@ -48,31 +63,48 @@ const moduleObj = { exports: {} }
 const wrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)
 wrapper(moduleObj.exports, stubRequire, moduleObj, sourcePath, path.dirname(sourcePath))
 
-const { buildCoreDeleteStatement, ENTITY_CONFIGS } = moduleObj.exports
+const { buildCoreDeleteStatements, ENTITY_CONFIGS } = moduleObj.exports
 
 {
-  const stmt = buildCoreDeleteStatement(ENTITY_CONFIGS.products, [1, 2, 3])
+  const statements = buildCoreDeleteStatements(ENTITY_CONFIGS.products, [1, 2, 3])
+  assert.strictEqual(statements.length, 1, 'a chunk inside D1\'s parameter limit stays a single statement')
+  const stmt = statements[0]
   assert.match(stmt.sql, /^UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id IN \(\?,\?,\?\)$/, 'products is a soft delete (UPDATE is_active=0), matching its single-row DELETE route\'s soft-delete behavior')
   assert.deepStrictEqual(stmt.params, [1, 2, 3], 'params are the raw chunk array for positional IN(...) binding, same shape db.batch() accepts elsewhere')
-  console.log('PASS buildCoreDeleteStatement soft-deletes products via UPDATE is_active=0')
+  console.log('PASS buildCoreDeleteStatements soft-deletes products via UPDATE is_active=0')
+}
+
+{
+  // The regression this split exists for: BULK_DELETE_CHUNK_SIZE is 500,
+  // D1 refuses any statement carrying more than 100 bound parameters, and
+  // the old single-statement version turned that hard limit into "all 500
+  // ids failed to delete" via runBulkDeleteJob's per-chunk catch.
+  const ids = Array.from({ length: 500 }, (_, i) => i + 1)
+  const statements = buildCoreDeleteStatements(ENTITY_CONFIGS.products, ids)
+  const bound = statements.map((s) => s.params.length)
+  assert.ok(bound.every((n) => n <= 100), `every statement must stay within D1's 100 bound parameters, got ${JSON.stringify(bound)}`)
+  assert.deepStrictEqual(statements.flatMap((s) => [...s.params]), ids, 'every id is covered exactly once, in order, across the split statements')
+  console.log('PASS buildCoreDeleteStatements splits a 500-id chunk into D1-legal statements without losing an id')
 }
 
 {
   for (const entityType of ['customers', 'suppliers', 'delivery_contacts']) {
-    const stmt = buildCoreDeleteStatement(ENTITY_CONFIGS[entityType], [10, 20])
+    const statements = buildCoreDeleteStatements(ENTITY_CONFIGS[entityType], [10, 20])
+    assert.strictEqual(statements.length, 1, `${entityType}: a two-id chunk is one statement`)
+    const stmt = statements[0]
     const config = ENTITY_CONFIGS[entityType]
     assert.strictEqual(config.deleteMode, 'hard', `${entityType} must be configured as a hard delete -- these tables have no is_active column`)
     assert.match(stmt.sql, new RegExp(`^DELETE FROM ${config.table} WHERE id IN \\(\\?,\\?\\)$`), `${entityType} must hard-delete (real DELETE), matching contacts.ts's existing single-row DELETE /:id for this table`)
     assert.deepStrictEqual(stmt.params, [10, 20], 'params are the raw chunk array')
   }
-  console.log('PASS buildCoreDeleteStatement hard-deletes customers/suppliers/delivery_contacts via DELETE, matching their existing single-row routes (no is_active column on any of the three)')
+  console.log('PASS buildCoreDeleteStatements hard-deletes customers/suppliers/delivery_contacts via DELETE, matching their existing single-row routes (no is_active column on any of the three)')
 }
 
 {
   // Every registered entity must have a buildExtraStatements that resolves
   // to an array (never throws, never returns something unusable) when
   // called with an empty id list -- the shape runBulkDeleteJob always
-  // spreads into a statement array via `[deleteStatement, ...extraStatements]`.
+  // spreads into a statement array via `[...deleteStatements, ...extraStatements]`.
   for (const entityType of Object.keys(ENTITY_CONFIGS)) {
     const config = ENTITY_CONFIGS[entityType]
     assert.ok(config.table && config.idColumn && config.auditEntity && config.cacheKey, `${entityType}'s config is missing a required field`)

@@ -98,7 +98,7 @@ check('image paths are read for the CURRENT WINDOW, not all at once', () => {
   )
   assert.match(
     engine,
-    /WHERE job_id = @id AND row_number IN \(\$\{placeholders\}\)/,
+    /WHERE job_id = @id AND row_number IN \(\$\{sql\}\)/,
     'the lookup must be keyed, not a full scan',
   )
   assert.ok(

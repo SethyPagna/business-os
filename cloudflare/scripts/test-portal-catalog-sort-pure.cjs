@@ -71,6 +71,9 @@ const searchMatch = loadReal('lib/searchMatch.ts')
 
 const portalRoute = loadReal('routes/portal.ts', {
   '../lib/db': { getDb: () => db },
+  // Real, pure -- its chunking is what keeps these reads inside D1's
+  // 100-bound-parameter limit, so a stub would test the stub.
+  '../lib/sqlBinding': loadReal('lib/sqlBinding.ts'),
   // Caching is transparent to what this test asserts (sort order), so the
   // producer is invoked directly -- exercising the real Cache API here would
   // test Workers, not this route's SQL.

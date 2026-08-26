@@ -95,6 +95,8 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
   if (columns.has('created_at') && payload.created_at == null) payload.created_at = nowIso()
   if (columns.has('updated_at') && payload.updated_at == null) payload.updated_at = nowIso()
   const keys = Object.keys(payload).filter((key) => columns.has(key))
+  // sql-bound-params: bounded by construction -- one parameter per COLUMN
+  // of a single row, capped by the table's schema, not by any row count.
   const placeholders = keys.map(() => '?').join(', ')
   const result = await env.DB.prepare(`INSERT INTO "${table}" (${keys.map((key) => `"${key}"`).join(', ')}) VALUES (${placeholders})`)
     .bind(...keys.map((key) => payload[key]))

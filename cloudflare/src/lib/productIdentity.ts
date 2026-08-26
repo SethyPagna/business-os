@@ -1,4 +1,5 @@
 import type { D1Compat } from './db'
+import { buildInClause, selectInChunks } from './sqlBinding'
 import { productDetailSignature, normalizeProductGroupName } from './productDetailRule'
 
 // Applies THE product identity rule (lib/productDetailRule.ts) at branch-
@@ -75,17 +76,21 @@ export async function findIdentityMatches(
   const result = new Map<number, ProductIdentityRow>()
   const nameKeys = [...new Set(sources.map((s) => nameKeyOf(s.name)).filter(Boolean))]
   if (!nameKeys.length) return result
-  const placeholders = nameKeys.map((_, i) => `@nk${i}`).join(', ')
-  const params: Record<string, unknown> = {}
-  nameKeys.forEach((key, i) => { params[`nk${i}`] = key })
-  const candidates = await db
-    .prepare(`
-      SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, name_key
-      FROM products
-      WHERE name_key IN (${placeholders}) AND is_active = 1
-      ORDER BY id ASC
-    `)
-    .all<ProductIdentityRow & { name_key: string }>(params)
+  // `sources` is a whole transfer/import batch, so this list is unbounded
+  // against D1's 100-bound-parameter limit. ORDER BY id survives chunking
+  // because callers group by name_key and only compare within a group,
+  // and a name_key's rows never split across chunks.
+  const candidates = await selectInChunks(nameKeys, 0, (chunk) => {
+    const { sql, params } = buildInClause('nk', chunk)
+    return db
+      .prepare(`
+        SELECT id, name, barcode, cost_price_usd, cost_price_khr, selling_price_usd, selling_price_khr, name_key
+        FROM products
+        WHERE name_key IN (${sql}) AND is_active = 1
+        ORDER BY id ASC
+      `)
+      .all<ProductIdentityRow & { name_key: string }>(params)
+  })
   const candidatesByNameKey = new Map<string, (ProductIdentityRow & { name_key: string })[]>()
   for (const candidate of candidates) {
     if (!candidatesByNameKey.has(candidate.name_key)) candidatesByNameKey.set(candidate.name_key, [])

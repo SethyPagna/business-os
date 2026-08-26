@@ -101,6 +101,9 @@ async function insertTableRow(env: Env, table: string, body: Record<string, unkn
   if (columns.has('created_at') && payload.created_at == null) payload.created_at = isoNow()
   if (columns.has('updated_at') && payload.updated_at == null) payload.updated_at = isoNow()
   const keys = Object.keys(payload).filter((key) => columns.has(key))
+  // sql-bound-params: bounded by construction -- one parameter per COLUMN
+  // of a single row, not per row, so this is capped by the table's schema
+  // (the widest, `products`, is well under D1's 100-parameter limit).
   const result = await env.DB.prepare(`INSERT INTO "${table}" (${keys.map((key) => `"${key}"`).join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`)
     .bind(...keys.map((key) => payload[key]))
     .run()

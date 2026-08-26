@@ -171,6 +171,19 @@ const searchMatchModuleObj = { exports: {} }
 const searchMatchWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', searchMatchOutputText)
 searchMatchWrapper(searchMatchModuleObj.exports, require, searchMatchModuleObj, searchMatchSourcePath, path.dirname(searchMatchSourcePath))
 
+// sqlBinding.ts is pure (no D1/Env dependency) and owns the chunk sizes
+// that keep importEngine's IN(...) lookups inside D1's 100-bound-parameter
+// limit -- loaded for real, since a stub would test the stub.
+const sqlBindingSourcePath = path.join(__dirname, '..', 'src', 'lib', 'sqlBinding.ts')
+const sqlBindingSource = fs.readFileSync(sqlBindingSourcePath, 'utf8')
+const { outputText: sqlBindingOutputText } = ts.transpileModule(sqlBindingSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'sqlBinding.ts',
+})
+const sqlBindingModuleObj = { exports: {} }
+const sqlBindingWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', sqlBindingOutputText)
+sqlBindingWrapper(sqlBindingModuleObj.exports, require, sqlBindingModuleObj, sqlBindingSourcePath, path.dirname(sqlBindingSourcePath))
+
 // The full file also imports real Cloudflare Workers modules (D1, durable
 // objects, etc.) that don't exist / can't run outside a Worker. We only
 // need the pure signature function, which has no such dependency, so
@@ -207,6 +220,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   }
   if (request === './searchMatch') {
     return searchMatchModuleObj.exports // real module -- product write paths call normalizeSearchText/compactSearchText
+  }
+  if (request === './sqlBinding') {
+    return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
   if (stubbable.has(request)) {
     return {} // empty stub -- fine, these truly aren't touched by the functions under test
