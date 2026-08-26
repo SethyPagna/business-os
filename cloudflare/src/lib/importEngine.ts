@@ -2647,10 +2647,11 @@ type ImportChunkState = {
   // to redo per-chunk even if it were window-safe. Cached here as plain
   // arrays (Maps aren't JSON-safe) and reused by every later chunk of the
   // SAME run via rehydrateImageMatchCache below.
-  imageMatch?: ImportImageMatchSummaryJson & {
-    rowImagePathEntries: Array<[number, string]>
-    renamePlanEntries: Array<[string | number, string]>
-  }
+  // Summary counts ONLY -- the per-row paths and the rename plan moved to
+  // import_job_image_matches / import_job_image_renames in migration 0052.
+  // Held here purely as the "already computed" flag and for the finished
+  // job's summary_json; the bulk that made this column expensive is gone.
+  imageMatch?: ImportImageMatchSummaryJson & { hasRenamePlan?: boolean }
   startedAtMs?: number // real wall-clock start of this whole (possibly many-invocation) phase run, for an honest summary_json.timings totalMs at the end
   // NOTE: the cross-chunk in-file duplicate ledger USED to live here as
   // `productSignatures`. It moved to the import_job_row_signatures table in
@@ -2824,14 +2825,67 @@ async function computeAndCacheImageMatch(
   state: ImportChunkState,
 ): Promise<NonNullable<ImportChunkState['imageMatch']>> {
   const match = await computeImportImageMatch(db, jobId, allRows, policyJson)
-  const cached = {
-    ...summarizeImageMatch(match),
-    rowImagePathEntries: [...match.rowImagePaths.entries()],
-    renamePlanEntries: [...match.renamePlan.entries()],
-  }
+
+  // Replace rather than merge: a re-run can legitimately match different
+  // rows (the operator changed a decision, or re-uploaded images), and a
+  // leftover row from the previous attempt would silently attach the wrong
+  // photo to a product.
+  await db.prepare(`DELETE FROM import_job_image_matches WHERE job_id = @id`).run({ id: jobId })
+  await db.prepare(`DELETE FROM import_job_image_renames WHERE job_id = @id`).run({ id: jobId })
+
+  const rowStatements = [...match.rowImagePaths.entries()].map(([rowNumber, imagePath]) => ({
+    sql: `INSERT OR REPLACE INTO import_job_image_matches (job_id, row_number, image_path) VALUES (@id, @rowNumber, @imagePath)`,
+    params: { id: jobId, rowNumber, imagePath },
+  }))
+  if (rowStatements.length) await runD1BatchInChunks(db, rowStatements)
+
+  const renameStatements = [...match.renamePlan.entries()].map(([fileId, newName]) => ({
+    sql: `INSERT OR REPLACE INTO import_job_image_renames (job_id, file_id, new_name) VALUES (@id, @fileId, @newName)`,
+    params: { id: jobId, fileId: String(fileId), newName },
+  }))
+  if (renameStatements.length) await runD1BatchInChunks(db, renameStatements)
+
+  const cached = { ...summarizeImageMatch(match), hasRenamePlan: renameStatements.length > 0 }
   state.imageMatch = cached
   await saveChunkState(db, jobId, cursor, state)
   return cached
+}
+
+// Image paths for just the rows in THIS window.
+//
+// The whole point of migration 0052: loading all 10,000 matched rows to use
+// 150 of them was the cost. Returns undefined when the job has no image
+// match at all, which is what classifyProducts already expects for a
+// CSV-only import.
+async function readRowImagePaths(
+  db: D1Compat,
+  jobId: string,
+  rows: ParsedCsvRow[],
+): Promise<Map<number, string> | undefined> {
+  const rowNumbers = rows.map((row) => Number(row._rowNumber)).filter((n) => Number.isFinite(n))
+  if (!rowNumbers.length) return undefined
+  const found = new Map<number, string>()
+  const LOOKUP_CHUNK = 200
+  for (let i = 0; i < rowNumbers.length; i += LOOKUP_CHUNK) {
+    const slice = rowNumbers.slice(i, i + LOOKUP_CHUNK)
+    const placeholders = slice.map((_, index) => `@r${index}`).join(', ')
+    const params: Record<string, unknown> = { id: jobId }
+    slice.forEach((value, index) => { params[`r${index}`] = value })
+    const matched = await db.prepare(`
+      SELECT row_number, image_path FROM import_job_image_matches
+      WHERE job_id = @id AND row_number IN (${placeholders})
+    `).all<{ row_number: number; image_path: string }>(params)
+    for (const row of matched) found.set(Number(row.row_number), String(row.image_path))
+  }
+  return found
+}
+
+/** The full rename plan. Read once per apply run, on its first chunk. */
+async function readImageRenamePlan(db: D1Compat, jobId: string): Promise<Array<[string, string]>> {
+  const rows = await db
+    .prepare(`SELECT file_id, new_name FROM import_job_image_renames WHERE job_id = @id`)
+    .all<{ file_id: string; new_name: string }>({ id: jobId })
+  return rows.map((row) => [String(row.file_id), String(row.new_name)])
 }
 
 // Persists this chunk's classification results so GET /:id/review (a
@@ -2928,7 +2982,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       ? new Map(groupEntries.slice(cursor, cursor + ROWS_PER_IMPORT_CHUNK).flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
       : undefined
 
-    const rowImagePaths = imageMatchCache ? new Map(imageMatchCache.rowImagePathEntries) : undefined
+    const rowImagePaths = imageMatchCache ? await readRowImagePaths(db, jobId, windowRows) : undefined
     const results = meta.type === 'products'
       ? await classifyProducts(db, windowRows, jobId, meta.policyJson, rowImagePaths)
       : await classifyRows(db, meta.type, windowRows, jobId, meta.policyJson)
@@ -3346,11 +3400,15 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     // match becomes final). Renames are keyed by fileId, global to the
     // job -- not row-window-scoped -- so this only needs to run once, on
     // this run's first chunk, not repeated per window.
-    if (isFreshStart && job.type === 'products' && imageMatchCache?.renamePlanEntries.length) {
+    if (isFreshStart && job.type === 'products' && imageMatchCache?.hasRenamePlan) {
+      // Read here rather than carried in chunk state: this runs on the first
+      // chunk only, so serialising the whole plan on all ~58 of them paid for
+      // something used once.
+      const renamePlanEntries = await readImageRenamePlan(db, jobId)
       const renameRows = await db.prepare(`SELECT id, file_asset_id FROM import_job_files WHERE job_id = @jobId AND kind = 'image'`).all<{ id: number; file_asset_id: number | null }>({ jobId })
       const fileAssetByJobFileId = new Map(renameRows.map((r) => [r.id, r.file_asset_id]))
       const renameStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
-      for (const [fileId, newName] of imageMatchCache.renamePlanEntries) {
+      for (const [fileId, newName] of renamePlanEntries) {
         renameStatements.push({
           sql: `UPDATE import_job_files SET original_name = @name WHERE id = @id`,
           params: { id: fileId, name: newName },
@@ -3374,7 +3432,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
       : undefined
 
-    const rowImagePaths = imageMatchCache ? new Map(imageMatchCache.rowImagePathEntries) : undefined
+    const rowImagePaths = imageMatchCache ? await readRowImagePaths(db, jobId, windowRows) : undefined
     const results = job.type === 'products'
       ? await classifyProducts(db, windowRows, jobId, job.policy_json, rowImagePaths)
       : await classifyRows(db, job.type, windowRows, jobId, job.policy_json)
