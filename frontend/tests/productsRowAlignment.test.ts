@@ -107,19 +107,20 @@ runTest('the column percentages sum to 100%, so table-fixed has nothing to redis
 runTest('a product row uses the shared gutter for its name, so it lands on the same rail', () => {
   assert.match(
     products,
-    /<td className=\{`\$\{indented \? CHILD_ROW_INDENT : ROW_TEXT_GUTTER\} py-2`\}>/,
-    "the name cell must pick ROW_TEXT_GUTTER or CHILD_ROW_INDENT -- a literal px-3 here is what put names off the group title's rail",
+    /<td className=\{`\$\{ROW_TEXT_GUTTER\} py-2`\}>/,
+    "the name cell must use ROW_TEXT_GUTTER for every row -- a child aligns with the group title, no indent",
   )
-  assert.match(products, /import ProductsListSurface, \{ CHILD_ROW_INDENT, ROW_TEXT_GUTTER \}/)
+  assert.match(products, /import ProductsListSurface, \{ ROW_TEXT_GUTTER \}/)
 })
 
-runTest('a grouped child row is indented only slightly, and only when it is actually in a group', () => {
-  // The ask was "a bit spacing", not the ~120px the column widths used to
-  // produce for every row regardless of grouping.
-  const indent = surface.match(/export const CHILD_ROW_INDENT = 'pl-(\d+) pr-\d+'/)
-  assert.ok(indent, 'CHILD_ROW_INDENT must be a plain pl-N pr-N literal (not px-* + pl-*, which resolve by stylesheet order) so Tailwind emits it and it does not conflict')
-  assert.ok(Number(indent![1]) <= 6, `a child indent of pl-${indent![1]} is a step, not a nudge`)
-  // `indented` is only ever true for a row inside a rendered group header.
+runTest('a grouped child row aligns with the group title -- no text indent (the empty image column is the offset)', () => {
+  // Revised (user, mid-turn): a child row shows no image, and that empty
+  // image column already sets the group title's thumbnail apart, so the
+  // child NAME lines up exactly with the group title. There must be no
+  // CHILD_ROW_INDENT applying a text nudge.
+  assert.ok(!/export const CHILD_ROW_INDENT/.test(surface), 'CHILD_ROW_INDENT must be gone -- a child row aligns with the group title, no indent')
+  assert.ok(!/CHILD_ROW_INDENT/.test(products), 'Products.tsx must not apply a child indent any more')
+  // `indented` is still what drops the child's thumbnail (its only remaining job).
   assert.match(surface, /renderDesktopProductRow\(product, \{ indented: showGroupRow \}\)/)
 })
 

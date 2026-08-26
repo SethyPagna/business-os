@@ -21,7 +21,7 @@ import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
-import ProductsListSurface, { CHILD_ROW_INDENT, ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
+import ProductsListSurface, { ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
@@ -2885,12 +2885,14 @@ function ProductsFullEditor() {
                 onTouchStart={(e) => e.stopPropagation()} />
             : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
         </td>
-        {/* Name rail (col 3): a standalone or group-title row uses the
-            shared ROW_TEXT_GUTTER; a grouped CHILD row swaps it for
-            CHILD_ROW_INDENT -- a small nudge right of the group title. The
-            category band sits one column LEFT of this, on the image rail
-            (see ProductsListSurface's geometry note). */}
-        <td className={`${indented ? CHILD_ROW_INDENT : ROW_TEXT_GUTTER} py-2`}>
+        {/* Name rail (col 3): child rows align EXACTLY with the group
+            title -- no text indent. A child row leaves its image cell empty
+            (see the image <td> above), and that empty image column is what
+            visually sets the group title's thumbnail apart from its
+            children, so an extra text indent on top would double the
+            offset. The category band sits one column LEFT of this, on the
+            image rail (see ProductsListSurface's geometry note). */}
+        <td className={`${ROW_TEXT_GUTTER} py-2`}>
           {/* Name cell previously forced align-top on the <td> itself, so
               a row with no meta pills (the common case) sat pinned to the
               top of the row instead of vertically centered like every
