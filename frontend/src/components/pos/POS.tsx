@@ -460,12 +460,12 @@ async function loadPosDeliveryContacts(): Promise<DeliveryContactRecord[]> {
   return getDeliveryContacts() as Promise<DeliveryContactRecord[]>
 }
 
-async function createPosCustomer(payload: CustomerFormState): Promise<Partial<CustomerRecord>> {
+async function createPosCustomer(payload: CustomerFormState & { confirmDuplicate?: boolean }): Promise<Partial<CustomerRecord>> {
   const { createCustomer } = await getContactWriteTransport()
   return createCustomer(payload) as Promise<Partial<CustomerRecord>>
 }
 
-async function createPosDeliveryContact(payload: DeliveryFormState): Promise<Partial<DeliveryContactRecord>> {
+async function createPosDeliveryContact(payload: DeliveryFormState & { confirmDuplicate?: boolean }): Promise<Partial<DeliveryContactRecord>> {
   const { createDeliveryContact } = await getContactWriteTransport()
   return createDeliveryContact(payload) as Promise<Partial<DeliveryContactRecord>>
 }
@@ -1528,14 +1528,35 @@ export default function POS() {
     membershipRedeemUnits: '',
   })
 
-  const handleAddCustomer = async () => {
+  // A create can come back 409 as a duplicate: either a soft "possible
+  // duplicate" (same name already uses this phone -- save again to confirm)
+  // or a hard "phone conflict" (that phone already belongs to someone
+  // else). The POS quick-add used to just surface the raw error and
+  // dead-end (11.8: "add new delivery/customer failed"). Now it acts:
+  // a possible-duplicate retries once confirmed, and a phone-conflict
+  // selects the existing contact instead -- the "create vs select the
+  // existing" choice the user asked for, made automatically at checkout.
+  const readDuplicateError = (error: unknown): { code: 'possible_duplicate' | 'phone_conflict'; id: number | null; name: string } | null => {
+    const e = error as { code?: unknown; duplicate?: { id?: unknown; name?: unknown } } | null
+    const code = e?.code
+    if (code !== 'possible_duplicate' && code !== 'phone_conflict') return null
+    const dup = e?.duplicate || {}
+    const id = Number(dup.id)
+    return { code, id: Number.isFinite(id) && id > 0 ? id : null, name: String(dup.name || '') }
+  }
+
+  const handleAddCustomer = async (confirmDuplicateArg: unknown = false) => {
+    // The QuickAddModal save button forwards its click event here, so only
+    // an explicit boolean true (from the possible-duplicate retry below)
+    // counts as a confirmation -- a MouseEvent must not.
+    const confirmDuplicate = confirmDuplicateArg === true
     if (!newCustomerForm.name.trim()) return notify('Name required', 'error')
     if (savingCustomerRef.current) return
     savingCustomerRef.current = true
     setSavingCustomer(true)
     try {
       const created = await withLoaderTimeout(
-        () => createPosCustomer(newCustomerForm),
+        () => createPosCustomer(confirmDuplicate ? { ...newCustomerForm, confirmDuplicate: true } : newCustomerForm),
         'Create POS customer',
         POS_CUSTOMER_CREATE_TIMEOUT_MS,
       )
@@ -1557,6 +1578,32 @@ export default function POS() {
       setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
       await loadCustomers('POS refresh customers after create')
     } catch (e) {
+      const dup = readDuplicateError(e)
+      if (dup?.code === 'possible_duplicate' && !confirmDuplicate) {
+        // The person deliberately chose "add new"; the backend just wants a
+        // confirm that this is a different contact. Retry once, confirmed.
+        savingCustomerRef.current = false
+        setSavingCustomer(false)
+        return handleAddCustomer(true)
+      }
+      if (dup?.code === 'phone_conflict' && dup.id) {
+        // That phone already belongs to someone -- select THEM instead of
+        // failing. Refresh the list so the full record is available, then
+        // pick it out; fall back to a minimal record if the refresh misses.
+        try {
+          const refreshed = await loadCustomers('POS select existing after phone conflict') as unknown
+          const list = Array.isArray(refreshed) ? refreshed as CustomerRecord[] : customers
+          const existing = list.find((customer) => String(customer.id) === String(dup.id))
+            || { id: dup.id, name: dup.name, phone: newCustomerForm.phone, address: '', email: '', membership_number: '' } as CustomerRecord
+          await selectCustomer(existing)
+          setShowAddCustomer(false)
+          setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
+          notify(t('customer_phone_exists_selected') || `That phone already belongs to ${dup.name} — selected them.`)
+          return
+        } catch {
+          // fall through to the generic error below
+        }
+      }
       notify(getErrorMessage(e), 'error')
     } finally {
       savingCustomerRef.current = false
@@ -1572,7 +1619,8 @@ export default function POS() {
   }
   const clearDelivery = () => patchActive({ selectedDelivery: null, deliverySearch: '' })
 
-  const handleAddDelivery = async () => {
+  const handleAddDelivery = async (confirmDuplicateArg: unknown = false) => {
+    const confirmDuplicate = confirmDuplicateArg === true
     if (!newDeliveryForm.name.trim() && !newDeliveryForm.phone.trim()) {
       return notify('Driver name or phone is required', 'error')
     }
@@ -1583,6 +1631,7 @@ export default function POS() {
       const payload = {
         ...newDeliveryForm,
         name: newDeliveryForm.name.trim() || `Driver ${newDeliveryForm.phone.trim()}`,
+        ...(confirmDuplicate ? { confirmDuplicate: true } : {}),
       }
       const res = await withLoaderTimeout(
         () => createPosDeliveryContact(payload),
@@ -1596,6 +1645,22 @@ export default function POS() {
       setShowAddDelivery(false)
       setNewDeliveryForm({ name: '', phone: '', area: '' })
     } catch (e) {
+      const dup = readDuplicateError(e)
+      if (dup?.code === 'possible_duplicate' && !confirmDuplicate) {
+        savingDeliveryRef.current = false
+        setSavingDelivery(false)
+        return handleAddDelivery(true)
+      }
+      if (dup?.code === 'phone_conflict' && dup.id) {
+        // Select the existing driver that already owns this phone.
+        const existing = deliveryContacts.find((contact) => String(contact.id) === String(dup.id))
+          || { id: dup.id, name: dup.name, phone: newDeliveryForm.phone, area: newDeliveryForm.area } as DeliveryContactRecord
+        selectDelivery(existing)
+        setShowAddDelivery(false)
+        setNewDeliveryForm({ name: '', phone: '', area: '' })
+        notify(t('delivery_phone_exists_selected') || `That phone already belongs to ${dup.name} — selected them.`)
+        return
+      }
       notify(getErrorMessage(e), 'error')
     } finally {
       savingDeliveryRef.current = false

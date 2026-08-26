@@ -283,6 +283,10 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   const error = new Error(parsed?.error || text || `HTTP ${status}`) as ApiRuntimeError
   error.status = status
   error.code = parsed?.code || null
+  // Carry the duplicate/phone-conflict match so a caller (e.g. POS quick-add)
+  // can offer to SELECT the existing contact instead of dead-ending on the
+  // 409 -- see routes/contacts.ts's duplicateErrorResponse.
+  error.duplicate = parsed?.duplicate || null
   error.transientGateway = isTransientGatewayError(status)
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
