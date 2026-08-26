@@ -28,6 +28,18 @@ const MIGRATION_SQLS = loadAll()
 // The real strict matcher, transpiled -- reimplementing the rule here would
 // test this file's copy of it.
 const ts = require(path.join(cloudflareRoot, 'node_modules', 'typescript'))
+const matcherPipeline = (() => {
+  const src = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'imagePipeline.ts'), 'utf8')
+  const { outputText } = ts.transpileModule(src, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'imagePipeline.ts',
+  })
+  const mod = { exports: {} }
+  const shim = (r) => (r === './quotaGuard' || r === './analytics' || r === '../index') ? {} : require(r)
+  new Function('exports', 'require', 'module', outputText)(mod.exports, shim, mod)
+  return mod.exports
+})()
+
 const matcher = (() => {
   const src = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'importImageMatch.ts'), 'utf8')
   const { outputText } = ts.transpileModule(src, {
@@ -53,13 +65,58 @@ check('the band matches the browser pipeline exactly', async () => {
   assert.match(browser, /targetBytes: 300 \* 1024/, 'browser floor must be the same number')
 })
 
-check('AVIF is tried before WebP, and quality descends', async () => {
+check('AVIF is tried before WebP', async () => {
   assert.match(pipeline, /FORMAT_LADDER = \['image\/avif', 'image\/webp'\]/, 'AVIF is 30-50% smaller at equal quality')
-  const ladder = pipeline.match(/QUALITY_LADDER = \[([^\]]+)\]/)
-  assert.ok(ladder, 'quality ladder not found')
-  const values = ladder[1].split(',').map((v) => Number(v.trim()))
-  assert.deepEqual(values, [...values].sort((a, b) => b - a), 'quality must descend, or "first under the ceiling" is not the best fit')
-  assert.equal(values[0], 85, 'starts at 85 -- above that the file grows fast for gains the eye does not register')
+})
+
+check('quality reduction is the LAST lever, never the first', async () => {
+  // The three levers are not equally costly to how the image looks. Format is
+  // free, resizing is cheap, and quality reduction is what produces the
+  // blocking and smearing that made compressed images look bad. The plan used
+  // to hold the dimension at 2560 and walk quality down immediately, so the
+  // very first fallback for a large photo was the most damaging one.
+  //
+  // This matters beyond taste: the loop takes the FIRST result under the
+  // ceiling, so whatever comes first is what MOST images actually get.
+  const plan = matcherPipeline.buildAttemptPlan('image/avif')
+  assert.ok(plan.length > 1)
+  assert.equal(plan[0].quality, 85, 'the first attempt must be full quality')
+  assert.equal(plan[0].width, 2560, 'and full size')
+
+  const firstReducedQuality = plan.findIndex((a) => a.quality < 85)
+  const lastFullQuality = plan.map((a) => a.quality).lastIndexOf(85)
+  assert.ok(
+    lastFullQuality < firstReducedQuality,
+    'every full-quality resize must be tried BEFORE any quality reduction',
+  )
+
+  // Within the full-quality run, size steps down monotonically.
+  const fullQualityWidths = plan.filter((a) => a.quality === 85).map((a) => a.width)
+  assert.deepEqual(fullQualityWidths, [...fullQualityWidths].sort((a, b) => b - a), 'sizes descend')
+  // Quality only ever drops at the smallest size -- shrinking further after
+  // already crushing quality would be doing both kinds of damage at once.
+  const reduced = plan.filter((a) => a.quality < 85)
+  assert.ok(reduced.every((a) => a.width === fullQualityWidths[fullQualityWidths.length - 1]),
+    'quality fallback applies only at the smallest dimension')
+  assert.deepEqual(reduced.map((a) => a.quality), [...reduced.map((a) => a.quality)].sort((a, b) => b - a))
+})
+
+check('a transform never upscales a source that is already smaller', async () => {
+  assert.match(pipeline, /fit: 'scale-down'/, 'scale-down is c_limit semantics -- shrink only')
+})
+
+check('image work leaves a reserve for video', async () => {
+  // A video that cannot be processed is a feature that does not work; an
+  // image that misses a pass is merely larger than ideal and the next sweep
+  // catches it. Left to compete freely the 6-hourly image sweep would spend
+  // the month in its first day or two -- it has thousands of candidates and
+  // video has a handful.
+  const guard = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'quotaGuard.ts'), 'utf8')
+  assert.match(guard, /cf_images_transform: 500/, 'reserve held back from the 5,000')
+  assert.match(guard, /export function reservedZoneFor/)
+  assert.match(pipeline, /cloudflareBudget\.reservedZone !== 'critical'/, 'the image path must read the RESERVED zone')
+  assert.match(pipeline, /cloudinaryBudget\.reservedZone !== 'exhausted'/)
+  assert.ok(!/cloudflareBudget\.zone !==/.test(pipeline), 'reading the raw zone here would spend the video reserve')
 })
 
 check('an image already inside the band is not reprocessed', async () => {
@@ -73,8 +130,8 @@ check('Cloudflare steps aside at CRITICAL, not at exhausted', async () => {
   // serve work that has no alternative.
   assert.match(
     pipeline,
-    /if \(cloudflareBudget\.zone !== 'critical' && cloudflareBudget\.zone !== 'exhausted'\)/,
-    'the ladder must step down before the wall',
+    /if \(cloudflareBudget\.reservedZone !== 'critical' && cloudflareBudget\.reservedZone !== 'exhausted'\)/,
+    'the ladder must step down before the wall, and against the RESERVED ceiling',
   )
 })
 
@@ -91,7 +148,7 @@ check('each transform attempt gets a FRESH stream', async () => {
   assert.match(pipeline, /const stream = new Blob\(\[source\]\)\.stream\(\)/)
   const loopBody = pipeline.slice(pipeline.indexOf('for (const format of FORMAT_LADDER)'))
   assert.ok(
-    loopBody.indexOf('new Blob([source]).stream()') < loopBody.indexOf('.output({ format, quality })'),
+    loopBody.indexOf('new Blob([source]).stream()') < loopBody.indexOf('.output({ format: attempt.format, quality: attempt.quality })'),
     'the stream must be created inside the attempt loop',
   )
 })

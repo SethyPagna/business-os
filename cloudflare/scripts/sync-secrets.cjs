@@ -23,7 +23,7 @@ const WRANGLER_BIN = path.join(CLOUDFLARE_DIR, 'node_modules', 'wrangler', 'bin'
 const SECRET_KEYS = [
   'GOOGLE_LOGIN_CLIENT_SECRET',
   'GOOGLE_DRIVE_CLIENT_SECRET',
-  'RESEND_API_KEY',
+  'RESEND_API_KEY', 'CLOUDINARY_API_SECRET', 'APP_ENCRYPTION_KEY',
 ]
 
 function parseEnvFile(filePath) {

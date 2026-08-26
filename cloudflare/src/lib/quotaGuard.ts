@@ -86,6 +86,36 @@ export function windowKeyFor(window: 'day' | 'month', now = new Date()): string 
   return window === 'day' ? iso.slice(0, 10) : iso.slice(0, 7)
 }
 
+// Transformations held back from IMAGE work so video always has some.
+//
+// Video transcodes are far rarer than image ones but far more expensive to go
+// without: an image that misses its optimisation pass is merely larger than
+// ideal and gets picked up by the next sweep, whereas a video that cannot be
+// processed is a feature that does not work. Left to compete freely, the
+// 6-hourly image sweep would spend the whole month's allowance in its first
+// day or two -- it has thousands of candidates and video has a handful.
+//
+// So image callers ask for the RESERVED zone, which treats the ceiling as
+// (limit - reserve) and therefore reaches 'exhausted' early, leaving the
+// remainder untouched for video.
+const VIDEO_RESERVE: Partial<Record<QuotaResource, number>> = {
+  cf_images_transform: 500,   // of 5,000
+  cloudinary_transform: 2500, // of 25,000
+}
+
+/**
+ * Zone as seen by a caller that must leave the video reserve alone.
+ *
+ * Same thresholds, applied against the reduced ceiling -- so an image sweep
+ * backs off while the real quota still has room, and a video request later
+ * that day still finds budget.
+ */
+export function reservedZoneFor(resource: QuotaResource, used: number): QuotaZone {
+  const { limit } = LIMITS[resource]
+  const reserve = VIDEO_RESERVE[resource] || 0
+  return zoneFor(used, Math.max(1, limit - reserve))
+}
+
 export function zoneFor(used: number, limit: number): QuotaZone {
   if (limit <= 0) return 'ok'
   const ratio = used / limit
@@ -101,6 +131,8 @@ export type QuotaStatus = {
   limit: number
   remaining: number
   zone: QuotaZone
+  /** Zone for callers that must leave the video reserve untouched. */
+  reservedZone: QuotaZone
   /** False once the ceiling is reached -- the caller must take its fallback. */
   allowed: boolean
 }
@@ -114,6 +146,10 @@ function buildStatus(resource: QuotaResource, used: number): QuotaStatus {
     limit,
     remaining: Math.max(0, limit - used),
     zone,
+    // What an image caller should read: the same thresholds against a
+    // ceiling reduced by the video reserve, so image work stops early and
+    // leaves the remainder for video.
+    reservedZone: reservedZoneFor(resource, used),
     allowed: zone !== 'exhausted',
   }
 }

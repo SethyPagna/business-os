@@ -71,12 +71,20 @@ function formatHistoryList(items: HistoryItem[] = []) {
   return items.map((item) => item?.label).filter(Boolean).slice(-10).reverse()
 }
 
+// "No longer reversible" read as "this expired", which is not what happened.
+// Undo is held as a live JS closure in the tab that performed the action, so
+// it was never recoverable anywhere else -- not from another tab, and not
+// after a reload. The row IS a faithful record of what was done; it simply
+// was not a thing that could be replayed from here.
+//
+// Calling that "Recorded" is the honest word. The hint explains the actual
+// constraint rather than implying the entry decayed.
 function formatServerStatus(item: HistoryItem, T: Translate, isActionable: boolean) {
   if (item?.status === 'undoable') {
-    return isActionable ? T('undo_available', 'Undo available') : T('history_no_longer_reversible', 'No longer reversible')
+    return isActionable ? T('undo_available', 'Undo available') : T('history_recorded_only', 'Recorded')
   }
   if (item?.status === 'redoable') {
-    return isActionable ? T('redo_available', 'Redo available') : T('history_no_longer_reversible', 'No longer reversible')
+    return isActionable ? T('redo_available', 'Redo available') : T('history_recorded_only', 'Recorded')
   }
   if (item?.status === 'failed') return T('failed', 'Failed')
   return T('recorded', 'Recorded')
@@ -253,7 +261,7 @@ export default function ActionHistoryBar({
                 className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left opacity-70"
                 title={
                   item?.status === 'undoable' || item?.status === 'redoable'
-                    ? T('history_no_longer_reversible_hint', 'This can only be undone/redone from the session where it happened.')
+                    ? T('history_recorded_only_hint', 'Undo is only available in the tab where the action happened, and only until that tab is reloaded. This entry is a record of what was done, not something that can be reversed from here.')
                     : undefined
                 }
               >

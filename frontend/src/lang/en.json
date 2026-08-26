@@ -1496,6 +1496,8 @@
   "history": "History",
   "history_no_longer_reversible": "No longer reversible",
   "history_no_longer_reversible_hint": "This can only be undone/redone from the session where it happened.",
+  "history_recorded_only": "Recorded",
+  "history_recorded_only_hint": "Undo is only available in the tab where the action happened, and only until that tab is reloaded. This entry is a record of what was done, not something that can be reversed from here.",
   "host_ui_local_only": "This action only works on the server machine. Type or paste a server path manually when connected remotely.",
   "host_ui_remote_note": "Remote sessions cannot open the server machine folder dialog or Explorer window. Use Browse folders below or type a server path manually.",
   "hours": "hours",

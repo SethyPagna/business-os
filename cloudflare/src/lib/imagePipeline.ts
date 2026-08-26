@@ -57,22 +57,51 @@ export type OptimizeResult = {
   reason?: string
 }
 
-/**
- * Quality ladder, highest first.
- *
- * Walked in order and the FIRST result at or under the ceiling is taken --
- * which, because quality is monotonically decreasing, is by construction the
- * best-looking one that fits. This is the same rule the browser pipeline uses,
- * and it exists because the obvious alternative (keep the smallest) is what
- * made stored images sit far below their budget.
- *
- * 85 first because that is where the quality/size curve turns: above it the
- * file grows fast for gains the eye does not register.
- */
-const QUALITY_LADDER = [85, 80, 72, 65, 58] as const
-
-/** AVIF first: 30-50% smaller than JPEG at equal quality, WebP a close second. */
+// The attempt plan, ordered LEAST destructive first.
+//
+// Three levers get a file under the ceiling, and they are not equally costly
+// to how the image looks:
+//
+//   1. FORMAT   -- free. AVIF is 30-50% smaller than JPEG at the same
+//                  perceptual quality. Changing container costs nothing
+//                  visually, so it is always tried first.
+//   2. DIMENSION-- cheap. A photo shown at 1280px loses nothing real by being
+//                  stored at 1280px, and a smaller image at HIGH quality
+//                  looks better than a large one that has been crushed.
+//   3. QUALITY  -- crude. This is what produces the blocking and smearing
+//                  that made compressed images look bad, so it is the LAST
+//                  lever and only used once format and size are exhausted.
+//
+// The previous plan had this backwards: it held the dimension at 2560 and
+// walked quality down immediately, so the very first fallback for a large
+// photo was the most visually damaging one available.
+//
+// Ordering matters beyond taste: the loop takes the FIRST result under the
+// ceiling, so whatever comes first in this list is what most images get.
+const MAX_QUALITY = 85
+const DIMENSION_LADDER = [2560, 2048, 1600, 1280] as const
+// Only reached when every dimension at full quality is still too big -- a
+// dense photograph, typically. Applied at the smallest dimension.
+const QUALITY_FALLBACK = [80, 72, 65, 58] as const
+/** AVIF first: smaller at equal quality. WebP when AVIF cannot be produced. */
 const FORMAT_LADDER = ['image/avif', 'image/webp'] as const
+
+type OutputFormat = typeof FORMAT_LADDER[number]
+export type TransformAttempt = { format: OutputFormat; width: number; quality: number }
+
+/**
+ * Every attempt for one format, in order of increasing visual damage.
+ *
+ * Exported so the ordering is directly testable -- a regression here would be
+ * invisible in the output (files would still be under the ceiling) but would
+ * quietly make every stored image worse.
+ */
+export function buildAttemptPlan(format: OutputFormat): TransformAttempt[] {
+  const attempts: TransformAttempt[] = DIMENSION_LADDER.map((width) => ({ format, width, quality: MAX_QUALITY }))
+  const smallest = DIMENSION_LADDER[DIMENSION_LADDER.length - 1]
+  for (const quality of QUALITY_FALLBACK) attempts.push({ format, width: smallest, quality })
+  return attempts
+}
 
 export type ImageInfo = { format?: string; fileSize?: number; width?: number; height?: number }
 
@@ -103,15 +132,16 @@ async function optimizeWithCloudflare(env: Env, source: ArrayBuffer): Promise<Op
   if (!env.IMAGES) return { ok: false, provider: 'cloudflare', reason: 'binding_absent' }
 
   for (const format of FORMAT_LADDER) {
-    for (const quality of QUALITY_LADDER) {
+    for (const attempt of buildAttemptPlan(format)) {
       // A fresh stream per attempt: a ReadableStream is single-use, so
       // reusing one silently yields an empty body on the second try.
       const stream = new Blob([source]).stream()
       try {
         const result = await env.IMAGES
           .input(stream)
-          .transform({ width: IMAGE_MAX_DIMENSION })
-          .output({ format, quality })
+          // c_limit semantics: never enlarge a source that is already smaller.
+          .transform({ width: attempt.width, fit: 'scale-down' })
+          .output({ format: attempt.format, quality: attempt.quality })
         const bytes = await result.response().arrayBuffer()
         if (bytes.byteLength <= IMAGE_MAX_BYTES) {
           return { ok: true, provider: 'cloudflare', bytes, contentType: format, byteSize: bytes.byteLength }
@@ -218,9 +248,14 @@ export async function optimizeImage(
   }
 
   const cloudflareBudget = await readQuota(env, 'cf_images_transform')
-  // Step down at 'critical' rather than 'exhausted', so Cloudflare keeps
-  // headroom for work that has no alternative.
-  if (cloudflareBudget.zone !== 'critical' && cloudflareBudget.zone !== 'exhausted') {
+  // reservedZone, not zone: image work must stop before it eats the slice
+  // held back for video. An image that misses a pass is merely larger than
+  // ideal and the next sweep catches it; a video that cannot be processed is
+  // a feature that does not work.
+  //
+  // Step down at 'critical' rather than 'exhausted' on top of that, so
+  // Cloudflare keeps headroom for anything with no alternative.
+  if (cloudflareBudget.reservedZone !== 'critical' && cloudflareBudget.reservedZone !== 'exhausted') {
     const result = await optimizeWithCloudflare(env, source)
     if (result.ok) {
       await consumeQuota(env, 'cf_images_transform', 1)
@@ -239,7 +274,7 @@ export async function optimizeImage(
   }
 
   const cloudinaryBudget = await readQuota(env, 'cloudinary_transform')
-  if (cloudinaryBudget.zone !== 'exhausted') {
+  if (cloudinaryBudget.reservedZone !== 'exhausted') {
     const result = await optimizeWithCloudinary(env, source, fileName)
     if (result.ok) {
       await consumeQuota(env, 'cloudinary_transform', 1)
