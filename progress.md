@@ -352,6 +352,47 @@ products list reads, closes §4.2/§11.23 at the same time.
 |---|---|---|
 | 8.1 | Click an image to open **details**: what is using it (which products/rows), edit, and rewire. | not started |
 
+### 15 — One stored image, many library names (dedup with aliases) — spec (Part 354)
+
+*User, this session.* An image is often the SAME photo reused across color
+variants of one item — e.g. Anastasia Blush Stick **Nectarine / Peachy Keen
+/ Soft Rose**. Wiring that one photo into each product, WITH the rename rule
+(each copy named after its product), must NOT create multiple physical
+files. Instead: **one stored object, multiple NAME rows in the Library.**
+Storage counts the bytes once; export lets the user pick names or download
+several copies under different names.
+
+**Why it does not work today:** `matchLibraryImagesStrict` is 1:1 by name,
+and the rename produces a distinct filename per product, so reusing one
+photo across three differently-named products implies three renamed R2
+objects. Dedup requires a storage-model change.
+
+**Recommended shape (needs approval — it is a migration + multi-surface):**
+- `file_assets` keeps ONE row per stored object, keyed by a new
+  `content_hash` (sha256 of the bytes) so identical uploads/wires resolve to
+  the same object instead of re-uploading.
+- Add `file_asset_names` (or a self `alias_of` fk): `(id, file_asset_id,
+  name)` — each row a display name the object is used under. Wiring the same
+  object to a second product under a new name inserts a NAME row, not a byte
+  copy.
+- **Library display:** list name rows (so the three variant names each
+  show), but the storage figure and the underlying object are counted once;
+  a "used by" list shows which products reference the object.
+- **Delete is ref-counted:** removing one name never deletes the object
+  while another name or product still references it; the R2 object goes only
+  when the last reference does. (This also protects the wire/unwire flow.)
+- **Export/download:** offer "download under selected name(s)" or "download a
+  copy per name" — the user's own call, made at export time, not by storing
+  duplicates.
+- **Wire path:** `wire-images` already points multiple products at one
+  `public_path` (storage is shared TODAY for the no-rename case); this
+  extends that to the renamed case by adding a name row rather than a file.
+
+**Decision to confirm before building:** content-hash dedup + a
+`file_asset_names` table vs. a lighter `alias_of` self-reference on
+`file_assets`. Both are migrations; pick one, then wire library display +
+ref-counted delete + export choice. Flagged, not guessed.
+
 ### 8 — Identity rule, remaining
 
 | # | Task | Status |
