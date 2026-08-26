@@ -406,6 +406,7 @@ async function expandSearchResultsToNameSiblings(env: Env, items: Array<Record<s
     return db.prepare(`
       SELECT p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
              p.selling_price_usd, p.selling_price_khr,
+             p.special_price_usd, p.special_price_khr,
              p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
              p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
              p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,
@@ -472,6 +473,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 
   const selectColumns = `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr,
+           p.special_price_usd, p.special_price_khr,
            p.cost_price_usd, p.cost_price_khr, p.stock_quantity, p.low_stock_threshold,
            p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
            p.is_group, p.discount_enabled, p.discount_type, p.discount_percent,

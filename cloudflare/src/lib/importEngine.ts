@@ -1254,12 +1254,23 @@ export async function classifyProducts(
     // mirroring frontend/productImportPlanner.ts's normalizeProductImportRow
     // defaults so a CSV row and the manual Add/Edit form produce the same
     // stored values for the same input.
-    data.special_price_usd = row.special_price_usd !== undefined && str(row.special_price_usd) !== ''
-      ? normalizeImportMoney(row.special_price_usd)
-      : (data.selling_price_usd as number)
-    data.special_price_khr = row.special_price_khr !== undefined && str(row.special_price_khr) !== ''
-      ? normalizeImportMoney(row.special_price_khr)
-      : (data.selling_price_khr as number)
+    // VIP price (stored in the special_price_* columns -- the DB name is
+    // unchanged; only the label is "VIP" now). Accepts the new `vip_price_*`
+    // header AND the legacy `special_price_*` one so old export files still
+    // import. A BLANK VIP price stores 0, NOT the selling price: defaulting
+    // to selling silently set VIP = selling on every row without an explicit
+    // value, which is exactly the "import didn't read the special price"
+    // report, and the edit form then wrote that back. Every consumer
+    // (POS, portal, detail) already treats 0 as "no VIP price, use selling",
+    // so 0 is the correct absent value.
+    const vipUsdRaw = row.vip_price_usd ?? row.special_price_usd
+    const vipKhrRaw = row.vip_price_khr ?? row.special_price_khr
+    data.special_price_usd = vipUsdRaw !== undefined && str(vipUsdRaw) !== ''
+      ? normalizeImportMoney(vipUsdRaw)
+      : 0
+    data.special_price_khr = vipKhrRaw !== undefined && str(vipKhrRaw) !== ''
+      ? normalizeImportMoney(vipKhrRaw)
+      : 0
     data.out_of_stock_threshold = parseImportNumericValue(row.out_of_stock_threshold, 0, { allowNegative: false, field: 'out_of_stock_threshold' })
     data.discount_enabled = toBool01(row.discount_enabled ?? row.promotion_enabled ?? row.on_promotion, 0)
     const importDiscountAmountUsd = normalizeImportMoney(row.discount_amount_usd, 0)

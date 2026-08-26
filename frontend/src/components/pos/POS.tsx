@@ -2627,7 +2627,7 @@ export default function POS() {
                     </p>
                     {asNumber(p.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(p.selling_price_khr))}</p> : null}
                     {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
-                      <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'Special'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
+                      <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'VIP'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
                     ) : null}
                     {promotion.active ? (
                       <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">

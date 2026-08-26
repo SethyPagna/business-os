@@ -3566,9 +3566,9 @@ function ProductsFullEditor() {
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
             <div><label className="text-xs text-gray-500 block mb-1">Selling Price (KHR)</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.selling_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,selling_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Special Price (USD)</label>
+            <div><label className="text-xs text-gray-500 block mb-1">VIP Price (USD)</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>
-            <div><label className="text-xs text-gray-500 block mb-1">Special Price (KHR)</label>
+            <div><label className="text-xs text-gray-500 block mb-1">VIP Price (KHR)</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.special_price_khr??''} onChange={e=>setBulkEditForm(f=>({...f,special_price_khr:e.target.value}))} placeholder="Leave blank to keep" /></div>
             <div><label className="text-xs text-gray-500 block mb-1">Purchase Price (USD)</label>
               <input className="input text-xs py-1" type="number" step="0.01" min="0" value={bulkEditForm.purchase_price_usd??''} onChange={e=>setBulkEditForm(f=>({...f,purchase_price_usd:e.target.value}))} placeholder="Leave blank to keep" /></div>

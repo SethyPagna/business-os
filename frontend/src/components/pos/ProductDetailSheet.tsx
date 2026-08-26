@@ -485,7 +485,7 @@ export default function ProductDetailSheet({
           ) : null)}
           <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('label_selling_price') || 'Price'}</span><div><span className="font-bold text-blue-600">{fmtUSD(asNumber(product.selling_price_usd))}</span>{asNumber(product.selling_price_khr) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.selling_price_khr))}</span> : null}</div></div>
           {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
-            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price') || 'Special'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}</span>{asNumber(product.special_price_khr || product.selling_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.special_price_khr || product.selling_price_khr || 0))}</span> : null}</div></div>
+            <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{t('special_price') || 'VIP'}</span><div><span className="font-bold text-emerald-600">{fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}</span>{asNumber(product.special_price_khr || product.selling_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(asNumber(product.special_price_khr || product.selling_price_khr || 0))}</span> : null}</div></div>
           ) : null}
           {promotion.active ? (
             <div className="flex gap-3"><span className="text-xs text-gray-400 w-24 flex-shrink-0 pt-0.5">{posCopy('Discounts', 'Discounts')}</span><div><span className="font-bold text-rose-600">{fmtUSD(promotion.applied_price_usd || 0)}</span>{(promotion.applied_price_khr || 0) > 0 ? <span className="text-xs text-gray-400 ml-2">{fmtKHR(promotion.applied_price_khr || 0)}</span> : null}</div></div>
@@ -652,7 +652,7 @@ export default function ProductDetailSheet({
                     </button>
                     {asNumber(effectiveVariant.special_price_usd) > 0 || asNumber(effectiveVariant.special_price_khr) > 0 ? (
                       <button className="btn-secondary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'special')}>
-                        {posCopy('Special', 'Special')} {fmtUSD(asNumber(effectiveVariant.special_price_usd || effectiveVariant.selling_price_usd || 0))}
+                        {posCopy('VIP', 'VIP')} {fmtUSD(asNumber(effectiveVariant.special_price_usd || effectiveVariant.selling_price_usd || 0))}
                       </button>
                     ) : null}
                     {effectiveVariantPromotion.active ? (
@@ -705,7 +705,7 @@ export default function ProductDetailSheet({
             ) : null}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
               <button className="btn-primary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'selling')}>
-                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'Pick a lot first') : `${posCopy('Regular', 'Regular')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
+                {displayedStock <= asNumber(product.out_of_stock_threshold) ? t('out_of_stock') : batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'Pick a lot first') : `${posCopy('Selling Price', 'Selling Price')} ${fmtUSD(asNumber(product.selling_price_usd || 0))}`}
               </button>
               {promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
@@ -714,7 +714,7 @@ export default function ProductDetailSheet({
               ) : null}
               {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
                 <button className="btn-secondary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'special')}>
-                  {posCopy('Special', 'Special')} {fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}
+                  {posCopy('VIP', 'VIP')} {fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}
                 </button>
               ) : null}
             </div>

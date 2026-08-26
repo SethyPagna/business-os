@@ -396,7 +396,7 @@ export default function ProductDetailModal({
             </Row>
           ) : null}
           {(specialUsd > 0 || specialKhr > 0) ? (
-            <Row label={T('special_price', 'Special Price')}>
+            <Row label={T('special_price', 'VIP Price')}>
               <span className="text-blue-600">{fmtUSD(specialUsd || sellingUsd)}</span>
               {(specialKhr > 0 || sellingKhr > 0) ? <span className="ml-2 text-xs text-gray-400">{fmtKHR(specialKhr || sellingKhr)}</span> : null}
             </Row>

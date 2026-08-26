@@ -28,7 +28,7 @@ export const REPLACE_COLUMN_GROUPS: ReplaceColumnGroup[] = [
   { key: 'basic', label: 'Name, SKU, barcode', hint: 'Core identity fields', columns: ['name', 'sku', 'barcode'] },
   { key: 'category', label: 'Category & brand', hint: 'Category, brand, unit, supplier', columns: ['category', 'categories', 'brand', 'brands', 'unit', 'supplier'] },
   { key: 'description', label: 'Description', hint: '', columns: ['description'] },
-  { key: 'pricing', label: 'Pricing', hint: 'Selling, special, and cost price (USD/KHR)', columns: ['selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr', 'cost_price_usd', 'cost_price_khr'] },
+  { key: 'pricing', label: 'Pricing', hint: 'Selling, VIP, and cost price (USD/KHR)', columns: ['selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr', 'cost_price_usd', 'cost_price_khr'] },
   { key: 'thresholds', label: 'Stock thresholds', hint: 'Low stock / out of stock alert levels', columns: ['low_stock_threshold', 'out_of_stock_threshold'] },
   { key: 'discount', label: 'Discount', hint: 'Promotion settings and badge', columns: ['discount_enabled', 'discount_type', 'discount_percent', 'discount_amount_usd', 'discount_amount_khr', 'discount_label', 'discount_badge_color', 'discount_starts_at', 'discount_ends_at'] },
   { key: 'expiry', label: 'Expiry', hint: '', columns: ['expiry_date', 'expiry_alert_days'] },

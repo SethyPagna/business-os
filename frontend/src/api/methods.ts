@@ -1337,7 +1337,7 @@ export function downloadImportTemplate(type) {
   return buildImportCsvTemplate([
     'name','sku','barcode','category','brand','unit','description',
     'selling_price_usd','selling_price_khr',
-    'special_price_usd','special_price_khr',
+    'vip_price_usd','vip_price_khr',
     'cost_price_usd','cost_price_khr',
     'stock_quantity','low_stock_threshold','batch(mm/dd/yyyy)','expiry_date','expiry_alert_days',
     'branch','supplier',
@@ -1348,7 +1348,7 @@ export function downloadImportTemplate(type) {
   ], 'products-template.csv', {
     name: 'Iced Coffee', sku: 'BEV-001', barcode: '', category: 'Beverages', brand: '', unit: 'cup',
     description: '', selling_price_usd: '2.50', selling_price_khr: '',
-    special_price_usd: '', special_price_khr: '',
+    vip_price_usd: '', vip_price_khr: '',
     cost_price_usd: '1.20', cost_price_khr: '',
     stock_quantity: '40', low_stock_threshold: '10',
     // Column consolidation (Aug 24 2026): the old separate `batch` label

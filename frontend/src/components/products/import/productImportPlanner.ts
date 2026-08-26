@@ -13,6 +13,11 @@ export const PRODUCT_MONEY_FIELDS = [
   'selling_price_khr',
   'special_price_usd',
   'special_price_khr',
+  // The VIP-price header alias -- listed as a money field so a raw
+  // 'vip_price_usd' string is coerced to a number before it is copied into
+  // special_price_* during normalization (see normalizeProductImportRow).
+  'vip_price_usd',
+  'vip_price_khr',
   'discount_amount_usd',
   'discount_amount_khr',
   'purchase_price_usd',
@@ -256,8 +261,14 @@ export function normalizeProductImportRow(row: ImportRow = {}, index = 0): Impor
 
   normalized.name = normalizeText(normalized.name)
   normalized.unit = normalizeText(normalized.unit || 'pcs')
-  normalized.special_price_usd = normalized.special_price_usd ?? normalized.selling_price_usd ?? 0
-  normalized.special_price_khr = normalized.special_price_khr ?? normalized.selling_price_khr ?? 0
+  // VIP price (stored in special_price_*; label is "VIP" now). Reads the
+  // new vip_price_* header OR the legacy special_price_* one, and defaults
+  // to 0 when neither is given -- NOT the selling price. Defaulting to
+  // selling set VIP = selling on every blank row, which the edit form then
+  // wrote back, destroying real VIP prices. Every consumer treats 0 as
+  // "no VIP price, use selling".
+  normalized.special_price_usd = normalized.special_price_usd ?? normalized.vip_price_usd ?? 0
+  normalized.special_price_khr = normalized.special_price_khr ?? normalized.vip_price_khr ?? 0
   normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
   normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
@@ -295,8 +306,14 @@ function normalizeProductForSignature(product: ImportRow = {}): ImportRow {
   })
   normalized.name = normalizeText(normalized.name)
   normalized.unit = normalizeText(normalized.unit || 'pcs')
-  normalized.special_price_usd = normalized.special_price_usd ?? normalized.selling_price_usd ?? 0
-  normalized.special_price_khr = normalized.special_price_khr ?? normalized.selling_price_khr ?? 0
+  // VIP price (stored in special_price_*; label is "VIP" now). Reads the
+  // new vip_price_* header OR the legacy special_price_* one, and defaults
+  // to 0 when neither is given -- NOT the selling price. Defaulting to
+  // selling set VIP = selling on every blank row, which the edit form then
+  // wrote back, destroying real VIP prices. Every consumer treats 0 as
+  // "no VIP price, use selling".
+  normalized.special_price_usd = normalized.special_price_usd ?? normalized.vip_price_usd ?? 0
+  normalized.special_price_khr = normalized.special_price_khr ?? normalized.vip_price_khr ?? 0
   normalized.cost_price_usd = normalized.cost_price_usd ?? normalized.purchase_price_usd ?? 0
   normalized.cost_price_khr = normalized.cost_price_khr ?? normalized.purchase_price_khr ?? 0
   normalized.low_stock_threshold = normalized.low_stock_threshold ?? 10
@@ -415,8 +432,8 @@ function buildProductImportReviewGroups(rows: ImportRow[] = []): Array<Record<st
       low_stock_threshold: row?.low_stock_threshold ?? '',
       selling_price_usd: row?.selling_price_usd ?? '',
       selling_price_khr: row?.selling_price_khr ?? '',
-      special_price_usd: row?.special_price_usd ?? '',
-      special_price_khr: row?.special_price_khr ?? '',
+      special_price_usd: row?.special_price_usd ?? row?.vip_price_usd ?? '',
+      special_price_khr: row?.special_price_khr ?? row?.vip_price_khr ?? '',
       purchase_price_usd: row?.purchase_price_usd ?? row?.cost_price_usd ?? '',
       purchase_price_khr: row?.purchase_price_khr ?? row?.cost_price_khr ?? '',
       discount_enabled: row?.discount_enabled ?? '',
@@ -471,8 +488,8 @@ function buildProductImportReviewGroups(rows: ImportRow[] = []): Array<Record<st
             low_stock_threshold: row.low_stock_threshold ?? '',
             selling_price_usd: row.selling_price_usd ?? '',
             selling_price_khr: row.selling_price_khr ?? '',
-            special_price_usd: row.special_price_usd ?? '',
-            special_price_khr: row.special_price_khr ?? '',
+            special_price_usd: row.special_price_usd ?? row.vip_price_usd ?? '',
+            special_price_khr: row.special_price_khr ?? row.vip_price_khr ?? '',
             purchase_price_usd: row.purchase_price_usd ?? row.cost_price_usd ?? '',
             purchase_price_khr: row.purchase_price_khr ?? row.cost_price_khr ?? '',
             discount_enabled: row.discount_enabled ?? '',

@@ -88,7 +88,7 @@ export default function CartItem({
   showItemDiscount = true,
 }: CartItemProps) {
   const lineId = item.cart_line_id || item.id
-  const specialPriceLabel = translate(t, 'special_price', 'Special price')
+  const specialPriceLabel = translate(t, 'special_price', 'VIP price')
   const promotionPriceLabel = item.product_discount_label || translate(t, 'promotion_price', 'Discount price')
   const savings = showItemDiscount ? computeCartLineSavings(item) : null
 

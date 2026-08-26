@@ -794,6 +794,23 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(d.expiry_alert_days, 45)
   }
 
+  // VIP price (stored in special_price_*; DB column name unchanged, label
+  // is "VIP" now). Two things this guards, both reported bugs:
+  //   1. the NEW `vip_price_*` header is read, and
+  //   2. the LEGACY `special_price_*` header still is (old export files),
+  //   3. a BLANK value defaults to 0, never the selling price.
+  {
+    const db = makeFakeProductsDb([])
+    const [viaVip, viaLegacy, blank] = await classifyProducts(db, [
+      row({ name: 'Vip New', selling_price_usd: '12', vip_price_usd: '8' }, 1),
+      row({ name: 'Vip Legacy', selling_price_usd: '12', special_price_usd: '7' }, 2),
+      row({ name: 'Vip Blank', selling_price_usd: '12' }, 3),
+    ], 'job-vip', null, noImages)
+    assert.strictEqual(viaVip.data.special_price_usd, 8, 'the new vip_price_usd header must be read into special_price_usd')
+    assert.strictEqual(viaLegacy.data.special_price_usd, 7, 'the legacy special_price_usd header must still be honored')
+    assert.strictEqual(blank.data.special_price_usd, 0, 'a row with no VIP price stores 0, not the selling price (12)')
+  }
+
   // 2) Nothing set beyond the required fields -- every default must match
   // both the products schema default (0001_init.sql) AND
   // frontend/productImportPlanner.ts's normalizeProductImportRow, so a CSV
@@ -803,7 +820,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const db = makeFakeProductsDb([])
     const results = await classifyProducts(db, [row({ name: 'Bare Product', selling_price_usd: '20' }, 1)], 'job-2', null, noImages)
     const d = results[0].data
-    assert.strictEqual(d.special_price_usd, 20, 'special_price_usd with no CSV value falls back to selling_price_usd, not 0')
+    assert.strictEqual(d.special_price_usd, 0, 'VIP (special) price with no CSV value defaults to 0, NOT the selling price -- defaulting to selling silently set VIP = selling on every row and the edit form then wrote it back, destroying real VIP prices')
     assert.strictEqual(d.out_of_stock_threshold, 0)
     assert.strictEqual(d.discount_enabled, 0)
     assert.strictEqual(d.discount_type, 'percent')

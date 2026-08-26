@@ -2870,7 +2870,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
             {showColumnsInfo ? (
               <div className="mt-3 space-y-3 rounded-lg border border-blue-200 bg-white/70 p-3 text-xs leading-relaxed text-slate-700 dark:border-blue-900/40 dark:bg-slate-900/40 dark:text-slate-200">
                 <p className="font-mono leading-relaxed">
-                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, special_price_usd, special_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(mm/dd/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
+                  {T('csv_template_columns', 'name*, sku, barcode, category, brand, unit, description, selling_price_usd, selling_price_khr, vip_price_usd, vip_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, batch(mm/dd/yyyy), expiry_date, expiry_alert_days, branch, supplier, parent_id, is_group, image_filename_1..5, image_filenames, is_active')}
                 </p>
                 <p><strong>{T('csv_info_required_label', 'Required')}:</strong> {T('csv_info_required', 'only name (marked with *) has to be filled in -- every other column can be left blank.')}</p>
                 <p><strong>{T('csv_info_pricing_label', 'Pricing')}:</strong> {T('csv_info_pricing', 'selling/special/cost prices each have a USD and a KHR column -- fill in whichever currency you use, the other can stay blank.')}</p>

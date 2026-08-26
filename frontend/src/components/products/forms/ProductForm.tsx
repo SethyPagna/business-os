@@ -525,8 +525,14 @@ export default function ProductForm({
       ...initialForm,
       selling_price_usd: editablePrice(initialForm.selling_price_usd),
       selling_price_khr: editablePrice(initialForm.selling_price_khr),
-      special_price_usd: editablePrice(initialForm.special_price_usd ?? initialForm.selling_price_usd),
-      special_price_khr: editablePrice(initialForm.special_price_khr ?? initialForm.selling_price_khr),
+      // VIP price is its OWN optional field. It must NOT default to the
+      // selling price: the API was omitting these two columns, so the
+      // `?? selling` fallback silently loaded the selling price into the
+      // VIP field, and the save below then wrote it back -- overwriting a
+      // real VIP price (e.g. 8) with the selling price (12) on every edit.
+      // A product with no VIP price loads blank/0 and stays that way.
+      special_price_usd: editablePrice(initialForm.special_price_usd),
+      special_price_khr: editablePrice(initialForm.special_price_khr),
       discount_enabled: Number(initialForm.discount_enabled || 0),
       discount_type: initialForm.discount_type || 'percent',
       discount_percent: editablePrice(initialForm.discount_percent || 0),
@@ -718,8 +724,11 @@ export default function ProductForm({
       ...form,
       selling_price_usd: normalizePriceValue(parseNumericInput(form.selling_price_usd)),
       selling_price_khr: normalizePriceValue(parseNumericInput(form.selling_price_khr)),
-      special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd ?? form.selling_price_usd)),
-      special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr ?? form.selling_price_khr)),
+      // No `?? selling` fallback -- see the load above. Whatever is in the
+      // VIP field (0 if the user left it blank) is what gets saved, so an
+      // untouched VIP price is never clobbered with the selling price.
+      special_price_usd: normalizePriceValue(parseNumericInput(form.special_price_usd)),
+      special_price_khr: normalizePriceValue(parseNumericInput(form.special_price_khr)),
       discount_enabled: form.discount_enabled ? 1 : 0,
       discount_type: form.discount_type === 'fixed' ? 'fixed' : 'percent',
       discount_percent: normalizePriceValue(parseNumericInput(form.discount_percent)),
