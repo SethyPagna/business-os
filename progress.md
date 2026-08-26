@@ -396,6 +396,14 @@ implies a separate stored file when the same photo serves several products.
 | 10.1 | **Backup restore still loads the whole document into memory** (`backup.ts:574` `object.json()`, then one statement per row). The write path was fixed and streamed; its mirror was not, so a database big enough to have caused the original OOM will OOM restoring its own backup. | not started |
 | 10.2 | Edit form does not auto-move sections back to Details — reported as a bug; not yet reproduced. | not started |
 
+### 16 — Branding / PWA / media / notes batch (Part 354)
+
+| # | Task | Status |
+|---|---|---|
+| 16.1 | **PWA "Install app" not showing on the storefront** (leangcosmetics.dpdns.org). **DONE, needs deploy** - the public portal AND the admin app swapped `<link rel="manifest">` to a `blob:` URL, which Chrome refuses to treat as installable. Removed both; the static `/manifest.json` (valid, 192+512 icons) is used, so Install returns. Verify live after deploy. | done, needs deploy |
+| 16.2 | **Media previews are redundant** - the upload UI shows a raw preview separate from "how it looks when applied". Show ONE preview: the applied result. And **make the vertical / horizontal fit+focus controls actually work** in that preview. | not started |
+| 16.3 | **Notes item not draggable** ("notes tab icon"). The list uses HTML5 `draggable`, which has NO touch support, and the grip handle is `opacity-0` until `group-hover` (never on touch) - so on a phone the note can't be grabbed or reordered. Needs pointer-based reordering (like NotesWidget's own pointer-drag) + an always-visible handle on touch. | not started |
+
 ### 11 — NEW request batch, Aug 26 2026 (Part 354, post-compaction)
 
 *Verbatim from the user's own message. Several overlap earlier rows — cross-referenced, not duplicated. Nothing here is started.*
@@ -437,9 +445,9 @@ implies a separate stored file when the same photo serves several products.
 
 | # | Task | Status |
 |---|---|---|
-| 11.14 | **Portal-editor images must NOT bleed into the admin app.** The logo and other images edited in the Customer Portal editor are for the PUBLIC portal only; they are currently affecting admin surfaces. | not started |
-| 11.15 | **The Settings "business logo" is only the TOPBAR logo.** The favicon stays the default — the business logo must not replace it. | not started |
-| 11.16 | **Settings should expose the file/auto-wire button too** (the wire-images action, reachable from Settings). | not started |
+| 11.14 | **Portal-editor images must NOT bleed into the admin app.** **PARTLY DONE (Part 354), needs deploy** - the shared bleed was the FAVICON/manifest, now removed (favicon/PWA icon are app default; the swaps that pulled portal/settings images into the tab icon + manifest are gone). Portal editor customizes only the in-page storefront LOGO. Audit any other image that still crosses over. | favicon bleed fixed; audit others |
+| 11.15 | **Settings business logo is only the topbar logo; favicon stays default.** **DONE (Part 354), needs deploy** - the favicon-image upload is removed from Settings and the admin favicon swap is gone, so the topbar logo can no longer become the favicon. | done, needs deploy |
+| 11.16 | **Delete the favicon image (Settings + portal editor).** **DONE (Part 354), needs deploy** - both favicon upload controls removed; icon is app default. (The original 11.16 "expose the wire-images button in Settings" is a separate, still-open idea.) | favicon removal done |
 | 11.17 | **The uploads/folder-path inputs are too wide.** Candidates found (Part 354): the backup folder-export path (`Backup.tsx:1750`, `input flex-1 font-mono`) and the import image-folder displays (`BulkImportModal.tsx:2922,3155`). Needs the user to confirm WHICH "uploads path input" (or all) before changing layout — not guessed. | needs user to point at it |
 
 **Imports — contacts is slow and its review UI is bare**
