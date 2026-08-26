@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { cachedJsonResponse, getVersion, bumpVersion } from '../lib/cache'
-import { matchImagesToProducts } from '../lib/importImageMatch'
+import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions } from '../lib/permissions'
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
@@ -1305,7 +1305,12 @@ app.post('/wire-images/preview', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const { products, images } = await loadWireImageInputs(c.env)
-  const result = matchImagesToProducts(
+  // STRICT, not the import's matcher. That one has a fuzzy fallback, which is
+  // right when an operator is reviewing a few hundred rows they just uploaded
+  // and a near-miss is a useful suggestion. It is wrong here: this runs
+  // across the whole catalog, and a fuzzy hit at that scale silently attaches
+  // the wrong photo to a real product. Exact name, or name + _1.._3, only.
+  const result = matchLibraryImagesStrict(
     images.map((image) => ({ id: image.id, originalName: image.original_name, relativePath: image.original_name, publicPath: image.public_path })),
     products.map((product) => ({ id: product.id, name: product.name })),
   )
@@ -1344,10 +1349,15 @@ app.post('/wire-images/preview', async (c) => {
       libraryImages: images.length,
       matched: result.matched.length,
       unmatched: result.unmatched.length,
+      ambiguous: result.ambiguous.length,
       wouldChange: changes.length,
       wouldReplace: changes.filter((change) => change.replaces).length,
     },
     unmatched: result.unmatched.slice(0, 50).map((image) => image.originalName),
+    // Reported separately from unmatched: a filename that resolves to more
+    // than one product is not a miss, it is a grouping question the operator
+    // has to settle. Picking one arbitrarily would attach it to the wrong row.
+    ambiguous: result.ambiguous.slice(0, 50).map((image) => image.originalName),
   })
 })
 

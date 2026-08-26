@@ -2781,8 +2781,20 @@ function ProductsFullEditor() {
             />
           ) : null}
         </td>
+        {/* A grouped CHILD row shows no image.
+            A name group is ONE product and carries ONE set of photos, drawn
+            once on the group header by renderGroupThumbnail -- repeating it
+            per child implies each row has its own, which is exactly the
+            model the group replaced.
+            renderMobileProductCard already did this; the desktop TABLE row
+            did not, which is why the duplicate thumbnails and the resulting
+            ragged left edge only appeared on large screens.
+            The cell itself still renders (a <td> has to exist for the column
+            to line up) -- it is the image inside that is dropped, so every
+            child row's name starts at exactly the same x as the group
+            title's. */}
         <td className="px-3 py-2">
-          {thumbnailState.hasImage
+          {indented ? null : thumbnailState.hasImage
             ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-10 w-10 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
                 // Stopping only the CLICK left the row still opening its
                 // detail flyout behind the lightbox: the row's long-press

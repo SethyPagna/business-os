@@ -339,6 +339,85 @@ function getExtension(originalName: string): string {
 // manually attached it to an existing catalog product one at a time.
 // `positionAmongSiblings` is 1-based; pass 1 with `totalSiblings` 1 for
 // "no suffix needed" (a product's only image).
+/**
+ * STRICT filename -> product matching, for wiring images that are already in
+ * the Library.
+ *
+ * Deliberately NOT matchImagesToProducts. That one has a fuzzy bigram
+ * fallback, which is right for an import -- the operator is reviewing a few
+ * hundred rows they just uploaded and a near-miss is a useful suggestion.
+ * It is wrong here: this runs across the whole catalog at once, and a fuzzy
+ * hit at that scale means silently attaching the wrong photo to a real
+ * product, which nobody would notice until a customer did.
+ *
+ * The rule is exactly what was asked for and nothing more:
+ *
+ *   - the filename equals the product name, or
+ *   - the filename is the product name plus a trailing _1 .. _N,
+ *     where N is MAX_IMAGES_PER_PRODUCT
+ *
+ * Separator folding still applies (underscore and hyphen read as space),
+ * because that is what the app already promises everywhere else and what its
+ * own rename produces -- so "coca_cola_1.jpg" and "Coca Cola_1.jpg" are the
+ * same file by a different keyboard, not a fuzzy guess.
+ *
+ * A name that resolves to more than one product is skipped rather than
+ * guessed at: two products genuinely sharing a name is a grouping question,
+ * and picking one arbitrarily would attach a photo to the wrong row.
+ */
+export function matchLibraryImagesStrict(
+  images: UploadedImageRef[],
+  products: Array<{ id: number | string; name: string }>,
+): { matched: MatchEntry[]; unmatched: UploadedImageRef[]; ambiguous: UploadedImageRef[] } {
+  const byName = new Map<string, Array<{ id: number | string; name: string }>>()
+  for (const product of products) {
+    const key = normalizeImageMatchKey(product.name)
+    if (!key) continue
+    const list = byName.get(key) || []
+    list.push(product)
+    byName.set(key, list)
+  }
+
+  const matched: MatchEntry[] = []
+  const unmatched: UploadedImageRef[] = []
+  const ambiguous: UploadedImageRef[] = []
+  // How many images each product has taken, so the cap is enforced here
+  // rather than leaving a caller to discover it.
+  const takenPerProduct = new Map<string, number>()
+
+  for (const image of images) {
+    const raw = normalizeImageMatchKey(image.originalName)
+    if (!raw) { unmatched.push(image); continue }
+
+    // Either the bare name, or the name with a trailing index within the cap.
+    // `\s` because normalizeImageMatchKey has already folded `_`/`-` to space.
+    const indexed = raw.match(/^(.*?)\s(\d+)$/)
+    let baseKey = raw
+    if (indexed) {
+      const position = Number(indexed[2])
+      // A trailing number ABOVE the cap is not an index -- it is part of the
+      // product's actual name ("Chanel No 5"), so it must not be stripped.
+      if (position >= 1 && position <= MAX_IMAGES_PER_PRODUCT && byName.has(indexed[1])) {
+        baseKey = indexed[1]
+      }
+    }
+
+    const candidates = byName.get(baseKey)
+    if (!candidates || !candidates.length) { unmatched.push(image); continue }
+    if (candidates.length > 1) { ambiguous.push(image); continue }
+
+    const product = candidates[0]
+    const productKey = String(product.id)
+    const taken = takenPerProduct.get(productKey) || 0
+    if (taken >= MAX_IMAGES_PER_PRODUCT) { unmatched.push(image); continue }
+    takenPerProduct.set(productKey, taken + 1)
+
+    matched.push({ image, productId: product.id, productName: product.name, score: 1, matchType: 'exact' })
+  }
+
+  return { matched, unmatched, ambiguous }
+}
+
 export function buildImageDisplayName(
   productName: string,
   originalName: string,

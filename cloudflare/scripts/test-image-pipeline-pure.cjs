@@ -25,6 +25,20 @@ const index = fs.readFileSync(path.join(cloudflareRoot, 'src', 'index.ts'), 'utf
 const wrangler = fs.readFileSync(path.join(cloudflareRoot, 'wrangler.toml'), 'utf8')
 const MIGRATION_SQLS = loadAll()
 
+// The real strict matcher, transpiled -- reimplementing the rule here would
+// test this file's copy of it.
+const ts = require(path.join(cloudflareRoot, 'node_modules', 'typescript'))
+const matcher = (() => {
+  const src = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'importImageMatch.ts'), 'utf8')
+  const { outputText } = ts.transpileModule(src, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    fileName: 'importImageMatch.ts',
+  })
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', outputText)(mod.exports, require, mod)
+  return mod.exports
+})()
+
 let passed = 0
 const tests = []
 const check = (name, fn) => tests.push({ name, fn })
@@ -154,6 +168,71 @@ check('the audit tables exist and index the sweep order', async () => {
   assert.deepEqual(rows.map((r) => r.key), ['uploads/a.jpg'])
   const idx = await db.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND name='idx_image_audit_status'`).get({})
   assert.ok(idx, 'the status index must exist, or every pass scans the whole table')
+})
+
+// ---------------------------------------------------------------------------
+// Strict library matching.
+//
+// Wiring library images runs across the WHOLE catalog at once, so the import's
+// fuzzy bigram fallback is the wrong tool: at that scale a near-miss means
+// silently attaching the wrong photo to a real product, and nobody notices
+// until a customer does. The rule is exact name, or name + _1.._3.
+// ---------------------------------------------------------------------------
+check('strict matching accepts the bare name and the indexed forms, nothing else', async () => {
+  const products = [{ id: 1, name: 'Coca Cola' }, { id: 2, name: 'Chanel No 5' }]
+  const names = ['Coca Cola.jpg', 'Coca Cola_1.jpg', 'Coca Cola_2.jpg', 'Coca Cola Zero.jpg', 'Chanel No 5.jpg']
+  const images = names.map((n, i) => ({ id: i, originalName: n, relativePath: n, publicPath: '/x' }))
+  const result = matcher.matchLibraryImagesStrict(images, products)
+  const matchedNames = result.matched.map((entry) => entry.image.originalName)
+  assert.ok(matchedNames.includes('Coca Cola.jpg'), 'exact 1:1 must match')
+  assert.ok(matchedNames.includes('Coca Cola_1.jpg') && matchedNames.includes('Coca Cola_2.jpg'), 'indexed forms must match')
+  assert.ok(!matchedNames.includes('Coca Cola Zero.jpg'), 'a DIFFERENT product name must not fuzzy-match')
+  assert.ok(matchedNames.includes('Chanel No 5.jpg'), 'a trailing number that is part of the NAME must not be read as an index')
+})
+
+check('the 3-image cap is enforced by the matcher, not left to the caller', async () => {
+  const products = [{ id: 1, name: 'Coca Cola' }]
+  const names = ['Coca Cola.jpg', 'Coca Cola_1.jpg', 'Coca Cola_2.jpg', 'Coca Cola_3.jpg']
+  const images = names.map((n, i) => ({ id: i, originalName: n, relativePath: n, publicPath: '/x' }))
+  const result = matcher.matchLibraryImagesStrict(images, products)
+  assert.equal(result.matched.length, 3, 'a group is one product and holds at most three images')
+  assert.equal(result.unmatched.length, 1, 'the fourth is reported, not silently dropped')
+})
+
+check('an index ABOVE the cap is not treated as an index', async () => {
+  // "Coca Cola_9" must not quietly become "Coca Cola" -- the 9 is not a slot
+  // this product has, so the file is a miss, not a fourth image.
+  const products = [{ id: 1, name: 'Coca Cola' }]
+  const images = [{ id: 0, originalName: 'Coca Cola_9.jpg', relativePath: 'Coca Cola_9.jpg', publicPath: '/x' }]
+  const result = matcher.matchLibraryImagesStrict(images, products)
+  assert.equal(result.matched.length, 0)
+})
+
+check('a name shared by two products is AMBIGUOUS, never guessed', async () => {
+  // Picking one arbitrarily would attach the photo to the wrong row, and two
+  // products sharing a name is a grouping question for the operator.
+  const products = [{ id: 3, name: 'Twin Name' }, { id: 4, name: 'Twin Name' }]
+  const images = [{ id: 0, originalName: 'Twin Name.jpg', relativePath: 'Twin Name.jpg', publicPath: '/x' }]
+  const result = matcher.matchLibraryImagesStrict(images, products)
+  assert.equal(result.matched.length, 0)
+  assert.equal(result.ambiguous.length, 1)
+})
+
+check('the wire-images route uses the STRICT matcher, not the fuzzy import one', async () => {
+  const route = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
+  assert.match(route, /matchLibraryImagesStrict\(/)
+  assert.ok(!/matchImagesToProducts\(/.test(route), 'the fuzzy matcher must not be reachable from the library path')
+})
+
+check('grouped CHILD rows show no thumbnail on the desktop table either', async () => {
+  // A name group is ONE product with ONE set of photos, drawn on the group
+  // header. renderMobileProductCard already did this; the desktop TABLE row
+  // did not, which is why duplicate thumbnails and the ragged left edge
+  // appeared only on large screens.
+  const products = fs.readFileSync(path.join(cloudflareRoot, '..', 'frontend', 'src', 'components', 'products', 'Products.tsx'), 'utf8')
+  assert.match(products, /\{indented \? null : thumbnailState\.hasImage/, 'desktop row must skip the image for a child row')
+  const guards = products.match(/indented \? null/g) || []
+  assert.ok(guards.length >= 2, 'both the mobile card and the desktop row need the guard')
 })
 
 async function main() {
