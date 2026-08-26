@@ -60,11 +60,14 @@ export default function ScanSearchButton({ onDetected, t, title, className = '',
             // Given a label it stops being a neutral square and reads as the
             // primary action it is -- accented border and text, not another
             // grey icon in a row of grey icons.
-            ? 'border-blue-300 bg-blue-50 px-3 text-sm text-blue-700 hover:border-blue-400 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
+            // Compact on purpose: the label has to survive on a phone
+            // without crowding out the search box next to it, so this trades
+            // padding and type size rather than dropping the word.
+            ? 'gap-1 border-blue-300 bg-blue-50 px-2 text-xs text-blue-700 hover:border-blue-400 hover:bg-blue-100 sm:gap-1.5 sm:px-3 sm:text-sm dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-900/40'
             : 'w-10 border-gray-300 bg-white text-gray-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/30 dark:hover:text-blue-300'
         } ${className}`.trim()}
       >
-        <ScanLine className="h-5 w-5" />
+        <ScanLine className={showLabel ? 'h-4 w-4 sm:h-5 sm:w-5' : 'h-5 w-5'} />
         {showLabel ? <span>{t('scan') || 'Scan'}</span> : null}
       </button>
       {open ? (

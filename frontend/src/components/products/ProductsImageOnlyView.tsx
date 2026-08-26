@@ -334,7 +334,7 @@ export default function ProductsImageOnlyView() {
         </p>
       </div>
 
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex items-center gap-1.5 sm:gap-2">
         <SearchInput
           id="products-image-only-search"
           value={search}
@@ -349,14 +349,19 @@ export default function ProductsImageOnlyView() {
         {/* Only offered for the dimensions this role may actually see. A
             category filter for someone not granted category visibility would
             hand them the whole taxonomy through the filter list -- the exact
-            data the permission withholds on the row itself. */}
+            data the permission withholds on the row itself.
+
+            `compact`, and deliberately NOT mobileIconOnly: the label stays on
+            phones too, because an unlabelled icon is the thing people miss.
+            Compactness is bought with padding and type size instead, so the
+            search box keeps the room it needs. */}
         {filterSections.length ? (
           <FilterMenu
             label={t('filter') || 'Filter'}
             activeCount={activeFilterCount}
             sections={filterSections}
             onClear={activeFilterCount ? clearFilters : null}
-            mobileIconOnly
+            compact
           />
         ) : null}
       </div>

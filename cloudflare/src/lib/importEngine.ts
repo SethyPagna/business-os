@@ -2652,29 +2652,12 @@ type ImportChunkState = {
     renamePlanEntries: Array<[string | number, string]>
   }
   startedAtMs?: number // real wall-clock start of this whole (possibly many-invocation) phase run, for an honest summary_json.timings totalMs at the end
-  // Cross-chunk in-file duplicate ledger for the ANALYZE phase only (see
-  // previewProductSignature / the dedup pass in runImportAnalyze below).
-  // Maps a productImportRowSignature-style signature -> the row number of
-  // the first row THIS RUN that produced it. runImportApply already solves
-  // this correctly via its own in-batch `inBatchSignatureToId` map (see
-  // productImportRowSignature's comment) plus the fact that each apply
-  // chunk's classify sees every EARLIER chunk's just-committed insert as a
-  // real DB match -- but that map is rebuilt fresh per chunk and apply
-  // writes to D1 as it goes, so it never needs to survive across chunks.
-  // Analyze does neither (no data-table writes, by design -- see
-  // runImportAnalyze's header), so without this ledger persisted here
-  // across chunk invocations, two rows for the "same" new product sitting
-  // in different ~150-row chunks (extremely common for a real multi-branch
-  // export: the whole catalog listed once per branch, so a duplicate is
-  // often thousands of rows -- many chunks -- away from its pair) would
-  // each independently see an empty products table and both show up as
-  // "create" in the review screen, even though only one of them will
-  // actually create a new product once approved. Confirmed with a real
-  // 11,896-row two-branch export: analyze previewed 11,896 creates / 0
-  // updates; the actual apply result was 6,071 created / 5,825 updated.
-  // The review screen the operator approves must match what approving it
-  // will actually do -- this ledger is what makes that true.
-  productSignatures?: Record<string, number>
+  // NOTE: the cross-chunk in-file duplicate ledger USED to live here as
+  // `productSignatures`. It moved to the import_job_row_signatures table in
+  // migration 0051 -- as a state blob it was parsed and re-serialised in
+  // full on every chunk, which is work proportional to (rows x chunks)
+  // rather than rows. See applyCrossChunkProductDedupe for the rule itself
+  // and why analyze needs it at all.
 }
 
 // Preview-only counterpart to productImportRowSignature, used solely by
@@ -2686,6 +2669,72 @@ type ImportChunkState = {
 // branch name to a real id the way apply does, so it takes a plain Record
 // instead of the narrower ProductImportSignatureInput apply already has a
 // real branch_id for.
+// Marks any 'create' row whose product already appeared earlier in THIS file
+// as an update instead, so the review screen matches what approving it will
+// actually do.
+//
+// The ledger lives in import_job_row_signatures rather than in
+// chunk_state_json (see migration 0051): as a state blob it was parsed and
+// re-serialised in full on every chunk, which is work proportional to
+// (rows x chunks) rather than rows. Here each chunk reads back only the
+// signatures it actually asks about.
+async function applyCrossChunkProductDedupe(
+  db: D1Compat,
+  jobId: string,
+  results: ImportRowResult[],
+): Promise<void> {
+  const creates = results.filter((r) => r.action === 'create')
+  if (!creates.length) return
+
+  const signatureByResult = new Map<ImportRowResult, string>()
+  const wanted = new Set<string>()
+  for (const result of creates) {
+    const signature = previewProductSignature(result.data as Record<string, unknown>)
+    signatureByResult.set(result, signature)
+    wanted.add(signature)
+  }
+
+  // One indexed lookup for this window's signatures, not the whole ledger.
+  const seen = new Map<string, number>()
+  const signatures = [...wanted]
+  const LOOKUP_CHUNK = 100
+  for (let i = 0; i < signatures.length; i += LOOKUP_CHUNK) {
+    const slice = signatures.slice(i, i + LOOKUP_CHUNK)
+    const placeholders = slice.map((_, index) => `@s${index}`).join(', ')
+    const params: Record<string, unknown> = { id: jobId }
+    slice.forEach((value, index) => { params[`s${index}`] = value })
+    const rows = await db.prepare(`
+      SELECT signature, row_number FROM import_job_row_signatures
+      WHERE job_id = @id AND signature IN (${placeholders})
+    `).all<{ signature: string; row_number: number }>(params)
+    for (const row of rows) seen.set(row.signature, Number(row.row_number))
+  }
+
+  // Walk in order so the FIRST row carrying a signature wins, whether its
+  // pair is in an earlier chunk (found above) or earlier in this one.
+  const inserts: { signature: string; rowNumber: number }[] = []
+  for (const result of creates) {
+    const signature = signatureByResult.get(result)!
+    const earlierRowNumber = seen.get(signature)
+    if (earlierRowNumber != null) {
+      result.action = 'update'
+      result.message = `Merges with row #${earlierRowNumber} elsewhere in this file (same product, not yet in the database)`
+      ;(result.data as Record<string, unknown>).merge_row_number = earlierRowNumber
+      continue
+    }
+    seen.set(signature, result.rowNumber)
+    inserts.push({ signature, rowNumber: result.rowNumber })
+  }
+
+  if (!inserts.length) return
+  // OR IGNORE rather than a plain INSERT: a retried chunk re-processes rows
+  // it already recorded, and that must be a no-op instead of an error.
+  await runD1BatchInChunks(db, inserts.map((entry) => ({
+    sql: `INSERT OR IGNORE INTO import_job_row_signatures (job_id, signature, row_number) VALUES (@id, @signature, @rowNumber)`,
+    params: { id: jobId, signature: entry.signature, rowNumber: entry.rowNumber },
+  })))
+}
+
 function previewProductSignature(d: Record<string, unknown>): string {
   return productIdentitySignature(d)
 }
@@ -2709,6 +2758,11 @@ async function saveChunkState(db: D1Compat, jobId: string, cursor: number, state
 // check for how a fresh run is detected.
 async function resetChunkState(db: D1Compat, jobId: string, phase: 'analyze' | 'apply'): Promise<void> {
   await db.prepare(`DELETE FROM import_job_rows WHERE job_id = @id AND phase = @phase`).run({ id: jobId, phase })
+  // The cross-chunk dedupe ledger is per-RUN, not per-file: a fresh analyze
+  // must not inherit the previous run's "already seen" marks, or rows would
+  // be reported as merging with rows from a run that no longer exists. This
+  // is what discarding chunk_state_json used to do implicitly.
+  await db.prepare(`DELETE FROM import_job_row_signatures WHERE job_id = @id`).run({ id: jobId })
   await saveChunkState(db, jobId, 0, { startedAtMs: Date.now() })
 }
 
@@ -2881,25 +2935,12 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     sw.lap('classifyChunkMs')
 
     // Cross-chunk in-file duplicate detection for products -- see
-    // ImportChunkState.productSignatures's comment for the full "why".
+    // applyCrossChunkProductDedupe's comment for the full "why".
     // Only rows classifyProducts couldn't match to anything already in the
     // database ('create') are candidates; a row that already matched a
     // real existing product is a genuine update, unrelated to this.
     if (meta.type === 'products') {
-      const signatures = state.productSignatures || {}
-      for (const r of results) {
-        if (r.action !== 'create') continue
-        const signature = previewProductSignature(r.data as Record<string, unknown>)
-        const earlierRowNumber = signatures[signature]
-        if (earlierRowNumber != null) {
-          r.action = 'update'
-          r.message = `Merges with row #${earlierRowNumber} elsewhere in this file (same product, not yet in the database)`
-          ;(r.data as Record<string, unknown>).merge_row_number = earlierRowNumber
-        } else {
-          signatures[signature] = r.rowNumber
-        }
-      }
-      state.productSignatures = signatures
+      await applyCrossChunkProductDedupe(db, jobId, results)
     }
 
     for (const result of results) {
