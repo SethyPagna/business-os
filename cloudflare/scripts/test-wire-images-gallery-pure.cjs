@@ -118,6 +118,7 @@ const productsRoute = loadReal('routes/products.ts', {
   '../lib/sqlBinding': sqlBinding,
   '../lib/productWrites': productWrites,
   '../lib/productIdentity': { findDuplicateProductGroups: async () => [] },
+  '../lib/productBatches': { attachBatchCounts: async () => {} },
   '../lib/searchMatch': searchMatch,
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },

@@ -33,6 +33,7 @@
 //   routes/inventory.ts's disclosure comment.
 import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
+import { buildInClause, selectInChunks } from './sqlBinding'
 
 export type ProductBatchRow = {
   id: number
@@ -64,6 +65,33 @@ function generateBatchKey(): string {
 // branchId is given, further scoped to products that actually have a
 // branch_batch_stock row at that branch (a product batch-tracked only at
 // other branches shouldn't force the picker here).
+// Per-product batch COUNT for a list badge (Products + Inventory). The list
+// reads deliberately do NOT ship every product's full batch array
+// (production has ~6,700 batches -- the detail view loads them on demand),
+// but the row badge still needs the real number instead of the 0 an absent
+// array produced. So this attaches a scalar `batch_count` per row: the
+// number of ACTIVE batches that still hold stock somewhere. Chunked for
+// D1's bound-parameter limit (see lib/sqlBinding.ts). One implementation,
+// used by both routes/inventory.ts and routes/products.ts, so the two pages
+// can never disagree on how a batch is counted.
+export async function attachBatchCounts(db: D1Compat, items: Array<Record<string, unknown>>): Promise<void> {
+  const ids = Array.from(new Set(items.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0)))
+  if (!ids.length) return
+  const rows = await selectInChunks(ids, 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`
+      SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count
+      FROM product_batches pb
+      JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.quantity > 0
+      WHERE pb.is_active = 1 AND pb.variant_product_id IN (${sql})
+      GROUP BY pb.variant_product_id
+    `).all<{ product_id: number; batch_count: number }>(params)
+  })
+  const countByProduct = new Map<number, number>()
+  for (const row of rows) countByProduct.set(Number(row.product_id), Number(row.batch_count) || 0)
+  for (const item of items) item.batch_count = countByProduct.get(Number(item.id)) || 0
+}
+
 export async function getTrackedProductIds(db: D1Compat, branchId: number | null): Promise<number[]> {
   const sql = branchId
     ? `SELECT DISTINCT pb.variant_product_id AS productId

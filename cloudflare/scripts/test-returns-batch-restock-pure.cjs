@@ -84,7 +84,7 @@ function loadReal(relPath, requireOverrides = {}) {
 const batchCode = loadReal('lib/batchCode.ts')
 
 // Real, pure -- no stubbing needed.
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode })
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts') })
 const permissions = loadReal('lib/permissions.ts')
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ returns: true }) }

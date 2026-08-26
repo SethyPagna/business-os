@@ -13,6 +13,7 @@ import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
 import { findDuplicateProductGroups } from '../lib/productIdentity'
+import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
@@ -510,6 +511,10 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
 
   const itemsWithBranchStock = await attachBranchStock(env, expandedItems as Array<Record<string, unknown>>)
   const itemsWithGallery = await attachImageGallery(env, itemsWithBranchStock)
+  // Scalar batch count per row (same shared helper Inventory uses), so the
+  // Products page shows "N batches" instead of 0 without shipping every
+  // product's full batch array. See lib/productBatches.ts's attachBatchCounts.
+  await attachBatchCounts(getDb(env), itemsWithGallery)
 
   return {
     items: itemsWithGallery,

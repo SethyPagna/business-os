@@ -130,10 +130,21 @@ const { outputText: productBatchesOutputText } = ts.transpileModule(productBatch
 })
 const productBatchesModuleObj = { exports: {} }
 const productBatchesWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', productBatchesOutputText)
+const sqlBindingSourcePath = path.join(__dirname, '..', 'src', 'lib', 'sqlBinding.ts')
+const sqlBindingSource = fs.readFileSync(sqlBindingSourcePath, 'utf8')
+const { outputText: sqlBindingOutputText } = ts.transpileModule(sqlBindingSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'sqlBinding.ts',
+})
+const sqlBindingModuleObj = { exports: {} }
+const sqlBindingWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', sqlBindingOutputText)
+sqlBindingWrapper(sqlBindingModuleObj.exports, require, sqlBindingModuleObj, sqlBindingSourcePath, path.dirname(sqlBindingSourcePath))
+
 function requireForProductBatches(request) {
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports
+  if (request === './sqlBinding') return sqlBindingModuleObj.exports
   return require(request)
 }
 productBatchesWrapper(productBatchesModuleObj.exports, requireForProductBatches, productBatchesModuleObj, productBatchesSourcePath, path.dirname(productBatchesSourcePath))
@@ -174,15 +185,6 @@ searchMatchWrapper(searchMatchModuleObj.exports, require, searchMatchModuleObj, 
 // sqlBinding.ts is pure (no D1/Env dependency) and owns the chunk sizes
 // that keep importEngine's IN(...) lookups inside D1's 100-bound-parameter
 // limit -- loaded for real, since a stub would test the stub.
-const sqlBindingSourcePath = path.join(__dirname, '..', 'src', 'lib', 'sqlBinding.ts')
-const sqlBindingSource = fs.readFileSync(sqlBindingSourcePath, 'utf8')
-const { outputText: sqlBindingOutputText } = ts.transpileModule(sqlBindingSource, {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
-  fileName: 'sqlBinding.ts',
-})
-const sqlBindingModuleObj = { exports: {} }
-const sqlBindingWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', sqlBindingOutputText)
-sqlBindingWrapper(sqlBindingModuleObj.exports, require, sqlBindingModuleObj, sqlBindingSourcePath, path.dirname(sqlBindingSourcePath))
 
 // The full file also imports real Cloudflare Workers modules (D1, durable
 // objects, etc.) that don't exist / can't run outside a Worker. We only

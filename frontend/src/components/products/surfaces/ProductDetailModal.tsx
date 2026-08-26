@@ -158,6 +158,12 @@ export default function ProductDetailModal({
   // "View stock history"-style row), so this pane no longer needs to
   // render every batch inline just to say how many there are.
   const visibleBatches = getVisibleProductBatches(p, 'all', { includeEmpty: true })
+  // The list read attaches a scalar `batch_count` instead of the full array
+  // (see cloudflare/src/lib/productBatches.ts's attachBatchCounts), so a
+  // detail opened straight from a list row has the number but not the rows.
+  // Show that count so the Batches affordance appears (and opens the full
+  // per-batch view) instead of vanishing at 0.
+  const batchCount = visibleBatches.length || Number((p as { batch_count?: unknown }).batch_count || 0)
   // "Batch" row (replaces the old "Added" row below): the most recently
   // received batch's date + lot code, falling back to the product's own
   // created_at only if no batch has a received_at yet (should be rare --
@@ -434,7 +440,7 @@ export default function ProductDetailModal({
             </div>
           ) : null}
 
-          {visibleBatches.length ? (
+          {batchCount ? (
             <div className="border-t border-gray-100 pt-2 dark:border-gray-700">
               {/* Click-to-view row, same pattern as Inventory's own
                   ProductDetailModal "View stock history" row -- a summary
@@ -449,7 +455,7 @@ export default function ProductDetailModal({
               >
                 <span className="flex items-center gap-1.5">
                   <Layers className="h-3.5 w-3.5" />
-                  {T('batches', 'Batches')} <span className="text-amber-500/80 dark:text-amber-300/70">({visibleBatches.length})</span>
+                  {T('batches', 'Batches')} <span className="text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
                 </span>
                 {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
               </button>
