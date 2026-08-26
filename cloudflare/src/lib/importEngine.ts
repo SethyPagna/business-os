@@ -2851,6 +2851,88 @@ async function computeAndCacheImageMatch(
   return cached
 }
 
+// SQL form of partitionSalesGroups' key, kept beside it deliberately: if the
+// two ever disagree, a sales import silently splits one receipt across two
+// chunks or merges two receipts into one order. Mirrors the JS rule exactly
+// -- trimmed receipt_number, else trimmed order_reference, else a per-row
+// key so an ungrouped line still becomes its own single-line sale.
+const SALES_GROUP_KEY_SQL = `COALESCE(
+  NULLIF(TRIM(COALESCE(json_extract(data_json, '$.receipt_number'), '')), ''),
+  NULLIF(TRIM(COALESCE(json_extract(data_json, '$.order_reference'), '')), ''),
+  '__row_' || row_number
+)`
+
+/**
+ * How many order groups a sales job has.
+ *
+ * The chunk cursor for a sales import counts GROUPS, not rows -- a receipt's
+ * line items must be classified together or the order is split across two
+ * invocations and written twice.
+ */
+async function countSalesGroups(db: D1Compat, jobId: string): Promise<number> {
+  const row = await db.prepare(`
+    SELECT COUNT(*) AS n FROM (
+      SELECT ${SALES_GROUP_KEY_SQL} AS group_key
+      FROM import_job_source_rows WHERE job_id = @id
+      GROUP BY group_key
+    )
+  `).get<{ n: number }>({ id: jobId })
+  return Number(row?.n || 0)
+}
+
+/**
+ * One window of sales groups, as [groupKey, rows] in stable order.
+ *
+ * Replaces reading EVERY row of the file and re-partitioning it on every
+ * chunk. For an 8,700-row file that was ~58 full reads and ~58 full
+ * re-partitions per phase, each one JSON.parsing every row, inside a 10ms
+ * budget -- the same shape as the two chunk-state costs already removed,
+ * and the last one left on the import path.
+ *
+ * Ordering is by the group's FIRST appearance in the file, which is what
+ * partitionSalesGroups produced (Map preserves insertion order) and what the
+ * cursor's meaning depends on: window N must be the same set of groups on a
+ * retry as it was on the first attempt.
+ */
+async function readSalesGroupWindow(
+  db: D1Compat,
+  jobId: string,
+  decisions: Record<string, RowDecision>,
+  cursor: number,
+  limit: number,
+): Promise<Array<[string, ParsedCsvRow[]]>> {
+  const keyRows = await db.prepare(`
+    SELECT ${SALES_GROUP_KEY_SQL} AS group_key, MIN(sequence) AS first_seq
+    FROM import_job_source_rows WHERE job_id = @id
+    GROUP BY group_key
+    ORDER BY first_seq ASC
+    LIMIT @limit OFFSET @cursor
+  `).all<{ group_key: string; first_seq: number }>({ id: jobId, limit, cursor })
+  if (!keyRows.length) return []
+
+  const placeholders = keyRows.map((_, index) => `@k${index}`).join(', ')
+  const params: Record<string, unknown> = { id: jobId }
+  keyRows.forEach((row, index) => { params[`k${index}`] = row.group_key })
+  const dataRows = await db.prepare(`
+    SELECT ${SALES_GROUP_KEY_SQL} AS group_key, data_json
+    FROM import_job_source_rows
+    WHERE job_id = @id AND ${SALES_GROUP_KEY_SQL} IN (${placeholders})
+    ORDER BY sequence ASC
+  `).all<{ group_key: string; data_json: string }>(params)
+
+  // Seed in key order first so a group with no rows cannot reorder the
+  // window, then fill -- rows arrive in sequence order, so line items keep
+  // their original order within each receipt.
+  const grouped = new Map<string, ParsedCsvRow[]>()
+  for (const key of keyRows) grouped.set(String(key.group_key), [])
+  for (const row of dataRows) {
+    const parsed = JSON.parse(row.data_json) as ParsedCsvRow
+    const list = grouped.get(String(row.group_key))
+    if (list) list.push(applyDecision(parsed, decisions[String(parsed._rowNumber)]))
+  }
+  return [...grouped.entries()]
+}
+
 // Image paths for just the rows in THIS window.
 //
 // The whole point of migration 0052: loading all 10,000 matched rows to use
@@ -2965,9 +3047,14 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     const decisions = getDecisionMap(meta.policyJson)
 
     const isSales = meta.type === 'sales'
-    const groups = isSales ? partitionSalesGroups(await readAllMaterializedRows(db, jobId, decisions)) : null
-    const groupEntries = groups ? [...groups.entries()] : null
-    const totalUnits = groupEntries ? groupEntries.length : meta.totalRows
+    // Only THIS window's groups, read by SQL. Previously every chunk read the
+    // whole file back and re-partitioned it, which is work proportional to
+    // (rows x chunks) rather than rows -- the last remaining cost of that
+    // shape on the import path.
+    const totalUnits = isSales ? await countSalesGroups(db, jobId) : meta.totalRows
+    const windowEntries = isSales
+      ? await readSalesGroupWindow(db, jobId, decisions, cursor, ROWS_PER_IMPORT_CHUNK)
+      : null
 
     let imageMatchCache = state.imageMatch
     if (meta.type === 'products' && !imageMatchCache) {
@@ -2975,11 +3062,11 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       imageMatchCache = await computeAndCacheImageMatch(db, jobId, allRows, meta.policyJson, cursor, state)
     }
 
-    const windowRows = groupEntries
-      ? groupEntries.slice(cursor, cursor + ROWS_PER_IMPORT_CHUNK).flatMap(([, rows]) => rows)
+    const windowRows = windowEntries
+      ? windowEntries.flatMap(([, rows]) => rows)
       : await readMaterializedWindow(db, jobId, cursor, ROWS_PER_IMPORT_CHUNK, decisions)
-    const groupIndexByRowNumber = groupEntries
-      ? new Map(groupEntries.slice(cursor, cursor + ROWS_PER_IMPORT_CHUNK).flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
+    const groupIndexByRowNumber = windowEntries
+      ? new Map(windowEntries.flatMap(([, rows], i) => rows.map((r) => [r._rowNumber, cursor + i] as const)))
       : undefined
 
     const rowImagePaths = imageMatchCache ? await readRowImagePaths(db, jobId, windowRows) : undefined
@@ -3011,7 +3098,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     if (errorInserts.length) await runD1BatchInChunks(db, errorInserts)
     await persistChunkResults(db, jobId, 'analyze', results, groupIndexByRowNumber)
 
-    const nextCursor = cursor + (groupEntries ? groupEntries.slice(cursor, cursor + ROWS_PER_IMPORT_CHUNK).length : windowRows.length)
+    const nextCursor = cursor + (windowEntries ? windowEntries.length : windowRows.length)
 
     if (nextCursor < totalUnits) {
       // More to do: checkpoint progress and hand off to a fresh invocation
@@ -3386,8 +3473,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     const { cursor, state } = await getChunkState(db, jobId)
     const decisions = getDecisionMap(job.policy_json)
 
-    const groupEntries = job.type === 'sales' ? [...partitionSalesGroups(await readAllMaterializedRows(db, jobId, decisions)).entries()] : null
-    const totalUnits = groupEntries ? groupEntries.length : totalRows.n
+    // Same SQL windowing the analyze path uses -- only this chunk's groups,
+    // not the whole file re-partitioned on every invocation.
+    const isSalesJob = job.type === 'sales'
+    const totalUnits = isSalesJob ? await countSalesGroups(db, jobId) : totalRows.n
+    const groupEntries = isSalesJob
+      ? await readSalesGroupWindow(db, jobId, decisions, cursor, ROWS_PER_IMPORT_CHUNK)
+      : null
 
     let imageMatchCache = state.imageMatch
     if (job.type === 'products' && !imageMatchCache) {
@@ -3425,7 +3517,9 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     sw.lap('imageRenameMs')
 
-    const windowEntries = groupEntries ? groupEntries.slice(cursor, cursor + ROWS_PER_IMPORT_CHUNK) : null
+    // Already windowed by readSalesGroupWindow's LIMIT/OFFSET -- slicing by
+    // `cursor` again here would window it twice and skip whole receipts.
+    const windowEntries = groupEntries
     const windowRows = windowEntries ? windowEntries.flatMap(([, rows]) => rows) : await readMaterializedWindow(db, jobId, cursor, ROWS_PER_IMPORT_CHUNK, decisions)
     const windowUnitCount = windowEntries ? windowEntries.length : windowRows.length
     const groupIndexByRowNumber = windowEntries
