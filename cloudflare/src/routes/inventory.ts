@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
+import { buildInClause, selectInChunks } from '../lib/sqlBinding'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -414,6 +415,33 @@ async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery
   return { filters: { brands: brandRows.map((row) => row.value), categories: categoryRows.map((row) => row.value) }, initials }
 }
 
+// Per-product batch COUNT for the list badge. The list read cannot ship
+// every product's full batch array (production has ~6,700 batches -- that is
+// the whole reason the detail modal loads them on demand via
+// getProductsByIds include=batches), but the row badge still needs to say
+// "N batches" instead of the 0 it showed when `batches` was simply absent.
+// So this attaches a scalar count only: the number of ACTIVE batches for the
+// product that still hold stock somewhere. Chunked for D1's bound-parameter
+// limit (see lib/sqlBinding.ts). View-details then loads the real rows.
+async function attachBatchCounts(env: Env, items: Array<Record<string, unknown>>): Promise<void> {
+  const ids = Array.from(new Set(items.map((row) => Number(row.id)).filter((id) => Number.isFinite(id) && id > 0)))
+  if (!ids.length) return
+  const db = getDb(env)
+  const rows = await selectInChunks(ids, 0, (chunk) => {
+    const { sql, params } = buildInClause('id', chunk)
+    return db.prepare(`
+      SELECT pb.variant_product_id AS product_id, COUNT(DISTINCT pb.id) AS batch_count
+      FROM product_batches pb
+      JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.quantity > 0
+      WHERE pb.is_active = 1 AND pb.variant_product_id IN (${sql})
+      GROUP BY pb.variant_product_id
+    `).all<{ product_id: number; batch_count: number }>(params)
+  })
+  const countByProduct = new Map<number, number>()
+  for (const row of rows) countByProduct.set(Number(row.product_id), Number(row.batch_count) || 0)
+  for (const item of items) item.batch_count = countByProduct.get(Number(item.id)) || 0
+}
+
 async function searchProductsPayload(env: Env, query: Record<string, string>) {
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 20, 1, 100)
@@ -488,6 +516,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
     delete next.branch_stock_json
     return next
   })
+
+  if (items.length) await attachBatchCounts(env, items)
 
   return {
     items,

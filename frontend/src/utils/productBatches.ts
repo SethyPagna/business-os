@@ -13,6 +13,10 @@ type ProductBatch = {
 
 type ProductWithBatches = {
   batches?: ProductBatch[] | unknown
+  // Scalar count attached by the LIST reads (routes/inventory.ts's
+  // attachBatchCounts) when the full `batches` array is deliberately not
+  // shipped -- see buildBatchPreview's fallback below.
+  batch_count?: unknown
 } | null | undefined
 
 type VisibleProductBatch = ProductBatch & {
@@ -71,9 +75,18 @@ export function getVisibleProductBatches(product: ProductWithBatches, branchId: 
 
 export function buildBatchPreview(product: ProductWithBatches, branchId: BranchId = 'all', { limit = 3, includeEmpty = false }: BatchPreviewOptions = {}) {
   const batches = getVisibleProductBatches(product, branchId, { includeEmpty })
+  // The list reads attach a scalar `batch_count` instead of the full array
+  // (too heavy for a page of rows -- see routes/inventory.ts). When the
+  // array is absent but the count is present, report the count so the badge
+  // reads "N batches" rather than the 0 the empty array used to produce.
+  // The count is branch-agnostic (active batches with stock anywhere), so it
+  // is only used as the all-branches fallback, never to override a real
+  // per-branch array the detail view loaded.
+  const scalarCount = Number((product as { batch_count?: unknown })?.batch_count || 0)
+  const totalCount = batches.length > 0 ? batches.length : scalarCount
   return {
     items: batches.slice(0, limit),
-    extraCount: Math.max(0, batches.length - limit),
-    totalCount: batches.length,
+    extraCount: Math.max(0, totalCount - limit),
+    totalCount,
   }
 }
