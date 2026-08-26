@@ -300,7 +300,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 |---|---|---|
 | 11.8 | **Add-new Delivery contact / Customer from inside POS fails.** Reported as a real bug when creating one during checkout. Reproduce first. | not started |
 | 11.9 | **POS must NOT show cost price.** The lot/option picker should offer only: batch, branch, barcode, damage, Selling price (label **SP**) and VIP price (label **VIP**). Cost is not a cashier-facing field. | not started |
-| 11.10 | **POS naming: "Selling price", not "Regular".** (Same as 4.5.) | not started |
+| 11.10 | **POS naming: "Selling price", not "Regular".** **DONE (Part 354), needs deploy.** The add-to-cart button's `posCopy('Regular')` → "Selling Price". (Also 4.5.) The SP/VIP short labels for a full price-mode picker belong to 11.9's POS redesign. |
 | 11.11 | **Discount %/$ toggle buttons can be LARGER; the fee input is TOO large.** Two locations (POS cart + one other — find both). | not started |
 
 **Returns — replace flow + a shared stock-action chooser**
@@ -339,8 +339,8 @@ user's own messages; nothing is inferred. Top of the list is next.*
 | # | Task | Status |
 |---|---|---|
 | 11.23 | **Batches still show 0 in Inventory / not applied throughout the app.** (Same as 4.2 — re-reported, still open.) | not started |
-| 11.24 | **Special price is read wrong.** Product detail shows the SELLING price in BOTH the selling and special fields. (Same as 4.3.) | not started |
-| 11.25 | **Rename "Special price" → "VIP price" EVERYWHERE, including the import template + column headers.** (Same as 4.4.) | not started |
+| 11.24 | **VIP (special) price read/write bug.** **DONE (Part 354), needs deploy.** Root cause: the products LIST/search SELECT never returned `special_price_usd/khr`, so ProductForm defaulted them to the selling price on load AND wrote that back on save — silently overwriting a real VIP price (8) with selling (12) on every edit; the detail modal showing "selling for both" was the visible symptom. Fixed the SELECT + dropped the `?? selling` fallback in the form and both import normalizers (blank VIP = 0; every consumer treats 0 as "use selling"). **Import also read it wrong the same way** and now defaults blank→0. Tests flipped/added on both sides. (Also 4.3.) |
+| 11.25 | **Rename "Special price" → "VIP price" everywhere.** **DONE (Part 354), needs deploy.** Label-only (the `special_price_*` DB columns keep their names). Renamed the `special_price*` label values in en+km, POS/detail/Products/CartItem literals, the import template header → `vip_price_usd/khr` (+ the CSV-columns hint), and the export headers → `VIP_Price_USD/KHR`. Import accepts BOTH `vip_price_*` and legacy `special_price_*` so old files still load. (Also 4.4.) |
 
 ---
 
