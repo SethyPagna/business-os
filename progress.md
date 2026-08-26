@@ -339,8 +339,12 @@ details, and the date of each available batch — the same interaction as the
 View detail). Needs: a backend read returning per-(product[,branch]) batch
 rows (product_batches joined to branch_batch_stock: lot_code, received_at,
 expiry_date, per-branch quantity), and a shared "batch details" modal used
-by all three pages. Inventory currently shows 0 batches (§4.2/§11.23) — the
-same read fixes both.
+by all three pages. **Confirmed live (Part 354):** the data EXISTS — production has 6,691
+`product_batches` (all active) and 3,668 non-zero `branch_batch_stock`
+rows. So "Inventory shows 0 batches" (§4.2/§11.23) is a DISPLAY-READ gap,
+not missing data: `routes/inventory.ts` has no batch_count in its product
+SELECT. The backend read that powers the modal, attached to the inventory +
+products list reads, closes §4.2/§11.23 at the same time.
 
 ### 7 — Library
 
