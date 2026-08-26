@@ -401,8 +401,8 @@ implies a separate stored file when the same photo serves several products.
 | # | Task | Status |
 |---|---|---|
 | 16.1 | **PWA "Install app" not showing on the storefront** (leangcosmetics.dpdns.org). **DONE, needs deploy** - the public portal AND the admin app swapped `<link rel="manifest">` to a `blob:` URL, which Chrome refuses to treat as installable. Removed both; the static `/manifest.json` (valid, 192+512 icons) is used, so Install returns. Verify live after deploy. | done, needs deploy |
-| 16.2 | **Media previews are redundant** - the upload UI shows a raw preview separate from "how it looks when applied". Show ONE preview: the applied result. And **make the vertical / horizontal fit+focus controls actually work** in that preview. | not started |
-| 16.3 | **Notes item not draggable** ("notes tab icon"). The list uses HTML5 `draggable`, which has NO touch support, and the grip handle is `opacity-0` until `group-hover` (never on touch) - so on a phone the note can't be grabbed or reordered. Needs pointer-based reordering (like NotesWidget's own pointer-drag) + an always-visible handle on touch. | not started |
+| 16.2 | **Logo preview matches the applied header; vertical/horizontal focus work when zoomed.** **DONE (Part 354), needs deploy** - editor preview + live header now share one `buildLogoImageStyle` (identical zoom clamp, so preview == applied and the full 80-180% range ships), and the zoom now originates at the focus point so H/V sliders stay meaningful when zoomed. Live header also honors fit=contain now. `logoImageStyle.test.ts`. | done, needs deploy |
+| 16.3 | **Notes reorder now works on touch.** **DONE (Part 354), needs deploy** - replaced HTML5 `draggable` (no touch support) with pointer-event drag on an always-visible grip: press, move over a note (elementFromPoint -> nearest [data-note-id]), release to drop before it; blue top-border marks the target. reorderNotes unchanged. | done, needs deploy |
 
 ### 11 — NEW request batch, Aug 26 2026 (Part 354, post-compaction)
 
