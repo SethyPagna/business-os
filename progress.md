@@ -400,7 +400,7 @@ implies a separate stored file when the same photo serves several products.
 
 | # | Task | Status |
 |---|---|---|
-| 16.1 | **PWA "Install app" not showing on the storefront** (leangcosmetics.dpdns.org). **DONE, needs deploy** - the public portal AND the admin app swapped `<link rel="manifest">` to a `blob:` URL, which Chrome refuses to treat as installable. Removed both; the static `/manifest.json` (valid, 192+512 icons) is used, so Install returns. Verify live after deploy. | done, needs deploy |
+| 16.1 | **PWA "Install app" not showing on the storefront** (leangcosmetics.dpdns.org). **NOW ACTUALLY DONE (Part 355), needs deploy.** The first §16 pass fixed the wrong file: it removed the blob-manifest swap from `CatalogPage.tsx` (the ADMIN in-app catalog preview) + `App.tsx`, but the user reported the missing Install on the LIVE storefront, which `index.tsx` mounts as **`PublicCatalogPage.tsx`** — a different component that was missed entirely and still swapped `<link rel="manifest">` to a `URL.createObjectURL` **blob** (Chrome won't install a blob: manifest) and still overrode the favicon from business config. Real fix keeps the deliberate admin=Business OS / storefront=Leang brand split but serves the storefront's icon + manifest as **static same-origin files** (new `public/portal-manifest.json` + bundled Leang icons) — installable, unlike a blob, and still Leang-branded. Verified: full `test:utils` chain green, `vite build` clean, `portal-manifest.json` ships in `dist`. **Verify Install live after deploy.** | done (Part 355), needs deploy |
 | 16.2 | **Logo preview matches the applied header; vertical/horizontal focus work when zoomed.** **DONE (Part 354), needs deploy** - editor preview + live header now share one `buildLogoImageStyle` (identical zoom clamp, so preview == applied and the full 80-180% range ships), and the zoom now originates at the focus point so H/V sliders stay meaningful when zoomed. Live header also honors fit=contain now. `logoImageStyle.test.ts`. | done, needs deploy |
 | 16.3 | **Notes reorder now works on touch.** **DONE (Part 354), needs deploy** - replaced HTML5 `draggable` (no touch support) with pointer-event drag on an always-visible grip: press, move over a note (elementFromPoint -> nearest [data-note-id]), release to drop before it; blue top-border marks the target. reorderNotes unchanged. | done, needs deploy |
 
@@ -445,7 +445,7 @@ implies a separate stored file when the same photo serves several products.
 
 | # | Task | Status |
 |---|---|---|
-| 11.14 | **Portal-editor images must NOT bleed into the admin app.** **PARTLY DONE (Part 354), needs deploy** - the shared bleed was the FAVICON/manifest, now removed (favicon/PWA icon are app default; the swaps that pulled portal/settings images into the tab icon + manifest are gone). Portal editor customizes only the in-page storefront LOGO. Audit any other image that still crosses over. | favicon bleed fixed; audit others |
+| 11.14 | **Portal-editor images must NOT bleed into the admin app.** **DONE (Part 355), needs deploy** - the shared bleed was the FAVICON/manifest. Part 354 removed the swaps from the admin App + CatalogPage; Part 355 removed the LAST one, on the live `PublicCatalogPage.tsx` (see 16.1), AND deleted the now-orphaned `utils/favicon.ts` + `utils/portalManifest.ts` helpers, the vite favicon chunk rule, and every test that still asserted the removed feature. Favicon/PWA icon are fixed app branding (admin=Business OS, storefront=Leang, both static); portal editor + Settings customize only the in-page LOGO. No image now crosses into the browser-tab/PWA layer. | done (Part 355) |
 | 11.15 | **Settings business logo is only the topbar logo; favicon stays default.** **DONE (Part 354), needs deploy** - the favicon-image upload is removed from Settings and the admin favicon swap is gone, so the topbar logo can no longer become the favicon. | done, needs deploy |
 | 11.16 | **Delete the favicon image (Settings + portal editor).** **DONE (Part 354), needs deploy** - both favicon upload controls removed; icon is app default. (The original 11.16 "expose the wire-images button in Settings" is a separate, still-open idea.) | favicon removal done |
 | 11.17 | **The uploads/folder-path inputs are too wide.** Candidates found (Part 354): the backup folder-export path (`Backup.tsx:1750`, `input flex-1 font-mono`) and the import image-folder displays (`BulkImportModal.tsx:2922,3155`). Needs the user to confirm WHICH "uploads path input" (or all) before changing layout — not guessed. | needs user to point at it |
@@ -532,23 +532,175 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 341 (Aug 25 2026).** Verification below was really run in a local Windows
+**As of Part 355 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
-[Environment notes](#environment-notes).
+[Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
+are the commands' actual results this session.
 
 | Check | Result |
 |---|---|
-| `frontend` `tsc --noEmit` | clean |
-| `cloudflare` `tsc --noEmit` | clean |
-| Backend `test-*.cjs` scripts | **41 / 41 pass** |
-| Frontend `npm run test:utils` (full chain, incl. `check:source` + `verify:public-runtime`) | green |
-| Real `vite build` | succeeds (~16s) |
-| `wrangler d1 migrations apply --local` | all 49 apply cleanly |
+| `frontend` `tsc --noEmit` | **clean** |
+| `cloudflare` `tsc --noEmit` | **clean** |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **64 / 64 pass** |
+| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → 130+ `tests/*.test.ts`) | **green** |
+| Real `vite build` | **succeeds (~16s)**; `portal-manifest.json` + Leang icons present in `dist` |
+| `wrangler d1 migrations apply --local` | all migrations apply cleanly (last verified Part 346; unchanged since) |
 
-**Version control:** the project is now a real git repository, pushed to
-`https://github.com/SethyPagna/business-os` (branch `main`). Before Part 338 it had been
-a month since anything was committed. Work is committed per feature/fix rather than
-delivered as checkpoint zips.
+**Nothing is deployed.** Every fix Parts 346–355 — including the two production outages
+(0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on
+`npm run deploy:full`. The user's re-pasted error logs predate the fixes.
+
+### Done / In progress / To do — at a glance
+
+- **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · products large-screen alignment + the 11.4/11.5 revisions · batch count + View-details (§14 / 4.2 / 11.23) · VIP read/write bug + rename (11.24 / 11.25 / 4.3 / 4.4) · POS "Selling price" (11.10) · POS add-new customer/delivery (11.8) · discount/fee sizing (11.11) · history-menu overflow (11.22 / 5.7) · selection-column-only-in-select-mode on Products (11.1–11.3) · logo preview == applied + working H/V focus (16.2) · notes touch-drag (16.3) · **storefront PWA Install + full favicon-feature removal (16.1 / 11.14–11.16, Part 355).**
+- **IN PROGRESS / partial:** unified import (§12 — resolver kernel built + tested, wiring open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **TO DO (specced, not started):** §13 two-screen import UX (folds in 11.18/11.19) · §15 library one-file/many-names · server-level undo/redo (3.1) · stats-card second pass (§4 / 5.x / 11.20 / 11.21) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · POS field redesign SP/VIP + hide cost (11.9) · identity rename-regroup (9.1/9.2) · backup-restore streaming (10.1). Full ordered list: [Open work — ORDERED](#open-work--ordered).
+
+### Cross-cutting principle in force: ONE source of truth per calculation
+
+The user's standing instruction — a calculation / conversion / change must never update
+only some pages, or leave data orphaned/zombie/forgotten/corrupted. Shared helpers already
+enforce this and are the pattern to extend (see [Shared single-source helpers](#shared-single-source-of-truth-helpers)):
+
+- `lib/sqlBinding.ts` — the ONE place D1's 100-bound-param limit is written down; every
+  `IN (...)` chunks through it.
+- `lib/productBatches.ts::attachBatchCounts` — Inventory + Products read batch counts the
+  same way, so the two pages cannot disagree.
+- `catalog/logoImageStyle.ts::buildLogoImageStyle` — the editor preview and the live header
+  render a logo identically, so the preview IS the applied result.
+
+**Version control:** real git repo, pushed to `https://github.com/SethyPagna/business-os`
+(branch `main`). Committed per feature/fix, not as checkpoint zips.
+
+---
+
+## Tests & Security
+
+*Requested Part 355: a clear map of what is tested, the security posture, and the two
+public surfaces. Everything here was run this session unless marked otherwise.*
+
+### How this project is tested (two harnesses, run for real)
+
+- **Backend — `cloudflare/scripts/test-*.cjs` (64 files, 64 pass).** Pure-logic harnesses
+  that transpile the REAL source with `typescript` + a `better-sqlite3` shim (migrations
+  applied), so they exercise actual route/lib code, not reimplementations. No single
+  "run-all" script exists on purpose — they are swept individually so one failure cannot
+  hide the rest (a chain stops at the first throw).
+- **Frontend — `npm run test:utils` (green).** A hand-maintained `&&` chain of 130+
+  `tests/*.test.ts` run directly under Node, front-loaded with `typecheck`,
+  `verify:public-runtime`, and `check:source`. `testChainCoverage.test.ts` fails if any
+  `tests/*.test.ts` is not wired into the chain (it caught two unwired files this session);
+  it cannot close the stop-at-first-failure half, so the chain is still read end-to-end.
+- **`langKeyIntegrity.test.ts`** enforces en/km translation parity and flags the unsafe
+  `t('key') || 'fallback'` idiom (t returns the key itself on a miss, so a missing key
+  renders as raw text) — this caught a real POS message bug this session.
+
+### Tests added / changed this session (Parts 354–355)
+
+| Area | Test | Guards |
+|---|---|---|
+| D1 param cap (0.2) | `test-d1-bound-params-repro.cjs` | installs D1's real 100-param limit in the shim (better-sqlite3 allows 32k, which is why this reached prod) and fails if any file builds an `IN`-list without chunking |
+| Products reset (0.1) | `test-reset-products-pure.cjs` | scoped backup covers exactly the tables the reset clears, across all 4 toggle combos |
+| Import stock actions (§12) | `test-stock-action-resolver-pure.cjs` | 16 checks on DIRECT/RECONCILE deltas, sale grouping, cost/batch conflict gating |
+| Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
+| Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
+| Alignment (4.1/11.4) | `productsRowAlignment.test.ts` | the 6 `<col>` widths sum to 100%; category band spans image+name |
+| Logo crop (16.2) | `logoImageStyle.test.ts` | preview == applied; transform-origin ties to the focus point; clamps |
+| PWA / branding (16.1/11.14) | `brandIcons.test.ts`, `performanceLoadingUx.test.ts`, `adminShellMediaGuards.test.ts` | storefront serves STATIC Leang icon+manifest, never a blob or per-merchant build; the removed favicon machinery cannot return (doesNotMatch guards) |
+
+### Security posture
+
+- **AuthZ / permissions.** Route-level gating is server-side (`test-route-permissions-pure.cjs`,
+  `test-action-overrides-pure.cjs`, `test-batches-permission-pure.cjs`); product reads are scoped
+  by SURFACE so a `products_image_only` grant cannot reach POS. Per-action overrides only NARROW
+  a tier, never widen — deliberate, so UI and API cannot disagree (7.1).
+- **AuthN.** Login identifier + lockout are tested (`test-login-identifier-pure.cjs`,
+  `test-login-lockout-pure.cjs`); sessions slide (`test-session-slide-pure.cjs`).
+- **Input / injection.** All SQL is parameterized through `lib/db.ts`'s D1Compat (@name →
+  positional); `inlineIntegerIds` throws on any non-safe-integer rather than interpolating.
+  No string-built SQL values. Search/FTS paths are tested (`test-search-fts-pure.cjs`,
+  `test-contacts-fts-pure.cjs`).
+- **Offline / client hardening.** `offlineSecurityHardening.test.ts`,
+  `storagePolicy.test.ts` — the offline queue and local mirror are covered.
+- **Error reporting.** Sentry with PII scrubbing + dedupe (`test-error-reporting-pure.cjs`).
+- **Secrets.** Cloudinary secret lives only in `.dev.vars` (gitignored, verified absent from
+  git history), never in `wrangler.toml`. Rotation is a user action — see
+  [Needs the user](#needs-the-user-not-code).
+- **JavaScript specifics.** No `eval`/`Function` construction in app code. The storefront
+  no longer builds a `blob:` manifest (16.1). `t()||fallback` misses are linted out. React
+  escapes interpolated content by default; no `dangerouslySetInnerHTML` was added this session.
+
+### Open ports / network surface
+
+- **One Worker, one public origin per site.** No app-managed listening ports — Cloudflare
+  Workers terminate HTTPS; there is no raw TCP/UDP socket the app opens. Local dev is
+  `wrangler dev --local` (Miniflare) on localhost only.
+- **Bindings, not ports:** D1 (SQLite), R2 (objects), KV (cache versions) are Worker bindings,
+  reached over Cloudflare's internal RPC, not network ports. Cloudinary is an outbound HTTPS
+  fallback with a signed URL.
+- **`workers_dev`** was toggled on during the Aug-26 DNS outage to restore access, then off
+  again by request; the switch + reasoning live in `wrangler.toml`.
+
+### The two websites
+
+| | Admin app | Public storefront |
+|---|---|---|
+| Origin | `admin.leangcosmetics.dpdns.org` (+ `localhost`) | `leangcosmetics.dpdns.org` |
+| Mounted by | `index.tsx` → `AdminRoot` → `App.tsx` | `index.tsx` → `PublicCatalogRoot` → **`PublicCatalogPage.tsx`** |
+| Brand | Business OS (static `/manifest.json`, `/favicon.ico`) | Leang Cosmetics (static `/portal-manifest.json`, Leang icons) |
+| PWA install | static admin manifest | **static Leang manifest (Part 355)** — was a broken `blob:` before |
+| Auth | staff sign-in, permission tiers | public catalog; guest/customer accounts still open (§5 / batch items) |
+| Caching | app shell + route chunks | public storefront caching added earlier this session |
+
+**Known follow-ups on the surfaces:** stale cache of embedded sites on the public site (6.3,
+repro-then-scope); portal pagination counts unmerged rows so it promises empty pages (6.5);
+backup RESTORE still loads the whole document into memory and would OOM a large DB (10.1).
+
+---
+
+## Shared single-source-of-truth helpers
+
+*The user's standing rule, stated Part 354: "a calculation, conversion, change never hides,
+… doesn't update 100% of the app pages … or data loss/orphaned/zombie/forgotten/corrupted
+along the way." A number the user sees must be computed in ONE place that every page calls,
+so pages cannot drift and a change lands everywhere at once.*
+
+### Established (do not re-implement per page — import these)
+
+| Helper | The one thing it owns | Callers |
+|---|---|---|
+| `cloudflare/src/lib/sqlBinding.ts` | D1's 100-bound-param limit + all `IN (...)` chunking (`chunkForBinding`, `selectInChunks`, `buildInClause`, `inlineIntegerIds`) | ~40 read/write sites; was the 0.2 outage |
+| `cloudflare/src/lib/productBatches.ts::attachBatchCounts` | how a product's batch count is derived (active batches with non-zero branch stock) | Products list read, Inventory list read |
+| `cloudflare/src/lib/backup.ts::writeBackupDocument` | the streaming backup writer | `createCloudflareBackup`, `createSectionBackup` (reset) |
+| `frontend/src/components/catalog/logoImageStyle.ts::buildLogoImageStyle` | the logo crop/zoom/focus CSS | editor preview + live header (admin & storefront) |
+| `frontend/src/components/products/…/productGrouping.ts` | how rows group by `name_key` and who the group lead is | Products list, group header, gallery union |
+
+### The generalization the user asked for (candidates, not yet built)
+
+The same "shared kernel + thin per-page callers" shape should cover every place a money or
+stock number is computed more than once. Each of these is currently computed inline in
+several components/routes and is a divergence risk:
+
+- **Pricing resolution** — selling vs VIP vs damaged price, currency (USD/KHR) conversion,
+  discount/fee application. Today POS, Sales, Returns, product detail, receipt, and the
+  public portal each format price independently. Target: one `resolvePriceView(product, ctx)`
+  + one `convertCurrency(amount, rate)` that all six import. (Guards the 11.24 class of bug —
+  a field read/written in one place but not another.)
+- **Stock math** — on-hand, reserved, available, low/out thresholds, per-branch vs total.
+  Dashboard, Inventory, Branches, POS availability, and the stock-action resolver each derive
+  these. Target: one `computeStockState(product, branch)` returning the labelled buckets, so
+  the 5.5/11.20 colour rules and the 5.6/11.21 branch stats read the SAME numbers.
+- **Sale/return totals** — line subtotal, discount, fee, tax, grand total, and the reverse
+  for returns/replace (11.12/11.13). `test-sale-totals-pure.cjs` already pins the arithmetic;
+  the kernel it tests should be the ONE function POS checkout, the receipt, Sales, and Returns
+  all call.
+- **Adjust / reconcile deltas** — `lib/stockActionResolver.ts` (§12) is already this shape for
+  imports; the POS/manual adjust path should route through the same delta+batch logic instead
+  of its own.
+
+**Rule for new work:** before writing a calculation, grep for an existing helper; if two pages
+will show the same number, extract the kernel FIRST and have both call it. A pure
+`*-pure.cjs` / `*.test.ts` on the kernel is the proof it cannot silently diverge.
 
 ---
 
