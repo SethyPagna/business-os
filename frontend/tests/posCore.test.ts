@@ -266,14 +266,17 @@ if (failed > 0) {
 // ---------------------------------------------------------------------------
 // Regression guard for a display bug the identity rule made reachable: the
 // POS option step used to be hardcoded to "Barcode" and printed
-// variant.barcode on every pill. Details are barcode + cost, so two rows in
-// one group can share a barcode and differ only in cost -- which rendered as
-// two IDENTICAL pills with nothing to choose between them, and picking the
-// wrong one books the sale against the wrong cost.
+// variant.barcode on every pill, so two rows in one group sharing a barcode
+// rendered as two IDENTICAL pills with nothing to choose between them.
+//
+// 11.9: cost is NOT a cashier-facing field, so the pills disambiguate by
+// barcode then SELLING price, never cost. Two rows that differ only by cost
+// collapse to a neutral label on purpose -- the batch picker settles which
+// lot's COGS a sale draws from, not the cashier reading a cost.
 await runTest('buildVariantOptionLabels labels by barcode when barcodes differ', () => {
   const result = buildVariantOptionLabels([
-    { id: 1, barcode: 'AAA', cost_price_usd: 5 },
-    { id: 2, barcode: 'BBB', cost_price_usd: 5 },
+    { id: 1, barcode: 'AAA', selling_price_usd: 5 },
+    { id: 2, barcode: 'BBB', selling_price_usd: 5 },
   ] as never)
   assert.equal(result.stepTitle, 'Barcode')
   assert.equal(result.byId.get('1')?.label, 'AAA')
@@ -281,22 +284,33 @@ await runTest('buildVariantOptionLabels labels by barcode when barcodes differ',
   assert.equal(result.byId.get('1')?.hint, null, 'no hint needed when only barcode varies')
 })
 
-await runTest('buildVariantOptionLabels labels by COST when the barcode is shared', () => {
-  // The exact case that produced two identical pills.
+await runTest('buildVariantOptionLabels labels by SELLING PRICE when the barcode is shared', () => {
   const result = buildVariantOptionLabels([
-    { id: 1, barcode: 'SAME', cost_price_usd: 28 },
-    { id: 2, barcode: 'SAME', cost_price_usd: 29.04 },
+    { id: 1, barcode: 'SAME', selling_price_usd: 12 },
+    { id: 2, barcode: 'SAME', selling_price_usd: 15.5 },
   ] as never, (v) => `$${v.toFixed(2)}`)
-  assert.equal(result.stepTitle, 'Cost')
-  assert.equal(result.byId.get('1')?.label, '$28.00')
-  assert.equal(result.byId.get('2')?.label, '$29.04')
+  assert.equal(result.stepTitle, 'Price')
+  assert.equal(result.byId.get('1')?.label, '$12.00')
+  assert.equal(result.byId.get('2')?.label, '$15.50')
   assert.notEqual(result.byId.get('1')?.label, result.byId.get('2')?.label, 'pills must never be identical')
 })
 
-await runTest('buildVariantOptionLabels shows barcode plus a cost hint when BOTH differ', () => {
+await runTest('buildVariantOptionLabels never labels by cost -- cost is not cashier-facing (11.9)', () => {
+  // Same barcode, same selling price, DIFFERENT cost: the cashier must not be
+  // shown the cost, so these fall back to a neutral distinct label, not $cost.
   const result = buildVariantOptionLabels([
-    { id: 1, barcode: 'AAA', cost_price_usd: 70 },
-    { id: 2, barcode: 'BBB', cost_price_usd: 96 },
+    { id: 1, barcode: 'SAME', selling_price_usd: 12, cost_price_usd: 5 },
+    { id: 2, barcode: 'SAME', selling_price_usd: 12, cost_price_usd: 8 },
+  ] as never, (v) => `$${v.toFixed(2)}`)
+  assert.equal(result.stepTitle, 'Option', 'a cost-only difference must NOT surface a Cost step')
+  assert.ok(!/\$5|\$8/.test(result.byId.get('1')?.label || ''), 'a cost value must never appear on a pill')
+  assert.notEqual(result.byId.get('1')?.label, result.byId.get('2')?.label, 'pills must never be identical')
+})
+
+await runTest('buildVariantOptionLabels shows barcode plus a selling-price hint when BOTH differ', () => {
+  const result = buildVariantOptionLabels([
+    { id: 1, barcode: 'AAA', selling_price_usd: 70 },
+    { id: 2, barcode: 'BBB', selling_price_usd: 96 },
   ] as never, (v) => `$${v.toFixed(2)}`)
   assert.equal(result.stepTitle, 'Barcode')
   assert.equal(result.byId.get('2')?.label, 'BBB')
@@ -305,8 +319,8 @@ await runTest('buildVariantOptionLabels shows barcode plus a cost hint when BOTH
 
 await runTest('buildVariantOptionLabels still yields distinct labels when nothing varies', () => {
   const result = buildVariantOptionLabels([
-    { id: 7, barcode: '', cost_price_usd: 0 },
-    { id: 8, barcode: '', cost_price_usd: 0 },
+    { id: 7, barcode: '', selling_price_usd: 0 },
+    { id: 8, barcode: '', selling_price_usd: 0 },
   ] as never)
   assert.equal(result.stepTitle, 'Option')
   assert.notEqual(
