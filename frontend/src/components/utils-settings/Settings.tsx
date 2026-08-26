@@ -15,7 +15,6 @@ import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import GripVertical from 'lucide-react/dist/esm/icons/grip-vertical.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
-import MonitorSmartphone from 'lucide-react/dist/esm/icons/monitor-smartphone.js'
 import Package from 'lucide-react/dist/esm/icons/package.js'
 import Pin from 'lucide-react/dist/esm/icons/pin.js'
 import PinOff from 'lucide-react/dist/esm/icons/pin-off.js'
@@ -144,9 +143,6 @@ function toNumberValue(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-const SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS = 8000
-const SETTINGS_FAVICON_PREVIEW_DELAY_MS = 1800
-const SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS = 7000
 const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
 const FALLBACK_COPY: Record<'en' | 'km', Record<string, string>> = {
@@ -476,17 +472,13 @@ export default function Settings() {
   const [newPm, setNewPm] = useState('')
   const [form, setForm] = useState<SettingsRecord>({})
   const [previewNow, setPreviewNow] = useState(() => new Date())
-  const [appFaviconPreview, setAppFaviconPreview] = useState('')
   const [dragPinnedId, setDragPinnedId] = useState<string | null>(null)
   const [dragNavId, setDragNavId] = useState<string | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('all')
   const [settingsConflict, setSettingsConflict] = useState<SettingsConflictState | null>(null)
   const [showConflictReview, setShowConflictReview] = useState(false)
   const [savingSettings, setSavingSettings] = useState(false)
-  const [uploadStates, setUploadStates] = useState<UploadStateMap>(() => ({
-    ui_app_favicon_image: createInitialUploadState(),
-  }))
-  const faviconPreviewRequestRef = useRef(0)
+  const [uploadStates, setUploadStates] = useState<UploadStateMap>(() => ({}))
   const settingsSaveInFlightRef = useRef(false)
   const uploadInFlightKeysRef = useRef<Set<string>>(new Set())
   const uploadControllersRef = useRef<Map<string, AbortController>>(new Map())
@@ -546,7 +538,6 @@ export default function Settings() {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
-      invalidateTrackedRequest(faviconPreviewRequestRef)
       uploadControllersRef.current.forEach((controller) => controller?.abort?.())
       uploadControllersRef.current.clear()
       uploadPreviewUrlsRef.current.forEach((previewUrl) => {
@@ -556,64 +547,8 @@ export default function Settings() {
     }
   }, [])
 
-  useEffect(() => {
-    const source = String(form.ui_app_favicon_image || settings.ui_app_favicon_image || '').trim()
-    if (!source) {
-      invalidateTrackedRequest(faviconPreviewRequestRef)
-      setAppFaviconPreview('')
-      return undefined
-    }
-    const requestId = beginTrackedRequest(faviconPreviewRequestRef)
-    setAppFaviconPreview(source)
-    const faviconFit = form.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'
-    const faviconZoom = Math.max(80, Math.min(220, toNumberValue(form.ui_app_favicon_zoom, 100)))
-    const faviconPositionX = Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_x, 50)))
-    const faviconPositionY = Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_y, 50)))
-    let timeoutId = 0
-    let idleId = 0
-    async function loadFaviconPreview() {
-      try {
-        const { createCircularFaviconDataUrl } = await import('../../utils/favicon.ts')
-        const preview = await withLoaderTimeout(
-          () => createCircularFaviconDataUrl(source, {
-            fit: faviconFit,
-            zoom: faviconZoom,
-            positionX: faviconPositionX,
-            positionY: faviconPositionY,
-          }),
-          'Settings favicon preview',
-          SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS,
-        )
-        if (!isTrackedRequestCurrent(faviconPreviewRequestRef, requestId) || !aliveRef.current) return
-        setAppFaviconPreview(preview || source)
-      } catch {
-        if (!isTrackedRequestCurrent(faviconPreviewRequestRef, requestId) || !aliveRef.current) return
-        setAppFaviconPreview(source)
-      }
-    }
-    const scheduleIdlePreview = () => {
-      if (typeof window.requestIdleCallback === 'function') {
-        idleId = window.requestIdleCallback(() => {
-          void loadFaviconPreview()
-        }, { timeout: SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS })
-        return
-      }
-      void loadFaviconPreview()
-    }
-    timeoutId = window.setTimeout(scheduleIdlePreview, SETTINGS_FAVICON_PREVIEW_DELAY_MS)
-    return () => {
-      invalidateTrackedRequest(faviconPreviewRequestRef)
-      if (timeoutId) window.clearTimeout(timeoutId)
-      if (idleId && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
-    }
-  }, [
-    form.ui_app_favicon_fit,
-    form.ui_app_favicon_image,
-    form.ui_app_favicon_position_x,
-    form.ui_app_favicon_position_y,
-    form.ui_app_favicon_zoom,
-    settings.ui_app_favicon_image,
-  ])
+  // (Settings favicon-preview effect removed with the favicon section --
+  // the admin tab icon is DEFAULT branding now.)
 
   useEffect(() => {
     try {
@@ -1083,155 +1018,11 @@ export default function Settings() {
             {field('business_website', t('business_website') || 'Public portal / website', 'url', 'https://yourshop.example.com')}
           </div>
 
-          <div className="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
-            <div className="mb-1 text-sm font-semibold text-gray-900 dark:text-white">{t('admin_tab_icon')}</div>
-            <div className="mb-4 text-xs text-gray-500 dark:text-gray-400">{t('admin_tab_icon_desc')}</div>
-          {(() => {
-            const faviconUpload = getUploadState('ui_app_favicon_image')
-            return (
-              <>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-            </div>
-            <div className="flex h-16 w-16 items-center justify-center rounded-full border border-gray-200 bg-gray-50 shadow-sm dark:border-gray-700 dark:bg-gray-800">
-              {appFaviconPreview ? (
-                <img src={appFaviconPreview} alt="Business OS tab icon preview" className="h-full w-full rounded-full object-cover" />
-              ) : (
-                <MonitorSmartphone className="h-7 w-7 text-gray-400" />
-              )}
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-            <div>
-              <label htmlFor="settings-ui-app-favicon-image" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Business OS tab icon image
-              </label>
-              <input
-                id="settings-ui-app-favicon-image"
-                name="ui_app_favicon_image"
-                className="input"
-                type="text"
-                autoComplete="off"
-                placeholder="/uploads/brand-icon.png"
-                value={form.ui_app_favicon_image || ''}
-                onChange={(event) => setValue('ui_app_favicon_image', event.target.value)}
-              />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-secondary text-sm" onClick={() => uploadImageSetting('ui_app_favicon_image')} disabled={faviconUpload.status === 'uploading'}>
-                <ImagePlus className="h-4 w-4" />
-                <span>{faviconUpload.status === 'uploading' ? (t('uploading') || 'Uploading...') : (t('upload_image') || 'Upload Image')}</span>
-              </button>
-              {faviconUpload.status === 'uploading' ? (
-                <button type="button" className="btn-secondary text-sm" onClick={() => cancelImageUpload('ui_app_favicon_image')}>
-                  <span>{uiLanguage === 'km' ? 'បោះបង់' : 'Cancel upload'}</span>
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="btn-secondary text-sm"
-                onClick={() => {
-                  const previewUrl = uploadPreviewUrlsRef.current.get('ui_app_favicon_image')
-                  if (previewUrl && String(previewUrl).startsWith('blob:')) URL.revokeObjectURL(previewUrl)
-                  uploadPreviewUrlsRef.current.delete('ui_app_favicon_image')
-                  setValue('ui_app_favicon_image', '')
-                  updateUploadState('ui_app_favicon_image', { type: 'success', publicPath: '', processingStatus: 'idle' })
-                }}
-                disabled={faviconUpload.status === 'uploading'}
-              >
-                <Trash2 className="h-4 w-4" />
-                <span>{t('clear_btn') || 'Clear'}</span>
-              </button>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-2 dark:border-slate-700 dark:bg-slate-800/50">
-            <div>
-              <label htmlFor="settings-ui-app-favicon-fit" className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-200">Image fit</label>
-              <AppSelect
-                id="settings-ui-app-favicon-fit"
-                name="ui_app_favicon_fit"
-                value={form.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'}
-                onChange={(nextValue) => setValue('ui_app_favicon_fit', nextValue === 'contain' ? 'contain' : 'cover')}
-                ariaLabel="Favicon image fit"
-                className="w-full"
-                buttonClassName="h-9 w-full text-xs"
-                menuClassName="min-w-[10rem]"
-                options={[
-                  { value: 'cover', label: 'Cover (fill circle)' },
-                  { value: 'contain', label: 'Contain (show whole image)' },
-                ]}
-              />
-            </div>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
-              Zoom <span className="font-normal text-slate-500 dark:text-slate-400">{Math.max(80, Math.min(220, toNumberValue(form.ui_app_favicon_zoom, 100)))}%</span>
-              <input
-                className="mt-2 w-full accent-primary-600"
-                type="range"
-                min="80"
-                max="220"
-                step="1"
-                value={Math.max(80, Math.min(220, toNumberValue(form.ui_app_favicon_zoom, 100)))}
-                onChange={(event) => setValue('ui_app_favicon_zoom', event.target.value)}
-                aria-label="Favicon zoom"
-              />
-            </label>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
-              Horizontal focus <span className="font-normal text-slate-500 dark:text-slate-400">{Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_x, 50)))}%</span>
-              <input
-                className="mt-2 w-full accent-primary-600"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_x, 50)))}
-                onChange={(event) => setValue('ui_app_favicon_position_x', event.target.value)}
-                aria-label="Favicon horizontal focus"
-              />
-            </label>
-            <label className="block text-xs font-medium text-slate-700 dark:text-slate-200">
-              Vertical focus <span className="font-normal text-slate-500 dark:text-slate-400">{Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_y, 50)))}%</span>
-              <input
-                className="mt-2 w-full accent-primary-600"
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={Math.max(0, Math.min(100, toNumberValue(form.ui_app_favicon_position_y, 50)))}
-                onChange={(event) => setValue('ui_app_favicon_position_y', event.target.value)}
-                aria-label="Favicon vertical focus"
-              />
-            </label>
-          </div>
-          <div className="mt-3 space-y-2 text-xs">
-            {faviconUpload.status === 'uploading' ? (
-              <div className="rounded-lg border border-primary-200 bg-primary-50 px-3 py-2 text-primary-700 dark:border-primary-900/50 dark:bg-primary-950/30 dark:text-primary-200">
-                <div className="flex items-center justify-between gap-3">
-                  <span>{faviconUpload.fileName || (uiLanguage === 'km' ? 'កំពុងផ្ទុកឡើង' : 'Uploading')}</span>
-                  <span>{Number(faviconUpload.progress || 0)}%</span>
-                </div>
-                <div className="mt-2 h-2 overflow-hidden rounded-full bg-primary-100 dark:bg-primary-900/60">
-                  <div className="h-full rounded-full bg-primary-600 transition-all" style={{ width: `${Math.max(6, Number(faviconUpload.progress || 0))}%` }} />
-                </div>
-              </div>
-            ) : null}
-            {faviconUpload.processingStatus && faviconUpload.processingStatus !== 'idle' && faviconUpload.status === 'uploaded' ? (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
-                {faviconUpload.processingStatus === 'queued'
-                  ? (uiLanguage === 'km' ? 'បានផ្ទុកឡើង ហើយកំពុងបង្កើតកំណែបង្កើនប្រសិទ្ធភាពនៅផ្ទៃក្រោយ។' : 'Uploaded. Background optimization is running now.')
-                  : (uiLanguage === 'km' ? 'រូបភាពត្រូវបានផ្ទុកឡើងរួចរាល់។' : 'Image uploaded and ready.')}
-              </div>
-            ) : null}
-            {faviconUpload.error ? (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
-                {faviconUpload.error}
-              </div>
-            ) : null}
-          </div>
-              </>
-            )
-          })()}
-          </div>
+          {/* The admin "tab icon" (favicon / PWA icon) section was removed:
+              that icon is DEFAULT app branding now, not settings-
+              customizable (see App.tsx's removed favicon/manifest effects
+              and the PWA install fix). Settings customizes only the in-app
+              TOPBAR organization logo, above. */}
         </SettingsSection>
         ) : null}
 

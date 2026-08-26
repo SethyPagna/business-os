@@ -1425,27 +1425,10 @@ function CatalogEditorSurfaceContent() {
               uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
               uploadState={getMediaUploadState('customer_portal_logo_image')}
             />
-            <ImageField
-              label={copy('faviconImage', 'Browser tab icon')}
-              value={editorDraft.customer_portal_favicon_image}
-              fieldId="portal-favicon-image"
-              onUpload={() => uploadDraftImage('customer_portal_favicon_image')}
-              onCancelUpload={() => cancelPortalMediaUpload('customer_portal_favicon_image')}
-              onChooseExisting={() => openFilePicker('customer_portal_favicon_image', 'image', copy('faviconImage', 'Browser tab icon'))}
-              onChange={(value) => setDraft('customer_portal_favicon_image', value)}
-              onClear={() => clearPortalMediaTarget('customer_portal_favicon_image')}
-              onPreview={() => openPortalImage(copy('faviconImage', 'Browser tab icon'), [editorDraft.customer_portal_favicon_image])}
-              uploadLabel={copy('uploadImage', 'Upload image')}
-              chooseLabel={copy('openFiles', 'Files')}
-              clearLabel={copy('clearImage', 'Clear')}
-              previewLabel={copy('openGallery', 'Open image gallery')}
-              hint={copy('faviconHint', 'Shown in browser tabs and saved shortcuts. If empty, the circular logo is used automatically.')}
-              cancelLabel={copy('cancelUpload', 'Cancel upload')}
-              uploadingLabel={copy('uploading', 'Uploading...')}
-              uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
-              uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
-              uploadState={getMediaUploadState('customer_portal_favicon_image')}
-            />
+            {/* The portal editor no longer sets a favicon / browser-tab
+                icon: that is DEFAULT app branding now, not per-portal (see
+                CatalogPage's removed favicon effect and the PWA fix). The
+                editor customizes only the in-page LOGO above. */}
             <div className="grid min-w-0 gap-4">
               <label className="flex items-center justify-between rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3" htmlFor="portal-show-logo">
                 <span className="text-sm font-medium text-slate-700">{copy('showLogo', 'Show logo')}</span>
