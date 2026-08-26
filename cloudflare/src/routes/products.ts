@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { cachedJsonResponse, getVersion, bumpVersion } from '../lib/cache'
+import { matchImagesToProducts } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions } from '../lib/permissions'
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
@@ -1262,6 +1263,126 @@ app.post('/variant', async (c) => {
 // browser/proxy layer, no CSRF-adjacent concerns a mutating POST has) and
 // so the two handlers' very different jobs -- "tell me" vs. "do it" --
 // stay easy to reason about independently.
+// ---------------------------------------------------------------------------
+// Wire library images to products by filename
+// ---------------------------------------------------------------------------
+// The import path has always been able to match uploaded photos to rows by
+// filename. Nothing could do the same for images ALREADY in the Library --
+// so a photo uploaded outside an import, or one whose import matched nothing
+// at the time, could only be attached by opening each product and picking it
+// by hand. For a catalog this size that is not a real option.
+//
+// Same matcher the import uses (lib/importImageMatch.ts), so "Coca Cola.jpg",
+// "Coca Cola_1.jpg", "coca_cola-2.png" and "Coca Cola (3).jpg" all resolve to
+// the same product here exactly as they do there. One rule, one
+// implementation.
+//
+// Split into preview and apply on purpose. Attaching photos to thousands of
+// products is not something to trigger from a menu and discover afterwards --
+// the preview is what makes it reviewable, and it is the same reason import
+// image wiring became an explicit action rather than an automatic one.
+
+/** Products that could receive an image, and the library images available. */
+async function loadWireImageInputs(env: Env) {
+  const db = getDb(env)
+  const [products, images] = await Promise.all([
+    db.prepare(`
+      SELECT id, name, image_path FROM products
+      WHERE is_active = 1 AND trim(COALESCE(name, '')) <> ''
+    `).all<{ id: number; name: string; image_path: string | null }>(),
+    db.prepare(`
+      SELECT id, original_name, public_path FROM file_assets
+      WHERE COALESCE(media_type, 'image') = 'image'
+      ORDER BY id ASC
+    `).all<{ id: number; original_name: string; public_path: string }>(),
+  ])
+  return { db, products, images }
+}
+
+app.post('/wire-images/preview', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'image') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const { products, images } = await loadWireImageInputs(c.env)
+  const result = matchImagesToProducts(
+    images.map((image) => ({ id: image.id, originalName: image.original_name, relativePath: image.original_name, publicPath: image.public_path })),
+    products.map((product) => ({ id: product.id, name: product.name })),
+  )
+
+  const productById = new Map(products.map((product) => [product.id, product]))
+  const imageById = new Map(images.map((image) => [image.id, image]))
+  // Only rows that would actually CHANGE. A product already showing that
+  // exact photo is not a pending action, and listing it would bury the ones
+  // that are.
+  const changes = result.matched
+    .filter((entry) => {
+      const image = imageById.get(Number(entry.image.id))
+      const product = productById.get(Number(entry.productId))
+      return !!image && !!product && product.image_path !== image.public_path
+    })
+    .map((entry) => {
+      const image = imageById.get(Number(entry.image.id))!
+      const product = productById.get(Number(entry.productId))!
+      return {
+        productId: product.id,
+        productName: product.name,
+        imageId: image.id,
+        imageName: image.original_name,
+        imagePath: image.public_path,
+        currentImagePath: product.image_path,
+        replaces: !!product.image_path,
+        matchType: entry.matchType,
+        score: entry.score,
+      }
+    })
+
+  return c.json({
+    success: true,
+    changes,
+    counts: {
+      libraryImages: images.length,
+      matched: result.matched.length,
+      unmatched: result.unmatched.length,
+      wouldChange: changes.length,
+      wouldReplace: changes.filter((change) => change.replaces).length,
+    },
+    unmatched: result.unmatched.slice(0, 50).map((image) => image.originalName),
+  })
+})
+
+app.post('/wire-images', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'image') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  // The client sends back the exact pairs it showed. Re-matching here would
+  // risk applying something the reviewer never saw, if the library changed
+  // between preview and confirm.
+  const pairs = Array.isArray(body.changes) ? body.changes : []
+  if (!pairs.length) return c.json({ success: true, updated: 0 })
+
+  const db = getDb(c.env)
+  const statements = pairs
+    .map((raw) => {
+      const pair = raw as { productId?: unknown; imagePath?: unknown }
+      const productId = Number(pair?.productId)
+      const imagePath = String(pair?.imagePath || '').trim()
+      if (!Number.isFinite(productId) || productId <= 0 || !imagePath) return null
+      return {
+        sql: `UPDATE products SET image_path = @imagePath, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active = 1`,
+        params: { id: productId, imagePath },
+      }
+    })
+    .filter((statement) => statement !== null) as Array<{ sql: string; params: Record<string, unknown> }>
+
+  if (!statements.length) return c.json({ success: true, updated: 0 })
+  await db.batch(statements)
+  await bumpVersion(c.env, 'products')
+  return c.json({ success: true, updated: statements.length })
+})
+
 app.get('/merge-duplicates/preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {

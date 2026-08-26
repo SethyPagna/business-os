@@ -4,6 +4,7 @@ import FolderTree from 'lucide-react/dist/esm/icons/folder-tree.js'
 import Award from 'lucide-react/dist/esm/icons/award.js'
 import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
@@ -41,6 +42,8 @@ type ProductsHeaderActionsProps = {
   // build) -- same "optional so other embedders don't need to wire it"
   // reasoning as onMergeDuplicates above.
   onZeroQuantityCleanup?: () => void
+  /** Opens the image auto-wire review. Omitted when the role may not upload product images. */
+  onWireImages?: () => void
   // Rendered as the middle button of this row (Products.tsx passes its
   // Suspense-wrapped ActionHistoryBar here) -- kept as a slot rather than
   // owned by this component so the lazy-loading/Suspense boundary stays
@@ -76,6 +79,7 @@ export default function ProductsHeaderActions({
   onAdd,
   onMergeDuplicates,
   onZeroQuantityCleanup,
+  onWireImages,
   historySlot = null,
   t,
 }: ProductsHeaderActionsProps) {
@@ -95,6 +99,8 @@ export default function ProductsHeaderActions({
   const productHint = tr('add_product_button_hint', 'Create a new product from scratch')
   const mergeDuplicatesLabel = tr('merge_duplicate_products', 'Merge duplicate products')
   const mergeDuplicatesHint = tr('merge_duplicates_button_hint', 'Combine branch-only duplicate rows of the same item into one')
+  const wireImagesLabel = tr('wire_images_title', 'Wire images to products')
+  const wireImagesHint = tr('wire_images_button_hint', 'Match uploaded photos to products by filename, then review before anything is attached')
   const zeroQuantityCleanupLabel = tr('zero_quantity_cleanup_title', 'Remove 0-quantity products')
   const zeroQuantityCleanupHint = tr('zero_quantity_cleanup_button_hint', 'Review and remove products that have sat at 0 stock everywhere')
   const categoriesLabel = tr('categories', 'Categories')
@@ -119,6 +125,7 @@ export default function ProductsHeaderActions({
   const transferItems: PortalMenuItem[] = [
     ...(onImport ? [{ label: importLabel, onClick: onImport, color: 'blue' as const, icon: <Upload className={iconClass} /> }] : []),
     ...(onExport ? [{ label: exportLabel, onClick: onExport, color: 'green' as const, icon: <Download className={iconClass} /> }] : []),
+    ...(onWireImages ? [{ label: wireImagesLabel, onClick: onWireImages, icon: <ImagePlus className={iconClass} /> }] : []),
   ]
   const cleanupItems: PortalMenuItem[] = [
     ...(onMergeDuplicates ? [{ label: mergeDuplicatesLabel, onClick: onMergeDuplicates, icon: <Merge className={iconClass} /> }] : []),
@@ -172,6 +179,7 @@ export default function ProductsHeaderActions({
           ...(onImport ? [{ icon: <Upload className={iconClass} />, label: importLabel, description: importHint }] : []),
           ...(onExport ? [{ icon: <Download className={iconClass} />, label: exportLabel, description: exportHint }] : []),
           ...(onMergeDuplicates ? [{ icon: <Merge className={iconClass} />, label: mergeDuplicatesLabel, description: mergeDuplicatesHint }] : []),
+          ...(onWireImages ? [{ icon: <ImagePlus className={iconClass} />, label: wireImagesLabel, description: wireImagesHint }] : []),
           ...(onZeroQuantityCleanup ? [{ icon: <Trash2 className={iconClass} />, label: zeroQuantityCleanupLabel, description: zeroQuantityCleanupHint }] : []),
           ...(onAdd ? [{ icon: <PackagePlus className={iconClass} />, label: productLabel, description: productHint }] : []),
           ...(historySlot ? [{ label: historyLabel, description: historyHint }] : []),

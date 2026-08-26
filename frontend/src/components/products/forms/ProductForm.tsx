@@ -433,6 +433,19 @@ export default function ProductForm({
     ids.push(currentProductId)
     return Math.min(...ids)
   }, [groupCandidates, initialForm.name, currentProductId, isGroupedProduct])
+  // Which rows share this product's name, oldest first. This is the GROUP --
+  // the thing the Products list draws a header for and pages as one unit.
+  const groupMembers = useMemo(() => {
+    const name = String(initialForm.name || '').trim().toLowerCase()
+    if (!name || !currentProductId) return []
+    const others = (Array.isArray(groupCandidates) ? groupCandidates : [])
+      .filter((candidate) => String(candidate?.name || '').trim().toLowerCase() === name)
+      .map((candidate) => Number(candidate?.id || 0))
+      .filter((id) => id > 0 && id !== currentProductId)
+    return [...others, currentProductId].sort((a, b) => a - b)
+  }, [groupCandidates, initialForm.name, currentProductId])
+  const groupPosition = groupMembers.indexOf(currentProductId ?? -1) + 1
+
   // True when this row is a CHILD of a name group: the group owns the photos
   // and this row is not the owner.
   const imagesOwnedByGroupLead = groupImageOwnerId != null && groupImageOwnerId !== currentProductId
@@ -920,6 +933,27 @@ export default function ProductForm({
                   </button>
                 ) : null}
               </div>
+              {/* Which group this row belongs to, and where in it.
+                  The "Group parent" dropdown further down only knows about
+                  parent_id, which name-grouped rows do not have -- so for a
+                  row that visibly sits under a group header it said "No group
+                  parent", which reads as "this is standalone" and is exactly
+                  wrong. Name IS the grouping, so it is stated here, next to
+                  the field that determines it. */}
+              {isGroupedProduct && groupMembers.length > 1 ? (
+                <p className="mt-1 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
+                  {tr('part_of_group', 'Part of the group', 'ជាផ្នែកនៃក្រុម')}
+                  {' '}
+                  <span className="font-semibold">{String(initialForm.name || '')}</span>
+                  {' — '}
+                  {tr('group_row_position', 'row {n} of {total}', 'ជួរទី {n} ក្នុងចំណោម {total}')
+                    .replace('{n}', String(groupPosition))
+                    .replace('{total}', String(groupMembers.length))}
+                  {imagesOwnedByGroupLead
+                    ? ` · ${tr('group_photos_on_first_row', 'photos live on the first row', 'រូបភាពស្ថិតនៅជួរទីមួយ')}`
+                    : ` · ${tr('group_photos_on_this_row', 'this row holds the group photos', 'ជួរនេះកាន់រូបភាពរបស់ក្រុម')}`}
+                </p>
+              ) : null}
               {nameLocked ? (
                 <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
                   {tr(
