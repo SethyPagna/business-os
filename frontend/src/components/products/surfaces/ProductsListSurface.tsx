@@ -3,6 +3,51 @@ import type { ReactNode, RefObject } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 
+// ---------------------------------------------------------------------------
+// Desktop table geometry: ONE left rail
+// ---------------------------------------------------------------------------
+// Reported three times: on a large screen the category band's label, the
+// group title and a product's own name each started at a different x, and
+// all of them sat far right of the band's left edge.
+//
+// The two earlier attempts both re-declared the column widths -- once as
+// padding, once as a CSS grid -- on the colSpan rows. That cannot work,
+// and measuring it in a browser against the real stylesheet is what
+// finally showed why:
+//
+//   requested   <col> 2rem / 3.5rem
+//   rendered    51px / 89px
+//
+// `table-fixed` distributes whatever width the declared columns do not
+// claim (these percentages sum to 90%) proportionally across every column,
+// so the leading columns are always WIDER than they ask for, by an amount
+// that changes with the viewport. Any hand-written copy of those widths is
+// therefore correct at exactly one window size and wrong at every other --
+// which is precisely the "still not aligned" report, twice.
+//
+// So the full-width rows no longer re-declare anything. They use REAL
+// cells in the SAME columns as a product row (checkbox, image, then one
+// colSpan for the rest), and the browser's own column geometry does the
+// aligning. It cannot drift, at any width, because there is nothing left
+// to keep in sync.
+//
+// What is still tunable is how much space those leading columns ASK for,
+// and they were asking for far more than their contents need: 2.5rem for a
+// 1rem checkbox, 4.5rem for a 2.5rem thumbnail. Tightened -- "only need a
+// bit spacing from the group image".
+const SELECT_COL_WIDTH = '2rem'
+const IMAGE_COL_WIDTH = '3.5rem'
+/** Padding between the image column and the start of any title text. */
+export const ROW_TEXT_GUTTER = 'px-2'
+/** How far a grouped child row's name sits right of its group's title. */
+export const CHILD_ROW_INDENT = 'pl-4'
+/**
+ * The columns a full-width row spans past the image column. Kept next to
+ * the <colgroup> below because the two have to agree: 2 leading cells plus
+ * this must equal the table's column count.
+ */
+const FULL_WIDTH_ROW_SPAN = 6
+
 type Translate = (key: string) => string | undefined
 type TranslateWithFallback = (key: string, fallback: string, khmerFallback?: string) => string
 type ProductId = string | number
@@ -109,21 +154,29 @@ export default function ProductsListSurface({
   // hide at their existing breakpoints, while Stock remains inside the card.
   const desktopColGroup = (
     <colgroup>
-      <col className="w-10" />
-      <col className="w-[4.5rem]" />
-      <col className="w-[31%]" />
-      <col className="w-[20%]" />
-      <col className="w-[10%]" />
+      <col style={{ width: SELECT_COL_WIDTH }} />
+      <col style={{ width: IMAGE_COL_WIDTH }} />
+      {/* These six MUST sum to 100%. They summed to 90%, and `table-fixed`
+          spreads whatever is unclaimed across EVERY column proportionally
+          -- including the two fixed ones above, which is why the checkbox
+          and image columns rendered at 51px and 89px on a 1400px table
+          having asked for 32px and 56px, and why the indent grew with the
+          window. Measured in a browser against the built stylesheet: at
+          100% they render at exactly 32px and 56px, and the left rail
+          stops moving with the viewport (98px at 1400px and at 820px). */}
+      <col className="w-[34%]" />
+      <col className="w-[22%]" />
       <col className="w-[11%]" />
-      <col className="w-[8%]" />
-      <col className="w-[10%]" />
+      <col className="w-[12%]" />
+      <col className="w-[9%]" />
+      <col className="w-[12%]" />
     </colgroup>
   )
 
   const renderDesktopTableHead = (showSelectionControl: boolean) => (
     <thead className="sticky top-0 z-10">
       <tr>
-        <th className="w-8 px-3 py-3">
+        <th className="px-2 py-3">
           {showSelectionControl ? (
             <input
               type="checkbox"
@@ -136,8 +189,8 @@ export default function ProductsListSurface({
             <span className="sr-only">loading</span>
           )}
         </th>
-        <th className="w-16 whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
-        <th className="min-w-[140px] px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('product_name')}</th>
+        <th className="whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
+        <th className={`min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400`}>{t('product_name')}</th>
         <th className="hidden whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('details') || 'Details'}</th>
         {/* Was t('cost_in_purchase') ("Cost In (Purchase)") -- too long for
             this column at normal widths, overflowing/truncating to
@@ -229,28 +282,37 @@ export default function ProductsListSurface({
                   const isCollapsed = collapsedProductSections.has(section.id)
                   return (
                     <Fragment key={section.id}>
+                      {/* Real cells in the table's own columns, not a
+                          colSpan with its own padding: the label then sits
+                          in the SAME column as every product name below
+                          it, whatever width the browser gives that column.
+                          The band still reads as full width -- the
+                          background is on the <tr>. */}
                       <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                        <td colSpan={8} className="px-4 py-2">
+                        <td className="px-2 py-2">
+                          {selectionModeActive ? (
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded"
+                              checked={isSelectionScopeFullySelected(section.ids)}
+                              ref={(node) => {
+                                if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
+                              }}
+                              onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
+                              aria-label={`Select ${section.label}`}
+                            />
+                          ) : null}
+                        </td>
+                        <td className="px-2 py-2" />
+                        <td colSpan={FULL_WIDTH_ROW_SPAN} className={`${ROW_TEXT_GUTTER} py-2`}>
                           <div className="flex items-center justify-between gap-3">
-                            <label className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                              {selectionModeActive ? (
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 rounded"
-                                  checked={isSelectionScopeFullySelected(section.ids)}
-                                  ref={(node) => {
-                                    if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                                  }}
-                                  onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                                  aria-label={`Select ${section.label}`}
-                                />
-                              ) : null}
-                              <span>{section.label}</span>
+                            <span className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                              <span className="truncate">{section.label}</span>
                               <span className="normal-case tracking-normal text-slate-400">{section.items.length}</span>
-                            </label>
+                            </span>
                             <button
                               type="button"
-                              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
+                              className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
                               onClick={() => toggleProductSection(section.id)}
                             >
                               {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -270,66 +332,67 @@ export default function ProductsListSurface({
                         const showGroupRow = group.rows.length > 1
                         return (
                           <Fragment key={group.key}>
+                            {/* Real cells in the table's own columns -- see the
+                                geometry note at the top of this file. The title
+                                therefore starts at exactly the same x as its child
+                                rows' names, and as the category label above, at
+                                every viewport width. */}
                             {showGroupRow ? (
                               <tr className="bg-white/80 dark:bg-slate-900/45" data-product-jump-id={group.anchorId}>
-                                <td colSpan={8} className="px-3 py-2.5">
-                                  <div className="grid grid-cols-[2.5rem_4.5rem_minmax(0,1fr)_auto] items-center gap-0">
-                                    <label className="flex h-8 items-center justify-center">
-                                      {selectionModeActive ? (
-                                        <input
-                                          type="checkbox"
-                                          className="h-4 w-4 rounded"
-                                          checked={isSelectionScopeFullySelected(group.ids)}
-                                          ref={(node) => {
-                                            if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                          }}
-                                          onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                          aria-label={`Select ${group.name}`}
-                                        />
-                                      ) : null}
-                                    </label>
-                                    <span className="flex h-8 items-center justify-center">{renderGroupThumbnail ? renderGroupThumbnail(group) : null}</span>
-                                    {/* Title has no leading chevron/icon anymore -- a
-                                        leading disclosure icon pushed this text ~24px
-                                        right of where every standalone/child row's own
-                                        title text starts (right after the shared
-                                        checkbox+thumbnail columns), making the group
-                                        title look "indented" relative to its own rows
-                                        instead of aligned with them. The expand/collapse
-                                        chevron moved to the trailing side (with the
-                                        summary pills/actions) so this column's text
-                                        lines up flush with every other row's title. */}
+                                <td className="px-2 py-2.5">
+                                  {selectionModeActive ? (
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 rounded"
+                                      checked={isSelectionScopeFullySelected(group.ids)}
+                                      ref={(node) => {
+                                        if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
+                                      }}
+                                      onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
+                                      aria-label={`Select ${group.name}`}
+                                    />
+                                  ) : null}
+                                </td>
+                                <td className="px-2 py-2.5">
+                                  <span className="flex items-center justify-center">{renderGroupThumbnail ? renderGroupThumbnail(group) : null}</span>
+                                </td>
+                                <td colSpan={FULL_WIDTH_ROW_SPAN} className={`${ROW_TEXT_GUTTER} py-2.5`}>
+                                  <div className="flex min-w-0 items-center justify-between gap-3">
+                                    {/* Title has no leading chevron/icon -- a leading
+                                        disclosure icon pushed this text ~24px right of
+                                        where every standalone/child row's own title
+                                        starts, making the group title look "indented"
+                                        relative to its own rows. The expand/collapse
+                                        chevron lives on the trailing side instead. */}
                                     <button
                                       type="button"
-                                      className="min-w-0 truncate px-3 text-left text-sm font-semibold text-slate-700 dark:text-slate-100"
+                                      className="min-w-0 truncate text-left text-sm font-semibold text-slate-700 dark:text-slate-100"
                                       onClick={() => toggleProductGroup(group.key)}
                                     >
                                       {group.name}
                                     </button>
-                                    <div className="ml-3 flex min-w-0 items-center justify-end gap-2">
-                                    <div className="hidden xl:flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500 dark:text-slate-300">
-                                      {getGroupSummaryParts(group).map((part) => (
-                                        <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
-                                          {part}
-                                        </span>
-                                      ))}
-                                    </div>
-                                    {/* Group-title three-dot menu (add child
-                                        row / add image) -- per the Aug 19
-                                        2026 ask. Rendered by the caller
-                                        (Products.tsx) since it's the one
-                                        holding the add-variant/open-form-tab
-                                        handlers; this surface just gives it
-                                        a slot next to the summary pills. */}
-                                    {renderGroupActions ? renderGroupActions(group) : null}
-                                    <button
-                                      type="button"
-                                      className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
-                                      onClick={() => toggleProductGroup(group.key)}
-                                      aria-label={groupCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                                    >
-                                      {groupCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                                    </button>
+                                    <div className="flex min-w-0 shrink-0 items-center justify-end gap-2">
+                                      <div className="hidden xl:flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500 dark:text-slate-300">
+                                        {getGroupSummaryParts(group).map((part) => (
+                                          <span key={`${group.key}-${part}`} className="rounded-full bg-slate-100 px-2 py-0.5 dark:bg-slate-800">
+                                            {part}
+                                          </span>
+                                        ))}
+                                      </div>
+                                      {/* Group-title three-dot menu (add child row /
+                                          add image). Rendered by the caller
+                                          (Products.tsx) since it holds the
+                                          add-variant/open-form-tab handlers; this
+                                          surface just gives it a slot. */}
+                                      {renderGroupActions ? renderGroupActions(group) : null}
+                                      <button
+                                        type="button"
+                                        className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                        onClick={() => toggleProductGroup(group.key)}
+                                        aria-label={groupCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
+                                      >
+                                        {groupCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                      </button>
                                     </div>
                                   </div>
                                 </td>

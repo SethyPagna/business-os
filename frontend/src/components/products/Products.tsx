@@ -21,7 +21,7 @@ import SearchInput from '../shared/SearchInput'
 import ScanSearchButton from '../shared/ScanSearchButton'
 import PaginationControls, { PAGE_SIZE_OPTIONS, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
-import ProductsListSurface from './surfaces/ProductsListSurface'
+import ProductsListSurface, { CHILD_ROW_INDENT, ROW_TEXT_GUTTER } from './surfaces/ProductsListSurface'
 import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
@@ -2847,7 +2847,7 @@ function ProductsFullEditor() {
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
-        <td className="px-3 py-2" onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
+        <td className="px-2 py-2" onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
           {selectionModeActive ? (
             <input
               type="checkbox"
@@ -2872,7 +2872,7 @@ function ProductsFullEditor() {
             to line up) -- it is the image inside that is dropped, so every
             child row's name starts at exactly the same x as the group
             title's. */}
-        <td className="px-3 py-2">
+        <td className="px-2 py-2">
           {indented ? null : thumbnailState.hasImage
             ? <ProductImg src={thumbnailState.thumbnail} alt={productName} className="h-10 w-10 rounded-lg bg-slate-50 object-contain p-0.5 cursor-zoom-in hover:ring-2 hover:ring-primary-400 dark:bg-slate-800" onClick={(e) => { e.stopPropagation(); openLightbox(thumbnailState.gallery, 0, productName) }}
                 // Stopping only the CLICK left the row still opening its
@@ -2885,7 +2885,12 @@ function ProductsFullEditor() {
                 onTouchStart={(e) => e.stopPropagation()} />
             : <ProductImagePlaceholder className="h-10 w-10 rounded-lg" compact />}
         </td>
-        <td className="px-3 py-2">
+        {/* One shared left rail with the category band and the group title
+            (see ProductsListSurface's geometry constants). A grouped CHILD
+            row adds CHILD_ROW_INDENT and nothing else -- enough to read as
+            "inside the group", instead of the ~120px offset the fixed
+            column widths used to produce for every row. */}
+        <td className={`${ROW_TEXT_GUTTER} py-2 ${indented ? CHILD_ROW_INDENT : ''}`}>
           {/* Name cell previously forced align-top on the <td> itself, so
               a row with no meta pills (the common case) sat pinned to the
               top of the row instead of vertically centered like every
