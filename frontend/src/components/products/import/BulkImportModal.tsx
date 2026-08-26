@@ -252,6 +252,7 @@ type ProductImportApi = {
   searchProducts?: (params: Record<string, unknown>) => Promise<unknown>
   resolveImportJobImageLimit?: (jobId: EntityId, rowNumber: number, keepFileIds: EntityId[]) => Promise<unknown>
   downloadImportTemplate: (type: string) => void
+  wireImportJobImages?: (jobId: EntityId) => Promise<unknown>
   downloadImportJobErrors?: (jobId: EntityId) => void
 }
 type FilePickerModalProps = {
@@ -1128,6 +1129,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
   const [isDragActive, setIsDragActive] = useState(false)
   const [imageDir, setImageDir] = useState<string | null>(null)
   const [imageFiles, setImageFiles] = useState<ImageFileMap>({})
+  const [wireImagesState, setWireImagesState] = useState<'idle' | 'working' | 'wired'>('idle')
   const [zipFile, setZipFile] = useState<File | null>(null)
   const [conflicts, setConflicts] = useState<ProductImportConflict[]>([])
   const [cleanRows, setCleanRows] = useState<ProductImportRow[]>([])
@@ -1603,6 +1605,31 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
       setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Failed to cancel import job')] })
       setStep(3)
       setLoading(false)
+    }
+  }
+
+  // Attaching this job's images is an explicit, opt-in step -- see
+  // importJobsTransport.ts's wireImportJobImages and the route's own
+  // comment for why it stopped happening automatically. Until it is
+  // pressed the job behaves exactly like a CSV with no images at all,
+  // which is a safe state to sit in rather than a half-applied one.
+  const handleWireImportJobImages = async () => {
+    const jobId = currentJob?.id || result?.job?.id || result?.jobId
+    if (!jobId || wireImagesState === 'working') return
+    const wire = getProductImportApi().wireImportJobImages
+    if (!wire) return
+    setWireImagesState('working')
+    try {
+      const response = await wire(jobId) as { success?: boolean; error?: string; imageCount?: number } | undefined
+      if (response?.success === false) throw new Error(response.error || 'Failed to wire images')
+      setWireImagesState('wired')
+      notify(
+        T('wire_import_images_done', '{n} image(s) will be attached when this import is applied.')
+          .replace('{n}', String(response?.imageCount ?? 0)),
+      )
+    } catch (error) {
+      setWireImagesState('idle')
+      notify(getErrorMessage(error, T('wire_import_images_failed', "Could not wire this import's images.")), 'error')
     }
   }
 
@@ -3196,6 +3223,31 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
                   Back to upload
                 </button>
               </div>
+            </div>
+          ) : null}
+          {/* Images are NOT attached automatically any more (see
+              handleWireImportJobImages above). This is the button that
+              opts this job in, and it only appears when the job actually
+              carried images -- offering it for a CSV-only import would be
+              a control that does nothing. */}
+          {(result.jobId || result.job?.id || currentJob?.id) && (Object.keys(imageFiles).length > 0 || zipFile) ? (
+            <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm dark:border-blue-900/50 dark:bg-blue-950/20">
+              <p className="font-medium text-blue-900 dark:text-blue-200">{T('wire_import_images_title', "Attach this import's images")}</p>
+              <p className="mt-1 text-xs text-blue-800 dark:text-blue-300">
+                {T('wire_import_images_hint', 'Photos are matched to rows by filename but stay unattached until you ask for it, so you can review the match first. Nothing about the products changes if you skip this.')}
+              </p>
+              <button
+                type="button"
+                className="btn-secondary mt-2 text-sm"
+                onClick={handleWireImportJobImages}
+                disabled={wireImagesState !== 'idle'}
+              >
+                {wireImagesState === 'working'
+                  ? T('wire_import_images_working', 'Wiring...')
+                  : wireImagesState === 'wired'
+                    ? T('wire_import_images_wired', 'Images will be attached')
+                    : T('wire_import_images_action', 'Wire images to these rows')}
+              </button>
             </div>
           ) : null}
           <button type="button" className="btn-primary w-full" onClick={onClose}>{T('close', 'Close')}</button>

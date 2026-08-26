@@ -701,6 +701,10 @@ export const resolveImportJobImageLimit = async (id, rowNumber, keepFileIds = []
   const module = await loadImportJobsTransport()
   return module.resolveImportJobImageLimit(id, rowNumber, keepFileIds)
 }
+export const wireImportJobImages = async id => {
+  const module = await loadImportJobsTransport()
+  return module.wireImportJobImages(id)
+}
 export const assignImportJobImageToExistingProduct = async (id, fileId, productId) => {
   const module = await loadImportJobsTransport()
   return module.assignImportJobImageToExistingProduct(id, fileId, productId)

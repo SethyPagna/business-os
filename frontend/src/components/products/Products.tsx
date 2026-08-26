@@ -26,6 +26,8 @@ import MergeDuplicatesReviewModal from './MergeDuplicatesReviewModal'
 import type { MergeDuplicatesPreviewGroup } from './MergeDuplicatesReviewModal'
 import ZeroQuantityCleanupModal from './ZeroQuantityCleanupModal'
 import type { ZeroQuantityCandidate } from './ZeroQuantityCleanupModal'
+import WireImagesReviewModal from './WireImagesReviewModal'
+import type { WireImageChange, WireImagesPreview } from './WireImagesReviewModal'
 import DeleteConfirmModal from './DeleteConfirmModal'
 import { summarizeDeleteImpact } from '../../utils/deleteImpactSummary'
 import ProductsHeaderActions from './surfaces/HeaderActions'
@@ -329,6 +331,9 @@ type ProductApi = {
   previewMergeDuplicates: () => Promise<ProductApiResponse | undefined>
   previewZeroQuantityCandidates: (thresholdDays?: number) => Promise<ProductApiResponse | undefined>
   deleteZeroQuantityProducts: (ids: number[]) => Promise<ProductApiResponse | undefined>
+  previewWireImages: () => Promise<ProductApiResponse | undefined>
+  wireImages: (changes: WireImageChange[]) => Promise<ProductApiResponse | undefined>
+  unwireImages: (productIds: number[]) => Promise<ProductApiResponse | undefined>
   searchProducts: (query: Record<string, unknown>) => Promise<ProductSearchResponse | ProductRecord[] | undefined>
   transferStock: (payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
   updateProduct: (id: EntityId, payload: Record<string, unknown>) => Promise<ProductApiResponse | undefined>
@@ -445,6 +450,9 @@ const productApi: ProductApi = {
   previewMergeDuplicates: async () => toProductApiResponse(await (await loadProductWriteModule()).previewMergeDuplicateProducts()),
   previewZeroQuantityCandidates: async (thresholdDays) => toProductApiResponse(await (await loadProductWriteModule()).previewZeroQuantityCandidates(thresholdDays)),
   deleteZeroQuantityProducts: async (ids) => toProductApiResponse(await (await loadProductWriteModule()).deleteZeroQuantityProducts(ids)),
+  previewWireImages: async () => toProductApiResponse(await (await loadProductWriteModule()).previewWireProductImages()),
+  wireImages: async (changes) => toProductApiResponse(await (await loadProductWriteModule()).wireProductImages(changes)),
+  unwireImages: async (productIds) => toProductApiResponse(await (await loadProductWriteModule()).unwireProductImages(productIds)),
   searchProducts: async (query) => {
     const module = await loadProductReadModule()
     return (await module.searchProducts(query as Parameters<ProductReadModule['searchProducts']>[0])) as ProductSearchResponse | ProductRecord[]
@@ -592,6 +600,12 @@ function ProductsFullEditor() {
   const canManageLookups = can('products', 'manage_lookups')
   const canMergeDuplicates = can('products', 'merge_duplicates')
   const canZeroQuantityCleanup = can('products', 'zero_qty_cleanup')
+  // Same action the per-product image uploader is gated on: wiring photos
+  // in bulk is the same authority as attaching one by hand, just applied
+  // across the catalog. The backend gates /wire-images on exactly this
+  // (getActionTier(user, 'products', 'image')), so hiding the entry for
+  // anyone else keeps the menu honest instead of offering a 403.
+  const canWireImages = can('products', 'image')
   const { syncChannel } = useProductsSync()
   const productApi = getProductApi()
   const isActive = useIsPageActive('products')
@@ -695,6 +709,8 @@ function ProductsFullEditor() {
   const [mergeDuplicatesReviewOpen, setMergeDuplicatesReviewOpen] = useState(false)
   const [zeroQuantityCleanupOpen, setZeroQuantityCleanupOpen] = useState(false)
   const [zeroQuantityCleanupBusy, setZeroQuantityCleanupBusy] = useState(false)
+  const [wireImagesOpen, setWireImagesOpen] = useState(false)
+  const [wireImagesBusy, setWireImagesBusy] = useState(false)
   // Pending delete confirmation (single or bulk) -- see DeleteConfirmModal
   // and handleDelete/handleBulkDelete below. `ids` holds whichever row(s)
   // are pending so the confirm button knows which delete to actually run;
@@ -1684,6 +1700,69 @@ function ProductsFullEditor() {
       return undefined
     } finally {
       setZeroQuantityCleanupBusy(false)
+    }
+  }
+
+  // Attach Library photos to products by filename (routes/products.ts's
+  // /wire-images preview + apply). Same "thin passthrough through
+  // productApi" shape as the two cleanups above -- the modal never talks
+  // to productWriteTransport.ts directly.
+  //
+  // This is the recovery path for a delete-and-reimport: a products reset
+  // clears each product's link to its photo but leaves every file in the
+  // Library, so after re-importing this is what puts the photos back.
+  const openWireImages = () => {
+    if (wireImagesBusy) return
+    setWireImagesOpen(true)
+  }
+
+  const loadWireImagesPreview = async (): Promise<WireImagesPreview> => {
+    const result = await productApi.previewWireImages() as (WireImagesPreview & { success?: boolean; error?: string }) | undefined
+    if (result?.success === false) throw new Error(result.error || 'Failed to match library images')
+    return {
+      changes: Array.isArray(result?.changes) ? result.changes : [],
+      counts: {
+        libraryImages: Number(result?.counts?.libraryImages || 0),
+        matched: Number(result?.counts?.matched || 0),
+        unmatched: Number(result?.counts?.unmatched || 0),
+        ambiguous: Number(result?.counts?.ambiguous || 0),
+        wouldChange: Number(result?.counts?.wouldChange || 0),
+        wouldReplace: Number(result?.counts?.wouldReplace || 0),
+      },
+      unmatched: Array.isArray(result?.unmatched) ? result.unmatched : [],
+      ambiguous: Array.isArray(result?.ambiguous) ? result.ambiguous : [],
+    }
+  }
+
+  const handleWireImages = async (changes: WireImageChange[]) => {
+    if (wireImagesBusy || !changes.length) return undefined
+    setWireImagesBusy(true)
+    try {
+      const result = await productApi.wireImages(changes) as { success?: boolean; error?: string; updated?: number; imagesAttached?: number } | undefined
+      if (result?.success === false) throw new Error(result.error || 'Failed to attach images')
+      if (Number(result?.updated || 0) > 0) await load(true)
+      return result
+    } catch (e) {
+      notify(getErrorMessage(e, 'Failed'), 'error')
+      return undefined
+    } finally {
+      setWireImagesBusy(false)
+    }
+  }
+
+  const handleUnwireImages = async (productIds: number[]) => {
+    if (wireImagesBusy || !productIds.length) return undefined
+    setWireImagesBusy(true)
+    try {
+      const result = await productApi.unwireImages(productIds) as { success?: boolean; error?: string; cleared?: number } | undefined
+      if (result?.success === false) throw new Error(result.error || 'Failed to detach images')
+      if (Number(result?.cleared || 0) > 0) await load(true)
+      return result
+    } catch (e) {
+      notify(getErrorMessage(e, 'Failed'), 'error')
+      return undefined
+    } finally {
+      setWireImagesBusy(false)
     }
   }
 
@@ -3182,6 +3261,7 @@ function ProductsFullEditor() {
             onAdd={canAddProduct ? ()=>{setSelected(null);setModal('form')} : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
+            onWireImages={canWireImages ? openWireImages : undefined}
             historySlot={historyReady ? (
               <Suspense fallback={<div className="h-9 min-w-0 flex-1 sm:flex-none sm:min-w-[6.5rem]" aria-hidden="true" />}>
                 <ActionHistoryBar history={actionHistory} className="min-w-0 flex-1 sm:flex-none sm:min-w-[6.5rem]" showLabel t={t} />
@@ -3920,6 +4000,16 @@ function ProductsFullEditor() {
           onLoadPreview={loadZeroQuantityCandidates}
           onConfirmDelete={handleZeroQuantityDelete}
           working={zeroQuantityCleanupBusy}
+        />
+      )}
+      {wireImagesOpen && (
+        <WireImagesReviewModal
+          t={t}
+          onClose={() => { if (!wireImagesBusy) setWireImagesOpen(false) }}
+          onLoadPreview={loadWireImagesPreview}
+          onConfirmWire={handleWireImages}
+          onUnwire={handleUnwireImages}
+          working={wireImagesBusy}
         />
       )}
       {pendingDelete && pendingDelete.ids.length > 0 && (

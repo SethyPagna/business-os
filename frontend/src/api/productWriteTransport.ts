@@ -160,6 +160,39 @@ export function deleteZeroQuantityProducts(ids: Array<string | number>): Promise
   )
 }
 
+// Attaching Library photos to products by filename (routes/products.ts's
+// POST /wire-images/preview + /wire-images). Same preview-then-apply split
+// as merge-duplicates above and for the same reason: this runs across the
+// whole catalog, so the person has to see what would move before it moves.
+//
+// The apply call sends back the exact changes the preview showed rather
+// than a "do it again" flag -- re-matching server-side could apply
+// something the reviewer never saw if the Library changed in between.
+export function previewWireProductImages(): Promise<unknown> {
+  return apiFetch('POST', '/api/products/wire-images/preview')
+}
+
+export function wireProductImages(changes: unknown[]): Promise<unknown> {
+  return route(
+    'products:wireImages',
+    () => apiFetch('POST', '/api/products/wire-images', { changes }),
+    null,
+    true,
+  )
+}
+
+// The undo for the two above. Detaches only -- every file stays in the
+// Library, which is what makes re-running the preview after a bad wire a
+// real recovery path rather than a re-upload.
+export function unwireProductImages(productIds: Array<string | number>): Promise<unknown> {
+  return route(
+    'products:unwireImages',
+    () => apiFetch('POST', '/api/products/unwire-images', { productIds }),
+    null,
+    true,
+  )
+}
+
 export function bulkImportProducts(payload: ProductPayload = {}): Promise<unknown> {
   return route(
     'products:bulkImport',

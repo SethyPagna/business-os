@@ -172,6 +172,28 @@ export function assignImportJobImage(id: string | number, fileId: string | numbe
   )
 }
 
+// Opts THIS job in to attaching its matched images (routes/importJobs.ts's
+// POST /:id/images/wire).
+//
+// Image matching used to run automatically on the first chunk of any
+// products import that carried images, which is the wrong default for the
+// case it is actually used in -- a delete-and-reimport, where the operator
+// wants to see what matched before anything is attached. Once it has run
+// there is no "not yet"; the only way back is another delete. So it is an
+// explicit action, and this is the call behind the button.
+//
+// Idempotent server-side (the flag is a boolean), and refused with a 409
+// while a phase is mid-flight, so pressing it twice or at the wrong moment
+// is safe rather than half-applied.
+export function wireImportJobImages(id: string | number): Promise<unknown> {
+  return route(
+    `importJobs:imagesWire:${id}`,
+    () => apiFetch('POST', `/api/import-jobs/${encodeId(id)}/images/wire`, withImportDeviceInfo({})),
+    null,
+    true,
+  )
+}
+
 // Manually attaches an unmatched image straight to an EXISTING catalog
 // product -- not a row in this import's own CSV (assignImportJobImage,
 // above, is for that case). Use when the operator is bulk-uploading

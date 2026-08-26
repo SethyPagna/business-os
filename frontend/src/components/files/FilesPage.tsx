@@ -6,6 +6,7 @@ import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
+import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
 import LockOpen from 'lucide-react/dist/esm/icons/unlock.js'
@@ -77,6 +78,8 @@ interface AppContextValue {
   t: TranslateFunction
   hasPermission: (key: string) => boolean
   getPermissionTier: (key: string) => 'full' | 'review' | 'none'
+  /** Per-action gate -- see AppContext's own can() comment. */
+  can: (permissionKey: string, actionKey: string) => boolean
 }
 
 interface SyncContextValue {
@@ -418,8 +421,17 @@ function downloadAssetFile(asset: FileAsset) {
   link.remove()
 }
 
+// The Library is where a photo actually lives, so it is the other obvious
+// place to reach "attach these to products" from -- the Products page has
+// the same entry in its Manage menu. Same component, same review step;
+// lazily loaded because most visits to this page never open it.
+const LazyWireImagesReviewModal = lazyRetry(async () => {
+  const module = await import('../products/WireImagesReviewModal')
+  return { default: module.default }
+}, 'WireImagesReviewModal')
+
 export default function FilesPage() {
-  const { notify, user, t, hasPermission, getPermissionTier } = useApp()
+  const { notify, user, t, can, hasPermission, getPermissionTier } = useApp()
   // Library view/manage split (see cloudflare/src/routes/files.ts's own
   // top-of-file comment for the full backend-side rule this mirrors):
   // browsing/searching/previewing an asset is available to every
@@ -430,10 +442,18 @@ export default function FilesPage() {
   // honors, kept here so the button doesn't disappear for an admin whose
   // role predates the `library` key existing.
   const canManageLibrary = getPermissionTier('library') === 'full' || hasPermission('settings')
+  // Wiring library photos onto products is a PRODUCTS write, not a library
+  // one -- it changes product rows and touches nothing in the library. So
+  // it is gated on the same action the per-product image uploader uses,
+  // exactly as the backend gates it (getActionTier(user, 'products',
+  // 'image')), rather than on whatever `library` tier the person holds.
+  const canWireImages = can('products', 'image')
   const { syncChannel } = useSync()
   const isActive = useIsPageActive('files')
   const filesApi = useMemo(() => getFilesApi(), [])
   const [activeTab, setActiveTab] = useState<FilesTab>('assets')
+  const [wireImagesOpen, setWireImagesOpen] = useState(false)
+  const [wireImagesBusy, setWireImagesBusy] = useState(false)
 
   const [files, setFiles] = useState<FileAsset[]>([])
   const [search, setSearch] = useState('')
@@ -590,6 +610,60 @@ export default function FilesPage() {
   const runProviderTest = useCallback((loader: () => Promise<ProviderTestResult>, label: string) => (
     withLoaderTimeout(loader, label, AI_PROVIDER_TEST_TIMEOUT_MS)
   ), [])
+
+  // Wiring library photos to products. The transport module is imported
+  // on demand rather than at the top: this page's usual job is uploading
+  // and browsing files, and most visits never open this at all.
+  const loadWireImagesPreview = useCallback(async () => {
+    const module = await import('../../api/productWriteTransport.ts')
+    const result = await module.previewWireProductImages() as Record<string, any> | undefined
+    if (result?.success === false) throw new Error(result.error || 'Failed to match library images')
+    return {
+      changes: Array.isArray(result?.changes) ? result.changes : [],
+      counts: {
+        libraryImages: Number(result?.counts?.libraryImages || 0),
+        matched: Number(result?.counts?.matched || 0),
+        unmatched: Number(result?.counts?.unmatched || 0),
+        ambiguous: Number(result?.counts?.ambiguous || 0),
+        wouldChange: Number(result?.counts?.wouldChange || 0),
+        wouldReplace: Number(result?.counts?.wouldReplace || 0),
+      },
+      unmatched: Array.isArray(result?.unmatched) ? result.unmatched : [],
+      ambiguous: Array.isArray(result?.ambiguous) ? result.ambiguous : [],
+    }
+  }, [])
+
+  const handleWireImages = useCallback(async (changes: unknown[]) => {
+    if (!changes.length) return undefined
+    setWireImagesBusy(true)
+    try {
+      const module = await import('../../api/productWriteTransport.ts')
+      const result = await module.wireProductImages(changes) as { success?: boolean; error?: string; updated?: number; imagesAttached?: number } | undefined
+      if (result?.success === false) throw new Error(result.error || 'Failed to attach images')
+      return result
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Failed to attach images', 'error')
+      return undefined
+    } finally {
+      setWireImagesBusy(false)
+    }
+  }, [notify])
+
+  const handleUnwireImages = useCallback(async (productIds: number[]) => {
+    if (!productIds.length) return undefined
+    setWireImagesBusy(true)
+    try {
+      const module = await import('../../api/productWriteTransport.ts')
+      const result = await module.unwireProductImages(productIds) as { success?: boolean; error?: string; cleared?: number } | undefined
+      if (result?.success === false) throw new Error(result.error || 'Failed to detach images')
+      return result
+    } catch (error) {
+      notify(error instanceof Error ? error.message : 'Failed to detach images', 'error')
+      return undefined
+    } finally {
+      setWireImagesBusy(false)
+    }
+  }, [notify])
 
   const loadFiles = useCallback(async () => {
     const requestId = beginTrackedRequest(fileLoadRequestRef)
@@ -1184,7 +1258,22 @@ export default function FilesPage() {
               row with it. */}
           {canManageLibrary ? (
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <label htmlFor="library-upload-file" className="btn-primary ml-auto inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap px-4 text-sm">
+              {/* Reaches the same review modal the Products page's Manage
+                  menu opens. Here because this is where the photos are:
+                  after uploading a batch of files named after products,
+                  the next thing wanted is attaching them, and sending
+                  someone to another page to do it is the long way round. */}
+              {canWireImages ? (
+                <button
+                  type="button"
+                  onClick={() => setWireImagesOpen(true)}
+                  className="ml-auto inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <ImagePlus className="h-4 w-4" />
+                  {tr('wire_images_title', 'Wire images to products')}
+                </button>
+              ) : null}
+              <label htmlFor="library-upload-file" className={`btn-primary inline-flex h-10 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap px-4 text-sm${canWireImages ? '' : ' ml-auto'}`}>
                 <Upload className="h-4 w-4" />
                 {uploading ? tr('uploading', 'Uploading...') : tr('upload_file', 'Upload file')}
                 <input id="library-upload-file" name="library_upload_file" type="file" accept="image/*,video/*,.pdf,.csv,text/csv" className="hidden" onChange={handleUpload} disabled={uploading || deletingAssetId != null} />
@@ -1471,6 +1560,19 @@ export default function FilesPage() {
             expandedResponseId={expandedResponseId}
             setExpandedResponseId={setExpandedResponseId}
             formatDateTime={formatDateTime}
+          />
+        </Suspense>
+      ) : null}
+
+      {wireImagesOpen ? (
+        <Suspense fallback={null}>
+          <LazyWireImagesReviewModal
+            t={t}
+            onClose={() => { if (!wireImagesBusy) setWireImagesOpen(false) }}
+            onLoadPreview={loadWireImagesPreview}
+            onConfirmWire={handleWireImages}
+            onUnwire={handleUnwireImages}
+            working={wireImagesBusy}
           />
         </Suspense>
       ) : null}

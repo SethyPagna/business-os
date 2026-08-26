@@ -1308,7 +1308,7 @@ app.post('/variant', async (c) => {
 /** Products that could receive an image, and the library images available. */
 async function loadWireImageInputs(env: Env) {
   const db = getDb(env)
-  const [products, images] = await Promise.all([
+  const [products, images, galleryRows] = await Promise.all([
     db.prepare(`
       SELECT id, name, image_path FROM products
       WHERE is_active = 1 AND trim(COALESCE(name, '')) <> ''
@@ -1318,8 +1318,50 @@ async function loadWireImageInputs(env: Env) {
       WHERE COALESCE(media_type, 'image') = 'image'
       ORDER BY id ASC
     `).all<{ id: number; original_name: string; public_path: string }>(),
+    // The gallery is read too, so "already wired" means the WHOLE set of
+    // photos already matches, not just the cover. Without this a product
+    // whose cover happened to be right would be reported as needing no
+    // change while its second and third photos were still missing.
+    db.prepare(`
+      SELECT product_id, image_path FROM product_images
+      ORDER BY product_id ASC, sort_order ASC, id ASC
+    `).all<{ product_id: number; image_path: string }>(),
   ])
-  return { db, products, images }
+  const galleryByProduct = new Map<number, string[]>()
+  for (const row of galleryRows) {
+    const list = galleryByProduct.get(row.product_id)
+    if (list) list.push(row.image_path)
+    else galleryByProduct.set(row.product_id, [row.image_path])
+  }
+  return { db, products, images, galleryByProduct }
+}
+
+/**
+ * The `_1` / `_2` / `_3` suffix decides a photo's position, so "Rose
+ * Serum_2.jpg" is the second image whichever order the library happens to
+ * return it in. Anything without a suffix sorts first.
+ *
+ * Mirrors the suffix rule matchLibraryImagesStrict uses to decide that a
+ * trailing number IS an index rather than part of the name (see its
+ * MAX_IMAGES_PER_PRODUCT check -- "Chanel No 5" keeps its 5).
+ */
+function imagePositionFromName(originalName: string): number {
+  const match = String(originalName || '').replace(/\.[^.]+$/, '').match(/[_\-\s](\d+)$/)
+  if (!match) return 0
+  const position = Number(match[1])
+  return position >= 1 && position <= MAX_IMAGES_PER_PRODUCT ? position : 0
+}
+
+/** One product's proposed photo set, in the order it would be stored. */
+type WireImageChange = {
+  productId: number
+  productName: string
+  imageIds: number[]
+  imageNames: string[]
+  imagePaths: string[]
+  currentImagePath: string | null
+  currentGallery: string[]
+  replaces: boolean
 }
 
 app.post('/wire-images/preview', async (c) => {
@@ -1327,7 +1369,7 @@ app.post('/wire-images/preview', async (c) => {
   if (getActionTier(user, 'products', 'image') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const { products, images } = await loadWireImageInputs(c.env)
+  const { products, images, galleryByProduct } = await loadWireImageInputs(c.env)
   // STRICT, not the import's matcher. That one has a fuzzy fallback, which is
   // right when an operator is reviewing a few hundred rows they just uploaded
   // and a near-miss is a useful suggestion. It is wrong here: this runs
@@ -1340,30 +1382,55 @@ app.post('/wire-images/preview', async (c) => {
 
   const productById = new Map(products.map((product) => [product.id, product]))
   const imageById = new Map(images.map((image) => [image.id, image]))
-  // Only rows that would actually CHANGE. A product already showing that
-  // exact photo is not a pending action, and listing it would bury the ones
-  // that are.
-  const changes = result.matched
-    .filter((entry) => {
-      const image = imageById.get(Number(entry.image.id))
-      const product = productById.get(Number(entry.productId))
-      return !!image && !!product && product.image_path !== image.public_path
-    })
-    .map((entry) => {
-      const image = imageById.get(Number(entry.image.id))!
-      const product = productById.get(Number(entry.productId))!
-      return {
-        productId: product.id,
-        productName: product.name,
-        imageId: image.id,
-        imageName: image.original_name,
-        imagePath: image.public_path,
-        currentImagePath: product.image_path,
-        replaces: !!product.image_path,
-        matchType: entry.matchType,
-        score: entry.score,
-      }
-    })
+
+  // Grouped PER PRODUCT, not per image. The matcher deliberately returns up
+  // to MAX_IMAGES_PER_PRODUCT images for one product (that is what the
+  // `_1`/`_2`/`_3` suffixes are for), and treating each as its own change
+  // meant three UPDATEs to the same `image_path` column where the last one
+  // silently won and the other two photos were dropped on the floor -- with
+  // the gallery table never written at all.
+  const pending = new Map<number, WireImageChange>()
+  for (const entry of result.matched) {
+    const image = imageById.get(Number(entry.image.id))
+    const product = productById.get(Number(entry.productId))
+    if (!image || !product) continue
+    const change = pending.get(product.id) || {
+      productId: product.id,
+      productName: product.name,
+      imageIds: [],
+      imageNames: [],
+      imagePaths: [],
+      currentImagePath: product.image_path,
+      currentGallery: galleryByProduct.get(product.id) || [],
+      replaces: false,
+    }
+    change.imageIds.push(image.id)
+    change.imageNames.push(image.original_name)
+    change.imagePaths.push(image.public_path)
+    pending.set(product.id, change)
+  }
+
+  const changes: WireImageChange[] = []
+  for (const change of pending.values()) {
+    // Sort by suffix so the cover is the photo actually named `_1`.
+    const order = change.imageNames
+      .map((name, index) => ({ index, position: imagePositionFromName(name) }))
+      .sort((a, b) => a.position - b.position || a.index - b.index)
+    change.imageIds = order.map((slot) => change.imageIds[slot.index])
+    change.imageNames = order.map((slot) => change.imageNames[slot.index])
+    change.imagePaths = order.map((slot) => change.imagePaths[slot.index])
+
+    // Only rows that would actually CHANGE. A product already showing exactly
+    // these photos, in this order, is not a pending action, and listing it
+    // would bury the ones that are.
+    const galleryUnchanged = change.currentGallery.length === change.imagePaths.length
+      && change.currentGallery.every((path, index) => path === change.imagePaths[index])
+    if (galleryUnchanged && change.currentImagePath === change.imagePaths[0]) continue
+
+    change.replaces = !!change.currentImagePath || change.currentGallery.length > 0
+    changes.push(change)
+  }
+  changes.sort((a, b) => a.productName.localeCompare(b.productName))
 
   return c.json({
     success: true,
@@ -1397,23 +1464,94 @@ app.post('/wire-images', async (c) => {
   if (!pairs.length) return c.json({ success: true, updated: 0 })
 
   const db = getDb(c.env)
-  const statements = pairs
+  const applied = pairs
     .map((raw) => {
-      const pair = raw as { productId?: unknown; imagePath?: unknown }
+      const pair = raw as { productId?: unknown; imagePaths?: unknown; imagePath?: unknown }
       const productId = Number(pair?.productId)
-      const imagePath = String(pair?.imagePath || '').trim()
-      if (!Number.isFinite(productId) || productId <= 0 || !imagePath) return null
-      return {
-        sql: `UPDATE products SET image_path = @imagePath, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active = 1`,
-        params: { id: productId, imagePath },
-      }
+      if (!Number.isFinite(productId) || productId <= 0) return null
+      // `imagePath` (singular) is what the first version of this endpoint
+      // accepted. Still honoured so an older client, or a retried request
+      // built before this deploy, wires the cover rather than failing.
+      const rawPaths = Array.isArray(pair?.imagePaths)
+        ? pair.imagePaths
+        : pair?.imagePath != null ? [pair.imagePath] : []
+      const imagePaths = sanitizeMediaList(rawPaths).slice(0, MAX_IMAGES_PER_PRODUCT)
+      if (!imagePaths.length) return null
+      return { productId, imagePaths }
     })
-    .filter((statement) => statement !== null) as Array<{ sql: string; params: Record<string, unknown> }>
+    .filter((entry): entry is { productId: number; imagePaths: string[] } => entry !== null)
 
-  if (!statements.length) return c.json({ success: true, updated: 0 })
-  await db.batch(statements)
+  if (!applied.length) return c.json({ success: true, updated: 0 })
+
+  // Cover column and gallery table both, through the same
+  // syncProductImageGallery every other product write uses -- the gallery is
+  // what the Products page, the edit form and the public portal all read, so
+  // writing only `image_path` here left the photos invisible everywhere but
+  // the row thumbnail.
+  for (const entry of applied) {
+    await db.batch([{
+      sql: `UPDATE products SET image_path = @imagePath, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND is_active = 1`,
+      params: { id: entry.productId, imagePath: entry.imagePaths[0] },
+    }])
+    await syncProductImageGallery(c.env, entry.productId, entry.imagePaths)
+  }
   await bumpVersion(c.env, 'products')
-  return c.json({ success: true, updated: statements.length })
+  return c.json({ success: true, updated: applied.length, imagesAttached: applied.reduce((sum, entry) => sum + entry.imagePaths.length, 0) })
+})
+
+// ---------------------------------------------------------------------------
+// Unwire: detach photos from products WITHOUT deleting the files
+// ---------------------------------------------------------------------------
+// The counterpart to wiring, and the reason it is needed: wiring is applied
+// across the whole catalog at once, so getting it wrong has to be reversible
+// in one action too. Undoing it by hand, product by product, is not a real
+// option at this scale.
+//
+// This clears the link only. Every file stays in the Library, so re-running
+// the wire preview after fixing the filenames finds them all again. Deleting
+// the files is a separate, explicit action on the Library page -- keeping
+// those apart is what makes this one safe to use.
+app.post('/unwire-images', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'products', 'image') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  const rawIds = Array.isArray(body.productIds) ? body.productIds : []
+  const productIds = [...new Set(rawIds.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))]
+  // `all` has to be asked for explicitly. An empty id list must never mean
+  // "everything" -- that is one dropped array away from clearing the whole
+  // catalog's photos.
+  const clearAll = body.all === true
+  if (!clearAll && !productIds.length) {
+    return c.json({ success: false, error: 'No products selected. Pass productIds, or all: true to detach every product image.' }, 400)
+  }
+
+  const db = getDb(c.env)
+  let cleared = 0
+  if (clearAll) {
+    const result = await db.prepare(
+      `UPDATE products SET image_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE is_active = 1 AND image_path IS NOT NULL`,
+    ).run()
+    cleared = Number(result.changes || 0)
+    await db.prepare(`DELETE FROM product_images`).run()
+  } else {
+    for (const chunk of chunkForBinding(productIds)) {
+      const { sql, params } = buildInClause('id', chunk)
+      const result = await db.prepare(
+        `UPDATE products SET image_path = NULL, updated_at = CURRENT_TIMESTAMP WHERE id IN (${sql}) AND is_active = 1`,
+      ).run(params)
+      cleared += Number(result.changes || 0)
+      await db.prepare(`DELETE FROM product_images WHERE product_id IN (${sql})`).run(params)
+    }
+  }
+
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'unwire_images', 'product', null, {
+    scope: clearAll ? 'all' : 'selection',
+    productCount: clearAll ? cleared : productIds.length,
+  })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  return c.json({ success: true, cleared })
 })
 
 app.get('/merge-duplicates/preview', async (c) => {
