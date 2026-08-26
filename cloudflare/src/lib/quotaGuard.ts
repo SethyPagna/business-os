@@ -36,7 +36,7 @@ import type { Env } from '../index'
 import { getDb } from './db'
 import { recordAnalytics } from './analytics'
 
-export type QuotaResource = 'kv_write' | 'r2_class_a'
+export type QuotaResource = 'kv_write' | 'r2_class_a' | 'cf_images_transform' | 'cloudinary_transform'
 
 export type QuotaZone =
   // Plenty of headroom -- proceed normally.
@@ -59,6 +59,15 @@ type QuotaLimit = {
 const LIMITS: Record<QuotaResource, QuotaLimit> = {
   kv_write: { limit: 1000, window: 'day' },
   r2_class_a: { limit: 1_000_000, window: 'month' },
+  // Cloudflare Images free plan: 5,000 UNIQUE transformations/month, counted
+  // per source+parameters. Exceeding it returns error 9422 and is never
+  // charged, so this budget protects capability rather than money -- once
+  // spent, no new size or format can be produced until the month rolls over.
+  cf_images_transform: { limit: 5000, window: 'month' },
+  // Cloudinary free plan: 25 credits/month, ~1,000 transformations per
+  // credit. Tracked as transformations so the two providers are directly
+  // comparable in the same units.
+  cloudinary_transform: { limit: 25_000, window: 'month' },
 }
 
 // Deliberately conservative. The point of a safe zone is to change behaviour

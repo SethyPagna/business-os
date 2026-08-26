@@ -35,6 +35,7 @@ import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handl
 import { maybeRunScheduledBackup } from './lib/backup'
 import { maybeRunScheduledDriveSync } from './lib/googleDrive'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
+import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 
 export type Env = {
   DB: D1Database
@@ -48,6 +49,15 @@ export type Env = {
   // Analytics Engine. Optional: absent means recordAnalytics is a no-op, so
   // a local run behaves exactly as it did before the binding existed.
   Business_OS_Analytics?: AnalyticsEngineDataset
+  // Cloudflare Images binding. Optional so a local run or a deploy predating
+  // the binding degrades to "no server-side transform available" rather than
+  // throwing -- lib/imagePipeline.ts falls through to the next provider.
+  IMAGES?: ImagesBinding
+  // Cloudinary, used only as the fallback once Cloudflare Images' monthly
+  // transformations are spent. Absent means that rung of the ladder is
+  // skipped -- see lib/imagePipeline.ts.
+  CLOUDINARY_CLOUD_NAME?: string
+  CLOUDINARY_UPLOAD_PRESET?: string
   IMPORT_QUEUE: Queue
   MEDIA_QUEUE: Queue
   // Optional (wrangler.toml [[queues.producers]] binding) -- see
@@ -273,6 +283,11 @@ export default {
       maybeRunScheduledBackup(env)
         .then(() => maybeRunScheduledDriveSync(env))
         .then(() => maybeRunScheduledAuditLogRetention(env))
+        // Last on purpose: it is the only one of these that is optional to
+        // the business. A backup must never be skipped because an image
+        // sweep ran long, and maybeRunScheduledImageAudit swallows its own
+        // errors so it cannot break the chain either.
+        .then(() => maybeRunScheduledImageAudit(env))
         .then(() => undefined),
     )
   },
