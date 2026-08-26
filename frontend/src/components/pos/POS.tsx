@@ -3008,7 +3008,9 @@ export default function POS() {
                   <div>
                     <label htmlFor="pos-delivery-fee-usd" className="text-xs text-gray-400 block mb-1">{t('delivery_fee')||'Delivery fee'}</label>
                     <div className="flex gap-2 items-center">
-                      <div className="relative flex-1">
+                      {/* Capped width -- a delivery fee is a small figure, so a
+                          full-width input read as "too large" (11.11). */}
+                      <div className="relative w-28 max-w-full">
                         <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span>
                         <input id="pos-delivery-fee-usd" name="pos_delivery_fee_usd" className="input text-xs py-1 pl-5 w-full" type="number" step="any" placeholder="0.00" value={active.deliveryFeeUsd} onChange={e => patchActive({ deliveryFeeUsd: e.target.value })} autoComplete="off" />
                       </div>
@@ -3042,17 +3044,17 @@ export default function POS() {
               <div>
                 <div className="flex items-center justify-between gap-2">
                   <label htmlFor="pos-discount-usd" className="text-xs text-gray-500 font-medium">{t('discount')}</label>
-                  <div className="flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-[11px] dark:border-gray-600">
+                  <div className="flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
                     <button
                       type="button"
-                      className={`px-1.5 py-1 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      className={`min-w-[2.5rem] px-3 py-1.5 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
                       onClick={() => handleDiscountType('percent')}
                     >
                       %
                     </button>
                     <button
                       type="button"
-                      className={`border-l border-gray-200 px-1.5 py-1 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      className={`min-w-[2.5rem] border-l border-gray-200 px-3 py-1.5 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
                       onClick={() => handleDiscountType('fixed')}
                     >
                       {usdSymbol}

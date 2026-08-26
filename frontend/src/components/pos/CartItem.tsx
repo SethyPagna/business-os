@@ -201,17 +201,17 @@ export default function CartItem({
 
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5" onClick={(event) => event.stopPropagation()}>
         <span className="flex-shrink-0 text-[11px] text-gray-400">{translate(t, 'discount', 'Discount')}</span>
-        <div className="flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-[11px] dark:border-gray-600">
+        <div className="flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
           <button
             type="button"
-            className={`px-1.5 py-1 ${item.manual_discount_type === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+            className={`min-w-[2.25rem] px-2.5 py-1 ${item.manual_discount_type === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
             onClick={() => onDiscountChange(lineId, 'percent', String(item.manual_discount_type === 'percent' ? item.manual_discount_value || 0 : 0))}
           >
             %
           </button>
           <button
             type="button"
-            className={`border-l border-gray-200 px-1.5 py-1 dark:border-gray-600 ${item.manual_discount_type === 'fixed' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+            className={`min-w-[2.25rem] border-l border-gray-200 px-2.5 py-1 dark:border-gray-600 ${item.manual_discount_type === 'fixed' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
             onClick={() => onDiscountChange(lineId, 'fixed', String(item.manual_discount_type === 'fixed' ? item.manual_discount_value || 0 : 0))}
           >
             {usdSymbol}
