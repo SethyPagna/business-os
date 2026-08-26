@@ -3,18 +3,18 @@ main = "src/index.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "743e5b727d139e85ed11679097f6f99e"
-# Kept ON as an always-reachable fallback, not as the primary URL.
+# Off by request (Aug 26 2026) once the custom domain was restored.
 #
-# Aug 26 2026 outage: both leangcosmetics.dpdns.org and admin.* went NXDOMAIN
-# at an honest resolver (1.1.1.1) while the Worker itself was deployed and
-# healthy. The routes below bind to a Cloudflare ZONE, so if the domain's DNS
-# breaks -- delegation reverted, records removed, a free subdomain lapsing --
-# there is no way in at all, and with workers_dev = false there was no second
-# door either. The shop simply stops.
+# It was turned on during that day's outage: both leangcosmetics.dpdns.org
+# and admin.* went NXDOMAIN while the Worker itself was deployed and healthy,
+# and because the routes bind to a Cloudflare ZONE there was no second way
+# in. Root cause was the delegation -- DigitalPlat still held it and pointed
+# at its own nameservers, so Cloudflare's records were never consulted.
 #
-# This costs nothing, does not affect the custom domain when it is working,
-# and turns a DNS failure into "different URL" instead of "offline".
-workers_dev = true
+# Worth remembering if the shop ever goes dark again with a healthy Worker:
+# flipping this to true and deploying restores access in about a minute,
+# independent of DNS.
+workers_dev = false
 
 routes = [
   { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },

@@ -1037,6 +1037,34 @@ export const PRODUCT_REPLACE_COLUMNS = [
   'expiry_date', 'expiry_alert_days', 'is_active', 'image_path',
 ] as const
 
+/**
+ * Whether this job may wire matched images onto products.
+ *
+ * Image matching used to run automatically on the first chunk of every
+ * products import that had images attached. That is the wrong default for
+ * the case it actually gets used in: a delete-and-reimport, where the
+ * operator wants to see WHICH images matched WHICH rows -- and how many
+ * matched nothing -- before any of it is attached. Once it has run
+ * automatically there is no "not yet"; the only way back is another delete.
+ *
+ * So it is now opt-in per job. `policy.wire_images` is set by the explicit
+ * "Wire images" action (POST /:id/images/wire); until then analyze and apply
+ * run exactly as they would for a CSV with no images at all, which is a
+ * genuinely safe state rather than a half-applied one.
+ *
+ * Absent policy means NOT wired. A job created before this existed therefore
+ * needs the button pressed too -- deliberate, because silently wiring images
+ * for an in-flight job is precisely the surprise this removes.
+ */
+export function shouldWireImages(policyJson: string | null | undefined): boolean {
+  try {
+    const policy = policyJson ? JSON.parse(policyJson) : {}
+    return policy?.wire_images === true
+  } catch (_) {
+    return false
+  }
+}
+
 export function getProductImportMode(policyJson: string | null | undefined): ProductImportMode {
   try {
     const policy = policyJson ? JSON.parse(policyJson) : {}
@@ -3128,7 +3156,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       : null
 
     let imageMatchCache = state.imageMatch
-    if (meta.type === 'products' && !imageMatchCache) {
+    if (meta.type === 'products' && !imageMatchCache && shouldWireImages(meta.policyJson)) {
       const allRows = await readAllMaterializedRows(db, jobId, decisions)
       imageMatchCache = await computeAndCacheImageMatch(db, jobId, allRows, meta.policyJson, cursor, state)
     }
@@ -3574,7 +3602,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       : null
 
     let imageMatchCache = state.imageMatch
-    if (job.type === 'products' && !imageMatchCache) {
+    if (job.type === 'products' && !imageMatchCache && shouldWireImages(job.policy_json)) {
       const allRows = await readAllMaterializedRows(db, jobId, decisions)
       imageMatchCache = await computeAndCacheImageMatch(db, jobId, allRows, job.policy_json, cursor, state)
     }

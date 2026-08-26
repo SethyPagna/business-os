@@ -888,6 +888,49 @@ app.post('/:id/images', async (c) => {
 // import_job_files.stored_path / file_assets.public_path are untouched,
 // so import matching and the Library listing both keep working exactly
 // as before, just against smaller bytes).
+// POST /:id/images/wire -- opt this job in to attaching matched images.
+//
+// Image matching used to run automatically on the first chunk of any products
+// import that had images. That is the wrong default for the case it is
+// actually used in -- a delete-and-reimport -- where the operator wants to
+// see which images matched which rows, and how many matched nothing, BEFORE
+// anything is attached. Once it has run automatically there is no "not yet";
+// the only way back is another delete.
+//
+// So it is an explicit action now. Until this is called, analyze and apply
+// behave exactly as they would for a CSV with no images at all, which is a
+// genuinely safe state rather than a half-applied one.
+//
+// Idempotent: pressing it twice is a no-op rather than a second wiring pass,
+// because the flag is a boolean and the match itself is recomputed only when
+// the job has none cached.
+app.post('/:id/images/wire', async (c) => {
+  const id = c.req.param('id')
+  const job = await getJob(c.env, id)
+  if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
+  const denied = await requireImportPermission(c as any, job)
+  if (denied) return denied
+
+  // Refuse while a phase is mid-flight. Flipping this under a running job
+  // would have some chunks wire images and earlier ones not, leaving a
+  // half-matched import that looks complete.
+  const status = String(job.status || '')
+  if (status === 'analyzing' || status === 'applying') {
+    return c.json({ success: false, error: 'Wait for the current pass to finish before wiring images.' }, 409)
+  }
+
+  const db = getDb(c.env)
+  const policy = safeJsonParse<Record<string, unknown>>(job.policy_json as string, {})
+  policy.wire_images = true
+  await db.prepare(`UPDATE import_jobs SET policy_json = @policy, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
+    .run({ id, policy: JSON.stringify(policy) })
+
+  const imageCount = await db
+    .prepare(`SELECT COUNT(*) AS n FROM import_job_files WHERE job_id = @id AND kind = 'image'`)
+    .get<{ n: number }>({ id })
+  return c.json({ success: true, wired: true, imageCount: Number(imageCount?.n || 0) })
+})
+
 app.post('/:id/images/:fileId/recompress', async (c) => {
   const id = c.req.param('id')
   const fileId = c.req.param('fileId')
