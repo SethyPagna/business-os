@@ -61,7 +61,6 @@ import {
 } from './portalTranslationData.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
-import { buildPortalManifest } from '../../utils/portalManifest.ts'
 
 const loadCatalogEditorSurface = () => import('./CatalogEditorSurface')
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
@@ -101,16 +100,6 @@ const CATALOG_PORTAL_EDITOR_HELPERS_TIMEOUT_MS = 10000
 const CATALOG_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
 const CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_FAVICON_TIMEOUT_MS = 8000
-// Fallback used for the browser-tab favicon and the PWA "Add to Home
-// Screen" manifest icon when the business hasn't configured a
-// customer_portal_favicon_image/business logo yet. Without this, an
-// unconfigured portal fell straight through to the shared static
-// /favicon.ico and /manifest.json -- the ADMIN app's generic branding --
-// which is exactly the "wrong PWA icon on the public site" bug. Ships as a
-// real file under /public so it works with zero settings configured; once
-// the business uploads its own logo/favicon in Settings, that always wins
-// (see the `|| DEFAULT_PORTAL_ICON_SRC` fallbacks below).
-const DEFAULT_PORTAL_ICON_SRC = '/leang-cosmetics-icon-512.png'
 const CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS = 25000
 const CATALOG_MEMBERSHIP_LOOKUP_TIMEOUT_MS = 12000
 const CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS = 30000
@@ -1382,8 +1371,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const assistantInFlightRef = useRef(false)
   const portalBootstrapRequestRef = useRef(0)
   const portalProductsRequestRef = useRef(0)
-  const portalFaviconRequestRef = useRef(0)
-  const portalManifestRequestRef = useRef(0)
   const skipNextBootstrappedProductSearchRef = useRef(false)
   const publicScrollAnchorRef = useRef(0)
   const publicPortalNavRef = useRef<HTMLElement | null>(null)
@@ -1540,14 +1527,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     previewConfig.logoPositionY,
     previewConfig.logoFit,
   ].join('|')
-  const faviconVersionSeed = [
-    previewConfig.businessFavicon || previewConfig.businessLogo,
-    previewConfig.businessFavicon ? 'portal-favicon' : 'logo-fallback',
-    previewConfig.logoFit,
-    previewConfig.logoZoom,
-    previewConfig.logoPositionX,
-    previewConfig.logoPositionY,
-  ].join('|')
   const coverVersionSeed = [
     previewConfig.businessCover,
     previewConfig.heroGradientStart,
@@ -1555,7 +1534,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     previewConfig.heroGradientEnd,
   ].join('|')
   const versionedBusinessLogo = withAssetVersion(previewConfig.businessLogo, logoVersionSeed)
-  const versionedBusinessFavicon = withAssetVersion(previewConfig.businessFavicon || previewConfig.businessLogo, faviconVersionSeed)
   const versionedBusinessCover = withAssetVersion(previewConfig.businessCover, coverVersionSeed)
   const aboutBlocks = useMemo(
     () => normalizeAboutBlocks((canEdit ? editorDraft.customer_portal_about_blocks : null) || previewConfig.aboutBlocks || [], { keepEmpty: true }),
@@ -2021,7 +1999,6 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     aliveRef.current = false
     invalidateTrackedRequest(portalBootstrapRequestRef)
     invalidateTrackedRequest(portalProductsRequestRef)
-    invalidateTrackedRequest(portalFaviconRequestRef)
     invalidateTrackedRequest(loadRequestRef)
     invalidateTrackedRequest(membershipLookupRequestRef)
     invalidateTrackedRequest(assistantRequestRef)
@@ -2051,218 +2028,27 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }, [publicView])
 
   useEffect(() => {
+    // Public portal sets only its TAB TITLE to the business name (page
+    // level). It no longer swaps the favicon: the browser-tab/PWA icon is
+    // the DEFAULT app branding now, not per-portal-customizable (the portal
+    // editor changes the in-page LOGO only), which also keeps the static
+    // /favicon.ico + /manifest.json intact so the storefront stays
+    // installable.
     if (!publicView || typeof document === 'undefined') return undefined
     const previousTitle = document.title
     const titleText = String(previewConfig.businessName || previewConfig.title || 'Leang Cosmetics').trim()
     document.title = titleText || 'Leang Cosmetics'
+    return () => { document.title = previousTitle }
+  }, [publicView, previewConfig.businessName, previewConfig.title])
 
-    const ensureLink = (rel: string) => {
-      let linkEl = document.querySelector(`link[rel="${rel}"]`)
-      let created = false
-      const previousHref = linkEl?.getAttribute('href') || ''
-      if (!linkEl) {
-        linkEl = document.createElement('link')
-        linkEl.setAttribute('rel', rel)
-        document.head.appendChild(linkEl)
-        created = true
-      }
-      return { linkEl, created, previousHref, rel }
-    }
+  // The public portal used to swap <link rel="manifest"> to a per-portal
+  // blob: URL built from the business favicon/logo. Chrome does NOT treat a
+  // blob: manifest as installable, so the storefront lost its "Install app"
+  // prompt entirely (reported for leangcosmetics.dpdns.org). Removed: the
+  // static, real /manifest.json is installable, and per the product
+  // decision the PWA icon + favicon are DEFAULT app branding, not
+  // per-portal-customizable (only the in-page LOGO is).
 
-    const iconLinks = [
-      ensureLink('icon'),
-      ensureLink('shortcut icon'),
-      ensureLink('apple-touch-icon'),
-    ]
-
-    const iconSource = versionedBusinessFavicon || versionedBusinessLogo || DEFAULT_PORTAL_ICON_SRC
-    const faviconOptions = previewConfig.businessFavicon
-      ? { fit: 'cover' as const, zoom: 100, positionX: 50, positionY: 50 }
-      : {
-          fit: 'cover' as const,
-          zoom: toNumber(previewConfig.logoZoom, 100),
-          positionX: toNumber(previewConfig.logoPositionX, 50),
-          positionY: toNumber(previewConfig.logoPositionY, 50),
-        }
-    let faviconIdleId: number | null = null
-    let faviconTimerId: number | null = null
-    if (iconSource) {
-      const requestId = beginTrackedRequest(portalFaviconRequestRef)
-      iconLinks.forEach(({ linkEl, rel }) => {
-        if (!linkEl) return
-        linkEl.setAttribute('href', iconSource)
-        if (rel === 'icon' || rel === 'shortcut icon') {
-          linkEl.setAttribute('type', 'image/png')
-        }
-      })
-
-      const renderRoundedFavicon = () => {
-        withLoaderTimeout(
-          () => import('../../utils/favicon.ts').then(({ createCircularFaviconDataUrl }) => (
-            createCircularFaviconDataUrl(iconSource, faviconOptions)
-          )),
-          'Portal favicon',
-          CATALOG_PORTAL_FAVICON_TIMEOUT_MS,
-        )
-          .then((faviconHref) => {
-            if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
-            const resolvedHref = faviconHref || iconSource
-            iconLinks.forEach(({ linkEl, rel }) => {
-              if (!linkEl) return
-              linkEl.setAttribute('href', resolvedHref)
-              if (rel === 'icon' || rel === 'shortcut icon') {
-                linkEl.setAttribute('type', 'image/png')
-              }
-            })
-          })
-          .catch(() => {
-            if (!aliveRef.current || !isTrackedRequestCurrent(portalFaviconRequestRef, requestId)) return
-            iconLinks.forEach(({ linkEl, rel }) => {
-              if (!linkEl) return
-              linkEl.setAttribute('href', iconSource)
-              if (rel === 'icon' || rel === 'shortcut icon') {
-                linkEl.setAttribute('type', 'image/png')
-              }
-            })
-          })
-      }
-
-      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-        faviconIdleId = window.requestIdleCallback(renderRoundedFavicon, { timeout: 1800 })
-      } else if (typeof window !== 'undefined') {
-        faviconTimerId = window.setTimeout(renderRoundedFavicon, 900)
-      } else {
-        renderRoundedFavicon()
-      }
-    } else {
-      invalidateTrackedRequest(portalFaviconRequestRef)
-    }
-
-    return () => {
-      if (faviconIdleId != null) window.cancelIdleCallback?.(faviconIdleId)
-      if (faviconTimerId != null) window.clearTimeout(faviconTimerId)
-      invalidateTrackedRequest(portalFaviconRequestRef)
-      document.title = previousTitle
-      iconLinks.forEach(({ linkEl, created, previousHref }) => {
-        if (!linkEl) return
-        if (created) {
-          linkEl.remove()
-        } else if (previousHref) {
-          linkEl.setAttribute('href', previousHref)
-        } else {
-          linkEl.removeAttribute('href')
-        }
-      })
-    }
-  }, [
-    publicView,
-    previewConfig.businessFavicon,
-    previewConfig.businessLogo,
-    previewConfig.businessName,
-    previewConfig.logoFit,
-    previewConfig.logoPositionX,
-    previewConfig.logoPositionY,
-    previewConfig.logoZoom,
-    previewConfig.title,
-    versionedBusinessLogo,
-    versionedBusinessFavicon,
-  ])
-
-  // Real gap (see progress.md's public-portal item): the app ships one
-  // static /manifest.json ("Business OS", generic icon) shared by both the
-  // internal admin app and every customer's public storefront -- someone
-  // who "Add to Home Screen"s a business's portal got the ADMIN app's
-  // name/icon, not that business's own branding, because nothing ever
-  // swapped `<link rel="manifest">` the way the effect above already
-  // swaps the favicon/title. Mirrors that effect's own pattern (idle-
-  // callback deferred, tracked-request-guarded, restores the original on
-  // cleanup) so this doesn't compete with it for the same source image.
-  useEffect(() => {
-    if (!publicView || typeof document === 'undefined') return undefined
-    const manifestLinkEl = document.querySelector('link[rel="manifest"]')
-    const previousManifestHref = manifestLinkEl?.getAttribute('href') || ''
-    const appleTitleMetaEl = document.querySelector('meta[name="apple-mobile-web-app-title"]')
-    const previousAppleTitle = appleTitleMetaEl?.getAttribute('content') || ''
-
-    const iconSource = versionedBusinessFavicon || versionedBusinessLogo || DEFAULT_PORTAL_ICON_SRC
-
-    const iconOptions = previewConfig.businessFavicon
-      ? { fit: 'cover' as const, zoom: 100, positionX: 50, positionY: 50 }
-      : {
-          fit: 'cover' as const,
-          zoom: toNumber(previewConfig.logoZoom, 100),
-          positionX: toNumber(previewConfig.logoPositionX, 50),
-          positionY: toNumber(previewConfig.logoPositionY, 50),
-        }
-
-    let manifestIdleId: number | null = null
-    let manifestTimerId: number | null = null
-    let manifestBlobUrl: string | null = null
-    const requestId = beginTrackedRequest(portalManifestRequestRef)
-
-    const applyPortalManifest = () => {
-      withLoaderTimeout(
-        () => import('../../utils/favicon.ts').then(({ createSquareIconDataUrl }) => Promise.all([
-          createSquareIconDataUrl(iconSource, { ...iconOptions, size: 192 }),
-          createSquareIconDataUrl(iconSource, { ...iconOptions, size: 512 }),
-        ])),
-        'Portal manifest icons',
-        CATALOG_PORTAL_FAVICON_TIMEOUT_MS,
-      )
-        .then(([icon192, icon512]) => {
-          if (!aliveRef.current || !isTrackedRequestCurrent(portalManifestRequestRef, requestId)) return
-          if (!icon192 && !icon512) return
-          const manifest = buildPortalManifest({
-            businessName: previewConfig.businessName,
-            title: previewConfig.title,
-            publicPath: previewConfig.publicPath,
-            icon192: icon192 || icon512,
-            icon512: icon512 || icon192,
-          })
-          const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' })
-          manifestBlobUrl = URL.createObjectURL(blob)
-          if (manifestLinkEl) manifestLinkEl.setAttribute('href', manifestBlobUrl)
-          if (appleTitleMetaEl) appleTitleMetaEl.setAttribute('content', manifest.name)
-        })
-        .catch(() => {})
-    }
-
-    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      manifestIdleId = window.requestIdleCallback(applyPortalManifest, { timeout: 1800 })
-    } else if (typeof window !== 'undefined') {
-      manifestTimerId = window.setTimeout(applyPortalManifest, 900)
-    } else {
-      applyPortalManifest()
-    }
-
-    return () => {
-      if (manifestIdleId != null) window.cancelIdleCallback?.(manifestIdleId)
-      if (manifestTimerId != null) window.clearTimeout(manifestTimerId)
-      invalidateTrackedRequest(portalManifestRequestRef)
-      if (manifestBlobUrl) URL.revokeObjectURL(manifestBlobUrl)
-      if (manifestLinkEl) {
-        if (previousManifestHref) manifestLinkEl.setAttribute('href', previousManifestHref)
-        else manifestLinkEl.removeAttribute('href')
-      }
-      if (appleTitleMetaEl) {
-        if (previousAppleTitle) appleTitleMetaEl.setAttribute('content', previousAppleTitle)
-        else appleTitleMetaEl.removeAttribute('content')
-      }
-    }
-  }, [
-    publicView,
-    previewConfig.businessFavicon,
-    previewConfig.businessLogo,
-    previewConfig.businessName,
-    previewConfig.logoFit,
-    previewConfig.logoPositionX,
-    previewConfig.logoPositionY,
-    previewConfig.logoZoom,
-    previewConfig.publicPath,
-    previewConfig.title,
-    versionedBusinessLogo,
-    versionedBusinessFavicon,
-  ])
 
   useEffect(() => {
     if (!publicView || typeof window === 'undefined') return undefined

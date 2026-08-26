@@ -16,7 +16,6 @@ import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
-import { buildPortalManifest } from './utils/portalManifest.ts'
 
 declare const __FRONTEND_BUILD_HASH__: string | undefined
 
@@ -315,9 +314,6 @@ const PAGE_IMPORTERS = {
   server: asPageModule(() => import('./components/server/ServerPage')),
 } satisfies Record<PageId, ChunkImporter>
 
-const APP_FAVICON_REQUEST_TIMEOUT_MS = 8000
-const APP_FAVICON_PROCESSING_DELAY_MS = 1800
-const APP_FAVICON_IDLE_TIMEOUT_MS = 7000
 
 const CHUNK_IMPORT_TIMEOUT_MS = 15000
 const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000
@@ -1542,8 +1538,6 @@ export default function App() {
     notify,
     t,
   } = useApp()
-  const faviconRequestRef = useRef(0)
-  const manifestRequestRef = useRef(0)
   const offlineNoticeRef = useRef({ queued: '', synced: '' })
   const {
     syncError,
@@ -1749,229 +1743,16 @@ export default function App() {
     }
   }, [isPublicCatalogRoute, settings.business_name])
 
-  useEffect(() => {
-    if (isPublicCatalogRoute || typeof document === 'undefined') return undefined
+  // The admin app no longer re-brands its favicon or swaps its manifest
+  // (both removed). The browser-tab / "Add to Home Screen" icon is the
+  // DEFAULT app branding, not settings-customizable -- Settings changes
+  // only the in-app TOPBAR organization logo. The manifest swap also built
+  // a blob: URL, which Chrome refuses to treat as installable, so keeping
+  // the static /manifest.json is what makes the app PWA-installable. The
+  // tab TITLE re-brand (above) stays.
 
-    const iconSource = String(
-      settings.ui_app_favicon_image
-      || settings.customer_portal_favicon_image
-      || settings.customer_portal_logo_image
-      || '',
-    ).trim()
-    if (!iconSource) return undefined
-    const faviconFit = settings.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'
-    const faviconZoom = Math.max(80, Math.min(220, toFiniteNumber(settings.ui_app_favicon_zoom, 100)))
-    const faviconPositionX = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_x, 50)))
-    const faviconPositionY = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_y, 50)))
 
-    let iconEls = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'))
-    let createdIcon = false
-    const previousIcons = iconEls.map((icon) => ({
-      icon,
-      href: icon.getAttribute('href') || '',
-      type: icon.getAttribute('type') || '',
-      sizes: icon.getAttribute('sizes') || '',
-    }))
-    let idleId: number | null = null
-    let timerId: number | null = null
-    const requestId = (Number(faviconRequestRef.current) || 0) + 1
-    faviconRequestRef.current = requestId
 
-    if (!iconEls.length) {
-      const iconEl = document.createElement('link')
-      iconEl.setAttribute('rel', 'icon')
-      document.head.appendChild(iconEl)
-      iconEls = [iconEl]
-      createdIcon = true
-    }
-    iconEls.forEach((iconEl) => iconEl.setAttribute('href', iconSource))
-
-    async function processFavicon() {
-      try {
-        const faviconHref = await withLoaderTimeout(
-          async () => {
-            const { createCircularFaviconDataUrl } = await import('./utils/favicon.ts')
-            return createCircularFaviconDataUrl(iconSource, {
-              fit: faviconFit,
-              zoom: faviconZoom,
-              positionX: faviconPositionX,
-              positionY: faviconPositionY,
-            })
-          },
-          'App favicon',
-          APP_FAVICON_REQUEST_TIMEOUT_MS,
-        )
-        if (faviconRequestRef.current !== requestId) return
-        iconEls.forEach((iconEl) => {
-          iconEl.setAttribute('href', faviconHref || iconSource)
-          iconEl.setAttribute('type', 'image/png')
-        })
-      } catch {
-        if (faviconRequestRef.current !== requestId) return
-        iconEls.forEach((iconEl) => iconEl.setAttribute('href', iconSource))
-      }
-    }
-    timerId = window.setTimeout(() => {
-      if (typeof window.requestIdleCallback === 'function') {
-        idleId = window.requestIdleCallback(processFavicon, { timeout: APP_FAVICON_IDLE_TIMEOUT_MS })
-      } else {
-        processFavicon()
-      }
-    }, APP_FAVICON_PROCESSING_DELAY_MS)
-
-    return () => {
-      faviconRequestRef.current = requestId + 1
-      if (timerId != null) window.clearTimeout(timerId)
-      if (idleId != null && typeof window.cancelIdleCallback === 'function') {
-        window.cancelIdleCallback(idleId)
-      }
-      if (createdIcon) {
-        iconEls.forEach((iconEl) => iconEl.remove())
-      } else {
-        previousIcons.forEach(({ icon, href, type, sizes }) => {
-          if (href) icon.setAttribute('href', href)
-          else icon.removeAttribute('href')
-          if (type) icon.setAttribute('type', type)
-          else icon.removeAttribute('type')
-          if (sizes) icon.setAttribute('sizes', sizes)
-          else icon.removeAttribute('sizes')
-        })
-      }
-    }
-  }, [
-    isPublicCatalogRoute,
-    settings.customer_portal_favicon_image,
-    settings.customer_portal_logo_image,
-    settings.ui_app_favicon_fit,
-    settings.ui_app_favicon_image,
-    settings.ui_app_favicon_position_x,
-    settings.ui_app_favicon_position_y,
-    settings.ui_app_favicon_zoom,
-  ])
-
-  // Real gap this fixes: the app ships one static /manifest.json ("Business
-  // OS", generic icon) and static index.html <meta name="apple-mobile-web-
-  // app-title">/<link rel="apple-touch-icon"> shared by every deployment --
-  // the tab title/favicon above already get re-branded with the real
-  // business's name/logo, but iOS/Android's "Add to Home Screen" reads this
-  // completely different set of tags, which nothing ever touched, so it
-  // baked in "Business OS" + the generic icon at build time and reset to
-  // that on every redeploy no matter what was configured in Settings.
-  // Mirrors CatalogPage.tsx's own manifest-swap effect for the public
-  // storefront (idle-callback deferred, request-ref guarded, restores the
-  // original on cleanup) -- same fix, just for the admin app's own
-  // "Add to Home Screen" instead of a customer's portal one.
-  useEffect(() => {
-    if (isPublicCatalogRoute || typeof document === 'undefined') return undefined
-
-    const manifestLinkEl = document.querySelector('link[rel="manifest"]')
-    const previousManifestHref = manifestLinkEl?.getAttribute('href') || ''
-    const appleTitleMetaEl = document.querySelector('meta[name="apple-mobile-web-app-title"]')
-    const previousAppleTitle = appleTitleMetaEl?.getAttribute('content') || ''
-    const appleIconEl = document.querySelector('link[rel="apple-touch-icon"]')
-    const previousAppleIconHref = appleIconEl?.getAttribute('href') || ''
-
-    const businessName = String(settings.business_name || '').trim()
-    const iconSource = String(
-      settings.ui_app_favicon_image
-      || settings.customer_portal_favicon_image
-      || settings.customer_portal_logo_image
-      || '',
-    ).trim()
-
-    if (!businessName && !iconSource) return undefined
-
-    if (appleTitleMetaEl && businessName) {
-      appleTitleMetaEl.setAttribute('content', businessName)
-    }
-
-    if (!iconSource) return () => {
-      if (appleTitleMetaEl) {
-        if (previousAppleTitle) appleTitleMetaEl.setAttribute('content', previousAppleTitle)
-        else appleTitleMetaEl.removeAttribute('content')
-      }
-    }
-
-    const iconFit = settings.ui_app_favicon_fit === 'contain' ? 'contain' : 'cover'
-    const iconZoom = Math.max(80, Math.min(220, toFiniteNumber(settings.ui_app_favicon_zoom, 100)))
-    const iconPositionX = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_x, 50)))
-    const iconPositionY = Math.max(0, Math.min(100, toFiniteNumber(settings.ui_app_favicon_position_y, 50)))
-
-    let idleId: number | null = null
-    let timerId: number | null = null
-    let manifestBlobUrl: string | null = null
-    const requestId = (Number(manifestRequestRef.current) || 0) + 1
-    manifestRequestRef.current = requestId
-
-    if (appleIconEl) appleIconEl.setAttribute('href', iconSource)
-
-    async function applyAppManifest() {
-      try {
-        const { createSquareIconDataUrl } = await import('./utils/favicon.ts')
-        const [icon192, icon512] = await withLoaderTimeout(
-          () => Promise.all([
-            createSquareIconDataUrl(iconSource, { size: 192, fit: iconFit, zoom: iconZoom, positionX: iconPositionX, positionY: iconPositionY }),
-            createSquareIconDataUrl(iconSource, { size: 512, fit: iconFit, zoom: iconZoom, positionX: iconPositionX, positionY: iconPositionY }),
-          ]),
-          'App manifest icons',
-          APP_FAVICON_REQUEST_TIMEOUT_MS,
-        )
-        if (manifestRequestRef.current !== requestId) return
-        if (!icon192 && !icon512) return
-        const manifest = buildPortalManifest({
-          businessName,
-          publicPath: '/',
-          icon192: icon192 || icon512,
-          icon512: icon512 || icon192,
-        })
-        const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' })
-        manifestBlobUrl = URL.createObjectURL(blob)
-        if (manifestLinkEl) manifestLinkEl.setAttribute('href', manifestBlobUrl)
-        if (appleTitleMetaEl) appleTitleMetaEl.setAttribute('content', manifest.name)
-        if (appleIconEl && (icon192 || icon512)) appleIconEl.setAttribute('href', icon512 || icon192)
-      } catch {
-        // Leave the swapped-in raw iconSource/business name in place; not
-        // worth failing the whole app shell over a home-screen icon render.
-      }
-    }
-
-    timerId = window.setTimeout(() => {
-      if (typeof window.requestIdleCallback === 'function') {
-        idleId = window.requestIdleCallback(applyAppManifest, { timeout: APP_FAVICON_IDLE_TIMEOUT_MS })
-      } else {
-        applyAppManifest()
-      }
-    }, APP_FAVICON_PROCESSING_DELAY_MS)
-
-    return () => {
-      manifestRequestRef.current = requestId + 1
-      if (timerId != null) window.clearTimeout(timerId)
-      if (idleId != null && typeof window.cancelIdleCallback === 'function') window.cancelIdleCallback(idleId)
-      if (manifestBlobUrl) URL.revokeObjectURL(manifestBlobUrl)
-      if (manifestLinkEl) {
-        if (previousManifestHref) manifestLinkEl.setAttribute('href', previousManifestHref)
-        else manifestLinkEl.removeAttribute('href')
-      }
-      if (appleTitleMetaEl) {
-        if (previousAppleTitle) appleTitleMetaEl.setAttribute('content', previousAppleTitle)
-        else appleTitleMetaEl.removeAttribute('content')
-      }
-      if (appleIconEl) {
-        if (previousAppleIconHref) appleIconEl.setAttribute('href', previousAppleIconHref)
-        else appleIconEl.removeAttribute('href')
-      }
-    }
-  }, [
-    isPublicCatalogRoute,
-    settings.business_name,
-    settings.customer_portal_favicon_image,
-    settings.customer_portal_logo_image,
-    settings.ui_app_favicon_fit,
-    settings.ui_app_favicon_image,
-    settings.ui_app_favicon_position_x,
-    settings.ui_app_favicon_position_y,
-    settings.ui_app_favicon_zoom,
-  ])
 
   if (isPublicCatalogRoute) {
     return <PublicCatalogView />
