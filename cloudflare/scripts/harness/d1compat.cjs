@@ -88,11 +88,22 @@ class D1Compat {
   }
   async batch(items) {
     const results = []
-    const tx = this.db.exec ? null : null
     for (const item of items) {
-      const stmt = this.db.prepare(item.sql)
+      // Route through Stmt so batched statements get the SAME @name
+      // filtering single statements already get.
+      //
+      // This used to hand `item.params` straight to node:sqlite, which
+      // throws on any named parameter the SQL does not reference
+      // ("Unknown named parameter 'received_date'"). Production does not
+      // behave that way: lib/db.ts's batch() runs every statement through
+      // translate(), which binds only the values the SQL actually names, so
+      // a params object carrying extra keys is perfectly valid there. The
+      // harness was therefore stricter than the real thing and failed a
+      // write path that works in production -- the worst kind of test
+      // infrastructure bug, because it accuses correct code.
+      const stmt = new Stmt(this.db, item.sql)
       const info = stmt.run(item.params || {})
-      results.push({ success: true, meta: { last_row_id: info.lastInsertRowid, changes: info.changes } })
+      results.push(info)
     }
     return results
   }
