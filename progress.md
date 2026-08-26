@@ -404,9 +404,9 @@ implies a separate stored file when the same photo serves several products.
 
 | # | Task | Status |
 |---|---|---|
-| 11.1 | **Select column should only take space in select mode.** Right now the checkbox column is always reserved and pushes the layout even when nothing is selected. Only show/push it once select mode is active, and auto-revert when it exits. | not started |
-| 11.2 | **Remove the select-column HEADER** — it is redundant with the select-all action. All pages. | not started |
-| 11.3 | **Hold-to-select does not work on the group TITLE row.** The long-press gesture that enters select mode on a normal row does nothing on a group header. | not started |
+| 11.1 | **Select column only takes space in select mode.** **DONE on Products (Part 354), needs deploy** — the `<col>` collapses to 0 and the cells drop padding out of select mode. Mobile already did this. **Open:** apply the same to Inventory/Sales/Returns/Branches/contacts surfaces. | products done; other pages open |
+| 11.2 | **Remove the redundant select-column header checkbox.** **DONE on Products (Part 354), needs deploy** — the toolbar "Select all (N)" stays; the dead ref/props were cleaned. **Open:** other pages. | products done; other pages open |
+| 11.3 | **Hold-to-select on the group title row.** **DONE on Products desktop (Part 354), needs deploy** — long-press selects the whole group, with a ghost-click guard so it does not also toggle expand. **Open (optional):** the mobile group header. | done (desktop) |
 
 **Products page — images & alignment (revises 4.1, now shipped)**
 
