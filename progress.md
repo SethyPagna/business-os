@@ -219,7 +219,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 | # | Task | Status |
 |---|---|---|
 | 4.1 | **Large-screen alignment.** **FIXED (Part 354), needs deploy — but see NEW 11.x below, the user revised what "aligned" should mean.** Measured the real table in a browser: the 8 `<col>` widths summed to 90%, and `table-fixed` spread the unclaimed 10% across every column INCLUDING the fixed leading two (checkbox asked 2rem, rendered 51px), so the rail moved with the viewport and no hand-written copy could track it. Fix: full-width rows (category band, group header) now use REAL cells in the table's own columns (browser does the aligning, nothing to drift); the six % columns now sum to 100%. Rail is a constant 98px. `test-productsRowAlignment.test.ts` guards the cause. |
-| 4.2 | Batches are **still not applied throughout the app** — Inventory shows 0. Reported repeatedly and still open. | not started |
+| 4.2 | Batches show 0 in Inventory. **DONE (Part 354), needs deploy** — was a missing list read (6,691 batches exist live); Products + Inventory now attach a scalar `batch_count`. See §14. | done, needs deploy |
 | 4.3 | **Special price is not read or used correctly.** The product detail shows the SELLING price in both the selling and special fields, so the special value is either not being read or is being overwritten. Real data bug, affects pricing. | not started |
 | 4.4 | **Rename "Special price" → "VIP price" EVERYWHERE**, including the import template and its column headers. | not started |
 | 4.5 | **POS naming:** use "Selling price" rather than "Regular". | not started |
@@ -339,7 +339,9 @@ details, and the date of each available batch — the same interaction as the
 View detail). Needs: a backend read returning per-(product[,branch]) batch
 rows (product_batches joined to branch_batch_stock: lot_code, received_at,
 expiry_date, per-branch quantity), and a shared "batch details" modal used
-by all three pages. **Confirmed live (Part 354):** the data EXISTS — production has 6,691
+by all three pages. **DONE (Part 354), needs deploy.** Count now shows on BOTH product-grid pages (Products + Inventory) via one shared `attachBatchCounts` (`lib/productBatches.ts`), and the "Batches (N)" affordance opens the existing per-branch/per-lot `ManageBatchesModal` (each batch's date, expiry, per-branch qty). Products already wired that modal — it was only missing the count. Branch page left as-is: its only batch UI is the transfer picker, not a per-product grid, so the count belongs on the two product grids. **Remaining (optional):** a strictly read-only "view" variant if the editable ManageBatchesModal is deemed too much; and a per-branch batch view on the Branch page if one is wanted later.
+
+**Original finding:** the data always EXISTED — production has 6,691
 `product_batches` (all active) and 3,668 non-zero `branch_batch_stock`
 rows. So "Inventory shows 0 batches" (§4.2/§11.23) is a DISPLAY-READ gap,
 not missing data: `routes/inventory.ts` has no batch_count in its product
@@ -459,7 +461,7 @@ implies a separate stored file when the same photo serves several products.
 
 | # | Task | Status |
 |---|---|---|
-| 11.23 | **Batches still show 0 in Inventory / not applied throughout the app.** (Same as 4.2 — re-reported, still open.) | not started |
+| 11.23 | **Batches show 0 in Inventory.** **DONE (Part 354), needs deploy** — see §14 / 4.2. | done, needs deploy |
 | 11.24 | **VIP (special) price read/write bug.** **DONE (Part 354), needs deploy.** Root cause: the products LIST/search SELECT never returned `special_price_usd/khr`, so ProductForm defaulted them to the selling price on load AND wrote that back on save — silently overwriting a real VIP price (8) with selling (12) on every edit; the detail modal showing "selling for both" was the visible symptom. Fixed the SELECT + dropped the `?? selling` fallback in the form and both import normalizers (blank VIP = 0; every consumer treats 0 as "use selling"). **Import also read it wrong the same way** and now defaults blank→0. Tests flipped/added on both sides. (Also 4.3.) |
 | 11.25 | **Rename "Special price" → "VIP price" everywhere.** **DONE (Part 354), needs deploy.** Label-only (the `special_price_*` DB columns keep their names). Renamed the `special_price*` label values in en+km, POS/detail/Products/CartItem literals, the import template header → `vip_price_usd/khr` (+ the CSV-columns hint), and the export headers → `VIP_Price_USD/KHR`. Import accepts BOTH `vip_price_*` and legacy `special_price_*` so old files still load. (Also 4.4.) |
 
