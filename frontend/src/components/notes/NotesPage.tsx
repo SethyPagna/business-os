@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
@@ -51,12 +51,47 @@ export default function NotesPage() {
   // below).
   const [mobileView, setMobileView] = useState<'list' | 'editor'>('list')
 
-  // Drag-to-reorder for the list pane -- same native draggable/onDragStart/
-  // onDragOver/onDrop pattern as Settings.tsx's nav-item/mobile-pinned
-  // lists (dragNoteId tracks the note currently being dragged, dropping on
-  // another note moves it right before that note; see reorderNotes in
-  // useNotesController.ts for the actual reordering + persistence).
+  // Drag-to-reorder, POINTER-based (not the old HTML5 `draggable`). Native
+  // drag-and-drop has no touch support at all and the grip handle was
+  // hidden until hover, so on a phone a note could never be grabbed or
+  // reordered ("notes tab icon was not draggable"). Pointer events work on
+  // touch and mouse alike: press the grip, move over another note (found
+  // via elementFromPoint -> the nearest [data-note-id]), release to drop
+  // the dragged note right before it. Refs drive the gesture (stable across
+  // the re-renders each move triggers); the state mirrors are only for the
+  // drag/drop visual highlight. reorderNotes (useNotesController.ts) still
+  // does the actual reordering + persistence.
+  const dragNoteIdRef = useRef<number | null>(null)
+  const dropTargetIdRef = useRef<number | null>(null)
   const [dragNoteId, setDragNoteId] = useState<number | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null)
+
+  const handleGripPointerDown = (noteId: number) => (event: import('react').PointerEvent<HTMLSpanElement>) => {
+    dragNoteIdRef.current = noteId
+    dropTargetIdRef.current = noteId
+    setDragNoteId(noteId)
+    setDropTargetId(noteId)
+    try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* capture is best-effort */ }
+  }
+  const handleGripPointerMove = (event: import('react').PointerEvent<HTMLSpanElement>) => {
+    if (dragNoteIdRef.current == null) return
+    const target = typeof document !== 'undefined' ? document.elementFromPoint(event.clientX, event.clientY) : null
+    const li = target instanceof Element ? target.closest('[data-note-id]') : null
+    const id = li ? Number(li.getAttribute('data-note-id')) : null
+    if (id != null && Number.isFinite(id)) {
+      dropTargetIdRef.current = id
+      setDropTargetId(id)
+    }
+  }
+  const endGripDrag = () => {
+    const dragId = dragNoteIdRef.current
+    const dropId = dropTargetIdRef.current
+    if (dragId != null && dropId != null && dragId !== dropId) reorderNotes(dragId, dropId)
+    dragNoteIdRef.current = null
+    dropTargetIdRef.current = null
+    setDragNoteId(null)
+    setDropTargetId(null)
+  }
 
   useEffect(() => { ensureLoaded() }, [ensureLoaded])
 
@@ -130,21 +165,24 @@ export default function NotesPage() {
                 {sortedNotes.map((note) => (
                   <li
                     key={note.id}
-                    draggable
-                    onDragStart={() => setDragNoteId(note.id)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => {
-                      if (dragNoteId != null) reorderNotes(dragNoteId, note.id)
-                      setDragNoteId(null)
-                    }}
-                    onDragEnd={() => setDragNoteId(null)}
+                    data-note-id={note.id}
                     className={`group flex items-start gap-1 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800/60 ${
                       note.id === activeId ? 'bg-blue-50/70 dark:bg-blue-950/40' : ''
-                    } ${dragNoteId === note.id ? 'opacity-60' : ''}`}
+                    } ${dragNoteId === note.id ? 'opacity-60' : ''} ${
+                      dragNoteId != null && dropTargetId === note.id && dropTargetId !== dragNoteId ? 'border-t-2 border-blue-400' : ''
+                    }`}
                   >
+                    {/* Grip is the pointer-drag handle (touch + mouse). Kept
+                        visible at rest (not opacity-0) so it can be grabbed
+                        on a touch screen, where there is no hover. touch-none
+                        stops the gesture from scrolling the list instead. */}
                     <span
-                      className="mt-1 shrink-0 cursor-grab text-slate-300 opacity-0 group-hover:opacity-100 dark:text-slate-600"
+                      className="mt-1 shrink-0 cursor-grab touch-none text-slate-400 opacity-60 group-hover:opacity-100 dark:text-slate-500"
                       title={t('dragToReorder') || 'Drag to reorder'}
+                      onPointerDown={handleGripPointerDown(note.id)}
+                      onPointerMove={handleGripPointerMove}
+                      onPointerUp={endGripDrag}
+                      onPointerCancel={endGripDrag}
                     >
                       <GripVertical className="h-3.5 w-3.5" />
                     </span>
