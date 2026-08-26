@@ -63,9 +63,11 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 > reasoning they carry, not as the current queue. Where they disagree, the ordered
 > backlog wins.
 >
-> **Two things are broken in production right now** and jump the queue: `reset-data`
-> exceeding the CPU limit, and `GET /api/products` failing with
-> `too many SQL variables`.
+> **The two production outages are FIXED in code (Part 354) and waiting on a
+> deploy** — `reset-data` exceeding the CPU limit (0.1) and `GET /api/products`
+> failing with `too many SQL variables` (0.2). The user re-pasted the old error
+> log AFTER these landed; it is from 13:45, before the fix. Nothing else jumps
+> the queue until `npm run deploy:full` ships and they are verified live.
 
 **Every task carries a status here and is updated as it moves.** Requested Aug 25 2026 so
 state is visible at a glance instead of inferred from prose further down this file.
@@ -195,8 +197,8 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 | # | Task | Status |
 |---|---|---|
-| 0.1 | **`POST /api/system/reset-data` exceeds the CPU limit.** Observed live Aug 26 13:45: `Exceeded CPU Limit` / `Worker exceeded CPU time limit`. Part 346 fixed the BACKUP that runs in front of it (paged + streamed), so this is a *different* failure — the reset itself is not chunked. Products-only reset is what was being run. **Also requested: move products-only reset into the section-reset UI** rather than living on its own. Needs the same treatment the import path got: a resumable, queue-driven pass with a cursor, not one invocation trying to delete everything. | **not started — highest priority** |
-| 0.2 | **`GET /api/products` → `D1_ERROR: too many SQL variables at offset 415`.** Observed live Aug 26 13:47, i.e. AFTER the recent product work. SQLite caps bound parameters (999 on older builds), so something is building an `IN (...)` list from an unbounded row set. Prime suspects, in order: `expandSearchResultsToNameSiblings` (routes/products.ts), the `IN` clause in `readRowImagePaths`/`applyCrossChunkProductDedupe` (both chunk at 100–200 and are probably fine), and `loadWireImageInputs`. **Reproduce first, then bound the clause** — do not guess. | **not started — highest priority** |
+| 0.1 | **`POST /api/system/reset-data` exceeds the CPU limit.** **FIXED (Part 354), needs deploy — the log the user re-pasted is from 13:45, before this shipped.** The reset code was never the problem: products mode called `createCloudflareBackup`, which walks all ~34 backup tables + lists the whole R2 bucket, so the request died inside the mandatory backup before deleting anything. Now takes a backup SCOPED to just the tables it will clear (`createSectionBackup`), the same fix `/reset-section` already had. Backup list and delete list derive from ONE array so a scoped backup can never miss a table the reset clears (test drives all 4 toggle combos). Products-only reset also MOVED into the page-reset grid as asked. includeImages R2 cleanup capped at 200 and the overflow reported. **Verify live after deploy.** |
+| 0.2 | **`GET /api/products` → `D1_ERROR: too many SQL variables at offset 415`.** **FIXED (Part 354), needs deploy.** Probed live against production D1: the real cap is **100** bound parameters, not 999 — 101 placeholders fail at offset 227 (exactly the 101st placeholder), and offset 415 is the 101st placeholder of `attachBranchStock`'s query, which built one `IN (...)` over every product row on the page. It was NOT one query — ~40 sites built a placeholder-per-row list, several already over the limit before any search (importEngine dedupe chunked at 100 THEN bound @job_id = 101; bulkDelete sent 500 in one DELETE and recorded the throw as 500 failed deletes). All routed through new `lib/sqlBinding.ts` (the one place the 100 limit is now written down). New `test-d1-bound-params-repro.cjs` installs D1's limit in the shim (better-sqlite3 allows 32k, which is why this reached prod) and fails if any file builds an IN-list without chunking. Also stopped `withD1Retry` re-running deterministic SQL errors. **Verify live after deploy.** |
 
 ### 1 — Imports (the stated next three)
 
@@ -204,7 +206,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 |---|---|---|
 | 2.1 | **Add/Sale absorbs Dated Stock Reconciliation** (batch-choice-on-sale, create-then-sell). Largest single remaining piece; never started. | not started |
 | 2.2 | **Import review / resolve screen** finished. | not started |
-| 2.3 | **Image auto-wire button — frontend half.** Backend is DONE and waiting: `POST /api/import-jobs/:id/images/wire` (opt-in flag, 409 while a phase runs), plus `POST /api/products/wire-images/preview` and `POST /api/products/wire-images` for the Library path with the STRICT matcher. Still needed: the review modal, the button in the Products **Manage** menu (`onWireImages` is accepted by HeaderActions but Products.tsx does not pass it yet, so the entry is deliberately hidden), a button in **Library**, and the button in BulkImportModal. **Also requested: an UNWIRE action** — a way to detach images that were wired. | backend done, UI not started |
+| 2.3 | **Image auto-wire button — frontend half.** **DONE (Part 354), needs deploy.** `WireImagesReviewModal` built (grouped per product, ordered by `_1/_2/_3`, shows would-replace + unmatched + ambiguous); wired into the Products **Manage** menu (gated on the `products/image` action), the **Library** page next to Upload, and the import modal's result step for the per-job wire endpoint. **UNWIRE** shipped too: `POST /api/products/unwire-images` (detach-only, files stay in the Library; empty id list refused, `all:true` required to clear everything) with a disclosure in the modal. **Found + fixed a real bug while building it:** the apply endpoint ran one `UPDATE image_path` per matched image, so a 3-photo product kept only the last and `product_images` was never written — now goes through `syncProductImageGallery`. `test-wire-images-gallery-pure.cjs` (9 checks). |
 
 ### 2 — Undo / redo (after 2.1–2.3)
 
@@ -216,7 +218,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 | # | Task | Status |
 |---|---|---|
-| 4.1 | **Large-screen alignment is STILL wrong.** Third report. Group titles and standalone rows must align with the **start of the category header**; child rows get only a *slight* indent from the group. Currently everything is pushed too far right. Note: hiding the child thumbnail (Part 352) was necessary but NOT sufficient — the remaining offset is the checkbox/image column geometry in the desktop `<table>`, so the fix is column widths, not the image. Measure against the drawn line in the screenshot. | not started |
+| 4.1 | **Large-screen alignment.** **FIXED (Part 354), needs deploy — but see NEW 11.x below, the user revised what "aligned" should mean.** Measured the real table in a browser: the 8 `<col>` widths summed to 90%, and `table-fixed` spread the unclaimed 10% across every column INCLUDING the fixed leading two (checkbox asked 2rem, rendered 51px), so the rail moved with the viewport and no hand-written copy could track it. Fix: full-width rows (category band, group header) now use REAL cells in the table's own columns (browser does the aligning, nothing to drift); the six % columns now sum to 100%. Rail is a constant 98px. `test-productsRowAlignment.test.ts` guards the cause. |
 | 4.2 | Batches are **still not applied throughout the app** — Inventory shows 0. Reported repeatedly and still open. | not started |
 | 4.3 | **Special price is not read or used correctly.** The product detail shows the SELLING price in both the selling and special fields, so the special value is either not being read or is being overwritten. Real data bug, affects pricing. | not started |
 | 4.4 | **Rename "Special price" → "VIP price" EVERYWHERE**, including the import template and its column headers. | not started |
@@ -270,6 +272,75 @@ user's own messages; nothing is inferred. Top of the list is next.*
 |---|---|---|
 | 10.1 | **Backup restore still loads the whole document into memory** (`backup.ts:574` `object.json()`, then one statement per row). The write path was fixed and streamed; its mirror was not, so a database big enough to have caused the original OOM will OOM restoring its own backup. | not started |
 | 10.2 | Edit form does not auto-move sections back to Details — reported as a bug; not yet reproduced. | not started |
+
+### 11 — NEW request batch, Aug 26 2026 (Part 354, post-compaction)
+
+*Verbatim from the user's own message. Several overlap earlier rows — cross-referenced, not duplicated. Nothing here is started.*
+
+**Selection / table chrome (ALL pages, not just Products)**
+
+| # | Task | Status |
+|---|---|---|
+| 11.1 | **Select column should only take space in select mode.** Right now the checkbox column is always reserved and pushes the layout even when nothing is selected. Only show/push it once select mode is active, and auto-revert when it exits. | not started |
+| 11.2 | **Remove the select-column HEADER** — it is redundant with the select-all action. All pages. | not started |
+| 11.3 | **Hold-to-select does not work on the group TITLE row.** The long-press gesture that enters select mode on a normal row does nothing on a group header. | not started |
+
+**Products page — images & alignment (revises 4.1, now shipped)**
+
+| # | Task | Status |
+|---|---|---|
+| 11.4 | **Category header should align with the IMAGE column, not the product name.** This revises 4.1's target: the user was measuring the child-row indent against the group title's IMAGE. So the rail decision is now explicit — the category band lines up with the image column, and a child row aligns with the group NAME (or a small indent FROM the group title). | not started |
+| 11.5 | **Child rows show images that are not on the group title.** A grouped child row is rendering its own thumbnail again (the group is ONE product, one photo set on the header). Fix the display and move it. | not started |
+| 11.6 | **No image upload on child rows.** Only allow uploading once a row reverts to standalone. (Part 347 hid the child uploader; re-verify it is actually gone everywhere including the detail sheet.) | not started |
+| 11.7 | **Group title uses its OWN UI for images**, instead of writing through the first child row. The group thumbnail/upload should own its state, not borrow the lead child's. | not started |
+
+**POS**
+
+| # | Task | Status |
+|---|---|---|
+| 11.8 | **Add-new Delivery contact / Customer from inside POS fails.** Reported as a real bug when creating one during checkout. Reproduce first. | not started |
+| 11.9 | **POS must NOT show cost price.** The lot/option picker should offer only: batch, branch, barcode, damage, Selling price (label **SP**) and VIP price (label **VIP**). Cost is not a cashier-facing field. | not started |
+| 11.10 | **POS naming: "Selling price", not "Regular".** (Same as 4.5.) | not started |
+| 11.11 | **Discount %/$ toggle buttons can be LARGER; the fee input is TOO large.** Two locations (POS cart + one other — find both). | not started |
+
+**Returns — replace flow + a shared stock-action chooser**
+
+| # | Task | Status |
+|---|---|---|
+| 11.12 | **Add a "Replace" option to Returns.** On top of returning, hand the customer a new product from the SAME-NAME stock, choosing options the POS way (batch/branch/etc). | not started |
+| 11.13 | **Merge the return options into one chooser with a stock-action.** Each option carries what happens to stock: (a) return, no restock / no stock change; (b) return, restock as the SAME stock; (c) return, restock as **damaged** — which adds a "damage" entry in the product's information. This damaged-stock concept then feeds POS and the other POS-related option pickers (see 11.9's `damage`). | not started |
+
+**Settings / portal image separation**
+
+| # | Task | Status |
+|---|---|---|
+| 11.14 | **Portal-editor images must NOT bleed into the admin app.** The logo and other images edited in the Customer Portal editor are for the PUBLIC portal only; they are currently affecting admin surfaces. | not started |
+| 11.15 | **The Settings "business logo" is only the TOPBAR logo.** The favicon stays the default — the business logo must not replace it. | not started |
+| 11.16 | **Settings should expose the file/auto-wire button too** (the wire-images action, reachable from Settings). | not started |
+| 11.17 | **The uploads-path input is too wide** in many places — it eats horizontal space. Shrink it everywhere it appears. | not started |
+
+**Imports — contacts is slow and its review UI is bare**
+
+| # | Task | Status |
+|---|---|---|
+| 11.18 | **Contacts import is far slower than the general import.** The general import shows its review with little/no delay; contacts analyzes for a long time, then review, then upload — low efficiency. Make contacts match the general import's fast path. | not started |
+| 11.19 | **Contacts import resolve/review screen has no sort/search.** No alphabetical order, no search, no filters. Add them (mirror the Products import review, or the plain list controls other pages use). | not started |
+
+**Inventory / Branches / stats colouring**
+
+| # | Task | Status |
+|---|---|---|
+| 11.20 | **Inventory product stats: colour, not labels, in the default view.** Healthy / low / out-of-stock as colour; the detail breakdown already carries the names. For OTHER stat cards keep the name, but also colour the values underneath. (Same intent as 5.5.) | not started |
+| 11.21 | **Branches page: too many stock stats outside.** Do it like the Inventory page's product handling — drop the many outer stock-quantity stats; per-branch branch-stock stats are fine to keep. (Same as 5.6.) | not started |
+| 11.22 | **History button in the profile menu overflows the profile boundary** — not responsive. (Same as 5.7.) | not started |
+
+**Pricing / batches correctness (re-reported)**
+
+| # | Task | Status |
+|---|---|---|
+| 11.23 | **Batches still show 0 in Inventory / not applied throughout the app.** (Same as 4.2 — re-reported, still open.) | not started |
+| 11.24 | **Special price is read wrong.** Product detail shows the SELLING price in BOTH the selling and special fields. (Same as 4.3.) | not started |
+| 11.25 | **Rename "Special price" → "VIP price" EVERYWHERE, including the import template + column headers.** (Same as 4.4.) | not started |
 
 ---
 
