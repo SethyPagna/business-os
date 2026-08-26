@@ -1,5 +1,5 @@
 import { Fragment } from 'react'
-import type { ReactNode, RefObject } from 'react'
+import type { ReactNode } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 
@@ -94,7 +94,6 @@ type ProductsListSurfaceProps = {
   allVisibleProducts: ProductLike[]
   collapsedProductGroups: Set<string>
   collapsedProductSections: Set<string>
-  desktopSelectAllRef: RefObject<HTMLInputElement | null>
   getGroupSummaryParts: (group: ProductGroup, options?: { includeCount?: boolean }) => string[]
   initialDesktopRevealReady: boolean
   isSelectionScopeFullySelected: (ids: ProductId[]) => boolean
@@ -105,6 +104,12 @@ type ProductsListSurfaceProps = {
   productTotalLabel?: string
   refreshingProducts: boolean
   renderDesktopProductRow: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
+  // 11.3: press-and-hold on a group TITLE row to enter select mode with
+  // the whole group selected. Products.tsx supplies the long-press handlers
+  // keyed by the group's anchor id; spread onto the group header <tr>.
+  // Only meaningful out of select mode (once selecting, the row's checkbox
+  // is the affordance).
+  bindGroupHold?: (group: ProductGroup) => Record<string, unknown>
   renderGroupActions?: (group: ProductGroup) => ReactNode
   renderGroupThumbnail?: (group: ProductGroup) => ReactNode
   renderMobileProductCard: (product: ProductLike, options: ProductRowRenderOptions) => ReactNode
@@ -113,14 +118,11 @@ type ProductsListSurfaceProps = {
   // true, matching the per-row checkboxes (part 77: "remove per-child
   // select bar from default view").
   selectionModeActive: boolean
-  selectedVisibleCount: number
   t: Translate
   toggleProductGroup: (key: string) => void
   toggleProductSection: (id: string) => void
-  toggleSelectAll: (checked: boolean) => void
   toggleSelectionScope: (ids: ProductId[], checked: boolean) => void
   tr: TranslateWithFallback
-  visibleIds: ProductId[]
   visibleProducts: ProductLike[]
 }
 
@@ -128,7 +130,6 @@ export default function ProductsListSurface({
   allVisibleProducts,
   collapsedProductGroups,
   collapsedProductSections,
-  desktopSelectAllRef,
   getGroupSummaryParts,
   initialDesktopRevealReady,
   isSelectionScopeFullySelected,
@@ -139,18 +140,16 @@ export default function ProductsListSurface({
   productTotalLabel,
   refreshingProducts,
   renderDesktopProductRow,
+  bindGroupHold,
   renderGroupActions,
   renderGroupThumbnail,
   renderMobileProductCard,
   selectionModeActive,
-  selectedVisibleCount,
   t,
   toggleProductGroup,
   toggleProductSection,
-  toggleSelectAll,
   toggleSelectionScope,
   tr,
-  visibleIds,
   visibleProducts,
 }: ProductsListSurfaceProps) {
   const skeletonRows = Array.from({ length: 8 }, (_, index) => index)
@@ -159,9 +158,20 @@ export default function ProductsListSurface({
   // A fixed responsive grid prevents long product metadata from widening
   // the table beyond an ordinary laptop viewport. Details/Margin still
   // hide at their existing breakpoints, while Stock remains inside the card.
+  // 11.1 + 11.2: the checkbox column only takes space in SELECT mode.
+  // Out of select mode the column collapses to 0 width and its cells drop
+  // their padding, so nothing is reserved and the whole grid sits a touch
+  // further left; entering select mode pushes everything right by the
+  // checkbox width, and leaving it reverts. The desktop table HEADER no
+  // longer carries a select-all checkbox at all -- it duplicated the
+  // toolbar's "Select all (N)" control, so that redundant header box is
+  // gone (11.2).
+  const selectColWidth = selectionModeActive ? SELECT_COL_WIDTH : '0px'
+  const selectCellPad = selectionModeActive ? 'px-2' : 'px-0'
+
   const desktopColGroup = (
     <colgroup>
-      <col style={{ width: SELECT_COL_WIDTH }} />
+      <col style={{ width: selectColWidth }} />
       <col style={{ width: IMAGE_COL_WIDTH }} />
       {/* These six MUST sum to 100%. They summed to 90%, and `table-fixed`
           spreads whatever is unclaimed across EVERY column proportionally
@@ -180,22 +190,14 @@ export default function ProductsListSurface({
     </colgroup>
   )
 
-  const renderDesktopTableHead = (showSelectionControl: boolean) => (
+  const renderDesktopTableHead = () => (
     <thead className="sticky top-0 z-10">
       <tr>
-        <th className="px-2 py-3">
-          {showSelectionControl ? (
-            <input
-              type="checkbox"
-              className="rounded"
-              checked={visibleIds.length > 0 && selectedVisibleCount === visibleIds.length}
-              ref={desktopSelectAllRef}
-              onChange={(event) => toggleSelectAll(event.target.checked)}
-            />
-          ) : (
-            <span className="sr-only">loading</span>
-          )}
-        </th>
+        {/* No select-all checkbox here -- it duplicated the toolbar's
+            own "Select all (N)" control (11.2). The cell stays only as the
+            checkbox column's header, collapsing to nothing out of select
+            mode. */}
+        <th className={`${selectCellPad} py-3`} aria-hidden />
         <th className="whitespace-nowrap px-2 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('receipt_image_short') || t('image') || 'Image'}</th>
         <th className={`min-w-[140px] ${ROW_TEXT_GUTTER} py-3 text-left font-semibold text-gray-600 dark:text-gray-400`}>{t('product_name')}</th>
         <th className="hidden whitespace-nowrap px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 md:table-cell">{t('details') || 'Details'}</th>
@@ -273,7 +275,7 @@ export default function ProductsListSurface({
         <div className="relative overflow-hidden">
           <table className="w-full table-fixed text-sm table-bordered">
             {desktopColGroup}
-            {renderDesktopTableHead(initialDesktopRevealReady)}
+            {renderDesktopTableHead()}
             <tbody className={showDesktopLoadingOverlay ? 'invisible' : ''}>
               {visibleProducts.length === 0
                 ? (showDesktopLoadingOverlay
@@ -300,7 +302,7 @@ export default function ProductsListSurface({
                           band still reads full width -- the background is
                           on the <tr>. */}
                       <tr className="bg-slate-100/90 dark:bg-slate-800/80">
-                        <td className="px-2 py-2">
+                        <td className={`${selectCellPad} py-2`}>
                           {selectionModeActive ? (
                             <input
                               type="checkbox"
@@ -348,8 +350,8 @@ export default function ProductsListSurface({
                                 rows' names, and as the category label above, at
                                 every viewport width. */}
                             {showGroupRow ? (
-                              <tr className="bg-white/80 dark:bg-slate-900/45" data-product-jump-id={group.anchorId}>
-                                <td className="px-2 py-2.5">
+                              <tr className="bg-white/80 dark:bg-slate-900/45" data-product-jump-id={group.anchorId} {...(bindGroupHold ? bindGroupHold(group) : {})}>
+                                <td className={`${selectCellPad} py-2.5`}>
                                   {selectionModeActive ? (
                                     <input
                                       type="checkbox"

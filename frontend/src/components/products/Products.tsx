@@ -2,7 +2,7 @@
 // Main Products page; all sub-modals are imported from sibling files.
 
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import type { ReactNode } from 'react'
+import type { ReactNode, MouseEvent as ReactMouseEvent } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -751,7 +751,6 @@ function ProductsFullEditor() {
   const pinnedEditedProductsRef = useRef<Map<number, ProductRecord>>(new Map())
   const productDeleteInFlightRef = useRef(false)
   const bulkActionInFlightRef = useRef(false)
-  const desktopSelectAllRef = useRef<HTMLInputElement | null>(null)
   const mobileSelectAllRef = useRef<HTMLInputElement | null>(null)
   const initializedCollapsedGroupKeysRef = useRef<Set<string>>(new Set())
   // One long-press timer/start-point slot per visible row, keyed by
@@ -2099,7 +2098,6 @@ function ProductsFullEditor() {
 
   useEffect(() => {
     const indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < visibleIds.length
-    if (desktopSelectAllRef.current) desktopSelectAllRef.current.indeterminate = indeterminate
     if (mobileSelectAllRef.current) mobileSelectAllRef.current.indeterminate = indeterminate
   }, [selectedVisibleCount, visibleIds.length])
 
@@ -2847,7 +2845,7 @@ function ProductsFullEditor() {
         onClick={selectionModeActive ? handleRowClick : undefined}
         {...(selectionModeActive ? {} : longPress)}
       >
-        <td className="px-2 py-2" onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
+        <td className={`${selectionModeActive ? 'px-2' : 'px-0'} py-2`} onClick={(e) => { e.stopPropagation(); if (selectionModeActive) toggleSelectionScope(rowScopeIds, !rowSelected) }}>
           {selectionModeActive ? (
             <input
               type="checkbox"
@@ -3205,6 +3203,31 @@ function ProductsFullEditor() {
   // the group's leadProduct, same product renderGroupThumbnail already
   // draws its image from, so "add image" changes the same photo the group
   // header displays.
+  // 11.3: press-and-hold on a group TITLE row to enter select mode with the
+  // whole group selected -- the same long-press gesture the product rows
+  // already use, which the group header was missing. Keyed in a distinct
+  // (negative) id space so a group's hold-state never collides with a
+  // product row's. The onClickCapture guard eats the follow-up "ghost"
+  // click after a hold so the group does not also toggle expand/collapse:
+  // once the hold fires, selectionModeActive flips and these handlers are
+  // detached, so end() never resets `fired` and consumeLongPressClick can
+  // swallow that one click (same mechanism the rows use).
+  const bindGroupHold = useCallback((group: { anchorId?: string | number; ids?: Array<string | number> }): Record<string, unknown> => {
+    const state = getLongPressState(-Number(group.anchorId ?? 0))
+    const guard = {
+      onClickCapture: (event: ReactMouseEvent) => {
+        if (consumeLongPressClick(state)) { event.stopPropagation(); event.preventDefault() }
+      },
+    }
+    if (selectionModeActive) return guard
+    const handlers = createLongPressHandlers(state, {
+      disabled: false,
+      onLongPress: () => toggleSelectionScope((group.ids as Array<string | number>) || [], true),
+      onClick: () => {},
+    })
+    return { ...handlers, ...guard }
+  }, [getLongPressState, selectionModeActive, toggleSelectionScope])
+
   const renderGroupActions = useCallback((group: { key: string; leadProduct?: ProductRecord }) => {
     const lead = group.leadProduct
     if (!lead) return null
@@ -3742,7 +3765,6 @@ function ProductsFullEditor() {
         allVisibleProducts={allVisibleProducts}
         collapsedProductGroups={collapsedProductGroups}
         collapsedProductSections={collapsedProductSections}
-        desktopSelectAllRef={desktopSelectAllRef}
         getGroupSummaryParts={getGroupSummaryParts}
         initialDesktopRevealReady={loadedOnceRef.current || !loading}
         isSelectionScopeFullySelected={isSelectionScopeFullySelected}
@@ -3753,18 +3775,16 @@ function ProductsFullEditor() {
         productTotalLabel={productSummaryLabel}
         refreshingProducts={refreshingProducts}
         renderDesktopProductRow={renderDesktopProductRow}
+        bindGroupHold={bindGroupHold}
         renderGroupActions={renderGroupActions}
         renderGroupThumbnail={renderGroupThumbnail}
         renderMobileProductCard={renderMobileProductCard}
         selectionModeActive={selectionModeActive}
-        selectedVisibleCount={selectedVisibleCount}
         t={t}
         toggleProductGroup={toggleProductGroup}
         toggleProductSection={toggleProductSection}
-        toggleSelectAll={toggleSelectAll}
         toggleSelectionScope={toggleSelectionScope}
         tr={tr}
-        visibleIds={visibleIds}
         visibleProducts={visibleProducts}
       />
 

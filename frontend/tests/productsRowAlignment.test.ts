@@ -41,11 +41,15 @@ const products = fs.readFileSync(new URL('../src/components/products/Products.ts
 runTest('the leading columns are sized from the shared constants, not hand-written widths', () => {
   assert.match(surface, /const SELECT_COL_WIDTH = '([\d.]+rem)'/)
   assert.match(surface, /const IMAGE_COL_WIDTH = '([\d.]+rem)'/)
+  // The checkbox column width is now derived (selectColWidth) so it can
+  // collapse to 0 out of select mode (11.1); it must still resolve to
+  // SELECT_COL_WIDTH while selecting, and the image column stays fixed.
   assert.match(
     surface,
-    /<col style=\{\{ width: SELECT_COL_WIDTH \}\} \/>\s*<col style=\{\{ width: IMAGE_COL_WIDTH \}\} \/>/,
-    'the colgroup must read the constants -- a literal w-10/w-[4.5rem] here is how the rails drifted apart',
+    /<col style=\{\{ width: selectColWidth \}\} \/>\s*<col style=\{\{ width: IMAGE_COL_WIDTH \}\} \/>/,
+    'the colgroup checkbox col must read selectColWidth (which is SELECT_COL_WIDTH in select mode, 0 otherwise) and the image col the constant',
   )
+  assert.match(surface, /const selectColWidth = selectionModeActive \? SELECT_COL_WIDTH : '0px'/, 'the checkbox column collapses to 0 out of select mode')
 })
 
 runTest('the image column is only a little wider than the thumbnail it holds', () => {
@@ -122,6 +126,28 @@ runTest('a grouped child row aligns with the group title -- no text indent (the 
   assert.ok(!/CHILD_ROW_INDENT/.test(products), 'Products.tsx must not apply a child indent any more')
   // `indented` is still what drops the child's thumbnail (its only remaining job).
   assert.match(surface, /renderDesktopProductRow\(product, \{ indented: showGroupRow \}\)/)
+})
+
+runTest('11.2: the desktop table header has no redundant select-all checkbox', () => {
+  assert.ok(!/ref=\{desktopSelectAllRef\}/.test(surface), 'the header select-all checkbox must be gone')
+  assert.ok(!/desktopSelectAllRef/.test(products), 'Products.tsx must not keep a dead desktopSelectAllRef')
+  assert.match(surface, /<th className=\{`\$\{selectCellPad\} py-3`\} aria-hidden \/>/, 'the header checkbox cell is an empty, collapsing header')
+})
+
+runTest('11.1: the checkbox column only takes space in select mode', () => {
+  assert.match(surface, /const selectColWidth = selectionModeActive \? SELECT_COL_WIDTH : '0px'/)
+  assert.match(surface, /const selectCellPad = selectionModeActive \? 'px-2' : 'px-0'/)
+  assert.match(surface, /<td className=\{`\$\{selectCellPad\} py-2`\}>/, 'the category band checkbox cell collapses')
+  assert.match(surface, /<td className=\{`\$\{selectCellPad\} py-2\.5`\}>/, 'the group header checkbox cell collapses')
+  assert.match(products, /<td className=\{`\$\{selectionModeActive \? 'px-2' : 'px-0'\} py-2`\} onClick=/, 'the product row checkbox cell collapses out of select mode')
+})
+
+runTest('11.3: hold-to-select is wired onto the group title row', () => {
+  assert.match(surface, /\{\.\.\.\(bindGroupHold \? bindGroupHold\(group\) : \{\}\)\}/, 'the group header <tr> spreads the hold handlers')
+  assert.match(products, /const bindGroupHold = useCallback/, 'Products.tsx defines bindGroupHold')
+  assert.match(products, /onLongPress: \(\) => toggleSelectionScope\(\(group\.ids/, 'a hold selects the whole group')
+  assert.match(products, /consumeLongPressClick\(state\)/, 'a ghost-click guard stops the group also toggling expand after a hold')
+  assert.match(products, /bindGroupHold=\{bindGroupHold\}/, 'bindGroupHold is passed to the surface')
 })
 
 if (failed > 0) {
