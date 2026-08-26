@@ -3,7 +3,18 @@ main = "src/index.ts"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
 account_id = "743e5b727d139e85ed11679097f6f99e"
-workers_dev = false
+# Kept ON as an always-reachable fallback, not as the primary URL.
+#
+# Aug 26 2026 outage: both leangcosmetics.dpdns.org and admin.* went NXDOMAIN
+# at an honest resolver (1.1.1.1) while the Worker itself was deployed and
+# healthy. The routes below bind to a Cloudflare ZONE, so if the domain's DNS
+# breaks -- delegation reverted, records removed, a free subdomain lapsing --
+# there is no way in at all, and with workers_dev = false there was no second
+# door either. The shop simply stops.
+#
+# This costs nothing, does not affect the custom domain when it is working,
+# and turns a DNS failure into "different URL" instead of "offline".
+workers_dev = true
 
 routes = [
   { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
