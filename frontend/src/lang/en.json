@@ -4140,5 +4140,7 @@
   "wire_import_images_working": "Wiring...",
   "wire_import_images_wired": "Images will be attached",
   "wire_import_images_done": "{n} image(s) will be attached when this import is applied.",
-  "wire_import_images_failed": "Could not wire this import's images."
+  "wire_import_images_failed": "Could not wire this import's images.",
+  "customer_phone_exists_selected": "That phone already belongs to {name} — selected them.",
+  "delivery_phone_exists_selected": "That phone already belongs to {name} — selected them."
 }

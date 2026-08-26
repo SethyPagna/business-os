@@ -1598,7 +1598,7 @@ export default function POS() {
           await selectCustomer(existing)
           setShowAddCustomer(false)
           setNewCustomerForm({ name: '', membership_number: '', phone: '', address: '' })
-          notify(t('customer_phone_exists_selected') || `That phone already belongs to ${dup.name} — selected them.`)
+          notify((t('customer_phone_exists_selected') || 'That phone already belongs to {name} — selected them.').replace('{name}', dup.name))
           return
         } catch {
           // fall through to the generic error below
@@ -1658,7 +1658,7 @@ export default function POS() {
         selectDelivery(existing)
         setShowAddDelivery(false)
         setNewDeliveryForm({ name: '', phone: '', area: '' })
-        notify(t('delivery_phone_exists_selected') || `That phone already belongs to ${dup.name} — selected them.`)
+        notify((t('delivery_phone_exists_selected') || 'That phone already belongs to {name} — selected them.').replace('{name}', dup.name))
         return
       }
       notify(getErrorMessage(e), 'error')
