@@ -1,5 +1,6 @@
 import type { Env } from '../index'
 import { copyObject, listObjects } from './r2'
+import { streamBackupEvents } from './backupRestoreStream'
 
 export const CLOUDFLARE_BACKUP_PREFIX = 'backups/cloudflare/'
 export const CLOUDFLARE_BACKUP_KEEP = 2
@@ -595,13 +596,17 @@ export async function maybeRunScheduledBackup(env: Env) {
   return { skipped: false, backup, retention: finalRetention }
 }
 
-async function loadBackup(env: Env, source: string): Promise<{ key: string; payload: BackupPayload }> {
+function resolveBackupKey(source: string): string {
   const raw = String(source || '').trim()
-  const key = raw.startsWith(CLOUDFLARE_BACKUP_PREFIX)
+  return raw.startsWith(CLOUDFLARE_BACKUP_PREFIX)
     ? raw
     : `${CLOUDFLARE_BACKUP_PREFIX}${raw.replace(/^\/+/, '')}`
+}
+
+async function loadBackup(env: Env, source: string): Promise<{ key: string; payload: BackupPayload }> {
+  const key = resolveBackupKey(source)
   const object = await env.ASSETS.get(key)
-  if (!object) throw new Error(`Backup not found: ${raw}`)
+  if (!object) throw new Error(`Backup not found: ${source}`)
   const payload = await object.json<BackupPayload>()
   if (payload?.format !== 'business-os-cloudflare-backup' || payload.formatVersion !== 1 || !payload.tables) {
     throw new Error('Unsupported backup format')
@@ -609,45 +614,112 @@ async function loadBackup(env: Env, source: string): Promise<{ key: string; payl
   return { key, payload }
 }
 
-export async function restoreCloudflareBackup(env: Env, source: string) {
-  const { key, payload } = await loadBackup(env, source)
-  const tableNames = BACKUP_TABLES.filter((table) => payload.tables[table])
-  const statements: Array<{ sql: string; values: unknown[] }> = []
-
-  for (const table of [...tableNames].reverse()) {
-    if (await tableExists(env, table)) statements.push({ sql: `DELETE FROM ${qid(table)}`, values: [] })
+/** Opens a fresh read stream over a backup object, or throws if it is gone. */
+async function openBackupStream(env: Env, key: string): Promise<ReadableStream<Uint8Array>> {
+  const object = await env.ASSETS.get(key)
+  if (!object) throw new Error(`Backup not found: ${key}`)
+  // The writer stamps the format in customMetadata, so we can reject an
+  // unsupported document without parsing it (the whole point of streaming).
+  const format = object.customMetadata?.format
+  if (format && format !== 'business-os-cloudflare-backup') {
+    throw new Error('Unsupported backup format')
   }
+  if (!object.body) throw new Error('Backup object has no body to stream')
+  return object.body
+}
 
-  for (const table of tableNames) {
-    if (!(await tableExists(env, table))) continue
-    const tableBackup = payload.tables[table]
-    const liveColumns = new Set(await tableColumns(env, table))
-    const columns = tableBackup.columns.filter((column) => liveColumns.has(column))
-    if (!columns.length) continue
-    // sql-bound-params: bounded by construction -- one parameter per
-    // COLUMN, and one statement per row (the row count is handled by
-    // chunkSize below), so this cannot reach D1's 100-parameter limit.
-    const placeholders = columns.map(() => '?').join(', ')
-    const sql = `INSERT INTO ${qid(table)} (${columns.map(qid).join(', ')}) VALUES (${placeholders})`
-    for (const row of tableBackup.rows || []) {
-      statements.push({ sql, values: columns.map((column) => row[column] ?? null) })
+export async function restoreCloudflareBackup(env: Env, source: string) {
+  const key = resolveBackupKey(source)
+
+  // Streaming restore (10.1). The old path called object.json() -- the ENTIRE
+  // backup parsed into one object -- then built an INSERT for every row before
+  // applying any, so a database large enough to have OOMed its own backup
+  // OOMed restoring it. Now the document is read as a byte stream and applied
+  // one bounded batch at a time; peak memory is a single row plus a small carry
+  // buffer, never the whole backup.
+  //
+  // Two passes, because foreign keys demand all DELETEs (children first) before
+  // any INSERT (parents first), and streaming discovers tables one at a time:
+  //   Pass 1 -- read table headers only, to learn which backup tables exist
+  //             live and in what order, then DELETE them in reverse.
+  //   Pass 2 -- stream rows and INSERT them in batches; capture the small
+  //             r2/summary metadata (which follows the tables) for asset restore.
+
+  // Pass 1: which BACKUP_TABLES are present in this document AND exist live.
+  const presentTables: string[] = []
+  {
+    const seen = new Set<string>()
+    for await (const ev of streamBackupEvents(await openBackupStream(env, key))) {
+      if (ev.type === 'table' && !seen.has(ev.table)) {
+        seen.add(ev.table)
+        if ((BACKUP_TABLES as readonly string[]).includes(ev.table) && await tableExists(env, ev.table)) {
+          presentTables.push(ev.table)
+        }
+      }
+      // rows/meta ignored in pass 1 -- nothing is held.
     }
   }
+  // Order by BACKUP_TABLES (the writer's dependency order) so the reverse
+  // delete respects foreign keys regardless of the document's own order.
+  const orderedTables: string[] = BACKUP_TABLES.filter((t) => presentTables.includes(t))
 
-  const chunkSize = 80
-  for (let i = 0; i < statements.length; i += chunkSize) {
-    const chunk = statements.slice(i, i + chunkSize).map((statement) => env.DB.prepare(statement.sql).bind(...statement.values))
-    await env.DB.batch(chunk)
+  let statementCount = 0
+  for (const table of [...orderedTables].reverse()) {
+    await env.DB.prepare(`DELETE FROM ${qid(table)}`).run()
+    statementCount += 1
   }
 
-  // Restore whichever asset bytes this backup actually copied (see
-  // createCloudflareBackup's MAX_ASSET_BYTES_PER_BACKUP cap -- a backup
-  // taken before this fix, or one whose catalog exceeded the cap, may
-  // have copiedKeys missing or incomplete; restoredAssets/missingAssets
-  // below makes that visible instead of a restore silently claiming every
-  // product's image came back when some didn't).
-  const copiedKeys = payload.r2?.copiedKeys || []
-  const assetsPrefix = payload.r2?.assetsPrefix
+  // Pass 2: stream rows and insert in bounded batches, per table.
+  const CHUNK = 80
+  const liveColumnsCache = new Map<string, Set<string>>()
+  let insertSql = ''
+  let insertColumns: string[] = []
+  let batch: D1PreparedStatement[] = []
+  let restoreTable = ''
+  let r2Meta: BackupPayload['r2'] | null = null
+  let summaryMeta: BackupPayload['summary'] | null = null
+
+  const flush = async () => {
+    if (!batch.length) return
+    await env.DB.batch(batch)
+    statementCount += batch.length
+    batch = []
+  }
+
+  for await (const ev of streamBackupEvents(await openBackupStream(env, key))) {
+    if (ev.type === 'table') {
+      await flush()
+      restoreTable = ''
+      if (!orderedTables.includes(ev.table)) { insertSql = ''; insertColumns = []; continue }
+      let liveColumns = liveColumnsCache.get(ev.table)
+      if (!liveColumns) { liveColumns = new Set(await tableColumns(env, ev.table)); liveColumnsCache.set(ev.table, liveColumns) }
+      insertColumns = ev.columns.filter((c) => liveColumns!.has(c))
+      if (!insertColumns.length) { insertSql = ''; continue }
+      // sql-bound-params: bounded by construction -- one parameter per COLUMN,
+      // one statement per row, and a table has far fewer than 100 columns, so
+      // this never nears D1's 100-parameter cap.
+      const placeholders = insertColumns.map(() => '?').join(', ')
+      insertSql = `INSERT INTO ${qid(ev.table)} (${insertColumns.map(qid).join(', ')}) VALUES (${placeholders})`
+      restoreTable = ev.table
+    } else if (ev.type === 'row') {
+      if (!restoreTable || !insertSql) continue
+      const values = insertColumns.map((c) => ev.row[c] ?? null)
+      batch.push(env.DB.prepare(insertSql).bind(...values))
+      if (batch.length >= CHUNK) await flush()
+    } else if (ev.type === 'meta') {
+      if (ev.key === 'r2') r2Meta = ev.value as BackupPayload['r2']
+      else if (ev.key === 'summary') summaryMeta = ev.value as BackupPayload['summary']
+    }
+  }
+  await flush()
+
+  // Restore whichever asset bytes this backup actually copied (best-effort;
+  // see createCloudflareBackup's MAX_ASSET_BYTES_PER_BACKUP cap). A backup
+  // taken before the asset-copy work, or one whose catalog exceeded the cap,
+  // may have copiedKeys missing/incomplete; restoredAssets/missingAssets makes
+  // that visible instead of silently claiming every image came back.
+  const copiedKeys = r2Meta?.copiedKeys || []
+  const assetsPrefix = r2Meta?.assetsPrefix
   let restoredAssets = 0
   const missingAssets: string[] = []
   if (assetsPrefix) {
@@ -666,11 +738,11 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
   return {
     key,
     restoredAt: new Date().toISOString(),
-    summary: payload.summary,
-    tables: tableNames.length,
-    statements: statements.length,
+    summary: summaryMeta,
+    tables: orderedTables.length,
+    statements: statementCount,
     restoredAssets,
-    assetsNotRestored: (payload.r2?.assets?.length || 0) - restoredAssets,
+    assetsNotRestored: (r2Meta?.assets?.length || 0) - restoredAssets,
     missingAssets: missingAssets.length ? missingAssets : undefined,
   }
 }

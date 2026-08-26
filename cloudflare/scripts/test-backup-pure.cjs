@@ -37,11 +37,21 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', r2.outpu
   r2ModuleObj.exports, require, r2ModuleObj, r2.sourcePath, path.dirname(r2.sourcePath),
 )
 
+// backup.ts also imports ./backupRestoreStream (the 10.1 streaming reader).
+// Transpile and run it for real too -- restore's correctness depends on it, so
+// this test exercises the actual scanner, not a stub.
+const restoreStream = transpile('lib/backupRestoreStream.ts')
+const restoreStreamModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', restoreStream.outputText)(
+  restoreStreamModuleObj.exports, require, restoreStreamModuleObj, restoreStream.sourcePath, path.dirname(restoreStream.sourcePath),
+)
+
 const backup = transpile('lib/backup.ts')
 const Module = require('module')
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './r2') return r2ModuleObj.exports // real module, actually exercised
+  if (request === './backupRestoreStream') return restoreStreamModuleObj.exports // real scanner
   return originalLoad.call(this, request, parent, isMain)
 }
 const backupModuleObj = { exports: {} }
@@ -126,12 +136,16 @@ function makeFakeD1(schema) {
           return {
             all: async () => (bound.all ? bound.all() : { results: [] }),
             first: async () => (bound.first ? bound.first() : null),
+            run: async () => { if (bound.exec) bound.exec(); return { success: true } },
             _exec: () => (bound.exec ? bound.exec() : undefined),
           }
         },
-        // .all()/.first() called directly with no .bind() (tableExists/tableColumns/read-all all bind() first in real code, but PRAGMA/SELECT * calls in backup.ts do prepare(...).all() with no bind -- support that shape too)
+        // .all()/.first()/.run() called directly with no .bind() -- backup.ts's
+        // PRAGMA/SELECT * reads and the streaming restore's `DELETE FROM x`.run()
+        // use this no-bind shape.
         all: async () => run(sql, []).all ? run(sql, []).all() : { results: [] },
         first: async () => run(sql, []).first ? run(sql, []).first() : null,
+        run: async () => { const b = run(sql, []); if (b.exec) b.exec(); return { success: true } },
       }
     },
     async batch(statements) {
@@ -149,10 +163,36 @@ function makeFakeD1(schema) {
 // delete/list(prefix,cursor,limit), matching what r2.ts's helpers and
 // backup.ts itself call directly.
 // ---------------------------------------------------------------------
+// Real R2's get() returns .body as a ReadableStream and .text()/.json() as
+// convenience readers; put() accepts a stream OR a string. The streaming
+// restore (10.1) reads .body as a stream, and copyObject pipes one object's
+// .body straight into put(), so the fake must model both -- otherwise the
+// round-trip restore test wouldn't actually exercise the streaming path.
+function stringToStream(str) {
+  const bytes = new TextEncoder().encode(str)
+  return new ReadableStream({
+    pull(controller) { controller.enqueue(bytes); controller.close() },
+  })
+}
+async function streamToString(stream) {
+  const reader = stream.getReader()
+  const chunks = []
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    chunks.push(Buffer.from(value))
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+async function toStoredBody(data) {
+  if (data && typeof data.getReader === 'function') return await streamToString(data)
+  return String(data ?? '')
+}
+
 function makeFakeR2(seed = {}) {
   const store = new Map()
   for (const [key, value] of Object.entries(seed)) {
-    store.set(key, { body: value.body ?? key, httpMetadata: value.httpMetadata, size: value.size ?? String(value.body ?? key).length, uploaded: value.uploaded ?? new Date() })
+    store.set(key, { body: value.body ?? key, httpMetadata: value.httpMetadata, customMetadata: value.customMetadata, size: value.size ?? String(value.body ?? key).length, uploaded: value.uploaded ?? new Date() })
   }
   return {
     _store: store,
@@ -160,13 +200,17 @@ function makeFakeR2(seed = {}) {
       const object = store.get(key)
       if (!object) return null
       return {
-        body: object.body,
+        // A fresh stream per get() -- restore reads the manifest twice.
+        body: stringToStream(object.body),
         httpMetadata: object.httpMetadata,
+        customMetadata: object.customMetadata,
+        text: async () => object.body,
         json: async () => JSON.parse(object.body),
       }
     },
     async put(key, data, opts) {
-      store.set(key, { body: data, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: String(data ?? '').length, uploaded: new Date() })
+      const body = await toStoredBody(data)
+      store.set(key, { body, httpMetadata: opts?.httpMetadata, customMetadata: opts?.customMetadata, size: body.length, uploaded: new Date() })
     },
     // Multipart support, added when createCloudflareBackup moved off a
     // single put() of one giant JSON string (which was exceeding the
@@ -296,13 +340,13 @@ async function main() {
     assert.ok(result.key.startsWith(CLOUDFLARE_BACKUP_PREFIX) && result.key.endsWith('.json'))
 
     const manifestObject = await env.ASSETS.get(result.key)
-    const payload = JSON.parse(manifestObject.body)
+    const payload = JSON.parse(await manifestObject.text())
     assert.deepStrictEqual(payload.tables.branches.rows, schema.branches.rows)
     assert.strictEqual(payload.r2.copiedKeys.length, 3)
     // Bytes were actually copied into the backup's own assets/ prefix, not
     // just listed -- read one back and confirm it round-trips.
     const copied = await env.ASSETS.get(`${payload.r2.assetsPrefix}a.png`)
-    assert.strictEqual(copied.body, 'A')
+    assert.strictEqual(await copied.text(), 'A')
   })
 
   // -- Test 2: the MAX_ASSET_BYTES_PER_BACKUP cap (40) is respected --
@@ -355,11 +399,11 @@ async function main() {
 
     const first = await createCloudflareBackup(env, 'manual')
     assert.strictEqual(first.summary.assetsBackedUp, 40)
-    const firstManifest = JSON.parse((await env.ASSETS.get(first.key)).body)
+    const firstManifest = JSON.parse(await (await env.ASSETS.get(first.key)).text())
 
     const second = await createCloudflareBackup(env, 'manual')
     assert.strictEqual(second.summary.assetsBackedUp, 40)
-    const secondManifest = JSON.parse((await env.ASSETS.get(second.key)).body)
+    const secondManifest = JSON.parse(await (await env.ASSETS.get(second.key)).text())
 
     // The two runs' copied sets should differ (real progress was made),
     // and together they should cover every one of the 50 assets at least
@@ -399,7 +443,7 @@ async function main() {
     assert.deepStrictEqual(liveSchema.settings.rows, [{ key: 'business_name', value: 'Acme' }])
     assert.deepStrictEqual(liveSchema.branches.rows, [{ id: 1, name: 'Main' }])
     assert.strictEqual(restoreResult.restoredAssets, 1)
-    assert.strictEqual((await liveEnv.ASSETS.get('uploads/logo.png')).body, 'LOGO', 'asset bytes should be copied back to their original key')
+    assert.strictEqual((await (await liveEnv.ASSETS.get('uploads/logo.png')).text()), 'LOGO', 'asset bytes should be copied back to their original key')
   })
 
   // -- Test 4: restore only writes columns that exist in the CURRENT live
@@ -512,7 +556,7 @@ async function main() {
     const result = await createCloudflareBackup(env, 'manual')
     assert.strictEqual(result.summary.assetsBackedUp, 40)
     assert.strictEqual(result.summary.assetsSkipped, 5)
-    const payload = JSON.parse((await env.ASSETS.get(result.key)).body)
+    const payload = JSON.parse(await (await env.ASSETS.get(result.key)).text())
     assert.strictEqual(payload.r2.assetCopyProgress, undefined, 'no-queue path should not set assetCopyProgress at all')
   })
 
@@ -531,7 +575,7 @@ async function main() {
     assert.strictEqual(result.summary.assetsSkipped, 15)
     assert.strictEqual(queue.sent.length, 1, 'exactly one continuation message should be enqueued')
     assert.deepStrictEqual(queue.sent[0], { kind: 'backup-continue', backupName: result.name.replace(/\.json$/, ''), nextIndex: 40 })
-    const payload = JSON.parse((await env.ASSETS.get(result.key)).body)
+    const payload = JSON.parse(await (await env.ASSETS.get(result.key)).text())
     assert.deepStrictEqual(payload.r2.assetCopyProgress, { nextIndex: 40, complete: false })
 
     // Under-the-cap run: no continuation should be enqueued at all.
@@ -540,7 +584,7 @@ async function main() {
     const smallEnv = makeEnv({ schema, assets: smallAssets, queue: smallQueue })
     const smallResult = await createCloudflareBackup(smallEnv, 'manual')
     assert.strictEqual(smallQueue.sent.length, 0, 'a run that covers every asset in one pass should not enqueue a continuation')
-    const smallPayload = JSON.parse((await smallEnv.ASSETS.get(smallResult.key)).body)
+    const smallPayload = JSON.parse(await (await smallEnv.ASSETS.get(smallResult.key)).text())
     assert.deepStrictEqual(smallPayload.r2.assetCopyProgress, { nextIndex: 1, complete: true })
   })
 
@@ -573,7 +617,7 @@ async function main() {
       assert.ok(iterations < 20, 'should not take anywhere near this many continuation steps for 95 assets at 40/step')
     }
 
-    const finalPayload = JSON.parse((await env.ASSETS.get(created.key)).body)
+    const finalPayload = JSON.parse(await (await env.ASSETS.get(created.key)).text())
     assert.strictEqual(finalPayload.summary.assetsBackedUp, 95, 'all 95 assets should be copied across the full run')
     assert.strictEqual(finalPayload.summary.assetsSkipped, 0)
     assert.deepStrictEqual(finalPayload.r2.assetCopyProgress, { nextIndex: 95, complete: true })
@@ -581,7 +625,7 @@ async function main() {
     // Every asset's bytes should be genuinely readable back from the
     // backup's own assets/ prefix, not just listed in copiedKeys.
     const sample = await env.ASSETS.get(`${finalPayload.r2.assetsPrefix}big-094.png`)
-    assert.strictEqual(sample.body, 'img94')
+    assert.strictEqual(await sample.text(), 'img94')
   })
 
   // -- Part 122, Test 10: a redundant continuation call against an
@@ -596,7 +640,7 @@ async function main() {
     const created = await createCloudflareBackup(env, 'manual')
     assert.strictEqual(queue.sent.length, 0, 'single-asset backup should already be complete after the initial run')
 
-    const before = JSON.parse((await env.ASSETS.get(created.key)).body)
+    const before = JSON.parse(await (await env.ASSETS.get(created.key)).text())
     assert.strictEqual(before.r2.assetCopyProgress.complete, true)
 
     const result = await continueCloudflareBackupAssetCopy(env, created.name.replace(/\.json$/, ''), before.r2.assetCopyProgress.nextIndex)
@@ -604,7 +648,7 @@ async function main() {
     assert.strictEqual(result.reason, 'already-complete')
     assert.strictEqual(queue.sent.length, 0, 'no continuation should be enqueued for an already-complete backup')
 
-    const after = JSON.parse((await env.ASSETS.get(created.key)).body)
+    const after = JSON.parse(await (await env.ASSETS.get(created.key)).text())
     assert.deepStrictEqual(after, before, 'manifest should be byte-for-byte unchanged by the no-op')
   })
 

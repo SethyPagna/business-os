@@ -78,7 +78,7 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 
 | Task | Status | Notes |
 |---|---|---|
-| Data reset fails — "Exceeded Memory Limit" | **done & DEPLOYED** (write path only — RESTORE still loads the whole document into memory, see Part 346 open items) | Cause was NOT the reset code: a full backup runs as a hard prerequisite in front of every reset, and it loaded every row of ~34 tables into memory then stringified it. Now paged + streamed to R2. Needs a deploy to take effect. |
+| Data reset fails — "Exceeded Memory Limit" | **done & DEPLOYED** (write path); streaming RESTORE fixed in Part 355, needs deploy | Cause was NOT the reset code: a full backup runs as a hard prerequisite in front of every reset, and it loaded every row of ~34 tables into memory then stringified it. Backup write is paged + streamed to R2; restore now streams rows in bounded batches (10.1). |
 | Organization must lock to LeangCosmetics | **done & DEPLOYED** (Part 346) | `ensureCoreDataInvariants` hardcoded the name and rewrote it **on every request**, so any rename reverted. Now configured via `BUSINESS_OS_ORGANIZATION_NAME`/`_SLUG`. Only applies once deployed against remote D1. |
 | POS / sales not working — options, batch pick, click-to-pick | done | Two causes. (1) A FLAT product produced no branch options at all (the sheet iterated `variants`, which is empty for non-groups), so the lot query had no branch and was fed an empty list. (2) route()'s read cache is keyed by channel string alone, and `batches:list` was constant — every product shared one cached lot list, which once warm would show ANOTHER product's lots. Verified end to end: both lots list, block clears, cart $37.00 → $55.50 with the lot recorded. |
 | Employees / non-admin roles see "No Data Found" in POS | **done — re-fixed properly, needs deploy** (Part 347) | **Confirmed by the user: the employee role does carry `products_image_only`.**<br><br>**Symptom:** a Products-page display restriction was applied at the *shared* product read endpoints, which POS also calls. Rows were stripped to `IMAGE_ONLY_BASE_FIELDS` (`id, name, image_path, image_gallery, updated_at`); `is_active` is not in that list, and POS filtered on it — so every row vanished behind an HTTP 200 with no error banner. The pagination count and A–Z rail kept showing real numbers above an empty grid, because those come from separate unrestricted queries.<br><br>**Part 346 fixed the symptom** by teaching the image-only predicate to also exclude anyone holding `pos`/`sales`/`inventory`. It worked, but the user pushed back correctly: *"these are two separate pages — why is a Products image-upload permission affecting POS?"* That fix left a Products concern coupled to three other pages' permissions, correct only while someone remembered to list every other page in it.<br><br>**Part 347 fixes the architecture.** The caller now declares which **surface** it reads for, and each surface is gated by its own page permission: `pos` → needs `pos`/`sales`, never field-restricted; `inventory` → needs `inventory`, never field-restricted; `products` → needs `products`/`products_image_only`, restricted only for the image-only case. **Declaring a surface cannot escalate** — claiming `surface=pos` without the permission is refused outright, not silently downgraded. Default stays `products`, so pre-existing callers are unchanged. The Products page keeps its restriction where it belongs.<br><br>Driven by a **cross-page permission audit** over both packages (kept at `scripts/` in scratch) that finds any place one page's permission is read by another page's code. Locked in by `scripts/test-product-surface-scoping-pure.cjs` (11 checks), which asserts the products read path **no longer contains** `hasPermission(user, 'pos')` at all, rather than merely asserting today's answer. The independent client-side half (POS reading an absent `is_active` as "archived") keeps its own test. |
@@ -86,7 +86,7 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 | Sale total omitted the delivery fee | **done & DEPLOYED** (Part 346, Aug 25 2026) | The POS cart charged `afterDiscount + tax + customerFee` and printed it on the receipt, but the server recorded `subtotal - discount - membershipDiscount + tax` with **no fee term** — the fee scalars were computed further down the handler and were not even in scope at total time. Every delivery sale stored a total **below what was collected**, and the gap propagated into `change_usd`, the Sales page, `salesAnalytics` and loyalty accrual. Fee is hoisted above the totals; only a **customer-paid** fee counts (a store-absorbed fee is a cost, not revenue). |
 | KHR-only sales recorded a fabricated USD tender | **done & DEPLOYED** (Part 346, Aug 25 2026) | `Number(body.amount_paid_usd) \|\| totalUsd` read a legitimate `0` as "not supplied" and substituted the whole total, so a customer paying entirely in riel was recorded as tendering the full USD amount **plus roughly a second full total as change**. "Absent" is now detected *before* coercion (`undefined`/`null`/`''` only) — `Number(null) === 0`, so a naive `Number.isFinite` check would have swung the bug the other way. |
 | A failed lot lookup read as "there are no lots" | **done & DEPLOYED** (Part 346, Aug 25 2026) | `batchesTransport` passed `() => ({ productIds: [] })` / `() => ({ batches: [] })` as route()'s local fallback, and `hasUsableLocalData` counts any non-empty object as usable — so a 403/500/timeout **resolved as a successful empty result and was cached**. Every batch-tracked product looked untracked, the lot picker never appeared, and **batch-tracked stock sold with no lot chosen**, bypassing FIFO/expiry silently. Both reads now propagate failures; POS keeps prior knowledge, flags the failure, routes every product through the detail sheet, and shows a retry banner; the sheet renders a real error instead of "No lots available". Deliberate availability-for-correctness trade: refusing a sale beats selling the wrong lot. |
-| Image compression: 300–350KB band, all library objects, re-verified every 6h | in progress | **Measured, not assumed: there is no 350KB anywhere in the codebase.** Compression is 100% browser-side (Canvas/`toBlob`); the Worker has no image processing at all. Global default is 180KB max / 140KB target (`utils/imageCompression.ts:33-54`); the **Library page overrides it to 70KB/40KB** (`api/fileTransport.ts:72-76`) — that override is the ~70KB you are seeing, and it means the library is on a *tighter* budget than product photos. **The algorithm is also structurally biased low**: it keeps the **smallest** blob found rather than the largest under the cap (`:265`), stops at the *soft* target rather than the cap (`:269`), and only ever steps **down** (`:112-124`) — nothing climbs back toward the band. **No backfill over existing R2 objects has ever existed** (that is why MB-sized objects persist), and `MEDIA_QUEUE` is dead code: no `optimize-image` branch (`queue.ts:139-166`) and **no producer anywhere**. The 6h cron exists (`wrangler.toml`) but runs only backup/drive-sync/audit-retention. **Decided this session:** hard ceiling 350KB, floor 300KB, cron audits R2 and records out-of-band objects, admin "Optimize library" screen recompresses in the browser (reusing the `importJobs.ts:891` round-trip shape). |
+| Image normalization, quality protection, all library objects, re-verified every 6h | plan locked; implementation not started | **Revised Aug 27:** every image may be metadata-stripped and converted to WebP when the result is smaller while retaining roughly **80–90%+ visual quality**. Files already at or below 350KB do **not** enter the aggressive resize/compression ladder and are never padded up to 300KB. Only sources above 350KB use all methods in order — format/metadata first, dimensions second, encoder quality last — selecting the highest-quality result at or below 350KB and aiming for 300–350KB when naturally achievable. Provider failure may never fall through to storing an oversized original. The server is authoritative; client compression is only a preview/latency optimization. See the Aug 27 locked execution plan below. |
 
 ### Import
 
@@ -382,6 +382,209 @@ products/product_images by shared path), and (2) a download/export step that
 renames on the fly. The import rename rule is unchanged; it just no longer
 implies a separate stored file when the same photo serves several products.
 
+### Execution plan locked Aug 27 2026 — §§11, 12, 13 and 15 plus storage, media, contacts and safeguards
+
+**Status: PLAN LOCKED; this entry does not mark implementation complete.**
+When an older historical note conflicts with this section, this section is
+authoritative. Existing completed Parts 346–355 remain unchanged and must be
+deployed and baseline-tested before the new phases begin.
+
+#### Locked product decisions
+
+- **Images:** normalize every static-image entry point through one server-side
+  pipeline. An image at or below 350KB may still be metadata-stripped and
+  converted to WebP when that produces fewer bytes while preserving roughly
+  **80–90%+ visual quality**; it does not undergo the aggressive resize/quality
+  ladder and is never enlarged or padded to reach 300KB. Only an input above
+  350KB uses the full ladder: orientation/metadata and format first, dimensions
+  second, quality/compression last. Choose the largest/highest-quality valid
+  result no larger than 350KB, with 300–350KB a target band when naturally
+  achievable. Never save a larger transformed result over a smaller source.
+- **Image count:** normal users/products/name-groups get at most **3** images;
+  an administrator may explicitly allow up to **5**. The API rejects excess
+  attachments with a clear 409 instead of silently slicing them. The cap covers
+  the union of the group owner and child references, all file/camera/library,
+  import, avatar, promotion, portal and settings upload paths.
+- **Returns/replacements (§11.12–11.13):** the default is an even exchange from
+  same-name stock. The user can instead settle the price difference or complete
+  a refund followed by a new sale. Non-default price adjustment requires full
+  access and an explicit preview. Returned stock is classified as no restock,
+  restock as sellable, or restock as damaged.
+- **Damaged stock:** use traceable damaged-stock lots tied to the exact return,
+  branch and batch; do not create duplicate “damaged” product records. POS and
+  stock pickers display Damage alongside batch/branch/barcode/SP/VIP, never cost.
+- **Imports (§12–§13):** retain detailed import artifacts for **24 hours** and a
+  compact summary for **7 days**. Every import has exactly two screens: upload,
+  then resolved review/confirm. No business write occurs before confirmation.
+- **Library (§15):** one R2 object can appear as multiple logical rows named for
+  its product references. Downloads rename on the fly; no physical copies and
+  no alias/dedup migration.
+- **Backups:** R2 retains exactly the newest **2 finalized, verified** backups.
+  Google Drive retains exactly the newest **7 finalized, verified** backups.
+  Create and verify the replacement before deleting the oldest. Failed,
+  cancelled, partial and stale-running jobs are visibly classified and cleaned
+  without counting as valid retained backups.
+- **Path-width UI:** narrow all three identified path fields (backup export path
+  and both import image-folder path displays), keeping full values available by
+  tooltip/copy/expand.
+
+#### Phase 0 — baseline, deployment safety and measured evidence
+
+1. Preserve the dirty worktree and deploy the already-completed Parts 346–355
+   only after their existing backend/frontend/type/build/migration checks pass.
+2. Capture before-change R2 inventory by prefix, object count, bytes, age and
+   multipart state; capture D1 table/page counts and query metrics. The current
+   audit found about **273MB/136 live R2 objects**, while 51 optimized image
+   objects total only about **9.6MB** and imports about **14MB**; most live bytes
+   are backup manifests and copied backup assets. A dashboard value above 900MB
+   can therefore be a daily/GB-month measurement rather than current live image
+   bytes and must be reconciled from Cloudflare metrics, not guessed.
+3. The current D1 audit found about **243MB**, with roughly **193MB** in import
+   staging source/result JSON plus orphan staging rows. The observed 24-hour
+   query load (about 142.6M rows read / 799.8K written) is far beyond the free
+   daily allowance and makes query-shape/index work a release blocker.
+
+#### Phase 1 — stop storage growth and make asynchronous jobs finite
+
+1. Add explicit job states and leases: queued, running, cancelling, cancelled,
+   succeeded, failed and stale. Cancellation is idempotent, workers check it at
+   bounded intervals, leases expire safely, retries use stable idempotency keys,
+   and the UI exposes retry/cancel/cleanup rather than leaving “stuck” rows.
+2. Move large import source and per-row result payloads from D1 into compressed
+   R2 NDJSON. Keep only summaries, cursors, conflicts, lease/idempotency markers
+   and short diagnostic text in D1. Delete detailed objects at 24h and summaries
+   at 7d; clean existing orphan staging only after a dry-run report and backup.
+3. Make backup artifacts self-describing and finalized only after manifest,
+   assets and checksums verify. R2 pruning always keeps the two newest verified
+   backup sets, and removes partial/stale artifacts separately.
+4. Drive sync mirrors the newest verified R2 backup rather than creating a
+   second backup. Upload the manifest **and every referenced asset** with
+   resumable, chunked uploads (256KB-aligned chunks), tagged `appProperties`,
+   bounded queue continuations and retry-safe session state. Verify the Drive
+   set before pruning tagged old sets to seven. Add Drive listing, staged restore
+   and checksum verification. Never auto-delete unrelated Drive files.
+
+#### Phase 2 — §11 returns, replacements and damaged inventory
+
+1. Add explicit `ReturnStockAction`, `ReplacementSettlement` and
+   `StockCondition` values plus `damaged_stock_lots` and
+   `return_replacement_items` records. Migrations are additive and reversible.
+2. Build one stock-action chooser with a before/after consequence preview.
+   Replacement selection uses the POS option picker constrained to same-name
+   stock. Even exchange is preselected; difference settlement and
+   refund-then-sale show all money/stock effects before confirmation.
+3. Commit sale reversal, restock/damage movement, replacement deduction,
+   settlement and audit events atomically, guarded by permissions, expected
+   versions and an idempotency key. A retry cannot double-refund, double-restock
+   or double-deduct.
+
+#### Phase 3 — §§12–13 import engine and two-screen UX
+
+1. Ship the single ten-column stock template and Direct/Reconcile semantics
+   already specified in §12, including `sale` daily grouping and `saleN`
+   receipt grouping.
+2. Stream parse into R2 staging; resolve products, branches, batches, prices and
+   conflicts in bounded chunks. Review supports search, alphabetic sort and
+   filters, including contacts. Confirmation seals an immutable plan hash; only
+   then may apply start.
+3. Apply through bounded transactions with indexed keyset pagination, leases,
+   cancellation checkpoints and idempotent chunk markers. Never rescan the full
+   CSV, full sales grouping or full image-match catalog for every chunk.
+
+#### Phase 4 — image pipeline, providers, counts and §15 library
+
+1. Route file picker, camera capture, library upload, ZIP/folder/data-URL import,
+   avatars, promotions, portal/settings and server attach APIs through one
+   validation contract. Verify magic bytes by decoding, enforce pixel/dimension
+   and decompression-bomb limits, strip metadata, correct orientation, sanitize
+   filenames, use random object keys and reject SVG/polyglot/unsupported content.
+2. Cloudflare transformation is the primary path and the existing Cloudinary
+   secret is the bounded fallback. Fix Cloudinary incoming transformations,
+   delete temporary provider assets, count attempts as well as successes, cap
+   concurrency, and fail closed when no provider can produce a compliant object.
+   Never expose provider secrets or accept a client-supplied transformation URL.
+3. Generate only bounded variants (`thumb` 192px, `card` 640px, `detail`
+   1600px) and guard unique transformation dimensions/quality to prevent abuse.
+   Store a normalized master once and serve cached variants; periodically audit
+   R2, report noncompliant/orphaned objects, and require a reviewed admin action
+   for backfill deletion/replacement.
+4. Replace every hidden hard-coded five-image client cap and every server-side
+   silent slice with the shared, server-derived 3/5 policy. Concurrent attaches
+   must remain within the cap transactionally.
+5. Implement §15 as a reference-aware Library read: each shared path can render
+   one logical row per product name, while details expose the single stored
+   object and every “used by” reference. Export streams the same bytes with the
+   chosen logical filename.
+
+#### Phase 5 — contacts duplicate-resolution safety and clarity
+
+1. Replace opaque Keep/Resolve/EyeOff actions with an expandable side-by-side
+   comparison, permanent legend/help, field differences, sales/returns/loyalty
+   history, explicit keeper choice and a before/after preview explaining every
+   reassigned reference and discarded value.
+2. Let the user choose the source for conflicting fields. The server returns an
+   immutable merge plan; commit checks `updated_at` versions and performs keeper
+   backfill, all reference moves, loyalty/history handling and duplicate removal
+   in one atomic, idempotent operation.
+3. Remove implicit pair ordering and “merge first into second” bulk behavior.
+   Bulk merge accepts only explicit reviewed plans; clusters of three or more
+   are never skipped silently. Destructive deletion of a contact with history
+   requires admin + `destructive_delete` + typed-name confirmation. Dismissals
+   have a visible filtered view and undo.
+4. Add normalized, indexed identity keys so duplicate discovery does not rely on
+   repeated full-table scans.
+
+#### Phase 6 — application, AI and free-plan safeguards
+
+1. Apply least-privilege server authorization to every mutation; validate all
+   schemas and content types; use parameterized SQL, allowlisted sort/filter
+   fields, bounded page sizes, statement/time limits and transactional invariants.
+2. Use Cloudflare Workers Rate Limiting bindings on costly/authenticated actions,
+   Turnstile on login recovery and public/high-risk actions, and one focused free
+   WAF rule for public AI/abuse surfaces. Do not spend D1 writes on high-frequency
+   rate-limit logs.
+3. Put AI calls behind server-side quotas and AI Gateway telemetry/rate limits.
+   Treat prompts, retrieved data and model output as untrusted: isolate system
+   instructions, allowlist tool/action IDs, require strict output schemas, cap
+   tokens/context/time, escape rendered output and require human confirmation for
+   destructive or financial operations. Never let model text become SQL, URLs,
+   headers or tool arguments without validation.
+4. Add CSP in report-only mode before enforcement, CSRF/origin protection,
+   secure cookies/session rotation, replay protection, upload/download headers,
+   audit events without secrets/PII, Analytics Engine counters and alertable
+   quota/error/latency/storage dashboards. Use bounded Queues for resumable work;
+   do not add a paid or novelty service where a free-plan primitive suffices.
+
+#### Deep test and release gates
+
+- **Images:** magic-byte spoof, malformed/truncated files, EXIF rotation, huge
+  dimensions/decompression bombs, animated inputs, transparency, WebP already
+  below 300KB, source within 300–350KB, source above 350KB, provider timeout,
+  Cloudinary cleanup, concurrent fourth/sixth attach, group union, import/camera
+  bypass attempts, visual-quality fixtures and “never larger than source” checks.
+- **Backups/storage:** interrupted multipart/chunk upload, stale lease, duplicate
+  queue delivery, cancellation at every phase, corrupt checksum, missing asset,
+  Drive 401/403/429/5xx and resume, restore round-trip, exactly 2 R2 / 7 Drive
+  verified sets, and proof that unrelated Drive/R2 objects cannot be deleted.
+- **Imports/D1:** million-row synthetic streams, quoted multiline UTF-8 data,
+  conflict review, plan tamper, confirm race, cancel/retry, duplicate delivery,
+  bounded memory/CPU/statements/rows-read, retention cleanup and orphan repair.
+- **Returns/contacts/security:** concurrent stock change, replayed settlement,
+  atomic rollback, permission matrix, three-plus duplicate clusters, stale merge
+  plans, reference preservation, CSRF, IDOR, injection, stored XSS, rate-limit
+  evasion, prompt injection/tool abuse and log/secret leakage.
+- Every phase must pass backend suites individually, the full frontend test chain,
+  both TypeScript checks, production build, migration validation and Wrangler
+  configuration validation. Deploy in small phases, compare storage/D1/CPU/error
+  metrics for 48 hours, and keep rollback paths. Update status rows only with
+  test and deployment evidence; “planned” is never reported as “done.”
+
+#### Continue after these phases
+
+Resume the ordered tracker with server-backed undo/redo, remaining §14 batch
+details, rename/regroup and orphan-image repair, stats/tooltips, then portal
+pagination/cache/performance. Re-measure Cloudflare usage before each expansion.
+
 ### 8 — Identity rule, remaining
 
 | # | Task | Status |
@@ -393,7 +596,7 @@ implies a separate stored file when the same photo serves several products.
 
 | # | Task | Status |
 |---|---|---|
-| 10.1 | **Backup restore still loads the whole document into memory** (`backup.ts:574` `object.json()`, then one statement per row). The write path was fixed and streamed; its mirror was not, so a database big enough to have caused the original OOM will OOM restoring its own backup. | not started |
+| 10.1 | **Backup restore loaded the whole document into memory.** **DONE (Part 355), needs deploy.** `restoreCloudflareBackup` called `object.json()` (the ENTIRE backup parsed into one object) then built an INSERT for every row before applying any — so a database big enough to have OOMed its backup OOMed restoring it (the worse failure: you restore precisely when things are already bad). Now streams the R2 body through a new `lib/backupRestoreStream.ts` and applies rows in bounded 80-row batches; peak memory is one row + a small carry buffer, never the whole backup. Two passes keep the FK-safe delete order (learn present tables → reverse-delete → stream-insert). The scanner only finds token BOUNDARIES (string/escape aware) and hands each row to the trusted `JSON.parse`, so a truncated/corrupt backup throws loudly rather than silently mis-restoring; corrupt *asset-list* metadata degrades (best-effort) instead of undoing a good table restore. `test-backup-restore-stream-pure.cjs` (12 checks incl. per-char + 200 random chunkings) + the existing `test-backup-pure.cjs` round-trip now drives the streaming path. | done (Part 355) |
 | 10.2 | Edit form does not auto-move sections back to Details — reported as a bug; not yet reproduced. | not started |
 
 ### 16 — Branding / PWA / media / notes batch (Part 354)
@@ -500,13 +703,13 @@ released, no error.
 reach POS); "Review Required" renamed **"Partial Access"**; per-action overrides,
 enforced server-side, one-way.
 
-**Images** — 300–350 KB band with the selection rule fixed; stepped downscaling (the
-blur was a single-jump resize, not the encoder); **quality reduction is now the LAST
-lever** after format and size; AVIF→WebP; every image indexed `_1/_2/_3` on BOTH sides;
-STRICT 1:1 library matching (no fuzzy — ambiguous names reported, `Chanel No 5` keeps
-its 5, 3-image cap enforced); Cloudflare Images binding + Cloudinary signed fallback;
-6-hourly R2 audit (never deletes an original, never writes back a larger file);
-**video reserve** so the image sweep cannot spend the month.
+**Images** — revised Aug 27: every static image can receive safe WebP/metadata
+optimization when smaller at roughly 80–90%+ quality; only sources above 350KB use
+the full format → dimensions → quality ladder, with 300–350KB a natural target and
+350KB a hard stored ceiling. Never pad small images or write back a larger result.
+Every image is indexed `_1/_2/_3`; regular products/groups cap at 3 and an admin can
+explicitly allow 5. Strict 1:1 library matching reports ambiguous names. Cloudflare is
+primary, Cloudinary is a bounded signed fallback, and the 6-hour audit is report-first.
 
 **Infrastructure** — quota guard with D1 fallback for cache versions (KV is 1,000
 writes/day and `bumpVersion` fires from 31 sites; exhaustion silently served STALE
@@ -541,7 +744,7 @@ are the commands' actual results this session.
 |---|---|
 | `frontend` `tsc --noEmit` | **clean** |
 | `cloudflare` `tsc --noEmit` | **clean** |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **64 / 64 pass** |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **65 / 65 pass** |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → 130+ `tests/*.test.ts`) | **green** |
 | Real `vite build` | **succeeds (~16s)**; `portal-manifest.json` + Leang icons present in `dist` |
 | `wrangler d1 migrations apply --local` | all migrations apply cleanly (last verified Part 346; unchanged since) |
@@ -607,6 +810,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Alignment (4.1/11.4) | `productsRowAlignment.test.ts` | the 6 `<col>` widths sum to 100%; category band spans image+name |
 | Logo crop (16.2) | `logoImageStyle.test.ts` | preview == applied; transform-origin ties to the focus point; clamps |
 | PWA / branding (16.1/11.14) | `brandIcons.test.ts`, `performanceLoadingUx.test.ts`, `adminShellMediaGuards.test.ts` | storefront serves STATIC Leang icon+manifest, never a blob or per-merchant build; the removed favicon machinery cannot return (doesNotMatch guards) |
+| Backup restore streaming (10.1) | `test-backup-restore-stream-pure.cjs` (12 checks) + `test-backup-pure.cjs` round-trip | reads the document one row at a time; identical events under per-char + 200 random chunkings; corrupt/truncated backup throws (never silently mis-restores); the round-trip now exercises the streaming path end to end |
 
 ### Security posture
 
@@ -653,8 +857,8 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Caching | app shell + route chunks | public storefront caching added earlier this session |
 
 **Known follow-ups on the surfaces:** stale cache of embedded sites on the public site (6.3,
-repro-then-scope); portal pagination counts unmerged rows so it promises empty pages (6.5);
-backup RESTORE still loads the whole document into memory and would OOM a large DB (10.1).
+repro-then-scope); portal pagination counts unmerged rows so it promises empty pages (6.5).
+The bounded-memory backup restore fix (10.1) is complete in Part 355 and awaits deploy.
 
 ---
 
@@ -3335,10 +3539,14 @@ rather than a hidden button.
 format; save and auto-delete on Drive; must not breach Cloudflare's free limits. Resets
 need a smart, safe UI that cannot do anything unintended.
 
-Not started this session. `lib/googleDrive.ts` and the `/api/system/drive-sync/*` routes
-exist. **Handle with care:** `/system/drive-sync/oauth/callback` must stay publicly
-reachable (it is Google's redirect) — Part 339 explicitly avoided "repairing" a dead guard
-that would have blocked it.
+Plan locked Aug 27; implementation is not started by this note. R2 retains exactly the
+newest **2 verified finalized** backup sets and Drive exactly the newest **7**. Drive sync
+must mirror the already-verified newest R2 backup (manifest plus all referenced assets),
+use resumable chunked uploads and checksum verification, then delete only older tagged
+app backup folders. It must not create another R2 backup or buffer a full object with
+`arrayBuffer()`. Partial/stuck/cancelled runs do not count toward retention and get an
+explicit cleanup path. `/system/drive-sync/oauth/callback` must stay publicly reachable
+(it is Google's redirect) — Part 339 correctly avoided blocking it.
 
 ### 7. 🟢 User-defined options instead of fixed ones
 
@@ -3651,10 +3859,11 @@ existing production rows, so nothing in the live catalog was altered by the depl
 - POS group-option display and picking (the "multiple pricings" UI request).
 - Rename does not regroup; `merge-duplicates` still orphans images.
 - No auto-merge flag/filter yet.
-- Image compression 300–350KB band, cron audit, browser backfill.
+- Image normalization per the Aug 27 rule (safe WebP for smaller files; full ladder only
+  above 350KB), 6-hour report-first audit, reviewed backfill.
 - Import CPU efficiency (whole-CSV re-decode per window; sales re-partition per chunk).
 - Portal pagination counts unmerged rows; portal A–Z initials ignore the out-of-stock toggle.
-- Backup **restore** still loads the whole document into memory.
+- Deploy and live-verify the Part 355 bounded-memory backup restore.
 
 ---
 
