@@ -234,7 +234,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 | 5.4 | **Dashboard and Inventory removed opposite metrics**: Dashboard still shows Gross Profit, Inventory still shows Net Sold. The Part 351 removal was applied inconsistently — decide one rule and apply it to both. | not started |
 | 5.5 | **Product stats: use COLOUR instead of labels** for healthy / low / out-of-stock in the default view; the detail breakdown is enough for names. For other stat cards, keep the name but colour the values underneath. | not started |
 | 5.6 | **Branches page: too many stock stats outside.** Do it like the Inventory page's product handling. Per-branch stock stats are fine to keep. | not started |
-| 5.7 | **History button in the profile menu is not responsive** — it overflows the profile boundary. | not started |
+| 5.7 | **History button in the profile menu is not responsive.** **DONE (Part 354), needs deploy** — see 11.22. | done, needs deploy |
 
 ### 5 — Public portal
 
@@ -455,7 +455,7 @@ implies a separate stored file when the same photo serves several products.
 |---|---|---|
 | 11.20 | **Inventory product stats: colour, not labels, in the default view.** Healthy / low / out-of-stock as colour; the detail breakdown already carries the names. For OTHER stat cards keep the name, but also colour the values underneath. (Same intent as 5.5.) | not started |
 | 11.21 | **Branches page: too many stock stats outside.** Do it like the Inventory page's product handling — drop the many outer stock-quantity stats; per-branch branch-stock stats are fine to keep. (Same as 5.6.) | not started |
-| 11.22 | **History button in the profile menu overflows the profile boundary** — not responsive. (Same as 5.7.) | not started |
+| 11.22 | **History menu overflowed the profile modal.** **DONE (Part 354), needs deploy** — the bar's dropdown/preview defaulted to open rightward off the modal edge; now `align="right"` + `flex-shrink-0`. (Also 5.7.) | done, needs deploy |
 
 **Pricing / batches correctness (re-reported)**
 
