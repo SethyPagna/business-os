@@ -2851,6 +2851,65 @@ async function computeAndCacheImageMatch(
   return cached
 }
 
+// ---------------------------------------------------------------------------
+// Single-writer lease
+// ---------------------------------------------------------------------------
+// Cloudflare Queues is at-least-once: the same message can arrive twice, and
+// a retry can overlap the invocation it retries. Without a lease, two
+// invocations of the SAME job read the same chunk_cursor, classify the same
+// ~150 rows, both see "no existing product matches" for every create, and
+// both INSERT -- duplicate products that nothing later reconciles, because
+// each looks like a legitimately distinct row. On the sales path the same
+// overlap writes a receipt twice.
+//
+// Two DIFFERENT jobs never contend here: every table this engine writes
+// during a run is keyed by job_id. This is specifically about one job being
+// processed twice at once.
+//
+// The lease EXPIRES rather than being a status flag. An invocation that dies
+// mid-chunk (CPU limit, isolate eviction) cannot release anything, and a
+// sticky flag would wedge the job forever with no way back from inside the
+// app. The worst case here is that the job waits out the remainder.
+const IMPORT_LEASE_MS = 60_000
+
+/**
+ * Claims the job for this invocation, or returns null if another one holds
+ * it. Atomic: the WHERE clause is what decides, so two racing invocations
+ * cannot both see a free lease -- D1 reports how many rows the UPDATE
+ * actually changed, and only one of them gets 1.
+ */
+async function acquireImportLease(db: D1Compat, jobId: string): Promise<string | null> {
+  const token = crypto.randomUUID()
+  const now = new Date()
+  const result = await db.prepare(`
+    UPDATE import_jobs
+    SET lease_token = @token, lease_expires_at = @expires, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+      AND (lease_expires_at IS NULL OR lease_expires_at < @now)
+  `).run({
+    id: jobId,
+    token,
+    now: now.toISOString(),
+    expires: new Date(now.getTime() + IMPORT_LEASE_MS).toISOString(),
+  })
+  return result.changes === 1 ? token : null
+}
+
+/**
+ * Releases the lease so the next continuation can start immediately rather
+ * than waiting out the full expiry.
+ *
+ * Guarded on the token: an invocation whose lease already expired and was
+ * taken by someone else must NOT clear the new holder's lease on its way
+ * out, or it would hand a third invocation a job that is actively running.
+ */
+async function releaseImportLease(db: D1Compat, jobId: string, token: string): Promise<void> {
+  await db.prepare(`
+    UPDATE import_jobs SET lease_token = NULL, lease_expires_at = NULL
+    WHERE id = @id AND lease_token = @token
+  `).run({ id: jobId, token })
+}
+
 // SQL form of partitionSalesGroups' key, kept beside it deliberately: if the
 // two ever disagree, a sales import silently splits one receipt across two
 // chunks or merges two receipts into one order. Mirrors the JS rule exactly
@@ -3015,6 +3074,18 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
   // (markJobFailed already ran), not 'analyzing', so it must be checked for
   // explicitly rather than assumed to still look like a continuation.
   const isFreshStart = isFreshImportRun(jobRow.status, 'analyzing')
+
+  // Claim the job before touching a chunk. If another invocation holds it --
+  // an at-least-once redelivery, or a retry overlapping the run it retries --
+  // return without processing. Deliberately NOT an error: the holder is
+  // making progress, so this message has nothing left to do and must ack
+  // rather than retry, or it would spin against a healthy run.
+  const leaseToken = await acquireImportLease(db, jobId)
+  if (!leaseToken) {
+    console.log('[import] skipping duplicate delivery; another invocation holds the lease', jobId)
+    return
+  }
+
   try {
     if (jobRow.status !== 'analyzing') {
       // Reclaim 'analyzing' status on every entry that isn't already an
@@ -3182,6 +3253,13 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
   } catch (error) {
     await markJobFailed(db, jobId, (error as Error).message || 'Analyze failed')
     throw error
+  } finally {
+    // Released on EVERY exit, including the failure path. A failed chunk is
+    // retried by the queue, and that retry must be able to claim the job
+    // rather than waiting out a 60s lease held by an invocation that is
+    // already gone. Token-guarded inside, so an invocation whose lease had
+    // already expired and been taken cannot clear the new holder's.
+    await releaseImportLease(db, jobId, leaseToken)
   }
 }
 
@@ -3441,6 +3519,20 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   // checked for explicitly rather than assumed to still look like a
   // continuation.
   const isFreshStart = isFreshImportRun(jobRow.status, 'applying')
+
+  // Claim the job before touching a chunk. If another invocation holds it --
+  // an at-least-once redelivery, or a retry overlapping the run it retries --
+  // return without processing. Deliberately NOT an error: the holder is
+  // making progress, so this message has nothing left to do and must ack
+  // rather than retry, or it would spin against a healthy run.
+  const leaseToken = await acquireImportLease(db, jobId)
+  if (!leaseToken) {
+    console.log('[import] skipping duplicate delivery; another invocation holds the lease', jobId)
+    // Zero applied, zero failed -- honest for an invocation that did
+    // nothing. The holder reports the real totals when it finishes.
+    return { applied: 0, failed: 0 }
+  }
+
   try {
     if (jobRow.status !== 'applying') {
       // Reclaim 'applying' status on every entry that isn't already an
@@ -4326,6 +4418,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
   } catch (error) {
     await markJobFailed(db, jobId, (error as Error).message || 'Apply failed')
     throw error
+  } finally {
+    // Released on EVERY exit, including the failure path. A failed chunk is
+    // retried by the queue, and that retry must be able to claim the job
+    // rather than waiting out a 60s lease held by an invocation that is
+    // already gone. Token-guarded inside, so an invocation whose lease had
+    // already expired and been taken cannot clear the new holder's.
+    await releaseImportLease(db, jobId, leaseToken)
   }
 }
 
