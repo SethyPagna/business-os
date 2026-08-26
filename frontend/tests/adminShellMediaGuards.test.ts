@@ -8,7 +8,6 @@ const webApiSource = readFileSync(new URL('../src/web-api.ts', import.meta.url),
 const localDbSource = readFileSync(new URL('../src/api/localDb.ts', import.meta.url), 'utf8')
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
 const catalogSource = readFileSync(new URL('../src/components/catalog/CatalogPage.tsx', import.meta.url), 'utf8')
-const faviconSource = readFileSync(new URL('../src/utils/favicon.ts', import.meta.url), 'utf8')
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const userProfileSource = readFileSync(new URL('../src/components/users/UserProfileModal.tsx', import.meta.url), 'utf8')
 
@@ -146,40 +145,20 @@ assert.match(
   'Portal preview cache-busting should not append version params onto temporary blob or data URLs',
 )
 
-assert.match(
-  faviconSource,
-  /function shouldUseAnonymousCors\(source: unknown\)/,
-  'Favicon canvas processing should decide CORS per URL instead of forcing protected same-origin uploads through anonymous CORS',
-)
-
-assert.match(
-  faviconSource,
-  /url\.origin !== window\.location\.origin/,
-  'Same-origin upload favicons should load without anonymous CORS so Cloudflare Access redirects do not become CORS cascades',
-)
-
-assert.match(
+// The custom-favicon feature (src/utils/favicon.ts, the Settings favicon
+// crop controls, and App.tsx's live tab-icon swap) was REMOVED (11.14-16):
+// the favicon/PWA icon is app-default branding, not per-merchant editable.
+// Guard that none of it comes back -- a reintroduced favicon swap is both a
+// first-paint cost and the admin/portal image bleed 11.14 fixed.
+assert.doesNotMatch(
   settingsSource,
-  /ui_app_favicon_fit[\s\S]*ui_app_favicon_zoom[\s\S]*ui_app_favicon_position_x[\s\S]*ui_app_favicon_position_y/,
-  'Settings should expose saved fit, zoom, and focus controls for the Business OS favicon',
+  /createCircularFaviconDataUrl|ui_app_favicon_fit/,
+  'Settings must not reintroduce favicon crop controls -- the tab icon is app default; Settings edits only the topbar logo',
 )
-
-assert.match(
-  settingsSource,
-  /createCircularFaviconDataUrl\(source, \{[\s\S]*fit: faviconFit,[\s\S]*zoom: faviconZoom,[\s\S]*positionX: faviconPositionX,[\s\S]*positionY: faviconPositionY/,
-  'Settings favicon preview should use the selected fit, zoom, and focus values',
-)
-
-assert.match(
+assert.doesNotMatch(
   appSource,
-  /const faviconFit = settings\.ui_app_favicon_fit === 'contain' \? 'contain' : 'cover'/,
-  'The live admin tab icon should honor the saved favicon fit',
-)
-
-assert.match(
-  appSource,
-  /createCircularFaviconDataUrl\(iconSource, \{[\s\S]*fit: faviconFit,[\s\S]*zoom: faviconZoom,[\s\S]*positionX: faviconPositionX,[\s\S]*positionY: faviconPositionY/,
-  'The live admin tab icon should honor saved favicon crop settings',
+  /createCircularFaviconDataUrl|const faviconFit =/,
+  'the admin shell must not swap its tab icon from saved favicon settings -- the favicon is app default',
 )
 
 assert.match(

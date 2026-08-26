@@ -70,10 +70,11 @@ const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_MEMBERSHIP_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
-const PUBLIC_PORTAL_FAVICON_TIMEOUT_MS = 4000
-// Used whenever a public portal has not yet configured a custom logo or
-// favicon, so it never falls back to the admin application's icon.
-const DEFAULT_PUBLIC_PORTAL_ICON = '/leang-cosmetics-icon-512.png'
+// Fixed Leang Cosmetics browser branding for the live storefront, served as
+// STATIC same-origin files (installable, unlike the old runtime blob: manifest
+// -- see the brand effect below). Not per-merchant customizable (11.14-16).
+const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
+const STOREFRONT_MANIFEST = '/portal-manifest.json'
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
@@ -576,8 +577,6 @@ export default function PublicCatalogPage() {
   const cachedPortalRef = useRef(embeddedPortalRef.current || readPortalCache())
   const cachedPortal = cachedPortalRef.current
   const requestRef = useRef(0)
-  const faviconRequestRef = useRef(0)
-  const manifestRequestRef = useRef(0)
   const productRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const previewSectionRef = useRef<HTMLDivElement>(null)
@@ -1112,95 +1111,49 @@ export default function PublicCatalogPage() {
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])
 
+  // Storefront tab title + FIXED Leang Cosmetics browser branding.
+  //
+  // This used to build the manifest AND the favicon at runtime from the
+  // merchant's uploaded logo. Two problems, both fixed here:
+  //   1. PWA "Install app" was gone on leangcosmetics.dpdns.org (16.1): the
+  //      manifest <link> was swapped to a runtime blob: URL, which Chrome
+  //      refuses to treat as installable. The §16 fix that
+  //      removed the blob swap only touched CatalogPage.tsx (the ADMIN
+  //      preview) -- this is the actual public component index.tsx mounts.
+  //   2. The favicon/PWA icon was per-merchant customizable, which 11.14-16
+  //      removed (the portal editor changes the in-page LOGO only now).
+  //
+  // The fix keeps the established admin/storefront brand split (admin =
+  // Business OS via the static /manifest.json + /favicon.ico in index.html;
+  // storefront = Leang Cosmetics) but serves the storefront's icon + manifest
+  // as STATIC same-origin files, which ARE installable, instead of a runtime
+  // blob. No canvas, no idle scheduling, no business-config input -- just a
+  // fixed brand swap. See public/portal-manifest.json and brandIcons.test.ts.
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
+    const previousTitle = document.title
     const title = String(displayConfig.businessName || displayConfig.title || 'Leang Cosmetics').trim()
-    if (title) document.title = title
-    const favicon = resolveCatalogAssetUrl(displayConfig.businessFavicon || displayConfig.businessLogo || '') || DEFAULT_PUBLIC_PORTAL_ICON
+    document.title = title || 'Leang Cosmetics'
 
-    // index.html ships THREE <link rel="icon"> tags (a plain .ico plus
-    // 192/512 PNGs for home-screen icons) -- this used to only grab the
-    // first one via querySelector, so browsers kept showing a stale icon
-    // from whichever of the other two they picked for the tab/shortcut.
-    // Mirrors App.tsx's admin-side favicon effect: update every matching
-    // link, and run the source through the same circular-mask helper so
-    // square uploads don't show square corners here either.
     const iconEls = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'))
-    if (!iconEls.length) return undefined
-    iconEls.forEach((iconEl) => iconEl.setAttribute('href', favicon))
+    const previousIconHrefs = iconEls.map((el) => el.getAttribute('href') || '')
+    iconEls.forEach((el) => {
+      el.setAttribute('href', STOREFRONT_ICON)
+      el.setAttribute('type', 'image/png')
+    })
 
-    const requestId = (Number(faviconRequestRef.current) || 0) + 1
-    faviconRequestRef.current = requestId
-    let cancelled = false
-    withLoaderTimeout(
-      async () => {
-        const { createCircularFaviconDataUrl } = await import('../../utils/favicon.ts')
-        return createCircularFaviconDataUrl(favicon)
-      },
-      'Public catalog favicon',
-      PUBLIC_PORTAL_FAVICON_TIMEOUT_MS,
-    )
-      .then((faviconHref) => {
-        if (cancelled || faviconRequestRef.current !== requestId) return
-        iconEls.forEach((iconEl) => {
-          iconEl.setAttribute('href', faviconHref || favicon)
-          iconEl.setAttribute('type', 'image/png')
-        })
-      })
-      .catch(() => {})
-
-    return () => {
-      cancelled = true
-    }
-  }, [displayConfig.businessFavicon, displayConfig.businessLogo, displayConfig.businessName, displayConfig.title])
-
-  // The customer portal shares index.html with the admin app.  Update the
-  // manifest as well as the favicon above so “Add to Home Screen” never
-  // retains Business OS branding.  This runs for the unconfigured portal
-  // too, using the supplied Leang Cosmetics fallback asset.
-  useEffect(() => {
-    if (typeof document === 'undefined') return undefined
     const manifestLink = document.querySelector<HTMLLinkElement>('link[rel="manifest"]')
-    if (!manifestLink) return undefined
-    const previousHref = manifestLink.getAttribute('href') || ''
-    const iconSource = resolveCatalogAssetUrl(displayConfig.businessFavicon || displayConfig.businessLogo || '') || DEFAULT_PUBLIC_PORTAL_ICON
-    const requestId = (Number(manifestRequestRef.current) || 0) + 1
-    manifestRequestRef.current = requestId
-    let manifestUrl: string | null = null
-    let cancelled = false
-
-    withLoaderTimeout(
-      async () => {
-        const [{ createSquareIconDataUrl }, { buildPortalManifest }] = await Promise.all([
-          import('../../utils/favicon.ts'),
-          import('../../utils/portalManifest.ts'),
-        ])
-        const [icon192, icon512] = await Promise.all([
-          createSquareIconDataUrl(iconSource, { size: 192, fit: 'contain', zoom: 110 }),
-          createSquareIconDataUrl(iconSource, { size: 512, fit: 'contain', zoom: 110 }),
-        ])
-        return buildPortalManifest({
-          businessName: displayConfig.businessName || displayConfig.title || 'Leang Cosmetics',
-          publicPath: window.location.pathname || '/',
-          icon192: icon192 || iconSource,
-          icon512: icon512 || iconSource,
-        })
-      },
-      'Public portal manifest',
-      PUBLIC_PORTAL_FAVICON_TIMEOUT_MS,
-    ).then((manifest) => {
-      if (cancelled || manifestRequestRef.current !== requestId) return
-      manifestUrl = URL.createObjectURL(new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' }))
-      manifestLink.setAttribute('href', manifestUrl)
-    }).catch(() => {})
+    const previousManifestHref = manifestLink?.getAttribute('href') || ''
+    if (manifestLink) manifestLink.setAttribute('href', STOREFRONT_MANIFEST)
 
     return () => {
-      cancelled = true
-      if (manifestUrl) URL.revokeObjectURL(manifestUrl)
-      if (previousHref) manifestLink.setAttribute('href', previousHref)
-      else manifestLink.removeAttribute('href')
+      document.title = previousTitle
+      iconEls.forEach((el, i) => {
+        if (previousIconHrefs[i]) el.setAttribute('href', previousIconHrefs[i])
+      })
+      if (manifestLink && previousManifestHref) manifestLink.setAttribute('href', previousManifestHref)
     }
-  }, [displayConfig.businessFavicon, displayConfig.businessLogo, displayConfig.businessName, displayConfig.title])
+  }, [displayConfig.businessName, displayConfig.title])
 
   // Real gap found and fixed this session: CatalogProductsSection.tsx's card
   // onClick already calls `openProductDetail?.(product)`, and

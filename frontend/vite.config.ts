@@ -410,7 +410,6 @@ const deferredModulePreloadPrefixes = [
   'assets/file-picker-modal-',
   'assets/image-lightbox-',
   'assets/media-upload-utils-',
-  'assets/favicon-utils-',
   'assets/notification-center-',
   'assets/background-import-tracker-',
   'assets/write-conflict-modal-',
@@ -845,9 +844,6 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/components/users/UserDetailSheet.tsx')) return 'user-detail-sheet'
     if (normalized.includes('/src/components/users/PermissionEditor.tsx')) return 'user-permission-editor'
     if (normalized.includes('/src/components/branches/TransferModal.tsx')) return 'branch-transfer-modal'
-    if (normalized.includes('/src/utils/favicon')) {
-      return 'favicon-utils'
-    }
     if (normalized.includes('/src/utils/mediaUpload.ts')) {
       return 'media-upload-utils'
     }

@@ -200,12 +200,14 @@ assert.doesNotMatch(app, /<div className="text-3xl mb-2 animate-pulse">\.\.\.<\/
 assert.match(app, /const CHUNK_IMPORT_TIMEOUT_MS = 15000/, 'chunk timeout should allow slow mobile networks before showing stalled UI')
 assert.match(app, /const INTENT_CHUNK_IMPORT_TIMEOUT_MS = 7000/, 'navigation intent warmup should have a short chunk timeout')
 assert.match(app, /const INTENT_CHUNK_WARMUP_DELAY_MS = 80/, 'navigation intent warmup should debounce accidental pointer passes')
-assert.match(app, /const APP_FAVICON_PROCESSING_DELAY_MS = 1800/, 'custom favicon canvas processing should be deferred past first paint')
-assert.match(app, /const APP_FAVICON_IDLE_TIMEOUT_MS = 7000/, 'deferred custom favicon processing should still run even if idle time is scarce')
-assert.match(app, /iconEl\.setAttribute\('href', iconSource\)[\s\S]*window\.requestIdleCallback\(processFavicon, \{ timeout: APP_FAVICON_IDLE_TIMEOUT_MS \}\)/, 'app should show the plain favicon immediately and defer circular canvas processing')
-assert.doesNotMatch(app, /import \{ createCircularFaviconDataUrl \} from '\.\/utils\/favicon\.ts'/, 'app shell should not statically import favicon canvas helpers during startup')
-assert.match(app, /const \{ createCircularFaviconDataUrl \} = await import\('\.\/utils\/favicon\.ts'\)/, 'app shell should load favicon canvas helpers only inside the delayed idle task')
-assert.doesNotMatch(app, /async function loadFavicon\(\)[\s\S]{0,700}\n\s*loadFavicon\(\)/, 'app should not process the custom favicon synchronously during shell startup')
+// The custom-favicon canvas feature was REMOVED (§16 / 11.14-16): the
+// browser-tab and PWA icon are now app-default branding, never swapped from
+// business config, so there is no canvas processing to defer at all. These
+// assertions now guard that it is not reintroduced (a swap would be both a
+// first-paint cost AND the admin/portal image bleed 11.14 fixed).
+assert.doesNotMatch(app, /APP_FAVICON_PROCESSING_DELAY_MS|APP_FAVICON_IDLE_TIMEOUT_MS|processFavicon/, 'the removed custom-favicon deferral scaffolding must not return; the favicon is app default')
+assert.doesNotMatch(app, /createCircularFaviconDataUrl/, 'app shell must not process a circular favicon at all -- the tab/PWA icon is default app branding')
+assert.doesNotMatch(app, /iconEl\.setAttribute\('href', iconSource\)/, 'app shell must not swap the favicon href from business config')
 assert.match(app, /const PENDING_SYNC_INITIAL_REFRESH_DELAY_MS = 30000/, 'initial pending-sync read should stay out of the first-load network window')
 assert.match(app, /const PENDING_SYNC_IDLE_TIMEOUT_MS = 45000/, 'deferred pending-sync read should still run during a long-lived session')
 assert.match(app, /const PENDING_SYNC_POLL_INTERVAL_MS = 20_000/, 'pending-sync polling cadence should stay explicit')
@@ -416,11 +418,13 @@ assert.doesNotMatch(portalPublicTransport, /from '\.\/(?:query|portalHttp)\.ts'/
 assert.match(viteConfig, /'assets\/auth-login-',/, 'signed-out Login UI should not be eagerly modulepreloaded into the authenticated shell')
 assert.match(viteConfig, /Login\.tsx'\)\) return 'auth-login'/, 'Vite should keep Login UI in an auth-only chunk')
 assert.match(viteConfig, /'assets\/app-local-db-',[\s\S]*'assets\/vendor-dexie-',/, 'local DB and Dexie chunks should be excluded from eager modulepreload')
-assert.match(viteConfig, /'assets\/media-upload-utils-',[\s\S]*'assets\/favicon-utils-',[\s\S]*'assets\/notification-center-',/, 'favicon/media upload helpers should be excluded from eager modulepreload')
+assert.match(viteConfig, /'assets\/media-upload-utils-',[\s\S]*'assets\/notification-center-',/, 'media upload helpers should be excluded from eager modulepreload')
 assert.doesNotMatch(viteConfig, /'assets\/public-asset-urls-'/, 'public asset URL helpers should fold into their caller so public catalog images do not wait on a late tiny helper chunk')
 assert.match(viteConfig, /normalized\.endsWith\('\/src\/utils\/mediaUploadState\.ts'\)\) \{[\s\S]*return 'media-upload-state'/, 'tiny media upload state helpers should not be owned by the heavier URL helper chunk')
 assert.doesNotMatch(viteConfig, /normalized\.endsWith\('\/src\/utils\/publicAssetUrls\.ts'\)\) \{[\s\S]*return 'public-asset-urls'/, 'public asset URL helper should not be forced into a separate chunk for public catalog startup')
-assert.match(viteConfig, /normalized\.includes\('\/src\/utils\/favicon'\)\) \{[\s\S]*return 'favicon-utils'[\s\S]*normalized\.includes\('\/src\/utils\/mediaUpload\.ts'\)\) \{[\s\S]*return 'media-upload-utils'/, 'favicon helpers should be evaluated before the media upload chunk rule')
+// (The favicon-utils chunk rule was removed with the custom-favicon feature
+// -- src/utils/favicon.ts is deleted; the tab/PWA icon is app default now.)
+assert.doesNotMatch(viteConfig, /favicon-utils/, 'the deleted favicon helper must not leave a dangling chunk rule')
 assert.doesNotMatch(viteConfig, /PortalMenu\.tsx'\)\) return 'portal-tools'/, 'shared PortalMenu should not be grouped with catalog portal tools')
 assert.match(viteConfig, /'assets\/shared-portal-menu-',/, 'PortalMenu should not be eagerly modulepreloaded into the initial shell')
 assert.doesNotMatch(viteConfig, /'assets\/shared-lazy-portal-menu-'|LazyPortalMenu\.tsx'\)\) return 'shared-lazy-portal-menu'/, 'tiny LazyPortalMenu wrapper should not cost a standalone startup request')
@@ -565,9 +569,9 @@ const publicPortalLoadEnd = publicPortalLoadStart + (adminPortalLoadMatch?.index
 const publicPortalLoadBranch = catalogPage.slice(publicPortalLoadStart, publicPortalLoadEnd)
 assert.doesNotMatch(publicPortalLoadBranch, /setEditorDraft\(buildDraft/, 'public catalog bootstrap should not build or write editor draft state')
 assert.match(catalogPage, /canEdit \? editorDraft\.customer_portal_about_blocks : null/, 'public catalog collection memos should read config directly instead of editor draft fields')
-assert.doesNotMatch(catalogPage, /import \{ createCircularFaviconDataUrl \} from '\.\.\/\.\.\/utils\/favicon'/, 'public catalog should not statically import the canvas favicon helper during route startup')
-assert.match(catalogPage, /window\.requestIdleCallback\(renderRoundedFavicon, \{ timeout: 1800 \}\)/, 'public catalog should round the favicon from an idle callback after the first viewport can render')
-assert.match(catalogPage, /import\('\.\.\/\.\.\/utils\/favicon\.ts'\)\.then\(\(\{ createCircularFaviconDataUrl \}\)/, 'public catalog should load favicon canvas helpers only from the delayed favicon task')
+// Public storefront favicon is app default now too (§16 / 11.14): the
+// portal must not generate or swap a rounded favicon from business config.
+assert.doesNotMatch(catalogPage, /createCircularFaviconDataUrl|renderRoundedFavicon|CATALOG_PORTAL_FAVICON_TIMEOUT_MS/, 'public catalog must not process or swap a custom favicon -- the tab/PWA icon is default app branding')
 assert.match(viteConfig, /CatalogEditorSurface\.tsx'\)[\s\S]*CatalogImageField\.tsx'\)[\s\S]*return 'catalog-editor'/, 'editor-only catalog image fields should not be grouped into the public catalog chunk')
 assert.doesNotMatch(viteConfig, /ActionHistoryBar\.tsx'\)\) return 'shared-action-history'/, 'ActionHistoryBar should not create a dedicated first-route action-history asset')
 assert.match(viteConfig, /QuickPreferenceToggles\.tsx'\)\) return 'shared-ui'[\s\S]*PaginationControls\.tsx'\)\) return 'shared-ui'[\s\S]*FilterMenu\.tsx'\)\) return 'shared-ui'[\s\S]*SectionSwitcher\.tsx'\)\) return 'shared-ui'[\s\S]*PageHeader\.tsx'\)\) return 'shared-page-header'[\s\S]*Modal\.tsx'\)\) return 'shared-modal'[\s\S]*if \(normalized\.includes\('\/src\/components\/shared\/'\)\) return 'app-shared'/, 'tiny preference controls should ride the existing shared UI request while later-route shared controls split before the generic app-shared startup chunk')
@@ -2176,11 +2180,8 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => getCatalogApi\(\)\.searchPortalCatalogProducts\(params\),\s*'Portal product search',\s*CATALOG_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS,\s*\)/,
   'catalog portal product search should timeout slow product reads',
 )
-assert.match(
-  catalogPage,
-  /'Portal favicon',\s*CATALOG_PORTAL_FAVICON_TIMEOUT_MS,/,
-  'catalog portal favicon generation should use the explicit timeout',
-)
+// (Portal favicon generation removed with the custom-favicon feature -- see
+// the doesNotMatch guard near the public-bootstrap assertions above.)
 assert.match(
   catalogPage,
   /'Portal AI request',\s*CATALOG_PORTAL_AI_REQUEST_TIMEOUT_MS,/,
@@ -2610,20 +2611,15 @@ assert.doesNotMatch(
   /SETTINGS_OTP_STATUS_TIMEOUT_MS|getSettingsApi\(\)\.otpStatus/,
   'Settings should not reintroduce the removed OTP status check',
 )
-assert.match(
-  settingsPage,
-  /const SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS = 8000/,
-  'settings favicon preview should use an explicit timeout constant',
-)
+// Settings favicon PREVIEW was removed with the favicon section (§16 /
+// 11.15-16): Settings customizes only the admin topbar logo now, and the
+// tab/PWA icon is app default -- so there is no favicon preview to time out
+// or defer. The consolidated guard below asserts the whole preview path is
+// gone.
 assert.match(
   settingsPage,
   /const SETTINGS_IMAGE_UPLOAD_TIMEOUT_MS = 30000/,
   'settings image uploads should use an explicit timeout constant',
-)
-assert.match(
-  settingsPage,
-  /'Settings favicon preview',\s*SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS,/,
-  'settings favicon preview should timeout slow preview generation',
 )
 assert.match(
   settingsPage,
@@ -2632,18 +2628,8 @@ assert.match(
 )
 assert.doesNotMatch(
   settingsPage,
-  /import \{ createCircularFaviconDataUrl \} from '\.\.\/\.\.\/utils\/favicon\.ts'/,
-  'Settings should not statically import favicon canvas helpers during route load',
-)
-assert.match(
-  settingsPage,
-  /const SETTINGS_FAVICON_PREVIEW_DELAY_MS = 1800[\s\S]*const SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS = 7000/,
-  'Settings favicon preview should be delayed past route-ready and bounded by an idle timeout',
-)
-assert.match(
-  settingsPage,
-  /const \{ createCircularFaviconDataUrl \} = await import\('\.\.\/\.\.\/utils\/favicon\.ts'\)/,
-  'Settings should load favicon canvas helpers only inside the delayed preview task',
+  /createCircularFaviconDataUrl|SETTINGS_FAVICON_PREVIEW_TIMEOUT_MS|SETTINGS_FAVICON_PREVIEW_DELAY_MS|SETTINGS_FAVICON_PREVIEW_IDLE_TIMEOUT_MS/,
+  'Settings must not reintroduce any favicon-preview machinery -- the tab/PWA icon is app default and Settings customizes only the topbar logo',
 )
 assert.doesNotMatch(
   settingsPage,
@@ -3371,7 +3357,7 @@ assert.match(
 )
 assert.match(
   pos,
-  /withLoaderTimeout\(\s*\(\) => createPosCustomer\(newCustomerForm\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => createPosCustomer\([^)]*newCustomerForm[^)]*\),\s*'Create POS customer',\s*POS_CUSTOMER_CREATE_TIMEOUT_MS,\s*\)/,
   'POS quick-add customer writes should timeout slow creates',
 )
 assert.match(

@@ -10,11 +10,17 @@ import { fileURLToPath } from 'node:url'
 //                       including its favicon and its "Add to Home Screen"
 //                       PWA icon
 //
-// The public storefront swaps the favicon and builds its manifest at runtime
-// from the merchant's uploaded logo, falling back to the bundled Leang
-// Cosmetics asset. The admin app keeps the static manifest.json and
-// favicon.ico. These assertions pin that split so a future edit cannot
-// quietly ship Business OS branding to customers, or vice versa.
+// The split is by AUDIENCE and is FIXED, not per-merchant customizable: the
+// favicon/PWA-icon customization in Settings + the portal editor was removed
+// (11.14-16), so both brands' icons are static assets now.
+//   - Admin keeps the static /manifest.json + /favicon.ico from index.html.
+//   - The storefront swaps to STATIC same-origin files -- a Leang icon and
+//     /portal-manifest.json. This used to build the manifest at runtime as a
+//     blob: URL, which Chrome refuses to treat as installable, so the
+//     storefront lost its Install prompt entirely (16.1). Static files ARE
+//     installable AND keep the Leang branding, so both hold at once.
+// These assertions pin the split so a future edit cannot quietly ship
+// Business OS branding to customers (or a blob: manifest that kills Install).
 //
 // Icon FILES themselves are regenerated from the source logos by
 // ops/scripts/assets/generate-app-icons.mjs (run it with --check to verify
@@ -29,7 +35,6 @@ const manifest = JSON.parse(read('../public/manifest.json')) as {
   icons: Array<{ src: string; sizes: string; purpose: string }>
 }
 const publicCatalog = read('../src/components/catalog/PublicCatalogPage.tsx')
-const catalogPage = read('../src/components/catalog/CatalogPage.tsx')
 const login = read('../src/components/auth/Login.tsx')
 
 // --- admin app keeps Business OS branding ---------------------------------
@@ -59,15 +64,39 @@ assert.ok(
   'the admin manifest must never reference storefront icons',
 )
 
-// --- public storefront falls back to Leang Cosmetics ----------------------
+// --- public storefront uses STATIC Leang Cosmetics branding ---------------
 
-for (const [label, source, constant] of [
-  ['PublicCatalogPage (the live customer site)', publicCatalog, 'DEFAULT_PUBLIC_PORTAL_ICON'],
-  ['CatalogPage (admin-side preview OF the customer site)', catalogPage, 'DEFAULT_PORTAL_ICON_SRC'],
-] as const) {
-  const pattern = new RegExp(`const ${constant} = '/leang-cosmetics-icon-512\\.png'`)
-  assert.match(source, pattern, `${label} should fall back to the Leang Cosmetics logo, not a Business OS icon`)
+// The live customer site (PublicCatalogPage) points the tab icon + manifest
+// at fixed Leang assets, NOT at anything derived from business config.
+assert.match(
+  publicCatalog,
+  /const STOREFRONT_ICON = '\/leang-cosmetics-icon-512\.png'/,
+  'the live storefront should use the static Leang Cosmetics tab icon, not a Business OS icon or a merchant upload',
+)
+assert.match(
+  publicCatalog,
+  /const STOREFRONT_MANIFEST = '\/portal-manifest\.json'/,
+  'the live storefront should point at the static Leang portal manifest',
+)
+// The static portal manifest is the storefront's own brand, and must stay a
+// real file (installable) -- the whole point of 16.1.
+const portalManifest = JSON.parse(read('../public/portal-manifest.json')) as {
+  name: string
+  icons: Array<{ src: string }>
 }
+assert.equal(portalManifest.name, 'Leang Cosmetics', 'the static portal manifest is the storefront brand, not Business OS')
+assert.ok(
+  portalManifest.icons.length > 0 && portalManifest.icons.every((icon) => /leang/i.test(icon.src)),
+  'every portal-manifest icon must be a Leang asset',
+)
+
+// The storefront must NOT reintroduce the runtime blob: manifest (Chrome
+// won't install it -- the 16.1 bug) or per-merchant favicon/manifest building.
+assert.doesNotMatch(
+  publicCatalog,
+  /URL\.createObjectURL|buildPortalManifest|createSquareIconDataUrl|createCircularFaviconDataUrl/,
+  'the storefront must not build a runtime blob manifest or per-merchant icons -- those are removed (16.1 / 11.14-16)',
+)
 
 // Admin sign-in is the one surface deliberately branded Business OS rather
 // than the storefront -- split by AUDIENCE (staff sign into the product;
@@ -84,18 +113,15 @@ assert.doesNotMatch(
   'admin sign-in must not default to storefront branding',
 )
 
-// The storefront must actually override BOTH the favicon and the manifest --
+// The storefront must override BOTH the favicon and the manifest link --
 // overriding only the favicon leaves Business OS branding on the customer's
-// home screen after "Add to Home Screen", which is the exact bug this pins.
+// home screen after "Add to Home Screen". It now does this via the static
+// files asserted above (STOREFRONT_ICON / STOREFRONT_MANIFEST), so pin that
+// it still touches the manifest link element at all.
 assert.match(
   publicCatalog,
   /link\[rel="manifest"\]/,
   'the public storefront must replace the manifest link, not just the favicon',
-)
-assert.match(
-  publicCatalog,
-  /buildPortalManifest/,
-  'the public storefront should build its manifest from portal settings',
 )
 
 // --- every referenced icon file exists ------------------------------------
