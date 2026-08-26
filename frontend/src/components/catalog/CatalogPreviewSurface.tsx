@@ -1,4 +1,5 @@
 import { Suspense, useMemo, useState } from 'react'
+import { buildLogoImageStyle } from './logoImageStyle'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -19,6 +20,7 @@ type CopyFunction = (key: string, fallback?: string) => string
 type DisplayConfig = {
   businessName?: string
   businessTagline?: string
+  logoFit?: string
   logoPositionX?: number
   logoPositionY?: number
   logoZoom?: number
@@ -300,10 +302,12 @@ export default function CatalogPreviewSurface({
                             fetchPriority="high"
                             className="h-full w-full rounded-full"
                             style={{
-                              objectFit: 'cover',
-                              objectPosition: `${displayConfig.logoPositionX || 50}% ${displayConfig.logoPositionY || 50}%`,
-                              transform: `scale(${Math.max(1, Math.min(1.35, (displayConfig.logoZoom || 100) / 100))})`,
-                              transformOrigin: 'center',
+                              ...buildLogoImageStyle({
+                                fit: displayConfig.logoFit,
+                                zoom: displayConfig.logoZoom,
+                                positionX: displayConfig.logoPositionX,
+                                positionY: displayConfig.logoPositionY,
+                              }),
                             }}
                           />
                         </button>

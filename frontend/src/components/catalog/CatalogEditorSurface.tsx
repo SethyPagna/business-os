@@ -1,4 +1,5 @@
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
+import { buildLogoImageStyle } from './logoImageStyle'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
@@ -1536,12 +1537,12 @@ function CatalogEditorSurfaceContent() {
                           loading="lazy"
                           decoding="async"
                           className="h-full w-full"
-                          style={{
-                            objectFit: editorDraft.customer_portal_logo_fit === 'cover' ? 'cover' : 'contain',
-                            objectPosition: `${editorDraft.customer_portal_logo_position_x || '50'}% ${editorDraft.customer_portal_logo_position_y || '50'}%`,
-                            transform: `scale(${Math.max(0.8, Math.min(1.8, (toNumber(editorDraft.customer_portal_logo_zoom, 100) || 100) / 100))})`,
-                            transformOrigin: 'center',
-                          }}
+                          style={buildLogoImageStyle({
+                            fit: editorDraft.customer_portal_logo_fit,
+                            zoom: editorDraft.customer_portal_logo_zoom,
+                            positionX: editorDraft.customer_portal_logo_position_x,
+                            positionY: editorDraft.customer_portal_logo_position_y,
+                          })}
                         />
                       </div>
                       <div className="min-w-0">
