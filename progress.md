@@ -57,6 +57,16 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ## Task board
 
+> **READ `## Open work — ORDERED` FIRST.** Rebuilt Aug 26 2026 (Part 353) immediately
+> before a context compaction, it is the authoritative list of what is open, in what
+> order, and what is already done. The tables below are older and kept for the
+> reasoning they carry, not as the current queue. Where they disagree, the ordered
+> backlog wins.
+>
+> **Two things are broken in production right now** and jump the queue: `reset-data`
+> exceeding the CPU limit, and `GET /api/products` failing with
+> `too many SQL variables`.
+
 **Every task carries a status here and is updated as it moves.** Requested Aug 25 2026 so
 state is visible at a glance instead of inferred from prose further down this file.
 
@@ -173,80 +183,150 @@ These modify third-party accounts, so they are listed rather than done:
 
 ## Open work — ORDERED
 
-*Rebuilt Aug 26 2026 (Part 348) at the user's request: "update the still open with
-these and order them". Top of the list is next. Order follows the user's own stated
-priority — per-action permissions, then imports, then backlog audits, then the rest.*
+*Rebuilt Aug 26 2026 (Part 353), immediately before a context compaction, so this
+section is the ONLY reliable record of what was asked. Everything below came from the
+user's own messages; nothing is inferred. Top of the list is next.*
 
-### 1 — Per-action permission picking, professional UI
-
-| # | Task | Status |
-|---|---|---|
-| 1.1 | **Admin picks individual ACTIONS, not just section tiers.** `utils/permissionActions.ts` already models per-action outcomes and the editor already *displays* a read-only breakdown; the missing half is making each action directly selectable and persisting a per-action override. | not started |
-| 1.2 | **Editor UI: professional, clean, classic, smart.** Beyond the Part 347 sizing fix — real visual hierarchy, sections that read at a glance, related controls compacted onto one row where space allows, no wall of tiny chips. | not started |
-| 1.3 | **Image-only Products page — MOSTLY DONE (Part 351).** Labelled **Scan** button (icon-only was easy to miss in a row of grey squares; `showLabel` is opt-in so other toolbars are untouched); category/brand **filter menu** with `mobileIconOnly` (icon on phones, icon + label on desktop) offered ONLY for dimensions the role may already see, since a category filter would otherwise leak the whole taxonomy; **stock as a coloured pill** against real thresholds instead of grey text; price labelled **"Selling price"**. `low_stock_threshold`/`out_of_stock_threshold` now ride along with the existing stock grant — without them a stock figure cannot be coloured at all. Items-per-page already existed. **Still open:** batch details, which need their own opt-in permission + allowlist entry. | **done — needs deploy** |
-
-### 2 — Imports (finish)
-
-| # | Task | Status |
-|---|---|---|
-| 2.1 | Add/Sale absorbs Dated Stock Reconciliation (batch-choice-on-sale, create-then-sell). Largest single piece. | not started |
-| 2.2 | Import **review / resolve screen** finished — explicitly added to scope by the user. | not started |
-| 2.3 | Image auto-wire as a **button**, not automatic (wanted mainly for delete-and-reimport). Matching + `_1`/`_2` rename already exist. | not started |
-| 2.5 | **VERIFIED END TO END (Part 352).** `scripts/harness/run_import_e2e.cjs` drives the REAL `runImportAnalyze` -> `runImportApply` through a fake queue, real SQLite + real migrations, and an R2 stand-in with **real range support**. On the real 8,727-row file: 8,728 rows materialized, 147 analyze + 59 apply invocations, **88 ranged reads totalling 21.8 MB against 521 MB for whole-file reads (24x less)**, chunk_state **113 chars** at the end, lease released, status `completed`, no error. Caught two HARNESS bugs unit tests could not: the fake `getDb` returned `{meta:{changes}}` where production returns `{changes}`, so the lease was never acquired and the whole import silently did nothing; and the harness's `batch()` was stricter than production's (which binds via `translate()`), so it **accused correct code** of an "Unknown named parameter". | **done** |
-| 2.6 | **Concurrent imports are safe (Part 352).** Two DIFFERENT jobs never contended -- every table the engine writes during a run is keyed by `job_id`. The same job processed twice was NOT safe: Queues is at-least-once, so two invocations read the same cursor, classified the same rows, both saw "no match", and **both INSERTed**. A single-writer lease (migration 0053) now decides atomically via the UPDATE's `changes` count. It EXPIRES (a status flag would wedge a job whose invocation died), releases in a `finally` so retries are not blocked, is token-guarded so a stale holder cannot free the active one, and RETURNS rather than throws so a duplicate acks instead of spinning. | **done** |
-| 2.4 | Import/delete stay inside CPU limits while staying fast and 1:1 after review. **All four hot spots fixed and measured.** Known hot spots: `fetchCsvText` re-decodes the whole CSV **every** materialize window (~87× for 8,727 rows); sales import re-reads + re-partitions the entire file **every chunk** (~58× per phase); products chunk-state JSON grows to one entry per row and is parsed + re-serialised every chunk. | not started |
-
-### 3 — Image quality and the 300–350KB band
-
-| # | Task | Status |
-|---|---|---|
-| 3.1 | **Land every image in 300–350KB, and prove it.** Today: global default 180KB max / 140KB target, Library overridden to **70KB/40KB** (`api/fileTransport.ts:72-76`) — that is the ~70KB being seen. The search is also structurally biased low: it keeps the **smallest** blob rather than the largest under the cap (`imageCompression.ts:265`), stops at the *soft* target (`:269`), and only ever steps **down** (`:112-124`). Needs a two-sided search with a real floor, not just a bigger ceiling. | not started |
-| 3.2 | **WebP/AVIF encode** with quality 80–85. 30–50% smaller at the same visual quality, which is what buys back the headroom to sit at 300–350KB instead of shrinking dimensions. Needs an encoder-support probe + a JPEG/PNG fallback. | not started |
-| 3.3 | **Quality-preserving resize.** The blurring is a resampling artefact: a single-step canvas downscale of a large image aliases badly. Fix with stepped/half-scale downscaling and a sharpening pass, so a big photo stays crisp the way a zip of the same file does. | not started |
-| 3.4 | **Manual image-quality tool** — per-image controls to re-encode, adjust sharpening, and preview before/after against the 300–350KB band. | not started |
-| 3.5 | **6h cron R2 audit + browser backfill.** Cron exists (`wrangler.toml`) but runs only backup/drive-sync/audit-retention. No backfill over existing objects has ever existed — that is why MB-sized objects persist. `MEDIA_QUEUE` is dead code: no `optimize-image` branch and **no producer anywhere**. | not started |
-
-### 4 — Public site and portal
-
-| # | Task | Status |
-|---|---|---|
-| 4.1 | Top bar: **remove the logo**; split social links to one side and language + light/dark to the other. | not started |
-| 4.2 | **Stale cache of embedded sites** on the public site — reproduce, then scope. | not started |
-| 4.3 | **Google Translate for languages** instead of hand-maintained packs. Must be fast, must not corrupt layout or Khmer text, must degrade safely when the service is unreachable — the current packs are the fallback, not the casualty. | not started |
-| 4.4 | Portal pagination counts **unmerged** rows: the server paginates at 50 before the browser merges duplicates, so the pager promises pages that do not exist. | not started |
-| 4.5 | **A-Z rail parity — DONE (Part 351).** Two bugs: the storefront bootstrap rail filtered on `is_active = 1` instead of `visibleFilter`, so it counted hidden products and then *changed* once the shopper searched (the search path already filtered correctly); and all three rails counted ROWS via `COUNT(*)` while a name group is ONE product everywhere else, so a 5-row group added 5 to its letter and the rail disagreed with the paginated total on the same screen. All three now count DISTINCT `name_key` groups. Proved on real SQLite: a 3-row group + a standalone counts **2**, where row counting gave 4. | **done — needs deploy** |
-| 4.6 | **Public storefront caching — DONE (Part 351).** There was none: every visitor page load ran the full settings + meta + catalog query set against D1, scaling with VISITORS rather than data changes. `/config`, `/bootstrap`, `/catalog/meta`, `/catalog/products`, `/catalog/products/search` now cached via the **Workers Cache API**, keyed on the products cache version so any mutation invalidates the storefront through the same `bumpVersion` path admin uses. **Not KV:** reads are generous (100k/day) but *populating* a KV entry costs a WRITE against the 1,000/day ceiling, and per-PoP misses would burn it — the exact limit `quotaGuard` exists to protect. Membership lookup and submissions deliberately left uncached (visitor-specific). | **done — needs deploy** |
-
-### 5 — Library
-
-| # | Task | Status |
-|---|---|---|
-| 5.1 | Click an image to open **details**: what is using it (which products/rows it is wired to), edit, and rewire. | not started |
-
-### 6 — Cloudflare free tier, used properly
-
-| # | Task | Status |
-|---|---|---|
-| 6.1 | **Already in place** — recorded so it is not "added" twice: KV namespace `de5f3b41c7264e4582077176fd0c1fe8` is bound as `CACHE` (`wrangler.toml:43-45`, the exact id supplied), and the Workers Cache API is already used by `cachedJsonResponse` (`lib/cache.ts:51`). Only `preview_id` for local dev is missing. | mostly done |
-| 6.3 | **Quota guard + Analytics Engine — DONE (Part 350–351).** `lib/quotaGuard.ts` counts KV writes and R2 class-A ops in D1 against measured ceilings, with warn at 70% and critical at 90% so behaviour changes while there is room to recover. **Fails open** — if its own bookkeeping breaks the answer is "allowed". The fallback is the point: at critical, `bumpVersion` moves the counter to D1 (100× the write budget, no per-key ceiling, strongly consistent) and deletes the KV key once so readers fall through. Analytics Engine binding wired and recording quota *zone transitions only* — never per consumption, and never anything identifying a person. | **done — needs deploy** |
-| 6.2 | Audit real headroom against the free limits and use them deliberately: **D1** 5M row reads/day + 100k writes/day (import writes are the risk), **R2** 10GB + free egress (the compression band matters here), **KV** 100k reads/day but only **1k writes/day and 1 write/sec/key** — a hot counter in KV would break, so audit every KV write path. Prefer Cache API for high-cardinality reads, KV for small hot config. | not started |
-
-### 7 — Identity rule, remaining
-
-| # | Task | Status |
-|---|---|---|
-| 7.1 | **Rename does not regroup.** A renamed product does not re-merge into its new name group or re-split the old one. `name_key` is trigger-maintained so the *flag* is right, but nothing reconciles the rows. | not started |
-| 7.2 | **Auto-merge flag + filter** so the user can see what merged automatically. No column exists yet; `ImportWarningKind` has no products-side auto-merge kind. | not started |
-| 7.3 | Description whitelist: also ignore **Brand / Category / Shop's Product Name** blocks — auto-wired from real columns, so importing them duplicates data. | not started |
-
-### 8 — Correctness carried over
-
-| # | Task | Status |
-|---|---|---|
-| 8.1 | **Backup restore still loads the whole document into memory** (`backup.ts:574` `object.json()`, then one statement per row). The write path was fixed and streamed; its mirror was not, so a database big enough to have caused the original OOM will OOM restoring its own backup. | not started |
-| 8.2 | Edit form does not auto-move sections back to Details — reported as a bug; not yet reproduced, may need to know which sections. | not started |
+**Stated order:** 2.1 → 2.2 → 2.3 → undo/redo (server-level) → everything else.
 
 ---
+
+### 0 — BROKEN IN PRODUCTION (jumps the queue)
+
+| # | Task | Status |
+|---|---|---|
+| 0.1 | **`POST /api/system/reset-data` exceeds the CPU limit.** Observed live Aug 26 13:45: `Exceeded CPU Limit` / `Worker exceeded CPU time limit`. Part 346 fixed the BACKUP that runs in front of it (paged + streamed), so this is a *different* failure — the reset itself is not chunked. Products-only reset is what was being run. **Also requested: move products-only reset into the section-reset UI** rather than living on its own. Needs the same treatment the import path got: a resumable, queue-driven pass with a cursor, not one invocation trying to delete everything. | **not started — highest priority** |
+| 0.2 | **`GET /api/products` → `D1_ERROR: too many SQL variables at offset 415`.** Observed live Aug 26 13:47, i.e. AFTER the recent product work. SQLite caps bound parameters (999 on older builds), so something is building an `IN (...)` list from an unbounded row set. Prime suspects, in order: `expandSearchResultsToNameSiblings` (routes/products.ts), the `IN` clause in `readRowImagePaths`/`applyCrossChunkProductDedupe` (both chunk at 100–200 and are probably fine), and `loadWireImageInputs`. **Reproduce first, then bound the clause** — do not guess. | **not started — highest priority** |
+
+### 1 — Imports (the stated next three)
+
+| # | Task | Status |
+|---|---|---|
+| 2.1 | **Add/Sale absorbs Dated Stock Reconciliation** (batch-choice-on-sale, create-then-sell). Largest single remaining piece; never started. | not started |
+| 2.2 | **Import review / resolve screen** finished. | not started |
+| 2.3 | **Image auto-wire button — frontend half.** Backend is DONE and waiting: `POST /api/import-jobs/:id/images/wire` (opt-in flag, 409 while a phase runs), plus `POST /api/products/wire-images/preview` and `POST /api/products/wire-images` for the Library path with the STRICT matcher. Still needed: the review modal, the button in the Products **Manage** menu (`onWireImages` is accepted by HeaderActions but Products.tsx does not pass it yet, so the entry is deliberately hidden), a button in **Library**, and the button in BulkImportModal. **Also requested: an UNWIRE action** — a way to detach images that were wired. | backend done, UI not started |
+
+### 2 — Undo / redo (after 2.1–2.3)
+
+| # | Task | Status |
+|---|---|---|
+| 3.1 | **Make undo/redo SERVER-level, not session-level.** Currently undo is a live JS closure held in the tab that performed the action, so it never survives a reload and in practice never works — confirmed by reading the code, not guessed. The server stores `undo_payload`/`redo_payload` on every action but NEVER replays them: `routes/actionHistory.ts:225` marks the transition `serverPayloadOnly: true`, and `/undo` only flips a status column. **Required behaviour:** an admin sees ALL users' actions and can undo/redo any of them; a non-admin sees and can reverse only their OWN account's changes. Needs a per-action-type applier reconstructing the change from the stored payload, the same shape `lib/reviewApply.ts` already uses for the approval queue. The Part 352 label change ("Recorded", with an honest hint) was cosmetic and does NOT count as this. | not started |
+
+### 3 — Products page layout (from annotated screenshots)
+
+| # | Task | Status |
+|---|---|---|
+| 4.1 | **Large-screen alignment is STILL wrong.** Third report. Group titles and standalone rows must align with the **start of the category header**; child rows get only a *slight* indent from the group. Currently everything is pushed too far right. Note: hiding the child thumbnail (Part 352) was necessary but NOT sufficient — the remaining offset is the checkbox/image column geometry in the desktop `<table>`, so the fix is column widths, not the image. Measure against the drawn line in the screenshot. | not started |
+| 4.2 | Batches are **still not applied throughout the app** — Inventory shows 0. Reported repeatedly and still open. | not started |
+| 4.3 | **Special price is not read or used correctly.** The product detail shows the SELLING price in both the selling and special fields, so the special value is either not being read or is being overwritten. Real data bug, affects pricing. | not started |
+| 4.4 | **Rename "Special price" → "VIP price" EVERYWHERE**, including the import template and its column headers. | not started |
+| 4.5 | **POS naming:** use "Selling price" rather than "Regular". | not started |
+
+### 4 — Stats cards (second pass; the Part 351 work was incomplete)
+
+| # | Task | Status |
+|---|---|---|
+| 5.1 | **Info tooltips are broken in practice**: not responsive, overflow their container, render UNDER other elements (wrong stacking layer, so they are blocked), and are too large. Seen on Returns, Branches and others. `InfoHint` uses `absolute` positioning inside cards that clip — it likely needs a portal and viewport-aware placement, not a bigger z-index. | not started |
+| 5.2 | Move the info affordance **next to the stat NAME**, not on the first row. | not started |
+| 5.3 | The **click-to-view-more-details** panel is also not fully covered / not responsive. | not started |
+| 5.4 | **Dashboard and Inventory removed opposite metrics**: Dashboard still shows Gross Profit, Inventory still shows Net Sold. The Part 351 removal was applied inconsistently — decide one rule and apply it to both. | not started |
+| 5.5 | **Product stats: use COLOUR instead of labels** for healthy / low / out-of-stock in the default view; the detail breakdown is enough for names. For other stat cards, keep the name but colour the values underneath. | not started |
+| 5.6 | **Branches page: too many stock stats outside.** Do it like the Inventory page's product handling. Per-branch stock stats are fine to keep. | not started |
+| 5.7 | **History button in the profile menu is not responsive** — it overflows the profile boundary. | not started |
+
+### 5 — Public portal
+
+| # | Task | Status |
+|---|---|---|
+| 6.1 | **Remove the colour overlay in the About section**, and make the **cover image cover the whole section**, not half of it. | not started |
+| 6.2 | Top bar: **remove the logo**; split social links to one side and language + light/dark to the other. | not started |
+| 6.3 | Stale cache of embedded sites on the public site — reproduce, then scope. | not started |
+| 6.4 | **Google Translate for languages** instead of hand-maintained packs. Must be fast, must not corrupt layout or Khmer text, and must degrade safely — the current packs are the fallback, not the casualty. | not started |
+| 6.5 | Portal pagination counts **unmerged** rows: the server paginates at 50 before the browser merges duplicates, so the pager promises pages that do not exist. | not started |
+
+### 6 — Permissions (half done)
+
+| # | Task | Status |
+|---|---|---|
+| 7.1 | **Per-action picking exists but only NARROWS.** An override can remove an action the tier granted, never add one it withheld — deliberate, because widening needs every route to honour it or the UI and API disagree. Wired through the Products routes only; other sections still honour the section tier alone. | partly done |
+| 7.2 | **Editor UI: professional, clean, classic, smart.** Beyond the Part 347 sizing fix — real hierarchy, sections readable at a glance, related controls compacted onto one row, no wall of tiny chips. | not started |
+
+### 7 — Library
+
+| # | Task | Status |
+|---|---|---|
+| 8.1 | Click an image to open **details**: what is using it (which products/rows), edit, and rewire. | not started |
+
+### 8 — Identity rule, remaining
+
+| # | Task | Status |
+|---|---|---|
+| 9.1 | **Rename does not regroup.** A renamed product does not re-merge into its new name group or re-split the old one. `name_key` is trigger-maintained so the flag is right, but nothing reconciles the rows. | not started |
+| 9.2 | **Auto-merge flag + filter** so the user can see what merged automatically. No column exists yet. Relevant scale: the real file merges **2,013 rows** into other rows in-file, and the FIRST row's details win — those 2,013 losing values are currently invisible. | not started |
+
+### 9 — Correctness carried over
+
+| # | Task | Status |
+|---|---|---|
+| 10.1 | **Backup restore still loads the whole document into memory** (`backup.ts:574` `object.json()`, then one statement per row). The write path was fixed and streamed; its mirror was not, so a database big enough to have caused the original OOM will OOM restoring its own backup. | not started |
+| 10.2 | Edit form does not auto-move sections back to Details — reported as a bug; not yet reproduced. | not started |
+
+---
+
+## DONE this session (Parts 346–353) — do not redo
+
+Every item verified with tests; commit hashes in `git log`.
+
+**Import path — all four CPU hot spots fixed, and proven end to end.**
+`run_import_e2e.cjs` drives the REAL engine through a fake queue: 8,727 rows →
+6,684 products, 147 analyze + 59 apply invocations, **88 ranged reads / 21.8 MB
+against 521 MB before (24×)**, chunk_state **113 chars**, status `completed`, lease
+released, no error.
+- CSV read by byte range instead of ~87 full decodes (`sourceIsComplete` guard stops a
+  cut slice being emitted as a complete row).
+- Dedupe ledger → `import_job_row_signatures` (was **8.24 ms** on the worst chunk of a
+  10 ms budget).
+- Image-match cache → `import_job_image_matches` / `_renames` (was **7.99 ms/chunk** at
+  10k images, full size from the FIRST chunk).
+- Sales chunks read only their own groups via SQL (`SALES_GROUP_KEY_SQL` mirrors
+  `partitionSalesGroups` exactly).
+- **Single-writer lease** (migration 0053): Queues is at-least-once, and two invocations
+  of one job both INSERTed. Expiring, released in `finally`, token-guarded, refusal
+  returns rather than throws. Two DIFFERENT jobs never contended.
+
+**Permissions** — product reads scoped by SURFACE (`products_image_only` can no longer
+reach POS); "Review Required" renamed **"Partial Access"**; per-action overrides,
+enforced server-side, one-way.
+
+**Images** — 300–350 KB band with the selection rule fixed; stepped downscaling (the
+blur was a single-jump resize, not the encoder); **quality reduction is now the LAST
+lever** after format and size; AVIF→WebP; every image indexed `_1/_2/_3` on BOTH sides;
+STRICT 1:1 library matching (no fuzzy — ambiguous names reported, `Chanel No 5` keeps
+its 5, 3-image cap enforced); Cloudflare Images binding + Cloudinary signed fallback;
+6-hourly R2 audit (never deletes an original, never writes back a larger file);
+**video reserve** so the image sweep cannot spend the month.
+
+**Infrastructure** — quota guard with D1 fallback for cache versions (KV is 1,000
+writes/day and `bumpVersion` fires from 31 sites; exhaustion silently served STALE
+data); backups were **never pruned** (retention was gated on a successful new backup);
+Sentry with PII scrubbing + dedupe; Analytics Engine; A–Z rail parity (counts NAME
+GROUPS, honours hide-out-of-stock); public storefront caching (there was none).
+
+**Outage, Aug 26** — both domains went NXDOMAIN while the Worker was healthy. Root
+cause: DigitalPlat still held the NS delegation, so Cloudflare's records were never
+consulted. `workers_dev` was turned on to restore access, then off again by request;
+the switch and its reasoning are recorded in `wrangler.toml`.
+
+---
+
+## Needs the user, not code
+
+1. **Rotate the Cloudinary API secret** — it was pasted in chat. It is in `.dev.vars`
+   (gitignored, verified absent from git history), never in `wrangler.toml`. User says
+   they have since updated it in `.dev.vars`.
+2. **Resend DNS** — the domain is unverified AND is a Tailscale name, not
+   `leangcosmetics.dpdns.org`. Password-reset email cannot send until both are fixed.
+3. **Deploy** — nothing since the outage fix has shipped. `npm run deploy:full`.
 
 ## Current status
 
