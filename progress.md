@@ -204,7 +204,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 | # | Task | Status |
 |---|---|---|
-| 2.1 | **Add/Sale absorbs Dated Stock Reconciliation** (batch-choice-on-sale, create-then-sell). Largest single remaining piece; never started. | not started |
+| 2.1 | **Unified Add/Sale/Reconciliation import — FULLY SPECIFIED now (Part 354), kernel BUILT.** See the detailed spec in [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The action/delta resolver (`lib/stockActionResolver.ts` + `test-stock-action-resolver-pure.cjs`, 16 checks) is done and tested. **Still to wire:** unified template + column mapping, the review screen (columns + Confirm Action gate), and the apply path. | kernel done, wiring open |
 | 2.2 | **Import review / resolve screen** finished. | not started |
 | 2.3 | **Image auto-wire button — frontend half.** **DONE (Part 354), needs deploy.** `WireImagesReviewModal` built (grouped per product, ordered by `_1/_2/_3`, shows would-replace + unmatched + ambiguous); wired into the Products **Manage** menu (gated on the `products/image` action), the **Library** page next to Upload, and the import modal's result step for the per-job wire endpoint. **UNWIRE** shipped too: `POST /api/products/unwire-images` (detach-only, files stay in the Library; empty id list refused, `all:true` required to clear everything) with a disclosure in the modal. **Found + fixed a real bug while building it:** the apply endpoint ran one `UPDATE image_path` per matched image, so a 3-photo product kept only the last and `product_images` was never written — now goes through `syncProductImageGallery`. `test-wire-images-gallery-pure.cjs` (9 checks). |
 
@@ -252,6 +252,95 @@ user's own messages; nothing is inferred. Top of the list is next.*
 |---|---|---|
 | 7.1 | **Per-action picking exists but only NARROWS.** An override can remove an action the tier granted, never add one it withheld — deliberate, because widening needs every route to honour it or the UI and API disagree. Wired through the Products routes only; other sections still honour the section tier alone. | partly done |
 | 7.2 | **Editor UI: professional, clean, classic, smart.** Beyond the Part 347 sizing fix — real hierarchy, sections readable at a glance, related controls compacted onto one row, no wall of tiny chips. | not started |
+
+### 12 — Unified Add/Sale/Reconciliation import (spec, Part 354)
+
+*The user's full design, captured verbatim-in-substance. This replaces the
+old multi-template Add/Sale + Dated Stock Reconciliation split.*
+
+**One mode, one column set, two options.** Columns in EVERY option:
+`name, barcode, shop, warehouse, date, action, selling_price, vip_price,
+cost_price, batch`. The system decides create/add/sale from the numbers +
+date; the `action` column only disambiguates a same-day mix or names a
+specific POS sale. "No guessing and comparing stock current with import"
+for the direct option; comparison only for the reconcile option.
+
+- **Option DIRECT** — the shop/warehouse numbers ARE the change; `action`
+  gives the direction. shop +2, warehouse 0, action=add ⇒ add 2 at shop.
+  shop 0, warehouse 2, action=sale ⇒ sell 2 from warehouse. No comparison.
+- **Option RECONCILE** — the numbers are the TOTAL count as of the date;
+  the system computes delta vs current stock (import>current ⇒ add the
+  difference; import<current ⇒ sale). The action column clarifies a
+  same-day add-then-sale whose net count would otherwise hide one side.
+
+**Sale grouping (why no per-sale templates):**
+- `action = 'sale'` (no number) ⇒ ONE aggregated daily sale: every 'sale'
+  row on the same date is one receipt for all its products.
+- `action = 'sale1'/'sale2'/...` ⇒ a SPECIFIC POS sale that day: rows
+  sharing `saleN` + date are one receipt, so several real sales in a day
+  stay separate.
+
+**Pricing is optional** when name+barcode match, the stock qty allows the
+action, and there is no conflicting multiplicity. Selling & VIP price
+differences are fine — both resolve to the selling price for a sale.
+**What conflicts is batches:** the SAME product on multiple rows with
+multiple batches AT multiple cost prices — flag with a reason, show in the
+review, and gate the import behind a **Confirm Action** button. (Done in
+the kernel: `detectCostBatchConflicts`.)
+
+**DONE (kernel):** `lib/stockActionResolver.ts` — `parseStockAction`,
+`resolveRowStockAction` (both options), `saleGroupKeyFor`,
+`detectCostBatchConflicts`, `resolveStockActions` (one plan per row,
+`needsReview` flag). Pure, DB-free, 16 tests.
+
+**OPEN (wiring), in order:**
+1. **Unified template + column mapping** — one products-stock template with
+   the 10 columns above; retire the separate Add/Sale and dated-count
+   templates. Map headers → the resolver's `StockActionRow` shape.
+2. **Resolution against real data** — resolve product (name→barcode per the
+   existing `classifyProducts` order) and branch (shop/warehouse → branch
+   ids, auto-create-on-miss like `resolveAndCreateBranches`), load current
+   per-(product,branch) stock, then call `resolveStockActions`.
+3. **Review screen** — the 10 columns, the computed action per row, the
+   conflicts, and a **Confirm Action** button that is the ONLY way to run a
+   sheet with any conflict. Reuse the 2-screen flow from §13.
+4. **Apply path** — per plan kind: `create` inserts the product then seeds
+   stock; `add` receives stock into the branch AND creates/updates the
+   batch (product_batches + branch_batch_stock, lot_code from the date via
+   `dateToBatchCode`); `sale` records a grouped sale (one row in `sales`
+   per `saleGroupKey`, its lines in `sale_items`, deducting branch_stock
+   and the chosen batch). Reuse `datedStockCountApply` / `productBatches`
+   patterns; keep it chunked + resumable like the rest of the import path.
+
+### 13 — Import UX: exactly TWO screens, ALL imports, ALL pages (Part 354)
+
+*User, this session + mid-turn clarification.*
+
+- **Screen 1 — upload.** ALL modes and their options on ONE screen; the
+  file is picked and uploaded here. Today the products import fans out into
+  several "Upload File & continue" steps — collapse them.
+- **Screen 2 — review before the import officially starts.** The resolved
+  rows / conflicts, then Confirm. **Only after Confirm does the real import
+  run.**
+- **No separate "analyze → resolve conflict → review → upload" chain** — the
+  user calls the current contacts-import flow (analyze for a long time,
+  THEN review, THEN upload) redundant. One upload screen, one review-before-
+  commit screen, everywhere (products, contacts, sales, inventory).
+- Contacts import is ALSO reported as far slower than the general import
+  (§11.18) and its review screen has no sort/search (§11.19) — fold those
+  into this 2-screen rework.
+
+### 14 — Batch count + "View details" across Products / Inventory / Branch (Part 354)
+
+*User, this session.* Wherever batches surface, show the NUMBER of batches
+plus a **View details** button that opens the specific per-batch stock,
+details, and the date of each available batch — the same interaction as the
+"view stock movement" detail already on the Inventory products page (click
+View detail). Needs: a backend read returning per-(product[,branch]) batch
+rows (product_batches joined to branch_batch_stock: lot_code, received_at,
+expiry_date, per-branch quantity), and a shared "batch details" modal used
+by all three pages. Inventory currently shows 0 batches (§4.2/§11.23) — the
+same read fixes both.
 
 ### 7 — Library
 
@@ -323,8 +412,8 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 | # | Task | Status |
 |---|---|---|
-| 11.18 | **Contacts import is far slower than the general import.** The general import shows its review with little/no delay; contacts analyzes for a long time, then review, then upload — low efficiency. Make contacts match the general import's fast path. | not started |
-| 11.19 | **Contacts import resolve/review screen has no sort/search.** No alphabetical order, no search, no filters. Add them (mirror the Products import review, or the plain list controls other pages use). | not started |
+| 11.18 | **Contacts import is far slower than the general import**, and its analyze→review→upload chain is the redundant flow the user wants gone. Fold into the **§13 two-screen rework** (one upload screen, one review-before-commit). | not started |
+| 11.19 | **Contacts import resolve/review screen has no sort/search.** Add alphabetical sort + search + filters as part of the **§13** review screen. | not started |
 
 **Inventory / Branches / stats colouring**
 
