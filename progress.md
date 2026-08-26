@@ -352,46 +352,33 @@ products list reads, closes §4.2/§11.23 at the same time.
 |---|---|---|
 | 8.1 | Click an image to open **details**: what is using it (which products/rows), edit, and rewire. | not started |
 
-### 15 — One stored image, many library names (dedup with aliases) — spec (Part 354)
+### 15 — One stored image, many library names — SIMPLIFIED (user, Part 354)
 
-*User, this session.* An image is often the SAME photo reused across color
-variants of one item — e.g. Anastasia Blush Stick **Nectarine / Peachy Keen
-/ Soft Rose**. Wiring that one photo into each product, WITH the rename rule
-(each copy named after its product), must NOT create multiple physical
-files. Instead: **one stored object, multiple NAME rows in the Library.**
-Storage counts the bytes once; export lets the user pick names or download
-several copies under different names.
+An image is often the same photo reused across color variants of one item
+(Anastasia Blush Stick **Nectarine / Peachy Keen / Soft Rose**). The user
+does NOT want physical copies or a schema migration for this. The simple
+model, in their words: "store the first image, but in UI in library show
+multiple rows... when download, we do renaming."
 
-**Why it does not work today:** `matchLibraryImagesStrict` is 1:1 by name,
-and the rename produces a distinct filename per product, so reusing one
-photo across three differently-named products implies three renamed R2
-objects. Dedup requires a storage-model change.
+So:
+- **Storage:** ONE object. Wiring the same photo to several products keeps
+  pointing every product at the one `public_path` — which `wire-images`
+  already does (no copy). Nothing new is stored.
+- **Library UI:** for that one object, show a ROW PER referencing product
+  name (Nectarine, Peachy Keen, Soft Rose), derived from which products
+  point at it (`products.image_path` / `product_images.image_path` = this
+  object's path). It reads as three named images; it IS one file. A
+  storage/"used by" line makes the sharing visible.
+- **Download/export:** the rename happens HERE, not in storage. Downloading
+  offers the object under a chosen name, or one copy per referencing name
+  (`<Product>_1.jpg` each) — the user decides at download time.
 
-**Recommended shape (needs approval — it is a migration + multi-surface):**
-- `file_assets` keeps ONE row per stored object, keyed by a new
-  `content_hash` (sha256 of the bytes) so identical uploads/wires resolve to
-  the same object instead of re-uploading.
-- Add `file_asset_names` (or a self `alias_of` fk): `(id, file_asset_id,
-  name)` — each row a display name the object is used under. Wiring the same
-  object to a second product under a new name inserts a NAME row, not a byte
-  copy.
-- **Library display:** list name rows (so the three variant names each
-  show), but the storage figure and the underlying object are counted once;
-  a "used by" list shows which products reference the object.
-- **Delete is ref-counted:** removing one name never deletes the object
-  while another name or product still references it; the R2 object goes only
-  when the last reference does. (This also protects the wire/unwire flow.)
-- **Export/download:** offer "download under selected name(s)" or "download a
-  copy per name" — the user's own call, made at export time, not by storing
-  duplicates.
-- **Wire path:** `wire-images` already points multiple products at one
-  `public_path` (storage is shared TODAY for the no-rename case); this
-  extends that to the renamed case by adding a name row rather than a file.
-
-**Decision to confirm before building:** content-hash dedup + a
-`file_asset_names` table vs. a lighter `alias_of` self-reference on
-`file_assets`. Both are migrations; pick one, then wire library display +
-ref-counted delete + export choice. Flagged, not guessed.
+**No migration, no dedup hashing, no alias table** — this supersedes the
+heavier design first sketched here. The work is: (1) a Library grouping that
+lists an image once per referencing product name (a read over
+products/product_images by shared path), and (2) a download/export step that
+renames on the fly. The import rename rule is unchanged; it just no longer
+implies a separate stored file when the same photo serves several products.
 
 ### 8 — Identity rule, remaining
 
