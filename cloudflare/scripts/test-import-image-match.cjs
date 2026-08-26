@@ -98,13 +98,18 @@ const img = (id, originalName, relativePath = null) => ({ id, originalName, rela
 }
 
 // -- Test 5: auto-rename plan -- single image per product gets the bare
-// product name; multiple get _1/_2/... in score-descending order. --
+// EVERY matched image gets _1/_2/... in score-descending order. --
 {
   const entries = [
     { image: img(1, 'a.jpg'), productId: 'p1', productName: 'Red Shirt', score: 1, matchType: 'exact' },
   ]
   const singlePlan = buildAutoRenamePlan(entries)
-  assert.strictEqual(singlePlan.get(1), 'Red Shirt.jpg', 'a single matched image should be renamed to just the product name, no suffix')
+  // Indexed even though it is the only image for that product. Previously
+  // this asserted the bare name, which meant a library held a mixture of
+  // "Red Shirt.jpg" and "Red Shirt_1.jpg" depending purely on how many
+  // siblings a file happened to have when matched -- and adding a second
+  // image later renamed the first, changing a name that had been stable.
+  assert.strictEqual(singlePlan.get(1), 'Red Shirt_1.jpg', 'every matched image is indexed, including a lone one')
 
   const multiEntries = [
     { image: img(2, 'b.png'), productId: 'p2', productName: 'Blue Shirt', score: 0.6, matchType: 'fuzzy' },

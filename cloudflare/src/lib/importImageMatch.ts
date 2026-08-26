@@ -343,12 +343,27 @@ export function buildImageDisplayName(
   productName: string,
   originalName: string,
   positionAmongSiblings: number,
-  totalSiblings: number,
+  // Retained for call-site clarity (and so a future rule can use it) even
+  // though every image is now indexed regardless of how many siblings it has.
+  _totalSiblings?: number,
 ): string {
   const base = sanitizeBaseName(productName)
   const ext = getExtension(originalName)
-  const suffix = totalSiblings > 1 ? `_${positionAmongSiblings}` : ''
-  return `${base}${suffix}.${ext}`
+  // ALWAYS indexed, even when a product has exactly one image.
+  //
+  // This used to omit the suffix for a lone image, so a library ended up
+  // holding a mixture of "Rose Serum.jpg" and "Rose Serum_1.jpg" for no
+  // reason the person could see -- whether a file got a number depended on
+  // how many siblings it happened to have at the moment it was matched.
+  // Adding a second image later renamed the first one, so a name that had
+  // been stable suddenly changed underneath anything referencing it.
+  //
+  // One rule instead: every matched image is `<Product Name>_<n>`. Sorting
+  // is then correct by name alone, the second image is purely additive, and
+  // there is a single shape to explain. Matching is unaffected either way --
+  // stripTrailingIndex already folds `_1`, `-1`, ` 1` and `(1)` back to the
+  // bare name, so both spellings resolve to the same product on re-import.
+  return `${base}_${positionAmongSiblings}.${ext}`
 }
 
 // Builds { image.id -> new display name } for every matched image,

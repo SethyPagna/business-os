@@ -62,7 +62,7 @@ runTest('normalizeImageMatchKey strips path/extension, lowercases, collapses whi
 
 // -- exact match: same product name on multiple rows all get the image --
 runTest('exact key match attaches one image to every candidate sharing that name', () => {
-  const images = [img(1, 'Coca Cola.jpg')]
+  const images = [img(1, 'Coca Cola_1.jpg')]
   const candidates = [
     { id: 'row1', name: 'Coca Cola' },
     { id: 'row2', name: 'Coca Cola' }, // e.g. one row per branch
@@ -110,9 +110,21 @@ runTest('overLimit reports every matched image but only keeps the top-scoring wi
   assert.strictEqual(overLimit[0].winners.length, 3, 'winners are capped at the per-product limit')
 })
 
-// -- rename plan: single image gets bare product name, multiple get _1/_2/... --
-runTest('buildImageDisplayName: single image needs no numeric suffix', () => {
-  assert.strictEqual(buildImageDisplayName('Coca Cola', 'whatever.jpg', 1, 1), 'Coca Cola.jpg')
+// -- rename plan: EVERY matched image is indexed, including a lone one --
+//
+// This used to assert the opposite: a single image kept the bare product
+// name and only siblings got _1/_2. That produced a library holding a
+// mixture of "Coca Cola.jpg" and "Coca Cola_1.jpg" for no reason visible to
+// the person -- whether a file got a number depended on how many siblings it
+// happened to have when it was matched, and adding a second image later
+// RENAMED the first one, changing a name that had been stable.
+//
+// One rule now: always `<Product Name>_<n>`. Matching is unaffected either
+// way, because stripTrailingIndex folds `_1`, `-1`, ` 1` and `(1)` back to
+// the bare name, so both spellings still resolve to the same product on
+// re-import (asserted below).
+runTest('buildImageDisplayName: a lone image is still indexed _1', () => {
+  assert.strictEqual(buildImageDisplayName('Coca Cola', 'whatever.jpg', 1, 1), 'Coca Cola_1.jpg')
 })
 runTest('buildImageDisplayName: multiple images get 1-based numeric suffixes', () => {
   assert.strictEqual(buildImageDisplayName('Coca Cola', 'a.png', 1, 3), 'Coca Cola_1.png')
@@ -122,7 +134,7 @@ runTest('buildImageDisplayName: multiple images get 1-based numeric suffixes', (
 runTest('buildImageDisplayName sanitizes unsafe characters out of the product name', () => {
   // Part 242: disallowed filename characters fold to '-' (not a plain
   // space) so hyphen<->space equivalence on re-import can round-trip them.
-  assert.strictEqual(buildImageDisplayName('Coke: 500ml / "Value"?', 'x.jpg', 1, 1), 'Coke-500ml-Value.jpg')
+  assert.strictEqual(buildImageDisplayName('Coke: 500ml / "Value"?', 'x.jpg', 1, 1), 'Coke-500ml-Value_1.jpg')
 })
 
 runTest('buildAutoRenamePlan orders by score (best match first) and numbers accordingly', () => {
@@ -138,20 +150,20 @@ runTest('buildAutoRenamePlan orders by score (best match first) and numbers acco
   assert.strictEqual(plan.get(1), 'Coca Cola_3.jpg', 'lowest score (0.6) should be position 3')
 })
 
-runTest('buildAutoRenamePlan gives a lone match per product the bare name, no suffix', () => {
+runTest('buildAutoRenamePlan indexes a lone match per product as _1', () => {
   const images = [img(1, 'a.jpg'), img(2, 'b.jpg')]
   const matched = [
     { image: images[0], productId: 'row1', productName: 'Coca Cola', score: 1, matchType: 'exact' },
     { image: images[1], productId: 'row2', productName: 'Sprite', score: 1, matchType: 'exact' },
   ]
   const plan = buildAutoRenamePlan(matched)
-  assert.strictEqual(plan.get(1), 'Coca Cola.jpg')
-  assert.strictEqual(plan.get(2), 'Sprite.jpg')
+  assert.strictEqual(plan.get(1), 'Coca Cola_1.jpg')
+  assert.strictEqual(plan.get(2), 'Sprite_1.jpg')
 })
 
 // -- image-only import: no CSV image column, matching purely on filename vs product name --
 runTest('image-only import (filenames matched straight against product names) still works end to end', () => {
-  const images = [img(10, 'Sprite.jpg'), img(11, 'coca-cola.png')]
+  const images = [img(10, 'Sprite_1.jpg'), img(11, 'coca-cola.png')]
   const candidates = [
     { id: 'r1', name: 'Sprite' },
     { id: 'r2', name: 'Coca Cola' },
