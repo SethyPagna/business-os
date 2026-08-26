@@ -421,10 +421,10 @@ implies a separate stored file when the same photo serves several products.
 
 | # | Task | Status |
 |---|---|---|
-| 11.8 | **Add-new Delivery contact / Customer from inside POS fails.** Reported as a real bug when creating one during checkout. Reproduce first. | not started |
+| 11.8 | **Add-new Delivery/Customer from POS failed.** **DONE (Part 354), needs deploy.** Diagnosed: the create returns 409 on a duplicate and the quick-add dead-ended on it. A `phone_conflict` (phone already belongs to someone) is a HARD block — now it SELECTS that existing contact instead of failing; a `possible_duplicate` retries once confirmed. `createApiError` now carries the matched contact. This also delivers the "create vs select existing" choice the user asked for. **If it still fails after deploy**, the next suspect is the `contacts` permission gate (a cashier lacking `contacts` 403s) — flag then. | done, needs deploy |
 | 11.9 | **POS must NOT show cost price.** The lot/option picker should offer only: batch, branch, barcode, damage, Selling price (label **SP**) and VIP price (label **VIP**). Cost is not a cashier-facing field. | not started |
 | 11.10 | **POS naming: "Selling price", not "Regular".** **DONE (Part 354), needs deploy.** The add-to-cart button's `posCopy('Regular')` → "Selling Price". (Also 4.5.) The SP/VIP short labels for a full price-mode picker belong to 11.9's POS redesign. |
-| 11.11 | **Discount %/$ toggle buttons can be LARGER; the fee input is TOO large.** Two locations (POS cart + one other — find both). | not started |
+| 11.11 | **Discount %/$ toggles larger, fee input narrower.** **DONE (Part 354), needs deploy.** Both toggle locations (POS cart-level + CartItem per-line) bumped from `px-1.5 py-1 text-[11px]` to `text-sm` with min-width; the delivery-fee input capped from w-full to w-28. | done, needs deploy |
 
 **Returns — replace flow + a shared stock-action chooser**
 
@@ -440,7 +440,7 @@ implies a separate stored file when the same photo serves several products.
 | 11.14 | **Portal-editor images must NOT bleed into the admin app.** The logo and other images edited in the Customer Portal editor are for the PUBLIC portal only; they are currently affecting admin surfaces. | not started |
 | 11.15 | **The Settings "business logo" is only the TOPBAR logo.** The favicon stays the default — the business logo must not replace it. | not started |
 | 11.16 | **Settings should expose the file/auto-wire button too** (the wire-images action, reachable from Settings). | not started |
-| 11.17 | **The uploads-path input is too wide** in many places — it eats horizontal space. Shrink it everywhere it appears. | not started |
+| 11.17 | **The uploads/folder-path inputs are too wide.** Candidates found (Part 354): the backup folder-export path (`Backup.tsx:1750`, `input flex-1 font-mono`) and the import image-folder displays (`BulkImportModal.tsx:2922,3155`). Needs the user to confirm WHICH "uploads path input" (or all) before changing layout — not guessed. | needs user to point at it |
 
 **Imports — contacts is slow and its review UI is bare**
 
