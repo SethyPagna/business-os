@@ -116,3 +116,76 @@ console.log('PASS imageCompression buildCompressionPlan ladder')
     )
   })
 }
+
+// ---------------------------------------------------------------------------
+// Stepped downscaling -- the fix for "blurred pixels".
+//
+// A single drawImage() from 4000px straight to 1600px makes the browser
+// resample a 2.5x reduction in one pass: roughly one source pixel is read per
+// destination pixel and the rest are discarded, so fine detail aliases into
+// mush. That is why a large photo came out soft while a zip of the same file
+// stays crisp -- zip is lossless and never resamples at all.
+//
+// Halving repeatedly is the standard remedy: each 2:1 step averages exactly
+// four source pixels into one, which is what the smoothing filter handles
+// well, and errors do not compound the way one big jump's do.
+//
+// Asserted against the source because the real function needs a DOM canvas.
+// What matters is the shape of the algorithm, and that is readable here.
+// ---------------------------------------------------------------------------
+{
+  const src = fs.readFileSync(new URL('../src/utils/imageCompression.ts', import.meta.url), 'utf8')
+
+  assert.match(src, /function drawDownscaled\(/, 'the stepped downscaler must exist')
+  assert.match(
+    src,
+    /drawDownscaled\(ctx, source as CanvasImageSource, width, height, target\.width, target\.height\)/,
+    'the resize path must go through it, not call drawImage directly',
+  )
+
+  const body = src.slice(src.indexOf('function drawDownscaled('), src.indexOf('export const DEFAULT_COMPRESS_OPTIONS'))
+
+  assert.match(
+    body,
+    /ctx\.imageSmoothingQuality = 'high'/,
+    "smoothing quality must be set explicitly -- browsers default it to 'low' in several cases, which is the cheap sampling being avoided",
+  )
+  assert.match(
+    body,
+    /while \(currentWidth \/ 2 > targetWidth && currentHeight \/ 2 > targetHeight\)/,
+    'it must halve only while a full halving still overshoots the target',
+  )
+  assert.match(
+    body,
+    /if \(targetWidth >= sourceWidth \|\| targetHeight >= sourceHeight \|\| sourceWidth \/ targetWidth < 2\)/,
+    'an upscale or a sub-2x reduction must take the plain single draw -- halving toward a LARGER size would be wrong',
+  )
+  assert.match(
+    body,
+    /scratch\.width = 0; scratch\.height = 0/,
+    'each scratch canvas must be freed immediately -- iOS Safari enforces an aggregate canvas-memory budget',
+  )
+
+  // Model the loop to prove the step sequence lands on the target exactly.
+  const stepsFor = (sourceW: number, sourceH: number, targetW: number, targetH: number): number[] => {
+    if (targetW >= sourceW || targetH >= sourceH || sourceW / targetW < 2) return [targetW]
+    const out: number[] = []
+    let w = sourceW
+    let h = sourceH
+    while (w / 2 > targetW && h / 2 > targetH) {
+      w = Math.max(1, Math.floor(w / 2))
+      h = Math.max(1, Math.floor(h / 2))
+      out.push(w)
+    }
+    out.push(targetW)
+    return out
+  }
+
+  assert.deepEqual(stepsFor(4000, 3000, 1000, 750), [2000, 1000], 'a 4x reduction halves once, then lands exactly')
+  assert.deepEqual(stepsFor(4000, 3000, 500, 375), [2000, 1000, 500], 'an 8x reduction halves twice, then lands')
+  assert.deepEqual(stepsFor(2000, 1500, 1600, 1200), [1600], 'a sub-2x reduction is a single draw, no halving')
+  assert.deepEqual(stepsFor(800, 600, 1600, 1200), [1600], 'an upscale never halves')
+  assert.equal(stepsFor(4000, 3000, 1000, 750).at(-1), 1000, 'the last step is always the exact target')
+
+  console.log('PASS stepped downscaling halves toward the target instead of one aliasing jump')
+}

@@ -30,6 +30,71 @@ export type CompressImageOptions = {
   targetBytes?: number
 }
 
+// Downscales in halving steps instead of one jump.
+//
+// This is the fix for "blurred pixels" on large photos. A single
+// drawImage() from, say, 4000px straight down to 1600px makes the browser
+// sample a 2.5x reduction in one pass: it reads roughly one source pixel per
+// destination pixel and discards the rest, so fine detail aliases into mush.
+// It is why a big photo came out looking soft while a zip of the same file
+// stays crisp -- zip is lossless and never resamples at all.
+//
+// Halving repeatedly is the standard remedy: each 2:1 step averages exactly
+// 4 source pixels into 1, which is what the smoothing filter is good at, and
+// the errors do not compound the way one large jump's do. The final step
+// lands on the exact target.
+//
+// imageSmoothingQuality is set explicitly because browsers default it to
+// 'low' in several cases, which is precisely the cheap sampling being
+// avoided here.
+function drawDownscaled(
+  ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+): void {
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+
+  // Not a reduction (or barely one): a single draw is already correct, and
+  // halving toward a LARGER size would be wrong.
+  if (targetWidth >= sourceWidth || targetHeight >= sourceHeight || sourceWidth / targetWidth < 2) {
+    ctx.drawImage(source, 0, 0, targetWidth, targetHeight)
+    return
+  }
+
+  let currentWidth = sourceWidth
+  let currentHeight = sourceHeight
+  let current: CanvasImageSource = source
+  let scratch: HTMLCanvasElement | null = null
+
+  // Halve while a full halving still overshoots the target.
+  while (currentWidth / 2 > targetWidth && currentHeight / 2 > targetHeight) {
+    const nextWidth = Math.max(1, Math.floor(currentWidth / 2))
+    const nextHeight = Math.max(1, Math.floor(currentHeight / 2))
+    const next = document.createElement('canvas')
+    next.width = nextWidth
+    next.height = nextHeight
+    const nextCtx = next.getContext('2d')
+    if (!nextCtx) break
+    nextCtx.imageSmoothingEnabled = true
+    nextCtx.imageSmoothingQuality = 'high'
+    nextCtx.drawImage(current, 0, 0, nextWidth, nextHeight)
+    // Free the previous scratch immediately rather than waiting on GC --
+    // same iOS Safari canvas-memory budget the main loop already guards.
+    if (scratch) { scratch.width = 0; scratch.height = 0 }
+    scratch = next
+    current = next
+    currentWidth = nextWidth
+    currentHeight = nextHeight
+  }
+
+  ctx.drawImage(current, 0, 0, targetWidth, targetHeight)
+  if (scratch) { scratch.width = 0; scratch.height = 0 }
+}
+
 export const DEFAULT_COMPRESS_OPTIONS: Required<Pick<CompressImageOptions, 'maxDimension' | 'quality' | 'minSavingsRatio' | 'maxBytes' | 'targetBytes'>> = {
   maxDimension: 2560,
   quality: 0.92,
@@ -257,7 +322,7 @@ export async function compressImageFile(file: File, options: CompressImageOption
         canvas.height = target.height
         ctx = canvas.getContext('2d')
         if (!ctx) break
-        ctx.drawImage(source as CanvasImageSource, 0, 0, target.width, target.height)
+        drawDownscaled(ctx, source as CanvasImageSource, width, height, target.width, target.height)
         currentDimension = step.maxDimension
         if (!webpChecked) {
           const canEncodeWebp = await canvasToBlob(canvas, 'image/webp', 0.95).then((blob) => !!blob).catch(() => false)
