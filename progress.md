@@ -204,7 +204,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 | # | Task | Status |
 |---|---|---|
-| 2.1 | **Unified Add/Sale/Reconciliation import — FULLY SPECIFIED now (Part 354), kernel BUILT.** See the detailed spec in [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The action/delta resolver (`lib/stockActionResolver.ts` + `test-stock-action-resolver-pure.cjs`, 16 checks) is done and tested. **Still to wire:** unified template + column mapping, the review screen (columns + Confirm Action gate), and the apply path. | kernel done, wiring open |
+| 2.1 | **Unified Add/Sale/Reconciliation import — FULLY SPECIFIED (Part 354), intake/classification PARTIAL (Part 357).** See [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The 10-column frontend contract/parser, action kernel, bounded product/branch/current-stock lookup and internal analyze dispatcher are built and tested. Ambiguous identities have no actionable plan; the public type remains closed and apply explicitly fails closed until its dedicated transaction/idempotency writer exists. **Still to wire:** cross-window sale/conflict sealing, review Confirm Action gate, transactional apply and public two-screen route/UI. | intake/classify done; apply/UI open |
 | 2.2 | **Import review / resolve screen** finished. | not started |
 | 2.3 | **Image auto-wire button — frontend half.** **DONE (Part 354), needs deploy.** `WireImagesReviewModal` built (grouped per product, ordered by `_1/_2/_3`, shows would-replace + unmatched + ambiguous); wired into the Products **Manage** menu (gated on the `products/image` action), the **Library** page next to Upload, and the import modal's result step for the per-job wire endpoint. **UNWIRE** shipped too: `POST /api/products/unwire-images` (detach-only, files stay in the Library; empty id list refused, `all:true` required to clear everything) with a disclosure in the modal. **Found + fixed a real bug while building it:** the apply endpoint ran one `UPDATE image_path` per matched image, so a 3-photo product kept only the last and `product_images` was never written — now goes through `syncProductImageGallery`. `test-wire-images-gallery-pure.cjs` (9 checks). |
 
@@ -293,14 +293,17 @@ the kernel: `detectCostBatchConflicts`.)
 `detectCostBatchConflicts`, `resolveStockActions` (one plan per row,
 `needsReview` flag). Pure, DB-free, 16 tests.
 
-**OPEN (wiring), in order:**
-1. **Unified template + column mapping** — one products-stock template with
+**WIRING STATUS (Part 357), in order:**
+1. **DONE — unified template + column mapping** — one products-stock template with
    the 10 columns above; retire the separate Add/Sale and dated-count
-   templates. Map headers → the resolver's `StockActionRow` shape.
-2. **Resolution against real data** — resolve product (name→barcode per the
+   templates. `unifiedStockImport.ts` owns the exact canonical header/parser.
+2. **DONE for bounded analyze windows; cross-window sealing open — resolution against real data** — resolve product (name→barcode per the
    existing `classifyProducts` order) and branch (shop/warehouse → branch
    ids, auto-create-on-miss like `resolveAndCreateBranches`), load current
-   per-(product,branch) stock, then call `resolveStockActions`.
+   per-(product,branch) stock, then call `resolveStockActions`. The classifier
+   performs only targeted, binding-capped reads; a missing branch is previewed
+   as pending and ambiguity is non-actionable. Apply-time creation/live-state
+   recheck and cross-chunk cost/batch conflict sealing remain open.
 3. **Review screen** — the 10 columns, the computed action per row, the
    conflicts, and a **Confirm Action** button that is the ONLY way to run a
    sheet with any conflict. Reuse the 2-screen flow from §13.
@@ -381,6 +384,18 @@ lists an image once per referencing product name (a read over
 products/product_images by shared path), and (2) a download/export step that
 renames on the fly. The import rename rule is unchanged; it just no longer
 implies a separate stored file when the same photo serves several products.
+
+**DONE in code (Part 357, needs deploy).** `GET /api/files` now builds one
+logical row per distinct active product reference across both cover and gallery
+paths, while an unreferenced physical asset remains one row. Search, count and
+pagination operate on those logical rows. Migration `0055` indexes both path
+joins so this does not add a full products/product_images scan to every Library
+page. The UI gives each logical row its own selection key, shows the derived
+`<Product>_1.ext` name plus the one shared stored filename, and can download
+several selected references as separately named files. `GET
+/api/files/:id/download` streams the same R2 body with a sanitized Unicode
+`Content-Disposition`; it never copies/renames the object and remains gated by
+Full Library access. Commits: `1f0d00b8`, `b1bf46cb`, `0f72c9aa`.
 
 ### Execution plan locked Aug 27 2026 — §§11, 12, 13 and 15 plus storage, media, contacts and safeguards
 
@@ -740,7 +755,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 356 (Aug 27 2026).** Everything below was really run in this local Windows
+**As of Part 357 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -760,9 +775,9 @@ are the commands' actual results this session.
 
 ### Done / In progress / To do — at a glance
 
-- **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · role-aware 3/5 image cap · R2 finalized lifecycle/exact-two retention · Drive streamed/deduplicated manifest mirror/exact-seven tagged retention · products large-screen alignment + 11.4/11.5 · §14 batch count/details · 11.24/11.25 VIP fixes · 11.8–11.11 POS fixes · 11.20/11.21 stock-health cards · 16.1/11.14–11.16 storefront PWA and favicon removal.
-- **IN PROGRESS / partial:** unified import (§12 — resolver kernel built + tested, wiring open) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
-- **TO DO (specced, not started):** §13 two-screen import UX (folds in 11.18/11.19) · §15 library one-file/many-names · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
+- **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · role-aware 3/5 image cap · R2 finalized lifecycle/exact-two retention · Drive streamed/deduplicated manifest mirror/exact-seven tagged retention · **§15 one-object/many-logical-Library-names + streamed rename-on-download** · products large-screen alignment + 11.4/11.5 · §14 batch count/details · 11.24/11.25 VIP fixes · 11.8–11.11 POS fixes · 11.20/11.21 stock-health cards · 16.1/11.14–11.16 storefront PWA and favicon removal.
+- **IN PROGRESS / partial:** unified import (§12 — canonical 10-column frontend contract, pure action kernel, bounded D1 catalog classifier and safe analyze dispatcher built/tested; transactional apply + public route/review wiring still closed) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **TO DO (specced, not started):** §13 two-screen import UX (folds in 11.18/11.19) · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
 
 ### Cross-cutting principle in force: ONE source of truth per calculation
 
@@ -810,6 +825,8 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | D1 param cap (0.2) | `test-d1-bound-params-repro.cjs` | installs D1's real 100-param limit in the shim (better-sqlite3 allows 32k, which is why this reached prod) and fails if any file builds an `IN`-list without chunking |
 | Products reset (0.1) | `test-reset-products-pure.cjs` | scoped backup covers exactly the tables the reset clears, across all 4 toggle combos |
 | Import stock actions (§12) | `test-stock-action-resolver-pure.cjs` | 16 checks on DIRECT/RECONCILE deltas, sale grouping, cost/batch conflict gating |
+| Unified stock intake (§12, Part 357) | `test-stock-action-import-pure.cjs` | exact 10 columns, strict numbers/dates, product ambiguity fail-closed, Shop/Warehouse resolution, bounded narrow D1 reads, direct/reconcile plans |
+| Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `libraryLogicalRows.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
 | Alignment (4.1/11.4) | `productsRowAlignment.test.ts` | the 6 `<col>` widths sum to 100%; category band spans image+name |
