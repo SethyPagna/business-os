@@ -208,9 +208,14 @@ the repository evidence, never from intent.
 - [x] Products/image-only: Screen 1 owns the real setup/upload and queued analyze;
   persisted D1 rows are the only Screen 2, durable safety decisions fail closed,
   and explicit Confirm is the sole route into queued apply (Part 368, `a31bbd80`).
-- [ ] Sales: finish the smart multi-line invoice contract, strict date + 24-hour
+- [x] Sales core: smart multi-line invoice contract, strict date + 24-hour
   time, customer inheritance/matching, FIFO/oversell/idempotency/permission bounds,
-  and lossless import→export round trip.
+  and import→export round trip are complete in Part 369. Historical sales do not
+  deduct today's stock (so FIFO/oversell is intentionally not applicable there);
+  returned quantities restock atomically, while live/stock-action sales retain the
+  strict FIFO/oversell guards. Restricted actual-delivery cost and any future
+  commission/service schema remain explicitly owned by Delivery (11.27), not hidden
+  as completed sales columns.
 - [ ] Stats: compact every page, put name + info on one row, and make tooltip/detail
   overlays viewport-aware top-layer UI (especially Returns).
 - [ ] Delivery: store customer charge separately from restricted actual delivery
@@ -585,6 +590,49 @@ classification before queued analysis, reducing Worker/D1 work on the Free plan.
 Verification: frontend `test:utils` **all 120 files green**, TypeScript/source checks
 clean, Cloudflare typecheck + import-engine + image-match suites green, and production
 build **880 modules / 27.68s** with only the two existing catalog circular warnings.
+
+**Part 369 — Production sales import/export core is complete in code (committed,
+needs migrations/deploy/live-browser verification).** Four pushed commits close the
+real §11.29 data path without conflating it with the still-open restricted-delivery
+schema in 11.27:
+
+- `6970334d` seals compact multi-line invoice inheritance during bounded CSV
+  materialization. Only the first row needs receipt/customer/payment fields; blank
+  following rows inherit the preceding explicit invoice across 100-row Worker
+  continuations. The JavaScript classifier and SQL group window use the same stored
+  key, so analyze and apply cannot split a receipt or drift on retry.
+- `99cce5e8` adds fail-closed historical timestamps (`YYYY-MM-DD HH:mm` 24-hour,
+  `MM/DD/YYYY HH:mm[:ss]`, or explicit-zone ISO), interpreted in the canonical
+  Asia/Phnom_Penh business timezone. Impossible dates/24:00 now block review instead
+  of silently becoming another date or apply-time “now.” Product lookup is
+  SKU→barcode→unique name (ambiguous names never guess), and exported historical
+  per-line cost snapshots override today's catalog cost so COGS survives.
+- `136ddef4` creates one `SALES_IMPORT_COLUMNS` source for template guidance,
+  two-row compact example, selected/visible XLSX and detailed CSV. Exports are real
+  line items, order fields appear only on line 1, Khmer/phone/barcode-safe XLSX stays
+  available, and the detailed CSV has no decorative report preamble so it reimports
+  directly. Base/product/manual discount metadata, KHR/USD price/cost, batch label,
+  returned quantity, customer/payment/membership/delivery-charge fields and notes
+  round-trip. Migration `0059` preserves imported per-line returned quantity.
+  Oversized 5,000+ sale report ranges fail export with a narrow-range instruction
+  instead of silently downloading a partial ledger, and `/sales/export` now enforces
+  the `sales` permission.
+- `a6c4cf09` removes the concurrency-unsafe “last N sales IDs” linkage and the three
+  separate header/items/return-stock transactions. Migration `0060` adds a per-job
+  receipt commit ledger; deterministic `client_request_id` resolves the parent ID
+  inside one D1 batch. Header, every item, any product/branch/batch return increment,
+  movement, and applied marker now commit or roll back together. At-least-once queue
+  retry is idempotent, and each receipt is capped at 50 lines so the largest atomic
+  transaction stays bounded for Workers/D1 Free.
+
+Verification performed after these changes: frontend full `test:utils` **all 120
+files green**; Cloudflare `test:import-engine` (now including the new real-SQL atomic
+sales writer test) green; both typechecks and frontend source check clean; all **61**
+migrations apply cleanly in the real SQLite harness; production build **881 modules /
+23.86s**, with only the two existing catalog circular warnings. The atomic test forces
+the final movement write to fail and proves sale/header/items/stock/ledger all roll
+back; retries do not duplicate sales or return stock; an unrelated newer sale cannot
+steal the lines; and the 50-line bound fails before a transaction is built.
 
 *User, this session + mid-turn clarification.*
 
@@ -972,7 +1020,7 @@ pagination/cache/performance. Re-measure Cloudflare usage before each expansion.
 | 11.26 | **Compact every page's stat cards consistently.** Stat name and Info affordance belong on the same row; cards must fit instead of being oversized. Tooltip/detail overlays must use viewport-aware top-layer placement and respect mobile/container boundaries. Returns is the clearest broken case, but the fix must use shared components and cover every stats page rather than page-local CSS. | not started |
 | 11.27 | **Separate customer delivery charge from secret actual delivery cost.** POS records both: the customer-facing charge remains on the receipt; actual delivery cost is staff/admin-only and never reaches customer/receipt/public responses. Sales/stats must distinguish delivery revenue, actual delivery expense and delivery margin (`charge - actual cost`). Requires permission/redaction, schema/API, edit/import/export, calculations and tests. | not started |
 | 11.28 | **Allow manual historical batches in Product edit and Inventory/Branch batch details.** User may enter the real received date/batch when recording stock late. Branch transfers preserve the product barcode; only create/add/adjust-stock flows may set/change a barcode. All entry points must share validation and stock/batch logic. | not started |
-| 11.29 | **Production sales CSV import/export.** **Screen structure DONE (Part 365):** Screen 1 real upload → Screen 2 authoritative persisted review/confirm. **Still open:** strict date plus 24-hour time, customer matching, oversell/FIFO/idempotency/permission bounds, and round-trip export. Multi-line invoices repeat invoice/customer/header data only on the first row; following item rows inherit it safely. The final template must adapt the user's supplied fields to the app's real schema and make charged delivery, actual delivery cost (restricted), discounts, exchange/KHR, commission/service, COGS and notes unambiguous. | partial (Part 365) |
+| 11.29 | **Production sales CSV import/export core. DONE in code (Part 369), needs migrations/deploy/live verify.** Screen 1 → persisted Screen 2 was completed in Part 365. Part 369 adds compact first-row-only invoice/customer inheritance, strict Cambodia 24-hour timestamps, safe customer/product matching, permission and 5,000-sale export bounds, one shared template/export contract, historical COGS and discount metadata, and a queued retry-idempotent atomic per-receipt writer (50-line bound). Ordinary historical imports intentionally do not deduct today's stock; returned quantities restock product/branch/batch atomically. **Still open elsewhere, not falsely represented as sales columns:** secret actual-delivery expense/margin and redaction are 11.27; commission/service need an explicit real schema/business rule before import/export can carry them. | done in code; needs deploy/live verify; 11.27 extension open |
 
 ---
 
@@ -1038,7 +1086,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 368 (Aug 28 2026).** Everything below was really run in this local Windows
+**As of Part 369 (Aug 28 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -1047,12 +1095,12 @@ are the commands' actual results this session.
 |---|---|
 | `frontend` `tsc --noEmit` | **clean** |
 | `cloudflare` `tsc --noEmit` | **clean** |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **78 / 78 pass** |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **79 / 79 pass** (full Part 369 resweep) |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** |
-| Real `vite build` | **succeeds (27.68s, 880 modules)**; only the two pre-existing catalog circular warnings |
-| `wrangler d1 migrations apply --local` | **current; no migrations pending** (reverified Part 362) |
+| Real `vite build` | **succeeds (23.86s, 881 modules)**; only the two pre-existing catalog circular warnings |
+| Migration harness | **all 61 migrations apply cleanly**; new `0059`/`0060` are committed but not deployed |
 
-**Nothing is deployed.** Every fix Parts 346–368 — including the two production outages
+**Nothing is deployed.** Every fix Parts 346–369 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on
 `npm run deploy:full`. The user's re-pasted error logs predate the fixes.
 
@@ -1061,8 +1109,9 @@ are the commands' actual results this session.
 - **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · role-aware 3/5 image cap · R2 finalized lifecycle/exact-two retention · Drive streamed/deduplicated manifest mirror/exact-seven tagged retention · **§15 one-object/many-logical-Library-names + streamed rename-on-download** · products large-screen alignment + 11.4/11.5 · §14 batch count/details · 11.24/11.25 VIP fixes · 11.8–11.11 POS fixes · 11.20/11.21 stock-health cards · 16.1/11.14–11.16 storefront PWA and favicon removal.
 - **DONE in code, needs deploy/live verification:** unified stock-action import (§12 + its §13 slice — analyze, persisted row review, confirmation, FIFO/oversell-safe apply, lifecycle seal and Free-plan bounds).
 - **DONE in code, needs deploy/live verification:** §13 two-screen structure for Stock Actions, Contacts, Sales, Inventory **and Products/image-only**; each real upload starts one queued analyze and one persisted review/confirm screen owns the decision.
-- **IN PROGRESS / partial:** smart sales contract/round-trip (11.29) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
-- **TO DO (specced, not started):** compact/top-layer stats UI on all pages (11.26) · customer delivery charge vs restricted actual cost/margin (11.27) · manual historical batch entry + barcode rules (11.28) · remaining smart sales import/export semantics (11.29) · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
+- **DONE in code, needs migrations/deploy/live verification:** smart sales import/export core (11.29, Part 369) — compact multi-line inheritance, strict time, safe matching, shared round-trip contract, permissions/bounds, atomic idempotent receipt apply and return restock.
+- **IN PROGRESS / partial:** Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **TO DO (specced, not started):** compact/top-layer stats UI on all pages (11.26) · customer delivery charge vs restricted actual cost/margin (11.27, including the sales import/export extension) · manual historical batch entry + barcode rules (11.28) · commission/service schema/business rule · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
 
 ### Cross-cutting principle in force: ONE source of truth per calculation
 
@@ -1089,7 +1138,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 
 ### How this project is tested (two harnesses, run for real)
 
-- **Backend — `cloudflare/scripts/test-*.cjs` (78 files, 78 pass).** Pure-logic harnesses
+- **Backend — `cloudflare/scripts/test-*.cjs` (79 files, 79 pass).** Pure-logic harnesses
   that transpile the REAL source with `typescript` + a `better-sqlite3` shim (migrations
   applied), so they exercise actual route/lib code, not reimplementations. No single
   "run-all" script exists on purpose — they are swept individually so one failure cannot
@@ -1103,7 +1152,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
   `t('key') || 'fallback'` idiom (t returns the key itself on a miss, so a missing key
   renders as raw text) — this caught a real POS message bug this session.
 
-### Tests added / changed this session (Parts 354–368)
+### Tests added / changed this session (Parts 354–369)
 
 | Area | Test | Guards |
 |---|---|---|
@@ -1122,6 +1171,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Sales + Inventory authoritative Screen 2 (Part 365) | `csvImport.test.ts`, `inventoryImportWorker.test.ts`, `salesImportWorker.test.ts` | both modals remain open through server analysis, read bounded persisted review rows, guard duplicate confirmation, and notify the parent only on approve or explicit background handoff |
 | Product conflict server gate (Part 367) | `test-import-review-query-pure.cjs`, `importJobApproveGate.test.ts` | D1 counts unresolved barcode/SKU/negative-stock rows across pages; approval fail-closes; persisted apply/skip choices survive review reads; the tracker cannot silently approve past the resolver |
 | Product authoritative two-screen flow (Part 368) | `importJobApproveGate.test.ts`, `csvImport.test.ts`, `performanceLoadingUx.test.ts`, `productImportPlanner.test.ts`, `importModeDetectionWiring.test.ts` | local validation cannot advance to or serialize a shadow review; queued analyze opens persisted D1 Screen 2; serious warnings require a visible saved decision; Confirm/cancel/review-later are explicit and guarded; no duplicate synchronous preflight; image-only uses the same job review |
+| Smart sales contract + atomic apply (Part 369) | `salesImportWorker.test.ts`, `test-sales-group-window-pure.cjs`, `test-import-engine-pure.cjs`, `test-sales-import-commit-pure.cjs` | one shared ordered template/export contract; first-row-only invoice/customer headers and cross-materialization inheritance; SQL/JS group parity; strict Cambodia 24-hour dates and invalid-date rejection; unique-name matching; COGS/discount/return snapshots; permission and export completeness guards; real 61-migration SQLite transaction proves deterministic parent linkage, full rollback on injected final-write failure, retry de-dup, return stock exactly once and the 50-line Free-plan cap |
 | Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
