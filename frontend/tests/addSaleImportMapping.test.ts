@@ -6,6 +6,14 @@ import {
   applyAddSaleMapping,
   TARGET_FIELDS,
 } from '../src/components/products/import/addSaleImportMapping.ts'
+import {
+  UNIFIED_STOCK_HEADERS,
+  buildUnifiedStockTemplateCsv,
+  findUnifiedStockCostBatchConflicts,
+  mapUnifiedStockHeaders,
+  normalizeUnifiedStockDate,
+  parseUnifiedStockRows,
+} from '../src/components/products/import/unifiedStockImport.ts'
 
 // normalizeHeaderForMatch -- lowercases and strips everything but
 // a-z0-9, so differently-punctuated headers collapse to the same key.
@@ -158,3 +166,33 @@ console.log('PASS normalizeHeaderForMatch collapses case/punctuation/whitespace 
 }
 
 console.log('addSaleImportMapping tests passed')
+
+// §12 supersedes the old Add/Sale mapping above with one ten-column file
+// contract shared by Direct and Reconcile. Keep the legacy checks until
+// the last old entry point is removed, and lock the replacement beside it.
+assert.deepEqual(UNIFIED_STOCK_HEADERS, [
+  'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
+  'selling_price', 'vip_price', 'cost_price', 'batch',
+])
+assert.equal(buildUnifiedStockTemplateCsv(), `\uFEFF${UNIFIED_STOCK_HEADERS.join(',')}\r\n`)
+assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'Warehouse', 'Sale Date', 'Movement', 'Price USD', 'Special Price', 'Unit Cost', 'Lot Code']), {
+  name: 'Product Name', barcode: 'UPC', shop: 'Shop Qty', warehouse: 'Warehouse', date: 'Sale Date', action: 'Movement',
+  selling_price: 'Price USD', vip_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code',
+})
+assert.equal(normalizeUnifiedStockDate('08/27/2026'), '2026-08-27')
+assert.equal(normalizeUnifiedStockDate('2026-02-29'), null)
+
+const unified = parseUnifiedStockRows([
+  { name: 'A', barcode: '1', shop: '2', warehouse: '0', date: '08/27/2026', action: 'add', selling_price: '$12.50', vip_price: '10', cost_price: '5', batch: 'B1' },
+  { name: 'A', barcode: '1', shop: '0', warehouse: '1', date: '2026-08-27', action: 'sale1', selling_price: '12.5', vip_price: '10', cost_price: '6', batch: 'B2' },
+])
+assert.equal(unified.issues.length, 0)
+assert.equal(unified.rows[0].shop, 2)
+assert.equal(unified.rows[0].sellingPrice, 12.5)
+assert.equal(unified.rows[1].date, '2026-08-27')
+assert.deepEqual([...findUnifiedStockCostBatchConflicts(unified.rows).keys()], [2, 3])
+
+const invalidUnified = parseUnifiedStockRows([{ name: '', barcode: '', shop: '-1', warehouse: '', date: '31/12/2026', selling_price: 'nope' }])
+assert.deepEqual(invalidUnified.issues.map((issue) => issue.code), ['missing_identity', 'invalid_quantity', 'invalid_date', 'invalid_price'])
+assert.equal(invalidUnified.rows.length, 1, 'invalid rows stay visible for review instead of disappearing')
+console.log('PASS unified §12 stock import uses one ten-column contract, strict parsing, and cost/batch conflict gating')
