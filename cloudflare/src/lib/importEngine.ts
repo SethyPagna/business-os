@@ -3306,7 +3306,7 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
         total_rows = @total, processed_rows = 0, failed_rows = @errored,
         warning_count = @warned, summary_json = @summary, updated_at = CURRENT_TIMESTAMP
       WHERE id = @id
-    `).run({ id: jobId, total, warned, summary: JSON.stringify(summary) })
+    `).run({ id: jobId, total, errored: byAction.error, warned, summary: JSON.stringify(summary) })
     console.log('[import-timing] analyze done', jobId, summary.timings.analyze)
   } catch (error) {
     await markJobFailed(db, jobId, (error as Error).message || 'Analyze failed')
