@@ -55,13 +55,217 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 
 ---
 
+## Master plan — Aug 28 2026 (Part 370) — THE authoritative queue
+
+> **This section supersedes `## Open work — ORDERED` and the task-board tables as the
+> queue.** Those sections stay because they carry the specs (§11/§12/§13/§14/§15 and
+> the locked execution plan) that the items below reference by number — read the spec
+> when picking up an item; read THIS list to know what is open and in what order.
+> Statuses: `[ ]` not started · `[~]` in progress / partly done · `[x]` done in code
+> (deploy status noted per item). Rebuilt from the user's Aug 28 request batch plus
+> every still-open item in the older sections.
+
+### Phase A — Deploy and verify live (gates EVERYTHING; nothing since Aug 26 has shipped)
+
+- [ ] A1. `npm run deploy:full` — ships Parts 346–370: both production outages (0.1/0.2),
+  POS oversell 409 (migration 0058), sales import (0059/0060), §12/§13 imports, §14, §15,
+  PWA branding, backup lifecycle. **The user's "no backups in Google Drive" report is
+  expected until this ships** — the Drive mirror code exists only locally.
+- [ ] A2. Live-verify the deploy checklist: reset-data, /api/products, POS sale with lots,
+  storefront iPhone install (delete old shortcut first), import round-trip, R2 keeps
+  exactly 2 finalized sets, Drive mirror actually uploads on the next backup run.
+- [ ] A3. **Google Drive retention is now 10, not 7** (user, Aug 28). Change the prune
+  constant + test (`test-google-drive-backup-pure.cjs` drives 10→7 today; make it →10),
+  and verify a real mirrored set appears in Drive after deploy. If Drive stays empty
+  after a live backup, debug the OAuth/token path with real logs — do not guess.
+- [ ] A4. **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
+  code is full of Free-plan ceilings that are now 30s CPU / higher D1+KV quotas /
+  1000 subrequests: apply caps (480 rows/60 units, 50-line receipts), backup slice
+  sizes (20 objects), includeImages cleanup cap (200), import windows, `STOCK_ACTION_MAX_UNITS`.
+  Keep every cap (they are also correctness bounds) but raise the ceilings deliberately,
+  one constant at a time, each with a measured reason — and record the new numbers in
+  wrangler.toml comments. Also now affordable: Cron Triggers for the 6h image audit and
+  backup schedule, Queues at paid limits, and `limits.cpu_ms` tuning.
+
+### Phase B — Stats/tooltips finish + small confirmed UI corrections
+
+- [~] B1. (11.26/5.1–5.3) Same-row stat label + info, portaled viewport-aware tooltip.
+  **Dashboard `MiniStat`, Branches, Inventory, Returns landed this session (Part 370):**
+  hint and drill-down are separate controls (a `role="button"` wrapper would re-fire the
+  drill-down from the hint's keyboard events), tooltip height uses the real space above/
+  below the trigger, panel is scrollable on touch. **Open:** sweep every remaining stats
+  page for the old pattern (no `InfoHint className="absolute…"` call sites remain — verify
+  visually), then the click-to-view detail panels' responsiveness (5.3), then 5.4's
+  Dashboard-vs-Inventory metric symmetry.
+- [ ] B2. Contact field labels tell the truth: "Contact Person" on Suppliers actually
+  holds a phone number — relabel to Phone Number (en+km) and make phone the first/default
+  field for supplier, customer AND delivery contact forms. Label = what the field holds.
+- [ ] B3. POS delivery panel compaction: rider search + fee on ONE row; the `= …៛` KHR
+  hint absorbed into that row; "Fee paid by" label + Customer/Store toggle on one row with
+  buttons sized to their text (no full-width halves).
+- [ ] B4. "Delivery was made into the category column — separate it." **Needs locating
+  before changing** (Golden Rule 7): find where a delivery value renders inside a
+  category column (Sales list? Contacts?), confirm with a screenshot/DOM read, then split
+  it into its own column.
+- [ ] B5. Receipt print: when 80x50 is enabled, clicking Print offers BOTH sizes and the
+  preview shows BOTH (today only one previews). Verify printing end-to-end while there.
+- [ ] B6. (11.1/11.2 rest) Select-column collapse + header-checkbox-as-select-all on
+  Inventory/Sales/Returns/Branches/Contacts (Products already done). "Select all" button
+  is removed; in select mode the column-header checkbox IS select-all.
+
+### Phase C — Delivery: customer charge vs internal actual cost (11.27, full)
+
+*The revenue-truth feature. Charge stays what the customer sees; actual cost is what the
+store really paid the rider; margin = charge − cost and is internal only.*
+
+- [ ] C1. Schema: `sales.delivery_actual_cost_usd` (+ derived khr at the sale's rate),
+  additive migration. POS records it next to the existing fee; edit allows correction.
+- [ ] C2. Redaction is server-side, not UI-side: receipts, customer-facing reads and every
+  public/portal API never include the field (deny-by-default serializer, tested the way
+  product surfaces are). Staff visibility can later be permission-scoped.
+- [ ] C3. Stats/sales distinguish three numbers everywhere they appear: delivery revenue
+  (customer-paid fees), delivery expense (actual costs, including store-absorbed fees),
+  delivery margin. One shared kernel computes them (see the single-source rule);
+  Dashboard/Sales/exports all call it.
+- [ ] C4. Import/export carry both fields (staff export only); receipt templates
+  re-verified to print only the customer charge.
+
+### Phase D — Products data model: stock-change ledger, batches, suppliers
+
+- [ ] D1. **Stock Change section on Products** (the user's ledger design): one row per
+  action with columns Name · Barcode (+N) · Before Qty · Adjustment (±, reason) ·
+  Stock In (add/create, colour-coded) · Stock Out (sale/damage/return/lost/wrong,
+  colour-coded) · After Qty. Views: All / Adjustments / Stock In / Stock Out. Row click
+  opens details: a summary section + a detailed mini-ledger incl. batches. Data source is
+  the EXISTING movement history — this is a read/UI surface, not a new write path.
+  Reuses/absorbs Inventory's "view stock movement" detail (D3).
+- [ ] D2. Filters grow: by supplier, by date range (the new date row), by action type,
+  by branch. **Date-scope row** sits directly below the search row on Products AND
+  Inventory, with the Filter button moved onto it.
+- [ ] D3. Product "click to view details" absorbs Inventory's stock-movement detail, so
+  the product detail is the one place with: info, batches (§14 modal), movements,
+  supplier section. Inventory's product list then repurposes/thins accordingly (see F1).
+- [ ] D4. (11.28) **Manual historical batches**: enter real received date + batch when
+  recording stock late — from Product edit, Inventory batch view and Branch batch views.
+  One shared validation + stock/batch kernel for all entry points. Branch transfers
+  PRESERVE the barcode; only create/add/adjust flows may set/change one.
+- [ ] D5. **Supplier accounting**: per-supplier totals (how much bought), auto-derived
+  from batches/add-stock; per-add-stock payment status incl. **awaiting payment**;
+  add/create stock can pick the supplier. Supplier lives on the batch/receipt level and
+  FOLDS into the product as a "Supplier" section — child rows inherit the group's
+  sections rather than each carrying supplier state.
+- [ ] D6. Rename cascades with before→after preview: changing a category/brand/supplier/
+  product name shows before and after and asks what happens to attached rows (carry all
+  attached products to the new name / keep a copy, new is new / cancel-go-back). Also the
+  path to closing 9.1 (rename does not regroup) — same reconciliation machinery.
+
+### Phase E — Information architecture: fewer, deeper pages
+
+*Rewiring, not logic changes. Keep internal page ids + permission keys STABLE (the
+permission model, `canAccessPage`, and audit references key off them); the sidebar
+shrinks and the moved pages become sections with deep-linkable tabs.*
+
+- [ ] E1. **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
+  stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
+  everything shipped since (batch preservation, §14 details).
+- [ ] E2. **Sales absorbs Returns and Fees** as sections of one Sales page.
+- [ ] E3. **Review + Audit Log merge into "Review & Logs"** — approvals queue and the
+  audit trail side by side.
+- [ ] E4. **Settings absorbs Users and Backup** as sections/mini-sections; the permissions
+  editor redesign (7.2) lands as part of this move.
+- [ ] E5. **Promotions page** (new) with Loyalty Points as a section (see Phase G).
+- [ ] E6. Every export/import affordance on the moved pages is re-checked after the move
+  (no orphaned buttons, no dead routes) — Golden Rule 6.
+
+### Phase F — Add/create flows: wizard, fast batch entry, drafts
+
+- [ ] F1. **Add Product = new products only.** Typing a name live-searches existing
+  products; matching name/barcode/both raises a structured warning with actions: go back ·
+  add as child of the matched group · proceed as new — with a before→after arrow preview
+  and a page-by-page confirm. Price similarity is advisory ("matches X on name+price but
+  differs on barcode; recommend child row").
+- [ ] F2. **Fast stock-in (batch in):** enter batch + supplier once, then per-product
+  name→details entry; "Add" appends and continues, "Done" completes the batch. Backed by
+  the same add/batch kernel as D4 — no parallel write path.
+- [ ] F3. **Draft persistence + tab chrome:** unfinished add-product / batch-in / detail
+  tabs survive navigation and reload (persisted drafts); each tab gets ✕ (close) and −
+  (minimize to a top-bar icon). One draft store, used by all three flows.
+
+### Phase G — Promotions + public portal
+
+- [ ] G1. Promotion engine: rule types "buy ≥ X save Y", "% off selected items", fixed
+  discount; optional display Title (tag/label shown or hidden); scope = one product,
+  a set, category/brand; start/end dates. POS + portal both read the SAME rule evaluation
+  kernel (truth never diverges between what POS charges and what the portal advertises).
+- [ ] G2. Loyalty Points moves in as a Promotions section (E5).
+- [ ] G3. Portal promo strip: one auto-scrolling row above search; "·" dots represent each
+  promoted product/promotion, click a dot to jump. Promos render Title + discount.
+- [ ] G4. Portal ordering flips to BRAND-first: alphabetical order and the fast A–Z rail
+  index brands, not categories.
+- [ ] G5. Carried portal items: §6.1 About overlay/cover, §6.2 top-bar split, §6.3 stale
+  embed cache (repro first), §6.4 Google-Translate-backed languages (packs as fallback),
+  §6.5 pagination counts merged rows.
+
+### Phase H — Exports/imports everywhere
+
+- [ ] H1. Export button on every page opens an options dialog: by summary / by actions /
+  detailed full coverage — options derived from what that page actually does (Products:
+  catalog, stock changes, batches; Sales: receipts, line items, fees, delivery incl. C-
+  fields staff-only; Branches: per-branch stock; Review & Logs: filtered audit slice).
+- [ ] H2. Every page's import re-checked against the two-screen contract (§13) after the
+  IA moves; templates regenerated where columns changed (delivery cost, supplier status).
+
+### Phase I — Audit log wraps the whole app
+
+- [ ] I1. Coverage: `audit(…)` is called in 22 of 30 route files today — sweep the other
+  8 and every uncovered mutation so ALL actions/changes land in the trail (one helper,
+  no bespoke logging). List the uncovered routes in the session log when measured.
+- [ ] I2. Audit UI (inside Review & Logs): the same one-row date-range control as
+  Products/Inventory (D2), filters by action / page / user, clean multi-option design,
+  detail drawer per entry showing before→after payloads where stored.
+
+### Phase J — Sessions & devices
+
+- [ ] J1. Stay signed in per device: login on a trusted device persists until an admin
+  revokes it (the `trusted_devices` + `revokeSessionsForDevice` machinery already
+  exists — wire "remember this device" to a long-lived session and make revocation kill
+  it; sliding renewal already landed Part 346).
+- [ ] J2. Password-manager friendliness: the login form triggers save/autofill
+  (`autocomplete="username"` / `current-password`, stable field names, real form submit).
+- [ ] J3. Admin device/session management UI lands in Settings→Users (E4): per-user
+  devices, last seen, revoke button.
+
+### Phase K — Carried-over engineering backlog (unchanged priorities)
+
+- [ ] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
+  users see their own.
+- [ ] K2. Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
+  picker rest of 11.9.
+- [ ] K3. Media pipeline completion (quality ladder, provider fallback, 6h audit — now
+  cheaper under Workers Paid, A4).
+- [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
+  NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
+- [ ] K5. Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).
+- [ ] K6. Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
+- [ ] K7. Performance pass (measured), portal §6 leftovers, Library details (8.1),
+  edit-form section jump bug (10.2), path-width inputs (11.17 — still needs the user to
+  point at which input).
+
+### Flagged, not guessed (Golden Rule 7)
+
+- B4's location (which page shows delivery inside a category column) is unconfirmed.
+- Commission/service fields for sales import/export still have no business rule.
+- H1's exact per-page option lists should be confirmed against real usage before build.
+
+---
+
 ## Task board
 
-> **READ `## Open work — ORDERED` FIRST.** Rebuilt Aug 26 2026 (Part 353) immediately
-> before a context compaction, it is the authoritative list of what is open, in what
-> order, and what is already done. The tables below are older and kept for the
-> reasoning they carry, not as the current queue. Where they disagree, the ordered
-> backlog wins.
+> **READ `## Master plan — Aug 28 2026 (Part 370)` ABOVE FIRST — it is the authoritative
+> queue.** `## Open work — ORDERED` below remains the spec library (§11–§15, locked
+> execution plan) that the master plan references by number. The tables below are older
+> and kept for the reasoning they carry, not as the current queue. Where anything
+> disagrees, the master plan wins.
 >
 > **The two production outages are FIXED in code (Part 354) and waiting on a
 > deploy** — `reset-data` exceeding the CPU limit (0.1) and `GET /api/products`
@@ -186,6 +390,10 @@ These modify third-party accounts, so they are listed rather than done:
 
 ## Open work — ORDERED
 
+> **Superseded as the queue by [Master plan — Aug 28 2026 (Part 370)](#master-plan--aug-28-2026-part-370--the-authoritative-queue).**
+> Kept as the SPEC LIBRARY: the master plan references §11–§15 and the locked
+> execution plan below by number. Do not pick work from here directly.
+
 *Rebuilt Aug 26 2026 (Part 353), immediately before a context compaction, so this
 section is the ONLY reliable record of what was asked. Everything below came from the
 user's own messages; nothing is inferred. Top of the list is next.*
@@ -216,8 +424,11 @@ the repository evidence, never from intent.
   strict FIFO/oversell guards. Restricted actual-delivery cost and any future
   commission/service schema remain explicitly owned by Delivery (11.27), not hidden
   as completed sales columns.
-- [ ] Stats: compact every page, put name + info on one row, and make tooltip/detail
-  overlays viewport-aware top-layer UI (especially Returns).
+- [~] Stats: compact every page, put name + info on one row, and make tooltip/detail
+  overlays viewport-aware top-layer UI (especially Returns). **Core landed Part 370**
+  (portaled real-space tooltips; same-row label+hint on Dashboard/Branches/Inventory/
+  Returns as separate controls); detail-panel responsiveness (5.3) and the metric
+  symmetry rule (5.4) remain — see master plan B1.
 - [ ] Delivery: store customer charge separately from restricted actual delivery
   cost; redact actual cost from receipts/customers/public APIs and report charge,
   expense and margin distinctly.
@@ -1086,19 +1297,23 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 369 (Aug 28 2026).** Everything below was really run in this local Windows
+**As of Part 370 (Aug 28 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
 
 | Check | Result |
 |---|---|
-| `frontend` `tsc --noEmit` | **clean** |
-| `cloudflare` `tsc --noEmit` | **clean** |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **79 / 79 pass** (full Part 369 resweep) |
-| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** |
-| Real `vite build` | **succeeds (23.86s, 881 modules)**; only the two pre-existing catalog circular warnings |
-| Migration harness | **all 61 migrations apply cleanly**; new `0059`/`0060` are committed but not deployed |
+| `frontend` `tsc --noEmit` | **clean** (Part 370 rerun) |
+| `cloudflare` `tsc --noEmit` | **clean** (Part 370 rerun; backend source untouched this session) |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **79 / 79 pass** (Part 369 sweep; no backend change since) |
+| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** (Part 370 rerun, exit 0) |
+| Real `vite build` | **succeeds (18.21s)**; only the two pre-existing catalog circular warnings |
+| Migration harness | **all 61 migrations apply cleanly** (Part 369); new `0059`/`0060` are committed but not deployed |
+
+**Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
+stats/tooltip work was finished and committed (`9d93db56`); the empty
+`{sales,returns,utils-settings}` component directory was removed.
 
 **Nothing is deployed.** Every fix Parts 346–369 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on

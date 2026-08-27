@@ -7424,3 +7424,52 @@ Commits pushed to `origin/main`: `1711a351`, `ebd68f5d`, `e28b116b`, `e109c7e1`.
 Product import still has its old client review before server-job creation, so the final
 single authoritative two-screen Product conversion remains open. Every unchecked item in
 `progress.md`'s Active umbrella goal remains open; the formal goal is intentionally active.
+
+## Part 370 (chat, Aug 28 2026) — master plan for the Aug-28 request batch; stats/tooltip fix finished
+
+*(Numbering note: this log's previous entry is labeled Part 341, but progress.md
+Parts 342–369 were recorded in progress.md itself without log entries. 370 continues
+from the highest number used anywhere, per the collision rule.)*
+
+**Ask.** A large planning batch: architect the new feature set (POS internal delivery
+cost vs customer charge; stock-change ledger on Products; manual historical batches;
+supplier payment statuses; IA restructure — Inventory→Branches, Returns/Fees→Sales,
+Audit→"Review & Logs", Users+Backup→Settings, Loyalty→Promotions; add-product duplicate
+wizard; fast batch stock-in; draft/minimizable tabs; promotions + portal promo strip +
+brand-first rail; per-page export options; app-wide audit coverage; device-persistent
+sessions; Drive retention now 10; Workers Paid $5/mo to maximize), then "clean the
+progress with the new plan and progress [], [~], [x]". The message also carried the
+in-flight stats correction description (hint/action as separate controls; tooltip
+height from real available space).
+
+**What changed.**
+- `progress.md`: new `## Master plan — Aug 28 2026 (Part 370)` section is THE queue
+  (phases A–K + flagged ambiguities); `Open work — ORDERED` demoted to spec library;
+  task-board banner updated; Current status moved to Part 370; umbrella stats item → [~].
+- Finished + committed the dirty worktree's stats work (`9d93db56`): `InfoHint` panel
+  height now budgets the ACTUAL space above/below the trigger (prefer below; cap 288px;
+  min 72px), panel accepts pointer events and counts as "inside" for the outside-tap
+  check so a capped hint scrolls on touch; `MiniStat` restructured so the hint and the
+  drill-down are separate controls (the uncommitted `role="button"` wrapper re-fired the
+  drill-down from the hint's bubbled keyboard events and nested interactive content) —
+  now the same card/label-row/figures-button structure the Branches/Inventory/Returns
+  tiles use. Removed the empty `{sales,returns,utils-settings}` directory.
+
+**What was found.**
+- No `InfoHint className="absolute…"` call sites remain in `frontend/src` — the
+  same-row conversion covers all current stats surfaces.
+- `audit(` appears in 22 of 30 route files — the master plan's I1 sweep baseline.
+- Device trust + revocation already exist server-side (`trusted_devices`,
+  `revokeSessionsForDevice`, sliding sessions) — J1–J3 are wiring/UI, not new auth.
+- "No backups in Google Drive" is expected: nothing since Part 346-era has been
+  deployed, so the Drive mirror code has never run in production (master plan A1/A3).
+
+**Verified.** `tsc --noEmit` clean in both packages; frontend `npm run test:utils`
+full chain green (exit 0, all 120 files); real `vite build` succeeded in 18.21s with
+only the two pre-existing catalog circular warnings. Backend suite not rerun — no
+backend source touched (Part 369's 79/79 sweep stands).
+
+**Not done.** Everything in master plan phases A–K except B1's landed core. Deploy
+(A1) still gates all Parts 346–370 work, including the Drive-backup verification. The
+B4 "delivery in the category column" location and the commission/service business rule
+remain flagged, not guessed.
