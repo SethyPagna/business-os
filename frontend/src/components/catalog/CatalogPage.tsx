@@ -46,7 +46,7 @@ import {
 } from './portalCatalogDisplay.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
-import { MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
+import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import {
   ALL_PUBLIC_TRANSLATE_OPTIONS,
   FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
@@ -940,7 +940,7 @@ function getStockStatus(product: CatalogProduct, qty: unknown, config: PortalCon
   return 'in_stock'
 }
 
-/** Build unique product gallery list with a max of MAX_PRODUCT_GALLERY_IMAGES images. */
+/** Build the full display gallery; only admins can write positions 4-5. */
 function normalizeProductGallery(product: CatalogProduct | null | undefined): string[] {
   const source = Array.isArray(product?.image_gallery)
     ? product.image_gallery
@@ -952,7 +952,7 @@ function normalizeProductGallery(product: CatalogProduct | null | undefined): st
     if (!value || seen.has(value)) continue
     seen.add(value)
     unique.push(value)
-    if (unique.length >= MAX_PRODUCT_GALLERY_IMAGES) break
+    if (unique.length >= ADMIN_MAX_PRODUCT_GALLERY_IMAGES) break
   }
   if (!unique.length && product?.image_path) unique.push(String(product.image_path))
   return unique

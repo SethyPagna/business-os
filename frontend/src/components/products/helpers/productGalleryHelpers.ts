@@ -10,6 +10,7 @@ import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
 // including each "child row"/variant in a group (a variant is just
 // another product row, so it already goes through this exact same cap).
 export const MAX_PRODUCT_GALLERY_IMAGES = 3
+export const ADMIN_MAX_PRODUCT_GALLERY_IMAGES = 5
 
 interface ProductGalleryRecord {
   image_gallery?: unknown

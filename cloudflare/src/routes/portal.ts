@@ -11,7 +11,7 @@ import { sanitizeMediaList } from '../lib/media'
 import { detectBufferKind } from '../lib/uploadSecurity'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse, getPortalAiUsageStatus } from '../lib/portalAi'
-import { MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
+import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import type { Env } from '../index'
 
@@ -668,7 +668,7 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
   }
 
   return items.map((product) => {
-    const gallery = sanitizeMediaList(imageMap.get(Number(product.id)) || []).slice(0, MAX_IMAGES_PER_PRODUCT)
+    const gallery = sanitizeMediaList(imageMap.get(Number(product.id)) || []).slice(0, ADMIN_MAX_IMAGES_PER_PRODUCT)
     const fallbackImage = sanitizeMediaList([product.image_path])[0] || null
     if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
     return { ...product, image_path: gallery[0] || null, image_gallery: gallery }

@@ -42,7 +42,7 @@ import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
 import { getPortalLanguageText } from './portalLanguagePacks.ts'
-import { MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
+import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import {
   ALL_PUBLIC_TRANSLATE_OPTIONS,
   GOOGLE_TRANSLATE_FALLBACK_OPTIONS,
@@ -483,7 +483,7 @@ function normalizeProductGallery(product: CatalogProduct | null | undefined): st
     if (!value || seen.has(value)) continue
     seen.add(value)
     unique.push(value)
-    if (unique.length >= MAX_PRODUCT_GALLERY_IMAGES) break
+    if (unique.length >= ADMIN_MAX_PRODUCT_GALLERY_IMAGES) break
   }
   if (!unique.length && product?.image_path) unique.push(String(product.image_path))
   return unique

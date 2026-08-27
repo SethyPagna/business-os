@@ -19,7 +19,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from '../../../utils/loaders.ts'
-import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 
 const BarcodeScannerModal = lazyRetry(() => import('../scanning/BarcodeScannerModal'), 'product-form-barcode-scanner-modal')
 const PRODUCT_SUPPLIERS_TIMEOUT_MS = 8000
@@ -50,6 +50,10 @@ interface BranchOption {
 interface ProductUser {
   id?: EntityId
   name?: string
+  username?: string
+  role_code?: string
+  permissions?: unknown
+  role_permissions?: unknown
 }
 
 interface GroupCandidate {
@@ -210,7 +214,25 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-function normalizeGallery(product?: ProductFormState | null): string[] {
+function hasAllPermission(value: unknown): boolean {
+  if (value && typeof value === 'object') return (value as { all?: unknown }).all === true
+  if (typeof value !== 'string' || !value.trim()) return false
+  try {
+    const parsed = JSON.parse(value) as { all?: unknown }
+    return parsed?.all === true
+  } catch {
+    return false
+  }
+}
+
+function isAdminProductUser(user?: ProductUser | null): boolean {
+  return String(user?.username || '').trim().toLowerCase() === 'admin'
+    || String(user?.role_code || '').trim().toLowerCase() === 'admin'
+    || hasAllPermission(user?.permissions)
+    || hasAllPermission(user?.role_permissions)
+}
+
+function normalizeGallery(product?: ProductFormState | null, limit = MAX_PRODUCT_GALLERY_IMAGES): string[] {
   const source = Array.isArray(product?.image_gallery)
     ? product.image_gallery
     : (product?.image_path ? [product.image_path] : [])
@@ -221,7 +243,7 @@ function normalizeGallery(product?: ProductFormState | null): string[] {
     if (!value || seen.has(value)) continue
     seen.add(value)
     list.push(value)
-    if (list.length >= MAX_PRODUCT_GALLERY_IMAGES) break
+    if (list.length >= limit) break
   }
   return list
 }
@@ -323,6 +345,7 @@ export default function ProductForm({
     || branches[0]?.id?.toString()
     || ''
   const currentProductId = Number(product?.id || 0)
+  const imageLimit = isAdminProductUser(user) ? ADMIN_MAX_PRODUCT_GALLERY_IMAGES : MAX_PRODUCT_GALLERY_IMAGES
 
   const initialForm = useMemo<ProductFormState>(() => {
     if (product) {
@@ -373,7 +396,10 @@ export default function ProductForm({
   ), [currentProductId, groupCandidates])
 
   const [form, setForm] = useState<ProductFormState>(initialForm)
-  const [imageList, setImageList] = useState(() => normalizeGallery(initialForm))
+  // Always retain/display a pre-existing admin gallery. The ordinary-user
+  // limit controls additions; it must not truncate positions 4-5 merely
+  // because someone edited an unrelated product field.
+  const [imageList, setImageList] = useState(() => normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
   const [activeTab, setActiveTab] = useState<ProductFormTab>(initialTab || 'basic')
   const lastTabResetKeyRef = useRef<string>(`${currentProductId}:${initialTab || 'basic'}`)
   const [supplierList, setSupplierList] = useState<SupplierOption[]>([])
@@ -548,7 +574,7 @@ export default function ProductForm({
       cost_price_khr: editablePrice(initialForm.cost_price_khr),
       parent_id: initialForm.parent_id ? Number(initialForm.parent_id) : null,
     })
-    setImageList(normalizeGallery(initialForm))
+    setImageList(normalizeGallery(initialForm, ADMIN_MAX_PRODUCT_GALLERY_IMAGES))
     // Defense-in-depth on top of the Products.tsx memoization fix (see
     // that file's comment on `modalProduct`): only reset the active tab
     // when this is genuinely a different product (or the caller asked
@@ -563,7 +589,7 @@ export default function ProductForm({
       setNameUnlocked(false)
       setNameUnlockConfirmOpen(false)
     }
-  }, [initialForm, initialTab, currentProductId])
+  }, [initialForm, initialTab, currentProductId, imageLimit])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -619,7 +645,7 @@ export default function ProductForm({
     if (imageUploading || imageUploadInFlightRef.current) return
     imageUploadInFlightRef.current = true
     try {
-      const remaining = Math.max(0, MAX_PRODUCT_GALLERY_IMAGES - imageList.length)
+      const remaining = Math.max(0, imageLimit - imageList.length)
       if (!remaining) {
         imageUploadInFlightRef.current = false
         return
@@ -636,7 +662,7 @@ export default function ProductForm({
       // images already on the product + every file in this batch), not just
       // this batch alone -- see buildGalleryImageName above.
       const existingCount = imageList.length
-      const totalAfterBatch = Math.min(5, existingCount + files.length)
+      const totalAfterBatch = Math.min(imageLimit, existingCount + files.length)
       for (const [index, file] of files.entries()) {
         const uploaded = await withLoaderTimeout(
           async () => (await loadProductImageUploadTransportModule()).uploadProductImage({
@@ -657,7 +683,7 @@ export default function ProductForm({
       setImageList((current) => {
         const next = [...current]
         stagedImages.forEach((url) => {
-          if (!next.includes(url) && next.length < 5) next.push(url)
+          if (!next.includes(url) && next.length < imageLimit) next.push(url)
         })
         return next
       })
@@ -745,7 +771,10 @@ export default function ProductForm({
       out_of_stock_threshold: parseNumericInput(form.out_of_stock_threshold),
       expiry_date: form.expiry_date || null,
       expiry_alert_days: parseNumericInput(form.expiry_alert_days, 30),
-      image_gallery: imageList.slice(0, MAX_PRODUCT_GALLERY_IMAGES),
+      // Positions 4-5 may be an existing admin-created gallery. They are
+      // preserved on ordinary edits; all add paths above still stop at the
+      // caller's 3/5 action limit.
+      image_gallery: imageList.slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES),
       image_path: imageList[0] || '',
       is_group: form.parent_id ? 0 : (Number(form.is_group) ? 1 : 0),
       parent_id: form.parent_id ? Number(form.parent_id) : null,
@@ -819,7 +848,11 @@ export default function ProductForm({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{tr('upload_image', 'Upload Image', 'បង្ហោះរូបភាព')}</p>
-              {imagesOwnedByGroupLead ? null : <p className="text-xs text-gray-400">{imageList.length}/{MAX_PRODUCT_GALLERY_IMAGES}</p>}
+              {imagesOwnedByGroupLead ? null : (
+                <p className="text-xs text-gray-400">
+                  {imageList.length > imageLimit ? `${imageList.length} stored · add limit ${imageLimit}` : `${imageList.length}/${imageLimit}`}
+                </p>
+              )}
             </div>
             {imagesOwnedByGroupLead ? (
               /* Child row of a name group: the group is one product to the
@@ -1561,7 +1594,7 @@ export default function ProductForm({
               mediaType="image"
               title={tr('choose_product_image', 'Choose product image', 'ជ្រើសរើសរូបភាពផលិតផល')}
               onClose={() => setFilePickerOpen(false)}
-              onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= MAX_PRODUCT_GALLERY_IMAGES ? current : [...current, publicPath])}
+              onSelect={(publicPath) => setImageList((current) => current.includes(publicPath) || current.length >= imageLimit ? current : [...current, publicPath])}
             />
           ) : null}
           {scannerField ? (

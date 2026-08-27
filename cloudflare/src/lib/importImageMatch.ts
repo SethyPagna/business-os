@@ -64,6 +64,7 @@ export type ImageMatchSummary = {
 // goes through this exact same cap already; no separate per-variant
 // limit needed).
 export const MAX_IMAGES_PER_PRODUCT = 3
+export const ADMIN_MAX_IMAGES_PER_PRODUCT = 5
 
 // A fuzzy match below this score is treated as no match at all -- better
 // to leave an image "unmatched" (operator can still hand-assign it via

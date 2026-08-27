@@ -4,7 +4,7 @@ import { paginateProductFamilies } from '../lib/familyPagination'
 import { cachedJsonResponse, getVersion, bumpVersion } from '../lib/cache'
 import { matchLibraryImagesStrict } from '../lib/importImageMatch'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions } from '../lib/permissions'
+import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
@@ -17,7 +17,7 @@ import { attachBatchCounts } from '../lib/productBatches'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
-import { MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
+import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import {
   buildFtsMatchExpression,
   buildHybridMatchClause,
@@ -80,12 +80,52 @@ import {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
   seedBranchStockForNewProduct, seedInitialBatchForNewProduct, isImageOnlyWritePayload, restrictToImageOnlyFields,
-  normalizeMultiValue,
+  normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
   seedBranchStockForNewProduct, seedInitialBatchForNewProduct,
+}
+
+function imageLimitForUser(user: SessionUser): number {
+  return isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT
+}
+
+async function validateImageGalleryPayload(
+  env: Env,
+  user: SessionUser,
+  body: Record<string, unknown>,
+  productId?: string,
+): Promise<ProductImageLimitError | null> {
+  if (!('image_gallery' in body)) return null
+  try {
+    body.image_gallery = validateProductImageGallery(body.image_gallery, imageLimitForUser(user))
+    return null
+  } catch (error) {
+    if (error instanceof ProductImageLimitError) {
+      // Existing admin galleries can be preserved/reordered/reduced by a
+      // normal editor, but the editor cannot introduce a fourth/fifth path.
+      if (productId && !isAdminControlUser(user)) {
+        const rows = await getDb(env).prepare(`
+          SELECT image_path FROM product_images
+          WHERE product_id = @id
+          ORDER BY sort_order ASC, id ASC
+        `).all<{ image_path: string }>({ id: productId })
+        const preserved = validatePreservedProductImageGallery(
+          body.image_gallery,
+          rows.map((row) => row.image_path),
+          ADMIN_MAX_IMAGES_PER_PRODUCT,
+        )
+        if (preserved) {
+          body.image_gallery = preserved
+          return null
+        }
+      }
+      return error
+    }
+    throw error
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -352,7 +392,9 @@ async function attachImageGallery(env: Env, products: Array<Record<string, unkno
     byProduct.get(row.product_id)!.push(row.image_path)
   }
   return products.map((product) => {
-    const gallery = sanitizeMediaList(byProduct.get(Number(product.id)) || []).slice(0, MAX_IMAGES_PER_PRODUCT)
+    // Admins may deliberately store images 4-5. Reads return the complete
+    // stored gallery to every viewer; only mutation authority differs.
+    const gallery = sanitizeMediaList(byProduct.get(Number(product.id)) || []).slice(0, ADMIN_MAX_IMAGES_PER_PRODUCT)
     const fallbackImage = sanitizeMediaList([product.image_path as string])[0] || null
     if (!gallery.length && fallbackImage) gallery.push(fallbackImage)
     return {
@@ -931,6 +973,15 @@ app.post('/', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  const imageLimitError = await validateImageGalleryPayload(c.env, user, body)
+  if (imageLimitError) {
+    return c.json({
+      error: imageLimitError.message,
+      code: imageLimitError.code,
+      limit: imageLimitError.limit,
+      supplied: imageLimitError.supplied,
+    }, 409)
+  }
 
   // Review Required tier (progress.md's "Permissions UI redesign" item):
   // unlike Fees (which only queues delete), Products queues every write --
@@ -983,7 +1034,7 @@ app.post('/', async (c) => {
 
   const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
   if ('image_gallery' in body) {
-    const gallery = await syncProductImageGallery(c.env, id as number, body.image_gallery)
+    const gallery = await syncProductImageGallery(c.env, id as number, body.image_gallery, imageLimitForUser(user))
     if (item) (item as Record<string, unknown>).image_gallery = gallery
   }
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
@@ -995,7 +1046,6 @@ app.put('/:id', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const id = c.req.param('id')
-
   // Image-only restricted role: normally blocked by the tier==='none' check
   // below (they have no real `products` grant), but let through here ONLY
   // when every key in the body is the one field this role is allowed to
@@ -1008,6 +1058,15 @@ app.put('/:id', async (c) => {
   const isImageOnlyEdit = isImageOnlyRead(user, 'products') && isImageOnlyWritePayload(body)
   if (getActionTier(user, 'products', 'edit') === 'none' && !isImageOnlyEdit) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
+  if (imageLimitError) {
+    return c.json({
+      error: imageLimitError.message,
+      code: imageLimitError.code,
+      limit: imageLimitError.limit,
+      supplied: imageLimitError.supplied,
+    }, 409)
   }
 
   // Image-only edits are never queued for review -- 'review' tier and this
@@ -1062,7 +1121,10 @@ app.put('/:id', async (c) => {
   const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
   if (!item) return c.json({ error: 'Product not found or unchanged' }, 404)
   if ('image_gallery' in body) {
-    const gallery = await syncProductImageGallery(c.env, id, body.image_gallery)
+    // validateImageGalleryPayload already proved this is either inside the
+    // caller's limit or a preservation-only edit of an existing admin
+    // gallery, so the writer may retain all five stored positions.
+    const gallery = await syncProductImageGallery(c.env, id, body.image_gallery, ADMIN_MAX_IMAGES_PER_PRODUCT)
     ;(item as Record<string, unknown>).image_gallery = gallery
   }
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))

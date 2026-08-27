@@ -10,7 +10,7 @@ import { getContrastingTextColor } from '../../../utils/color.ts'
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { getVisibleProductBatches } from '../../../utils/productBatches.ts'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
-import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 
 const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescriptionDetailModal'), 'products-description-detail-modal')
 
@@ -136,7 +136,7 @@ export default function ProductDetailModal({
   const marginUsd = sellingUsd - purchaseUsd
   const marginPct = sellingUsd > 0 ? (marginUsd / sellingUsd) * 100 : 0
   const gallery = Array.isArray(p?.image_gallery) && p.image_gallery.length
-    ? p.image_gallery.filter((imagePath): imagePath is string => Boolean(imagePath)).slice(0, MAX_PRODUCT_GALLERY_IMAGES)
+    ? p.image_gallery.filter((imagePath): imagePath is string => Boolean(imagePath)).slice(0, ADMIN_MAX_PRODUCT_GALLERY_IMAGES)
     : (p?.image_path ? [p.image_path] : [])
   const primaryImage = gallery[0] || ''
   const unitColor = p.unit ? unitMap?.[p.unit]?.color || '' : ''

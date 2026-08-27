@@ -159,8 +159,44 @@ export function normalizeMultiValue(primary: unknown, rawMulti: unknown): string
 }
 
 
-export async function syncProductImageGallery(env: Env, productId: number | string, rawGallery: unknown): Promise<string[]> {
-  const gallery = sanitizeMediaList(rawGallery).slice(0, MAX_IMAGES_PER_PRODUCT)
+export class ProductImageLimitError extends Error {
+  readonly code = 'product_image_limit_exceeded'
+  constructor(readonly limit: number, readonly supplied: number) {
+    super(`A product can have at most ${limit} images; ${supplied} unique images were supplied.`)
+    this.name = 'ProductImageLimitError'
+  }
+}
+
+export function validateProductImageGallery(rawGallery: unknown, maxImages = MAX_IMAGES_PER_PRODUCT): string[] {
+  const limit = Math.max(0, Math.floor(Number(maxImages) || 0))
+  const gallery = sanitizeMediaList(rawGallery)
+  if (gallery.length > limit) throw new ProductImageLimitError(limit, gallery.length)
+  return gallery
+}
+
+// A non-admin editing a product that already has an admin-created 4/5-image
+// gallery must not silently erase those extra images. Permit only a bounded
+// reorder/removal of paths already stored; adding any new path still has to
+// satisfy the normal three-image limit.
+export function validatePreservedProductImageGallery(
+  rawGallery: unknown,
+  existingGallery: unknown,
+  maxStoredImages: number,
+): string[] | null {
+  const gallery = sanitizeMediaList(rawGallery)
+  const maxStored = Math.max(0, Math.floor(Number(maxStoredImages) || 0))
+  if (gallery.length > maxStored) return null
+  const existing = new Set(sanitizeMediaList(existingGallery))
+  return gallery.every((path) => existing.has(path)) ? gallery : null
+}
+
+export async function syncProductImageGallery(
+  env: Env,
+  productId: number | string,
+  rawGallery: unknown,
+  maxImages = MAX_IMAGES_PER_PRODUCT,
+): Promise<string[]> {
+  const gallery = validateProductImageGallery(rawGallery, maxImages)
   const db = getDb(env)
   await db.batch([
     { sql: `DELETE FROM product_images WHERE product_id = @id`, params: { id: productId } },
