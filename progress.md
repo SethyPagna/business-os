@@ -204,7 +204,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 | # | Task | Status |
 |---|---|---|
-| 2.1 | **Unified Add/Sale/Reconciliation import — FULLY SPECIFIED (Part 354), intake/classification PARTIAL (Part 357).** See [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The 10-column frontend contract/parser, action kernel, bounded product/branch/current-stock lookup and internal analyze dispatcher are built and tested. Ambiguous identities have no actionable plan; the public type remains closed and apply explicitly fails closed until its dedicated transaction/idempotency writer exists. **Still to wire:** cross-window sale/conflict sealing, review Confirm Action gate, transactional apply and public two-screen route/UI. | intake/classify done; apply/UI open |
+| 2.1 | **Unified Add/Sale/Reconciliation import — backend COMPLETE (Part 359); UI open.** See [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The 10-column contract/parser, action kernel, bounded lookup, analyze dispatcher, cross-window conflict sealing, server-gated approval, and now the **full transactional apply engine** (atomic idempotent add/create writers + grouped-sale FIFO writer + `applyStockActionsJob` orchestration) are built and tested end-to-end. Apply is oversell-proof (transaction-enforced CHECK), partial-receipt-proof, per-unit error-isolated, and whole-job idempotent. **Still open:** the public `stock_actions` allow-list stays closed until the §13 two-screen import UI exists — engine ready, creation gated. | backend done; UI open |
 | 2.2 | **Import review / resolve screen** finished. | not started |
 | 2.3 | **Image auto-wire button — frontend half.** **DONE (Part 354), needs deploy.** `WireImagesReviewModal` built (grouped per product, ordered by `_1/_2/_3`, shows would-replace + unmatched + ambiguous); wired into the Products **Manage** menu (gated on the `products/image` action), the **Library** page next to Upload, and the import modal's result step for the per-job wire endpoint. **UNWIRE** shipped too: `POST /api/products/unwire-images` (detach-only, files stay in the Library; empty id list refused, `all:true` required to clear everything) with a disclosure in the modal. **Found + fixed a real bug while building it:** the apply endpoint ran one `UPDATE image_path` per matched image, so a 3-photo product kept only the last and `product_images` was never written — now goes through `syncProductImageGallery`. `test-wire-images-gallery-pure.cjs` (9 checks). |
 
@@ -331,6 +331,43 @@ marker; injected failure rolls everything back and retry cannot double stock.
 **Still closed:** grouped-sale/FIFO deduction writer, apply orchestration,
 immutable whole-plan hash, public `stock_actions` allow-list and §13 review UI.
 Commits: `a09b2996`, `ea57e403`, `9fd5c0cf`, `85fe2c8b`.
+
+**Part 359 — grouped-sale writer + apply engine WIRED (committed, needs deploy).**
+Item 4's apply path is now complete and the engine is live-in-code (creation
+still gated, see below). The atomic grouped-sale writer (`applyUnifiedStockSale`)
+commits one receipt per `saleGroupKey`: sale header, line items, FIFO
+allocations across lots (earliest expiry first, explicit lot labels reserved
+before FIFO), branch/batch/product stock deductions, and the idempotency seal
+— all or nothing. Availability is a **transaction-enforced CHECK** (migration
+`0057`'s `import_stock_action_guards`), so a concurrent sale can never make an
+import silently clamp or oversell; the old POS `MAX(0,…)` clamp gap does not
+exist here. `runImportApply` no longer fails closed on `stock_actions`: a
+dedicated, **isolated** `applyStockActionsJob` classifies the sheet, groups
+rows into receipts, and dispatches each `create`/`add`/`sale` through the
+atomic writers — it never reaches the generic products/sales-shaped write tail,
+so no existing import type can be disturbed by it. Design decisions worth
+keeping: (a) a **single whole-sheet pass**, not the chunked cursor — sale
+grouping depends on the resolver's mode + per-branch numbers (a blank-action
+reconcile drop is an inferred daily sale), which no SQL `GROUP BY` can
+reproduce; windowing by any SQL key would split an inferred receipt and the
+writer's idempotency seal would silently drop the second half. Kept
+operator-scale by `STOCK_ACTION_MAX_UNITS`. (b) **Partial-receipt prevention** —
+a blocked line has no `saleGroupKey`, so its would-be key is re-derived and the
+whole receipt is poisoned; a sale group never commits some lines and drops the
+rest. (c) **Per-unit error isolation** — an oversell/guard failure fails only
+its own group (`completed_with_errors`); every other unit still applies. (d)
+**Whole-job retry is idempotent** — no double receipt, no double deduction. The
+apply-phase finalize was extracted into one shared `finalizeImportApply` so the
+generic and stock-action paths can never disagree on how a finished import is
+recorded (same single-source-of-truth rule as `attachBatchCounts`).
+**Still closed on purpose:** the public `stock_actions` allow-list
+(`ALLOWED_TYPES`) still omits the type — the engine is ready and safe, but
+CREATION stays gated until the §13 two-screen import UI lands, so no half-wired
+feature is exposed. Commits: `0e7192bb` (grouped writer), this part's apply-engine
+commit. Tests: `test-stock-action-sale-commit-pure.cjs` (writer: FIFO, oversell,
+rollback, retry, bounds), `test-stock-action-apply-pure.cjs` (engine end-to-end:
+add / create / FIFO sale group / whole-job idempotency / oversell isolation /
+partial-receipt prevention, against a real in-memory SQLite).
 
 ### 13 — Import UX: exactly TWO screens, ALL imports, ALL pages (Part 354)
 
@@ -844,6 +881,8 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Import stock actions (§12) | `test-stock-action-resolver-pure.cjs` | 16 checks on DIRECT/RECONCILE deltas, sale grouping, cost/batch conflict gating |
 | Unified stock intake (§12, Part 357) | `test-stock-action-import-pure.cjs` | exact 10 columns, strict numbers/dates, product ambiguity fail-closed, Shop/Warehouse resolution, bounded narrow D1 reads, direct/reconcile plans |
 | Stock-action sealing/apply (§12, Part 358) | `test-stock-action-seal-pure.cjs`, `test-stock-action-commit-pure.cjs`, `test-stock-action-approval-pure.cjs` | cross-window conflict catch + retry de-dup; injected transaction failure rolls back ledger/batch/stock/movement; retry cannot double-add; stable product creation; three-permission/state/Confirm Action server gate |
+| Grouped-sale writer + apply engine (§12, Part 359) | `test-stock-action-sale-commit-pure.cjs`, `test-stock-action-apply-pure.cjs` | writer: one receipt per group, FIFO across lots (explicit label reserved before FIFO), aggregate + batch oversell fail via transaction-enforced CHECK, injected mid-tx failure rolls back, retry de-dup, hard group-size bounds. Engine end-to-end (real in-memory SQLite): add / create / FIFO sale group; whole-job retry adds no second receipt; an oversell fails only its group while an independent add still applies; a sale group with an unresolved sibling line fails wholesale (never a partial receipt) |
+| Import warning parity (regression) | `test-import-warning-detail-pure.cjs` | frontend `ImportReportModal` `SERIOUS_KINDS` must match backend `SERIOUS_IMPORT_WARNING_KINDS` — caught a gap where `stock_action_conflict` would have rendered under "Other warnings" and been missed |
 | Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
