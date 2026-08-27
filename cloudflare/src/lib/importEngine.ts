@@ -75,6 +75,7 @@ import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './sal
 import { incrementBatchStockStatement } from './productBatches'
 import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { classifyUnifiedStockActions } from './stockActionCatalog'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -90,7 +91,7 @@ import {
 // happens it must stop appearing as a match candidate/unmatched entry
 // on every subsequent analyze, hence the status exclusion below.
 
-export type ImportType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts' | 'inventory' | 'sales'
+export type ImportType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts' | 'inventory' | 'sales' | 'stock_actions'
 
 export type RowAction = 'create' | 'update' | 'skip' | 'error'
 
@@ -103,7 +104,7 @@ export type RowAction = 'create' | 'update' | 'skip' | 'error'
 // callsite that doesn't bother threading a specific kind through; the
 // report still counts and lists it, just under a generic bucket instead of
 // silently dropping it from the summary.
-export type ImportWarningKind = 'negative_stock' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'other'
+export type ImportWarningKind = 'negative_stock' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'other'
 
 export type ImportRowWarning = { kind: ImportWarningKind; message: string }
 
@@ -146,6 +147,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   membership_mismatch: 'Membership number belongs to a different name on file',
   membership_phone_conflict: 'Membership number and phone number belong to different customers on file',
   duplicate_row_match: 'Two rows in this file matched the same existing contact',
+  stock_action_conflict: 'Stock action needs explicit confirmation',
   other: 'Other warning',
 }
 
@@ -153,7 +155,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
 // specifically (as opposed to a routine "just so you know") -- used to
 // decide what surfaces in the import report / dashboard / audit log
 // without the caller needing its own copy of this list.
-export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match'])
+export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict'])
 
 // Counts DISTINCT rows that carry at least one warning whose kind is in
 // `kinds` -- NOT the sum of summarizeImportWarnings' per-kind group counts.
@@ -2593,6 +2595,7 @@ async function classifyRows(db: D1Compat, type: ImportType, rows: ParsedCsvRow[]
   if (type === 'suppliers') return classifyContacts(db, 'suppliers', rows, policyJson)
   if (type === 'delivery_contacts') return classifyContacts(db, 'delivery_contacts', rows, policyJson)
   if (type === 'inventory') return classifyInventory(db, rows, getInventoryImportAction(policyJson))
+  if (type === 'stock_actions') return classifyUnifiedStockActions(db, rows, policyJson)
   return classifySales(db, rows)
 }
 
@@ -3591,6 +3594,15 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
 
     const job = await db.prepare(`SELECT type, policy_json FROM import_jobs WHERE id = @id`).get<{ type: ImportType; policy_json: string | null }>({ id: jobId })
     if (!job) throw new Error('Import job not found')
+    // Fail closed until stock_actions' dedicated idempotent writer is wired.
+    // The generic tail of this function is intentionally sales-shaped; a
+    // new type must never reach it by fallthrough and mutate sales tables.
+    // The route allow-list also keeps this type private in the meantime,
+    // making this a second server-side safeguard against manually inserted
+    // or stale job rows.
+    if (job.type === 'stock_actions') {
+      throw new Error('Unified stock-action apply is not enabled until its transactional writer is installed')
+    }
 
     const stillMaterializing = await ensureSourceRowsMaterialized(env, db, jobId, 'apply')
     if (stillMaterializing) {
