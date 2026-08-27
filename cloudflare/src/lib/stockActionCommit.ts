@@ -22,6 +22,16 @@ export interface UnifiedStockCommitResult {
   alreadyApplied: boolean
 }
 
+export interface UnifiedStockCreateProductInput {
+  jobId: string
+  identityKey: string
+  productName: string
+  barcode?: string | null
+  sellingPriceUsd?: number | null
+  vipPriceUsd?: number | null
+  costPriceUsd?: number | null
+}
+
 function positiveFinite(value: unknown, field: string): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${field} must be greater than 0`)
@@ -58,6 +68,60 @@ function pendingGuard(): string {
     SELECT 1 FROM import_stock_action_commits
     WHERE job_id = @jobId AND action_key = @actionKey AND status = 'pending'
   )`
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStockCreateProductInput): Promise<{ productId: number; created: boolean; clientRequestId: string }> {
+  const jobId = String(input.jobId || '').trim()
+  const identityKey = String(input.identityKey || '').trim()
+  const productName = String(input.productName || '').trim()
+  if (!jobId) throw new Error('Import job id is required')
+  if (!identityKey) throw new Error('Product identity is required')
+  if (!productName) throw new Error('Product name is required')
+
+  const identityHash = await sha256Hex(`${jobId}\n${identityKey}`)
+  const clientRequestId = `stock-import:${jobId}:${identityHash}`
+  let product = await db.prepare(`
+    SELECT id FROM products WHERE client_request_id = @clientRequestId
+  `).get<{ id: number }>({ clientRequestId })
+  let created = false
+  if (!product) {
+    const inserted = await db.prepare(`
+      INSERT OR IGNORE INTO products (
+        name, barcode, unit, selling_price_usd, special_price_usd, cost_price_usd,
+        stock_quantity, is_active, client_request_id, created_at, updated_at
+      ) VALUES (
+        @productName, @barcode, 'pcs', @sellingPriceUsd, @vipPriceUsd, @costPriceUsd,
+        0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+    `).run({
+      productName,
+      barcode: String(input.barcode || '').trim() || null,
+      sellingPriceUsd: optionalMoney(input.sellingPriceUsd) ?? 0,
+      vipPriceUsd: optionalMoney(input.vipPriceUsd) ?? 0,
+      costPriceUsd: optionalMoney(input.costPriceUsd) ?? 0,
+      clientRequestId,
+    })
+    created = inserted.changes === 1
+    product = await db.prepare(`
+      SELECT id FROM products WHERE client_request_id = @clientRequestId
+    `).get<{ id: number }>({ clientRequestId })
+  }
+  const productId = Number(product?.id || 0)
+  if (!Number.isSafeInteger(productId) || productId <= 0) throw new Error('Could not resolve the imported product after creation')
+
+  // Safe to repeat after any interruption. This is deliberately separate
+  // from the product INSERT because the generated id must be read first;
+  // INSERT OR IGNORE makes the second half retry-idempotent as well.
+  await db.prepare(`
+    INSERT OR IGNORE INTO branch_stock (product_id, branch_id, quantity)
+    SELECT @productId, id, 0 FROM branches WHERE is_active = 1
+  `).run({ productId })
+  return { productId, created, clientRequestId }
 }
 
 export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddInput): Promise<UnifiedStockCommitResult> {

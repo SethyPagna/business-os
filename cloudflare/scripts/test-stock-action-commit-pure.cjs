@@ -21,9 +21,10 @@ const subject = compile('stockActionCommit.ts', { './db': {}, './batchCode': bat
 function setup() {
   const sqlite = new Database(':memory:')
   sqlite.exec(`
-    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, stock_quantity REAL DEFAULT 0,
-      selling_price_usd REAL DEFAULT 0, special_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0, updated_at TEXT);
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT);
+    CREATE TABLE products (id INTEGER PRIMARY KEY, name TEXT, barcode TEXT, unit TEXT, stock_quantity REAL DEFAULT 0,
+      selling_price_usd REAL DEFAULT 0, special_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
+      is_active INTEGER DEFAULT 1, client_request_id TEXT UNIQUE, created_at TEXT, updated_at TEXT);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
@@ -37,7 +38,7 @@ function setup() {
   `)
   sqlite.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.prepare(`INSERT INTO products(id, name) VALUES (10, 'Serum')`).run()
-  sqlite.prepare(`INSERT INTO branches(id, name) VALUES (1, 'Shop')`).run()
+  sqlite.prepare(`INSERT INTO branches(id, name) VALUES (1, 'Shop'), (2, 'Warehouse')`).run()
 
   const db = {
     prepare(sql) {
@@ -83,6 +84,24 @@ const input = {
   assert.strictEqual(failed.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 0)
   assert.strictEqual(failed.sqlite.prepare(`SELECT COUNT(*) AS n FROM product_batches`).get().n, 0)
   assert.strictEqual(failed.sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits`).get().n, 0)
+
+  const createdDb = setup()
+  const created = await subject.ensureUnifiedStockProduct(createdDb.db, {
+    jobId: 'job-new', identityKey: 'new:new serum|NEW', productName: 'New Serum', barcode: 'NEW',
+    sellingPriceUsd: 9.999, vipPriceUsd: 8, costPriceUsd: 4,
+  })
+  const createRetry = await subject.ensureUnifiedStockProduct(createdDb.db, {
+    jobId: 'job-new', identityKey: 'new:new serum|NEW', productName: 'New Serum', barcode: 'NEW',
+    sellingPriceUsd: 99, vipPriceUsd: 88, costPriceUsd: 44,
+  })
+  assert.strictEqual(created.created, true)
+  assert.strictEqual(createRetry.created, false)
+  assert.strictEqual(createRetry.productId, created.productId)
+  assert.strictEqual(createdDb.sqlite.prepare(`SELECT COUNT(*) AS n FROM products WHERE client_request_id LIKE 'stock-import:%'`).get().n, 1)
+  assert.strictEqual(createdDb.sqlite.prepare(`SELECT COUNT(*) AS n FROM branch_stock WHERE product_id = @id AND quantity = 0`).get({ id: created.productId }).n, 2)
+  assert.deepStrictEqual(createdDb.sqlite.prepare(`SELECT selling_price_usd, special_price_usd, cost_price_usd FROM products WHERE id = @id`).get({ id: created.productId }), {
+    selling_price_usd: 10, special_price_usd: 8, cost_price_usd: 4,
+  }, 'a retry resolves the original product instead of overwriting it with retry payload prices')
   console.log('PASS unified stock add commits batch/branch/product/movement/ledger atomically and is retry-idempotent')
 })().catch((error) => {
   console.error(error)
