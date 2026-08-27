@@ -1611,6 +1611,7 @@
   "import_warning_kind_negative_stock": "Negative stock (clamped to 0)",
   "import_warning_kind_other": "Other warning",
   "import_warning_kind_sku_collision": "Same SKU, different name",
+  "import_warning_kind_stock_action_conflict": "Stock action needs explicit confirmation",
   "imported": "Imported",
   "imported_records": "Imported Records",
   "imported_rows_count": "Imported {count} row(s)",

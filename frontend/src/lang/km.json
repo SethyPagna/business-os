@@ -1611,6 +1611,7 @@
   "import_warning_kind_negative_stock": "ស្តុកអវិជ្ជមាន (កំណត់ត្រឹម ០)",
   "import_warning_kind_other": "ការព្រមានផ្សេងទៀត",
   "import_warning_kind_sku_collision": "លេខ SKU ដូចគ្នា ប៉ុន្តែឈ្មោះខុសគ្នា",
+  "import_warning_kind_stock_action_conflict": "សកម្មភាពស្តុកត្រូវការការបញ្ជាក់ច្បាស់លាស់",
   "imported": "នាំចូលបានហើយ",
   "imported_records": "កំណត់ត្រានាំចូល",
   "imported_rows_count": "បាននាំចូល {count} ជួរ",
