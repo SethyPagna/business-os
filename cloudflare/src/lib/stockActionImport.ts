@@ -190,7 +190,12 @@ export function resolveUnifiedStockImportRows(
   const resolution = resolveStockActions(stockRows, current, mode, (row) => provisional.find((item) => item.rowNumber === row.rowNumber)?.identityKey || `row:${row.rowNumber}`)
   const planByRow = new Map(resolution.plans.map((plan) => [plan.rowNumber, plan]))
   return provisional.map((row) => {
-    const plan = row.errors.length ? null : planByRow.get(row.rowNumber) || null
+    // An ambiguous catalog identity is reviewable, but never actionable.
+    // Treating it as a new product would duplicate an existing item merely
+    // because two candidates shared a barcode/name. A later reviewer choice
+    // can provide the exact product; until then apply must have no plan.
+    const unresolvedIdentity = row.productId == null && row.conflicts.length > 0
+    const plan = row.errors.length || unresolvedIdentity ? null : planByRow.get(row.rowNumber) || null
     return { ...row, plan, conflicts: [...row.conflicts, ...(plan?.conflicts || [])] }
   })
 }
