@@ -235,11 +235,11 @@ export function preflightImportJob(id: string | number): Promise<unknown> {
   )
 }
 
-function runImportJobAction(id: string | number, action: string, options: ImportJobOptions = {}, timeoutMs?: number): Promise<unknown> {
+function runImportJobAction(id: string | number, action: string, options: ImportJobOptions = {}, timeoutMs?: number, extraBody: ImportJobPayload = {}): Promise<unknown> {
   notifyImportJobActivity(action, id)
   return route(
     `importJobs:${action}:${id}`,
-    () => apiFetch('POST', `/api/import-jobs/${encodeId(id)}/${action}`, withImportDeviceInfo({ source: getSource(options) }), timeoutMs),
+    () => apiFetch('POST', `/api/import-jobs/${encodeId(id)}/${action}`, withImportDeviceInfo({ source: getSource(options), ...extraBody }), timeoutMs),
     null,
     true,
   )
@@ -249,7 +249,12 @@ export function startImportJob(id: string | number, options: ImportJobOptions = 
   return runImportJobAction(id, 'start', options)
 }
 
-export function approveImportJob(id: string | number, options: ImportJobOptions = {}): Promise<unknown> {
+// `confirmStockActions` sends confirm_stock_actions:true, the explicit
+// "Confirm Action" gate a unified stock-action import requires before it will
+// apply any conflicted plan (see cloudflare/src/routes/importJobs.ts's
+// requires_stock_action_confirmation check). Harmless for every other import
+// type and for a stock-action import with no conflicts.
+export function approveImportJob(id: string | number, options: ImportJobOptions & { confirmStockActions?: boolean } = {}): Promise<unknown> {
   // See IMPORT_JOB_SYNC_ACTION_TIMEOUT_MS's comment above -- approve
   // immediately flips status and enqueues the apply phase, which is fast on
   // its own, but this route is what Part-254-class false "server offline"
@@ -257,7 +262,8 @@ export function approveImportJob(id: string | number, options: ImportJobOptions 
   // preflight call in the same UI action was the slow one -- this timeout
   // is raised too for the same margin-of-safety reason Reset's write got
   // raised, not because /approve itself is known to be slow).
-  return runImportJobAction(id, 'approve', options, IMPORT_JOB_SYNC_ACTION_TIMEOUT_MS)
+  const extraBody = options.confirmStockActions ? { confirm_stock_actions: true } : {}
+  return runImportJobAction(id, 'approve', options, IMPORT_JOB_SYNC_ACTION_TIMEOUT_MS, extraBody)
 }
 
 export function cancelImportJob(id: string | number, options: ImportJobOptions = {}): Promise<unknown> {

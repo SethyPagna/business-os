@@ -77,7 +77,11 @@ import { Suspense } from 'react'
 
 const BulkImportModal = lazyRetry(() => import('./BulkImportModal'), 'products-bulk-import-legacy')
 const DatedStockReconciliationModal = lazyRetry(() => import('./DatedStockReconciliationModal'), 'products-dated-stock-reconciliation-import')
-const AddSaleImportModal = lazyRetry(() => import('./AddSaleImportModal'), 'products-add-sale-import')
+// Add-Sale now runs the server-backed unified stock-action import (§12/§13):
+// one sheet does create/add/sale/reconciliation through the atomic,
+// idempotent, oversell-proof engine, with a two-screen upload -> review-and-
+// confirm flow. Supersedes the old client-side AddSaleImportModal.
+const StockActionImportModal = lazyRetry(() => import('./StockActionImportModal'), 'products-stock-action-import')
 
 type TopMode = 'general' | 'replace' | 'add_sale'
 type GeneralSubOption = 'add_update' | 'dated_reconciliation'
@@ -509,7 +513,7 @@ export default function ImportModeWizard({ onClose, onDone, t, products = [], br
   if (launchedModal === 'add_sale') {
     return (
       <Suspense fallback={null}>
-        <AddSaleImportModal onClose={onClose} onDone={onDone} t={t} branches={branches} />
+        <StockActionImportModal onClose={onClose} onDone={onDone} t={t} />
       </Suspense>
     )
   }
