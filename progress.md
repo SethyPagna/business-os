@@ -633,7 +633,7 @@ pagination/cache/performance. Re-measure Cloudflare usage before each expansion.
 | # | Task | Status |
 |---|---|---|
 | 11.8 | **Add-new Delivery/Customer from POS failed.** **DONE (Part 354), needs deploy.** Diagnosed: the create returns 409 on a duplicate and the quick-add dead-ended on it. A `phone_conflict` (phone already belongs to someone) is a HARD block — now it SELECTS that existing contact instead of failing; a `possible_duplicate` retries once confirmed. `createApiError` now carries the matched contact. This also delivers the "create vs select existing" choice the user asked for. **If it still fails after deploy**, the next suspect is the `contacts` permission gate (a cashier lacking `contacts` 403s) — flag then. | done, needs deploy |
-| 11.9 | **POS must NOT show cost price.** The lot/option picker should offer only: batch, branch, barcode, damage, Selling price (label **SP**) and VIP price (label **VIP**). Cost is not a cashier-facing field. | not started |
+| 11.9 | **POS must NOT show cost price.** **DONE (Part 355), needs deploy.** The option picker (`posCore.ts::buildVariantOptionLabels`) disambiguated rows in a name group by COST when barcodes matched (stepTitle "Cost", cost-valued pills). Now it disambiguates by barcode → SELLING price → a neutral `#id`, and never reads cost; rows differing only by cost collapse to the neutral label (the batch picker settles which lot's COGS a sale draws from). stepTitle is `Barcode`/`Price`/`Option`. `posCore.test.ts` updated + a guard that no cost value ever reaches a pill. **Still open (bigger redesign):** the SP/VIP short-label price picker and the `damage` option (the latter depends on 11.13's damaged-stock chooser). | core done; SP/VIP+damage picker open |
 | 11.10 | **POS naming: "Selling price", not "Regular".** **DONE (Part 354), needs deploy.** The add-to-cart button's `posCopy('Regular')` → "Selling Price". (Also 4.5.) The SP/VIP short labels for a full price-mode picker belong to 11.9's POS redesign. |
 | 11.11 | **Discount %/$ toggles larger, fee input narrower.** **DONE (Part 354), needs deploy.** Both toggle locations (POS cart-level + CartItem per-line) bumped from `px-1.5 py-1 text-[11px]` to `text-sm` with min-width; the delivery-fee input capped from w-full to w-28. | done, needs deploy |
 
@@ -664,8 +664,8 @@ pagination/cache/performance. Re-measure Cloudflare usage before each expansion.
 
 | # | Task | Status |
 |---|---|---|
-| 11.20 | **Inventory product stats: colour, not labels, in the default view.** Healthy / low / out-of-stock as colour; the detail breakdown already carries the names. For OTHER stat cards keep the name, but also colour the values underneath. (Same intent as 5.5.) | not started |
-| 11.21 | **Branches page: too many stock stats outside.** Do it like the Inventory page's product handling — drop the many outer stock-quantity stats; per-branch branch-stock stats are fine to keep. (Same as 5.6.) | not started |
+| 11.20 | **Inventory product stats: colour, not labels, in the default view.** **DONE (Part 355), needs deploy.** The Products card's sub-line shows healthy/low/out as green/amber/red counts (labels kept as title/aria; the click-through detail keeps the names). The health→colour mapping is one shared source, new `inventory/stockHealthSummary.ts` (`buildStockHealthSegments`), tested (`stockHealthSummary.test.ts`, 5 checks). **Other stat cards** already colour their values via `cls`. (5.5.) | done (Part 355) |
+| 11.21 | **Branches page: too many stock stats outside.** **DONE (Part 355), needs deploy.** The outer row went from 7 tiles to 3 (Branches / Items / Value); the four health tiles (In Stock/Healthy/Low/Out) fold into the Items tile as one coloured sub via the SAME `buildStockHealthSegments` helper (Inventory + Branches can't disagree). Full breakdown stays on the Items detail; per-branch stats untouched. (5.6.) | done (Part 355) |
 | 11.22 | **History menu overflowed the profile modal.** **DONE (Part 354), needs deploy** — the bar's dropdown/preview defaulted to open rightward off the modal edge; now `align="right"` + `flex-shrink-0`. (Also 5.7.) | done, needs deploy |
 
 **Pricing / batches correctness (re-reported)**
@@ -811,6 +811,8 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Logo crop (16.2) | `logoImageStyle.test.ts` | preview == applied; transform-origin ties to the focus point; clamps |
 | PWA / branding (16.1/11.14) | `brandIcons.test.ts`, `performanceLoadingUx.test.ts`, `adminShellMediaGuards.test.ts` | storefront serves STATIC Leang icon+manifest, never a blob or per-merchant build; the removed favicon machinery cannot return (doesNotMatch guards) |
 | Backup restore streaming (10.1) | `test-backup-restore-stream-pure.cjs` (12 checks) + `test-backup-pure.cjs` round-trip | reads the document one row at a time; identical events under per-char + 200 random chunkings; corrupt/truncated backup throws (never silently mis-restores); the round-trip now exercises the streaming path end to end |
+| POS cost hidden (11.9) | `posCore.test.ts` | the option picker labels by barcode/selling price, never cost; a cost-only difference never surfaces a cost value on a pill |
+| Stock-health colour (11.20/11.21) | `stockHealthSummary.test.ts` (5 checks) | one healthy/low/out→colour source; order, colours, single-source contract, count coercion |
 
 ### Security posture
 
@@ -877,6 +879,7 @@ so pages cannot drift and a change lands everywhere at once.*
 | `cloudflare/src/lib/productBatches.ts::attachBatchCounts` | how a product's batch count is derived (active batches with non-zero branch stock) | Products list read, Inventory list read |
 | `cloudflare/src/lib/backup.ts::writeBackupDocument` | the streaming backup writer | `createCloudflareBackup`, `createSectionBackup` (reset) |
 | `frontend/src/components/catalog/logoImageStyle.ts::buildLogoImageStyle` | the logo crop/zoom/focus CSS | editor preview + live header (admin & storefront) |
+| `frontend/src/components/inventory/stockHealthSummary.ts::buildStockHealthSegments` | the healthy/low/out → colour mapping | Inventory products card + Branches Items tile (11.20/11.21) |
 | `frontend/src/components/products/…/productGrouping.ts` | how rows group by `name_key` and who the group lead is | Products list, group header, gallery union |
 
 ### The generalization the user asked for (candidates, not yet built)
