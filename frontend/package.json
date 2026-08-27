@@ -9,6 +9,7 @@
     "build": "vite build",
     "build:public-runtime": "node ../ops/scripts/frontend/build-public-runtime-scripts.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:library-logical": "node tests/libraryLogicalRows.test.ts",
     "check:source": "node tests/sourceSyntaxCheck.ts",
     "check:jsx": "npm run check:source",
     "preview": "vite preview",

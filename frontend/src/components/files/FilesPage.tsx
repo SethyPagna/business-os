@@ -25,6 +25,8 @@ import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { getSyncServerUrl } from '../../api/http.ts'
+import { logicalAssetDisplayName, logicalAssetDownloadPath, logicalAssetKey } from './libraryLogicalRows.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import {
   beginTrackedRequest,
@@ -91,6 +93,10 @@ interface SyncContextValue {
 
 interface FileAsset {
   id: string | number
+  logical_id?: string | null
+  logical_name?: string | null
+  physical_original_name?: string | null
+  referenceProduct?: { id: string | number; name?: string | null } | null
   original_name?: string | null
   public_path?: string | null
   browser_public_path?: string | null
@@ -297,9 +303,9 @@ function AssetPreview({ asset, onOpenPreview }: AssetPreviewProps) {
         type="button"
         onClick={() => asset && onOpenPreview?.(asset)}
         className="block aspect-[4/3] w-full cursor-zoom-in overflow-hidden rounded-2xl bg-slate-100 transition hover:opacity-90"
-        aria-label={asset.original_name || 'Preview file'}
+        aria-label={logicalAssetDisplayName(asset)}
       >
-        <img src={previewUrl || ''} alt={asset.original_name || 'File preview'} className="h-full w-full object-cover" loading="lazy" decoding="async" />
+        <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="h-full w-full object-cover" loading="lazy" decoding="async" />
       </button>
     )
   }
@@ -324,9 +330,9 @@ function AssetPreview({ asset, onOpenPreview }: AssetPreviewProps) {
 function AssetPreviewModal({ asset, onClose }: { asset: FileAsset; onClose: () => void }) {
   const previewUrl = resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path
   return (
-    <Modal title={sanitizeFallback(asset.original_name || '') || 'Preview'} onClose={onClose} size="xl">
+    <Modal title={sanitizeFallback(logicalAssetDisplayName(asset)) || 'Preview'} onClose={onClose} size="xl">
       <div className="flex max-h-[70vh] w-full items-center justify-center overflow-hidden rounded-xl bg-slate-100 dark:bg-slate-800">
-        <img src={previewUrl || ''} alt={asset.original_name || 'File preview'} className="max-h-[70vh] w-full object-contain" />
+        <img src={previewUrl || ''} alt={logicalAssetDisplayName(asset)} className="max-h-[70vh] w-full object-contain" />
       </div>
     </Modal>
   )
@@ -410,11 +416,11 @@ function getDefaultFilesPageSize(): number {
 }
 
 function downloadAssetFile(asset: FileAsset) {
-  const downloadUrl = resolvePublicAssetUrl(asset?.public_path) || asset?.browser_public_path || asset?.public_path
-  if (!downloadUrl || typeof document === 'undefined') return
+  if (!asset?.id || typeof document === 'undefined') return
+  const downloadUrl = `${getSyncServerUrl().replace(/\/$/, '')}${logicalAssetDownloadPath(asset)}`
   const link = document.createElement('a')
   link.href = downloadUrl
-  link.download = asset.original_name || ''
+  link.download = logicalAssetDisplayName(asset)
   link.rel = 'noreferrer'
   document.body.appendChild(link)
   link.click()
@@ -476,7 +482,7 @@ export default function FilesPage() {
   const [renameDraft, setRenameDraft] = useState('')
   const [previewAsset, setPreviewAsset] = useState<FileAsset | null>(null)
   const [renameSavingId, setRenameSavingId] = useState<string | number | null>(null)
-  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<number>>(() => new Set())
+  const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(() => new Set())
   // User-reported gap: single-file delete used a plain window.confirm() and
   // a generic "in use" notify with no reason and no way to proceed even
   // when the person genuinely wants to delete an in-use file. Replaced
@@ -562,12 +568,12 @@ export default function FilesPage() {
   const pageStart = files.length ? ((page - 1) * pageSize) + 1 : 0
   const pageEnd = files.length ? pageStart + files.length - 1 : 0
   const selectableFileIds = useMemo(
-    () => files.map((asset) => Number(asset?.id || 0)).filter((id) => id > 0),
+    () => files.map(logicalAssetKey),
     [files],
   )
   const allFilesSelected = selectableFileIds.length > 0 && selectableFileIds.every((id) => selectedAssetIds.has(id))
   const selectedAssets = useMemo(
-    () => files.filter((asset) => selectedAssetIds.has(Number(asset?.id || 0))),
+    () => files.filter((asset) => selectedAssetIds.has(logicalAssetKey(asset))),
     [files, selectedAssetIds],
   )
   const bulkDeletableAssets = useMemo(
@@ -689,7 +695,7 @@ export default function FilesPage() {
       setTotalFiles(Number(result?.total || nextFiles.length || 0))
       filesLoadedOnceRef.current = true
       setSelectedAssetIds((current) => {
-        const validIds = new Set(nextFiles.map((asset) => Number(asset?.id || 0)).filter((id) => id > 0))
+        const validIds = new Set(nextFiles.map(logicalAssetKey))
         return new Set([...current].filter((id) => validIds.has(id)))
       })
     } catch (error) {
@@ -959,13 +965,12 @@ export default function FilesPage() {
     }
   }
 
-  function toggleAssetSelection(assetId: string | number) {
-    const numericId = Number(assetId || 0)
-    if (!numericId) return
+  function toggleAssetSelection(asset: FileAsset) {
+    const rowKey = logicalAssetKey(asset)
     setSelectedAssetIds((current) => {
-      const next = new Set<number>(current)
-      if (next.has(numericId)) next.delete(numericId)
-      else next.add(numericId)
+      const next = new Set<string>(current)
+      if (next.has(rowKey)) next.delete(rowKey)
+      else next.add(rowKey)
       return next
     })
   }
@@ -1405,16 +1410,16 @@ export default function FilesPage() {
           {files.length ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
               {files.map((asset) => {
-                const assetId = Number(asset?.id || 0)
-                const selected = selectedAssetIds.has(assetId)
+                const rowKey = logicalAssetKey(asset)
+                const selected = selectedAssetIds.has(rowKey)
                 const assetUrl = resolvePublicAssetUrl(asset.public_path) || asset.browser_public_path || asset.public_path || ''
                 return (
-                  <div key={asset.id} className="card min-w-0 overflow-hidden p-3 sm:p-4">
+                  <div key={rowKey} className="card min-w-0 overflow-hidden p-3 sm:p-4">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <button
                         type="button"
                         className="inline-flex min-w-0 items-center gap-2 rounded-full px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
-                        onClick={() => toggleAssetSelection(asset.id)}
+                        onClick={() => toggleAssetSelection(asset)}
                       >
                         {selected ? <CheckSquare className="h-4 w-4 text-blue-600" /> : <Square className="h-4 w-4" />}
                         <span>{tr('select', 'Select')}</span>
@@ -1428,7 +1433,7 @@ export default function FilesPage() {
                     </div>
                     <AssetPreview asset={asset} onOpenPreview={setPreviewAsset} />
                     <div className="mt-3 min-w-0">
-                      {canManageLibrary && renamingAssetId === asset.id ? (
+                      {!asset.referenceProduct && canManageLibrary && renamingAssetId === asset.id ? (
                         <div className="flex items-center gap-1.5">
                           <input
                             type="text"
@@ -1445,20 +1450,25 @@ export default function FilesPage() {
                             aria-label={tr('rename_file', 'Rename file')}
                           />
                         </div>
-                      ) : canManageLibrary ? (
+                      ) : !asset.referenceProduct && canManageLibrary ? (
                         <button
                           type="button"
                           className="block w-full truncate rounded px-0.5 text-left text-sm font-semibold leading-5 text-slate-900 hover:bg-slate-100 dark:text-white dark:hover:bg-slate-800"
                           title={tr('rename_file_hint', 'Click to rename')}
                           onClick={() => startRenameAsset(asset)}
                         >
-                          {asset.original_name || '-'}
+                          {logicalAssetDisplayName(asset)}
                         </button>
                       ) : (
-                        <div className="block w-full truncate px-0.5 text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={asset.original_name || ''}>
-                          {asset.original_name || '-'}
+                        <div className="block w-full truncate px-0.5 text-sm font-semibold leading-5 text-slate-900 dark:text-white" title={logicalAssetDisplayName(asset)}>
+                          {logicalAssetDisplayName(asset)}
                         </div>
                       )}
+                      {asset.referenceProduct ? (
+                        <div className="mt-1 truncate px-0.5 text-[10px] text-slate-500" title={asset.physical_original_name || asset.original_name || ''}>
+                          {tr('one_stored_file', 'One stored file')}: {asset.physical_original_name || asset.original_name || '-'}
+                        </div>
+                      ) : null}
                       <div className="mt-1 truncate rounded-xl bg-slate-50 px-2 py-1 text-[10px] leading-4 text-slate-500 dark:bg-slate-800/60" title={assetUrl}>{assetUrl}</div>
                       <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 text-[11px] text-slate-500">
                         <span>{asset.media_type || 'file'}</span>
@@ -1467,12 +1477,12 @@ export default function FilesPage() {
                         <span className="text-right">{formatDateTime(asset.created_at)}</span>
                       </div>
                     </div>
-                    <div className={`mt-4 grid gap-2 ${canManageLibrary ? 'grid-cols-3' : 'grid-cols-1'}`}>
+                    <div className={`mt-4 grid gap-2 ${canManageLibrary ? (asset.referenceProduct ? 'grid-cols-2' : 'grid-cols-3') : 'grid-cols-1'}`}>
                       <button type="button" className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3" onClick={() => navigator.clipboard?.writeText(assetUrl).catch(() => {})} title={tr('copy', 'Copy')}>
                         <Copy className="inline h-4 w-4 sm:mr-2" />
                         <span className="hidden sm:inline">{tr('copy', 'Copy')}</span>
                       </button>
-                      {canManageLibrary ? (
+                      {canManageLibrary && !asset.referenceProduct ? (
                         <button
                           type="button"
                           className="btn-secondary min-w-0 justify-center px-2.5 text-sm sm:px-3"
