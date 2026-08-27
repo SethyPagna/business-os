@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { unwrapImportJob, deriveStockImportReview } from '../src/components/products/import/stockActionImportModel.ts'
+import { unwrapImportJob, unwrapStockActionReview, describeStockActionReviewRow, deriveStockImportReview } from '../src/components/products/import/stockActionImportModel.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(join(here, '..', rel), 'utf8')
@@ -24,6 +24,24 @@ test('unwrapImportJob accepts {job:{id}}, a bare job, and rejects id-less/garbag
   assert.equal(unwrapImportJob({}), null)
   assert.equal(unwrapImportJob(null), null)
   assert.equal(unwrapImportJob('nope'), null)
+})
+
+test('review payload unwraps safely and describes the exact branch plan', () => {
+  const page = unwrapStockActionReview({
+    rows: [{
+      rowNumber: 2, action: 'update', identifier: 'S10', message: null,
+      data: {
+        branchRefs: [{ branchId: 1, branchName: 'Shop', value: 3 }],
+        plan: { branchActions: [{ branchId: 1, direction: 'sale', quantity: 3 }] },
+      },
+    }],
+    page: 2, pageSize: 50, total: 75,
+  })
+  assert.equal(page.rows.length, 1)
+  assert.equal(page.page, 2)
+  assert.equal(page.total, 75)
+  assert.equal(describeStockActionReviewRow(page.rows[0]), 'Shop: sale 3')
+  assert.equal(describeStockActionReviewRow({ rowNumber: 3, action: 'error', identifier: null, message: 'bad' }), 'Blocked')
 })
 
 test('still analyzing until a terminal status is reached', () => {
@@ -75,6 +93,8 @@ test('StockActionImportModal drives the server job with type stock_actions + con
   assert.ok(/type:\s*'stock_actions'/.test(src), 'creates a stock_actions job')
   assert.ok(src.includes('stock_action_mode: mode'), 'sends the Direct/Reconcile mode in the policy')
   assert.ok(src.includes('confirmStockActions: true'), 'approves with the confirm-action gate')
+  assert.ok(src.includes('getImportJobReview'), 'loads the persisted server-resolved rows for Screen 2')
+  assert.ok(src.includes('describeStockActionReviewRow'), 'shows the exact resolved per-branch stock action')
   assert.ok(src.includes("useState<Step>('upload')"), 'starts on the upload screen')
 })
 

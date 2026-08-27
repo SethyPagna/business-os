@@ -20,6 +20,7 @@ import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import Modal from '../../shared/Modal'
+import AppSelect from '../../shared/AppSelect'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
 import { parseCsvRows } from '../../../utils/csvImport.ts'
 import {
@@ -27,6 +28,7 @@ import {
   uploadImportJobCsv,
   startImportJob,
   getImportJob,
+  getImportJobReview,
   approveImportJob,
   cancelImportJob,
 } from '../../../api/importJobsTransport.ts'
@@ -38,8 +40,11 @@ import {
 } from './unifiedStockImport.ts'
 import {
   unwrapImportJob,
+  unwrapStockActionReview,
+  describeStockActionReviewRow,
   deriveStockImportReview,
   STOCK_IMPORT_TERMINAL_ANALYZE,
+  type StockActionReviewRow,
   type StockImportJob,
 } from './stockActionImportModel.ts'
 
@@ -86,6 +91,12 @@ export default function StockActionImportModal({ onClose, onDone, t, notify }: S
   const [jobId, setJobId] = useState<string | number | null>(null)
   const [job, setJob] = useState<StockImportJob | null>(null)
   const [confirmChecked, setConfirmChecked] = useState(false)
+  const [reviewRows, setReviewRows] = useState<StockActionReviewRow[]>([])
+  const [reviewTotal, setReviewTotal] = useState(0)
+  const [reviewPage, setReviewPage] = useState(1)
+  const [reviewQuery, setReviewQuery] = useState('')
+  const [reviewFilter, setReviewFilter] = useState('all')
+  const [reviewLoading, setReviewLoading] = useState(false)
   const aliveRef = useRef(true)
 
   useEffect(() => () => { aliveRef.current = false }, [])
@@ -111,6 +122,33 @@ export default function StockActionImportModal({ onClose, onDone, t, notify }: S
     void poll()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
   }, [step, jobId])
+
+  // Screen 2's authoritative data is the analyzer's persisted row set, not
+  // the browser's initial parse. Fetch it page-by-page so the operator sees
+  // the exact resolved product/action/branch plan they are confirming.
+  useEffect(() => {
+    if (step !== 'review' || jobId == null || String(job?.status || '') !== 'awaiting_review') return
+    let cancelled = false
+    const timer = setTimeout(() => {
+      setReviewLoading(true)
+      void getImportJobReview(jobId, {
+        page: reviewPage,
+        pageSize: 50,
+        ...(reviewFilter !== 'all' ? { filter: reviewFilter } : {}),
+        ...(reviewQuery.trim() ? { query: reviewQuery.trim() } : {}),
+      }).then((payload) => {
+        if (cancelled || !aliveRef.current) return
+        const reviewPageData = unwrapStockActionReview(payload)
+        setReviewRows(reviewPageData.rows)
+        setReviewTotal(reviewPageData.total)
+      }).catch((err) => {
+        if (!cancelled && aliveRef.current) setError(err instanceof Error ? err.message : 'Could not load resolved rows.')
+      }).finally(() => {
+        if (!cancelled && aliveRef.current) setReviewLoading(false)
+      })
+    }, 250)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [step, jobId, job?.status, reviewPage, reviewQuery, reviewFilter])
 
   const readFile = async (file: File) => {
     setError('')
@@ -179,6 +217,11 @@ export default function StockActionImportModal({ onClose, onDone, t, notify }: S
     setJobId(null)
     setJob(null)
     setConfirmChecked(false)
+    setReviewRows([])
+    setReviewTotal(0)
+    setReviewPage(1)
+    setReviewQuery('')
+    setReviewFilter('all')
     setError('')
     setStep('upload')
   }
@@ -305,6 +348,82 @@ export default function StockActionImportModal({ onClose, onDone, t, notify }: S
                   {tr('stock_import_errored_note', 'Rows with errors are skipped; the rest still import. Download the error report from the progress bar after it runs.', 'ជួរដែលមានកំហុសត្រូវបានរំលង។')}
                 </div>
               ) : null}
+
+              <div className="space-y-2 rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <div className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                      {tr('stock_import_resolved_rows', 'Resolved rows', 'ជួរដែលបានដោះស្រាយ')}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {tr('stock_import_resolved_rows_help', 'This is the server plan that Confirm will apply.', 'នេះជាផែនការម៉ាស៊ីនមេដែលការបញ្ជាក់នឹងអនុវត្ត។')}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      value={reviewQuery}
+                      onChange={(event) => { setReviewQuery(event.target.value); setReviewPage(1) }}
+                      placeholder={tr('search_rows', 'Search rows…', 'ស្វែងរកជួរ…')}
+                      className="w-40 rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-xs dark:border-gray-600 dark:bg-gray-900"
+                    />
+                    <AppSelect
+                      ariaLabel={tr('filter_rows', 'Filter rows', 'ត្រងជួរ')}
+                      value={reviewFilter}
+                      onChange={(value) => { setReviewFilter(value); setReviewPage(1) }}
+                      buttonClassName="h-8 rounded-lg text-xs"
+                      options={[
+                        { value: 'all', label: tr('all_rows', 'All rows', 'ជួរទាំងអស់') },
+                        { value: 'create', label: tr('create', 'Create', 'បង្កើត') },
+                        { value: 'update', label: tr('update', 'Update', 'កែប្រែ') },
+                        { value: 'skip', label: tr('skip', 'Skip', 'រំលង') },
+                        { value: 'error', label: tr('errors', 'Errors', 'កំហុស') },
+                      ]}
+                    />
+                  </div>
+                </div>
+
+                <div className="max-h-72 overflow-auto rounded-lg border border-gray-100 dark:border-gray-800">
+                  <table className="min-w-full text-left text-xs">
+                    <thead className="sticky top-0 bg-gray-50 text-gray-500 dark:bg-gray-900 dark:text-gray-400">
+                      <tr>
+                        <th className="px-2 py-2">#</th>
+                        <th className="px-2 py-2">{tr('product', 'Product', 'ផលិតផល')}</th>
+                        <th className="px-2 py-2">{tr('resolved_action', 'Resolved action', 'សកម្មភាពដែលបានដោះស្រាយ')}</th>
+                        <th className="px-2 py-2">{tr('status', 'Status', 'ស្ថានភាព')}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                      {reviewRows.map((row) => (
+                        <tr key={row.rowNumber} className={row.message ? 'bg-amber-50/60 dark:bg-amber-950/20' : ''}>
+                          <td className="whitespace-nowrap px-2 py-2 text-gray-500">{row.rowNumber}</td>
+                          <td className="px-2 py-2">
+                            <div className="font-medium text-gray-800 dark:text-gray-100">{row.data?.productName || row.identifier || '—'}</div>
+                            <div className="text-gray-500 dark:text-gray-400">{row.data?.date || ''}{row.data?.action ? ` · ${row.data.action}` : ''}</div>
+                          </td>
+                          <td className="min-w-52 px-2 py-2 text-gray-700 dark:text-gray-200">{describeStockActionReviewRow(row)}</td>
+                          <td className="min-w-44 px-2 py-2">
+                            <span className={row.action === 'error' ? 'font-medium text-red-600 dark:text-red-400' : 'font-medium text-gray-700 dark:text-gray-200'}>{row.action}</span>
+                            {row.message ? <div className="mt-0.5 text-amber-700 dark:text-amber-300">{row.message}</div> : null}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {!reviewLoading && reviewRows.length === 0 ? (
+                    <div className="p-4 text-center text-xs text-gray-500">{tr('no_matching_rows', 'No matching rows.', 'រកមិនឃើញជួរដែលត្រូវគ្នា។')}</div>
+                  ) : null}
+                  {reviewLoading ? <div className="p-4 text-center text-xs text-gray-500">{tr('loading', 'Loading…', 'កំពុងផ្ទុក…')}</div> : null}
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                  <span>{reviewTotal} {tr('rows', 'rows', 'ជួរ')}</span>
+                  <div className="flex items-center gap-2">
+                    <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={reviewPage <= 1 || reviewLoading} onClick={() => setReviewPage((page) => Math.max(1, page - 1))}>{tr('previous', 'Previous', 'មុន')}</button>
+                    <span>{reviewPage} / {Math.max(1, Math.ceil(reviewTotal / 50))}</span>
+                    <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={reviewPage * 50 >= reviewTotal || reviewLoading} onClick={() => setReviewPage((page) => page + 1)}>{tr('next', 'Next', 'បន្ទាប់')}</button>
+                  </div>
+                </div>
+              </div>
             </>
           )}
 
