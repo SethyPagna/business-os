@@ -26,6 +26,16 @@ export interface ApproveGateJob {
 
 export const CONTACT_IMPORT_JOB_TYPES = new Set(['customers', 'suppliers', 'delivery_contacts'])
 
+export function shouldPromptProductConflictReviewBeforeApprove(
+  job: ApproveGateJob,
+  resolvedJobIds: ReadonlySet<string>,
+  jobId: string,
+): boolean {
+  if (String(job.type || '') !== 'products') return false
+  if (!(Number(job.summary?.warned || 0) > 0)) return false
+  return !resolvedJobIds.has(jobId)
+}
+
 // `reviewedJobIds` is the caller's own per-session "conflicts modal has
 // been opened for this job at least once" set -- this function doesn't
 // own or mutate it, so the same logic can be unit-tested with a plain

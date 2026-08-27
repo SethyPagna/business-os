@@ -11,7 +11,7 @@ import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImag
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
-import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere } from '../lib/importReviewQuery'
+import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -325,6 +325,13 @@ app.get('/:id/review', async (c) => {
       .get<{ n: number }>(unresolvedWhere.params)
     unresolvedContactConflicts = Number(unresolvedRow?.n || 0)
   }
+  let unresolvedProductConflicts = 0
+  if (String(job.type || '') === 'products') {
+    const unresolvedWhere = buildUnresolvedProductReviewWhere(id, JSON.stringify(decisionsByRowNumber))
+    const unresolvedRow = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+      .get<{ n: number }>(unresolvedWhere.params)
+    unresolvedProductConflicts = Number(unresolvedRow?.n || 0)
+  }
 
   const countRows = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
     .all<{ action: 'create' | 'update' | 'skip' | 'error'; n: number }>({ id })
@@ -342,7 +349,7 @@ app.get('/:id/review', async (c) => {
   // doesn't have to re-derive this client-side from raw per-row messages.
   const warningSummary = summarizeImportWarnings(pageResults)
 
-  return c.json({ success: true, rows: pageResultsWithDecisions, page, pageSize, total, counts, warned: warnedRow?.n || 0, warningSummary, unresolvedContactConflicts })
+  return c.json({ success: true, rows: pageResultsWithDecisions, page, pageSize, total, counts, warned: warnedRow?.n || 0, warningSummary, unresolvedContactConflicts, unresolvedProductConflicts })
 })
 
 // GET /:id/report -- the full import report for a finished (or in-progress)
@@ -1075,6 +1082,25 @@ app.post('/:id/approve', async (c) => {
         success: false,
         error: `Review every contact conflict before applying this import. ${Number(unresolved?.n || 0)} remain unresolved.`,
         code: 'contact_conflicts_unresolved',
+        unresolvedRows: Number(unresolved?.n || 0),
+      }, 409)
+    }
+  }
+  if (String(job.type || '') === 'products') {
+    const decisions = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object'
+      ? policy.decisionsByRowNumber
+      : {}
+    const unresolvedWhere = buildUnresolvedProductReviewWhere(id, JSON.stringify(decisions))
+    const unresolved = await getDb(c.env).prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+      .get<{ n: number }>(unresolvedWhere.params)
+    if (Number(unresolved?.n || 0) > 0) {
+      await auditImportEvent(c, 'import_job_approve_blocked', id, job, job, {
+        source: body?.source || 'api', mode: 'apply', reason: 'product_conflicts_unresolved',
+      })
+      return c.json({
+        success: false,
+        error: `Review every product identity or stock conflict before applying this import. ${Number(unresolved?.n || 0)} remain unresolved.`,
+        code: 'product_conflicts_unresolved',
         unresolvedRows: Number(unresolved?.n || 0),
       }, 409)
     }

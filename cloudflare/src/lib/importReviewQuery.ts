@@ -15,6 +15,7 @@ export interface ImportReviewWhere {
 export type ImportReviewSort = 'row_asc' | 'row_desc' | 'name_asc' | 'name_desc'
 
 export const CONTACT_REVIEW_WARNING_KINDS: ImportWarningKind[] = ['name_match', 'membership_phone_conflict']
+export const PRODUCT_REVIEW_WARNING_KINDS: ImportWarningKind[] = ['negative_stock', 'barcode_collision', 'sku_collision']
 
 function escapeLike(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
@@ -73,6 +74,19 @@ export function buildImportReviewOrder(sort: unknown): string {
  */
 export function buildUnresolvedContactReviewWhere(jobId: string, decisionsJson: string): ImportReviewWhere {
   const base = buildImportReviewWhere({ jobId, warningKinds: CONTACT_REVIEW_WARNING_KINDS })
+  return {
+    sql: `${base.sql} AND json_type(@decisions, '$."' || row_number || '"') IS NULL`,
+    params: { ...base.params, decisions: decisionsJson || '{}' },
+  }
+}
+
+/**
+ * Product rows with lossy or identity-ambiguous normalization need a durable
+ * reviewer choice too. This is intentionally narrower than the global serious
+ * warning set: contact and stock-action warnings have their own domain gates.
+ */
+export function buildUnresolvedProductReviewWhere(jobId: string, decisionsJson: string): ImportReviewWhere {
+  const base = buildImportReviewWhere({ jobId, warningKinds: PRODUCT_REVIEW_WARNING_KINDS })
   return {
     sql: `${base.sql} AND json_type(@decisions, '$."' || row_number || '"') IS NULL`,
     params: { ...base.params, decisions: decisionsJson || '{}' },

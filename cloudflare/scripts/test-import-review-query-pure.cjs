@@ -11,7 +11,7 @@ const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
 }).outputText
 const mod = { exports: {} }
 new Function('exports', 'require', 'module', output)(mod.exports, require, mod)
-const { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere } = mod.exports
+const { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere, buildUnresolvedProductReviewWhere } = mod.exports
 
 const basic = buildImportReviewWhere({ jobId: 'job-1' })
 assert.match(basic.sql, /job_id = @id/)
@@ -73,10 +73,21 @@ const unresolvedWhere = buildUnresolvedContactReviewWhere('job-contact', JSON.st
 const unresolved = sqlite.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`).get(unresolvedWhere.params)
 assert.strictEqual(unresolved.n, 1, 'only contact-conflict rows without a durable row decision block approval')
 
+insert.run('job-product', 2, 'create', 'Shared barcode', JSON.stringify({ warnings: [{ kind: 'barcode_collision', message: 'review' }] }))
+insert.run('job-product', 3, 'create', 'Shared sku', JSON.stringify({ warnings: [{ kind: 'sku_collision', message: 'review' }] }))
+insert.run('job-product', 4, 'create', 'Negative stock', JSON.stringify({ warnings: [{ kind: 'negative_stock', message: 'review' }] }))
+insert.run('job-product', 5, 'update', 'Ordinary price', JSON.stringify({ warnings: [] }))
+insert.run('job-product', 6, 'update', 'Contact-only warning', JSON.stringify({ warnings: [{ kind: 'name_match', message: 'not a product gate' }] }))
+const unresolvedProductWhere = buildUnresolvedProductReviewWhere('job-product', JSON.stringify({ 2: { action: 'apply' }, 4: { action: 'skip' } }))
+const unresolvedProducts = sqlite.prepare(`SELECT row_number FROM import_job_rows WHERE ${unresolvedProductWhere.sql} ORDER BY row_number`).all(unresolvedProductWhere.params)
+assert.deepStrictEqual(unresolvedProducts.map((row) => row.row_number), [3], 'only product safety warnings without a durable decision block approval')
+
 const routeSource = fs.readFileSync(routeFile, 'utf8')
 assert.match(routeSource, /buildImportReviewOrder\(c\.req\.query\('sort'\)\)/, 'review route must parse sort through the fixed whitelist')
 assert.match(routeSource, /ORDER BY \$\{orderBy\}/, 'review route must apply the whitelisted order fragment')
 assert.match(routeSource, /code: 'contact_conflicts_unresolved'/, 'contact approval must fail closed while any conflict lacks a durable decision')
 assert.match(routeSource, /unresolvedContactConflicts/, 'review response exposes the server-wide unresolved count for paginated confirmation UI')
+assert.match(routeSource, /code: 'product_conflicts_unresolved'/, 'product approval must fail closed while any identity or negative-stock conflict lacks a durable decision')
+assert.match(routeSource, /unresolvedProductConflicts/, 'review response exposes the server-wide unresolved Product count')
 
 console.log('PASS import review query keeps filtering/pagination in D1 with bound, escaped inputs')

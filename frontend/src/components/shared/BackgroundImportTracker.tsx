@@ -15,7 +15,7 @@ import { dispatchImportCompletionRefresh, onImportTrackerPoke, shouldDispatchImp
 import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { shouldPromptConflictReviewBeforeApprove } from './importJobApproveGate.ts'
+import { shouldPromptConflictReviewBeforeApprove, shouldPromptProductConflictReviewBeforeApprove } from './importJobApproveGate.ts'
 
 // This widget is the ONE place import jobs surface across every page
 // (mounted globally in NotificationCenter.tsx -- Products/Inventory/Sales/
@@ -36,6 +36,7 @@ const ImportReportModal = lazyRetry(() => import('./ImportReportModal'), 'Backgr
 // GET /:id/review + PATCH /:id/decisions endpoints -- see
 // ContactImportConflictsModal.tsx's own header comment.
 const ContactImportConflictsModal = lazyRetry(() => import('../contacts/ContactImportConflictsModal'), 'BackgroundImportTracker-ContactImportConflictsModal')
+const ProductImportConflictsModal = lazyRetry(() => import('../products/import/ProductImportConflictsModal'), 'BackgroundImportTracker-ProductImportConflictsModal')
 const CONTACT_JOB_TYPES = new Set(['customers', 'suppliers', 'delivery_contacts'])
 const CONTACT_JOB_TYPE_LABELS: Record<string, string> = {
   customers: 'Customers',
@@ -697,6 +698,7 @@ export default function BackgroundImportTracker() {
   const [expanded, setExpanded] = useState(false)
   const [reportJobId, setReportJobId] = useState<string | null>(null)
   const [conflictsJob, setConflictsJob] = useState<{ id: string; entityLabel: string } | null>(null)
+  const [productConflictsJobId, setProductConflictsJobId] = useState('')
   // Per-session "has this job's conflicts list been opened at least once"
   // set -- see importJobApproveGate.ts's header comment. Deliberately not
   // persisted (readDismissedJobs-style) -- this only needs to survive
@@ -704,6 +706,7 @@ export default function BackgroundImportTracker() {
   // re-prompting once more for a still-open job is the safe direction to
   // err in, not the annoying one.
   const [reviewedConflictJobIds, setReviewedConflictJobIds] = useState<Set<string>>(() => new Set())
+  const [resolvedProductConflictJobIds, setResolvedProductConflictJobIds] = useState<Set<string>>(() => new Set())
   const openConflictsModal = useCallback((jobId: string, entityLabel: string) => {
     setConflictsJob({ id: jobId, entityLabel })
     setReviewedConflictJobIds((current) => (current.has(jobId) ? current : new Set(current).add(jobId)))
@@ -1070,6 +1073,11 @@ export default function BackgroundImportTracker() {
       )
       return
     }
+    if (shouldPromptProductConflictReviewBeforeApprove(job, resolvedProductConflictJobIds, jobId)) {
+      setProductConflictsJobId(jobId)
+      notify('Review every flagged product row before importing.', 'info')
+      return
+    }
     const action = beginTrackerAction(job, 'approve')
     if (!action) return
     try {
@@ -1385,6 +1393,11 @@ export default function BackgroundImportTracker() {
                         <AlertTriangle className="mr-1 inline h-3.5 w-3.5" /> {t('resolve_conflicts') || 'Resolve conflicts'}
                       </button>
                     ) : null}
+                    {isJobDismissable && String(job.type || '') === 'products' && Number(job.summary?.warned || 0) > 0 ? (
+                      <button type="button" className="btn-secondary px-2 py-1 text-xs" disabled={busyJobId === job.id} onClick={() => setProductConflictsJobId(String(job.id || ''))}>
+                        <AlertTriangle className="mr-1 inline h-3.5 w-3.5" /> Resolve product conflicts
+                      </button>
+                    ) : null}
                     {isAwaitingReview ? (
                       <button type="button" className="btn-primary px-2 py-1 text-xs" disabled={busyJobId === job.id} aria-label={`${approveLabel} ${getJobLabel(job)}`} onClick={() => handleApprove(job)}>
                         <PlayCircle className="mr-1 inline h-3.5 w-3.5" /> {approveLabel}
@@ -1431,6 +1444,16 @@ export default function BackgroundImportTracker() {
             t={t}
             notify={(message: string, tone?: string) => notify(message, tone as NotifyTone | undefined)}
             onClose={() => setConflictsJob(null)}
+          />
+        </Suspense>
+      ) : null}
+      {productConflictsJobId ? (
+        <Suspense fallback={null}>
+          <ProductImportConflictsModal
+            jobId={productConflictsJobId}
+            notify={(message: string, tone?: string) => notify(message, tone as NotifyTone | undefined)}
+            onAllResolved={() => setResolvedProductConflictJobIds((current) => new Set(current).add(productConflictsJobId))}
+            onClose={() => setProductConflictsJobId('')}
           />
         </Suspense>
       ) : null}
