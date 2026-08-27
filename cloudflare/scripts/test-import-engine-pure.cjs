@@ -193,7 +193,7 @@ searchMatchWrapper(searchMatchModuleObj.exports, require, searchMatchModuleObj, 
 // so the module can load; none of their exports are exercised by this test.
 const Module = require('module')
 const originalResolve = Module._resolveFilename
-const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', '../durable-objects/broadcastHub'])
+const stubbable = new Set(['../index', './db', './importCsv', './cache', './stockActionCatalog', './stockActionSeal', '../durable-objects/broadcastHub'])
 const originalLoad = Module._load
 Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './importImageMatch') {

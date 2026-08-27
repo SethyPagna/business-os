@@ -76,6 +76,7 @@ import { incrementBatchStockStatement } from './productBatches'
 import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { classifyUnifiedStockActions } from './stockActionCatalog'
+import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -3233,6 +3234,10 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     // Last chunk: aggregate the persisted per-row results into the final
     // summary instead of an in-memory accumulator (which couldn't have
     // survived across the many invocations this run may have taken).
+    if (meta.type === 'stock_actions') {
+      await sealUnifiedStockAnalyzeConflicts(db, jobId)
+      sw.lap('sealStockActionConflictsMs')
+    }
     const counts = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
       .all<{ action: RowAction; n: number }>({ id: jobId })
     const byAction: Record<RowAction, number> = { create: 0, update: 0, skip: 0, error: 0 }
@@ -3252,6 +3257,9 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
       `SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' AND action != 'error' AND json_extract(result_json, '$.message') IS NOT NULL`,
     ).get<{ n: number }>({ id: jobId })
     const warned = warnedRow?.n || 0
+    const stockActionConfirmationRows = meta.type === 'stock_actions'
+      ? await countUnifiedStockConfirmationRows(db, jobId)
+      : 0
 
     // File-structure warnings (Part 316): NOT per-row -- these describe the
     // header row itself, so they don't fit ImportRowWarning's per-row shape
@@ -3270,6 +3278,10 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     const summary = {
       created: byAction.create, updated: byAction.update, skipped: byAction.skip, errored: byAction.error, warned, total,
       analyzed_rows: total,
+      ...(meta.type === 'stock_actions' ? {
+        requires_stock_action_confirmation: stockActionConfirmationRows > 0,
+        stock_action_confirmation_rows: stockActionConfirmationRows,
+      } : {}),
       imageMatch: imageMatchCache
         ? { matchedCount: imageMatchCache.matchedCount, unmatched: imageMatchCache.unmatched, overLimit: imageMatchCache.overLimit }
         : null,

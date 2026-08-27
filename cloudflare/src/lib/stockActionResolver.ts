@@ -265,12 +265,14 @@ export function detectCostBatchConflicts(
       group.map((r) => String(r.batchLabel ?? '').trim()).filter((v) => v !== ''),
     )
     if (distinctCosts.size > 1 && distinctBatches.size > 1) {
-      const reason = `Same product has ${distinctBatches.size} batches at ${distinctCosts.size} different cost prices — choose which lot each sale draws from before importing.`
+      const reason = COST_BATCH_CONFLICT_MESSAGE
       for (const r of group) reasonByRow.set(r.rowNumber, reason)
     }
   }
   return reasonByRow
 }
+
+export const COST_BATCH_CONFLICT_MESSAGE = 'Same product has multiple batches at different cost prices — choose which lot each sale draws from before importing.'
 
 export interface StockActionResolution {
   plans: StockActionPlan[]
