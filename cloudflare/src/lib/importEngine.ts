@@ -702,6 +702,12 @@ type MaterializeState = {
   // catches (exact-same-key collision, and Excel's `.1`/`.2` re-export
   // suffix artifact).
   duplicateHeaderKeys?: string[]
+  // Sales templates use a compact multi-line invoice contract: only the
+  // first item row repeats receipt/customer/order fields and following
+  // rows leave them blank. Persist the last explicit receipt across the
+  // 100-row materialization windows so a continuation row on the next
+  // Worker invocation is still assigned to the same order in O(n) time.
+  salesLastGroupKey?: string
 }
 
 // Kept separate from ROWS_PER_IMPORT_CHUNK: a materialize window only
@@ -720,14 +726,14 @@ type MaterializeState = {
 // going smaller, only more queue round-trips.
 const MATERIALIZE_ROWS_PER_CHUNK = 100
 
-async function getMaterializeState(db: D1Compat, jobId: string): Promise<{ state: MaterializeState; done: boolean }> {
-  const row = await db.prepare(`SELECT materialize_state_json, materialize_done FROM import_jobs WHERE id = @id`)
-    .get<{ materialize_state_json: string | null; materialize_done: number }>({ id: jobId })
+async function getMaterializeState(db: D1Compat, jobId: string): Promise<{ state: MaterializeState; done: boolean; type: ImportType | null }> {
+  const row = await db.prepare(`SELECT type, materialize_state_json, materialize_done FROM import_jobs WHERE id = @id`)
+    .get<{ type: ImportType; materialize_state_json: string | null; materialize_done: number }>({ id: jobId })
   let state: MaterializeState = { charOffset: 0, byteOffset: 0, inQuotes: false, headers: null, rawRowIndex: 0, rowsWritten: 0, delimiter: ',' }
   try {
     if (row?.materialize_state_json) state = { ...state, ...JSON.parse(row.materialize_state_json) }
   } catch { /* keep default -- treat as not-yet-started */ }
-  return { state, done: Boolean(row?.materialize_done) }
+  return { state, done: Boolean(row?.materialize_done), type: row?.type || null }
 }
 
 async function saveMaterializeState(db: D1Compat, jobId: string, state: MaterializeState, done: boolean): Promise<void> {
@@ -756,7 +762,7 @@ export async function resetMaterializeState(db: D1Compat, jobId: string): Promis
 // materialize_done was ALREADY true on entry (the common-case, cheap
 // no-op check) -- the caller then proceeds to read import_job_source_rows.
 async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: string, kind: 'analyze' | 'apply'): Promise<boolean> {
-  const { state, done } = await getMaterializeState(db, jobId)
+  const { state, done, type } = await getMaterializeState(db, jobId)
   if (done) return false
 
   // A job that began materializing under the previous build has a
@@ -775,6 +781,24 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
     state.headers = null
     state.rawRowIndex = 0
     state.rowsWritten = 0
+    state.salesLastGroupKey = undefined
+  }
+
+  // A sales job caught mid-materialization across this deployment may
+  // already have persisted rows without the new inherited key. Restart it
+  // once instead of mixing old and new grouping rules in one review seal.
+  if (type === 'sales' && state.rowsWritten > 0 && state.salesLastGroupKey === undefined) {
+    await db.prepare(`DELETE FROM import_job_source_rows WHERE job_id = @id`).run({ id: jobId })
+    state.byteOffset = 0
+    state.charOffset = 0
+    state.inQuotes = false
+    state.headers = null
+    state.rawRowIndex = 0
+    state.rowsWritten = 0
+    state.salesLastGroupKey = ''
+  }
+  if (type === 'sales' && state.rowsWritten === 0 && state.salesLastGroupKey === undefined) {
+    state.salesLastGroupKey = ''
   }
 
   // Read ONE range rather than the whole object. `windowStart` is a byte
@@ -867,6 +891,17 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
     if (sequence >= MAX_SYNC_ROWS) { cappedEarly = true; break } // same hard ceiling fetchDecidedRows applied via `.slice(0, MAX_SYNC_ROWS)` -- preserved here so a huge file still stops materializing rather than growing import_job_source_rows unbounded
     const parsedRow = csvValuesToRow(values, state.headers, rawIndex)
     if (!hasParsedCsvRowContent(parsedRow)) continue // matches parseCsvRows' blank-row skip -- sequence must stay contiguous over non-blank rows only
+    if (type === 'sales') {
+      const explicitGroupKey = str(parsedRow.receipt_number || parsedRow.order_reference)
+      if (explicitGroupKey) {
+        state.salesLastGroupKey = explicitGroupKey
+      } else if (state.salesLastGroupKey) {
+        // Internal only: never part of the user-facing template and never
+        // written to sales. It seals the file-order inheritance decision
+        // once, before analyze/review/apply retries can diverge.
+        parsedRow._sales_group_key = state.salesLastGroupKey
+      }
+    }
     statements.push({
       sql: `INSERT OR REPLACE INTO import_job_source_rows (job_id, sequence, row_number, data_json) VALUES (@job_id, @sequence, @row_number, @data_json)`,
       params: { job_id: jobId, sequence, row_number: rawIndex, data_json: JSON.stringify(parsedRow) },
@@ -2109,6 +2144,7 @@ async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAc
 // needing to cache it, unlike the image-match computation below.
 function partitionSalesGroups(rows: ParsedCsvRow[]): Map<string, ParsedCsvRow[]> {
   const groups = new Map<string, ParsedCsvRow[]>()
+  let lastExplicitKey = ''
   for (const row of rows) {
     // receipt_number is the real column on the sales-template.csv (see
     // downloadImportTemplate in frontend/src/api/methods.ts); order_reference
@@ -2116,7 +2152,9 @@ function partitionSalesGroups(rows: ParsedCsvRow[]): Map<string, ParsedCsvRow[]>
     // hand-built or externally-generated CSV using that name still groups
     // its line items into one order instead of each becoming its own
     // single-line sale.
-    const key = str(row.receipt_number || row.order_reference) || `__row_${row._rowNumber}`
+    const explicitKey = str(row.receipt_number || row.order_reference)
+    if (explicitKey) lastExplicitKey = explicitKey
+    const key = explicitKey || str(row._sales_group_key) || lastExplicitKey || `__row_${row._rowNumber}`
     const list = groups.get(key) || []
     list.push(row)
     groups.set(key, list)
@@ -2959,11 +2997,13 @@ async function releaseImportLease(db: D1Compat, jobId: string, token: string): P
 // SQL form of partitionSalesGroups' key, kept beside it deliberately: if the
 // two ever disagree, a sales import silently splits one receipt across two
 // chunks or merges two receipts into one order. Mirrors the JS rule exactly
-// -- trimmed receipt_number, else trimmed order_reference, else a per-row
-// key so an ungrouped line still becomes its own single-line sale.
+// -- trimmed receipt_number, else trimmed order_reference, else the compact
+// template's inherited key sealed during materialization, else a per-row
+// key (only possible before any invoice header has appeared).
 const SALES_GROUP_KEY_SQL = `COALESCE(
   NULLIF(TRIM(COALESCE(json_extract(data_json, '$.receipt_number'), '')), ''),
   NULLIF(TRIM(COALESCE(json_extract(data_json, '$.order_reference'), '')), ''),
+  NULLIF(TRIM(COALESCE(json_extract(data_json, '$._sales_group_key'), '')), ''),
   '__row_' || row_number
 )`
 

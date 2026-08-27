@@ -44,8 +44,11 @@ const SALES_GROUP_KEY_SQL = (() => {
 const str = (v) => String(v ?? '').trim()
 function partitionSalesGroupsJs(rows) {
   const groups = new Map()
+  let lastExplicitKey = ''
   for (const row of rows) {
-    const key = str(row.receipt_number || row.order_reference) || `__row_${row._rowNumber}`
+    const explicitKey = str(row.receipt_number || row.order_reference)
+    if (explicitKey) lastExplicitKey = explicitKey
+    const key = explicitKey || str(row._sales_group_key) || lastExplicitKey || `__row_${row._rowNumber}`
     const list = groups.get(key) || []
     list.push(row)
     groups.set(key, list)
@@ -61,11 +64,17 @@ async function seed(rows) {
     );
   `])
   for (let i = 0; i < rows.length; i += 1) {
+    const row = { ...rows[i] }
+    const explicitKey = str(row.receipt_number || row.order_reference)
+    if (explicitKey) seed.lastGroupKey = explicitKey
+    else if (seed.lastGroupKey) row._sales_group_key = seed.lastGroupKey
     await db.prepare(`INSERT INTO import_job_source_rows VALUES ('j', @seq, @rn, @data)`)
-      .run({ seq: i, rn: rows[i]._rowNumber, data: JSON.stringify(rows[i]) })
+      .run({ seq: i, rn: row._rowNumber, data: JSON.stringify(row) })
   }
+  seed.lastGroupKey = ''
   return db
 }
+seed.lastGroupKey = ''
 
 async function sqlGroupKeys(db) {
   const rows = await db.prepare(`
@@ -77,17 +86,17 @@ async function sqlGroupKeys(db) {
 }
 
 // Deliberately awkward: padded whitespace, a numeric receipt, the
-// order_reference fallback, a row with neither, and -- the case a naive
+// order_reference fallback, compact blank continuation rows, and -- the case a naive
 // "consecutive rows" implementation gets wrong -- a receipt whose lines are
 // separated by other receipts.
 const ROWS = [
   { _rowNumber: 1, receipt_number: ' R-100 ', item: 'a' },
   { _rowNumber: 2, order_reference: 'O-55', item: 'b' },
-  { _rowNumber: 3, item: 'c' },
+  { _rowNumber: 3, item: 'c' }, // inherits O-55
   { _rowNumber: 4, receipt_number: 'R-100', item: 'd' },
   { _rowNumber: 5, receipt_number: 2001, item: 'e' },
   { _rowNumber: 6, receipt_number: '', order_reference: ' O-55 ', item: 'f' },
-  { _rowNumber: 7, item: 'g' },
+  { _rowNumber: 7, item: 'g' }, // inherits O-55
   { _rowNumber: 8, receipt_number: 'R-100', item: 'h' },
   { _rowNumber: 9, receipt_number: 2001, item: 'i' },
 ]
@@ -117,12 +126,24 @@ check('padding and numeric receipt numbers group the same on both sides', async 
   assert.ok(keys.includes('O-55'), 'order_reference is the fallback key')
 })
 
-check('a row with neither identifier gets its own group, keyed by its CSV line', async () => {
+check('blank compact item rows inherit the preceding explicit invoice', async () => {
   const db = await seed(ROWS)
+  const rows = await db.prepare(`
+    SELECT ${SALES_GROUP_KEY_SQL} AS group_key, row_number
+    FROM import_job_source_rows WHERE job_id = 'j' ORDER BY sequence ASC
+  `).all({})
+  assert.equal(String(rows.find((row) => Number(row.row_number) === 3).group_key), 'O-55')
+  assert.equal(String(rows.find((row) => Number(row.row_number) === 7).group_key), 'O-55')
+})
+
+check('a leading blank row remains an isolated sale instead of guessing', async () => {
+  const db = await seed([
+    { _rowNumber: 1, sku: 'first' },
+    { _rowNumber: 2, receipt_number: 'R-2', sku: 'second' },
+    { _rowNumber: 3, sku: 'third' },
+  ])
   const keys = await sqlGroupKeys(db)
-  assert.ok(keys.includes('__row_3'), 'row 3 has no identifier')
-  assert.ok(keys.includes('__row_7'), 'row 7 has no identifier')
-  assert.notEqual(keys.indexOf('__row_3'), keys.indexOf('__row_7'), 'they must not collapse together')
+  assert.deepEqual(keys, ['__row_1', 'R-2'])
 })
 
 check('windowing by LIMIT/OFFSET covers every group exactly once, at every window size', async () => {
