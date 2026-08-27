@@ -315,6 +315,23 @@ the kernel: `detectCostBatchConflicts`.)
    and the chosen batch). Reuse `datedStockCountApply` / `productBatches`
    patterns; keep it chunked + resumable like the rest of the import path.
 
+**Part 358 transactional checkpoint (committed, needs deploy).** The final
+analyze invocation now seals cost+batch conflicts across **all persisted
+windows** with one D1 JSON update; a product split between rows 2 and 302 can
+no longer evade review just because it crossed a queue boundary. The seal is
+idempotent and the summary records whether/how many rows require Confirm
+Action. Approval is server-gated: stock actions require Products + Inventory +
+Sales permissions, `awaiting_review` compare-and-set state, and an explicit
+`confirm_stock_actions: true` for any conflicted plan; confirming actor/time
+are persisted. Migration `0056` adds an apply ledger. New-product creation uses
+a stable SHA-256 client request id and retry-safe branch zero seeding. The ADD
+writer atomically commits ledger claim, product batch, branch-batch stock,
+branch/product aggregates, optional prices, movement history and applied
+marker; injected failure rolls everything back and retry cannot double stock.
+**Still closed:** grouped-sale/FIFO deduction writer, apply orchestration,
+immutable whole-plan hash, public `stock_actions` allow-list and §13 review UI.
+Commits: `a09b2996`, `ea57e403`, `9fd5c0cf`, `85fe2c8b`.
+
 ### 13 — Import UX: exactly TWO screens, ALL imports, ALL pages (Part 354)
 
 *User, this session + mid-turn clarification.*
@@ -755,7 +772,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 357 (Aug 27 2026).** Everything below was really run in this local Windows
+**As of Part 358 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -776,7 +793,7 @@ are the commands' actual results this session.
 ### Done / In progress / To do — at a glance
 
 - **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · role-aware 3/5 image cap · R2 finalized lifecycle/exact-two retention · Drive streamed/deduplicated manifest mirror/exact-seven tagged retention · **§15 one-object/many-logical-Library-names + streamed rename-on-download** · products large-screen alignment + 11.4/11.5 · §14 batch count/details · 11.24/11.25 VIP fixes · 11.8–11.11 POS fixes · 11.20/11.21 stock-health cards · 16.1/11.14–11.16 storefront PWA and favicon removal.
-- **IN PROGRESS / partial:** unified import (§12 — canonical 10-column frontend contract, pure action kernel, bounded D1 catalog classifier and safe analyze dispatcher built/tested; transactional apply + public route/review wiring still closed) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **IN PROGRESS / partial:** unified import (§12 — canonical contract, pure kernel, bounded classifier/analyze, cross-window seal, server Confirm Action gate, idempotent product creation and atomic ADD writer built/tested; grouped-sale/FIFO writer + orchestration + public route/review remain closed) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
 - **TO DO (specced, not started):** §13 two-screen import UX (folds in 11.18/11.19) · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
 
 ### Cross-cutting principle in force: ONE source of truth per calculation
@@ -826,6 +843,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Products reset (0.1) | `test-reset-products-pure.cjs` | scoped backup covers exactly the tables the reset clears, across all 4 toggle combos |
 | Import stock actions (§12) | `test-stock-action-resolver-pure.cjs` | 16 checks on DIRECT/RECONCILE deltas, sale grouping, cost/batch conflict gating |
 | Unified stock intake (§12, Part 357) | `test-stock-action-import-pure.cjs` | exact 10 columns, strict numbers/dates, product ambiguity fail-closed, Shop/Warehouse resolution, bounded narrow D1 reads, direct/reconcile plans |
+| Stock-action sealing/apply (§12, Part 358) | `test-stock-action-seal-pure.cjs`, `test-stock-action-commit-pure.cjs`, `test-stock-action-approval-pure.cjs` | cross-window conflict catch + retry de-dup; injected transaction failure rolls back ledger/batch/stock/movement; retry cannot double-add; stable product creation; three-permission/state/Confirm Action server gate |
 | Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
