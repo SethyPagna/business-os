@@ -412,10 +412,18 @@ export default function Login() {
 
   // Session duration is not user-selectable on this page (the removed
   // "keep me logged in" control). It's derived from the account's saved
-  // preference (Settings > Profile > Default login duration), safely
-  // defaulting to 'session' (signed out when the browser closes) rather
-  // than silently persisting forever for a first-time/cleared browser.
-  const sessionDuration = String(settings?.login_session_duration || '').trim() || 'session'
+  // preference (Settings > Profile > Default login duration).
+  //
+  // The fallback is 'always', matching the server's DEFAULT_SESSION_MS
+  // intent (lib/auth.ts). It used to be 'session', which the server maps
+  // to 24 HOURS -- so any account without a saved preference was silently
+  // signed out every day, which the user reported as "logged out after a
+  // few hours". The security model here is device approval, not short
+  // sessions: a device begins pending until an admin approves it, and an
+  // admin revoke kills the device's LIVE sessions immediately
+  // (revokeSessionsForDevice) -- so an approved device staying signed in
+  // until revoked is the intended behavior, per the Aug 28 request.
+  const sessionDuration = String(settings?.login_session_duration || '').trim() || 'always'
 
   useEffect(() => {
     const loadCapabilities = async () => {
