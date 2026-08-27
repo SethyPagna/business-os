@@ -10,6 +10,7 @@ import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError 
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -395,6 +396,13 @@ app.patch('/:id/decisions', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const status = String(job.status || '').toLowerCase()
+  if (job.type === 'stock_actions') {
+    return c.json({ success: false, error: 'Stock-action rows are sealed by analysis and cannot be overridden. Go back and upload a corrected sheet.' }, 409)
+  }
+  if (!canEditImportDecisions(job.type, status)) {
+    return c.json({ success: false, error: 'Import decisions can only be changed while awaiting review.' }, 409)
+  }
 
   const body = await c.req.json().catch(() => ({}))
   const incoming = body?.decisions || body?.rows || {}
@@ -742,6 +750,15 @@ app.post('/:id/csv', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  // The reviewed source must be immutable. Without this gate a caller could
+  // upload a different CSV after analyze finished, retain the old Screen 2
+  // summary, then approve and apply the unreviewed replacement. `failed` is
+  // allowed so a parse/validation failure can be corrected in the same job;
+  // every other post-start state must use Back/Cancel + a fresh job.
+  const status = String(job.status || '').toLowerCase()
+  if (!canReplaceImportCsv(status)) {
+    return c.json({ success: false, error: 'The import source is locked after analysis starts. Create a new import to use a different file.' }, 409)
+  }
   const form = await c.req.formData()
   const file = form.get('file')
   if (!(file instanceof File)) return c.json({ success: false, error: 'CSV file required' }, 400)
@@ -1153,7 +1170,15 @@ app.post('/:id/retry', async (c) => {
   if (denied) return denied
   const db = getDb(c.env)
   const status = String(job.status || '').toLowerCase()
-  const mode = ['awaiting_review', 'approved'].includes(status) ? 'apply' : 'analyze'
+  // Awaiting review is not a failed phase and must never be an alternate
+  // route into apply. In particular, stock_actions /approve enforces the
+  // explicit conflict confirmation and records the confirming actor/time;
+  // retry used to bypass that entire gate by queueing `apply` directly.
+  const retryMode = retryModeForImportStatus(status)
+  if (retryMode === 'review_required') {
+    return c.json({ success: false, error: 'This import is waiting for review. Use Confirm to apply it, or cancel it to start over.' }, 409)
+  }
+  const mode = retryMode
   await db.prepare(`
     UPDATE import_jobs SET status = 'queued', phase = 'queued', cancel_requested = 0,
       processed_rows = 0, failed_rows = 0, last_error = NULL, updated_at = CURRENT_TIMESTAMP
