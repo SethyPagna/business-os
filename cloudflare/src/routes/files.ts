@@ -4,6 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier } from '../lib/permissions'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
+import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
@@ -46,6 +47,24 @@ const ALLOWED_MEDIA_TYPES = new Set(['all', 'image', 'video', 'document', 'file'
 const MAX_FILE_SEARCH_LENGTH = 120
 const DEFAULT_FILE_PAGE_SIZE = 24
 const MAX_FILE_PAGE_SIZE = 60
+
+const LOGICAL_LIBRARY_CTE = `
+  WITH product_refs AS (
+    SELECT image_path AS public_path, id AS product_id, name AS product_name
+    FROM products
+    WHERE is_active = 1 AND image_path IS NOT NULL AND image_path != ''
+    UNION
+    SELECT pi.image_path AS public_path, p.id AS product_id, p.name AS product_name
+    FROM product_images pi
+    JOIN products p ON p.id = pi.product_id AND p.is_active = 1
+    WHERE pi.image_path IS NOT NULL AND pi.image_path != ''
+  ),
+  logical_assets AS (
+    SELECT fa.*, refs.product_id AS reference_product_id, refs.product_name AS reference_product_name
+    FROM file_assets fa
+    LEFT JOIN product_refs refs ON refs.public_path = fa.public_path
+  )
+`
 
 function isPathReferencedInSettings(values: readonly { value: string }[], publicPath: string): boolean {
   // Do this precise substring check in application code.  D1 can reject a
@@ -92,7 +111,9 @@ app.get('/', async (c) => {
   const where: string[] = []
   const params: Record<string, unknown> = { limit: pageSize, offset }
   if (search) {
-    where.push('lower(original_name) LIKE @search')
+    // A shared object is presented under each product name, so searching
+    // must match that logical name as well as the physical upload name.
+    where.push(`(lower(original_name) LIKE @search OR lower(COALESCE(reference_product_name, '')) LIKE @search)`)
     params.search = `%${search.toLowerCase()}%`
   }
   if (mediaType !== 'all') {
@@ -101,7 +122,10 @@ app.get('/', async (c) => {
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
-  const totalRow = await db.prepare(`SELECT COUNT(*) AS count FROM file_assets ${whereSql}`).get<{ count: number }>(params)
+  // Count/page the logical rows, not physical objects. Otherwise a page can
+  // render more cards than pageSize and its "x / total" indicator lies as
+  // soon as one photo is shared by two products.
+  const totalRow = await db.prepare(`${LOGICAL_LIBRARY_CTE} SELECT COUNT(*) AS count FROM logical_assets ${whereSql}`).get<{ count: number }>(params)
   // usage_count cross-references each asset's public_path against every place
   // a file can be referenced elsewhere in the app: a product's cover image,
   // its gallery, a user's avatar, and any business/portal setting (logo,
@@ -113,14 +137,15 @@ app.get('/', async (c) => {
   // not.
   const [rawItems, settingValues] = await Promise.all([
     db.prepare(`
+    ${LOGICAL_LIBRARY_CTE}
     SELECT id, original_name, stored_name, public_path, mime_type, media_type, byte_size,
            width, height, source, created_by_id, created_by_name, created_at, updated_at,
-           optimization_status, optimization_note,
-           (SELECT COUNT(*) FROM products WHERE image_path = file_assets.public_path) AS product_usage,
-           (SELECT COUNT(*) FROM product_images WHERE image_path = file_assets.public_path) AS gallery_usage,
-           (SELECT COUNT(*) FROM users WHERE avatar_path = file_assets.public_path) AS avatar_usage
-    FROM file_assets ${whereSql}
-    ORDER BY id DESC
+           optimization_status, optimization_note, reference_product_id, reference_product_name,
+           (SELECT COUNT(*) FROM products WHERE image_path = logical_assets.public_path) AS product_usage,
+           (SELECT COUNT(*) FROM product_images WHERE image_path = logical_assets.public_path) AS gallery_usage,
+           (SELECT COUNT(*) FROM users WHERE avatar_path = logical_assets.public_path) AS avatar_usage
+    FROM logical_assets ${whereSql}
+    ORDER BY id DESC, reference_product_name COLLATE NOCASE ASC, reference_product_id ASC
     LIMIT @limit OFFSET @offset
     `).all(params),
     db.prepare('SELECT value FROM settings').all<{ value: string }>(),
@@ -140,7 +165,18 @@ app.get('/', async (c) => {
     }
     const usageCount = usage.products + usage.gallery + usage.avatars + usage.settings
     const { product_usage: _p, gallery_usage: _g, avatar_usage: _a, ...rest } = row
-    return { ...rest, usageCount, usage, canDelete: usageCount === 0 }
+    const referenceProductId = row.reference_product_id == null ? null : Number(row.reference_product_id)
+    const referenceProductName = String(row.reference_product_name || '').trim() || null
+    return {
+      ...rest,
+      logical_id: referenceProductId ? `${row.id}:product:${referenceProductId}` : `${row.id}:asset`,
+      logical_name: logicalLibraryName(row.original_name, referenceProductName),
+      physical_original_name: row.original_name,
+      referenceProduct: referenceProductId ? { id: referenceProductId, name: referenceProductName } : null,
+      usageCount,
+      usage,
+      canDelete: usageCount === 0,
+    }
   })
 
   return c.json({ items, total: totalRow?.count || 0, page, pageSize })
