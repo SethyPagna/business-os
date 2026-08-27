@@ -23,7 +23,7 @@
 import type { Env } from '../index'
 import { getDb } from './db'
 import { encryptSecret, decryptSecret } from './secretCrypto'
-import { createCloudflareBackup } from './backup'
+import { listCloudflareBackups } from './backup'
 
 const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -32,7 +32,7 @@ const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 export const DRIVE_CALLBACK_PATH = '/api/system/drive-sync/oauth/callback'
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const DEFAULT_FOLDER_NAME = 'Business OS Sync'
-const DEFAULT_KEEP = 10
+export const DRIVE_BACKUP_KEEP = 7
 
 function trim(value: unknown): string {
   return String(value ?? '').trim()
@@ -93,7 +93,7 @@ export async function driveSyncStatus(env: Env): Promise<{ item: DriveSyncStatus
       deleteMissing: settings.drive_sync_delete_missing !== '0',
       enabled: settings.drive_sync_enabled !== '0',
       syncIntervalSeconds: Number(settings.drive_sync_interval_seconds || 21600),
-      maxBackups: DEFAULT_KEEP,
+      maxBackups: DRIVE_BACKUP_KEEP,
       hasClientSecret: !!trim(env.GOOGLE_DRIVE_CLIENT_SECRET),
       redirectUri: getRedirectUri(env),
       lastSyncedAt: settings.drive_sync_last_synced_at || null,
@@ -244,35 +244,76 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     const folderId = await ensureFolder(token, folderName, settings.drive_sync_folder_id || '')
     await setSettings(env, [['drive_sync_folder_id', folderId]])
 
-    const backup = await createCloudflareBackup(env, 'manual')
+    // Mirror the newest already-finalized R2 backup. Drive sync used to call
+    // createCloudflareBackup() again, doubling backup work/storage and racing
+    // R2's own retention. A copying/partial/failed set is never eligible.
+    const backups = await listCloudflareBackups(env)
+    const backup = backups.find((item) => item.finalized)
+    if (!backup) throw new Error('No finalized R2 backup is available to mirror yet.')
+    const fileName = backup.name || `backup-${Date.now()}.json`
+    const existingFiles = await listDriveBackups(token, folderId)
+    const existing = existingFiles.find((file) => file.appProperties?.backupKey === backup.key && file.appProperties?.status === 'finalized')
+    if (existing) {
+      await pruneDriveBackups(token, existingFiles, DRIVE_BACKUP_KEEP)
+      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
+      return { success: true, fileId: existing.id, fileName }
+    }
+
     const object = await env.ASSETS.get(backup.key)
-    if (!object) throw new Error('Backup snapshot was created but could not be read back from R2.')
-    const bytes = await object.arrayBuffer()
-    const fileName = backup.key.split('/').pop() || backup.name || `backup-${Date.now()}.json`
+    if (!object?.body) throw new Error('The finalized R2 backup could not be streamed.')
 
-    const metadata = { name: fileName, parents: [folderId] }
-    const boundary = `bos-${crypto.randomUUID()}`
-    const encoder = new TextEncoder()
-    const parts: (Uint8Array | ArrayBuffer)[] = [
-      encoder.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n`),
-      bytes,
-      encoder.encode(`\r\n--${boundary}--`),
-    ]
-    const uploadRes = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=multipart`, {
+    const metadata = {
+      name: fileName,
+      parents: [folderId],
+      appProperties: {
+        businessOsBackup: 'true',
+        backupKey: backup.key,
+        status: 'finalized',
+      },
+    }
+    const initRes = await fetch(`${DRIVE_UPLOAD_URL}?uploadType=resumable&fields=id,name,size,appProperties`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': `multipart/related; boundary=${boundary}` },
-      body: new Blob(parts),
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json; charset=UTF-8',
+        'X-Upload-Content-Type': 'application/json',
+        'X-Upload-Content-Length': String(object.size),
+      },
+      body: JSON.stringify(metadata),
     })
-    const uploaded = await uploadRes.json().catch(() => ({} as { id?: string; error?: unknown })) as { id?: string; error?: unknown }
+    const sessionUrl = initRes.headers.get('location') || ''
+    if (!initRes.ok || !isTrustedDriveUploadSession(sessionUrl)) {
+      throw new Error('Google Drive did not return a trusted resumable upload session.')
+    }
+    const uploadRes = await fetch(sessionUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Content-Length': String(object.size),
+      },
+      body: object.body,
+    })
+    const uploaded = await uploadRes.json().catch(() => ({} as { id?: string; size?: string; error?: unknown })) as { id?: string; size?: string; error?: unknown }
     if (!uploadRes.ok || !uploaded.id) throw new Error(typeof uploaded.error === 'string' ? uploaded.error : 'Google Drive upload failed.')
+    if (uploaded.size && Number(uploaded.size) !== object.size) throw new Error('Google Drive upload size verification failed.')
 
-    await pruneDriveBackups(token, folderId, DEFAULT_KEEP)
+    await pruneDriveBackups(token, [{ id: uploaded.id, appProperties: metadata.appProperties }, ...existingFiles], DRIVE_BACKUP_KEEP)
     await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
     return { success: true, fileId: uploaded.id, fileName }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Drive sync failed.'
     await setSettings(env, [['drive_sync_last_error', message]])
     return { success: false, error: message }
+  }
+}
+
+export function isTrustedDriveUploadSession(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && (url.hostname === 'www.googleapis.com' || url.hostname.endsWith('.googleapis.com'))
+  } catch {
+    return false
   }
 }
 
@@ -311,14 +352,40 @@ export async function maybeRunScheduledDriveSync(env: Env): Promise<{ skipped: b
   return { skipped: false, result }
 }
 
-async function pruneDriveBackups(token: string, folderId: string, keep: number): Promise<void> {
-  const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`)
-  const listRes = await fetch(`${DRIVE_FILES_URL}?q=${query}&fields=files(id,name,createdTime)&orderBy=createdTime desc&pageSize=100`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  const listed = await listRes.json().catch(() => ({} as { files?: { id: string }[] })) as { files?: { id: string }[] }
-  const files = listed.files || []
-  for (const file of files.slice(keep)) {
-    await fetch(`${DRIVE_FILES_URL}/${file.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } }).catch(() => undefined)
+type DriveBackupFile = {
+  id: string
+  name?: string
+  createdTime?: string
+  appProperties?: Record<string, string>
+}
+
+async function listDriveBackups(token: string, folderId: string): Promise<DriveBackupFile[]> {
+  // Only files created and tagged by this app are eligible. The old query
+  // listed every file in the configured folder and could delete unrelated
+  // user content after the retention index. Follow every result page so the
+  // "keep exactly seven" promise remains true even after a historic pile-up.
+  const files: DriveBackupFile[] = []
+  let pageToken = ''
+  do {
+    const url = new URL(DRIVE_FILES_URL)
+    url.searchParams.set('q', `'${folderId}' in parents and trashed = false and appProperties has { key='businessOsBackup' and value='true' }`)
+    url.searchParams.set('fields', 'nextPageToken,files(id,name,createdTime,appProperties)')
+    url.searchParams.set('orderBy', 'createdTime desc')
+    url.searchParams.set('pageSize', '1000')
+    if (pageToken) url.searchParams.set('pageToken', pageToken)
+    const listRes = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } })
+    if (!listRes.ok) throw new Error('Failed to list Google Drive backups for retention.')
+    const listed = await listRes.json().catch(() => ({} as { files?: DriveBackupFile[]; nextPageToken?: string })) as { files?: DriveBackupFile[]; nextPageToken?: string }
+    files.push(...(listed.files || []))
+    pageToken = String(listed.nextPageToken || '')
+  } while (pageToken)
+  return files
+}
+
+async function pruneDriveBackups(token: string, files: DriveBackupFile[], keep: number): Promise<void> {
+  const finalized = files.filter((file) => file.appProperties?.businessOsBackup === 'true' && file.appProperties?.status === 'finalized')
+  for (const file of finalized.slice(Math.max(0, keep))) {
+    const response = await fetch(`${DRIVE_FILES_URL}/${encodeURIComponent(file.id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+    if (!response.ok && response.status !== 404) throw new Error(`Failed to prune Google Drive backup ${file.id}.`)
   }
 }
