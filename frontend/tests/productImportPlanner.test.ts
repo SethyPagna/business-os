@@ -317,7 +317,7 @@ await runTest('bulk import modal explains specific review errors before apply', 
   assert.match(source, /Same identifier appears in CSV rows/)
 })
 
-await runTest('bulk import modal has collapsible inline details and cancelled job recovery', () => {
+await runTest('bulk import modal keeps cancelled-job recovery and one persisted server review', () => {
   const source = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
 
   assert.match(source, /expandedDetailRows/)
@@ -330,17 +330,13 @@ await runTest('bulk import modal has collapsible inline details and cancelled jo
   assert.match(source, /cancelledImportRecovery/)
   assert.match(source, /isCancelledStartError/)
   assert.match(source, /const IMPORT_JOB_STATUS_TIMEOUT_MS = 10000/)
-  assert.match(source, /const IMPORT_JOB_PREFLIGHT_TIMEOUT_MS = 15000/)
+  assert.match(source, /ProductServerImportReviewScreen/)
   assert.match(
     source,
     /withLoaderTimeout\(\s*\(\) => api\.getImportJob\?\.\(jobId\),\s*'Product import job status',\s*IMPORT_JOB_STATUS_TIMEOUT_MS,\s*\)/,
   )
-  assert.match(
-    source,
-    /withLoaderTimeout\(\s*\(\) => api\.preflightImportJob\(jobId\),\s*'Product import preflight',\s*IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,\s*\)/,
-  )
+  assert.doesNotMatch(source, /preflightImportJob|IMPORT_JOB_PREFLIGHT_TIMEOUT_MS/)
   assert.doesNotMatch(source, /const payload = await window\.api\.getImportJob\(jobId\)/)
-  assert.doesNotMatch(source, /const preflight = await window\.api\.preflightImportJob\(jobId\)/)
 })
 
 await runTest('corrupted Khmer text is blocked before import', () => {

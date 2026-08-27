@@ -47,12 +47,12 @@ await runTest('runs the detector against the freshly parsed rows inside analyzeP
   assert.ok(setDatedReconciliationSignalIndex > datedSignalCallIndex, 'datedSignal computed before it is stored in state')
 })
 
-await runTest('the suggestion banner only renders on the review step, and only when not dismissed', () => {
-  assert.match(source, /\{datedReconciliationSignal && !dismissedDatedSignal && step === 2 \? \(/)
+await runTest('the suggestion banner renders on Screen 1 before upload, and only when not dismissed', () => {
+  assert.match(source, /\{datedReconciliationSignal && !dismissedDatedSignal && step === 1 \? \(/)
 })
 
 await runTest('the banner never claims to auto-switch -- its action button closes the import (cancel), not a silent mode change', () => {
-  const bannerStart = source.indexOf('datedReconciliationSignal && !dismissedDatedSignal && step === 2')
+  const bannerStart = source.indexOf('datedReconciliationSignal && !dismissedDatedSignal && step === 1')
   assert.ok(bannerStart >= 0, 'banner block exists')
   const bannerBlock = source.slice(bannerStart, bannerStart + 2200)
   assert.match(bannerBlock, /onClick=\{onClose\}/)
@@ -62,7 +62,7 @@ await runTest('the banner never claims to auto-switch -- its action button close
 })
 
 await runTest("the banner surfaces the detector's own repeatedGroupCount and sampleProductName, not a canned message", () => {
-  const bannerStart = source.indexOf('datedReconciliationSignal && !dismissedDatedSignal && step === 2')
+  const bannerStart = source.indexOf('datedReconciliationSignal && !dismissedDatedSignal && step === 1')
   const bannerBlock = source.slice(bannerStart, bannerStart + 2200)
   assert.match(bannerBlock, /datedReconciliationSignal\.repeatedGroupCount/)
   assert.match(bannerBlock, /datedReconciliationSignal\.sampleProductName/)

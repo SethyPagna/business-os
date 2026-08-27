@@ -70,6 +70,27 @@ await runTest('the product resolver persists explicit apply/skip decisions and e
   assert.match(source, /unresolvedProductConflicts/)
 })
 
+await runTest('the products modal uses one persisted server review instead of advancing after local parsing', () => {
+  const modal = fs.readFileSync(new URL('../src/components/products/import/BulkImportModal.tsx', import.meta.url), 'utf8')
+  const screen = fs.readFileSync(new URL('../src/components/products/import/ProductServerImportReviewScreen.tsx', import.meta.url), 'utf8')
+  const analyzeBody = modal.slice(modal.indexOf('const analyzePickedCsv'), modal.indexOf('const handlePickCSV'))
+  assert.doesNotMatch(analyzeBody, /setStep\(2\)/)
+  assert.match(modal, /buildCsvForServerReview/)
+  assert.match(modal, /Object\.entries\(row \|\| \{\}\)\.filter\(\(\[key\]\) => !key\.startsWith\('_'\)\)/)
+  assert.match(modal, /<ProductServerImportReviewScreen/)
+  assert.match(screen, /getImportJobReview\(jobId, \{ page, pageSize: PAGE_SIZE/)
+  assert.match(screen, /updateImportJobDecisions\(jobId, \{ \[String\(row\.rowNumber\)\]: decisionFor\(choice\) \}\)/)
+  assert.match(screen, /approveImportJob\(jobId, \{ source: 'products_modal' \}\)/)
+})
+
+await runTest('serious product warnings require a visible durable choice and approval is fail-closed', () => {
+  const screen = fs.readFileSync(new URL('../src/components/products/import/ProductServerImportReviewScreen.tsx', import.meta.url), 'utf8')
+  assert.match(screen, /\['negative_stock', 'barcode_collision', 'sku_collision'\]/)
+  assert.match(screen, /if \(needsDecision && !row\.decision\) return 'needs_decision'/)
+  assert.match(screen, /disabled=\{approving \|\| loadingRows \|\| unresolved > 0\}/)
+  assert.match(screen, /onCancel/)
+})
+
 if (failed > 0) {
   console.error(`${failed} test(s) failed`)
   process.exit(1)

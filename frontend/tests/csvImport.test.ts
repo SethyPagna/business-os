@@ -85,10 +85,10 @@ await runTest('import modals notify parent pages only after handoff or explicit 
   for (const file of files) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
     assert.match(source, /signalDone\s*=\s*async\s*\(payload(?::[^)]*)?\)/, `${file} should define a queued import callback helper`)
-    if (/InventoryImportModal|SalesImportModal/.test(file)) {
-      assert.match(source, /<ServerImportReviewScreen/, `${file} should keep the server-backed review in the same modal`)
-      assert.match(source, /onApproved=\{async \(\) => \{[\s\S]{0,220}?await signalDone\(/, `${file} should notify after explicit approval`)
-      assert.match(source, /onReviewLater=\{async \(\) => \{[\s\S]{0,220}?await signalDone\(/, `${file} should notify after explicit background handoff`)
+    if (/InventoryImportModal|SalesImportModal|BulkImportModal/.test(file)) {
+      assert.match(source, /<(?:ServerImportReviewScreen|ProductServerImportReviewScreen)/, `${file} should keep the server-backed review in the same modal`)
+      assert.match(source, /onApproved=\{async \(\) => \{[\s\S]{0,500}?await signalDone\(/, `${file} should notify after explicit approval`)
+      assert.match(source, /onReviewLater=\{(?:async \(\) => \{|\(\) => )[\s\S]{0,500}?(?:await signalDone\(|handOffToBackgroundTracker\()/, `${file} should notify after explicit background handoff`)
       continue
     }
     if (directCall.test(source)) continue

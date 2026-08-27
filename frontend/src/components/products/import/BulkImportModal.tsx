@@ -30,6 +30,7 @@ import { detectLikelyDatedReconciliation, type ImportModeDetectionResult } from 
 import { REPLACE_COLUMN_GROUPS } from './productReplaceColumnGroups.ts'
 import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMode } from './ProductImportModeTabs'
+import ProductServerImportReviewScreen from './ProductServerImportReviewScreen'
 
 type NotifyFn = (message: string, tone?: 'info' | 'success' | 'warning' | 'error') => void
 const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean }
@@ -92,7 +93,6 @@ const CONFLICT_FILTER_OPTIONS: ConflictFilterOption[] = [
 ]
 
 const IMPORT_JOB_STATUS_TIMEOUT_MS = 10000
-const IMPORT_JOB_PREFLIGHT_TIMEOUT_MS = 15000
 const PRODUCT_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
 const PRODUCT_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 45000
 const PRODUCT_IMPORT_IMAGE_UPLOAD_TIMEOUT_MS = 120000
@@ -207,24 +207,6 @@ type ImportProgress = {
   progress: number
   label: string
 }
-type PreflightIssue = {
-  rowNumber?: EntityId
-  message?: string
-  // Machine-readable warning kind (e.g. 'sku_collision', 'negative_stock')
-  // for warnings, or the literal 'validation_error' for failures -- see
-  // IMPORT_WARNING_LABELS in cloudflare/src/lib/importEngine.ts, which
-  // `label` below is the pre-resolved human text for. Both optional so
-  // this still degrades fine against an older server response that only
-  // sent `message`.
-  code?: string
-  label?: string
-}
-type ServerPreflight = {
-  jobId: EntityId
-  checkedRows: number
-  failures: PreflightIssue[]
-  warnings: PreflightIssue[]
-}
 type ReviewUndoSnapshot = {
   label: string
   decisions: Record<RowIndex, ImportDecision>
@@ -242,7 +224,6 @@ type ProductImportApi = {
   openFolderDialog?: () => Promise<string | null | undefined>
   openCSVDialog: () => Promise<CsvData | null | undefined>
   getImportJob?: (jobId: EntityId | null | undefined) => Promise<ImportRecord | ImportJob | undefined>
-  preflightImportJob: (jobId: EntityId) => Promise<ImportRecord | undefined>
   cancelImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<ImportRecord | ImportJob | undefined>
   retryImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<ImportRecord | ImportJob | undefined>
   deleteImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<unknown>
@@ -277,7 +258,6 @@ type BulkImportModalProps = {
 }
 type ProductImportError = Error & {
   code?: string
-  preflight?: ServerPreflight
 }
 type ConflictFilterOption = {
   value: string
@@ -1211,7 +1191,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   }
   const [result, setResult] = useState<ImportResult | null>(null)
   const [currentJob, setCurrentJob] = useState<ImportJob | null>(null)
-  const [serverPreflight, setServerPreflight] = useState<ServerPreflight | null>(null)
   const [loading, setLoading] = useState(false)
   const [filePickerOpen, setFilePickerOpen] = useState(false)
   const cancelRequestedRef = useRef(false)
@@ -1429,7 +1408,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     setFieldRules({})
     setZipFile(null)
     setCurrentJob(null)
-    setServerPreflight(null)
     editSessionRef.current = new Set()
     cancelRequestedRef.current = false
     setStep(1)
@@ -1526,72 +1504,32 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     })
   }
 
-  const buildCsvForImportJob = (): string => {
+  const buildCsvForServerReview = (): string => {
     const rows = importRows.length ? importRows : analyzeProductImportText(csvData?.content || '', []).rows
-    const instructions = rows.map((row, index) => {
-      const rowIndex = Number(row?._import_row_index ?? index)
-      const action = decisions[rowIndex] || row?._planned_action || 'new'
-      const editedRow = {
-        ...row,
-        ...(rowOverrides[rowIndex] || {}),
-        sku: identifierOverrides[rowIndex]?.sku ?? row.sku,
-        barcode: identifierOverrides[rowIndex]?.barcode ?? row.barcode,
-      }
+    const instructions = rows.map((row) => {
+      // Screen 1 may normalize and validate the file, but it must not bake
+      // client-side conflict decisions into the upload. The authoritative
+      // action is classified from persisted rows on Screen 2 and saved via
+      // PATCH /decisions before one explicit approval.
+      const editedRow = Object.fromEntries(
+        Object.entries(row || {}).filter(([key]) => !key.startsWith('_')),
+      ) as ProductImportRow
       const matchedImageRef = getIncomingImageFilenames(editedRow).length ? '' : findImageReferenceForRow(editedRow, imageFiles)
       return {
         ...editedRow,
         ...(matchedImageRef ? { image_filename_1: matchedImageRef } : {}),
-        _action: action,
-        image_conflict_mode: imageDecisions[rowIndex] || row?.image_conflict_mode || (getIncomingImageFilenames(editedRow).length || matchedImageRef ? 'replace_with_csv' : 'keep_existing'),
+        image_conflict_mode: row?.image_conflict_mode || (getIncomingImageFilenames(editedRow).length || matchedImageRef ? 'replace_with_csv' : 'keep_existing'),
         _field_rules: JSON.stringify(fieldRules || {}),
-        _identifier_conflict_mode: identifierDecisions[rowIndex] || row?._identifier_conflict_mode || 'clear_imported',
-        _target_product_id: row?._target_product_id || '',
-        _parent_id: row?._parent_id || '',
       }
     })
     const headers = Array.from(instructions.reduce((set: Set<string>, row) => {
       Object.keys(row || {}).forEach((key) => set.add(key))
       return set
-    }, new Set(['name', 'sku', 'barcode', '_action', '_target_product_id', '_parent_id', '_field_rules', '_identifier_conflict_mode', 'image_conflict_mode'])))
+    }, new Set(['name', 'sku', 'barcode', '_field_rules', 'image_conflict_mode'])))
     return [
       headers.join(','),
       ...instructions.map((row) => headers.map((header) => csvEscape((row as ImportRecord)?.[header])).join(',')),
     ].join('\n')
-  }
-
-  const ensureServerPreflightReady = async (jobId: EntityId): Promise<ImportRecord | undefined> => {
-    const api = getProductImportApi()
-    const preflight = await withLoaderTimeout(
-      () => api.preflightImportJob(jobId),
-      'Product import preflight',
-      IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,
-    )
-    const failures = Array.isArray(preflight?.failures) ? preflight.failures : []
-    const warnings = Array.isArray(preflight?.warnings) ? preflight.warnings : []
-    if (failures.length) {
-      const preflightError = new Error(failures[0]?.message || 'Import review still has blocking issues.') as ProductImportError
-      preflightError.preflight = {
-        jobId,
-        checkedRows: Number(preflight?.checkedRows || 0),
-        failures,
-        warnings,
-      }
-      setServerPreflight({
-        jobId,
-        checkedRows: Number(preflight?.checkedRows || 0),
-        failures,
-        warnings,
-      })
-      setConflictFilter('errors')
-      throw preflightError
-    }
-    setServerPreflight({
-      jobId,
-      checkedRows: Number(preflight?.checkedRows || 0),
-      failures: [],
-      warnings,
-    })
-    return preflight
   }
 
   const handleCancelCurrentJob = async () => {
@@ -1695,7 +1633,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     if (!Object.keys(imageFiles).length && !zipFile) return
     if (!beginImportAction('image-only')) return
     cancelRequestedRef.current = false
-    setServerPreflight(null)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
     let jobId: EntityId | null = null
     const api = getProductImportApi()
@@ -1750,33 +1687,22 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
         )
         throwIfImportCancelled()
       }
-      setAnalysisProgress({ progress: 92, label: 'Checking conflicts and row decisions' })
-      await ensureServerPreflightReady(activeJobId)
-      throwIfImportCancelled()
-      await withLoaderTimeout(
+      setAnalysisProgress({ progress: 92, label: 'Starting server review' })
+      const started = await withLoaderTimeout(
         () => api.startImportJob(activeJobId, { source: 'products_modal' }),
         'Product image import start',
         PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,
       )
       throwIfImportCancelled()
-      const nextResult = {
-        imported: 0,
-        updated: 0,
-        images_matched: 0,
-        queued: Object.keys(imageFiles).length,
-        jobId,
-        errors: [],
-        message: T('import_analysis_started', 'Import analysis started. Review and approve it from the top progress bar.'),
-      }
-      await handOffToBackgroundTracker(nextResult)
+      const startedPayload = started as { job?: ImportJob } | ImportJob | undefined
+      const startedJob = (('job' in (startedPayload || {}) ? (startedPayload as { job?: ImportJob }).job : startedPayload) || job) as ImportJob
+      setCurrentJob(startedJob)
+      setStep(2)
       return
     } catch (error) {
       const importError = error as ProductImportError
       if (importError?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
         await setCancelledResult(jobId, error)
-      } else if (Array.isArray(importError?.preflight?.failures) && importError.preflight.failures.length) {
-        alert(getErrorMessage(error, 'Server preflight found rows that still need review.'))
-        setStep(2)
       } else {
         setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Import failed')] })
         setStep(3)
@@ -1841,9 +1767,9 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     setCollapsedFamilyKeys(new Set())
     setExpandedDetailRows(new Set())
     setReviewUndoStack([])
-    setServerPreflight(null)
     editSessionRef.current = new Set()
-    setStep(2)
+    // This pass only validates/normalizes the selected file. The second
+    // screen opens after the server has persisted its authoritative review.
   }
 
   const handlePickCSV = async () => {
@@ -1922,7 +1848,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
     }
     if (!beginImportAction('import')) return
     cancelRequestedRef.current = false
-    setServerPreflight(null)
     setAnalysisProgress({ progress: 0, label: 'Creating import job' })
     let jobId: EntityId | null = null
     const api = getProductImportApi()
@@ -1955,7 +1880,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       await withLoaderTimeout(
         () => api.uploadImportJobCsv({
           jobId: activeJobId,
-          text: buildCsvForImportJob(),
+          text: buildCsvForServerReview(),
           fileName: csvData?.name || 'products-import.csv',
         }),
         'Product import CSV upload',
@@ -1987,32 +1912,22 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
         )
         throwIfImportCancelled()
       }
-      setAnalysisProgress({ progress: 92, label: 'Checking conflicts and row decisions' })
-      await ensureServerPreflightReady(activeJobId)
-      throwIfImportCancelled()
-      await withLoaderTimeout(
+      setAnalysisProgress({ progress: 92, label: 'Starting server review' })
+      const started = await withLoaderTimeout(
         () => api.startImportJob(activeJobId, { source: 'products_modal' }),
         'Product import start',
         PRODUCT_IMPORT_JOB_START_TIMEOUT_MS,
       )
       throwIfImportCancelled()
-      const nextResult = {
-        imported: 0,
-        updated: 0,
-        queued: totalCount,
-        jobId,
-        errors: [],
-        message: T('import_analysis_started', 'Import analysis started. Review and approve it from the top progress bar.'),
-      }
-      await handOffToBackgroundTracker(nextResult)
+      const startedPayload = started as { job?: ImportJob } | ImportJob | undefined
+      const startedJob = (('job' in (startedPayload || {}) ? (startedPayload as { job?: ImportJob }).job : startedPayload) || job) as ImportJob
+      setCurrentJob(startedJob)
+      setStep(2)
       return
     } catch (error) {
       const importError = error as ProductImportError
       if (importError?.code === 'import_cancel_requested' || isCancelledStartError(error)) {
         await setCancelledResult(jobId, error)
-      } else if (Array.isArray(importError?.preflight?.failures) && importError.preflight.failures.length) {
-        alert(getErrorMessage(error, 'Server preflight found rows that still need review.'))
-        setStep(2)
       } else {
         setResult({ imported: 0, updated: 0, errors: [getErrorMessage(error, 'Import failed')] })
         setStep(3)
@@ -2467,7 +2382,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
       {step === 1 && onTopModeChange ? <ProductImportModeTabs value={topMode} onChange={onTopModeChange} /> : null}
 
       <div className="mb-5 flex gap-1.5">
-        {[1, 2, 3].map((value) => (
+        {[1, 2].map((value) => (
           <div key={value} className={`h-1 flex-1 rounded-full ${step >= value ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'}`} />
         ))}
       </div>
@@ -2538,11 +2453,9 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
         />
       ) : null}
       {/* Header-level file warnings (e.g. duplicate/near-duplicate CSV
-          columns) -- shown once at the top of the review step, separate
-          from serverPreflight below (that's about row data, this is about
-          the header row itself, and only the client-side analysis knows
-          about it). */}
-      {analysisWarnings.length && step === 2 ? (
+          columns) belong to Screen 1 file validation. Row outcomes are
+          classified and persisted by the server for Screen 2. */}
+      {analysisWarnings.length && step === 1 ? (
         <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
           <div className="font-semibold">{T('csv_header_warning_title', 'File warning')}</div>
           <div className="mt-1 space-y-1">
@@ -2557,7 +2470,7 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           silent redirect) keeps the deliberate "mode is locked once you're
           past the wizard" design DatedStockReconciliationModal's own header
           comment documents. */}
-      {datedReconciliationSignal && !dismissedDatedSignal && step === 2 ? (
+      {datedReconciliationSignal && !dismissedDatedSignal && step === 1 ? (
         <div className="mb-4 rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -2591,44 +2504,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
           </div>
         </div>
       ) : null}
-      {serverPreflight && step !== 1 ? (
-        <div className={`mb-4 rounded-xl border p-3 text-xs ${serverPreflight.failures?.length ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200' : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100'}`}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="font-semibold">
-              {serverPreflight.failures?.length
-                ? 'Server preflight found rows that still need review'
-                : 'Server preflight completed'}
-            </div>
-            <div>
-              {serverPreflight.checkedRows || 0} rows checked
-            </div>
-          </div>
-          {serverPreflight.failures?.length ? (
-            <div className="mt-2 space-y-1">
-              {serverPreflight.failures.slice(0, 6).map((failure, index) => (
-                <div key={`${failure.rowNumber || 'row'}-${index}`}>
-                  Row {failure.rowNumber || '?'}: {failure.message}
-                </div>
-              ))}
-              {serverPreflight.failures.length > 6 ? (
-                <div>+ {serverPreflight.failures.length - 6} more issue(s)</div>
-              ) : null}
-            </div>
-          ) : null}
-          {!serverPreflight.failures?.length && serverPreflight.warnings?.length ? (
-            <div className="mt-2 space-y-1 text-amber-700 dark:text-amber-200">
-              {serverPreflight.warnings.slice(0, 4).map((warning, index) => (
-                <div key={`${warning.rowNumber || 'warning'}-${index}`}>
-                  Row {warning.rowNumber || '?'}
-                  {warning.label ? <span className="font-medium"> ({warning.label})</span> : null}
-                  : {warning.message}
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
       {step === 1 && mode === 'products' ? (
         <div className="flex flex-col gap-3">
           {/* Unified upload card (redesign, Aug 2026): the whole card is
@@ -2688,6 +2563,13 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             <Download className="h-4 w-4" aria-hidden="true" />
             {T('csv_template_download', 'Download Template')}
           </button>
+
+          {csvData ? (
+            <div className="order-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100">
+              <div className="font-semibold">{csvData.name || T('selected_file', 'Selected file')}</div>
+              <div className="mt-1">{T('rows_ready_for_server_review', '{n} row(s) passed file validation and are ready for server review.').replace('{n}', String(totalCount))}</div>
+            </div>
+          ) : null}
 
           <div
             onDragOver={handleImageDragOver}
@@ -2797,6 +2679,21 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
                 />
               ) : null}
             </div>
+            <label className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-semibold text-gray-600 dark:text-gray-300">{T('product_detail_handling', 'Existing product details')}</span>
+              <AppSelect
+                value={(fieldRules.__preset as FieldRulePreset | undefined) || 'merge_blank_only'}
+                onChange={(nextValue) => applyFieldRulePreset(nextValue as FieldRulePreset)}
+                ariaLabel="Product detail handling"
+                className="min-w-[12rem] flex-1"
+                buttonClassName="w-full px-2.5 py-2 text-xs"
+                options={[
+                  { value: 'merge_blank_only', label: 'Fill blanks only' },
+                  { value: 'keep_existing', label: 'Keep existing' },
+                  { value: 'use_imported', label: 'Use imported' },
+                ]}
+              />
+            </label>
             {topMode === 'replace' && !canReplaceAll ? (
               <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
                 {T('csv_replace_permission_required', 'Replace imports require destructive-data permission. Choose Add / Update, or ask an administrator for access.')}
@@ -2887,6 +2784,23 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
             ) : null}
           </div>
 
+          {blockingIssueCount ? (
+            <div className="order-6 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
+              <div className="font-semibold">{T('file_validation_blocked', 'Fix the file before uploading')}</div>
+              <div className="mt-1">{T('blocking_barcode_issue_count', '{n} barcode(s) must be edited or cleared before import.').replace('{n}', String(blockingIssueCount))}</div>
+              <div className="mt-1">{blockingIssueEntries.slice(0, 3).map((entry) => `Row ${entry.rowNumber}: ${getProductImportIssueLabel(entry.issue)}`).join('; ')}</div>
+            </div>
+          ) : null}
+
+          <button
+            type="button"
+            className="btn-primary order-7 w-full"
+            onClick={handleImport}
+            disabled={loading || !csvData?.content || blockingIssueCount > 0 || (importMode === 'replace_columns' && !selectedReplaceColumns.length)}
+          >
+            {loading ? T('uploading_for_review', 'Uploading for review…') : T('upload_and_review', 'Upload & review')}
+          </button>
+
         </div>
       ) : null}
 
@@ -2945,232 +2859,27 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
         </div>
       ) : null}
 
-      {step === 2 ? (
-        <div className="space-y-4">
-          {mode === 'products' && importMode === 'replace_all' ? (
-            <div className="flex items-start gap-2 rounded-xl border border-red-300 bg-red-50 p-3 text-xs text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>
-                {T('csv_mode_replace_review_warning', 'Replace mode: importing will also deactivate every active product not in this file, in addition to the changes below.')}
-              </span>
-            </div>
-          ) : null}
-          <div className="grid grid-cols-3 gap-2 text-center text-xs">
-            <div className="rounded-lg bg-green-50 p-2 dark:bg-green-900/20">
-              <div className="text-lg font-bold text-green-700 dark:text-green-400">{cleanRows.length}</div>
-              <div className="text-green-600 dark:text-green-500">{T('new_products_count', 'New products')}</div>
-            </div>
-            <div className="rounded-lg bg-yellow-50 p-2 dark:bg-yellow-900/20">
-              <div className="text-lg font-bold text-yellow-700 dark:text-yellow-400">{conflicts.length}</div>
-              <div className="text-yellow-600 dark:text-yellow-500">{T('existing_matches_count', 'Existing matches')}</div>
-            </div>
-            <div className="rounded-lg bg-blue-50 p-2 dark:bg-blue-900/20">
-              <div className="text-lg font-bold text-blue-700 dark:text-blue-400">{analysisSummary?.variantCount ?? pendingAsk.length}</div>
-              <div className="text-blue-600 dark:text-blue-500">{T('variant_rows_count', 'Variant rows')}</div>
-            </div>
-          </div>
-
-          {conflicts.length ? (
-            <div className="space-y-3">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                <div className="mb-3 grid gap-2">
-                  <label className="sr-only" htmlFor="product-import-conflict-search">Search conflicts</label>
-                  <input
-                    id="product-import-conflict-search"
-                    className="input h-11 text-sm"
-                    value={conflictQuery}
-                    onChange={(event) => setConflictQuery(event.target.value)}
-                    placeholder="Search conflict rows by name, barcode, SKU, brand, category..."
-                    autoComplete="off"
-                  />
-                  <div className="flex flex-col gap-1.5" data-testid="product-import-filter-row">
-                    <div className="flex flex-wrap gap-1.5 text-xs">
-                      {CONFLICT_FILTER_OPTIONS.filter((item) => item.group === 'scope' || item.group === 'severity').map(renderConflictFilterChip)}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        By field
-                      </span>
-                      {CONFLICT_FILTER_OPTIONS.filter((item) => item.group === 'field').map(renderConflictFilterChip)}
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                      <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        By status
-                      </span>
-                      {CONFLICT_FILTER_OPTIONS.filter((item) => item.group === 'status').map(renderConflictFilterChip)}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <button
-                    type="button"
-                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 font-semibold text-slate-600 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                    onClick={undoLastReviewChange}
-                    disabled={!reviewUndoStack.length}
-                    title={reviewUndoStack.length ? `Undo: ${reviewUndoStack[reviewUndoStack.length - 1]?.label || 'last review change'}` : 'No review changes to undo yet.'}
-                  >
-                    <Undo2 className="h-3.5 w-3.5" />
-                    Undo
-                  </button>
-                  <label className="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={visibleReviewRowCount > 0 && selectedConflictCount > 0 && selectedConflictCount === visibleReviewRowCount}
-                      onChange={(event) => toggleSelectAllConflicts(event.target.checked)}
-                    />
-                    Visible matches
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <span className="text-gray-500 dark:text-gray-400">Action</span>
-                    <AppSelect
-                      value=""
-                      onChange={(nextValue) => { if (nextValue) applyDecisionToSelection(nextValue) }}
-                      ariaLabel="Apply action to selected"
-                      className="min-w-[9rem]"
-                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
-                      menuClassName="min-w-[10rem]"
-                      optionClassName="text-xs"
-                      options={[{ value: '', label: 'Apply to selected...' }, ...IMPORT_DECISION_OPTIONS]}
-                    />
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <span className="text-gray-500 dark:text-gray-400">SKU/barcode</span>
-                    <AppSelect
-                      value=""
-                      onChange={(nextValue) => { if (nextValue) applyIdentifierDecisionToSelection(nextValue) }}
-                      ariaLabel="Apply identifier decision to selected"
-                      className="min-w-[9rem]"
-                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
-                      menuClassName="min-w-[10rem]"
-                      optionClassName="text-xs"
-                      options={[{ value: '', label: 'Apply...' }, ...IDENTIFIER_DECISION_OPTIONS]}
-                    />
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <span className="text-gray-500 dark:text-gray-400">Images</span>
-                    <AppSelect
-                      value=""
-                      onChange={(nextValue) => { if (nextValue) applyImageDecisionToSelection(nextValue) }}
-                      ariaLabel="Apply image decision to selected"
-                      className="min-w-[9rem]"
-                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
-                      menuClassName="min-w-[11rem]"
-                      optionClassName="text-xs"
-                      options={[{ value: '', label: 'Apply...' }, ...IMAGE_CONFLICT_OPTIONS]}
-                    />
-                  </label>
-                  <label className="ml-auto inline-flex min-w-[13rem] items-center gap-2">
-                    <span className="whitespace-nowrap text-gray-500 dark:text-gray-400">Details</span>
-                    <AppSelect
-                      value={(fieldRules.__preset as FieldRulePreset | undefined) || 'merge_blank_only'}
-                      onChange={(nextValue) => {
-                        const value = nextValue as FieldRulePreset
-                        applyFieldRulePreset(value)
-                      }}
-                      ariaLabel="Product detail handling"
-                      className="min-w-[11rem]"
-                      buttonClassName="h-8 w-full px-2 py-1 text-xs"
-                      menuClassName="min-w-[11rem]"
-                      optionClassName="text-xs"
-                      options={[
-                        { value: 'merge_blank_only', label: 'Fill blanks only' },
-                        { value: 'keep_existing', label: 'Keep existing' },
-                        { value: 'use_imported', label: 'Use imported' },
-                      ]}
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {T('import_conflict_rows_label', 'Rows that need review')}
-                  </p>
-                {visibleConflictSections.map((section) => {
-                  const collapsed = collapsedFamilyKeys.has(section.familyKey)
-                  const group = section.group
-                  return (
-                    <div key={section.key} className={group ? 'overflow-hidden rounded-xl border border-indigo-100 bg-indigo-50/40 dark:border-indigo-900/50 dark:bg-indigo-950/10' : 'space-y-2'}>
-                      {group ? (
-                        <div className="flex flex-wrap items-start gap-2 p-2 text-xs">
-                          <button
-                            type="button"
-                            className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-lg bg-white text-indigo-700 shadow-sm dark:bg-slate-900 dark:text-indigo-200"
-                            onClick={() => toggleFamilyCollapse(section.familyKey)}
-                            title={collapsed ? 'Expand this family group.' : 'Collapse this family group.'}
-                            aria-label={collapsed ? 'Expand family group' : 'Collapse family group'}
-                          >
-                            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                          </button>
-                          <div className="min-w-[12rem] flex-1">
-                            <div className="font-semibold text-indigo-900 dark:text-indigo-100">Family: {section.title}</div>
-                            <div className="mt-0.5 text-indigo-700/80 dark:text-indigo-200/80">
-                              Rows {summarizeRowNumbers(section.rowNumbers)} - {group.subgroups?.length || 1} case(s). Expand to decide which row adds stock and which row becomes a parent or variant.
-                            </div>
-                            {group.subgroups?.length ? (
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                {group.subgroups.map((subgroup, subgroupIndex) => (
-                                  <span key={subgroup.signature || subgroupIndex} className="rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-700 dark:bg-slate-900 dark:text-indigo-200" title={summarizeSubgroup(subgroup, subgroupIndex)}>
-                                    {summarizeSubgroup(subgroup, subgroupIndex)}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : null}
-                          </div>
-                          <button
-                            type="button"
-                            className="rounded-lg bg-white px-2 py-1 font-semibold text-indigo-700 shadow-sm dark:bg-slate-900 dark:text-indigo-200"
-                            onClick={() => setSelectedConflictIds((current) => {
-                              const next = new Set(current)
-                              section.rows.forEach((entry) => next.add(entry.index))
-                              return next
-                            })}
-                            title="Select every visible row in this family for one bulk action."
-                          >
-                            Select family
-                          </button>
-                        </div>
-                      ) : null}
-                      {!collapsed ? (
-                        <div className={group ? 'space-y-2 border-t border-indigo-100 p-2 dark:border-indigo-900/40' : 'space-y-2'}>
-                          {section.rows.map(renderConflictRow)}
-                        </div>
-                      ) : null}
-                    </div>
-                  )
-                })}
-                {conflicts.length > visibleConflicts.length ? (
-                  <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:bg-slate-800 dark:text-slate-300">
-                    Showing first {visibleReviewRowCount} visible family/review rows from {conflicts.length} review matches. Search or use filters to narrow the rows before applying bulk actions.
-                  </p>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
-
-          {blockingIssueCount ? (
-            <p className="rounded-lg bg-red-50 p-2 text-xs text-red-600 dark:bg-red-950/30 dark:text-red-300">
-              {T('blocking_barcode_issue_count', '{n} barcode(s) must be edited or cleared before import.').replace('{n}', String(blockingIssueCount))}
-              {' '}
-              {blockingIssueEntries.slice(0, 3).map((entry) => `Row ${entry.rowNumber}: ${getProductImportIssueLabel(entry.issue)}`).join('; ')}
-            </p>
-          ) : null}
-
-          {pendingAsk.length ? (
-            <p className="rounded-lg bg-yellow-50 p-2 text-xs text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400">
-              {T('still_need_decision', '{n} product(s) still need a decision.').replace('{n}', String(pendingAsk.length))}
-            </p>
-          ) : null}
-
-          {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx's
-              own fix -- this is the review step, which can run long once
-              rows/photos are listed above it. */}
-          <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
-            <button type="button" className="btn-secondary" onClick={resetCsvState}>{T('back', 'Back')}</button>
-            <button type="button" className="btn-primary flex-1" onClick={handleImport} disabled={loading || !allDecided || (importMode === 'replace_columns' && !selectedReplaceColumns.length)}>
-              {loading ? T('importing_images', 'Importing...') : T('import_n_products', 'Import {n} products').replace('{n}', String(totalCount))}
-            </button>
-          </div>
-        </div>
+      {step === 2 && (currentJob?.id || currentJob?.job_id) ? (
+        <ProductServerImportReviewScreen
+          jobId={(currentJob.id || currentJob.job_id) as EntityId}
+          jobRevision={currentJob.updated_at || currentJob.status}
+          t={(key) => T(key, key)}
+          notify={notify}
+          onJob={(job) => setCurrentJob(job as ImportJob)}
+          onCancel={handleCancelCurrentJob}
+          onReviewLater={() => handOffToBackgroundTracker({
+            imported: 0,
+            updated: 0,
+            queued: totalCount,
+            jobId: currentJob.id || currentJob.job_id,
+            errors: [],
+            message: T('import_review_later_notice', 'Product review was saved. Continue it from the import tracker.'),
+          })}
+          onApproved={async () => {
+            await signalDone({ imported: 0, updated: 0, queued: totalCount, jobId: currentJob.id || currentJob.job_id, errors: [] })
+            onClose()
+          }}
+        />
       ) : null}
 
       {step === 3 && result ? (

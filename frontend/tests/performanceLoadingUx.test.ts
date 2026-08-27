@@ -2777,10 +2777,15 @@ assert.match(
   /const IMPORT_JOB_STATUS_TIMEOUT_MS = 10000/,
   'bulk import cancelled-job recovery should use an explicit status timeout',
 )
+assert.doesNotMatch(
+  bulkImportModal,
+  /preflightImportJob|IMPORT_JOB_PREFLIGHT_TIMEOUT_MS/,
+  'product import should not repeat a synchronous full-file preflight before queued server analysis',
+)
 assert.match(
   bulkImportModal,
-  /const IMPORT_JOB_PREFLIGHT_TIMEOUT_MS = 15000/,
-  'bulk import final preflight should use an explicit timeout',
+  /api\.startImportJob\(activeJobId,[\s\S]*setCurrentJob\(startedJob\)[\s\S]*setStep\(2\)/,
+  'queued analysis should hand the active job to the persisted Screen 2 review',
 )
 assert.match(
   bulkImportModal,
@@ -2888,10 +2893,10 @@ assert.match(
   /withLoaderTimeout\(\s*\(\) => api\.getImportJob\?\.\(jobId\),\s*'Product import job status',\s*IMPORT_JOB_STATUS_TIMEOUT_MS,\s*\)/,
   'bulk import cancelled-job recovery should timeout slow job status reads',
 )
-assert.match(
+assert.doesNotMatch(
   bulkImportModal,
-  /withLoaderTimeout\(\s*\(\) => api\.preflightImportJob\(jobId\),\s*'Product import preflight',\s*IMPORT_JOB_PREFLIGHT_TIMEOUT_MS,\s*\)/,
-  'bulk import final preflight should timeout slow server review checks',
+  /api\.preflightImportJob/,
+  'product imports should rely on one queued persisted analysis instead of a duplicate synchronous review check',
 )
 assert.match(
   bulkImportModal,
