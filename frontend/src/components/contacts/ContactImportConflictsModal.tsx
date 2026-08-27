@@ -6,8 +6,19 @@ import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronUp from 'lucide-react/dist/esm/icons/chevron-up.js'
+import Search from 'lucide-react/dist/esm/icons/search.js'
 import Modal from '../shared/Modal'
+import AppSelect from '../shared/AppSelect'
 import { getImportJobReview, updateImportJobDecisions } from '../../api/importJobsTransport'
+import {
+  CONTACT_REVIEW_PAGE_SIZE,
+  contactConflictWarningKinds,
+  contactReviewPageCount,
+  restoreContactRowDecision,
+  type ContactConflictFilter as ConflictFilter,
+  type ContactReviewSort as ReviewSort,
+  type ContactRowChoice as RowChoice,
+} from './contactImportReviewModel'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -36,8 +47,6 @@ interface ContactImportConflictsModalProps {
   // urgency styling without a full re-poll.
   onAllResolved?: () => void
 }
-
-type RowChoice = 'merge' | 'different' | 'delete'
 
 // Contacts import (customers/suppliers/delivery_contacts) never creates a
 // second contact sharing an existing one's exact name -- classifyContacts
@@ -76,6 +85,20 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   const [savingBulk, setSavingBulk] = useState(false)
   const [selectedRows, setSelectedRows] = useState<Set<number>>(() => new Set())
   const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set())
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [searchDraft, setSearchDraft] = useState('')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [conflictFilter, setConflictFilter] = useState<ConflictFilter>('all')
+  const [sort, setSort] = useState<ReviewSort>('name_asc')
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSearchQuery(searchDraft.trim())
+      setPage(1)
+    }, 250)
+    return () => window.clearTimeout(timeout)
+  }, [searchDraft])
 
   useEffect(() => {
     let cancelled = false
@@ -89,12 +112,20 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
     // not decided). Previously only name_match was ever fetched, so a
     // phone conflict on an import had nowhere to show up at all short of
     // reading the raw per-row JSON.
-    getImportJobReview(jobId, { warningKind: 'name_match,membership_phone_conflict', pageSize: 200 })
+    const warningKind = contactConflictWarningKinds(conflictFilter)
+    getImportJobReview(jobId, {
+      warningKind,
+      page,
+      pageSize: CONTACT_REVIEW_PAGE_SIZE,
+      query: searchQuery || undefined,
+      sort,
+    })
       .then((result) => {
         if (cancelled) return
-        const payload = (result || {}) as { rows?: ReviewRow[] }
+        const payload = (result || {}) as { rows?: ReviewRow[]; total?: number; page?: number }
         const loadedRows = Array.isArray(payload.rows) ? payload.rows : []
         setRows(loadedRows)
+        setTotal(Math.max(0, Number(payload.total) || 0))
         // A row's decision (saved via PATCH /:id/decisions) used to only
         // ever live in local component state -- reopening this modal, or
         // BackgroundImportTracker remounting it, re-fetched the same rows
@@ -107,16 +138,10 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
         const nextDrafts: Record<number, string> = {}
         const nextResolved = new Set<number>()
         for (const row of loadedRows) {
-          const decision = row.decision
-          if (decision?.action === 'skip') {
-            nextChoices[row.rowNumber] = 'delete'
-            nextResolved.add(row.rowNumber)
-          } else if (decision?.action === 'force_create') {
-            nextChoices[row.rowNumber] = 'different'
-            nextResolved.add(row.rowNumber)
-            const name = decision.field_overrides?.name
-            if (typeof name === 'string' && name) nextDrafts[row.rowNumber] = name
-          }
+          const restored = restoreContactRowDecision(row.decision)
+          if (restored.choice) nextChoices[row.rowNumber] = restored.choice
+          if (restored.rename) nextDrafts[row.rowNumber] = restored.rename
+          if (restored.resolved) nextResolved.add(row.rowNumber)
         }
         setChoices(nextChoices)
         setRenameDrafts(nextDrafts)
@@ -130,7 +155,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobId])
+  }, [conflictFilter, jobId, page, searchQuery, sort])
 
   const nameMatchWarning = (row: ReviewRow) => (row.warnings || []).find((w) => w.kind === 'name_match') || null
   const phoneConflictWarning = (row: ReviewRow) => (row.warnings || []).find((w) => w.kind === 'membership_phone_conflict') || null
@@ -160,10 +185,21 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   }
 
   const saveMerge = async (row: ReviewRow) => {
-    // Merge is the existing default -- classifyContacts already does this
-    // with no decision recorded at all, so "confirm merge" just marks the
-    // row resolved locally. Nothing to send.
-    setResolvedRows((current) => new Set(current).add(row.rowNumber))
+    // `apply` keeps classifyContacts' safe default merge, but records that
+    // the reviewer explicitly chose it. Without this durable marker a page
+    // change/reopen made a completed row look unresolved again.
+    setSavingRow(row.rowNumber)
+    try {
+      await updateImportJobDecisions(jobId, {
+        [String(row.rowNumber)]: { action: 'apply' },
+      })
+      setResolvedRows((current) => new Set(current).add(row.rowNumber))
+      notify(tr('contacts_import_conflict_merge_saved', 'Saved -- this row will merge into the existing contact'), 'success')
+    } catch (err) {
+      notify(err instanceof Error ? err.message : tr('contacts_import_conflict_save_failed', 'Could not save this decision'), 'error')
+    } finally {
+      setSavingRow(null)
+    }
   }
 
   const saveDifferentPerson = async (row: ReviewRow) => {
@@ -257,31 +293,20 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
     setResolvedRows((current) => new Set(current).add(rowNumber))
   }
 
-  // Bulk "same person -- merge": merge never records a decision (see
-  // saveMerge above), so this is purely local -- but doing it for every
-  // selected row in one click, instead of one Save click per row, is the
-  // whole point of adding selection here.
-  const bulkMerge = () => {
-    setResolvedRows((current) => {
-      const next = new Set(current)
-      selectedRows.forEach((rowNumber) => next.add(rowNumber))
-      return next
-    })
-    setSelectedRows(new Set())
-  }
-
-  // Bulk "delete/skip selected" and bulk "keep separate selected" both hit
+  // Every bulk action hits
   // PATCH /:id/decisions exactly once for the whole selection (it already
   // accepts a decisions map keyed by row number and merges it into
   // policy_json in one write) instead of one request per row.
-  const bulkSave = async (choice: 'delete' | 'different') => {
-    const targetRows = rows.filter((row) => selectedRows.has(row.rowNumber) && !resolvedRows.has(row.rowNumber))
+  const bulkSave = async (choice: RowChoice) => {
+    const targetRows = nameConflictRows.filter((row) => selectedRows.has(row.rowNumber) && !resolvedRows.has(row.rowNumber))
     if (!targetRows.length) return
     setSavingBulk(true)
     try {
       const decisions: Record<string, { action: string; field_overrides?: Record<string, unknown> }> = {}
       for (const row of targetRows) {
-        if (choice === 'delete') {
+        if (choice === 'merge') {
+          decisions[String(row.rowNumber)] = { action: 'apply' }
+        } else if (choice === 'delete') {
           decisions[String(row.rowNumber)] = { action: 'skip' }
         } else {
           const importedName = String(row.data?.name || '')
@@ -302,7 +327,9 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
       })
       setSelectedRows(new Set())
       notify(
-        choice === 'delete'
+        choice === 'merge'
+          ? tr('contacts_import_conflict_bulk_merged', 'Saved -- selected rows will merge into their existing contacts')
+          : choice === 'delete'
           ? tr('contacts_import_conflict_bulk_deleted', 'Saved -- selected rows will be skipped')
           : tr('contacts_import_conflict_bulk_different', 'Saved -- selected rows will import as new, separate contacts'),
         'success',
@@ -317,9 +344,9 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   const unresolvedCount = rows.filter((row) => !resolvedRows.has(row.rowNumber)).length
 
   useEffect(() => {
-    if (!loading && rows.length > 0 && unresolvedCount === 0) onAllResolved?.()
+    if (!loading && total > 0 && total <= rows.length && unresolvedCount === 0) onAllResolved?.()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, unresolvedCount, rows.length])
+  }, [loading, total, unresolvedCount, rows.length])
 
   return (
     <Modal title={tr('contacts_import_conflicts_title', 'Resolve name conflicts').replace('{type}', entityLabel)} onClose={onClose} size="lg" draggable>
@@ -327,7 +354,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {tr(
             'contacts_import_conflicts_intro',
-            'Each row below has the same name as an existing contact. By default it will merge into that contact. If it\'s actually a different person, give it a name that\'s not already in use.',
+            'Review name and phone conflicts before importing. Every action says exactly what will happen, and saved choices remain when you change pages or reopen this review.',
           )}
         </p>
 
@@ -338,13 +365,58 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
           </div>
         ) : error ? (
           <div className="py-8 text-center text-sm text-red-600 dark:text-red-400">{error}</div>
-        ) : rows.length === 0 ? (
+        ) : total === 0 && !searchQuery && conflictFilter === 'all' ? (
           <div className="flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-4 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/10 dark:text-green-400">
             <CheckCircle2 className="h-4 w-4" />
             {tr('contacts_import_no_conflicts', 'No name or phone conflicts on this import.')}
           </div>
         ) : (
           <>
+            <div className="grid gap-2 rounded-xl border border-gray-200 bg-gray-50 p-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] dark:border-zinc-700 dark:bg-zinc-800/60">
+              <label className="relative block">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="search"
+                  value={searchDraft}
+                  onChange={(event) => setSearchDraft(event.target.value)}
+                  placeholder={tr('contacts_import_conflicts_search', 'Search name, phone, email or membership number')}
+                  className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-8 pr-3 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                />
+              </label>
+              <AppSelect
+                value={conflictFilter}
+                onChange={(value) => { setConflictFilter(value as ConflictFilter); setPage(1) }}
+                ariaLabel={tr('contacts_import_conflicts_filter', 'Conflict type')}
+                options={[
+                  { value: 'all', label: tr('contacts_import_conflicts_filter_all', 'All conflicts') },
+                  { value: 'name', label: tr('contacts_import_conflicts_filter_name', 'Name conflicts') },
+                  { value: 'phone', label: tr('contacts_import_conflicts_filter_phone', 'Phone conflicts') },
+                ]}
+                buttonClassName="w-full px-2.5 py-2 text-sm"
+              />
+              <AppSelect
+                value={sort}
+                onChange={(value) => { setSort(value as ReviewSort); setPage(1) }}
+                ariaLabel={tr('contacts_import_conflicts_sort', 'Sort conflicts')}
+                options={[
+                  { value: 'name_asc', label: tr('sort_name_az', 'Name A–Z') },
+                  { value: 'name_desc', label: tr('sort_name_za', 'Name Z–A') },
+                  { value: 'row_asc', label: tr('sort_row_asc', 'Sheet row: first–last') },
+                  { value: 'row_desc', label: tr('sort_row_desc', 'Sheet row: last–first') },
+                ]}
+                buttonClassName="w-full px-2.5 py-2 text-sm"
+              />
+              <div className="text-xs text-gray-500 sm:col-span-3 dark:text-gray-400">
+                {tr('contacts_import_conflicts_results', '{count} matching conflict(s)').replace('{count}', String(total))}
+              </div>
+            </div>
+
+            {rows.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-gray-300 px-4 py-8 text-center text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">
+                {tr('contacts_import_conflicts_no_matches', 'No conflicts match this search and filter.')}
+              </div>
+            ) : null}
+
             {nameConflictRows.length > 0 ? (
               <>
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
@@ -359,7 +431,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                     {selectedRows.size > 0 ? tr('contacts_import_conflicts_selected', '{count} selected').replace('{count}', String(selectedRows.size)) : ''}
                   </span>
                   <div className="ml-auto flex flex-wrap gap-2">
-                    <button type="button" disabled={!selectedRows.size || savingBulk} onClick={bulkMerge} className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50">
+                    <button type="button" disabled={!selectedRows.size || savingBulk} onClick={() => void bulkSave('merge')} className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50">
                       <GitMerge className="mr-1 inline h-3.5 w-3.5" />
                       {tr('contacts_import_conflict_bulk_merge_action', 'Merge selected')}
                     </button>
@@ -534,13 +606,31 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                 </div>
               </>
             ) : null}
+
+            {total > CONTACT_REVIEW_PAGE_SIZE ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 px-3 py-2 text-xs dark:border-zinc-700">
+                <span className="text-gray-500 dark:text-gray-400">
+                  {tr('contacts_import_conflicts_page', 'Page {page} of {pages}')
+                    .replace('{page}', String(page))
+                    .replace('{pages}', String(contactReviewPageCount(total)))}
+                </span>
+                <div className="flex gap-2">
+                  <button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page <= 1 || loading} onClick={() => setPage((current) => Math.max(1, current - 1))}>
+                    {tr('previous', 'Previous')}
+                  </button>
+                  <button type="button" className="btn-secondary px-2.5 py-1 text-xs" disabled={page >= contactReviewPageCount(total) || loading} onClick={() => setPage((current) => current + 1)}>
+                    {tr('next', 'Next')}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </>
         )}
 
         <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-zinc-800">
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {rows.length > 0
-              ? tr('contacts_import_conflicts_remaining', '{count} unresolved').replace('{count}', String(unresolvedCount))
+              ? tr('contacts_import_conflicts_remaining_page', '{count} unresolved on this page').replace('{count}', String(unresolvedCount))
               : ''}
           </span>
           <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={onClose}>

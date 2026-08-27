@@ -11,7 +11,7 @@ import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImag
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
-import { buildImportReviewWhere } from '../lib/importReviewQuery'
+import { buildImportReviewOrder, buildImportReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -252,6 +252,7 @@ app.get('/:id/review', async (c) => {
   const pageSize = Math.min(200, Math.max(1, Number.parseInt(c.req.query('pageSize') || '50', 10) || 50))
   const filter = (c.req.query('type') || c.req.query('filter') || 'all').toLowerCase()
   const query = (c.req.query('query') || c.req.query('q') || '').toLowerCase().trim()
+  const orderBy = buildImportReviewOrder(c.req.query('sort'))
   // Filters down to only rows carrying a specific warning kind (e.g.
   // 'name_match', the contacts-import "same name as an existing record"
   // case) -- what ContactImportConflictsModal.tsx uses to build its
@@ -291,7 +292,7 @@ app.get('/:id/review', async (c) => {
     SELECT row_number, action, identifier, result_json
     FROM import_job_rows
     WHERE ${where.sql}
-    ORDER BY row_number ASC
+    ORDER BY ${orderBy}
     LIMIT @limit OFFSET @offset
   `).all<{ row_number: number; action: string; identifier: string | null; result_json: string }>({
     ...where.params, limit: pageSize, offset,
