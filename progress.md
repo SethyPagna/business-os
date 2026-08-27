@@ -78,6 +78,7 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 
 | Task | Status | Notes |
 |---|---|---|
+| POS oversell was silently clamped (race) | **done (Part 360), needs deploy** | The POS/sales deduction validated stock with a plain READ then wrote `MAX(0, qty - sold)`. Not atomic: two concurrent sales of the last unit both pass the read and the clamp floors stock at 0 — an oversell with stock lost and no error. Migration `0058` adds `CHECK(quantity >= 0)` to `branch_stock` AND `branch_batch_stock` (already satisfied by every existing `MAX(0,…)` site, so a safe global net); POST `/sales` and PATCH `/:id/status` now deduct with plain subtraction so a concurrent oversell aborts the atomic batch and returns a **409 stock_conflict** instead of clamping. **Per-lot nuance honored:** a multi-batch product's stock is separated across lots — a sale drawing from a specific lot is bounded by THAT lot's `branch_batch_stock`, not the product total, so selling 5 from a 4-unit lot fails even when the total is 10. Also fixed a latent bug the CHECK exposed: `datedStockCountApply` could seed a negative `branch_stock` row on a remove against a not-yet-tracked product/branch. Test: `test-sales-oversell-strict-pure.cjs`. |
 | Data reset fails — "Exceeded Memory Limit" | **done & DEPLOYED** (write path); streaming RESTORE fixed in Part 355, needs deploy | Cause was NOT the reset code: a full backup runs as a hard prerequisite in front of every reset, and it loaded every row of ~34 tables into memory then stringified it. Backup write is paged + streamed to R2; restore now streams rows in bounded batches (10.1). |
 | Organization must lock to LeangCosmetics | **done & DEPLOYED** (Part 346) | `ensureCoreDataInvariants` hardcoded the name and rewrote it **on every request**, so any rename reverted. Now configured via `BUSINESS_OS_ORGANIZATION_NAME`/`_SLUG`. Only applies once deployed against remote D1. |
 | POS / sales not working — options, batch pick, click-to-pick | done | Two causes. (1) A FLAT product produced no branch options at all (the sheet iterated `variants`, which is empty for non-groups), so the lot query had no branch and was fed an empty list. (2) route()'s read cache is keyed by channel string alone, and `batches:list` was constant — every product shared one cached lot list, which once warm would show ANOTHER product's lots. Verified end to end: both lots list, block clears, cart $37.00 → $55.50 with the lot recorded. |
@@ -370,6 +371,22 @@ add / create / FIFO sale group / whole-job idempotency / oversell isolation /
 partial-receipt prevention, against a real in-memory SQLite).
 
 ### 13 — Import UX: exactly TWO screens, ALL imports, ALL pages (Part 354)
+
+**Part 361 — unified stock-action import is LIVE end-to-end (committed, needs deploy).**
+The §12 engine is now reachable: `ALLOWED_TYPES` admits `stock_actions`, and a
+new server-backed two-screen `StockActionImportModal` replaces the old
+client-side `AddSaleImportModal` on the wizard's Add-Sale mode. **Screen 1**
+uploads the one ten-column sheet and picks Direct vs Reconcile with a
+client-side row/issue preview; **Screen 2** polls the analyzed job and shows
+the resolved counts + conflicts behind an explicit **Confirm** gate
+(`approveImportJob` forwards `confirm_stock_actions`). Apply runs in the
+background queue through the atomic/idempotent/oversell-proof engine — never a
+browser-side apply. The review-state logic (`analyzing`/`needsConfirm`/
+`canConfirm`) is a pure, unit-tested helper (`stockActionImportModel.ts`) shared
+by the modal and its tests. The old `AddSaleImportModal.tsx` was deleted (its
+`addSaleImport*` helpers stay — `importModeDetection.ts` still uses them). This
+is the stock-action slice of §13; the full 2-screen rework of every OTHER
+import type is still open. Test: `stockActionImportModel.test.ts`.
 
 *User, this session + mid-turn clarification.*
 
@@ -883,6 +900,8 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Stock-action sealing/apply (§12, Part 358) | `test-stock-action-seal-pure.cjs`, `test-stock-action-commit-pure.cjs`, `test-stock-action-approval-pure.cjs` | cross-window conflict catch + retry de-dup; injected transaction failure rolls back ledger/batch/stock/movement; retry cannot double-add; stable product creation; three-permission/state/Confirm Action server gate |
 | Grouped-sale writer + apply engine (§12, Part 359) | `test-stock-action-sale-commit-pure.cjs`, `test-stock-action-apply-pure.cjs` | writer: one receipt per group, FIFO across lots (explicit label reserved before FIFO), aggregate + batch oversell fail via transaction-enforced CHECK, injected mid-tx failure rolls back, retry de-dup, hard group-size bounds. Engine end-to-end (real in-memory SQLite): add / create / FIFO sale group; whole-job retry adds no second receipt; an oversell fails only its group while an independent add still applies; a sale group with an unresolved sibling line fails wholesale (never a partial receipt) |
 | Import warning parity (regression) | `test-import-warning-detail-pure.cjs` | frontend `ImportReportModal` `SERIOUS_KINDS` must match backend `SERIOUS_IMPORT_WARNING_KINDS` — caught a gap where `stock_action_conflict` would have rendered under "Other warnings" and been missed |
+| POS oversell strict (Part 360) | `test-sales-oversell-strict-pure.cjs` | migration 0058 rebuilds both stock tables with `CHECK(quantity >= 0)` and floors pre-existing negatives; a within-stock sale commits while an oversell aborts + fully rolls back (no clamp); a specific lot is guarded by its OWN stock not the product total; the route source ships plain subtraction (no `MAX(0)` clamp) and maps the abort to a 409 |
+| Stock-action import UI wiring (§13, Part 361) | `stockActionImportModel.test.ts` | pure review logic (analyzing/needsConfirm/canConfirm, the confirm gate, errored-only still confirmable, all-skipped not); guards the whole chain — modal drives a `stock_actions` job with `confirm_stock_actions`, the wizard launches it, the transport forwards the flag, the backend allow-list admits the type |
 | Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
