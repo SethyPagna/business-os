@@ -8,10 +8,11 @@ import { UTF8_BOM, escapeCsvValue } from './csv.ts'
 // person opening the file for the first time had nothing showing what a
 // real value should look like for a column like `batch` or `date`, only the
 // bare column name.
-export function buildCSVTemplate(headers: string[], filename: string, exampleRow?: Record<string, unknown>): void {
+export function buildCSVTemplate(headers: string[], filename: string, exampleRow?: Record<string, unknown> | Array<Record<string, unknown>>): void {
   const lines = [headers.join(',')]
-  if (exampleRow && typeof exampleRow === 'object') {
-    lines.push(headers.map((header) => escapeCsvValue(exampleRow[header])).join(','))
+  const examples = Array.isArray(exampleRow) ? exampleRow : (exampleRow ? [exampleRow] : [])
+  for (const row of examples) {
+    lines.push(headers.map((header) => escapeCsvValue(row[header])).join(','))
   }
   const blob = new Blob([UTF8_BOM, lines.join('\n'), '\n'], { type: 'text/csv;charset=utf-8' })
   const anchor = document.createElement('a')

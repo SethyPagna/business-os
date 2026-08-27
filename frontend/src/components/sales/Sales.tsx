@@ -41,6 +41,7 @@ const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
 import SalesListSurface from './SalesListSurface'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
+import { buildSalesImportRows } from '../../utils/salesImportContract.ts'
 
 const SALES_USER_OPTIONS_TIMEOUT_MS = 8000
 const SALES_STATUS_MUTATION_TIMEOUT_MS = 12000
@@ -59,6 +60,8 @@ interface SaleItemRecord {
   quantity?: number | string
   product_name?: string
   sku?: string
+  barcode?: string
+  [key: string]: unknown
 }
 
 interface SaleRecord extends Record<string, unknown> {
@@ -203,19 +206,7 @@ function getSaleBranchLabel(sale: SaleRecord | null | undefined): string {
 }
 
 function buildSaleExportRows(rows: SaleRecord[] = []): Array<Record<string, unknown>> {
-  return rows.map((sale) => ({
-    Receipt: sale.receipt_number || '',
-    Date: sale.created_at || '',
-    Status: sale.sale_status || 'completed',
-    Cashier: sale.cashier_name || '',
-    Payment_Method: sale.payment_method || '',
-    Branch: getSaleBranchLabel(sale) || '',
-    Customer: sale.customer_name || '',
-    Total_USD: sale.total_usd || 0,
-    Net_Total_USD: sale.net_total_usd ?? sale.total_usd ?? 0,
-    Items: Array.isArray(sale.items) ? sale.items.length : 0,
-    Notes: sale.notes || '',
-  }))
+  return buildSalesImportRows(rows.map((sale) => ({ ...sale, branch_name: getSaleBranchLabel(sale) })))
 }
 
 export default function Sales() {

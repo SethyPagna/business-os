@@ -213,6 +213,7 @@ async function buildImportCsvTemplate(headers, filename, exampleRow) {
 
 import { getSyncServerUrl } from './httpState.ts'
 import { pokeImportTracker } from '../utils/importJobRefresh.ts'
+import { SALES_IMPORT_COLUMNS, SALES_IMPORT_EXAMPLE_ROWS } from '../utils/salesImportContract.ts'
 export async function openCSVDialog() {
   const { openCSVDialog: openBrowserCSVDialog } = await loadBrowserDialogsModule()
   return openBrowserCSVDialog()
@@ -1240,25 +1241,7 @@ export function downloadImportTemplate(type) {
     // replayed/stale live request from overspending a balance that could
     // have changed since the cashier's screen last loaded it, which has
     // no equivalent for a historical file being loaded once.
-    return buildImportCsvTemplate([
-      'receipt_number', 'sale_date', 'sale_status', 'payment_method', 'payment_currency', 'exchange_rate',
-      'branch', 'customer_name', 'customer_phone', 'customer_address',
-      'cashier_name', 'name', 'sku', 'barcode', 'quantity',
-      'unit_price_usd', 'unit_price_khr', 'batch_label', 'returned_quantity',
-      'discount_usd', 'discount_khr', 'tax_usd', 'amount_paid_usd', 'amount_paid_khr',
-      'membership_discount_usd', 'membership_discount_khr', 'membership_points_redeemed',
-      'is_delivery', 'delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address',
-      'delivery_fee_usd', 'delivery_fee_khr', 'delivery_fee_paid_by', 'notes',
-    ], 'sales-template.csv', {
-      receipt_number: 'RCT-1001', sale_date: '', sale_status: 'completed', payment_method: 'cash', payment_currency: 'USD', exchange_rate: '',
-      branch: 'Main Branch', customer_name: '', customer_phone: '', customer_address: '',
-      cashier_name: '', name: 'Iced Coffee', sku: 'BEV-001', barcode: '', quantity: '2',
-      unit_price_usd: '2.50', unit_price_khr: '', batch_label: '', returned_quantity: '',
-      discount_usd: '', discount_khr: '', tax_usd: '', amount_paid_usd: '5.00', amount_paid_khr: '',
-      membership_discount_usd: '', membership_discount_khr: '', membership_points_redeemed: '',
-      is_delivery: '', delivery_contact_name: '', delivery_contact_phone: '', delivery_contact_address: '',
-      delivery_fee_usd: '', delivery_fee_khr: '', delivery_fee_paid_by: '', notes: '',
-    })
+    return buildImportCsvTemplate([...SALES_IMPORT_COLUMNS], 'sales-template.csv', SALES_IMPORT_EXAMPLE_ROWS)
   }
   // Inventory used to ship as one template with a free-text 'action' column
   // (add/remove/set typed by hand into the CSV) -- easy to mistype, and

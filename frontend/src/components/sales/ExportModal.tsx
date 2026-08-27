@@ -7,6 +7,7 @@ import Modal from '../shared/Modal'
 import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { todayStr, businessYear, businessMonth } from '../../utils/dateHelpers'
+import { SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
 
 const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
 const SALES_EXPORT_CSV_TIMEOUT_MS = 30000
@@ -136,10 +137,10 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
     URL.revokeObjectURL(url)
   }
 
-  const buildCsvFallback = (data: SalesExportData, dates: ExportDates): string => {
+  const buildCsvFallback = (data: SalesExportData): string => {
     if (!data?.sales?.length) throw new Error(tr('no_data_to_export', 'No data to export'))
     const rows = data.sales
-    const headers = Object.keys(rows[0] || {})
+    const headers = [...SALES_IMPORT_COLUMNS]
     const escape = (value: unknown): string => {
       if (value == null) return ''
       const text = String(value)
@@ -147,15 +148,11 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
         ? `"${text.replace(/"/g, '""')}"`
         : text
     }
-    const summaryLines = Object.entries(data.summary || {}).map(([key, value]) => `${key},${value}`).join('\n')
-    return [
-      'SALES EXPORT REPORT',
-      `Period: ${dates.start} to ${dates.end}`,
-      '',
-      'SUMMARY',
-      summaryLines,
-      '',
-      'SALES DETAIL',
+    // Deliberately no report-title/summary preamble: this CSV is the
+    // authoritative import-compatible detail file. The accounting summary
+    // stays in Preview, while the downloaded file can round-trip directly
+    // through Sales Import without deleting decorative rows by hand.
+    return '\uFEFF' + [
       headers.join(','),
       ...rows.map((row) => headers.map((header) => escape(row[header])).join(',')),
     ].join('\n')
@@ -188,7 +185,10 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
         'Sales export CSV',
         SALES_EXPORT_CSV_TIMEOUT_MS,
       )
-      const csvText = typeof data === 'string' ? data : buildCsvFallback(data, dates)
+      if (typeof data !== 'string' && data.truncated) {
+        throw new Error(tr('sales_export_truncated_blocked', 'This range exceeds the safe 5,000-sale export bound. Narrow the dates so the file is complete.'))
+      }
+      const csvText = typeof data === 'string' ? data : buildCsvFallback(data)
       downloadCsvBlob(csvText, dates)
     } catch (error) {
       alert(getErrorMessage(error, tr('export_error', 'Export error')))

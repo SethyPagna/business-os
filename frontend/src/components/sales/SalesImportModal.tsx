@@ -12,8 +12,9 @@ import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 import { parseImportFile } from '../../utils/spreadsheetImport.ts'
 import CsvImportPreview from '../shared/CsvImportPreview.tsx'
 import ServerImportReviewScreen from '../imports/ServerImportReviewScreen.tsx'
+import { SALES_TEMPLATE_COLUMNS_TEXT } from '../../utils/salesImportContract.ts'
 
-const SALES_TEMPLATE_COLUMNS = 'receipt_number, sale_date, sale_status, payment_method, payment_currency, exchange_rate, branch, customer_name, customer_phone, customer_address, cashier_name, name, sku, barcode, quantity, unit_price_usd, unit_price_khr, batch_label, returned_quantity, discount_usd, discount_khr, tax_usd, amount_paid_usd, amount_paid_khr, membership_discount_usd, membership_discount_khr, membership_points_redeemed, is_delivery, delivery_contact_name, delivery_contact_phone, delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by, notes'
+const SALES_TEMPLATE_COLUMNS = SALES_TEMPLATE_COLUMNS_TEXT
 
 const SALES_IMPORT_JOB_CREATE_TIMEOUT_MS = 12000
 const SALES_IMPORT_JOB_UPLOAD_TIMEOUT_MS = 30000

@@ -1413,9 +1413,19 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(item.cost_price_usd, 6, 'imported sale item must carry the matched product\'s cost_price_usd -- COGS/profit reporting reads this column directly')
     assert.strictEqual(item.cost_price_khr, 24600, 'imported sale item must carry the matched product\'s cost_price_khr')
 
-    const preserved = await classifySales(db, [row({ receipt_number: 'R-11b', sku: 'SKU-1', quantity: 1, cost_price_usd: '4.25', cost_price_khr: '17425' }, 1)], null)
+    const preserved = await classifySales(db, [row({
+      receipt_number: 'R-11b', sku: 'SKU-1', quantity: 1,
+      cost_price_usd: '4.25', cost_price_khr: '17425',
+      base_price_usd: '6', product_discount_type: 'fixed', product_discount_label: 'Promo', product_discount_usd: '0.5',
+      manual_discount_type: 'percent', manual_discount_value: '10', manual_discount_usd: '0.5',
+    }, 1)], null)
     assert.strictEqual(preserved[0].data.items[0].cost_price_usd, 4.25, 'an exported historical cost snapshot overrides today\'s product cost')
     assert.strictEqual(preserved[0].data.items[0].cost_price_khr, 17425)
+    assert.strictEqual(preserved[0].data.items[0].base_price_usd, 6)
+    assert.strictEqual(preserved[0].data.items[0].product_discount_label, 'Promo')
+    assert.strictEqual(preserved[0].data.items[0].product_discount_usd, 0.5)
+    assert.strictEqual(preserved[0].data.items[0].manual_discount_type, 'percent')
+    assert.strictEqual(preserved[0].data.items[0].manual_discount_value, 10)
 
     const invalidCost = await classifySales(db, [row({ receipt_number: 'R-11c', sku: 'SKU-1', quantity: 1, cost_price_usd: '-1' }, 1)], null)
     assert.strictEqual(invalidCost[0].action, 'error', 'a negative historical cost is rejected instead of corrupting COGS')
@@ -1561,7 +1571,12 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const insertMatch = source.match(/INSERT INTO sale_items \(([^)]+)\) VALUES/)
   assert.ok(insertMatch, 'runImportApply should still build an INSERT INTO sale_items(...) statement for imported sales')
   const insertColumns = insertMatch[1].split(',').map((c) => c.trim())
-  for (const column of ['cost_price_usd', 'cost_price_khr']) {
+  for (const column of [
+    'cost_price_usd', 'cost_price_khr', 'base_price_usd', 'base_price_khr',
+    'product_discount_type', 'product_discount_label', 'product_discount_usd', 'product_discount_khr',
+    'manual_discount_type', 'manual_discount_value', 'manual_discount_usd', 'manual_discount_khr',
+    'returned_quantity',
+  ]) {
     assert.ok(insertColumns.includes(column), `sale_items INSERT (import apply path) is missing column "${column}" -- COGS/profit reporting would silently read 0 for every imported sale`)
   }
 

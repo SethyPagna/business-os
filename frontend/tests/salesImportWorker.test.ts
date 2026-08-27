@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { countCsvDataRows } from '../src/utils/csvRowCounter.ts'
+import { buildSalesImportRows, SALES_IMPORT_COLUMNS } from '../src/utils/salesImportContract.ts'
 
 let failed = 0
 
@@ -40,6 +41,38 @@ await runTest('sales import stays in-modal for authoritative Screen 2 review and
   assert.match(source, /setReviewJob\(\{ id: job\.id as string \| number, rowCount \}\)/)
   assert.match(source, /<ServerImportReviewScreen/)
   assert.doesNotMatch(source, /Review and approve it from the top progress bar/)
+})
+
+await runTest('sales export is an import-compatible compact multi-item contract', () => {
+  const rows = buildSalesImportRows([{
+    receipt_number: 'R-100', created_at: '2026-08-28T07:30:00.000Z', sale_status: 'completed',
+    customer_name: 'Dara', customer_phone: '012345678', discount_usd: 1, amount_paid_usd: 14,
+    items: [
+      { product_name: 'Widget', sku: 'SKU-1', quantity: 2, applied_price_usd: 5, cost_price_usd: 3 },
+      { product_name: 'Gadget', sku: 'SKU-2', quantity: 1, applied_price_usd: 5, cost_price_usd: 2 },
+    ],
+  }])
+  assert.equal(rows.length, 2)
+  assert.deepEqual(Object.keys(rows[0]), [...SALES_IMPORT_COLUMNS], 'export columns stay in authoritative import order')
+  assert.equal(rows[0].receipt_number, 'R-100')
+  assert.equal(rows[0].sale_date, '08/28/2026 14:30', 'UTC storage exports as Cambodia 24-hour wall time')
+  assert.equal(rows[0].customer_phone, '012345678')
+  assert.equal(rows[1].receipt_number, '', 'continuation line does not repeat invoice data')
+  assert.equal(rows[1].customer_name, '', 'continuation line inherits customer from the first line')
+  assert.equal(rows[1].sku, 'SKU-2')
+  assert.equal(rows[1].cost_price_usd, 2, 'historical COGS snapshot survives export')
+})
+
+await runTest('template, modal, selected export, and report CSV share the same sales contract', () => {
+  const modal = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
+  const sales = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
+  const report = fs.readFileSync(new URL('../src/components/sales/ExportModal.tsx', import.meta.url), 'utf8')
+  const methods = fs.readFileSync(new URL('../src/api/methods.ts', import.meta.url), 'utf8')
+  assert.match(modal, /SALES_TEMPLATE_COLUMNS_TEXT/)
+  assert.match(sales, /buildSalesImportRows/)
+  assert.match(report, /const headers = \[\.\.\.SALES_IMPORT_COLUMNS\]/)
+  assert.doesNotMatch(report, /'SALES EXPORT REPORT'/, 'download must not contain a decorative preamble that breaks re-import')
+  assert.match(methods, /SALES_IMPORT_EXAMPLE_ROWS/)
 })
 
 if (failed > 0) {

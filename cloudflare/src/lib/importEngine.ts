@@ -2434,13 +2434,27 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       const priceKhr = row.unit_price_khr != null && str(row.unit_price_khr) !== '' ? normalizeImportMoney(row.unit_price_khr) : product.selling_price_khr
       let costPriceUsd = product.cost_price_usd || 0
       let costPriceKhr = product.cost_price_khr || 0
+      let basePriceUsd = priceUsd
+      let basePriceKhr = priceKhr
+      let productDiscountUsd = 0
+      let productDiscountKhr = 0
+      let manualDiscountValue = 0
+      let manualDiscountUsd = 0
+      let manualDiscountKhr = 0
       try {
-        if (row.cost_price_usd != null && str(row.cost_price_usd) !== '') {
-          costPriceUsd = normalizeImportMoney(parseImportNumericValue(row.cost_price_usd, 0, { allowNegative: false, field: 'cost_price_usd', strict: true }))
+        const optionalMoney = (raw: unknown, fallback: number, field: string): number => {
+          if (raw == null || str(raw) === '') return fallback
+          return normalizeImportMoney(parseImportNumericValue(raw, fallback, { allowNegative: false, field, strict: true }))
         }
-        if (row.cost_price_khr != null && str(row.cost_price_khr) !== '') {
-          costPriceKhr = normalizeImportMoney(parseImportNumericValue(row.cost_price_khr, 0, { allowNegative: false, field: 'cost_price_khr', strict: true }))
-        }
+        costPriceUsd = optionalMoney(row.cost_price_usd, costPriceUsd, 'cost_price_usd')
+        costPriceKhr = optionalMoney(row.cost_price_khr, costPriceKhr, 'cost_price_khr')
+        basePriceUsd = optionalMoney(row.base_price_usd, basePriceUsd, 'base_price_usd')
+        basePriceKhr = optionalMoney(row.base_price_khr, basePriceKhr, 'base_price_khr')
+        productDiscountUsd = optionalMoney(row.product_discount_usd, 0, 'product_discount_usd')
+        productDiscountKhr = optionalMoney(row.product_discount_khr, 0, 'product_discount_khr')
+        manualDiscountValue = optionalMoney(row.manual_discount_value, 0, 'manual_discount_value')
+        manualDiscountUsd = optionalMoney(row.manual_discount_usd, 0, 'manual_discount_usd')
+        manualDiscountKhr = optionalMoney(row.manual_discount_khr, 0, 'manual_discount_khr')
       } catch (err) {
         error = (err as Error).message
         break
@@ -2467,6 +2481,13 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
         // the original per-line snapshot; a hand-built file that leaves it
         // blank safely falls back to the product's current cost.
         cost_price_usd: costPriceUsd, cost_price_khr: costPriceKhr,
+        base_price_usd: basePriceUsd, base_price_khr: basePriceKhr,
+        product_discount_type: str(row.product_discount_type) || null,
+        product_discount_label: str(row.product_discount_label) || null,
+        product_discount_usd: productDiscountUsd, product_discount_khr: productDiscountKhr,
+        manual_discount_type: str(row.manual_discount_type) || null,
+        manual_discount_value: manualDiscountValue,
+        manual_discount_usd: manualDiscountUsd, manual_discount_khr: manualDiscountKhr,
         // Item-level branch mirrors the order's single branch column --
         // the template has no per-line branch override, same as it has no
         // per-line status override, for the same reason.
@@ -4629,12 +4650,18 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                     sale_id, product_id, product_name, sku, quantity,
                     applied_price_usd, applied_price_khr, total_usd, total_khr,
                     cost_price_usd, cost_price_khr,
-                    branch_id, batch_id, batch_label, batch_expiry_date
+                    base_price_usd, base_price_khr,
+                    product_discount_type, product_discount_label, product_discount_usd, product_discount_khr,
+                    manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr,
+                    branch_id, batch_id, batch_label, batch_expiry_date, returned_quantity
                   ) VALUES (
                     @sale_id, @product_id, @product_name, @sku, @quantity,
                     @applied_price_usd, @applied_price_khr, @total_usd, @total_khr,
                     @cost_price_usd, @cost_price_khr,
-                    @branch_id, @batch_id, @batch_label, @batch_expiry_date
+                    @base_price_usd, @base_price_khr,
+                    @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr,
+                    @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr,
+                    @branch_id, @batch_id, @batch_label, @batch_expiry_date, @returned_quantity
                   )`,
             params: { ...item, sale_id: saleId },
           })

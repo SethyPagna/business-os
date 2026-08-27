@@ -1101,9 +1101,10 @@ app.get('/', async (c) => {
   const saleIds = sales.map((s) => s.id)
 
   const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-    SELECT si.*, b.name AS branch_name
+    SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category
     FROM sale_items si
     LEFT JOIN branches b ON b.id = si.branch_id
+    LEFT JOIN products p ON p.id = si.product_id
     WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
     ORDER BY si.id ASC
   `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
@@ -1237,6 +1238,9 @@ app.get('/stats', async (c) => {
 // a real implementation -- so this is a fresh build against ExportModal's
 // actual field usage, not a port.
 app.get('/export', async (c) => {
+  if (!hasPermission(c.get('user'), 'sales')) {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   const db = getDb(c.env)
   const query = c.req.query()
 
@@ -1264,19 +1268,27 @@ app.get('/export', async (c) => {
 
   const sales = await db.prepare(`
     SELECT s.id, s.receipt_number, s.created_at, s.branch_name, s.cashier_name,
-           s.customer_name, s.customer_phone, s.payment_method, s.sale_status,
-           s.subtotal_usd, s.discount_usd, s.membership_discount_usd, s.tax_usd,
-           s.delivery_fee_usd, s.total_usd
+           s.customer_name, s.customer_phone, s.customer_address,
+           s.payment_method, s.payment_currency, s.exchange_rate, s.sale_status,
+           s.subtotal_usd, s.subtotal_khr, s.discount_usd, s.discount_khr,
+           s.membership_discount_usd, s.membership_discount_khr, s.membership_points_redeemed,
+           s.tax_usd, s.amount_paid_usd, s.amount_paid_khr,
+           s.is_delivery, s.delivery_contact_name, s.delivery_contact_phone, s.delivery_contact_address,
+           s.delivery_fee_usd, s.delivery_fee_khr, s.delivery_fee_paid_by, s.total_usd, s.total_khr, s.notes
     FROM sales s
     WHERE ${where.join(' AND ')}
     ORDER BY s.created_at ASC
     LIMIT 5000
   `).all<{
     id: number; receipt_number: string | null; created_at: string; branch_name: string | null
-    cashier_name: string | null; customer_name: string | null; customer_phone: string | null
-    payment_method: string | null; sale_status: string | null; subtotal_usd: number | null
-    discount_usd: number | null; membership_discount_usd: number | null; tax_usd: number | null
-    delivery_fee_usd: number | null; total_usd: number | null
+    cashier_name: string | null; customer_name: string | null; customer_phone: string | null; customer_address: string | null
+    payment_method: string | null; payment_currency: string | null; exchange_rate: number | null; sale_status: string | null
+    subtotal_usd: number | null; subtotal_khr: number | null; discount_usd: number | null; discount_khr: number | null
+    membership_discount_usd: number | null; membership_discount_khr: number | null; membership_points_redeemed: number | null
+    tax_usd: number | null; amount_paid_usd: number | null; amount_paid_khr: number | null
+    is_delivery: number | null; delivery_contact_name: string | null; delivery_contact_phone: string | null; delivery_contact_address: string | null
+    delivery_fee_usd: number | null; delivery_fee_khr: number | null; delivery_fee_paid_by: string | null
+    total_usd: number | null; total_khr: number | null; notes: string | null
   }>(params)
 
   // Real gap fixed this session: this route caps its own detail-row query
@@ -1306,6 +1318,18 @@ app.get('/export', async (c) => {
   }
 
   const saleIds = sales.map((s) => s.id)
+  const exportItems = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
+    SELECT si.*, p.barcode AS barcode
+    FROM sale_items si
+    LEFT JOIN products p ON p.id = si.product_id
+    WHERE si.sale_id IN (${chunk.map(() => '?').join(',')})
+    ORDER BY si.id ASC
+  `).all<{ sale_id: number; [key: string]: unknown }>(chunk))
+  const exportItemsBySale = new Map<number, Array<Record<string, unknown>>>()
+  for (const item of exportItems) {
+    if (!exportItemsBySale.has(item.sale_id)) exportItemsBySale.set(item.sale_id, [])
+    exportItemsBySale.get(item.sale_id)!.push(item)
+  }
   // Cancelled sales are kept in the detail rows and the by-status
   // breakdown (so the report can show they happened), but excluded from
   // revenue/COGS/top-products, same convention as "active" vs "cancelled"
@@ -1366,27 +1390,42 @@ app.get('/export', async (c) => {
   }
 
   let totalRefundsUsd = 0
-  const detailRows = sales.map((s) => {
+  const detailRows = sales.flatMap((s) => {
     const refundUsd = refundsBySale.get(s.id) || 0
     totalRefundsUsd += refundUsd
-    return {
-      id: s.id,
-      receipt_number: s.receipt_number,
-      date: s.created_at,
-      branch: s.branch_name,
-      cashier: s.cashier_name,
-      customer: s.customer_name,
-      customer_phone: s.customer_phone,
-      payment_method: s.payment_method,
-      status: s.sale_status,
-      subtotal_usd: round2(s.subtotal_usd || 0),
-      discount_usd: round2((s.discount_usd || 0) + (s.membership_discount_usd || 0)),
-      tax_usd: round2(s.tax_usd || 0),
-      delivery_fee_usd: round2(s.delivery_fee_usd || 0),
-      total_usd: round2(s.total_usd || 0),
-      refund_usd: round2(refundUsd),
-      net_total_usd: round2((s.total_usd || 0) - refundUsd),
-    }
+    const storedItems = exportItemsBySale.get(s.id) || []
+    const items = storedItems.length ? storedItems : [{}]
+    return items.map((item, index) => ({
+      receipt_number: index === 0 ? s.receipt_number : '',
+      sale_date: index === 0 ? s.created_at : '',
+      sale_status: index === 0 ? s.sale_status : '',
+      payment_method: index === 0 ? s.payment_method : '',
+      payment_currency: index === 0 ? s.payment_currency : '',
+      exchange_rate: index === 0 ? s.exchange_rate : '',
+      branch: index === 0 ? s.branch_name : '',
+      customer_name: index === 0 ? s.customer_name : '',
+      customer_phone: index === 0 ? s.customer_phone : '',
+      customer_address: index === 0 ? s.customer_address : '',
+      cashier_name: index === 0 ? s.cashier_name : '',
+      name: item.product_name ?? '', sku: item.sku ?? '', barcode: item.barcode ?? '', quantity: item.quantity ?? 1,
+      unit_price_usd: item.applied_price_usd ?? 0, unit_price_khr: item.applied_price_khr ?? 0,
+      base_price_usd: item.base_price_usd ?? item.applied_price_usd ?? 0,
+      base_price_khr: item.base_price_khr ?? item.applied_price_khr ?? 0,
+      product_discount_type: item.product_discount_type ?? '', product_discount_label: item.product_discount_label ?? '',
+      product_discount_usd: item.product_discount_usd ?? 0, product_discount_khr: item.product_discount_khr ?? 0,
+      manual_discount_type: item.manual_discount_type ?? '', manual_discount_value: item.manual_discount_value ?? 0,
+      manual_discount_usd: item.manual_discount_usd ?? 0, manual_discount_khr: item.manual_discount_khr ?? 0,
+      cost_price_usd: item.cost_price_usd ?? 0, cost_price_khr: item.cost_price_khr ?? 0,
+      batch_label: item.batch_label ?? '', returned_quantity: item.returned_quantity ?? '',
+      discount_usd: index === 0 ? s.discount_usd : '', discount_khr: index === 0 ? s.discount_khr : '',
+      tax_usd: index === 0 ? s.tax_usd : '', amount_paid_usd: index === 0 ? s.amount_paid_usd : '', amount_paid_khr: index === 0 ? s.amount_paid_khr : '',
+      membership_discount_usd: index === 0 ? s.membership_discount_usd : '', membership_discount_khr: index === 0 ? s.membership_discount_khr : '',
+      membership_points_redeemed: index === 0 ? s.membership_points_redeemed : '',
+      is_delivery: index === 0 ? s.is_delivery : '', delivery_contact_name: index === 0 ? s.delivery_contact_name : '',
+      delivery_contact_phone: index === 0 ? s.delivery_contact_phone : '', delivery_contact_address: index === 0 ? s.delivery_contact_address : '',
+      delivery_fee_usd: index === 0 ? s.delivery_fee_usd : '', delivery_fee_khr: index === 0 ? s.delivery_fee_khr : '',
+      delivery_fee_paid_by: index === 0 ? s.delivery_fee_paid_by : '', notes: index === 0 ? s.notes : '',
+    }))
   })
 
   // Real gap fixed alongside the truncation fix above: `totalRefundsUsd`
