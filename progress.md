@@ -206,7 +206,7 @@ user's own messages; nothing is inferred. Top of the list is next.*
 | # | Task | Status |
 |---|---|---|
 | 2.1 | **Unified Add/Sale/Reconciliation import — LIVE IN CODE end-to-end (Parts 359–362), needs deploy.** See [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The 10-column contract/parser, bounded analyze path, persisted resolved-row review, cross-window conflict seal, server confirmation gate, immutable reviewed source, and transactional apply engine are built and tested. Apply is FIFO, oversell-proof, partial-receipt-proof, cancellation-aware, retry-idempotent, and bounded for Workers Free. **Open:** deploy/live-browser verification and the OTHER import types in §13. | done in code; needs deploy/live verify |
-| 2.2 | **Import review / resolve screen.** Stock Actions is finished with authoritative persisted rows, server pagination/search/action filters and explicit confirmation. Contacts now has bounded server pagination/search/sort/filter and durable merge decisions (Part 363), but its redundant analyze/upload transition remains. Products has the real unified Screen 1, but still has client review plus a later server review. Sales and inventory remain open. | stock actions done; contacts/product partial; sales/inventory open |
+| 2.2 | **Import review / resolve screen.** Stock Actions and Contacts are now exact server-backed two-screen flows with authoritative persisted review and explicit confirmation (Parts 361–364). Products has the real unified Screen 1, but still has client review plus a later server review. Sales and inventory remain open. | stock actions/contacts done; product partial; sales/inventory open |
 | 2.3 | **Image auto-wire button — frontend half.** **DONE (Part 354), needs deploy.** `WireImagesReviewModal` built (grouped per product, ordered by `_1/_2/_3`, shows would-replace + unmatched + ambiguous); wired into the Products **Manage** menu (gated on the `products/image` action), the **Library** page next to Upload, and the import modal's result step for the per-job wire endpoint. **UNWIRE** shipped too: `POST /api/products/unwire-images` (detach-only, files stay in the Library; empty id list refused, `all:true` required to clear everything) with a disclosure in the modal. **Found + fixed a real bug while building it:** the apply endpoint ran one `UPDATE image_path` per matched image, so a 3-photo product kept only the last and `product_images` was never written — now goes through `syncProductImageGallery`. `test-wire-images-gallery-pure.cjs` (9 checks). |
 
 ### 2 — Undo / redo (after 2.1–2.3)
@@ -439,6 +439,26 @@ need the same conversion. Tests for this part: frontend full chain **120/120**,
 in 13.72s** (only the existing circular-chunk warnings). Backend was not changed
 by these two commits; the Part 362 backend sweep remains **78/78**.
 
+**Part 364 — Contacts is now an exact, fail-closed two-screen import
+(committed, needs deploy).** Commit `0773b470` closes the remaining Contacts
+transition and a real approval loophole found while tracing it. **Screen 1** owns
+template, policy and the one actual file upload/start. Server analysis is only a
+loading state. **Screen 2** is the authoritative paginated conflict review and
+now owns **Confirm & import** directly—there is no Done → separate Approve
+screen. “Review later” safely hands the existing job to the tracker without
+applying it.
+
+Every name/phone conflict now needs a durable row decision. Phone acknowledgment
+previously existed only in React state; it now persists `action: apply` like an
+explicit merge. D1 computes one server-wide unresolved count across every page
+using bound SQL + JSON decision lookup, so page 1 cannot claim completion while
+page 2 still has conflicts. `/approve` independently recomputes that count and
+returns `409 contact_conflicts_unresolved`; bypassing or racing the UI cannot
+apply an unreviewed Contacts job. Verification: backend **78/78**, frontend full
+chain **120/120**, both typechecks clean, real SQLite decision/count proof, and
+production build **877 modules / 14.12s** with only the existing circular-chunk
+warnings.
+
 *User, this session + mid-turn clarification.*
 
 - **Screen 1 — upload.** ALL modes and their options on ONE screen; the
@@ -453,8 +473,8 @@ by these two commits; the Part 362 backend sweep remains **78/78**.
   commit screen, everywhere (products, contacts, sales, inventory).
 - Contacts import is ALSO reported as far slower than the general import
   (§11.18). Its review screen's missing sort/search/filter work (§11.19) is
-  complete in Part 363; removing the extra contacts analyze/upload transition
-  remains part of the exact two-screen conversion.
+  complete in Part 363, and Part 364 closes the exact two-screen conversion
+  with a server-enforced unresolved-conflict gate.
 - **Exact product Screen 1 design (clarified after Part 362):** retain the
   wrapper's Mode and Options card design, but it must surround the REAL
   template, REAL upload, information and image inputs. Part 363 completes this
@@ -799,7 +819,7 @@ pagination/cache/performance. Re-measure Cloudflare usage before each expansion.
 
 | # | Task | Status |
 |---|---|---|
-| 11.18 | **Contacts import is far slower than the general import**, and its analyze→review→upload chain is the redundant flow the user wants gone. Part 362 moved review reads to bounded D1 COUNT/filter/LIMIT/OFFSET, and Part 363 added bounded server search/sort/filter. **Still open:** remove the redundant contacts transition so it is exactly Screen 1 upload/analyze → Screen 2 authoritative review/confirm. | partial (Parts 362–363) |
+| 11.18 | **Contacts import is far slower than the general import**, and its analyze→review→upload chain is redundant. **DONE (Parts 362–364), needs deploy.** Review reads are bounded in D1; Screen 1 uploads/starts once, then Screen 2 owns authoritative conflict resolution and Confirm. No Done→Approve third screen. Server approval refuses unresolved conflicts across all pages. | done (Part 364) |
 | 11.19 | **Contacts import resolve/review screen has no sort/search.** **DONE (Part 363), needs deploy.** Server-backed search covers name/phone/email/membership/barcode/identifier, sort is row/A–Z/Z–A, conflict filters are bounded and merge decisions persist. Commit `af19985c`. | done (Part 363) |
 
 **Inventory / Branches / stats colouring**
@@ -891,7 +911,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 363 (Aug 27 2026).** Everything below was really run in this local Windows
+**As of Part 364 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -902,10 +922,10 @@ are the commands' actual results this session.
 | `cloudflare` `tsc --noEmit` | **clean** |
 | Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **78 / 78 pass** |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** |
-| Real `vite build` | **succeeds (13.72s, 877 modules)**; only the pre-existing manual-chunk circular warnings |
+| Real `vite build` | **succeeds (14.12s, 877 modules)**; only the pre-existing manual-chunk circular warnings |
 | `wrangler d1 migrations apply --local` | **current; no migrations pending** (reverified Part 362) |
 
-**Nothing is deployed.** Every fix Parts 346–363 — including the two production outages
+**Nothing is deployed.** Every fix Parts 346–364 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on
 `npm run deploy:full`. The user's re-pasted error logs predate the fixes.
 
@@ -913,8 +933,8 @@ are the commands' actual results this session.
 
 - **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · role-aware 3/5 image cap · R2 finalized lifecycle/exact-two retention · Drive streamed/deduplicated manifest mirror/exact-seven tagged retention · **§15 one-object/many-logical-Library-names + streamed rename-on-download** · products large-screen alignment + 11.4/11.5 · §14 batch count/details · 11.24/11.25 VIP fixes · 11.8–11.11 POS fixes · 11.20/11.21 stock-health cards · 16.1/11.14–11.16 storefront PWA and favicon removal.
 - **DONE in code, needs deploy/live verification:** unified stock-action import (§12 + its §13 slice — analyze, persisted row review, confirmation, FIFO/oversell-safe apply, lifecycle seal and Free-plan bounds).
-- **IN PROGRESS / partial:** §13 for products/contacts/sales/inventory (stock actions done; contacts review search/sort/filter done; product's real Screen 1 merged, but product + contacts still have redundant client/server transitions) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
-- **TO DO (specced, not started):** remaining authoritative §13 conversions for products/contacts/sales/inventory · compact/top-layer stats UI on all pages (11.26) · customer delivery charge vs restricted actual cost/margin (11.27) · manual historical batch entry + barcode rules (11.28) · smart round-trip sales import/export (11.29) · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
+- **IN PROGRESS / partial:** §13 for products/sales/inventory (stock actions + contacts done; product's real Screen 1 merged, but product still has duplicate client/server review) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **TO DO (specced, not started):** remaining authoritative §13 conversions for products/sales/inventory · compact/top-layer stats UI on all pages (11.26) · customer delivery charge vs restricted actual cost/margin (11.27) · manual historical batch entry + barcode rules (11.28) · smart round-trip sales import/export (11.29) · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
 
 ### Cross-cutting principle in force: ONE source of truth per calculation
 
@@ -955,7 +975,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
   `t('key') || 'fallback'` idiom (t returns the key itself on a miss, so a missing key
   renders as raw text) — this caught a real POS message bug this session.
 
-### Tests added / changed this session (Parts 354–363)
+### Tests added / changed this session (Parts 354–364)
 
 | Area | Test | Guards |
 |---|---|---|
@@ -970,6 +990,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Stock-action import UI wiring (§13, Part 361) | `stockActionImportModel.test.ts` | pure review logic (analyzing/needsConfirm/canConfirm, the confirm gate, errored-only still confirmable, all-skipped not); guards the whole chain — modal drives a `stock_actions` job with `confirm_stock_actions`, the wizard launches it, the transport forwards the flag, the backend allow-list admits the type |
 | Stock-action full analyze/review gate (Part 362) | `test-stock-action-analyze-e2e.cjs`, `test-import-lifecycle-gate-pure.cjs`, `test-import-review-query-pure.cjs` | real ranged CSV → bounded materialization → two classify windows → persisted Screen 2 rows → cross-window seal; preview-only/cancel/lease/oversize guards; reviewed-source immutability; no retry approval bypass; parameterized D1 pagination/search/warning filters with literal wildcard handling |
 | Contacts review + real product Screen 1 (Part 363) | `test-import-review-query-pure.cjs`, `contactImportPostStartFlow.test.ts`, `stockActionImportModel.test.ts` | bounded contact search/sort/filter + persisted merge decisions; wrapper cannot reintroduce fake template/upload handoff; real product/stock modals own mode/options/template/upload/images/information and image selection appears once |
+| Contacts exact two-screen approval gate (Part 364) | `test-import-review-query-pure.cjs`, `contactImportPostStartFlow.test.ts` | SQLite proves only unresolved name/phone-conflict rows block; approval route fail-closes; phone acknowledgment persists; paginated Screen 2 owns Confirm and cannot advance through a separate Done step |
 | Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
