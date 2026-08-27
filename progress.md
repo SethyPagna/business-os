@@ -205,8 +205,8 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 | # | Task | Status |
 |---|---|---|
-| 2.1 | **Unified Add/Sale/Reconciliation import — backend COMPLETE (Part 359); UI open.** See [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The 10-column contract/parser, action kernel, bounded lookup, analyze dispatcher, cross-window conflict sealing, server-gated approval, and now the **full transactional apply engine** (atomic idempotent add/create writers + grouped-sale FIFO writer + `applyStockActionsJob` orchestration) are built and tested end-to-end. Apply is oversell-proof (transaction-enforced CHECK), partial-receipt-proof, per-unit error-isolated, and whole-job idempotent. **Still open:** the public `stock_actions` allow-list stays closed until the §13 two-screen import UI exists — engine ready, creation gated. | backend done; UI open |
-| 2.2 | **Import review / resolve screen** finished. | not started |
+| 2.1 | **Unified Add/Sale/Reconciliation import — LIVE IN CODE end-to-end (Parts 359–362), needs deploy.** See [§12 below](#12--unified-addsalereconciliation-import-spec-part-354). The 10-column contract/parser, bounded analyze path, persisted resolved-row review, cross-window conflict seal, server confirmation gate, immutable reviewed source, and transactional apply engine are built and tested. Apply is FIFO, oversell-proof, partial-receipt-proof, cancellation-aware, retry-idempotent, and bounded for Workers Free. **Open:** deploy/live-browser verification and the OTHER import types in §13. | done in code; needs deploy/live verify |
+| 2.2 | **Import review / resolve screen.** The stock-action version is finished with authoritative persisted rows, server pagination/search/action filters and explicit confirmation. The equivalent two-screen conversion for products, contacts, sales and inventory remains §13 work. | stock actions done; other types open |
 | 2.3 | **Image auto-wire button — frontend half.** **DONE (Part 354), needs deploy.** `WireImagesReviewModal` built (grouped per product, ordered by `_1/_2/_3`, shows would-replace + unmatched + ambiguous); wired into the Products **Manage** menu (gated on the `products/image` action), the **Library** page next to Upload, and the import modal's result step for the per-job wire endpoint. **UNWIRE** shipped too: `POST /api/products/unwire-images` (detach-only, files stay in the Library; empty id list refused, `all:true` required to clear everything) with a disclosure in the modal. **Found + fixed a real bug while building it:** the apply endpoint ran one `UPDATE image_path` per matched image, so a 3-photo product kept only the last and `product_images` was never written — now goes through `syncProductImageGallery`. `test-wire-images-gallery-pure.cjs` (9 checks). |
 
 ### 2 — Undo / redo (after 2.1–2.3)
@@ -294,21 +294,21 @@ the kernel: `detectCostBatchConflicts`.)
 `detectCostBatchConflicts`, `resolveStockActions` (one plan per row,
 `needsReview` flag). Pure, DB-free, 16 tests.
 
-**WIRING STATUS (Part 357), in order:**
+**WIRING STATUS (Part 357 historical checkpoint; completed by Parts 358–362), in order:**
 1. **DONE — unified template + column mapping** — one products-stock template with
    the 10 columns above; retire the separate Add/Sale and dated-count
    templates. `unifiedStockImport.ts` owns the exact canonical header/parser.
-2. **DONE for bounded analyze windows; cross-window sealing open — resolution against real data** — resolve product (name→barcode per the
+2. **DONE — resolution against real data + cross-window sealing** — resolve product (name→barcode per the
    existing `classifyProducts` order) and branch (shop/warehouse → branch
    ids, auto-create-on-miss like `resolveAndCreateBranches`), load current
    per-(product,branch) stock, then call `resolveStockActions`. The classifier
    performs only targeted, binding-capped reads; a missing branch is previewed
-   as pending and ambiguity is non-actionable. Apply-time creation/live-state
-   recheck and cross-chunk cost/batch conflict sealing remain open.
-3. **Review screen** — the 10 columns, the computed action per row, the
+   as pending and ambiguity is non-actionable. Apply reclassifies against
+   live state; final analyze seals conflicts across every persisted window.
+3. **DONE — review screen** — the 10 columns, computed action per row, the
    conflicts, and a **Confirm Action** button that is the ONLY way to run a
    sheet with any conflict. Reuse the 2-screen flow from §13.
-4. **Apply path** — per plan kind: `create` inserts the product then seeds
+4. **DONE — apply path** — per plan kind: `create` inserts the product then seeds
    stock; `add` receives stock into the branch AND creates/updates the
    batch (product_batches + branch_batch_stock, lot_code from the date via
    `dateToBatchCode`); `sale` records a grouped sale (one row in `sales`
@@ -329,8 +329,9 @@ a stable SHA-256 client request id and retry-safe branch zero seeding. The ADD
 writer atomically commits ledger claim, product batch, branch-batch stock,
 branch/product aggregates, optional prices, movement history and applied
 marker; injected failure rolls everything back and retry cannot double stock.
-**Still closed:** grouped-sale/FIFO deduction writer, apply orchestration,
-immutable whole-plan hash, public `stock_actions` allow-list and §13 review UI.
+**Still closed at this historical checkpoint (superseded by Parts 359–362):**
+grouped-sale/FIFO deduction, apply orchestration, reviewed-source sealing,
+public `stock_actions` allow-list and the stock-action §13 review UI.
 Commits: `a09b2996`, `ea57e403`, `9fd5c0cf`, `85fe2c8b`.
 
 **Part 359 — grouped-sale writer + apply engine WIRED (committed, needs deploy).**
@@ -361,11 +362,11 @@ its own group (`completed_with_errors`); every other unit still applies. (d)
 apply-phase finalize was extracted into one shared `finalizeImportApply` so the
 generic and stock-action paths can never disagree on how a finished import is
 recorded (same single-source-of-truth rule as `attachBatchCounts`).
-**Still closed on purpose:** the public `stock_actions` allow-list
+**Closed on purpose at Part 359 (superseded by Part 361):** the public `stock_actions` allow-list
 (`ALLOWED_TYPES`) still omits the type — the engine is ready and safe, but
 CREATION stays gated until the §13 two-screen import UI lands, so no half-wired
-feature is exposed. Commits: `0e7192bb` (grouped writer), this part's apply-engine
-commit. Tests: `test-stock-action-sale-commit-pure.cjs` (writer: FIFO, oversell,
+feature is exposed. Commits: `0e7192bb` (grouped writer), `131aa13d` (apply engine).
+Tests: `test-stock-action-sale-commit-pure.cjs` (writer: FIFO, oversell,
 rollback, retry, bounds), `test-stock-action-apply-pure.cjs` (engine end-to-end:
 add / create / FIFO sale group / whole-job idempotency / oversell isolation /
 partial-receipt prevention, against a real in-memory SQLite).
@@ -386,7 +387,30 @@ browser-side apply. The review-state logic (`analyzing`/`needsConfirm`/
 by the modal and its tests. The old `AddSaleImportModal.tsx` was deleted (its
 `addSaleImport*` helpers stay — `importModeDetection.ts` still uses them). This
 is the stock-action slice of §13; the full 2-screen rework of every OTHER
-import type is still open. Test: `stockActionImportModel.test.ts`.
+import type is still open. Commit: `3bb9a67d`. Test: `stockActionImportModel.test.ts`.
+
+**Part 362 — full-flow proof + review/apply hardening (committed, needs deploy).**
+The previously unproved analyze half now has a real multi-invocation harness:
+151 CSV rows are range-read from R2, materialized in bounded windows, classified
+across two queue windows, persisted one-for-one for Screen 2, and sealed so a
+same-product cost/batch conflict split between rows 2 and 152 still requires
+confirmation. It proves analyze writes no products/stock/movements, releases
+every lease, honors cancellation before R2, and rejects oversized sheets before
+classification. The test found and fixed a shared bug: analyze's final SQL named
+`@errored` without binding it, so `failed_rows` was stored as `NULL`.
+
+The reviewed plan is now server-sealed by lifecycle: CSV replacement is allowed
+only before start or after failure; stock-action row overrides are refused; and
+`/retry` on `awaiting_review` can no longer bypass `/approve` + Confirm Action.
+Apply is capped at **480 raw rows / 60 business units**, leaving headroom under
+Workers Free's internal-service-subrequest ceiling even for a new product that
+touches two branches. Queue-entry cancellation and both limits are directly
+tested. Screen 2 now fetches the authoritative persisted rows and shows
+product/date, computed branch action + quantity, status and conflict/error
+reason, with pagination/search/action filtering. The shared review API performs
+COUNT/filter/LIMIT/OFFSET in D1 instead of loading and JSON-parsing the whole job
+on every request—also a concrete §11.18 contacts-speed improvement. Commits:
+`7b201ee5`, `f554e736`, `f0d5626e`, `3286bea9`, `417ca902`.
 
 *User, this session + mid-turn clarification.*
 
@@ -826,7 +850,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 358 (Aug 27 2026).** Everything below was really run in this local Windows
+**As of Part 362 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -835,20 +859,21 @@ are the commands' actual results this session.
 |---|---|
 | `frontend` `tsc --noEmit` | **clean** |
 | `cloudflare` `tsc --noEmit` | **clean** |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **67 / 67 pass** |
-| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → 130+ `tests/*.test.ts`) | **green** |
-| Real `vite build` | **succeeds (26.71s, 878 modules)**; only the pre-existing manual-chunk circular warnings |
-| `wrangler d1 migrations apply --local` | all migrations apply cleanly (last verified Part 346; unchanged since) |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **78 / 78 pass** |
+| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** |
+| Real `vite build` | **succeeds (20.97s, 877 modules)**; only the pre-existing manual-chunk circular warnings |
+| `wrangler d1 migrations apply --local` | **current; no migrations pending** (reverified Part 362) |
 
-**Nothing is deployed.** Every fix Parts 346–356 — including the two production outages
+**Nothing is deployed.** Every fix Parts 346–362 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on
 `npm run deploy:full`. The user's re-pasted error logs predate the fixes.
 
 ### Done / In progress / To do — at a glance
 
 - **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · role-aware 3/5 image cap · R2 finalized lifecycle/exact-two retention · Drive streamed/deduplicated manifest mirror/exact-seven tagged retention · **§15 one-object/many-logical-Library-names + streamed rename-on-download** · products large-screen alignment + 11.4/11.5 · §14 batch count/details · 11.24/11.25 VIP fixes · 11.8–11.11 POS fixes · 11.20/11.21 stock-health cards · 16.1/11.14–11.16 storefront PWA and favicon removal.
-- **IN PROGRESS / partial:** unified import (§12 — canonical contract, pure kernel, bounded classifier/analyze, cross-window seal, server Confirm Action gate, idempotent product creation and atomic ADD writer built/tested; grouped-sale/FIFO writer + orchestration + public route/review remain closed) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
-- **TO DO (specced, not started):** §13 two-screen import UX (folds in 11.18/11.19) · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
+- **DONE in code, needs deploy/live verification:** unified stock-action import (§12 + its §13 slice — analyze, persisted row review, confirmation, FIFO/oversell-safe apply, lifecycle seal and Free-plan bounds).
+- **IN PROGRESS / partial:** §13 for products/contacts/sales/inventory (stock actions done; shared D1-paginated review query now improves contacts) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **TO DO (specced, not started):** remaining §13 two-screen conversions + contacts review UX (11.18/11.19) · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
 
 ### Cross-cutting principle in force: ONE source of truth per calculation
 
@@ -875,12 +900,12 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 
 ### How this project is tested (two harnesses, run for real)
 
-- **Backend — `cloudflare/scripts/test-*.cjs` (67 files, 67 pass).** Pure-logic harnesses
+- **Backend — `cloudflare/scripts/test-*.cjs` (78 files, 78 pass).** Pure-logic harnesses
   that transpile the REAL source with `typescript` + a `better-sqlite3` shim (migrations
   applied), so they exercise actual route/lib code, not reimplementations. No single
   "run-all" script exists on purpose — they are swept individually so one failure cannot
   hide the rest (a chain stops at the first throw).
-- **Frontend — `npm run test:utils` (green).** A hand-maintained `&&` chain of 130+
+- **Frontend — `npm run test:utils` (green; all 120 test files wired and pass).** A hand-maintained `&&` chain of 120
   `tests/*.test.ts` run directly under Node, front-loaded with `typecheck`,
   `verify:public-runtime`, and `check:source`. `testChainCoverage.test.ts` fails if any
   `tests/*.test.ts` is not wired into the chain (it caught two unwired files this session);
@@ -902,6 +927,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Import warning parity (regression) | `test-import-warning-detail-pure.cjs` | frontend `ImportReportModal` `SERIOUS_KINDS` must match backend `SERIOUS_IMPORT_WARNING_KINDS` — caught a gap where `stock_action_conflict` would have rendered under "Other warnings" and been missed |
 | POS oversell strict (Part 360) | `test-sales-oversell-strict-pure.cjs` | migration 0058 rebuilds both stock tables with `CHECK(quantity >= 0)` and floors pre-existing negatives; a within-stock sale commits while an oversell aborts + fully rolls back (no clamp); a specific lot is guarded by its OWN stock not the product total; the route source ships plain subtraction (no `MAX(0)` clamp) and maps the abort to a 409 |
 | Stock-action import UI wiring (§13, Part 361) | `stockActionImportModel.test.ts` | pure review logic (analyzing/needsConfirm/canConfirm, the confirm gate, errored-only still confirmable, all-skipped not); guards the whole chain — modal drives a `stock_actions` job with `confirm_stock_actions`, the wizard launches it, the transport forwards the flag, the backend allow-list admits the type |
+| Stock-action full analyze/review gate (Part 362) | `test-stock-action-analyze-e2e.cjs`, `test-import-lifecycle-gate-pure.cjs`, `test-import-review-query-pure.cjs` | real ranged CSV → bounded materialization → two classify windows → persisted Screen 2 rows → cross-window seal; preview-only/cancel/lease/oversize guards; reviewed-source immutability; no retry approval bypass; parameterized D1 pagination/search/warning filters with literal wildcard handling |
 | Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
