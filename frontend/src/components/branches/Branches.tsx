@@ -20,6 +20,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
+import { buildStockHealthSegments } from '../inventory/stockHealthSummary.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -195,6 +196,7 @@ interface BranchStatTileProps {
   value: ReactNode
   detail?: ReactNode
   color?: string
+  sub?: ReactNode
   onClick?: () => void
 }
 
@@ -239,7 +241,7 @@ function isTransferRecord(value: unknown): value is StockTransfer {
   return !!value && typeof value === 'object' && 'id' in value
 }
 
-function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:text-slate-100', onClick }: BranchStatTileProps) {
+function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:text-slate-100', sub, onClick }: BranchStatTileProps) {
   const detailText = String(detail || '')
   // The explanation used to be a `title` attribute, i.e. the browser's own
   // black tooltip: unreadable on touch (no hover), unstyleable, and slow to
@@ -254,6 +256,7 @@ function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:tex
       <button type="button" className="block w-full min-w-0 text-left focus:outline-none" onClick={onClick}>
         <div className="truncate pr-4 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 sm:text-[11px]">{label}</div>
         <div className={`mt-0.5 truncate text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
+        {sub ? <div className="mt-0.5 min-w-0 truncate text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">{sub}</div> : null}
       </button>
     </div>
   )
@@ -860,33 +863,56 @@ export default function Branches() {
   return (
     <div className="page-scroll flex min-h-0 flex-col p-3 sm:p-6">
       {branchSummary ? (
-        <div className="mb-4 grid grid-cols-3 gap-1.5 sm:gap-2 xl:grid-cols-7">
-          {[
-            { key: 'branches', label: tr('branches_short', tr('branches', 'Branches')), value: branchSummary.branch_count ?? activeBranches.length, color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stat_branches_detail', 'Active branch locations available for stock review and transfer.') },
-            // `total_products` (getFamilyStockStats, cloudflare/src/lib/familyStockStats.ts)
-            // already counts one family/group as a single item, matching the
-            // products/inventory listing's own pagination -- not a raw row count.
-            { key: 'items', label: tr('items_short', 'Items'), value: branchSummary.total_products || 0, color: 'text-slate-700 dark:text-slate-100', detail: tr('branch_stat_products_detail', 'Unique products counted across branch stock records (one per product group, matching the listing).') },
-            // `branchSummary.in_stock` is already the combined healthy+low
-            // figure (see familyStockStats.ts's own `in_stock` column
-            // comment) -- previously this tile added low_stock on top of
-            // it, double-counting every low-stock product into the In
-            // Stock total.
-            { key: 'in-stock', label: tr('in_stock_short', 'In Stock'), value: branchSummary.in_stock || 0, color: 'text-emerald-600 dark:text-emerald-300', detail: tr('branch_stat_in_stock_detail', 'Products with positive stock in at least one branch (includes both healthy and low stock; {n} of these are healthy, above the low stock threshold).').replace('{n}', String(branchSummary.healthy || 0)) },
-            { key: 'healthy', label: tr('healthy_stock_short', 'Healthy'), value: branchSummary.healthy || 0, color: 'text-teal-600 dark:text-teal-300', detail: tr('branch_stat_healthy_detail', 'Products above their low stock threshold (a strict subset of In Stock).') },
-            { key: 'low-stock', label: tr('low_stock_short', 'Low'), value: branchSummary.low_stock || 0, color: 'text-amber-600 dark:text-amber-300', detail: tr('branch_stat_low_stock_detail', 'Products at or below their low stock threshold.') },
-            { key: 'out-stock', label: tr('out_of_stock_short', 'Out'), value: branchSummary.out_of_stock || 0, color: 'text-red-600 dark:text-red-300', detail: tr('branch_stat_out_stock_detail', 'Products at or below their out of stock threshold.') },
-            { key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(Number(branchSummary.stock_value_usd || 0)), color: 'text-cyan-600 dark:text-cyan-300', detail: tr('branch_stat_value_detail', 'Estimated stock value using available branch stock and product cost.') },
-          ].map(({ key, label, value, color, detail }) => (
-            <BranchStatTile
-              key={key}
-              label={label}
-              value={value}
-              color={color}
-              detail={detail}
-              onClick={() => openStatDetail(label, value, detail)}
-            />
-          ))}
+        // 11.21: the outer row used to carry SEVEN tiles, four of them the
+        // stock-health split (In Stock / Healthy / Low / Out) spelled out
+        // separately. Like the Inventory page (11.20), that split now rides on
+        // the Items tile as ONE coloured sub-line (green/amber/red counts via
+        // the shared buildStockHealthSegments), so the outer row is just
+        // Branches / Items / Value. The full health breakdown stays reachable
+        // by clicking Items. Per-branch stock stats below are untouched.
+        <div className="mb-4 grid grid-cols-3 gap-1.5 sm:gap-2">
+          {(() => {
+            const healthSegments = buildStockHealthSegments(
+              { healthy: branchSummary.healthy || 0, low: branchSummary.low_stock || 0, out: branchSummary.out_of_stock || 0 },
+              { healthy: tr('healthy_stock_short', 'Healthy'), low: tr('low_stock_short', 'Low'), out: tr('out_of_stock_short', 'Out') },
+            )
+            const inStock = branchSummary.in_stock || 0
+            const itemsDetail = `${tr('in_stock_short', 'In Stock')}: ${inStock} · ${healthSegments.map((s) => `${s.count} ${s.label}`).join(' · ')}`
+            const tiles = [
+              { key: 'branches', label: tr('branches_short', tr('branches', 'Branches')), value: branchSummary.branch_count ?? activeBranches.length, color: 'text-blue-600 dark:text-blue-300', detail: tr('branch_stat_branches_detail', 'Active branch locations available for stock review and transfer.'), sub: null as ReactNode },
+              // `total_products` (getFamilyStockStats) counts one family/group
+              // as a single item, matching the listing's own pagination.
+              {
+                key: 'items',
+                label: tr('items_short', 'Items'),
+                value: branchSummary.total_products || 0,
+                color: 'text-slate-700 dark:text-slate-100',
+                detail: itemsDetail,
+                sub: (
+                  <span className="inline-flex items-center gap-1">
+                    {healthSegments.map((seg, i) => (
+                      <span key={seg.key} className="inline-flex items-center gap-1">
+                        {i > 0 ? <span className="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span> : null}
+                        <span className={`font-semibold ${seg.colorClass}`} title={`${seg.count} ${seg.label}`} aria-label={`${seg.count} ${seg.label}`}>{seg.count}</span>
+                      </span>
+                    ))}
+                  </span>
+                ),
+              },
+              { key: 'value', label: tr('stock_value_short', 'Value'), value: fmtUSD(Number(branchSummary.stock_value_usd || 0)), color: 'text-cyan-600 dark:text-cyan-300', detail: tr('branch_stat_value_detail', 'Estimated stock value using available branch stock and product cost.'), sub: null as ReactNode },
+            ]
+            return tiles.map(({ key, label, value, color, detail, sub }) => (
+              <BranchStatTile
+                key={key}
+                label={label}
+                value={value}
+                color={color}
+                detail={detail}
+                sub={sub}
+                onClick={() => openStatDetail(label, value, detail)}
+              />
+            ))
+          })()}
         </div>
       ) : null}
 
