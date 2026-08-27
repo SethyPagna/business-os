@@ -5,6 +5,8 @@ import { hasPermission } from '../lib/permissions'
 import {
   CLOUDFLARE_BACKUP_KEEP,
   createCloudflareBackup,
+  getSystemJob,
+  linkCloudflareBackupJob,
   listCloudflareBackups,
   pruneCloudflareBackups,
   restoreCloudflareBackup,
@@ -67,14 +69,37 @@ app.post('/', async (c) => {
     if (type === 'export-folder' || type === 'export-cloudflare' || !type) {
       const backup = await createCloudflareBackup(c.env, 'manual')
       const retention = await pruneCloudflareBackups(c.env, CLOUDFLARE_BACKUP_KEEP)
-      const job = await storeSystemJob(c.env, completedJob('Cloudflare backup exported', {
-        success: true,
-        packageId: backup.name,
-        backupKey: backup.key,
-        backup,
-        retention,
-      }))
-      return c.json({ job_id: job.id, item: job })
+      const jobId = crypto.randomUUID()
+      const totalAssets = backup.summary.assetCount
+      const copiedAssets = backup.summary.assetsBackedUp
+      const running = backup.status === 'copying'
+      const failed = backup.status === 'partial'
+      const job = await storeSystemJob(c.env, {
+        id: jobId,
+        status: running ? 'running' : failed ? 'failed' : 'completed',
+        progress: running && totalAssets ? Math.max(5, Math.min(99, Math.round((copiedAssets / totalAssets) * 100))) : 100,
+        message: running
+          ? `Cloudflare backup copying assets (${copiedAssets}/${totalAssets})`
+          : failed
+            ? 'Cloudflare backup manifest was created, but full asset coverage requires the backup queue.'
+            : 'Cloudflare backup finalized',
+        error: failed ? 'Full asset backup is unavailable because BACKUP_QUEUE is not configured.' : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        result: {
+          success: !failed,
+          packageId: backup.name,
+          backupKey: backup.key,
+          backup,
+          retention,
+        },
+      })
+      await linkCloudflareBackupJob(c.env, backup.name.replace(/\.json$/, ''), jobId)
+      const currentJob = await getSystemJob(c.env, jobId) || job
+      return c.json(
+        { job_id: currentJob.id, item: currentJob },
+        running ? 202 : failed ? 503 : 200,
+      )
     }
 
     if (type === 'import-folder') {

@@ -167,9 +167,10 @@ export async function handleMediaQueue(batch: MessageBatch<MediaJobMessage>, env
 
 // Consumer for 'business-os-backup-assets' (Part 122). Each message is one
 // continuation step of a single backup's full-asset-coverage copy --
-// continueCloudflareBackupAssetCopy does the actual work (read manifest,
-// copy the next slice, update the manifest in place, re-enqueue itself if
-// more remain) and is unit-tested directly in scripts/test-backup-pure.cjs;
+// continueCloudflareBackupAssetCopy does the actual work (read the small
+// lifecycle sidecar, copy the next free-plan-safe slice, update the sidecar,
+// re-enqueue itself if more remain) and is unit-tested directly in
+// scripts/test-backup-pure.cjs; it never reparses the large DB manifest.
 // this consumer is just the queue-delivery plumbing around it, same shape
 // as handleImportQueue/handleMediaQueue above.
 export async function handleBackupQueue(batch: MessageBatch<BackupQueueMessage>, env: Env): Promise<void> {

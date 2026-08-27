@@ -68,10 +68,14 @@ const {
   validateCloudflareBackup,
   selectAssetsToCopy,
   continueCloudflareBackupAssetCopy,
+  getCloudflareBackupState,
+  linkCloudflareBackupJob,
+  storeSystemJob,
+  getSystemJob,
   CLOUDFLARE_BACKUP_PREFIX,
 } = backupModuleObj.exports
 
-for (const fn of [createCloudflareBackup, restoreCloudflareBackup, pruneCloudflareBackups, listCloudflareBackups, validateCloudflareBackup, selectAssetsToCopy, continueCloudflareBackupAssetCopy]) {
+for (const fn of [createCloudflareBackup, restoreCloudflareBackup, pruneCloudflareBackups, listCloudflareBackups, validateCloudflareBackup, selectAssetsToCopy, continueCloudflareBackupAssetCopy, getCloudflareBackupState, linkCloudflareBackupJob, storeSystemJob, getSystemJob]) {
   assert.strictEqual(typeof fn, 'function', 'expected backup.ts export missing -- source may have changed')
 }
 
@@ -191,12 +195,15 @@ async function toStoredBody(data) {
 
 function makeFakeR2(seed = {}) {
   const store = new Map()
+  const failGets = new Set()
   for (const [key, value] of Object.entries(seed)) {
     store.set(key, { body: value.body ?? key, httpMetadata: value.httpMetadata, customMetadata: value.customMetadata, size: value.size ?? String(value.body ?? key).length, uploaded: value.uploaded ?? new Date() })
   }
   return {
     _store: store,
+    _failGets: failGets,
     async get(key) {
+      if (failGets.has(key)) return null
       const object = store.get(key)
       if (!object) return null
       return {
@@ -207,6 +214,11 @@ function makeFakeR2(seed = {}) {
         text: async () => object.body,
         json: async () => JSON.parse(object.body),
       }
+    },
+    async head(key) {
+      const object = store.get(key)
+      if (!object) return null
+      return { key, size: object.size, uploaded: object.uploaded, httpMetadata: object.httpMetadata, customMetadata: object.customMetadata }
     },
     async put(key, data, opts) {
       const body = await toStoredBody(data)
@@ -242,7 +254,7 @@ function makeFakeR2(seed = {}) {
       }
     },
     async delete(key) {
-      store.delete(key)
+      for (const item of Array.isArray(key) ? key : [key]) store.delete(item)
     },
     async list({ prefix = '', cursor, limit = 1000 } = {}) {
       const allKeys = [...store.keys()].filter((key) => key.startsWith(prefix)).sort()
@@ -250,7 +262,7 @@ function makeFakeR2(seed = {}) {
       const page = allKeys.slice(start, start + limit)
       const truncated = start + limit < allKeys.length
       return {
-        objects: page.map((key) => ({ key, size: store.get(key).size, uploaded: store.get(key).uploaded })),
+        objects: page.map((key) => ({ key, size: store.get(key).size, uploaded: store.get(key).uploaded, customMetadata: store.get(key).customMetadata })),
         truncated,
         cursor: truncated ? page[page.length - 1] : undefined,
       }
@@ -335,7 +347,7 @@ async function main() {
     assert.strictEqual(result.summary.tableCount, 2)
     assert.strictEqual(result.summary.rowCount, 3)
     assert.strictEqual(result.summary.assetCount, 3)
-    assert.strictEqual(result.summary.assetsBackedUp, 3, 'all 3 assets are under the 40-asset cap, all should be copied')
+    assert.strictEqual(result.summary.assetsBackedUp, 3, 'all 3 assets are under the 20-asset cap, all should be copied')
     assert.strictEqual(result.summary.assetsSkipped, 0)
     assert.ok(result.key.startsWith(CLOUDFLARE_BACKUP_PREFIX) && result.key.endsWith('.json'))
 
@@ -349,17 +361,17 @@ async function main() {
     assert.strictEqual(await copied.text(), 'A')
   })
 
-  // -- Test 2: the MAX_ASSET_BYTES_PER_BACKUP cap (40) is respected --
+  // -- Test 2: the free-plan-safe 20-object copy cap is respected --
   // assets beyond it are listed in the manifest but not byte-copied.
-  await checkAsync('createCloudflareBackup caps asset byte-copies at 40 and reports the skip count', async () => {
+  await checkAsync('createCloudflareBackup caps asset byte-copies at 20 and reports the skip count', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
     for (let i = 0; i < 45; i++) assets[`uploads/img-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
     const env = makeEnv({ schema, assets })
     const result = await createCloudflareBackup(env, 'manual')
     assert.strictEqual(result.summary.assetCount, 45)
-    assert.strictEqual(result.summary.assetsBackedUp, 40, 'copy count should be capped at MAX_ASSET_BYTES_PER_BACKUP')
-    assert.strictEqual(result.summary.assetsSkipped, 5)
+    assert.strictEqual(result.summary.assetsBackedUp, 20, 'copy count should be capped at MAX_ASSET_BYTES_PER_BACKUP')
+    assert.strictEqual(result.summary.assetsSkipped, 25)
   })
 
   // -- Test 2b: selectAssetsToCopy (the cursor-resume slicer, unit-tested
@@ -390,29 +402,29 @@ async function main() {
   // -- Test 2c: end-to-end through createCloudflareBackup -- consecutive
   // runs against the same env (same persisted KV cursor) make genuine
   // cumulative progress instead of every run re-copying the same first
-  // 40, which is the actual gap this was closing.
-  await checkAsync('createCloudflareBackup resumes asset copying across consecutive runs instead of repeating the same first 40', async () => {
+  // 20, which is the actual gap this was closing.
+  await checkAsync('createCloudflareBackup resumes asset copying across consecutive runs instead of repeating the same first 20', async () => {
     const schema = { settings: { columns: ['key', 'value'], rows: [] } }
     const assets = {}
-    for (let i = 0; i < 50; i++) assets[`uploads/img-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
+    for (let i = 0; i < 35; i++) assets[`uploads/img-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
     const env = makeEnv({ schema, assets })
 
     const first = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(first.summary.assetsBackedUp, 40)
+    assert.strictEqual(first.summary.assetsBackedUp, 20)
     const firstManifest = JSON.parse(await (await env.ASSETS.get(first.key)).text())
 
     const second = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(second.summary.assetsBackedUp, 40)
+    assert.strictEqual(second.summary.assetsBackedUp, 20)
     const secondManifest = JSON.parse(await (await env.ASSETS.get(second.key)).text())
 
     // The two runs' copied sets should differ (real progress was made),
-    // and together they should cover every one of the 50 assets at least
+    // and together they should cover every one of the 35 assets at least
     // once -- the actual guarantee this cursor exists to provide.
     const firstKeys = new Set(firstManifest.r2.copiedKeys)
     const secondKeys = new Set(secondManifest.r2.copiedKeys)
     assert.notDeepStrictEqual([...firstKeys].sort(), [...secondKeys].sort(), 'second run should not just repeat the first run\'s exact set')
     const union = new Set([...firstKeys, ...secondKeys])
-    assert.strictEqual(union.size, 50, 'two runs together should cover all 50 assets at least once')
+    assert.strictEqual(union.size, 35, 'two runs together should cover all 35 assets at least once')
   })
 
   // -- Test 3: restore replaces live table contents with the backup's,
@@ -554,8 +566,8 @@ async function main() {
     for (let i = 0; i < 45; i++) assets[`uploads/nq-${String(i).padStart(2, '0')}.png`] = { body: `img${i}` }
     const env = makeEnv({ schema, assets }) // no queue option -- env.BACKUP_QUEUE is undefined
     const result = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(result.summary.assetsBackedUp, 40)
-    assert.strictEqual(result.summary.assetsSkipped, 5)
+    assert.strictEqual(result.summary.assetsBackedUp, 20)
+    assert.strictEqual(result.summary.assetsSkipped, 25)
     const payload = JSON.parse(await (await env.ASSETS.get(result.key)).text())
     assert.strictEqual(payload.r2.assetCopyProgress, undefined, 'no-queue path should not set assetCopyProgress at all')
   })
@@ -571,12 +583,15 @@ async function main() {
     const queue = makeFakeQueue()
     const env = makeEnv({ schema, assets, queue })
     const result = await createCloudflareBackup(env, 'manual')
-    assert.strictEqual(result.summary.assetsBackedUp, 40)
-    assert.strictEqual(result.summary.assetsSkipped, 15)
+    assert.strictEqual(result.summary.assetsBackedUp, 20)
+    assert.strictEqual(result.summary.assetsSkipped, 35)
     assert.strictEqual(queue.sent.length, 1, 'exactly one continuation message should be enqueued')
-    assert.deepStrictEqual(queue.sent[0], { kind: 'backup-continue', backupName: result.name.replace(/\.json$/, ''), nextIndex: 40 })
+    assert.deepStrictEqual(queue.sent[0], { kind: 'backup-continue', backupName: result.name.replace(/\.json$/, ''), nextIndex: 20 })
     const payload = JSON.parse(await (await env.ASSETS.get(result.key)).text())
-    assert.deepStrictEqual(payload.r2.assetCopyProgress, { nextIndex: 40, complete: false })
+    assert.deepStrictEqual(payload.r2.assetCopyProgress, { nextIndex: 20, complete: false })
+    const state = await getCloudflareBackupState(env, result.name.replace(/\.json$/, ''))
+    assert.strictEqual(state.status, 'copying')
+    assert.strictEqual(state.pendingKeys.length, 35)
 
     // Under-the-cap run: no continuation should be enqueued at all.
     const smallAssets = { 'uploads/one.png': { body: 'X' } }
@@ -614,14 +629,15 @@ async function main() {
       assert.strictEqual(message.backupName, backupName)
       await continueCloudflareBackupAssetCopy(env, message.backupName, message.nextIndex)
       iterations += 1
-      assert.ok(iterations < 20, 'should not take anywhere near this many continuation steps for 95 assets at 40/step')
+      assert.ok(iterations < 20, 'should not take anywhere near this many continuation steps for 95 assets at 20/step')
     }
 
     const finalPayload = JSON.parse(await (await env.ASSETS.get(created.key)).text())
-    assert.strictEqual(finalPayload.summary.assetsBackedUp, 95, 'all 95 assets should be copied across the full run')
-    assert.strictEqual(finalPayload.summary.assetsSkipped, 0)
-    assert.deepStrictEqual(finalPayload.r2.assetCopyProgress, { nextIndex: 95, complete: true })
-    assert.strictEqual(new Set(finalPayload.r2.copiedKeys).size, 95, 'no duplicate copies, every asset covered exactly once')
+    const finalState = await getCloudflareBackupState(env, backupName)
+    assert.strictEqual(finalState.status, 'finalized')
+    assert.strictEqual(finalState.pendingKeys.length, 0)
+    assert.strictEqual(finalState.failedKeys.length, 0)
+    assert.strictEqual(new Set(finalState.copiedKeys).size, 95, 'no duplicate copies, every asset covered exactly once')
     // Every asset's bytes should be genuinely readable back from the
     // backup's own assets/ prefix, not just listed in copiedKeys.
     const sample = await env.ASSETS.get(`${finalPayload.r2.assetsPrefix}big-094.png`)
@@ -642,6 +658,8 @@ async function main() {
 
     const before = JSON.parse(await (await env.ASSETS.get(created.key)).text())
     assert.strictEqual(before.r2.assetCopyProgress.complete, true)
+    const beforeState = await getCloudflareBackupState(env, created.name.replace(/\.json$/, ''))
+    assert.strictEqual(beforeState.status, 'finalized')
 
     const result = await continueCloudflareBackupAssetCopy(env, created.name.replace(/\.json$/, ''), before.r2.assetCopyProgress.nextIndex)
     assert.strictEqual(result.skipped, true)
@@ -650,6 +668,115 @@ async function main() {
 
     const after = JSON.parse(await (await env.ASSETS.get(created.key)).text())
     assert.deepStrictEqual(after, before, 'manifest should be byte-for-byte unchanged by the no-op')
+  })
+
+  await checkAsync('an unfinished backup never evicts either finalized backup; finalization prunes to exactly two', async () => {
+    const schema = { settings: { columns: ['key', 'value'], rows: [] } }
+    const env = makeEnv({ schema, assets: { 'uploads/base.png': { body: 'BASE' } } })
+    const RealDate = Date
+    const baseMs = RealDate.now()
+    let tick = 0
+    class TickedDate extends RealDate {
+      constructor(...args) {
+        if (args.length === 0) super(baseMs + tick * 1000)
+        else super(...args)
+      }
+      static now() { return baseMs + tick * 1000 }
+    }
+    global.Date = TickedDate
+    let first
+    let second
+    let third
+    const queue = makeFakeQueue()
+    try {
+      first = await createCloudflareBackup(env, 'manual')
+      tick = 1
+      second = await createCloudflareBackup(env, 'manual')
+      for (let i = 0; i < 24; i++) await env.ASSETS.put(`uploads/extra-${String(i).padStart(2, '0')}.png`, `E${i}`)
+      env.BACKUP_QUEUE = queue
+      tick = 2
+      third = await createCloudflareBackup(env, 'manual')
+
+      const before = await pruneCloudflareBackups(env, 2)
+      assert.strictEqual(before.kept.length, 2, 'both known-good backups stay retained')
+      assert.strictEqual(before.removed.length, 0, 'copying backup cannot evict a finalized backup')
+      assert.strictEqual(before.incomplete.length, 1)
+      assert.strictEqual(before.incomplete[0].key, third.key)
+
+      while (queue.sent.length) {
+        const message = queue.sent.shift()
+        tick += 1
+        await continueCloudflareBackupAssetCopy(env, message.backupName, message.nextIndex)
+      }
+    } finally {
+      global.Date = RealDate
+    }
+
+    const after = await listCloudflareBackups(env)
+    assert.strictEqual(after.length, 2)
+    assert.ok(after.every((item) => item.finalized), 'retained sets must all be finalized')
+    assert.ok(after.some((item) => item.key === second.key))
+    assert.ok(after.some((item) => item.key === third.key))
+    assert.ok(!after.some((item) => item.key === first.key), 'oldest finalized set is removed only after replacement finalizes')
+  })
+
+  await checkAsync('a repeatedly missing asset marks the backup failed after three bounded attempts', async () => {
+    const schema = { settings: { columns: ['key', 'value'], rows: [] } }
+    const assets = { 'uploads/00-fail.png': { body: 'FAIL' } }
+    for (let i = 0; i < 20; i++) assets[`uploads/ok-${String(i).padStart(2, '0')}.png`] = { body: `OK${i}` }
+    const queue = makeFakeQueue()
+    const env = makeEnv({ schema, assets, queue })
+    env.ASSETS._failGets.add('uploads/00-fail.png')
+
+    const created = await createCloudflareBackup(env, 'manual')
+    let iterations = 0
+    while (queue.sent.length) {
+      const message = queue.sent.shift()
+      await continueCloudflareBackupAssetCopy(env, message.backupName, message.nextIndex)
+      iterations += 1
+      assert.ok(iterations < 10, 'a permanent failure must not requeue forever')
+    }
+
+    const backupName = created.name.replace(/\.json$/, '')
+    const state = await getCloudflareBackupState(env, backupName)
+    assert.strictEqual(state.status, 'failed')
+    assert.deepStrictEqual(state.failedKeys, ['uploads/00-fail.png'])
+    assert.strictEqual(state.attempts['uploads/00-fail.png'], 3)
+    const validation = await validateCloudflareBackup(env, created.key)
+    assert.strictEqual(validation.restorable, false)
+    assert.strictEqual(validation.failedAssets, 1)
+  })
+
+  await checkAsync('a linked manual-backup job moves from visible running progress to completed at finalization', async () => {
+    const schema = { settings: { columns: ['key', 'value'], rows: [] } }
+    const assets = {}
+    for (let i = 0; i < 25; i++) assets[`uploads/job-${String(i).padStart(2, '0')}.png`] = { body: `J${i}` }
+    const queue = makeFakeQueue()
+    const env = makeEnv({ schema, assets, queue })
+    const created = await createCloudflareBackup(env, 'manual')
+    const seeded = await storeSystemJob(env, {
+      id: 'job-1',
+      status: 'running',
+      progress: 0,
+      message: 'starting',
+      updated_at: '2000-01-01T00:00:00.000Z',
+    })
+    assert.notStrictEqual(seeded.updated_at, '2000-01-01T00:00:00.000Z', 'system jobs must receive a fresh server timestamp')
+    await linkCloudflareBackupJob(env, created.name.replace(/\.json$/, ''), 'job-1')
+
+    const running = await getSystemJob(env, 'job-1')
+    assert.strictEqual(running.status, 'running')
+    assert.strictEqual(running.progress, 80)
+    assert.match(running.message, /20\/25/)
+
+    while (queue.sent.length) {
+      const message = queue.sent.shift()
+      await continueCloudflareBackupAssetCopy(env, message.backupName, message.nextIndex)
+    }
+    const completed = await getSystemJob(env, 'job-1')
+    assert.strictEqual(completed.status, 'completed')
+    assert.strictEqual(completed.progress, 100)
+    assert.ok(completed.finished_at)
   })
 
   console.log(`\n${passed} check(s) passed.`)

@@ -14,7 +14,16 @@ export const CLOUDFLARE_BACKUP_KEEP = 2
 // manifest (as before) but their bytes are not copied this run --
 // `summary.assetsBackedUp` vs `summary.assetsSkipped` makes that visible
 // instead of silently claiming a complete asset backup that isn't one.
-const MAX_ASSET_BYTES_PER_BACKUP = 40
+// Each copy is one R2 get plus one R2 put. Workers Free allows 50
+// subrequests per invocation, so 20 copies leave headroom for the lifecycle
+// state read/write, manifest work and queue send. The old value (40) could
+// require 80+ subrequests and fail before the continuation was recorded.
+const MAX_ASSET_BYTES_PER_BACKUP = 20
+const MAX_ASSET_COPY_ATTEMPTS = 3
+const BACKUP_LIFECYCLE_FORMAT = 'business-os-cloudflare-backup-state'
+const BACKUP_LIFECYCLE_VERSION = 1
+const MANAGED_BACKUP_MARKER = 'sidecar-v1'
+const STALE_BACKUP_MS = 24 * 60 * 60 * 1000
 
 // A single backup run can only ever byte-copy MAX_ASSET_BYTES_PER_BACKUP
 // assets, so full coverage of a catalog bigger than that has to come from
@@ -136,7 +145,84 @@ type BackupPayload = {
 // been copied so far) lives on the manifest itself, read fresh by
 // continueCloudflareBackupAssetCopy on each invocation, not carried in the
 // message.
-export type BackupQueueMessage = { kind: 'backup-continue'; backupName: string; nextIndex: number }
+export type BackupQueueMessage = { kind: 'backup-continue'; backupName: string; nextIndex?: number }
+
+export type BackupLifecycleState = {
+  format: typeof BACKUP_LIFECYCLE_FORMAT
+  version: typeof BACKUP_LIFECYCLE_VERSION
+  backupName: string
+  manifestKey: string
+  createdAt: string
+  updatedAt: string
+  finalizedAt?: string
+  source: 'manual' | 'scheduled'
+  status: 'copying' | 'finalized' | 'partial' | 'failed'
+  assetsPrefix: string
+  assets: BackupPayload['r2']['assets']
+  copiedKeys: string[]
+  pendingKeys: string[]
+  failedKeys: string[]
+  attempts: Record<string, number>
+  systemJobId?: string
+}
+
+function backupStateKey(backupName: string): string {
+  return `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/state.json`
+}
+
+async function putBackupState(env: Env, state: BackupLifecycleState): Promise<void> {
+  state.updatedAt = new Date().toISOString()
+  await env.ASSETS.put(backupStateKey(state.backupName), JSON.stringify(state), {
+    httpMetadata: { contentType: 'application/json; charset=utf-8' },
+    customMetadata: { format: BACKUP_LIFECYCLE_FORMAT, status: state.status, updatedAt: state.updatedAt },
+  })
+}
+
+export async function getCloudflareBackupState(env: Env, backupName: string): Promise<BackupLifecycleState | null> {
+  const object = await env.ASSETS.get(backupStateKey(backupName))
+  if (!object) return null
+  const state = await object.json<BackupLifecycleState>()
+  if (state?.format !== BACKUP_LIFECYCLE_FORMAT || state.version !== BACKUP_LIFECYCLE_VERSION) return null
+  return state
+}
+
+async function syncLinkedBackupJob(env: Env, state: BackupLifecycleState): Promise<void> {
+  if (!state.systemJobId) return
+  const current = await getSystemJob(env, state.systemJobId)
+  if (!current) return
+  const total = state.assets.length
+  const progress = state.status === 'finalized' || state.status === 'failed'
+    ? 100
+    : total
+      ? Math.max(5, Math.min(99, Math.round((state.copiedKeys.length / total) * 100)))
+      : 5
+  const status = state.status === 'finalized'
+    ? 'completed'
+    : state.status === 'failed' || state.status === 'partial'
+      ? 'failed'
+      : 'running'
+  const message = state.status === 'finalized'
+    ? 'Cloudflare backup finalized'
+    : state.status === 'failed' || state.status === 'partial'
+      ? `Cloudflare backup incomplete (${state.failedKeys.length || state.pendingKeys.length} asset(s) unavailable)`
+      : `Cloudflare backup copying assets (${state.copiedKeys.length}/${total})`
+  await storeSystemJob(env, {
+    ...current,
+    status,
+    progress,
+    message,
+    error: status === 'failed' ? message : null,
+    finished_at: status === 'running' ? null : new Date().toISOString(),
+  })
+}
+
+export async function linkCloudflareBackupJob(env: Env, backupName: string, systemJobId: string): Promise<void> {
+  const state = await getCloudflareBackupState(env, backupName)
+  if (!state) return
+  state.systemJobId = systemJobId
+  await putBackupState(env, state)
+  await syncLinkedBackupJob(env, state)
+}
 
 function pad(n: number): string {
   return String(n).padStart(2, '0')
@@ -175,17 +261,41 @@ async function listAssets(env: Env) {
 }
 
 export async function listCloudflareBackups(env: Env) {
-  const items: Array<{ key: string; name: string; size: number; uploaded: string | null }> = []
+  const items: Array<{
+    key: string
+    name: string
+    size: number
+    uploaded: string | null
+    status: 'copying' | 'finalized' | 'partial' | 'failed'
+    finalized: boolean
+  }> = []
   let cursor: string | undefined
   do {
-    const page = await env.ASSETS.list({ prefix: CLOUDFLARE_BACKUP_PREFIX, cursor, limit: 1000 })
+    const page = await env.ASSETS.list({
+      prefix: CLOUDFLARE_BACKUP_PREFIX,
+      cursor,
+      limit: 1000,
+      include: ['customMetadata'],
+    })
     for (const object of page.objects || []) {
       if (!object.key.endsWith('.json')) continue
+      // state.json lives under a backup folder and is not a backup manifest.
+      if (object.key.endsWith('/state.json')) continue
+      const name = object.key.slice(CLOUDFLARE_BACKUP_PREFIX.length)
+      const backupName = name.replace(/\.json$/, '')
+      const managed = object.customMetadata?.lifecycle === MANAGED_BACKUP_MARKER
+      const state = managed ? await getCloudflareBackupState(env, backupName) : null
+      // Existing backups predate lifecycle sidecars. Treat them as finalized
+      // for backward compatibility; a new managed manifest without its
+      // sidecar is copying/unfinished and can never evict a known-good backup.
+      const status = managed ? (state?.status || 'copying') : 'finalized'
       items.push({
         key: object.key,
-        name: object.key.slice(CLOUDFLARE_BACKUP_PREFIX.length),
+        name,
         size: object.size,
         uploaded: object.uploaded?.toISOString?.() || null,
+        status,
+        finalized: status === 'finalized',
       })
     }
     cursor = page.truncated ? page.cursor : undefined
@@ -305,6 +415,9 @@ async function writeBackupDocument(
   const assetsPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/assets/`
 
   let copiedKeys: string[] = []
+  const pendingKeys: string[] = []
+  const failedKeys: string[] = []
+  const attempts: Record<string, number> = {}
   let assetCopyProgress: BackupPayload['r2']['assetCopyProgress']
 
   if (!includeAssets) {
@@ -326,23 +439,20 @@ async function writeBackupDocument(
     // needed to reach full asset coverage.
     const firstSlice = assets.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
     for (const asset of firstSlice) {
+      attempts[asset.key] = 1
       try {
         const destKey = `${assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
         const copied = await copyObject(env.ASSETS, asset.key, destKey)
         if (copied) copiedKeys.push(asset.key)
+        else pendingKeys.push(asset.key)
       } catch (_) {
-        // Best-effort per-asset -- one bad/missing object shouldn't abort
-        // the whole backup. nextIndex below still advances past it (see
-        // continueCloudflareBackupAssetCopy's matching comment) so it
-        // isn't retried forever.
+        pendingKeys.push(asset.key)
       }
     }
+    pendingKeys.push(...assets.slice(firstSlice.length).map((asset) => asset.key))
     const nextIndex = firstSlice.length
-    const complete = nextIndex >= assets.length
+    const complete = pendingKeys.length === 0
     assetCopyProgress = { nextIndex, complete }
-    if (!complete) {
-      await env.BACKUP_QUEUE.send({ kind: 'backup-continue', backupName, nextIndex } satisfies BackupQueueMessage)
-    }
   } else {
     // No-queue fallback -- byte-for-byte the original Part 48 behavior.
     // Which N assets get copied resumes from the persisted cross-run
@@ -373,7 +483,7 @@ async function writeBackupDocument(
 
   const upload = await env.ASSETS.createMultipartUpload(key, {
     httpMetadata: { contentType: 'application/json; charset=utf-8' },
-    customMetadata: { source, createdAt, format },
+    customMetadata: { source, createdAt, format, lifecycle: MANAGED_BACKUP_MARKER },
   })
   const writer = new R2StreamWriter(upload)
 
@@ -431,6 +541,40 @@ async function writeBackupDocument(
     throw error
   }
 
+  // Lifecycle lives in a small sidecar. Continuation workers update only
+  // this document, never parse/rewrite the potentially huge database
+  // manifest. This is also the source of truth for finalized retention.
+  const status: BackupLifecycleState['status'] = !includeAssets || copiedKeys.length === assets.length
+    ? 'finalized'
+    : env.BACKUP_QUEUE
+      ? 'copying'
+      : 'partial'
+  const lifecycle: BackupLifecycleState = {
+    format: BACKUP_LIFECYCLE_FORMAT,
+    version: BACKUP_LIFECYCLE_VERSION,
+    backupName,
+    manifestKey: key,
+    createdAt,
+    updatedAt: createdAt,
+    finalizedAt: status === 'finalized' ? new Date().toISOString() : undefined,
+    source,
+    status,
+    assetsPrefix,
+    assets,
+    copiedKeys,
+    pendingKeys,
+    failedKeys,
+    attempts,
+  }
+  await putBackupState(env, lifecycle)
+
+  // Enqueue only AFTER both the manifest and lifecycle state are durable.
+  // Previously the queue send happened first, so a fast consumer could see
+  // no manifest, acknowledge the message as a no-op and strand the backup.
+  if (status === 'copying' && env.BACKUP_QUEUE) {
+    await env.BACKUP_QUEUE.send({ kind: 'backup-continue', backupName, nextIndex: copiedKeys.length } satisfies BackupQueueMessage)
+  }
+
   const summary = {
     tableCount,
     rowCount,
@@ -438,7 +582,7 @@ async function writeBackupDocument(
     assetsBackedUp: copiedKeys.length,
     assetsSkipped: Math.max(0, assets.length - copiedKeys.length),
   }
-  return { key, name: key.slice(CLOUDFLARE_BACKUP_PREFIX.length), createdAt, summary }
+  return { key, name: key.slice(CLOUDFLARE_BACKUP_PREFIX.length), createdAt, status, summary }
 }
 
 // Scoped backup: dumps ONLY the tables a given reset is about to delete,
@@ -471,94 +615,142 @@ export async function createSectionBackup(env: Env, tables: readonly string[], s
 }
 
 // Queue consumer entry point (called from queue.ts's handleBackupQueue for
-// each 'backup-continue' message). Copies the NEXT MAX_ASSET_BYTES_PER_BACKUP
-// assets of the manifest's own fixed snapshot (payload.r2.assets), starting
-// at nextIndex, updates the SAME manifest object in place, and re-enqueues
-// itself if assets remain -- until the whole snapshot is covered.
-export async function continueCloudflareBackupAssetCopy(env: Env, backupName: string, nextIndex: number) {
+// each 'backup-continue' message). Copies the next free-plan-safe slice from
+// the lifecycle sidecar's fixed asset snapshot, updates only that small
+// sidecar, and re-enqueues itself until finished. The large DB manifest stays
+// immutable.
+export async function continueCloudflareBackupAssetCopy(env: Env, backupName: string, _nextIndex?: number) {
   const key = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`
-  const object = await env.ASSETS.get(key)
-  if (!object) {
-    // Manifest is gone (pruned, or a stale/duplicate queue redelivery for
-    // a backup that no longer exists) -- nothing to resume, safe no-op.
+  const manifest = await env.ASSETS.head(key)
+  if (!manifest) {
     return { key, skipped: true, reason: 'manifest-not-found' as const }
   }
-  const payload = await object.json<BackupPayload>()
-
-  // Redundant continuation (a duplicate queue delivery, or a message that
-  // raced a later one) on an already-complete backup -- safe no-op, don't
-  // re-copy or re-enqueue.
-  if (payload.r2.assetCopyProgress?.complete) {
-    return { key, skipped: true, reason: 'already-complete' as const, summary: payload.summary }
+  const state = await getCloudflareBackupState(env, backupName)
+  // Never fall back to object.json() on the full manifest: that was the
+  // memory bug this sidecar exists to remove. A pre-sidecar continuation
+  // remains an honest partial legacy backup and cannot evict finalized ones.
+  if (!state) return { key, skipped: true, reason: 'state-not-found' as const }
+  if (state.status === 'finalized') {
+    return { key, skipped: true, reason: 'already-complete' as const, status: state.status }
+  }
+  if (state.status === 'failed' || state.status === 'partial') {
+    return { key, skipped: true, reason: 'not-resumable' as const, status: state.status }
   }
 
-  const assets = payload.r2.assets
-  const slice = assets.slice(nextIndex, nextIndex + MAX_ASSET_BYTES_PER_BACKUP)
-  const copiedKeys = payload.r2.copiedKeys.slice()
-  for (const asset of slice) {
+  const slice = state.pendingKeys.slice(0, MAX_ASSET_BYTES_PER_BACKUP)
+  if (!slice.length) {
+    state.status = state.failedKeys.length ? 'failed' : 'finalized'
+    if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
+    await putBackupState(env, state)
+    await syncLinkedBackupJob(env, state)
+    if (state.status === 'finalized') await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
+    return { key, skipped: false as const, complete: true, status: state.status }
+  }
+
+  const copied = new Set(state.copiedKeys)
+  const remaining = state.pendingKeys.slice(slice.length)
+  for (const assetKey of slice) {
+    state.attempts[assetKey] = (state.attempts[assetKey] || 0) + 1
     try {
-      const destKey = `${payload.r2.assetsPrefix}${asset.key.replace(/^uploads\//, '')}`
-      const copied = await copyObject(env.ASSETS, asset.key, destKey)
-      if (copied) copiedKeys.push(asset.key)
+      const destKey = `${state.assetsPrefix}${assetKey.replace(/^uploads\//, '')}`
+      const ok = await copyObject(env.ASSETS, assetKey, destKey)
+      if (ok) {
+        copied.add(assetKey)
+      } else if (state.attempts[assetKey] < MAX_ASSET_COPY_ATTEMPTS) {
+        remaining.push(assetKey)
+      } else {
+        state.failedKeys.push(assetKey)
+      }
     } catch (_) {
-      // Best-effort per-asset, same as createCloudflareBackup's first
-      // slice -- one bad/missing object shouldn't stall the rest of the
-      // catalog.
+      if (state.attempts[assetKey] < MAX_ASSET_COPY_ATTEMPTS) remaining.push(assetKey)
+      else state.failedKeys.push(assetKey)
     }
   }
-  // Advance past every asset ATTEMPTED this slice, not just the ones that
-  // actually succeeded -- tracked explicitly here rather than inferred
-  // from copiedKeys.length, which would diverge (and get stuck retrying
-  // the same failed object forever) the moment any single copy fails.
-  const newNextIndex = nextIndex + slice.length
-  const complete = newNextIndex >= assets.length
 
-  payload.r2.copiedKeys = copiedKeys
-  payload.r2.assetCopyProgress = { nextIndex: newNextIndex, complete }
-  payload.summary.assetsBackedUp = copiedKeys.length
-  payload.summary.assetsSkipped = Math.max(0, assets.length - copiedKeys.length)
-
-  await env.ASSETS.put(key, JSON.stringify(payload), {
-    httpMetadata: { contentType: 'application/json; charset=utf-8' },
-    customMetadata: { source: payload.source, createdAt: payload.createdAt, format: payload.format },
-  })
+  state.copiedKeys = [...copied]
+  state.pendingKeys = remaining
+  const complete = remaining.length === 0
+  if (complete) {
+    state.status = state.failedKeys.length ? 'failed' : 'finalized'
+    if (state.status === 'finalized') state.finalizedAt = new Date().toISOString()
+  }
+  await putBackupState(env, state)
+  await syncLinkedBackupJob(env, state)
 
   if (!complete && env.BACKUP_QUEUE) {
-    await env.BACKUP_QUEUE.send({ kind: 'backup-continue', backupName, nextIndex: newNextIndex } satisfies BackupQueueMessage)
+    await env.BACKUP_QUEUE.send({ kind: 'backup-continue', backupName, nextIndex: state.copiedKeys.length } satisfies BackupQueueMessage)
+  } else if (state.status === 'finalized') {
+    // Retention happens at finalization, not at manifest creation. Until
+    // this point the new backup is not allowed to displace either of the
+    // two known-good finalized backups.
+    await pruneCloudflareBackups(env, CLOUDFLARE_BACKUP_KEEP)
   }
 
-  return { key, skipped: false as const, nextIndex: newNextIndex, complete, summary: payload.summary }
+  return {
+    key,
+    skipped: false as const,
+    nextIndex: state.copiedKeys.length,
+    complete,
+    status: state.status,
+    assetsBackedUp: state.copiedKeys.length,
+    assetsFailed: state.failedKeys.length,
+  }
 }
 
 export async function pruneCloudflareBackups(env: Env, keep = CLOUDFLARE_BACKUP_KEEP) {
   const backups = await listCloudflareBackups(env)
+  const finalized = backups.filter((item) => item.finalized)
+  const incomplete = backups.filter((item) => !item.finalized)
   const removed: string[] = []
-  for (const item of backups.slice(Math.max(0, keep))) {
-    await env.ASSETS.delete(item.key)
-    // The backup's own copied-asset-bytes subfolder (assets/) is a
-    // separate set of R2 objects, not deleted by removing the manifest
-    // .json above -- without this, every pruned backup left its copied
-    // images behind forever, silently growing R2 usage with objects no
-    // backup listing referenced anymore. item.name is the manifest's own
-    // filename (matches backupName in createCloudflareBackup, since the
-    // manifest key is `${CLOUDFLARE_BACKUP_PREFIX}${backupName}.json`).
+  const staleRemoved: string[] = []
+
+  const deleteBackupSet = async (item: typeof backups[number]) => {
     const backupName = item.name.replace(/\.json$/, '')
-    const assetsPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/assets/`
+    const backupPrefix = `${CLOUDFLARE_BACKUP_PREFIX}${backupName}/`
+    const keys = [item.key]
     try {
-      const assetObjects = await listObjects(env.ASSETS, assetsPrefix)
-      await Promise.all(assetObjects.map((o) => env.ASSETS.delete(o.key)))
+      const objects = await listObjects(env.ASSETS, backupPrefix)
+      keys.push(...objects.map((object) => object.key))
     } catch (_) {
-      // Non-fatal -- an orphaned copied-asset folder from a pruned backup
-      // doesn't affect app correctness, only R2 usage.
+      // The manifest is still deleted below; a later orphan sweep can
+      // remove an unreachable folder if listing itself was unavailable.
     }
+    for (let offset = 0; offset < keys.length; offset += 500) {
+      await env.ASSETS.delete(keys.slice(offset, offset + 500))
+    }
+  }
+
+  // Only finalized backups count toward the retention promise. A new
+  // copying/partial/failed set cannot evict either known-good backup.
+  for (const item of finalized.slice(Math.max(0, keep))) {
+    await deleteBackupSet(item)
     removed.push(item.key)
   }
-  return { kept: backups.slice(0, keep), removed }
+
+  // Incomplete artifacts are a separate lifecycle, not retained backups.
+  // Give active queue work a full day, then remove stale/failed/partial sets
+  // so they cannot become the unexplained R2 growth reported by the user.
+  for (const item of incomplete) {
+    const uploadedMs = item.uploaded ? Date.parse(item.uploaded) : 0
+    if (!uploadedMs || Date.now() - uploadedMs < STALE_BACKUP_MS) continue
+    await deleteBackupSet(item)
+    staleRemoved.push(item.key)
+  }
+
+  return {
+    kept: finalized.slice(0, Math.max(0, keep)),
+    removed,
+    incomplete: incomplete.filter((item) => !staleRemoved.includes(item.key)),
+    staleRemoved,
+  }
 }
 
 export async function maybeRunScheduledBackup(env: Env) {
   const backups = await listCloudflareBackups(env)
-  const newest = backups[0]?.uploaded ? Date.parse(backups[0].uploaded) : 0
+  const newestFinalized = backups.find((item) => item.finalized)
+  const newest = newestFinalized?.uploaded ? Date.parse(newestFinalized.uploaded) : 0
+  const activeCopy = backups.find((item) => item.status === 'copying')
+  const activeCopyMs = activeCopy?.uploaded ? Date.parse(activeCopy.uploaded) : 0
 
   // Retention runs FIRST, and unconditionally.
   //
@@ -586,8 +778,11 @@ export async function maybeRunScheduledBackup(env: Env) {
     console.error('[backup] retention pass failed', error)
   }
 
+  if (activeCopyMs && Date.now() - activeCopyMs < STALE_BACKUP_MS) {
+    return { skipped: true, reason: 'backup-in-progress', latest: activeCopy, retention }
+  }
   if (newest && Date.now() - newest < 5.5 * 60 * 60 * 1000) {
-    return { skipped: true, reason: 'recent-backup-exists', latest: backups[0], retention }
+    return { skipped: true, reason: 'recent-backup-exists', latest: newestFinalized, retention }
   }
   const backup = await createCloudflareBackup(env, 'scheduled')
   // Second pass: the backup just written is now the newest, so this is what
@@ -718,8 +913,10 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
   // taken before the asset-copy work, or one whose catalog exceeded the cap,
   // may have copiedKeys missing/incomplete; restoredAssets/missingAssets makes
   // that visible instead of silently claiming every image came back.
-  const copiedKeys = r2Meta?.copiedKeys || []
-  const assetsPrefix = r2Meta?.assetsPrefix
+  const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
+  const lifecycle = await getCloudflareBackupState(env, backupName)
+  const copiedKeys = lifecycle?.copiedKeys || r2Meta?.copiedKeys || []
+  const assetsPrefix = lifecycle?.assetsPrefix || r2Meta?.assetsPrefix
   let restoredAssets = 0
   const missingAssets: string[] = []
   if (assetsPrefix) {
@@ -742,13 +939,17 @@ export async function restoreCloudflareBackup(env: Env, source: string) {
     tables: orderedTables.length,
     statements: statementCount,
     restoredAssets,
-    assetsNotRestored: (r2Meta?.assets?.length || 0) - restoredAssets,
+    assetsNotRestored: (lifecycle?.assets?.length || r2Meta?.assets?.length || 0) - restoredAssets,
     missingAssets: missingAssets.length ? missingAssets : undefined,
   }
 }
 
 export async function validateCloudflareBackup(env: Env, source: string) {
   const { key, payload } = await loadBackup(env, source)
+  const backupName = key.slice(CLOUDFLARE_BACKUP_PREFIX.length).replace(/\.json$/, '')
+  const lifecycle = await getCloudflareBackupState(env, backupName)
+  const copiedCount = lifecycle?.copiedKeys.length ?? payload.r2?.copiedKeys?.length ?? payload.summary?.assetsBackedUp ?? 0
+  const assetCount = lifecycle?.assets.length ?? payload.r2?.assets?.length ?? payload.summary?.assetCount ?? 0
   return {
     key,
     createdAt: payload.createdAt,
@@ -757,15 +958,22 @@ export async function validateCloudflareBackup(env: Env, source: string) {
     tables: Object.keys(payload.tables || {}).length,
     // Surfaces the asset-completeness gap described on summary.assetsSkipped
     // at validate/dry-run time too, not just after a real restore.
-    assetsBackedUp: payload.r2?.copiedKeys?.length ?? payload.summary?.assetsBackedUp ?? 0,
-    assetCount: payload.r2?.assets?.length ?? payload.summary?.assetCount ?? 0,
-    restorable: payload.format === 'business-os-cloudflare-backup' && payload.formatVersion === 1,
+    assetsBackedUp: copiedCount,
+    assetCount,
+    status: lifecycle?.status || 'finalized',
+    failedAssets: lifecycle?.failedKeys.length || 0,
+    restorable: payload.format === 'business-os-cloudflare-backup'
+      && payload.formatVersion === 1
+      && (!lifecycle || lifecycle.status === 'finalized'),
   }
 }
 
 export async function storeSystemJob(env: Env, job: Record<string, unknown>) {
   const id = String(job.id || crypto.randomUUID())
-  const item = { id, updated_at: new Date().toISOString(), ...job }
+  // Generated identity/freshness fields must win over a caller spreading a
+  // previously stored job. Otherwise lifecycle progress updates retain their
+  // original timestamp and appear stuck in the UI/system-job sort order.
+  const item = { ...job, id, updated_at: new Date().toISOString() }
   await env.CACHE.put(`system-job:${id}`, JSON.stringify(item), { expirationTtl: 7 * 24 * 60 * 60 })
   return item
 }

@@ -152,21 +152,19 @@ max_batch_timeout = 30
 [[queues.consumers]]
 queue = "business-os-backup-assets"
 # handleBackupQueue processes one continuation step per message
-# (continueCloudflareBackupAssetCopy copies up to MAX_ASSET_BYTES_PER_BACKUP
-# assets and re-enqueues itself) -- same reasoning as business-os-import's
+# (continueCloudflareBackupAssetCopy copies up to 20 assets -- 40 R2
+# get/put subrequests, leaving headroom under Workers Free's 50 -- and
+# re-enqueues itself) -- same reasoning as business-os-import's
 # max_batch_size = 1 above: keep each invocation's R2 get()+put() work
 # inside the Workers Free plan's per-invocation CPU budget rather than
 # packing several continuation steps' worth of copying into one call.
 max_batch_size = 1
 max_batch_timeout = 5
 # No dead_letter_queue configured here (unlike business-os-import) --
-# deliberate: an exhausted-retries continuation just leaves that backup's
-# manifest at whatever nextIndex it last reached (assetCopyProgress.complete
-# stays false, summary.assetsSkipped reflects it honestly) rather than
-# needing a separate DLQ-handling code path. A later manually-triggered
-# backup run still succeeds independently -- nothing is left in a broken
-# state, just one backup with partial asset coverage, which the manifest
-# already surfaces via assetsSkipped/assetCopyProgress.
+# deliberate: an exhausted infra retry leaves the small lifecycle sidecar in
+# copying state. It cannot evict either finalized backup, and the scheduled
+# stale-artifact pass removes it after 24 hours. Per-asset missing-object
+# failures are separately bounded to three attempts and end in failed state.
 #
 # REQUIRES the same one-time manual step as business-os-import-dlq above
 # (this repo has no live Cloudflare credentials to run it from here):
