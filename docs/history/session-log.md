@@ -7391,3 +7391,36 @@ Open and History sections still appear in the new files. Zero missing.
 grouped by area with explicit status markers. Left alone this session — reorganising the
 backlog is a content decision, not a formatting one, and worth doing with the user rather
 than unilaterally.
+
+## Part 341 (chat, Aug 27 2026) — iPhone storefront PWA branding and Product import fail-closed review checkpoint
+
+**Ask.** Continue the full recorded remediation goal, make every requested task explicit,
+keep `progress.md` authoritative, and fix the public website's iPhone PWA still using the
+admin Business OS image.
+
+**What changed.** `progress.md` now carries one acceptance-based umbrella checklist for
+the imports, stats, delivery accounting, historical batches, media, backups/storage,
+security and remaining UI/domain work. The parser-time PWA route bootstrap now treats `/`
+on the public hostname as storefront (while `admin.*`/localhost remain admin), and selects
+the Leang manifest, favicon, Apple title and new versioned opaque 180x180 touch icon before
+React. Proper Leang maskable assets and service-worker caching were added. Product import
+approval now counts unresolved barcode/SKU/negative-stock rows from persisted D1 review
+data and returns 409 until every one has a durable apply/skip decision; the tracker exposes
+a paginated resolver explaining both consequences.
+
+**What was found.** The prior storefront fix correctly removed the blob manifest, but the
+static HTML independently hard-coded `/` as admin and the later React effect never touched
+`apple-touch-icon` or the Apple app title. In Product imports, the server review was readable
+but approval had no Product-specific unresolved-conflict gate, so bypassing the client could
+approve serious rows blindly.
+
+**Verified.** Frontend `npm run test:utils` passed all 120 wired test files; frontend
+TypeScript/source checks passed (373 source files); backend test sweep passed 78/78;
+Cloudflare typecheck passed; icon regeneration `--check` passed; production Vite build
+passed with 879 modules in 26.66s and only the two existing catalog circular warnings.
+Commits pushed to `origin/main`: `1711a351`, `ebd68f5d`, `e28b116b`, `e109c7e1`.
+
+**Not done.** Nothing was deployed or tested through a real iPhone Add to Home Screen flow.
+Product import still has its old client review before server-job creation, so the final
+single authoritative two-screen Product conversion remains open. Every unchecked item in
+`progress.md`'s Active umbrella goal remains open; the formal goal is intentionally active.
