@@ -251,6 +251,41 @@ app.post('/upload', async (c) => {
   return c.json(asset)
 })
 
+// Streams the one stored object with a caller-selected logical filename.
+// The filename is presentation only (Content-Disposition); R2 is never
+// copied or renamed. Full Library access matches the existing bulk-download
+// gate in FilesPage and prevents the public asset URL from becoming an
+// alternate permission bypass for export actions.
+app.get('/:id/download', async (c) => {
+  const user = c.get('user')
+  if (!hasFullLibraryAccess(user)) {
+    return c.json({ error: 'Downloading a file requires Full Access to Library.' }, 403)
+  }
+  const id = Number(c.req.param('id'))
+  if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid file id' }, 400)
+
+  const db = getDb(c.env)
+  const asset = await db.prepare(`
+    SELECT stored_name, original_name, mime_type FROM file_assets WHERE id = @id
+  `).get<{ stored_name: string; original_name: string; mime_type: string | null }>({ id })
+  if (!asset) return c.json({ error: 'File not found' }, 404)
+
+  const object = await c.env.ASSETS.get(`uploads/${asset.stored_name}`)
+  if (!object) return c.json({ error: 'Stored file object not found' }, 404)
+
+  const requestedName = c.req.query('name') || asset.original_name
+  const downloadName = sanitizeOriginalFileName(requestedName)
+  const asciiFallback = downloadName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '_') || 'download'
+  const headers = new Headers()
+  object.writeHttpMetadata(headers)
+  headers.set('Content-Type', asset.mime_type || headers.get('Content-Type') || 'application/octet-stream')
+  headers.set('Content-Length', String(object.size))
+  headers.set('Content-Disposition', `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(downloadName)}`)
+  headers.set('X-Content-Type-Options', 'nosniff')
+  headers.set('Cache-Control', 'private, no-store')
+  return new Response(object.body, { headers })
+})
+
 // Renames only the display name (`original_name`) shown in the Library --
 // the R2 storage key (`stored_name`) and the `public_path` every product
 // image / avatar / setting actually references are left untouched, so a
