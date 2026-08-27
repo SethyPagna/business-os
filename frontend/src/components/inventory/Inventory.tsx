@@ -54,6 +54,7 @@ const ProductHistoryPreviewModal = lazyRetry(() => import('./ProductHistoryPrevi
 const InventoryProductsSurfaceView = InventoryProductsSurface as any
 
 import { buildMovementGroups, getMovementGroupPage, movementColorClass, movementColorClassForRecord, movementGroupHaystack, translateMovementType } from './movementGroups'
+import { buildStockHealthSegments } from './stockHealthSummary'
 
 // Default quantity the Adjust-stock "Add" form starts with -- see
 // InventoryStockModals.tsx's quick-pick chips (1 / this value / 5 / 10 /
@@ -2696,9 +2697,28 @@ export default function Inventory() {
 ${inventoryThresholdFormulaText}`,
       value: statsValue(totalProducts),
       cls: 'text-gray-800 dark:text-gray-200',
-      sub: stockStatsLoaded
-        ? `${healthyCount} ${healthyShortLabel} | ${lowStockCount} ${lowShortLabel} | ${outStockCount} ${outShortLabel}`
-        : safeT('loading', 'Loading...'),
+      // 11.20: colour carries healthy/low/out here (green/amber/red counts),
+      // not text labels -- the detail breakdown below keeps the names. The
+      // label rides along as title/aria so colour is not the only cue.
+      sub: stockStatsLoaded ? (
+        <span className="inline-flex items-center gap-1">
+          {buildStockHealthSegments(
+            { healthy: healthyCount, low: lowStockCount, out: outStockCount },
+            { healthy: healthyShortLabel, low: lowShortLabel, out: outShortLabel },
+          ).map((seg, i) => (
+            <span key={seg.key} className="inline-flex items-center gap-1">
+              {i > 0 ? <span className="text-gray-300 dark:text-gray-600" aria-hidden="true">·</span> : null}
+              <span
+                className={`font-semibold ${seg.colorClass}`}
+                title={`${seg.count} ${seg.label}`}
+                aria-label={`${seg.count} ${seg.label}`}
+              >
+                {seg.count}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : safeT('loading', 'Loading...'),
       // Full breakdown, not just low/out -- total counts each product
       // group as one (getFamilyStockStats/paginateProductFamilies both
       // group by family root, matching the listing's own pagination), and
