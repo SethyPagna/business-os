@@ -206,7 +206,8 @@ the repository evidence, never from intent.
 - [x] Public storefront iPhone PWA: production `/` selects Leang Cosmetics before
   React, including Apple title/touch icon and static manifest; admin stays Business OS.
 - [ ] Products: remove the remaining client review so its persisted server review
-  is the only Screen 2.
+  is the only Screen 2. Part 367 added the server-authoritative conflict decisions
+  and fail-closed approval gate; moving the upload/modal onto that source is open.
 - [ ] Sales: finish the smart multi-line invoice contract, strict date + 24-hour
   time, customer inheritance/matching, FIFO/oversell/idempotency/permission bounds,
   and lossless import→export round trip.
@@ -541,6 +542,25 @@ green, TypeScript/source checks clean, and production build **878 modules / 30.5
 with only the two existing catalog circular warnings. Live iPhone verification still
 requires deployment; remove the old home-screen shortcut before re-adding because iOS
 caches installed icon URLs aggressively.
+
+**Part 367 — Product server review now fail-closes on unresolved safety conflicts
+(committed, needs deploy).** Commit `e28b116b` adds the prerequisite that was missing
+before the final Product two-screen conversion: Product approval can no longer pass a
+barcode collision, SKU collision or negative-stock coercion merely because the UI did
+not open a resolver. D1 counts unresolved flagged rows across every persisted review
+page using bound JSON/SQL; both `GET /review` and `POST /approve` use that source. Direct
+API approval returns `409 product_conflicts_unresolved` until each row has a durable
+choice.
+
+The global tracker now opens a Product-specific resolver. Each flagged row explains the
+consequence and records either **Use safe result** (collision remains a separate product;
+negative stock becomes 0) or **Skip row**. Decisions survive refresh/page changes and
+approval remains server-gated even if the frontend is bypassed. This is a safety
+checkpoint, **not** completion of Product §13: `BulkImportModal` still shows its client
+review before it creates the server job, so consolidating that modal onto the persisted
+review source remains open. Verification: backend **78/78**, frontend full chain
+**120/120**, both typechecks/source checks clean, and production build **879 modules /
+26.66s**, with only the two existing catalog circular warnings.
 
 *User, this session + mid-turn clarification.*
 
@@ -994,7 +1014,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 366 (Aug 27 2026).** Everything below was really run in this local Windows
+**As of Part 367 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -1005,10 +1025,10 @@ are the commands' actual results this session.
 | `cloudflare` `tsc --noEmit` | **clean** |
 | Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **78 / 78 pass** |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** |
-| Real `vite build` | **succeeds (30.50s, 878 modules)**; only the two pre-existing catalog circular warnings |
+| Real `vite build` | **succeeds (26.66s, 879 modules)**; only the two pre-existing catalog circular warnings |
 | `wrangler d1 migrations apply --local` | **current; no migrations pending** (reverified Part 362) |
 
-**Nothing is deployed.** Every fix Parts 346–366 — including the two production outages
+**Nothing is deployed.** Every fix Parts 346–367 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on
 `npm run deploy:full`. The user's re-pasted error logs predate the fixes.
 
@@ -1075,6 +1095,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Contacts review + real product Screen 1 (Part 363) | `test-import-review-query-pure.cjs`, `contactImportPostStartFlow.test.ts`, `stockActionImportModel.test.ts` | bounded contact search/sort/filter + persisted merge decisions; wrapper cannot reintroduce fake template/upload handoff; real product/stock modals own mode/options/template/upload/images/information and image selection appears once |
 | Contacts exact two-screen approval gate (Part 364) | `test-import-review-query-pure.cjs`, `contactImportPostStartFlow.test.ts` | SQLite proves only unresolved name/phone-conflict rows block; approval route fail-closes; phone acknowledgment persists; paginated Screen 2 owns Confirm and cannot advance through a separate Done step |
 | Sales + Inventory authoritative Screen 2 (Part 365) | `csvImport.test.ts`, `inventoryImportWorker.test.ts`, `salesImportWorker.test.ts` | both modals remain open through server analysis, read bounded persisted review rows, guard duplicate confirmation, and notify the parent only on approve or explicit background handoff |
+| Product conflict server gate (Part 367) | `test-import-review-query-pure.cjs`, `importJobApproveGate.test.ts` | D1 counts unresolved barcode/SKU/negative-stock rows across pages; approval fail-closes; persisted apply/skip choices survive review reads; the tracker cannot silently approve past the resolver |
 | Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
