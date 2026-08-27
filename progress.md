@@ -192,6 +192,45 @@ user's own messages; nothing is inferred. Top of the list is next.*
 
 **Stated order:** 2.1 → 2.2 → 2.3 → undo/redo (server-level) → everything else.
 
+### Active umbrella goal — Aug 27 2026
+
+Do not call this goal complete until every box below is either implemented and
+verified or is recorded here with a concrete external blocker. Each coherent
+change is committed and pushed to `origin/main`; `progress.md` is updated from
+the repository evidence, never from intent.
+
+- [x] Stock Actions: bounded analyze → persisted review/conflict seal → explicit
+  confirmation → queued atomic/idempotent/FIFO/oversell-safe apply.
+- [x] Contacts, Sales and Inventory: one real upload screen and one authoritative
+  persisted review/confirm screen; Contacts includes bounded search/sort/filter.
+- [x] Public storefront iPhone PWA: production `/` selects Leang Cosmetics before
+  React, including Apple title/touch icon and static manifest; admin stays Business OS.
+- [ ] Products: remove the remaining client review so its persisted server review
+  is the only Screen 2.
+- [ ] Sales: finish the smart multi-line invoice contract, strict date + 24-hour
+  time, customer inheritance/matching, FIFO/oversell/idempotency/permission bounds,
+  and lossless import→export round trip.
+- [ ] Stats: compact every page, put name + info on one row, and make tooltip/detail
+  overlays viewport-aware top-layer UI (especially Returns).
+- [ ] Delivery: store customer charge separately from restricted actual delivery
+  cost; redact actual cost from receipts/customers/public APIs and report charge,
+  expense and margin distinctly.
+- [ ] Historical batches: allow safe received-date/batch entry from Product,
+  Inventory and Branch batch views; preserve barcode on branch transfer and only
+  permit barcode changes in create/add/adjust flows.
+- [ ] Media: complete the shared 3-image normal / explicit admin exception policy,
+  300–350KB ceiling strategy, magic-byte/decompression safeguards and bounded
+  Cloudflare-primary/Cloudinary-fallback transformations across every entry point.
+- [ ] Storage/backups/jobs/security: exact-two verified R2 retention, complete
+  verified Google Drive mirror/prune, storage-growth remediation, finite job leases/
+  cancellation, and CPU/SQL/rate/AI-input/abuse safeguards with deep tests.
+- [ ] Remaining recorded UI/domain work: cross-page selection columns, Returns
+  replace/damaged-stock chooser, contact duplicate-resolution clarity, §15 audit,
+  and the rest of this ordered backlog.
+- [ ] Final gate: full backend/frontend/type/build/migration checks pass,
+  `progress.md` matches HEAD, every coherent commit is pushed, and anything requiring
+  deployment/account configuration is named precisely.
+
 ---
 
 ### 0 — BROKEN IN PRODUCTION (jumps the queue)
@@ -481,6 +520,27 @@ review architecture. Verification: frontend full chain **120/120**, source check
 only the two pre-existing catalog circular warnings remain (an extra shared-
 chunk cycle found during the first build was removed before commit). Backend was
 unchanged; Part 364's **78/78** sweep remains current.
+
+**Part 366 — iPhone storefront install branding corrected at the production root
+(committed, needs deploy).** The static HTML route bootstrap disagreed with the real
+router: it always classified `/` as admin, although `/` on
+`leangcosmetics.dpdns.org` is the public storefront. It therefore presented the
+Business OS manifest, Apple title and `apple-touch-icon` while iOS captured Add to
+Home Screen metadata. `PublicCatalogPage` later swapped ordinary favicons/manifest,
+but never the Apple-specific metadata.
+
+Commit `1711a351` makes the parser-time bootstrap hostname-aware, gives the root-path
+case precedence over the admin route table, and selects the static Leang manifest,
+favicon, Apple title and a new opaque 180x180 versioned touch icon before React loads.
+The runtime effect also maintains the Apple metadata. The Leang manifest now uses real
+safe-zone maskable icons, and the service worker caches every storefront manifest/icon
+asset. `brandIcons.test.ts` executes the real inline bootstrap against public-root,
+admin-host, localhost and loopback DOM doubles and checks the 180x180 PNG dimensions.
+Verification: full frontend `test:utils` **120/120 green**, icon generator `--check`
+green, TypeScript/source checks clean, and production build **878 modules / 30.50s**
+with only the two existing catalog circular warnings. Live iPhone verification still
+requires deployment; remove the old home-screen shortcut before re-adding because iOS
+caches installed icon URLs aggressively.
 
 *User, this session + mid-turn clarification.*
 
@@ -788,7 +848,7 @@ pagination/cache/performance. Re-measure Cloudflare usage before each expansion.
 
 | # | Task | Status |
 |---|---|---|
-| 16.1 | **PWA "Install app" not showing on the storefront** (leangcosmetics.dpdns.org). **NOW ACTUALLY DONE (Part 355), needs deploy.** The first §16 pass fixed the wrong file: it removed the blob-manifest swap from `CatalogPage.tsx` (the ADMIN in-app catalog preview) + `App.tsx`, but the user reported the missing Install on the LIVE storefront, which `index.tsx` mounts as **`PublicCatalogPage.tsx`** — a different component that was missed entirely and still swapped `<link rel="manifest">` to a `URL.createObjectURL` **blob** (Chrome won't install a blob: manifest) and still overrode the favicon from business config. Real fix keeps the deliberate admin=Business OS / storefront=Leang brand split but serves the storefront's icon + manifest as **static same-origin files** (new `public/portal-manifest.json` + bundled Leang icons) — installable, unlike a blob, and still Leang-branded. Verified: full `test:utils` chain green, `vite build` clean, `portal-manifest.json` ships in `dist`. **Verify Install live after deploy.** | done (Part 355), needs deploy |
+| 16.1 | **PWA install + correct storefront icon** (leangcosmetics.dpdns.org). **DONE in code (Parts 355 + 366), needs deploy/live iPhone verify.** Part 355 removed the non-installable blob manifest from the real public component. Part 366 fixed the remaining iPhone-specific root-route bug: static HTML classified production `/` as admin and never swapped `apple-touch-icon`/Apple app title. Public `/` now selects the static Leang manifest, favicon and a versioned opaque 180x180 Apple icon before React; admin/localhost remain Business OS. Real Leang maskable icons and service-worker caching were added. Full 120-test frontend chain + production build green. After deployment, delete the old iPhone shortcut before re-adding because iOS caches installed icon URLs. Commit `1711a351`. | done in code; needs deploy/live iPhone verify |
 | 16.2 | **Logo preview matches the applied header; vertical/horizontal focus work when zoomed.** **DONE (Part 354), needs deploy** - editor preview + live header now share one `buildLogoImageStyle` (identical zoom clamp, so preview == applied and the full 80-180% range ships), and the zoom now originates at the focus point so H/V sliders stay meaningful when zoomed. Live header also honors fit=contain now. `logoImageStyle.test.ts`. | done, needs deploy |
 | 16.3 | **Notes reorder now works on touch.** **DONE (Part 354), needs deploy** - replaced HTML5 `draggable` (no touch support) with pointer-event drag on an always-visible grip: press, move over a note (elementFromPoint -> nearest [data-note-id]), release to drop before it; blue top-border marks the target. reorderNotes unchanged. | done, needs deploy |
 
@@ -934,7 +994,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 365 (Aug 27 2026).** Everything below was really run in this local Windows
+**As of Part 366 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -945,10 +1005,10 @@ are the commands' actual results this session.
 | `cloudflare` `tsc --noEmit` | **clean** |
 | Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **78 / 78 pass** |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 120 `tests/*.test.ts`) | **green** |
-| Real `vite build` | **succeeds (27.99s, 878 modules)**; only the two pre-existing catalog circular warnings |
+| Real `vite build` | **succeeds (30.50s, 878 modules)**; only the two pre-existing catalog circular warnings |
 | `wrangler d1 migrations apply --local` | **current; no migrations pending** (reverified Part 362) |
 
-**Nothing is deployed.** Every fix Parts 346–365 — including the two production outages
+**Nothing is deployed.** Every fix Parts 346–366 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on
 `npm run deploy:full`. The user's re-pasted error logs predate the fixes.
 
@@ -1021,6 +1081,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Alignment (4.1/11.4) | `productsRowAlignment.test.ts` | the 6 `<col>` widths sum to 100%; category band spans image+name |
 | Logo crop (16.2) | `logoImageStyle.test.ts` | preview == applied; transform-origin ties to the focus point; clamps |
 | PWA / branding (16.1/11.14) | `brandIcons.test.ts`, `performanceLoadingUx.test.ts`, `adminShellMediaGuards.test.ts` | storefront serves STATIC Leang icon+manifest, never a blob or per-merchant build; the removed favicon machinery cannot return (doesNotMatch guards) |
+| iPhone public-root branding (Part 366) | `brandIcons.test.ts`, icon generator `--check` | executes the real parser-time bootstrap: public production `/` selects Leang manifest/favicon/Apple title/versioned 180x180 touch icon, while admin/localhost/loopback retain Business OS; portal maskable files reproduce from source |
 | Backup restore streaming (10.1) | `test-backup-restore-stream-pure.cjs` (12 checks) + `test-backup-pure.cjs` round-trip | reads the document one row at a time; identical events under per-char + 200 random chunkings; corrupt/truncated backup throws (never silently mis-restores); the round-trip now exercises the streaming path end to end |
 | R2 lifecycle / retention | `test-backup-pure.cjs` (18 checks) | unfinished sets cannot evict either good backup; finalization leaves exactly two; missing assets fail after three attempts; a linked job moves running→completed instead of appearing stuck |
 | Google Drive checkpoint | `test-google-drive-backup-pure.cjs` | skips unfinished R2, streams a trusted resumable session, paginates tagged files, deduplicates the same backup and prunes 10→7 without touching an unrelated file |
