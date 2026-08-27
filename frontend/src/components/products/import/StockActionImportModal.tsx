@@ -19,6 +19,8 @@ import UploadIcon from 'lucide-react/dist/esm/icons/upload.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
+import Scale from 'lucide-react/dist/esm/icons/scale.js'
+import TrendingUp from 'lucide-react/dist/esm/icons/trending-up.js'
 import Modal from '../../shared/Modal'
 import AppSelect from '../../shared/AppSelect'
 import { parseImportFile } from '../../../utils/spreadsheetImport.ts'
@@ -47,6 +49,7 @@ import {
   type StockActionReviewRow,
   type StockImportJob,
 } from './stockActionImportModel.ts'
+import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMode } from './ProductImportModeTabs'
 
 type TranslateFn = (key: string, fallback?: string, km?: string) => string
 
@@ -55,6 +58,8 @@ interface StockActionImportModalProps {
   onDone: () => void
   t: TranslateFn
   notify?: (message: string, tone?: string) => void
+  topMode?: 'stock_actions'
+  onTopModeChange?: (mode: ProductImportTopMode) => void
 }
 
 type Step = 'upload' | 'review'
@@ -73,7 +78,7 @@ function triggerDownload(name: string, text: string): void {
   URL.revokeObjectURL(url)
 }
 
-export default function StockActionImportModal({ onClose, onDone, t, notify }: StockActionImportModalProps) {
+export default function StockActionImportModal({ onClose, onDone, t, notify, topMode = 'stock_actions', onTopModeChange }: StockActionImportModalProps) {
   const tr = (key: string, en: string, km = en): string => {
     const value = typeof t === 'function' ? t(key, en, km) : en
     return value && value !== key ? value : en
@@ -236,6 +241,7 @@ export default function StockActionImportModal({ onClose, onDone, t, notify }: S
     <Modal title={tr('stock_import_title', 'Import Stock Actions', 'នាំចូលសកម្មភាពស្តុក')} onClose={onClose} draggable>
       {step === 'upload' ? (
         <div className="space-y-4">
+          {onTopModeChange ? <ProductImportModeTabs value={topMode} onChange={onTopModeChange} /> : null}
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {tr('stock_import_help', 'One sheet for add, sale, and reconciliation. The system decides what each row does from its numbers, date and the action column — no separate templates.', 'សន្លឹកតែមួយសម្រាប់បន្ថែម លក់ និងផ្ទៀងផ្ទាត់។ ប្រព័ន្ធសម្រេចថាជួរនីមួយៗធ្វើអ្វីពីលេខ កាលបរិច្ឆេទ និងជួរសកម្មភាព។')}
           </p>
@@ -247,15 +253,14 @@ export default function StockActionImportModal({ onClose, onDone, t, notify }: S
                 ['direct', tr('stock_import_mode_direct', 'Direct — the number IS the change', 'ផ្ទាល់ — លេខគឺជាការផ្លាស់ប្តូរ'), tr('stock_import_mode_direct_help', 'shop/warehouse are how much to add or sell; the action column says which.', 'shop/warehouse គឺជាចំនួនត្រូវបន្ថែម ឬលក់។')],
                 ['reconcile', tr('stock_import_mode_reconcile', 'Reconcile — the number is the total count', 'ផ្ទៀងផ្ទាត់ — លេខគឺជាចំនួនសរុប'), tr('stock_import_mode_reconcile_help', 'shop/warehouse are the counted total on that date; the system computes the delta.', 'shop/warehouse គឺជាចំនួនសរុបនៅថ្ងៃនោះ។')],
               ] as const).map(([value, label, help]) => (
-                <button
+                <ProductImportOptionCard
                   key={value}
-                  type="button"
+                  active={mode === value}
+                  icon={value === 'direct' ? TrendingUp : Scale}
+                  title={label}
+                  description={help}
                   onClick={() => setMode(value)}
-                  className={`rounded-xl border p-3 text-left transition ${mode === value ? 'border-indigo-500 ring-1 ring-indigo-500 bg-indigo-50 dark:bg-indigo-950/40' : 'border-gray-200 dark:border-gray-700'}`}
-                >
-                  <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{label}</div>
-                  <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{help}</div>
-                </button>
+                />
               ))}
             </div>
           </div>

@@ -98,10 +98,30 @@ test('StockActionImportModal drives the server job with type stock_actions + con
   assert.ok(src.includes("useState<Step>('upload')"), 'starts on the upload screen')
 })
 
-test('ImportModeWizard launches the server-backed modal, not the old client-side one', () => {
+test('ImportModeWizard is only a mode owner; it does not render a duplicate setup/upload screen', () => {
   const src = read('src/components/products/import/ImportModeWizard.tsx')
   assert.ok(src.includes('StockActionImportModal'), 'wires in the server-backed modal')
+  assert.ok(src.includes('BulkImportModal'), 'wires in the real product/image importer')
   assert.ok(!/import\(['"]\.\/AddSaleImportModal['"]\)/.test(src), 'no longer launches the retired client-side AddSaleImportModal')
+  assert.ok(!src.includes('<Modal'), 'wrapper must not create a second modal screen')
+  assert.ok(!src.includes('Upload file &'), 'wrapper must not render a fake upload handoff')
+  assert.ok(!src.includes('TemplateUploadInfo'), 'wrapper must not duplicate the real template/information controls')
+})
+
+test('real Screen 1 keeps the wrapper section design and owns upload, template, images and information', () => {
+  const bulk = read('src/components/products/import/BulkImportModal.tsx')
+  const stock = read('src/components/products/import/StockActionImportModal.tsx')
+  const shared = read('src/components/products/import/ProductImportModeTabs.tsx')
+  assert.ok(shared.includes('ProductImportOptionCard'), 'wrapper-style compact option cards are shared by real importers')
+  assert.ok(shared.includes('InfoHint'), 'option explanations stay in the wrapper-style info affordance')
+  assert.ok(bulk.includes('<ProductImportModeTabs'), 'real product Screen 1 owns the mode section')
+  assert.ok(bulk.includes('<ProductImportOptionCard'), 'real product Screen 1 uses wrapper-style options')
+  assert.ok(bulk.includes("T('csv_template_download'"), 'real template download remains on Screen 1')
+  assert.ok(bulk.includes("T('images_screen_one_hint'"), 'image selection explicitly belongs to Screen 1')
+  assert.equal((bulk.match(/T\('images_optional'/g) || []).length, 1, 'image picker must not be duplicated on review')
+  assert.ok(bulk.includes('order-1 rounded-xl'), 'options render before the real template/upload controls')
+  assert.ok(stock.includes('<ProductImportModeTabs'), 'real stock-action Screen 1 owns the same mode section')
+  assert.ok(stock.includes('<ProductImportOptionCard'), 'Direct/Reconcile use the same wrapper option design')
 })
 
 test('approveImportJob forwards confirm_stock_actions', () => {

@@ -9,6 +9,10 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import Columns3 from 'lucide-react/dist/esm/icons/columns-3.js'
+import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
+import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Modal from '../../shared/Modal'
 import AppSelect from '../../shared/AppSelect'
 import FilePickerModalBase from '../../files/FilePickerModal'
@@ -25,6 +29,7 @@ import { useApp as useAppHook } from '../../../app/AppContextCore.tsx'
 import { detectLikelyDatedReconciliation, type ImportModeDetectionResult } from './importModeDetection.ts'
 import { REPLACE_COLUMN_GROUPS } from './productReplaceColumnGroups.ts'
 import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
+import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMode } from './ProductImportModeTabs'
 
 type NotifyFn = (message: string, tone?: 'info' | 'success' | 'warning' | 'error') => void
 const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean }
@@ -267,6 +272,8 @@ type BulkImportModalProps = {
   onClose: () => void
   onDone?: (payload: ImportResult) => unknown | Promise<unknown>
   t?: (key: string) => string
+  topMode?: Exclude<ProductImportTopMode, 'stock_actions'>
+  onTopModeChange?: (mode: ProductImportTopMode) => void
 }
 type ProductImportError = Error & {
   code?: string
@@ -1109,7 +1116,7 @@ function getBrowserImageEntries(imageFiles: ImageFileMap = {}): BrowserImageEntr
     }))
 }
 
-export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalProps) {
+export default function BulkImportModal({ onClose, onDone, t, topMode = 'general', onTopModeChange }: BulkImportModalProps) {
   const { notify, hasPermission } = useApp()
   // Server-side gate lives in routes/importJobs.ts (requires the
   // 'destructive_delete' permission, not just ordinary products-import
@@ -1119,7 +1126,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
   // replacement for it: someone without this permission would otherwise
   // see a mode they can pick but always get a 403 on.
   const canReplaceAll = hasPermission('destructive_delete')
-  const [mode, setMode] = useState<ImportMode>('products')
+  const mode: ImportMode = topMode === 'images' ? 'images' : 'products'
   const [step, setStep] = useState(1)
   const [showColumnsInfo, setShowColumnsInfo] = useState(false)
   const [csvData, setCsvData] = useState<CsvData | null>(null)
@@ -1186,7 +1193,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
   // Available to everyone (unlike the two replace_* modes below, gated on
   // destructive_delete) since it can only ever add information to an
   // already-blank field, never overwrite or remove anything.
-  const [importMode, setImportMode] = useState<'merge' | 'fill_blank' | 'replace_columns' | 'replace_all'>('merge')
+  const [importMode, setImportMode] = useState<'merge' | 'fill_blank' | 'replace_columns' | 'replace_all'>(topMode === 'replace' ? 'replace_columns' : 'merge')
   const [replaceColumnGroupKeys, setReplaceColumnGroupKeys] = useState<Set<string>>(() => new Set())
   // Flattened column list the actually-selected groups expand to -- this,
   // not the group keys, is what the backend's allow-list
@@ -2457,24 +2464,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
 
   return (
     <Modal title={mode === 'products' ? T('csv_template_title', 'Products + CSV') : T('csv_images_only', 'Images Only')} onClose={onClose} wide draggable>
-      {step === 1 ? (
-        <div className="mb-4 flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMode('products')}
-            className={`flex-1 rounded-xl border py-2 text-sm font-medium ${mode === 'products' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400'}`}
-          >
-            {T('csv_template_title', 'Products + CSV')}
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('images')}
-            className={`flex-1 rounded-xl border py-2 text-sm font-medium ${mode === 'images' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-400'}`}
-          >
-            {T('csv_images_only', 'Images Only')}
-          </button>
-        </div>
-      ) : null}
+      {step === 1 && onTopModeChange ? <ProductImportModeTabs value={topMode} onChange={onTopModeChange} /> : null}
 
       <div className="mb-5 flex gap-1.5">
         {[1, 2, 3].map((value) => (
@@ -2640,7 +2630,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
       ) : null}
 
       {step === 1 && mode === 'products' ? (
-        <div className="space-y-3">
+        <div className="flex flex-col gap-3">
           {/* Unified upload card (redesign, Aug 2026): the whole card is
               the drop target (onDragOver/Leave/Drop) AND a click target
               (same handlePickCSV a button used to own alone), so there's
@@ -2660,11 +2650,11 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
               already uses, not a small text-only link. */}
           <div
             role="button"
-            tabIndex={loading ? -1 : 0}
-            aria-disabled={loading}
-            onClick={() => { if (!loading) handlePickCSV() }}
+            tabIndex={loading || (topMode === 'replace' && !canReplaceAll) ? -1 : 0}
+            aria-disabled={loading || (topMode === 'replace' && !canReplaceAll)}
+            onClick={() => { if (!loading && !(topMode === 'replace' && !canReplaceAll)) handlePickCSV() }}
             onKeyDown={(event) => {
-              if (loading) return
+              if (loading || (topMode === 'replace' && !canReplaceAll)) return
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault()
                 handlePickCSV()
@@ -2673,7 +2663,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
             onDragOver={handleDragOverCSV}
             onDragLeave={handleDragLeaveCSV}
             onDrop={handleDropCSVEvent}
-            className={`flex flex-row items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-4 text-left transition-colors ${loading ? 'cursor-wait opacity-70' : 'cursor-pointer'} ${
+            className={`order-3 flex flex-row items-center gap-3 rounded-2xl border-2 border-dashed px-4 py-4 text-left transition-colors ${loading ? 'cursor-wait opacity-70' : 'cursor-pointer'} ${
               isDragActive
                 ? 'border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20'
                 : 'border-gray-300 hover:border-blue-300 hover:bg-blue-50/40 dark:border-gray-700 dark:hover:border-blue-800 dark:hover:bg-blue-900/10'
@@ -2693,14 +2683,34 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
           <button
             type="button"
             onClick={(event) => { event.stopPropagation(); getProductImportApi().downloadImportTemplate('products') }}
-            className="btn-secondary flex w-full items-center justify-center gap-1.5 text-sm"
+            className="btn-secondary order-2 flex w-full items-center justify-center gap-1.5 text-sm"
           >
             <Download className="h-4 w-4" aria-hidden="true" />
             {T('csv_template_download', 'Download Template')}
           </button>
 
+          <div
+            onDragOver={handleImageDragOver}
+            onDragLeave={handleImageDragLeave}
+            onDrop={handleImageDropEvent}
+            className={`order-4 rounded-xl border p-3 transition-colors ${isImageDragActive ? 'border-dashed border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20' : 'border-gray-200 dark:border-gray-700'}`}
+          >
+            <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">
+              {isImageDragActive ? T('zip_drop_file', 'Drop the .zip here') : T('images_optional', 'Product images (optional)')}
+            </p>
+            <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
+              {T('images_screen_one_hint', 'Choose the image folder or ZIP here on Screen 1. Screen 2 only reviews the CSV, image matches, and final actions.')}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <div className="input min-w-0 flex-1 truncate text-xs text-gray-500">{imageDir || zipFile?.name || T('no_folder', 'No images selected')}</div>
+              <button type="button" className="btn-secondary text-sm" onClick={pickImageDirectory}>{T('browse', 'Browse')}</button>
+              <button type="button" className="btn-secondary text-sm" onClick={pickImageZip}>{T('zip_images', 'ZIP')}</button>
+              <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>{T('files', 'Files')}</button>
+            </div>
+          </div>
+
           {analysisProgress ? (
-            <div className="rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
+            <div className="order-6 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <span>{analysisProgress.label || T('analysing', 'Analyzing...')}</span>
                 <span>{Math.round(analysisProgress.progress || 0)}%</span>
@@ -2730,73 +2740,68 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
               destructive option can't be picked by accident while
               scrolling past it, and each mode's own warning/column
               picker only appears once it's actually selected. */}
-          <div className={`rounded-xl border p-4 text-sm transition-colors ${importMode === 'replace_columns' || importMode === 'replace_all' ? 'border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/20' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/40'}`}>
+          <div className={`order-1 rounded-xl border p-4 text-sm transition-colors ${importMode === 'replace_columns' || importMode === 'replace_all' ? 'border-red-300 bg-red-50 dark:border-red-900/60 dark:bg-red-950/20' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900/40'}`}>
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
               {T('csv_import_mode_label', 'Import mode')}
             </p>
             <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">
               {T('csv_import_mode_intro', 'Choose what this file should do to your catalog before uploading it.')}
             </p>
-            <div className={`grid grid-cols-2 gap-2 ${canReplaceAll ? 'sm:grid-cols-4' : ''}`}>
-              <button
-                type="button"
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {topMode === 'general' ? (
+                <>
+              <ProductImportOptionCard
+                active={importMode === 'merge'}
+                icon={PackagePlus}
+                title={T('csv_mode_merge_title', 'Add / update products')}
+                description={T('csv_mode_merge_hint', 'A row with no match becomes a new product. A matched row updates the existing product and adds its stock; nothing already in your catalog is removed.')}
                 onClick={() => setImportMode('merge')}
-                aria-pressed={importMode === 'merge'}
-                className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${importMode === 'merge' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'}`}
-              >
-                <span className="block font-semibold">{T('csv_mode_merge_title', 'Add (default)')}</span>
-                <span className={`block ${importMode === 'merge' ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>
-                  {T('csv_mode_merge_hint', 'One mode for both: a row with no match becomes a new product, a row matching an existing product (same name + same cost/price/barcode) adds to its stock instead. Nothing already in your catalog is removed.')}
-                </span>
-              </button>
+              />
               {/* Non-destructive, like Add -- available to everyone, no
                   permission gate. Only fills a field the existing product
                   doesn't already have a value for; never overwrites
                   something already on file and never touches stock, so
                   there's nothing here that needs the same "are you sure"
                   treatment the two red tiles below get. */}
-              <button
-                type="button"
+              <ProductImportOptionCard
+                active={importMode === 'fill_blank'}
+                icon={Sparkles}
+                title={T('csv_mode_fill_blank_title', 'Fill missing details only')}
+                description={T('csv_mode_fill_blank_hint', 'For a matched product, only empty fields are filled. Existing values stay unchanged and quantity is ignored; unmatched rows still create products.')}
                 onClick={() => setImportMode('fill_blank')}
-                aria-pressed={importMode === 'fill_blank'}
-                className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${importMode === 'fill_blank' ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'}`}
-              >
-                <span className="block font-semibold">{T('csv_mode_fill_blank_title', 'Fill missing details only')}</span>
-                <span className={`block ${importMode === 'fill_blank' ? 'text-blue-100' : 'text-gray-400 dark:text-gray-500'}`}>
-                  {T('csv_mode_fill_blank_hint', 'For a matched product, only fills in fields that are currently empty (barcode, description, unit, etc.) -- anything already on file is left alone. Quantity is always ignored in this mode. A row with no match still creates a new product, same as Add.')}
-                </span>
-              </button>
+              />
+                </>
+              ) : null}
               {/* Both destructive tiles below only render for someone
                   holding 'destructive_delete' -- routes/importJobs.ts
                   enforces this for real for both; hiding the tiles
                   otherwise avoids offering a choice that always 403s. */}
-              {canReplaceAll ? (
-                <button
-                  type="button"
+              {topMode === 'replace' && canReplaceAll ? (
+                <ProductImportOptionCard
+                  active={importMode === 'replace_columns'}
+                  dangerous
+                  icon={Columns3}
+                  title={T('csv_mode_replace_columns_title', 'Replace selected columns')}
+                  description={T('csv_mode_replace_columns_hint', 'For a matched product, overwrite only the column groups selected below. Everything else stays untouched; unmatched rows still create products.')}
                   onClick={() => setImportMode('replace_columns')}
-                  aria-pressed={importMode === 'replace_columns'}
-                  className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${importMode === 'replace_columns' ? 'border-red-600 bg-red-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'}`}
-                >
-                  <span className="block font-semibold">{T('csv_mode_replace_columns_title', 'Replace selected columns')}</span>
-                  <span className={`block ${importMode === 'replace_columns' ? 'text-red-100' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {T('csv_mode_replace_columns_hint', 'For a matched product, overwrite only the columns you pick below (e.g. just pricing). Everything else on that product stays untouched. A row with no match still creates a new product, same as Add.')}
-                  </span>
-                </button>
+                />
               ) : null}
-              {canReplaceAll ? (
-                <button
-                  type="button"
+              {topMode === 'replace' && canReplaceAll ? (
+                <ProductImportOptionCard
+                  active={importMode === 'replace_all'}
+                  dangerous
+                  icon={RefreshCw}
+                  title={T('csv_mode_replace_title', 'Replace entire catalog')}
+                  description={T('csv_mode_replace_hint', 'This file becomes the complete catalog. Matched products update in place and every active product absent from the file is deactivated.')}
                   onClick={() => setImportMode('replace_all')}
-                  aria-pressed={importMode === 'replace_all'}
-                  className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${importMode === 'replace_all' ? 'border-red-600 bg-red-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800'}`}
-                >
-                  <span className="block font-semibold">{T('csv_mode_replace_title', 'Replace entire catalog')}</span>
-                  <span className={`block ${importMode === 'replace_all' ? 'text-red-100' : 'text-gray-400 dark:text-gray-500'}`}>
-                    {T('csv_mode_replace_hint', 'This file becomes the full catalog. A row matching an existing product (same name + same cost/price/barcode) updates it in place; everything else this file does not mention gets deactivated.')}
-                  </span>
-                </button>
+                />
               ) : null}
             </div>
+            {topMode === 'replace' && !canReplaceAll ? (
+              <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                {T('csv_replace_permission_required', 'Replace imports require destructive-data permission. Choose Add / Update, or ask an administrator for access.')}
+              </p>
+            ) : null}
             {importMode === 'replace_columns' ? (
               <div className="mt-3 space-y-2">
                 <p className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-100/60 p-2 text-xs text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
@@ -2852,7 +2857,7 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
               the toggle reveals the full column list AND the field-by-
               field notes together, instead of two separately-triggered
               reveals stacked on top of each other. */}
-          <div className="rounded-xl bg-blue-50 p-4 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
+          <div className="order-5 rounded-xl bg-blue-50 p-4 text-sm text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">
             <div className="flex items-center justify-between gap-2">
               <p>
                 {T('csv_columns_summary', 'Only ')}<code className="rounded bg-blue-100 px-1 py-0.5 font-mono text-xs dark:bg-blue-900/40">name</code>{T('csv_columns_summary_rest', ' is required -- pricing, stock, images, and variant columns are all optional.')}
@@ -3141,23 +3146,6 @@ export default function BulkImportModal({ onClose, onDone, t }: BulkImportModalP
               </div>
             </div>
           ) : null}
-
-          <div
-            onDragOver={handleImageDragOver}
-            onDragLeave={handleImageDragLeave}
-            onDrop={handleImageDropEvent}
-            className={`rounded-lg p-2 transition-colors ${isImageDragActive ? 'border border-dashed border-blue-400 bg-blue-50 dark:border-blue-600 dark:bg-blue-900/20' : ''}`}
-          >
-            <p className="mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">
-              {isImageDragActive ? T('zip_drop_file', 'Drop the .zip here') : T('images_optional', 'Images folder (optional)')}
-            </p>
-            <div className="flex gap-2">
-              <div className="input flex-1 truncate text-xs text-gray-500">{imageDir || T('no_folder', 'No folder')}</div>
-              <button type="button" className="btn-secondary text-sm" onClick={pickImageDirectory}>{T('browse', 'Browse')}</button>
-              <button type="button" className="btn-secondary text-sm" onClick={pickImageZip}>{T('zip_images', 'ZIP')}</button>
-              <button type="button" className="btn-secondary text-sm" onClick={() => setFilePickerOpen(true)}>{T('files', 'Files')}</button>
-            </div>
-          </div>
 
           {blockingIssueCount ? (
             <p className="rounded-lg bg-red-50 p-2 text-xs text-red-600 dark:bg-red-950/30 dark:text-red-300">
