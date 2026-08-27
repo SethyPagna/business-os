@@ -7,7 +7,7 @@ import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
 import { getSalesTotals } from '../lib/salesAnalytics'
-import { decrementBatchStockStatement, incrementBatchStockStatement } from '../lib/productBatches'
+import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
 import { buildLikeAliasClause, tokenizeSearchTermGroups } from '../lib/searchMatch'
 import { computeSaleTotals, round2 } from '../lib/saleTotals'
@@ -504,17 +504,24 @@ app.post('/', async (c) => {
         },
       })
       if (item.batch_id && item.branch_id && shouldDeductStock) {
-        statements.push(decrementBatchStockStatement(item.batch_id, item.branch_id, item.quantity))
+        // Strict (no MAX(0) clamp): under a race two sales can both pass the
+        // plain-read availability check above, so the deduction itself is the
+        // real guard -- an oversell of this lot violates branch_batch_stock's
+        // CHECK(quantity >= 0) (migration 0058) and rolls the whole sale back.
+        statements.push(decrementBatchStockStrictStatement(item.batch_id, item.branch_id, item.quantity))
       }
       if (item.branch_id && shouldDeductStock) {
-        // SQLite's MAX() takes multiple scalar args (largest of them),
-        // unlike Postgres where that's GREATEST() and MAX() is
-        // aggregate-only. The original backend/src/routes/sales.ts uses
-        // GREATEST(0, ...) here -- Postgres-only syntax that would fail on
-        // D1/SQLite as a plain syntax error, not a subtle bug.
+        // Plain subtraction, NOT MAX(0, ...): the availability check at step 2
+        // is a non-atomic read, so a concurrent sale of the last unit could
+        // slip past it. branch_stock's CHECK(quantity >= 0) (migration 0058)
+        // turns that race into a real constraint failure that aborts this
+        // atomic batch -- the sale is rejected (see the catch below), never
+        // silently clamped to 0 with stock quietly lost.
+        // (The INSERT ... VALUES (..., 0) branch only fires when no row exists,
+        // which the availability check already rejects for any positive qty.)
         statements.push({
           sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity - @quantity)`,
+                ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
           params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
         })
         statements.push({
@@ -580,8 +587,19 @@ app.post('/', async (c) => {
       }
     }
   } catch (error) {
+    // The atomic batch rolled back, so nothing here was applied; delete the
+    // orphaned header written in step 4 so the caller never sees an itemless
+    // sale.
     await db.prepare('DELETE FROM sales WHERE id = ?').run([saleId])
-    return c.json({ error: `Failed to record sale items: ${(error as Error).message}` }, 500)
+    const message = (error as Error).message || ''
+    // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
+    // stock between this request's availability read and its write -- report
+    // it as the same 409 an up-front shortage gets, not an opaque 500, so the
+    // client retries/refreshes rather than treating it as a server fault.
+    if (/CHECK constraint|constraint failed/i.test(message)) {
+      return c.json({ error: 'Insufficient stock: another sale took the last units while this one was being recorded. Refresh and try again.', code: 'stock_conflict' }, 409)
+    }
+    return c.json({ error: `Failed to record sale items: ${message}` }, 500)
   }
 
   // Invalidate the 20s /api/products/search cache (see lib/cache.ts) so
@@ -704,9 +722,13 @@ app.patch('/:id/status', async (c) => {
   for (const item of items) {
     if (!item.product_id || !item.branch_id) continue
     if (!wasStockDeducted && willStockBeDeducted) {
+      // Plain subtraction, not MAX(0, ...): same strictness as POST / above --
+      // the availability read at line 683 is non-atomic, so branch_stock's
+      // CHECK(quantity >= 0) (migration 0058) is what actually guarantees a
+      // concurrent oversell rolls this transition back instead of clamping.
       statements.push({
         sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity - @quantity)`,
+              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
         params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
       })
       statements.push({
@@ -771,7 +793,19 @@ app.patch('/:id/status', async (c) => {
     }
   }
 
-  await db.batch(statements)
+  try {
+    await db.batch(statements)
+  } catch (error) {
+    const message = (error as Error).message || ''
+    // Same race guard as POST /: a CHECK(quantity >= 0) failure means a
+    // concurrent sale consumed the stock between the availability read above
+    // and this write. The batch rolled back atomically (status unchanged, no
+    // deduction), so just report the shortage as a 409 rather than a 500.
+    if (/CHECK constraint|constraint failed/i.test(message)) {
+      return c.json({ error: 'Insufficient stock to complete this sale: another sale took the last units first. Refresh and try again.', code: 'stock_conflict' }, 409)
+    }
+    throw error
+  }
   await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', id, { oldStatus, newStatus: saleStatus })
   // Same cache-invalidation reasoning as POST / above -- a status change
   // here can deduct or restore stock.

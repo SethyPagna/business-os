@@ -401,6 +401,21 @@ export function decrementBatchStockStatement(batchId: number, branchId: number, 
   }
 }
 
+// Strict sibling of decrementBatchStockStatement: plain subtraction, no
+// MAX(0) clamp, so an oversell of a specific lot violates branch_batch_stock's
+// CHECK(quantity >= 0) (migration 0058) and aborts the whole atomic sale batch
+// instead of silently flooring the lot at 0. Used only by the POS/sales write
+// paths, which pre-validate availability and want a concurrent oversell to
+// FAIL the sale rather than clamp it. Other callers (transfers, returns) keep
+// the clamped version deliberately -- see each call site.
+export function decrementBatchStockStrictStatement(batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
+  return {
+    sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')
+          WHERE batch_id = @batchId AND branch_id = @branchId`,
+    params: { batchId, branchId, quantity },
+  }
+}
+
 export function incrementBatchStockStatement(batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
   return {
     sql: `INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (@batchId, @branchId, @quantity)

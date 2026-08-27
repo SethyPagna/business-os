@@ -38,8 +38,17 @@ function groupKey(productId: number, branchId: number): string {
 async function applyPlainStockDelta(db: D1Compat, productId: number, branchId: number, delta: number): Promise<void> {
   await db.batch([
     {
-      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
-            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, quantity + excluded.quantity)`,
+      // Two clamps, both against MAX(0, ...): the INSERT seed floors a
+      // no-existing-row REMOVE (delta < 0) to 0 (nothing to remove), and the
+      // conflict update floors an existing row that a remove would take
+      // negative. The conflict update references the bound @delta directly,
+      // NOT excluded.quantity -- excluded carries the already-floored INSERT
+      // value (0 for any remove), so using it would drop every remove on an
+      // existing row. Previously the raw INSERT seed could store a negative
+      // row silently; migration 0058's CHECK(quantity >= 0) now rejects that,
+      // which this floors to match.
+      sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, MAX(0, @delta))
+            ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = MAX(0, branch_stock.quantity + @delta)`,
       params: { productId, branchId, delta },
     },
     {
