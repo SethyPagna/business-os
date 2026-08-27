@@ -826,7 +826,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Products reset (0.1) | `test-reset-products-pure.cjs` | scoped backup covers exactly the tables the reset clears, across all 4 toggle combos |
 | Import stock actions (§12) | `test-stock-action-resolver-pure.cjs` | 16 checks on DIRECT/RECONCILE deltas, sale grouping, cost/batch conflict gating |
 | Unified stock intake (§12, Part 357) | `test-stock-action-import-pure.cjs` | exact 10 columns, strict numbers/dates, product ambiguity fail-closed, Shop/Warehouse resolution, bounded narrow D1 reads, direct/reconcile plans |
-| Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `libraryLogicalRows.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
+| Logical Library rows (§15, Part 357) | `test-library-logical-assets-pure.cjs`, `mediaUploadHelpers.test.ts` | cover+gallery de-dup, unreferenced visibility, indexed path joins, logical pagination/search, independent selection keys, sanitized product-name downloads over one object |
 | Image wiring (2.3) | `test-wire-images-gallery-pure.cjs` | a multi-photo product keeps ALL images via `syncProductImageGallery` (found a real one-image-survives bug) |
 | Batch counts (§14) | `productBatches.test.ts` | Inventory + Products attach counts identically |
 | Alignment (4.1/11.4) | `productsRowAlignment.test.ts` | the 6 `<col>` widths sum to 100%; category band spans image+name |
