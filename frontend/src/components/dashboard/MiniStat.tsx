@@ -33,10 +33,17 @@ export default function MiniStat({ label, value, sub, color, trend, onClick, cla
   const subLineClass = 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[10px] leading-3.5 text-gray-500 dark:text-gray-400'
   const classNames = `card relative flex flex-col gap-0 px-3 py-2 text-left sm:px-3.5 sm:py-2.5 ${onClick ? 'transition focus-within:ring-2 focus-within:ring-blue-200 hover:ring-2 hover:ring-blue-200 dark:focus-within:ring-blue-800/60 dark:hover:ring-blue-800/60' : ''} ${className}`
 
-  const content = (
+  // The label and hint share one compact row; the hint is only rendered here,
+  // so every branch below gets the same-row layout from this one place.
+  const labelRow = (
+    <div className="flex min-w-0 items-center gap-1">
+      <div className="min-w-0 flex-1 truncate text-[11px] font-medium leading-4 text-gray-500 dark:text-gray-400">{label}</div>
+      {info ? <InfoHint className="shrink-0" label={infoLabel || String(label)} text={info} /> : null}
+    </div>
+  )
+
+  const figures = (
     <>
-      {/* pr-5 keeps the label clear of the info affordance in the corner. */}
-      <div className="pr-5 text-[11px] font-medium leading-4 text-gray-500 dark:text-gray-400">{label}</div>
       <div className={`text-lg font-bold leading-6 tracking-tight sm:text-[1.2rem] ${color || 'text-gray-900 dark:text-white'}`}>{value}</div>
       {hasSub ? (
         <div
@@ -59,21 +66,19 @@ export default function MiniStat({ label, value, sub, color, trend, onClick, cla
     </>
   )
 
-  const hint = info ? (
-    <InfoHint className="absolute right-0.5 top-0.5" label={infoLabel || String(label)} text={info} />
-  ) : null
-
-  // With a hint present the card becomes a container holding BOTH the hint
-  // and a clickable region, rather than being one big <button>. InfoHint is
-  // itself a <button>, and a button nested inside a button is invalid HTML --
-  // the browser drops one of them, which silently breaks either the hint or
-  // the drill-down.
-  if (onClick && hint) {
+  // With a hint present, the hint and the drill-down stay SEPARATE controls.
+  // InfoHint is itself a <button>: nesting it in another button is invalid
+  // HTML, and a role="button" wrapper is no better -- keyboard activation of
+  // the hint bubbles and would fire the drill-down too. So the card is a
+  // plain container, the label row (with the hint) sits outside, and only the
+  // figures region is the clickable drill-down -- the same structure the
+  // Branches/Inventory/Returns stat tiles use.
+  if (onClick && info) {
     return (
       <div className={classNames}>
-        {hint}
+        {labelRow}
         <button type="button" onClick={onClick} className="flex min-w-0 flex-col gap-0 text-left">
-          {content}
+          {figures}
         </button>
       </div>
     )
@@ -81,12 +86,13 @@ export default function MiniStat({ label, value, sub, color, trend, onClick, cla
 
   return onClick ? (
     <button type="button" onClick={onClick} className={classNames}>
-      {content}
+      {labelRow}
+      {figures}
     </button>
   ) : (
     <div className={classNames}>
-      {hint}
-      {content}
+      {labelRow}
+      {figures}
     </div>
   )
 }

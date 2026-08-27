@@ -3419,21 +3419,23 @@ ${inventoryReturnsFormulaText}`,
           {inventoryStatCards.map((stat) => (
             <div
               key={stat.id}
-              className={`card relative flex min-h-[3.85rem] min-w-0 flex-col items-start self-start px-2.5 py-1.5 text-left transition focus-within:ring-2 focus-within:ring-blue-200 hover:ring-2 hover:ring-blue-200 dark:focus-within:ring-blue-800/50 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
+              className={`card flex min-h-[3.5rem] min-w-0 flex-col items-start self-start px-2.5 py-1.5 text-left transition focus-within:ring-2 focus-within:ring-blue-200 hover:ring-2 hover:ring-blue-200 dark:focus-within:ring-blue-800/50 dark:hover:ring-blue-800/50 ${stat.border ? `border-l-2 ${stat.border}` : ''}`}
             >
-              {stat.info ? (
-                <InfoHint
-                  className="absolute right-0.5 top-0.5"
-                  label={`${String(stat.label)} - ${tr('what_this_means', 'what this means')}`}
-                  text={String(stat.info)}
-                />
-              ) : null}
+              <div className="flex w-full min-w-0 items-center gap-1">
+                <div className="min-w-0 flex-1 truncate text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
+                {stat.info ? (
+                  <InfoHint
+                    className="shrink-0"
+                    label={`${String(stat.label)} - ${tr('what_this_means', 'what this means')}`}
+                    text={String(stat.info)}
+                  />
+                ) : null}
+              </div>
               <button
                 type="button"
                 className="flex min-w-0 max-w-full flex-col items-start text-left"
                 onClick={() => setStatDetail(stat as StatDetail)}
               >
-                <div className="mb-0.5 pr-5 text-[10px] font-medium uppercase leading-4 tracking-[0.06em] text-gray-400">{stat.label}</div>
                 <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-base font-bold leading-5 ${stat.cls}`}>{stat.value}</div>
                 {stat.sub ? (
                   <div className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">

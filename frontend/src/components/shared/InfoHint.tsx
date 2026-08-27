@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 
 type InfoHintProps = {
@@ -29,12 +30,46 @@ type InfoHintProps = {
 export default function InfoHint({ text, label, className }: InfoHintProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLSpanElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const panelRef = useRef<HTMLSpanElement | null>(null)
   const panelId = useId()
+  const [position, setPosition] = useState({ left: 8, top: 8, width: 256, maxHeight: 288, placement: 'below' as 'above' | 'below' })
+
+  const placePanel = useCallback(() => {
+    const trigger = buttonRef.current?.getBoundingClientRect()
+    if (!trigger || typeof window === 'undefined') return
+    const gutter = 8
+    const gap = 6
+    const cap = 288
+    const width = Math.min(cap, Math.max(200, window.innerWidth - gutter * 2))
+    const left = Math.min(window.innerWidth - width - gutter, Math.max(gutter, trigger.right - width))
+    // The panel's height budget is the ACTUAL space on the chosen side of the
+    // trigger, not the whole viewport -- a viewport-height cap still let the
+    // panel run off-screen when the trigger sat near an edge. Prefer below;
+    // go above only when below cannot fit the cap AND above has more room.
+    const roomBelow = window.innerHeight - trigger.bottom - gap - gutter
+    const roomAbove = trigger.top - gap - gutter
+    const placement = roomBelow >= cap || roomBelow >= roomAbove ? 'below' : 'above'
+    const maxHeight = Math.max(72, Math.min(cap, placement === 'below' ? roomBelow : roomAbove))
+    const top = placement === 'below'
+      ? Math.min(window.innerHeight - gutter, trigger.bottom + gap)
+      : Math.max(gutter, trigger.top - gap)
+    setPosition({ left, top, width, maxHeight, placement })
+  }, [])
+
+  useLayoutEffect(() => {
+    if (open) placePanel()
+  }, [open, placePanel])
 
   useEffect(() => {
     if (!open) return undefined
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false)
+      const target = event.target as Node
+      // The panel is portaled to <body>, so it is NOT inside wrapperRef --
+      // without the second check, touching the panel to scroll it would
+      // count as an outside tap and close it.
+      if (wrapperRef.current?.contains(target) || panelRef.current?.contains(target)) return
+      setOpen(false)
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setOpen(false)
@@ -42,16 +77,23 @@ export default function InfoHint({ text, label, className }: InfoHintProps) {
     document.addEventListener('mousedown', onPointerDown)
     document.addEventListener('touchstart', onPointerDown)
     document.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', placePanel)
+    // Capture scroll events from nested page containers too. A fixed panel
+    // must follow its trigger even when `.page-scroll` moves but window does not.
+    window.addEventListener('scroll', placePanel, true)
     return () => {
       document.removeEventListener('mousedown', onPointerDown)
       document.removeEventListener('touchstart', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', placePanel)
+      window.removeEventListener('scroll', placePanel, true)
     }
-  }, [open])
+  }, [open, placePanel])
 
   return (
-    <span ref={wrapperRef} className={`relative inline-flex ${className || ''}`}>
+    <span ref={wrapperRef} className={`inline-flex ${className || ''}`}>
       <button
+        ref={buttonRef}
         type="button"
         aria-label={label}
         aria-expanded={open}
@@ -77,21 +119,29 @@ export default function InfoHint({ text, label, className }: InfoHintProps) {
       >
         <Info className="h-3.5 w-3.5" />
       </button>
-      {open ? (
+      {open && typeof document !== 'undefined' ? createPortal(
         <span
           id={panelId}
+          ref={panelRef}
           role="tooltip"
-          // right-0 so it never runs off the right edge of a narrow card,
-          // and pointer-events-none so it cannot swallow the click that is
-          // heading for the option underneath it.
-          // whitespace-pre-line so a hint can carry more than one paragraph.
-          // Callers pass a plain-English meaning, a blank line, then how the
-          // figure is calculated; without this the two run together into one
-          // undifferentiated block of prose.
-          className="pointer-events-none absolute right-0 top-6 z-50 w-64 whitespace-pre-line rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-lg dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
+          style={{
+            left: position.left,
+            top: position.top,
+            width: position.width,
+            maxHeight: position.maxHeight,
+            transform: position.placement === 'above' ? 'translateY(-100%)' : undefined,
+          }}
+          // Portaled to body so overflow-x stat rows, transformed cards and
+          // sticky toolbars cannot clip it or create a higher stacking context.
+          // Fixed viewport coordinates are clamped on every resize/nested scroll.
+          // Pointer events stay ON (unlike the old in-flow panel) so a long
+          // hint capped by maxHeight can be scrolled on touch; it closes on
+          // Escape or any tap outside the trigger and the panel itself.
+          className="fixed z-[1000] overflow-y-auto whitespace-pre-line rounded-lg border border-slate-200 bg-white p-2.5 text-left text-xs font-normal leading-relaxed text-slate-600 shadow-xl dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300"
         >
           {text}
-        </span>
+        </span>,
+        document.body,
       ) : null}
     </span>
   )

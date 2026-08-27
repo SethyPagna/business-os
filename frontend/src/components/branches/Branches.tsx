@@ -251,11 +251,13 @@ function BranchStatTile({ label, value, detail, color = 'text-slate-700 dark:tex
   // HTML -- the browser drops one, silently breaking either the hint or the
   // drill-down.
   return (
-    <div className="relative min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-left shadow-sm transition focus-within:ring-2 focus-within:ring-blue-500/30 hover:border-blue-200 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-800/70 dark:hover:border-blue-900 dark:hover:bg-blue-950/20">
-      {detailText ? <InfoHint className="absolute right-0 top-0" label={String(label || '')} text={detailText} /> : null}
+    <div className="min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-left shadow-sm transition focus-within:ring-2 focus-within:ring-blue-500/30 hover:border-blue-200 hover:bg-blue-50/40 dark:border-gray-700 dark:bg-gray-800/70 dark:hover:border-blue-900 dark:hover:bg-blue-950/20">
+      <div className="flex min-w-0 items-center gap-1">
+        <div className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 sm:text-[11px]">{label}</div>
+        {detailText ? <InfoHint className="shrink-0" label={String(label || '')} text={detailText} /> : null}
+      </div>
       <button type="button" className="block w-full min-w-0 text-left focus:outline-none" onClick={onClick}>
-        <div className="truncate pr-4 text-[10px] font-semibold uppercase text-gray-400 dark:text-gray-500 sm:text-[11px]">{label}</div>
-        <div className={`mt-0.5 truncate text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
+        <div className={`truncate text-sm font-bold leading-tight sm:text-base ${color}`}>{value}</div>
         {sub ? <div className="mt-0.5 min-w-0 truncate text-[9.5px] leading-3 text-gray-500 dark:text-gray-400">{sub}</div> : null}
       </button>
     </div>

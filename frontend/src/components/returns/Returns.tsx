@@ -268,11 +268,13 @@ type ReturnStatTileProps = {
 // the list and the tiles can never look out of sync.
 function ReturnStatTile({ label, value, color, info, active, onClick }: ReturnStatTileProps) {
   return (
-    <div className={`card relative min-w-[7.5rem] flex-1 px-3 py-2 text-left transition ${active ? 'ring-2 ring-blue-400 dark:ring-blue-500/60' : ''}`}>
-      <InfoHint className="absolute right-0 top-0" label={label} text={info} />
+    <div className={`card min-w-0 px-2.5 py-1.5 text-left transition ${active ? 'ring-2 ring-blue-400 dark:ring-blue-500/60' : ''}`}>
+      <div className="flex min-w-0 items-center gap-1">
+        <div className="min-w-0 flex-1 truncate text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+        <InfoHint className="shrink-0" label={label} text={info} />
+      </div>
       <button type="button" className="block w-full text-left focus:outline-none" onClick={onClick} aria-pressed={active}>
-        <div className="pr-4 text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
-        <div className={`text-sm font-bold ${color}`}>{value}</div>
+        <div className={`truncate text-sm font-bold leading-5 ${color}`}>{value}</div>
       </button>
     </div>
   )
@@ -902,7 +904,7 @@ export default function Returns() {
       ) : null}
 
       {scope === CUSTOMER_SCOPE ? (
-        <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+        <div className="mb-3 grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:gap-2">
           <ReturnStatTile
             label={tr('total_refunded', 'Total Refunded')}
             value={fmtUSD(customerStats.refundedUsd)}
@@ -937,7 +939,7 @@ export default function Returns() {
           />
         </div>
       ) : (
-        <div className="mb-3 flex gap-2 overflow-x-auto pb-1">
+        <div className="mb-3 grid grid-cols-3 gap-1.5 sm:gap-2">
           <ReturnStatTile
             label={tr('return_to_supplier', 'Return to Supplier')}
             value={supplierStats.count}
