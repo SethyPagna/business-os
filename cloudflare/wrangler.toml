@@ -10,13 +10,30 @@ account_id = "743e5b727d139e85ed11679097f6f99e"
 # and because the routes bind to a Cloudflare ZONE there was no second way
 # in. Root cause was the delegation -- DigitalPlat still held it and pointed
 # at its own nameservers, so Cloudflare's records were never consulted.
+# (Historical record: the outage happened on the OLD domain above, before
+# leangbeauty.com existed -- do not "update" it in a rename sweep.)
 #
 # Worth remembering if the shop ever goes dark again with a healthy Worker:
 # flipping this to true and deploying restores access in about a minute,
 # independent of DNS.
 workers_dev = false
 
+# leangbeauty.com (bought Aug 2026, registered on this Cloudflare account) is
+# the primary pair, as Workers CUSTOM DOMAINS: unlike zone routes, a custom
+# domain creates its own proxied DNS record + certificate on deploy, which is
+# exactly what this zone was missing -- measured Aug 28: the apex had NO
+# A/AAAA record at all, and admin. had a stray unproxied A record pointing at
+# 36.37.242.94 (not Cloudflare), so "deployed yesterday" served nothing.
+# NOTE: if the deploy reports a conflict on admin.leangbeauty.com, that stray
+# A record must be deleted in the Cloudflare DNS dashboard first -- wrangler
+# will not silently overwrite an existing record.
+#
+# The old leangcosmetics.dpdns.org zone routes stay during the transition:
+# existing PWA installs, bookmarks and the Google OAuth redirect URIs
+# registered for the old admin host keep working until the cutover is done.
 routes = [
+  { pattern = "leangbeauty.com", custom_domain = true },
+  { pattern = "admin.leangbeauty.com", custom_domain = true },
   { pattern = "leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
   { pattern = "admin.leangcosmetics.dpdns.org/*", zone_name = "leangcosmetics.dpdns.org" },
 ]
@@ -190,8 +207,8 @@ tag = "v2-broadcast-hub"
 new_sqlite_classes = ["BroadcastHub"]
 
 [vars]
-BUSINESS_OS_PUBLIC_URL = "https://leangcosmetics.dpdns.org"
-BUSINESS_OS_ADMIN_URL = "https://admin.leangcosmetics.dpdns.org"
+BUSINESS_OS_PUBLIC_URL = "https://leangbeauty.com"
+BUSINESS_OS_ADMIN_URL = "https://admin.leangbeauty.com"
 # The one organization this deployment serves. The login screen pins to it
 # and offers no way to create another (routes/organizations.ts has no write
 # endpoints, and /bootstrap reports organizationCreationEnabled: false);
@@ -200,6 +217,15 @@ BUSINESS_OS_ADMIN_URL = "https://admin.leangcosmetics.dpdns.org"
 # case-insensitively. If it matches nothing, the Worker falls back to the
 # first organization row rather than failing -- a stale value here can
 # never lock anyone out. Change this if the organization is ever renamed.
+# KEPT as leangcosmetics on purpose during the leangbeauty.com domain move
+# (Aug 28 2026). This slug/name pair is the ORGANIZATION'S identity in D1,
+# not the domain: coreDataInvariants matches the existing row by this slug
+# (or the legacy business-os one) and renames it in place -- but a value
+# matching NEITHER makes it INSERT A SECOND, EMPTY organization next to the
+# real one (verified against the live matching logic; production has exactly
+# one org row: LeangCosmetics/leangcosmetics). If the business itself should
+# be renamed to LeangBeauty, that needs the adoption logic extended to match
+# the current row first -- ask for it explicitly, do not just edit this.
 BUSINESS_OS_ORGANIZATION_SLUG = "leangcosmetics"
 # Display name for that organization. Previously hardcoded to "Business OS"
 # in lib/coreDataInvariants.ts, which rewrote it on every run -- so renaming
@@ -217,14 +243,14 @@ SENTRY_DSN = "https://3a7ba49248bf45b90262cdc5709df9c1@o4511967341903872.ingest.
 # requires BOTH this and RESEND_API_KEY; with either missing, email is silently
 # skipped with only a console warning. Must be on a Resend domain whose DNS is
 # verified -- see progress.md's connected-services table.
-RESEND_FROM_EMAIL = "no-reply@leangcosmetics.dpdns.org"
+RESEND_FROM_EMAIL = "no-reply@leangbeauty.com"
 # Password-reset emails (lib/verification.ts) are sent via Resend. This
 # must be a verified sender/domain on the Resend account, e.g.
-# "Leang Cosmetics <no-reply@leangcosmetics.dpdns.org>". The API key is a
+# "Leang Cosmetics <no-reply@leangbeauty.com>". The API key is a
 
 
 GOOGLE_LOGIN_CLIENT_ID = "784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com"
-GOOGLE_LOGIN_REDIRECT_URI = "https://admin.leangcosmetics.dpdns.org/api/auth/oauth/callback"
+GOOGLE_LOGIN_REDIRECT_URI = "https://admin.leangbeauty.com/api/auth/oauth/callback"
 
 # Google Drive OAuth (off-Cloudflare backup mirror) -- see
 # cloudflare/src/lib/googleDrive.ts and the /api/system/drive-sync/* routes
@@ -234,4 +260,4 @@ GOOGLE_LOGIN_REDIRECT_URI = "https://admin.leangcosmetics.dpdns.org/api/auth/oau
 # see cloudflare/.dev.vars locally, `wrangler secret put
 # GOOGLE_DRIVE_CLIENT_SECRET` for production.
 GOOGLE_DRIVE_CLIENT_ID = "784691087631-8ptg5j6vb15oi3ljg66dli7ssne88jig.apps.googleusercontent.com"
-GOOGLE_DRIVE_REDIRECT_URI = "https://admin.leangcosmetics.dpdns.org/api/system/drive-sync/oauth/callback"
+GOOGLE_DRIVE_REDIRECT_URI = "https://admin.leangbeauty.com/api/system/drive-sync/oauth/callback"
