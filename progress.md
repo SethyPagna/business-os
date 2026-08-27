@@ -86,7 +86,7 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 | Sale total omitted the delivery fee | **done & DEPLOYED** (Part 346, Aug 25 2026) | The POS cart charged `afterDiscount + tax + customerFee` and printed it on the receipt, but the server recorded `subtotal - discount - membershipDiscount + tax` with **no fee term** — the fee scalars were computed further down the handler and were not even in scope at total time. Every delivery sale stored a total **below what was collected**, and the gap propagated into `change_usd`, the Sales page, `salesAnalytics` and loyalty accrual. Fee is hoisted above the totals; only a **customer-paid** fee counts (a store-absorbed fee is a cost, not revenue). |
 | KHR-only sales recorded a fabricated USD tender | **done & DEPLOYED** (Part 346, Aug 25 2026) | `Number(body.amount_paid_usd) \|\| totalUsd` read a legitimate `0` as "not supplied" and substituted the whole total, so a customer paying entirely in riel was recorded as tendering the full USD amount **plus roughly a second full total as change**. "Absent" is now detected *before* coercion (`undefined`/`null`/`''` only) — `Number(null) === 0`, so a naive `Number.isFinite` check would have swung the bug the other way. |
 | A failed lot lookup read as "there are no lots" | **done & DEPLOYED** (Part 346, Aug 25 2026) | `batchesTransport` passed `() => ({ productIds: [] })` / `() => ({ batches: [] })` as route()'s local fallback, and `hasUsableLocalData` counts any non-empty object as usable — so a 403/500/timeout **resolved as a successful empty result and was cached**. Every batch-tracked product looked untracked, the lot picker never appeared, and **batch-tracked stock sold with no lot chosen**, bypassing FIFO/expiry silently. Both reads now propagate failures; POS keeps prior knowledge, flags the failure, routes every product through the detail sheet, and shows a retry banner; the sheet renders a real error instead of "No lots available". Deliberate availability-for-correctness trade: refusing a sale beats selling the wrong lot. |
-| Image normalization, quality protection, all library objects, re-verified every 6h | plan locked; implementation not started | **Revised Aug 27:** every image may be metadata-stripped and converted to WebP when the result is smaller while retaining roughly **80–90%+ visual quality**. Files already at or below 350KB do **not** enter the aggressive resize/compression ladder and are never padded up to 300KB. Only sources above 350KB use all methods in order — format/metadata first, dimensions second, encoder quality last — selecting the highest-quality result at or below 350KB and aiming for 300–350KB when naturally achievable. Provider failure may never fall through to storing an oversized original. The server is authoritative; client compression is only a preview/latency optimization. See the Aug 27 locked execution plan below. |
+| Image normalization, quality protection, all library objects, re-verified every 6h | **in progress (Part 356)** | **Revised Aug 27:** every image may be metadata-stripped and converted to WebP when the result is smaller while retaining roughly **80–90%+ visual quality**. Files already at or below 350KB do **not** enter the aggressive resize/compression ladder and are never padded up to 300KB. Only sources above 350KB use all methods in order — format/metadata first, dimensions second, encoder quality last — selecting the highest-quality result at or below 350KB and aiming for 300–350KB when naturally achievable. Provider failure may never fall through to storing an oversized original. **Part 356 checkpoint:** the server now rejects a fourth unique image for a normal user (409, no silent slicing) and permits five only for admin-control users; file upload, camera and Library picker share that cap. Existing admin-created positions 4–5 survive an ordinary edit but cannot be replaced with a new fourth path. Full server-authoritative quality normalization/provider pipeline is still open. |
 
 ### Import
 
@@ -708,14 +708,19 @@ optimization when smaller at roughly 80–90%+ quality; only sources above 350KB
 the full format → dimensions → quality ladder, with 300–350KB a natural target and
 350KB a hard stored ceiling. Never pad small images or write back a larger result.
 Every image is indexed `_1/_2/_3`; regular products/groups cap at 3 and an admin can
-explicitly allow 5. Strict 1:1 library matching reports ambiguous names. Cloudflare is
-primary, Cloudinary is a bounded signed fallback, and the 6-hour audit is report-first.
+explicitly allow 5. **Part 356 now enforces that 3/5 contract at the API and every
+ProductForm picker without silently truncating admin-created galleries.** Strict 1:1
+library matching reports ambiguous names. Cloudflare is primary, Cloudinary is a bounded
+signed fallback, and the 6-hour audit is report-first; that provider/audit pipeline is open.
 
 **Infrastructure** — quota guard with D1 fallback for cache versions (KV is 1,000
 writes/day and `bumpVersion` fires from 31 sites; exhaustion silently served STALE
-data); backups were **never pruned** (retention was gated on a successful new backup);
-Sentry with PII scrubbing + dedupe; Analytics Engine; A–Z rail parity (counts NAME
-GROUPS, honours hide-out-of-stock); public storefront caching (there was none).
+data). **Part 356 fixes backup retention/lifecycle:** exactly two finalized R2 sets,
+20-object continuation slices, immutable large manifests + small state sidecars, three
+bounded attempts, stale-incomplete cleanup, and system jobs that stay running until
+asset copy truly finalizes. Drive now streams/deduplicates the finalized R2 manifest and
+keeps exactly seven tagged files; full referenced-asset mirroring is still open. Sentry
+with PII scrubbing + dedupe; Analytics Engine; A–Z rail parity; storefront caching.
 
 **Outage, Aug 26** — both domains went NXDOMAIN while the Worker was healthy. Root
 cause: DigitalPlat still held the NS delegation, so Cloudflare's records were never
@@ -735,7 +740,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 355 (Aug 27 2026).** Everything below was really run in this local Windows
+**As of Part 356 (Aug 27 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -744,20 +749,20 @@ are the commands' actual results this session.
 |---|---|
 | `frontend` `tsc --noEmit` | **clean** |
 | `cloudflare` `tsc --noEmit` | **clean** |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **65 / 65 pass** |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **67 / 67 pass** |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → 130+ `tests/*.test.ts`) | **green** |
-| Real `vite build` | **succeeds (~16s)**; `portal-manifest.json` + Leang icons present in `dist` |
+| Real `vite build` | **succeeds (26.71s, 878 modules)**; only the pre-existing manual-chunk circular warnings |
 | `wrangler d1 migrations apply --local` | all migrations apply cleanly (last verified Part 346; unchanged since) |
 
-**Nothing is deployed.** Every fix Parts 346–355 — including the two production outages
+**Nothing is deployed.** Every fix Parts 346–356 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on
 `npm run deploy:full`. The user's re-pasted error logs predate the fixes.
 
 ### Done / In progress / To do — at a glance
 
-- **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · products large-screen alignment + the 11.4/11.5 revisions · batch count + View-details (§14 / 4.2 / 11.23) · VIP read/write bug + rename (11.24 / 11.25 / 4.3 / 4.4) · POS "Selling price" (11.10) · POS add-new customer/delivery (11.8) · discount/fee sizing (11.11) · history-menu overflow (11.22 / 5.7) · selection-column-only-in-select-mode on Products (11.1–11.3) · logo preview == applied + working H/V focus (16.2) · notes touch-drag (16.3) · **storefront PWA Install + full favicon-feature removal (16.1 / 11.14–11.16, Part 355).**
-- **IN PROGRESS / partial:** unified import (§12 — resolver kernel built + tested, wiring open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
-- **TO DO (specced, not started):** §13 two-screen import UX (folds in 11.18/11.19) · §15 library one-file/many-names · server-level undo/redo (3.1) · stats-card second pass (§4 / 5.x / 11.20 / 11.21) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · POS field redesign SP/VIP + hide cost (11.9) · identity rename-regroup (9.1/9.2) · backup-restore streaming (10.1). Full ordered list: [Open work — ORDERED](#open-work--ordered).
+- **DONE in code, waiting on deploy:** 0.1, 0.2 (both outages) · image auto-wire + unwire (2.3) · role-aware 3/5 image cap · R2 finalized lifecycle/exact-two retention · Drive streamed/deduplicated manifest mirror/exact-seven tagged retention · products large-screen alignment + 11.4/11.5 · §14 batch count/details · 11.24/11.25 VIP fixes · 11.8–11.11 POS fixes · 11.20/11.21 stock-health cards · 16.1/11.14–11.16 storefront PWA and favicon removal.
+- **IN PROGRESS / partial:** unified import (§12 — resolver kernel built + tested, wiring open) · Drive backup (manifest checkpoint done; referenced asset-folder mirror open) · image pipeline (role cap done; quality/provider audit open) · per-action permissions (7.1 — narrows-only, Products routes only) · selection-column behavior (11.1/11.2 — Products done, other pages open).
+- **TO DO (specced, not started):** §13 two-screen import UX (folds in 11.18/11.19) · §15 library one-file/many-names · server-level undo/redo (3.1) · public-portal polish (§5) · Returns replace + damaged-stock chooser (11.12/11.13) · remaining POS SP/VIP/damage picker · identity rename-regroup (9.1/9.2). Full ordered list: [Open work — ORDERED](#open-work--ordered).
 
 ### Cross-cutting principle in force: ONE source of truth per calculation
 
@@ -784,7 +789,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 
 ### How this project is tested (two harnesses, run for real)
 
-- **Backend — `cloudflare/scripts/test-*.cjs` (64 files, 64 pass).** Pure-logic harnesses
+- **Backend — `cloudflare/scripts/test-*.cjs` (67 files, 67 pass).** Pure-logic harnesses
   that transpile the REAL source with `typescript` + a `better-sqlite3` shim (migrations
   applied), so they exercise actual route/lib code, not reimplementations. No single
   "run-all" script exists on purpose — they are swept individually so one failure cannot
@@ -798,7 +803,7 @@ public surfaces. Everything here was run this session unless marked otherwise.*
   `t('key') || 'fallback'` idiom (t returns the key itself on a miss, so a missing key
   renders as raw text) — this caught a real POS message bug this session.
 
-### Tests added / changed this session (Parts 354–355)
+### Tests added / changed this session (Parts 354–356)
 
 | Area | Test | Guards |
 |---|---|---|
@@ -811,6 +816,9 @@ public surfaces. Everything here was run this session unless marked otherwise.*
 | Logo crop (16.2) | `logoImageStyle.test.ts` | preview == applied; transform-origin ties to the focus point; clamps |
 | PWA / branding (16.1/11.14) | `brandIcons.test.ts`, `performanceLoadingUx.test.ts`, `adminShellMediaGuards.test.ts` | storefront serves STATIC Leang icon+manifest, never a blob or per-merchant build; the removed favicon machinery cannot return (doesNotMatch guards) |
 | Backup restore streaming (10.1) | `test-backup-restore-stream-pure.cjs` (12 checks) + `test-backup-pure.cjs` round-trip | reads the document one row at a time; identical events under per-char + 200 random chunkings; corrupt/truncated backup throws (never silently mis-restores); the round-trip now exercises the streaming path end to end |
+| R2 lifecycle / retention | `test-backup-pure.cjs` (18 checks) | unfinished sets cannot evict either good backup; finalization leaves exactly two; missing assets fail after three attempts; a linked job moves running→completed instead of appearing stuck |
+| Google Drive checkpoint | `test-google-drive-backup-pure.cjs` | skips unfinished R2, streams a trusted resumable session, paginates tagged files, deduplicates the same backup and prunes 10→7 without touching an unrelated file |
+| Product image limit | `test-product-image-limit-pure.cjs` | normal=3/admin=5 at server and UI; no silent slice; an existing admin gallery is preserved while a new fourth normal-user path is refused |
 | POS cost hidden (11.9) | `posCore.test.ts` | the option picker labels by barcode/selling price, never cost; a cost-only difference never surfaces a cost value on a pill |
 | Stock-health colour (11.20/11.21) | `stockHealthSummary.test.ts` (5 checks) | one healthy/low/out→colour source; order, colours, single-source contract, count coercion |
 
@@ -3542,14 +3550,21 @@ rather than a hidden button.
 format; save and auto-delete on Drive; must not breach Cloudflare's free limits. Resets
 need a smart, safe UI that cannot do anything unintended.
 
-Plan locked Aug 27; implementation is not started by this note. R2 retains exactly the
-newest **2 verified finalized** backup sets and Drive exactly the newest **7**. Drive sync
-must mirror the already-verified newest R2 backup (manifest plus all referenced assets),
-use resumable chunked uploads and checksum verification, then delete only older tagged
-app backup folders. It must not create another R2 backup or buffer a full object with
-`arrayBuffer()`. Partial/stuck/cancelled runs do not count toward retention and get an
-explicit cleanup path. `/system/drive-sync/oauth/callback` must stay publicly reachable
-(it is Google's redirect) — Part 339 correctly avoided blocking it.
+**Part 356 checkpoint (committed, needs deploy).** R2 now retains exactly the newest
+**2 finalized** backup sets. Copying/partial/failed sets never evict either good set;
+the immutable database manifest is paired with a small lifecycle sidecar, copied in
+20-object slices (within the Free plan's 50-subrequest/request ceiling), with three
+attempts per missing asset and stale incomplete cleanup. Manual system jobs reflect
+copying progress and finalize/fail with the backup instead of being marked complete
+early. Drive retains exactly **7 tagged finalized** files, paginates the entire tagged
+set, streams via a validated Google resumable-session URL, reuses rather than recreates
+the newest finalized R2 backup, and deduplicates an already-mirrored `backupKey`; only
+app-tagged files can be deleted. It never calls `arrayBuffer()`.
+
+**Still open:** Drive currently mirrors the finalized JSON manifest only. Complete the
+manifest-plus-all-referenced-assets folder mirror, resumable retry handling for
+401/403/429/5xx, checksums/round-trip restore from Drive, and explicit cancellation UI.
+`/system/drive-sync/oauth/callback` must stay publicly reachable (Google's redirect).
 
 ### 7. 🟢 User-defined options instead of fixed ones
 
