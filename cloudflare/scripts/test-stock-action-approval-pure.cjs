@@ -1,0 +1,13 @@
+const fs = require('fs')
+const path = require('path')
+const assert = require('assert')
+
+const route = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'importJobs.ts'), 'utf8')
+
+assert.match(route, /normalized === 'stock_actions'\s*\? \['products', 'inventory', 'sales'\]/, 'stock actions must require all three business permissions')
+assert.match(route, /status !== 'awaiting_review'/, 'approval must be state-gated and retry-safe')
+assert.match(route, /body\?\.confirm_stock_actions !== true/, 'conflict confirmation must be checked server-side')
+assert.match(route, /code: 'stock_action_confirmation_required'/, 'the UI must receive a stable gate code')
+assert.match(route, /WHERE id = @id AND status = 'awaiting_review'/, 'approval update must use compare-and-set state')
+assert.match(route, /stock_action_confirmed_by/, 'the confirming actor must be persisted for auditability')
+console.log('PASS stock-action approval requires all permissions, valid state, explicit confirmation, and an auditable compare-and-set')

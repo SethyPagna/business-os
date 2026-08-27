@@ -43,8 +43,15 @@ function permissionForType(type: string): string {
   return 'products'
 }
 
+function permissionsForType(type: string): string[] {
+  const normalized = String(type || 'products').trim().toLowerCase()
+  return normalized === 'stock_actions'
+    ? ['products', 'inventory', 'sales']
+    : [permissionForType(normalized)]
+}
+
 function permittedTypes(user: SessionUser): string[] {
-  return [...ALLOWED_TYPES].filter((type) => hasPermission(user, permissionForType(type)))
+  return [...ALLOWED_TYPES].filter((type) => permissionsForType(type).every((permission) => hasPermission(user, permission)))
 }
 
 async function getJob(env: Env, id: string) {
@@ -54,9 +61,9 @@ async function getJob(env: Env, id: string) {
 async function requireImportPermission(c: any, job: Record<string, unknown> | undefined, bodyType?: string) {
   const user = c.get('user')
   const type = (job?.type as string) || bodyType || 'products'
-  const permission = permissionForType(type)
-  if (!hasPermission(user, permission)) {
-    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission }, 403)
+  const missingPermission = permissionsForType(type).find((permission) => !hasPermission(user, permission))
+  if (missingPermission) {
+    return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: missingPermission }, 403)
   }
   return null
 }
@@ -1011,8 +1018,43 @@ app.post('/:id/approve', async (c) => {
   if (!job) return c.json({ success: false, error: 'Import job not found' }, 404)
   const denied = await requireImportPermission(c as any, job)
   if (denied) return denied
+  const status = String(job.status || '').toLowerCase()
+  if (job.cancel_requested || status === 'cancelled' || status === 'cancelling') {
+    return c.json({ success: false, error: 'A cancelled import cannot be approved. Use Retry to analyze it again.' }, 409)
+  }
+  if (status !== 'awaiting_review') {
+    return c.json({ success: false, error: `Import cannot be approved while its status is ${status || 'unknown'}.` }, 409)
+  }
+
+  const body = await c.req.json().catch(() => ({}))
+  const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
+  const requiresStockConfirmation = job.type === 'stock_actions' && summary.requires_stock_action_confirmation === true
+  if (requiresStockConfirmation && body?.confirm_stock_actions !== true) {
+    await auditImportEvent(c, 'import_job_approve_blocked', id, job, job, {
+      source: body?.source || 'api', mode: 'apply', reason: 'stock_action_confirmation_required',
+    })
+    return c.json({
+      success: false,
+      error: 'Review the flagged stock actions and use Confirm Action before applying this import.',
+      code: 'stock_action_confirmation_required',
+      confirmationRows: Number(summary.stock_action_confirmation_rows || 0),
+    }, 409)
+  }
+
   const db = getDb(c.env)
-  await db.prepare(`UPDATE import_jobs SET status = 'approved', phase = 'approved', updated_at = CURRENT_TIMESTAMP WHERE id = @id`).run({ id })
+  const policy = safeJsonParse<Record<string, unknown>>(job.policy_json as string, {})
+  if (job.type === 'stock_actions') {
+    policy.stock_action_conflicts_confirmed = requiresStockConfirmation
+    policy.stock_action_confirmed_by = c.get('user')?.id ?? null
+    policy.stock_action_confirmed_at = new Date().toISOString()
+  }
+  const approval = await db.prepare(`
+    UPDATE import_jobs SET status = 'approved', phase = 'approved', policy_json = @policy, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND status = 'awaiting_review'
+  `).run({ id, policy: JSON.stringify(policy) })
+  if (approval.changes !== 1) {
+    return c.json({ success: false, error: 'Import status changed before approval. Refresh and review it again.' }, 409)
+  }
   await c.env.IMPORT_QUEUE.send({ jobId: id, kind: 'apply' })
   const queued = await getJob(c.env, id)
   await auditImportEvent(c, 'import_job_approve', id, job, queued || null, { source: 'api', mode: 'apply' })
