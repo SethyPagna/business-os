@@ -75,8 +75,11 @@ import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './sal
 import { incrementBatchStockStatement } from './productBatches'
 import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
-import { classifyUnifiedStockActions } from './stockActionCatalog'
+import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
+import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, type UnifiedStockSaleLine } from './stockActionCommit'
+import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
+import type { UnifiedStockResolvedRow } from './stockActionImport'
 import {
   normalizeImageMatchKey,
   MAX_IMAGES_PER_PRODUCT,
@@ -3485,6 +3488,260 @@ export async function markJobFailed(db: D1Compat, jobId: string, message: string
   }
 }
 
+// Shared apply-phase finalize. Both the generic (products/sales/contacts/
+// inventory) tail of runImportApply and the dedicated stock-actions apply
+// path funnel through here so the two can never disagree on how a finished
+// import's status, counts, warning total, or summary_json is computed --
+// the single-source-of-truth rule the batch/health helpers already follow.
+// Reads the authoritative per-row outcomes from import_job_rows (every
+// chunk's, not just the last), so it is correct whether the job ran in one
+// pass or many. Caller does its own cache-invalidation/broadcast first (the
+// channels differ by type); this only writes the terminal job row.
+async function finalizeImportApply(
+  db: D1Compat,
+  jobId: string,
+  totalUnits: number,
+  startedAtMs: number | undefined,
+  applyMarks: Record<string, number>,
+  queueLatencyMs: number | undefined,
+  deactivatedCount: number,
+): Promise<{ applied: number; failed: number }> {
+  const finalCounts = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
+    .all<{ action: RowAction; n: number }>({ id: jobId })
+  const byAction: Record<RowAction, number> = { create: 0, update: 0, skip: 0, error: 0 }
+  for (const row of finalCounts) byAction[row.action] = row.n
+  const totalApplied = byAction.create + byAction.update
+  const totalFailed = byAction.error
+
+  // A job with any failed row is marked completed_with_errors (not a
+  // plain completed) -- the frontend tracker already special-cases this
+  // status (keeps the "Download errors" / "Retry" actions visible after
+  // the import finishes).
+  const finalStatus = totalFailed > 0 ? 'completed_with_errors' : 'completed'
+  const warnedApplyRow = await db.prepare(
+    `SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND action != 'error' AND json_extract(result_json, '$.message') IS NOT NULL`,
+  ).get<{ n: number }>({ id: jobId })
+  const warnedApply = warnedApplyRow?.n || 0
+  await db.prepare(`
+    UPDATE import_jobs SET status = @status, phase = @status,
+      processed_rows = @processed, failed_rows = @failed, warning_count = @warned, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
+  `).run({ id: jobId, status: finalStatus, processed: totalApplied, failed: totalFailed, warned: warnedApply })
+
+  const existing = await db.prepare(`SELECT summary_json FROM import_jobs WHERE id = @id`).get<{ summary_json: string | null }>({ id: jobId })
+  let summary: Record<string, unknown> = {}
+  try { summary = existing?.summary_json ? JSON.parse(existing.summary_json) : {} } catch { summary = {} }
+  const priorTimings = (summary.timings as Record<string, unknown>) || {}
+  summary.created = byAction.create
+  summary.updated = byAction.update
+  summary.skipped = byAction.skip
+  summary.errored = totalFailed
+  summary.warned = warnedApply
+  summary.total = totalUnits
+  if (deactivatedCount > 0) summary.deactivated = deactivatedCount
+  summary.timings = {
+    ...priorTimings,
+    apply: {
+      totalMs: Date.now() - (startedAtMs ?? Date.now()),
+      lastChunkMs: applyMarks,
+      queueLatencyMs: queueLatencyMs ?? null,
+    },
+  }
+  await db.prepare(`UPDATE import_jobs SET summary_json = @summary WHERE id = @id`).run({ id: jobId, summary: JSON.stringify(summary) })
+  return { applied: totalApplied, failed: totalFailed }
+}
+
+// Operator-scale ceiling for one unified stock-action import. Unlike the
+// generic apply path this is a SINGLE pass (see applyStockActionsJob's own
+// comment on why it cannot be chunked), so it is bounded here instead: a
+// larger sheet is rejected with a clear "split it" message rather than risk
+// a Worker's CPU/subrequest budget. Every add/sale/create is its own bounded
+// D1 transaction (stockActionCommit.ts), so a few hundred is comfortably safe.
+const STOCK_ACTION_MAX_UNITS = 250
+
+/**
+ * Applies a unified "Add / Sale / Reconciliation" stock-action import.
+ *
+ * Dedicated, isolated path (never the generic products/sales tail): each
+ * add/create/sale is committed by stockActionCommit.ts's own atomic,
+ * idempotent, oversell-proof writer, so this function only has to CLASSIFY,
+ * GROUP, and dispatch -- it never writes stock tables itself.
+ *
+ * Why a single whole-sheet pass rather than the chunked cursor every other
+ * type uses: a sale's grouping is a function of the resolver's mode AND the
+ * per-branch numbers (a blank-action reconcile drop is an inferred daily
+ * sale), which a SQL `GROUP BY` cannot reproduce. Windowing by any SQL key
+ * would split an inferred receipt across two invocations; the second call's
+ * extra lines would hit the writer's per-group idempotency seal and be
+ * silently dropped -- exactly the data loss the whole feature exists to
+ * prevent. So the sheet is classified together and grouped in memory, and
+ * kept operator-scale by STOCK_ACTION_MAX_UNITS instead.
+ */
+export async function applyStockActionsJob(
+  env: Env,
+  db: D1Compat,
+  jobId: string,
+  policyJson: string | null,
+  sw: ReturnType<typeof makeStopwatch>,
+  queueLatencyMs: number | undefined,
+): Promise<{ applied: number; failed: number }> {
+  const startedAtMs = Date.now()
+  // Same materialize-first contract as the generic apply path: this
+  // self-enqueues and returns 'still working' until every raw row is in
+  // import_job_source_rows, so this invocation just acks with 0/0.
+  const stillMaterializing = await ensureSourceRowsMaterialized(env, db, jobId, 'apply')
+  if (stillMaterializing) {
+    sw.lap('materializeChunkMs')
+    return { applied: 0, failed: 0 }
+  }
+
+  const decisions = getDecisionMap(policyJson)
+  const rows = await readAllMaterializedRows(db, jobId, decisions)
+  const totalUnits = rows.length
+  if (!totalUnits) throw new Error('No CSV file uploaded for this job')
+  sw.lap('fetchAndParseMs')
+
+  const results = (await classifyRows(db, 'stock_actions', rows, jobId, policyJson)) as StockActionImportResult[]
+  sw.lap('classifyChunkMs')
+  const resolvedOf = (r: StockActionImportResult) => r.data as unknown as UnifiedStockResolvedRow
+
+  // A sale receipt is all-or-nothing. A blocked line (bad data / unresolved
+  // identity) has no plan and therefore no saleGroupKey of its own, so its
+  // valid siblings would otherwise commit a PARTIAL receipt. Re-derive the
+  // group key a blocked row WOULD have had (from its own date + action) and
+  // poison that group so the whole receipt is failed together, never split.
+  const poisoned = new Set<string>()
+  for (const r of results) {
+    const resolved = resolvedOf(r)
+    if (r.action !== 'error' && resolved.plan) continue
+    const parsed = parseStockAction(resolved.action)
+    if (parsed.kind === 'sale' && resolved.date) poisoned.add(saleGroupKeyFor(resolved.date, parsed.saleOrdinal))
+  }
+
+  // Partition the actionable rows into sale groups (rows sharing a
+  // saleGroupKey = one receipt) and singles (each create/add/noop row).
+  const saleGroups = new Map<string, StockActionImportResult[]>()
+  const singles: StockActionImportResult[] = []
+  for (const r of results) {
+    const plan = resolvedOf(r).plan
+    if (r.action === 'error' || !plan) continue // already a failure; persisted as-is
+    if (plan.kind === 'sale' && plan.saleGroupKey) {
+      const list = saleGroups.get(plan.saleGroupKey) || []
+      list.push(r)
+      saleGroups.set(plan.saleGroupKey, list)
+    } else {
+      singles.push(r)
+    }
+  }
+
+  const unitCount = saleGroups.size + singles.length
+  if (unitCount > STOCK_ACTION_MAX_UNITS) {
+    throw new Error(`This stock import resolves to ${unitCount} actions; split it into files of at most ${STOCK_ACTION_MAX_UNITS} actions before importing.`)
+  }
+
+  const fail = (r: StockActionImportResult, message: string) => { r.action = 'error'; r.message = message }
+
+  // --- Single rows: create / add / noop -----------------------------------
+  for (const r of singles) {
+    const resolved = resolvedOf(r)
+    const plan = resolved.plan!
+    if (plan.kind === 'noop') { r.action = 'skip'; continue }
+    const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
+    try {
+      let productId = resolved.productId ?? 0
+      if (plan.kind === 'create') {
+        const ensured = await ensureUnifiedStockProduct(db, {
+          jobId,
+          identityKey: resolved.identityKey,
+          productName: resolved.productName,
+          barcode: resolved.barcode || null,
+          sellingPriceUsd: resolved.sellingPriceUsd,
+          vipPriceUsd: resolved.vipPriceUsd,
+          costPriceUsd: resolved.costPriceUsd,
+        })
+        productId = ensured.productId
+        r.existingId = productId
+      }
+      if (!(productId > 0)) { fail(r, 'Could not resolve the product for this row.'); continue }
+      // A create is an add that also inserts the product; both dispatch the
+      // row's positive per-branch quantities through the same atomic writer.
+      const adds = plan.branchActions.filter((a) => a.direction === 'add' && a.quantity > 0)
+      for (const add of adds) {
+        await applyUnifiedStockAdd(db, {
+          jobId,
+          rowNumber: resolved.rowNumber,
+          productId,
+          productName: resolved.productName,
+          branchId: add.branchId,
+          branchName: branchNameById.get(add.branchId) || '',
+          quantity: add.quantity,
+          date: resolved.date,
+          batchLabel: resolved.batchLabel,
+          sellingPriceUsd: resolved.sellingPriceUsd,
+          vipPriceUsd: resolved.vipPriceUsd,
+          costPriceUsd: resolved.costPriceUsd,
+        })
+      }
+    } catch (error) {
+      fail(r, error instanceof Error ? error.message : 'Stock action failed')
+    }
+  }
+
+  // --- Sale groups: one atomic receipt each -------------------------------
+  for (const [saleGroupKey, groupRows] of saleGroups) {
+    if (poisoned.has(saleGroupKey)) {
+      for (const r of groupRows) fail(r, 'This sale group has a line that could not be resolved; a receipt is never imported partially — fix or remove that line, then re-import.')
+      continue
+    }
+    const first = resolvedOf(groupRows[0])
+    const lines: UnifiedStockSaleLine[] = []
+    for (const r of groupRows) {
+      const resolved = resolvedOf(r)
+      const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
+      // A single sheet row may sell from both branches; each becomes its own
+      // sale line so the writer's FIFO/oversell guard runs per branch.
+      for (const sale of resolved.plan!.branchActions) {
+        if (sale.direction !== 'sale' || sale.quantity <= 0) continue
+        lines.push({
+          rowNumber: resolved.rowNumber,
+          productId: resolved.productId ?? 0,
+          productName: resolved.productName,
+          branchId: sale.branchId,
+          branchName: branchNameById.get(sale.branchId) || '',
+          quantity: sale.quantity,
+          sellingPriceUsd: Number(resolved.sellingPriceUsd ?? 0),
+          costPriceUsd: resolved.costPriceUsd,
+          batchLabel: resolved.batchLabel,
+        })
+      }
+    }
+    if (!lines.length) { for (const r of groupRows) { r.action = 'skip' } continue }
+    try {
+      await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sale group failed'
+      for (const r of groupRows) fail(r, message)
+    }
+  }
+  sw.lap('buildAndWriteStatementsMs')
+
+  await persistChunkResults(db, jobId, 'apply', results)
+
+  // Stock actions touch products (new rows, aggregate stock), inventory
+  // (branch/batch stock, movements) and sales (imported receipts) -- refresh
+  // every surface that reads them, same fire-and-forget pattern the generic
+  // path uses on its last chunk.
+  await bumpVersion(env, 'products').catch(() => {})
+  await broadcast(env, 'products', { action: 'import', jobId }).catch(() => {})
+  await broadcast(env, 'inventory', { action: 'import', jobId }).catch(() => {})
+  await broadcast(env, 'sales', { action: 'import', jobId }).catch(() => {})
+  sw.lap('cacheInvalidateMs')
+
+  const outcome = await finalizeImportApply(db, jobId, totalUnits, startedAtMs, sw.marks, queueLatencyMs, 0)
+  console.log('[import-timing] stock-action apply done', jobId, outcome)
+  return outcome
+}
+
 // D1 has its own per-transaction CPU-time budget, separate from the Worker's
 // own cpu_ms limit. db.batch() sends every statement as ONE atomic SQLite
 // transaction (see db.ts) -- fine for a small edit, but a large products
@@ -3606,14 +3863,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
 
     const job = await db.prepare(`SELECT type, policy_json FROM import_jobs WHERE id = @id`).get<{ type: ImportType; policy_json: string | null }>({ id: jobId })
     if (!job) throw new Error('Import job not found')
-    // Fail closed until stock_actions' dedicated idempotent writer is wired.
-    // The generic tail of this function is intentionally sales-shaped; a
-    // new type must never reach it by fallthrough and mutate sales tables.
-    // The route allow-list also keeps this type private in the meantime,
-    // making this a second server-side safeguard against manually inserted
-    // or stale job rows.
+    // Unified stock actions have their own dedicated, isolated apply path --
+    // each add/sale/create is committed by stockActionCommit.ts's atomic,
+    // idempotent, oversell-proof writer. It deliberately never reaches the
+    // generic (products/sales-shaped) tail of this function below, which
+    // would mutate sales tables with the wrong row shape. Returns here with
+    // its own {applied, failed}; the lease is released in the shared finally.
     if (job.type === 'stock_actions') {
-      throw new Error('Unified stock-action apply is not enabled until its transactional writer is installed')
+      return await applyStockActionsJob(env, db, jobId, job.policy_json, sw, queueLatencyMs)
     }
 
     const stillMaterializing = await ensureSourceRowsMaterialized(env, db, jobId, 'apply')
@@ -4410,75 +4667,14 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
     }
     sw.lap('cacheInvalidateMs')
 
-    // Final counts from the persisted per-row results (every chunk's
-    // results, not just this last one) -- same reasoning as analyze's
-    // finalize step above.
-    const finalCounts = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' GROUP BY action`)
-      .all<{ action: RowAction; n: number }>({ id: jobId })
-    const byAction: Record<RowAction, number> = { create: 0, update: 0, skip: 0, error: 0 }
-    for (const row of finalCounts) byAction[row.action] = row.n
-    const totalApplied = byAction.create + byAction.update
-    const totalFailed = byAction.error
-
-    // A job with any failed row is marked completed_with_errors (not a
-    // plain completed) -- the frontend tracker already special-cases this
-    // status (keeps the "Download errors" / "Retry" actions visible after
-    // the import finishes).
-    const finalStatus = totalFailed > 0 ? 'completed_with_errors' : 'completed'
-    // Same non-blocking-notice count as runImportAnalyze's finalize (see
-    // its own comment) -- recomputed against the APPLY phase's persisted
-    // rows since decisions/live DB state (and therefore which rows carry a
-    // warning message) can shift between analyze and approve.
-    const warnedApplyRow = await db.prepare(
-      `SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'apply' AND action != 'error' AND json_extract(result_json, '$.message') IS NOT NULL`,
-    ).get<{ n: number }>({ id: jobId })
-    const warnedApply = warnedApplyRow?.n || 0
-    await db.prepare(`
-      UPDATE import_jobs SET status = @status, phase = @status,
-        processed_rows = @processed, failed_rows = @failed, warning_count = @warned, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = @id
-    `).run({ id: jobId, status: finalStatus, processed: totalApplied, failed: totalFailed, warned: warnedApply })
-
-    // Written as its own follow-up update (not folded into the
-    // status='completed' update above) so cache invalidation is captured
-    // before this is built. Merges onto whatever runImportAnalyze already
-    // wrote under summary_json.timings rather than clobbering it, since
-    // both phases share the one column.
-    const existing = await db.prepare(`SELECT summary_json FROM import_jobs WHERE id = @id`).get<{ summary_json: string | null }>({ id: jobId })
-    let summary: Record<string, unknown> = {}
-    try { summary = existing?.summary_json ? JSON.parse(existing.summary_json) : {} } catch { summary = {} }
-    const priorTimings = (summary.timings as Record<string, unknown>) || {}
-    // Overwrite the analyze-phase's created/updated/skipped/errored counts
-    // (a preview estimate from before the row was actually written) with
-    // the real numbers from this apply pass -- decisions or matching
-    // products can shift between analyze and approve, so this is the
-    // first point where these counts are guaranteed to match what's
-    // actually in the database. This is what the tracker's result-summary
-    // line ("N created, N updated, ...") reads once the job finishes.
-    summary.created = byAction.create
-    summary.updated = byAction.update
-    summary.skipped = byAction.skip
-    summary.errored = totalFailed
-    summary.warned = warnedApply
-    summary.total = totalUnits
-    // Only meaningful for a products job in replace_all mode -- 0/absent
-    // for every other job type or mode. See the replace_all block above
-    // for what this counts (products this run left untouched, now
-    // soft-deactivated because the imported file is the new complete
-    // catalog).
-    if (deactivatedCount > 0) summary.deactivated = deactivatedCount
-    summary.timings = {
-      ...priorTimings,
-      apply: {
-        totalMs: Date.now() - (state.startedAtMs ?? Date.now()),
-        lastChunkMs: sw.marks,
-        queueLatencyMs: queueLatencyMs ?? null,
-      },
-    }
-    await db.prepare(`UPDATE import_jobs SET summary_json = @summary WHERE id = @id`).run({ id: jobId, summary: JSON.stringify(summary) })
-    console.log('[import-timing] apply done', jobId, (summary.timings as { apply: unknown }).apply)
-
-    return { applied: totalApplied, failed: totalFailed }
+    // Final status/counts/summary are computed once, in the shared
+    // finalizeImportApply helper, from the persisted per-row results of
+    // EVERY chunk (not just this last one) -- see runImportAnalyze's
+    // finalize step for the same reasoning. Shared so the dedicated
+    // stock-actions apply path can never disagree with this one.
+    const outcome = await finalizeImportApply(db, jobId, totalUnits, state.startedAtMs, sw.marks, queueLatencyMs, deactivatedCount)
+    console.log('[import-timing] apply done', jobId, outcome)
+    return outcome
   } catch (error) {
     await markJobFailed(db, jobId, (error as Error).message || 'Apply failed')
     throw error

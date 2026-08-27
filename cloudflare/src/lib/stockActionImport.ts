@@ -41,6 +41,7 @@ export interface UnifiedStockResolvedRow {
   identifier: string
   productId: number | null
   productName: string
+  barcode: string
   identityKey: string
   date: string
   action: string
@@ -161,6 +162,7 @@ export function resolveUnifiedStockImportRows(
       identifier: barcode || name,
       productId: matched.product?.id ?? null,
       productName,
+      barcode,
       identityKey,
       date,
       action,
