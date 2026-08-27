@@ -11,7 +11,7 @@ const output = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
 }).outputText
 const mod = { exports: {} }
 new Function('exports', 'require', 'module', output)(mod.exports, require, mod)
-const { buildImportReviewOrder, buildImportReviewWhere } = mod.exports
+const { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere } = mod.exports
 
 const basic = buildImportReviewWhere({ jobId: 'job-1' })
 assert.match(basic.sql, /job_id = @id/)
@@ -66,8 +66,17 @@ const sorted = sqlite.prepare(`SELECT row_number FROM import_job_rows WHERE ${so
   .all(sortWhere.params)
 assert.deepStrictEqual(sorted.map((row) => row.row_number), [3, 4, 2], 'alphabetical review order is case-insensitive and stable by row number')
 
+insert.run('job-contact', 2, 'update', 'Sokha', JSON.stringify({ warnings: [{ kind: 'name_match', message: 'review' }] }))
+insert.run('job-contact', 3, 'update', 'Dara', JSON.stringify({ warnings: [{ kind: 'membership_phone_conflict', message: 'review' }] }))
+insert.run('job-contact', 4, 'update', 'Clean', JSON.stringify({ warnings: [] }))
+const unresolvedWhere = buildUnresolvedContactReviewWhere('job-contact', JSON.stringify({ 2: { action: 'apply' } }))
+const unresolved = sqlite.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`).get(unresolvedWhere.params)
+assert.strictEqual(unresolved.n, 1, 'only contact-conflict rows without a durable row decision block approval')
+
 const routeSource = fs.readFileSync(routeFile, 'utf8')
 assert.match(routeSource, /buildImportReviewOrder\(c\.req\.query\('sort'\)\)/, 'review route must parse sort through the fixed whitelist')
 assert.match(routeSource, /ORDER BY \$\{orderBy\}/, 'review route must apply the whitelisted order fragment')
+assert.match(routeSource, /code: 'contact_conflicts_unresolved'/, 'contact approval must fail closed while any conflict lacks a durable decision')
+assert.match(routeSource, /unresolvedContactConflicts/, 'review response exposes the server-wide unresolved count for paginated confirmation UI')
 
 console.log('PASS import review query keeps filtering/pagination in D1 with bound, escaped inputs')

@@ -14,6 +14,8 @@ export interface ImportReviewWhere {
 
 export type ImportReviewSort = 'row_asc' | 'row_desc' | 'name_asc' | 'name_desc'
 
+export const CONTACT_REVIEW_WARNING_KINDS: ImportWarningKind[] = ['name_match', 'membership_phone_conflict']
+
 function escapeLike(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_')
 }
@@ -60,5 +62,19 @@ export function buildImportReviewOrder(sort: unknown): string {
     case 'name_asc': return `LOWER(COALESCE(identifier, '')) ASC, row_number ASC`
     case 'name_desc': return `LOWER(COALESCE(identifier, '')) DESC, row_number ASC`
     default: return 'row_number ASC'
+  }
+}
+
+/**
+ * Counts contact-conflict rows that do not yet have a durable reviewer
+ * decision. The JSON path is derived from the integer row_number stored by D1,
+ * never from request text. Keeping this in SQL avoids loading every result row
+ * merely to decide whether approval is safe.
+ */
+export function buildUnresolvedContactReviewWhere(jobId: string, decisionsJson: string): ImportReviewWhere {
+  const base = buildImportReviewWhere({ jobId, warningKinds: CONTACT_REVIEW_WARNING_KINDS })
+  return {
+    sql: `${base.sql} AND json_type(@decisions, '$."' || row_number || '"') IS NULL`,
+    params: { ...base.params, decisions: decisionsJson || '{}' },
   }
 }

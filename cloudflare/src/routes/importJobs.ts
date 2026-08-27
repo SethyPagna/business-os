@@ -11,7 +11,7 @@ import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImag
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
-import { buildImportReviewOrder, buildImportReviewWhere } from '../lib/importReviewQuery'
+import { buildImportReviewOrder, buildImportReviewWhere, buildUnresolvedContactReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -317,6 +317,15 @@ app.get('/:id/review', async (c) => {
     decision: decisionsByRowNumber[String(row.rowNumber)] || null,
   }))
 
+  const contactJob = ['customers', 'suppliers', 'delivery_contacts'].includes(String(job.type || ''))
+  let unresolvedContactConflicts = 0
+  if (contactJob) {
+    const unresolvedWhere = buildUnresolvedContactReviewWhere(id, JSON.stringify(decisionsByRowNumber))
+    const unresolvedRow = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+      .get<{ n: number }>(unresolvedWhere.params)
+    unresolvedContactConflicts = Number(unresolvedRow?.n || 0)
+  }
+
   const countRows = await db.prepare(`SELECT action, COUNT(*) AS n FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' GROUP BY action`)
     .all<{ action: 'create' | 'update' | 'skip' | 'error'; n: number }>({ id })
   const counts = { create: 0, update: 0, skip: 0, error: 0 }
@@ -333,7 +342,7 @@ app.get('/:id/review', async (c) => {
   // doesn't have to re-derive this client-side from raw per-row messages.
   const warningSummary = summarizeImportWarnings(pageResults)
 
-  return c.json({ success: true, rows: pageResultsWithDecisions, page, pageSize, total, counts, warned: warnedRow?.n || 0, warningSummary })
+  return c.json({ success: true, rows: pageResultsWithDecisions, page, pageSize, total, counts, warned: warnedRow?.n || 0, warningSummary, unresolvedContactConflicts })
 })
 
 // GET /:id/report -- the full import report for a finished (or in-progress)
@@ -1050,6 +1059,26 @@ app.post('/:id/approve', async (c) => {
 
   const body = await c.req.json().catch(() => ({}))
   const summary = safeJsonParse<Record<string, unknown>>(job.summary_json as string, {})
+  const policy = safeJsonParse<Record<string, any>>(job.policy_json as string, {})
+  if (['customers', 'suppliers', 'delivery_contacts'].includes(String(job.type || ''))) {
+    const decisions = policy.decisionsByRowNumber && typeof policy.decisionsByRowNumber === 'object'
+      ? policy.decisionsByRowNumber
+      : {}
+    const unresolvedWhere = buildUnresolvedContactReviewWhere(id, JSON.stringify(decisions))
+    const unresolved = await getDb(c.env).prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${unresolvedWhere.sql}`)
+      .get<{ n: number }>(unresolvedWhere.params)
+    if (Number(unresolved?.n || 0) > 0) {
+      await auditImportEvent(c, 'import_job_approve_blocked', id, job, job, {
+        source: body?.source || 'api', mode: 'apply', reason: 'contact_conflicts_unresolved',
+      })
+      return c.json({
+        success: false,
+        error: `Review every contact conflict before applying this import. ${Number(unresolved?.n || 0)} remain unresolved.`,
+        code: 'contact_conflicts_unresolved',
+        unresolvedRows: Number(unresolved?.n || 0),
+      }, 409)
+    }
+  }
   const requiresStockConfirmation = job.type === 'stock_actions' && summary.requires_stock_action_confirmation === true
   if (requiresStockConfirmation && body?.confirm_stock_actions !== true) {
     await auditImportEvent(c, 'import_job_approve_blocked', id, job, job, {
@@ -1064,7 +1093,6 @@ app.post('/:id/approve', async (c) => {
   }
 
   const db = getDb(c.env)
-  const policy = safeJsonParse<Record<string, unknown>>(job.policy_json as string, {})
   if (job.type === 'stock_actions') {
     policy.stock_action_conflicts_confirmed = requiresStockConfirmation
     policy.stock_action_confirmed_by = c.get('user')?.id ?? null

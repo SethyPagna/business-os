@@ -42,6 +42,8 @@ interface ContactImportConflictsModalProps {
   t?: TranslateFn
   notify: NotifyFn
   onClose: () => void
+  onConfirm?: () => void | Promise<void>
+  confirming?: boolean
   // Called once every conflict on this job has a resolution recorded, so
   // the caller (BackgroundImportTracker) can drop the "Resolve conflicts"
   // urgency styling without a full re-poll.
@@ -70,7 +72,7 @@ interface ContactImportConflictsModalProps {
 //    so this can never silently create a second contact sharing a name
 //    the way just flipping "force_create" alone (with the name
 //    unchanged) would have.
-export default function ContactImportConflictsModal({ jobId, entityLabel, t, notify, onClose, onAllResolved }: ContactImportConflictsModalProps) {
+export default function ContactImportConflictsModal({ jobId, entityLabel, t, notify, onClose, onConfirm, confirming = false, onAllResolved }: ContactImportConflictsModalProps) {
   const tr = (key: string, fallbackEn: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallbackEn
@@ -87,6 +89,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   const [expandedRows, setExpandedRows] = useState<Set<number>>(() => new Set())
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
+  const [unresolvedTotal, setUnresolvedTotal] = useState(0)
   const [searchDraft, setSearchDraft] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [conflictFilter, setConflictFilter] = useState<ConflictFilter>('all')
@@ -122,10 +125,11 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
     })
       .then((result) => {
         if (cancelled) return
-        const payload = (result || {}) as { rows?: ReviewRow[]; total?: number; page?: number }
+        const payload = (result || {}) as { rows?: ReviewRow[]; total?: number; page?: number; unresolvedContactConflicts?: number }
         const loadedRows = Array.isArray(payload.rows) ? payload.rows : []
         setRows(loadedRows)
         setTotal(Math.max(0, Number(payload.total) || 0))
+        setUnresolvedTotal(Math.max(0, Number(payload.unresolvedContactConflicts) || 0))
         // A row's decision (saved via PATCH /:id/decisions) used to only
         // ever live in local component state -- reopening this modal, or
         // BackgroundImportTracker remounting it, re-fetched the same rows
@@ -184,6 +188,16 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
     }
   }
 
+  const markResolved = (rowNumber: number) => {
+    setResolvedRows((current) => {
+      if (current.has(rowNumber)) return current
+      const next = new Set(current)
+      next.add(rowNumber)
+      setUnresolvedTotal((count) => Math.max(0, count - 1))
+      return next
+    })
+  }
+
   const saveMerge = async (row: ReviewRow) => {
     // `apply` keeps classifyContacts' safe default merge, but records that
     // the reviewer explicitly chose it. Without this durable marker a page
@@ -193,7 +207,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
       await updateImportJobDecisions(jobId, {
         [String(row.rowNumber)]: { action: 'apply' },
       })
-      setResolvedRows((current) => new Set(current).add(row.rowNumber))
+      markResolved(row.rowNumber)
       notify(tr('contacts_import_conflict_merge_saved', 'Saved -- this row will merge into the existing contact'), 'success')
     } catch (err) {
       notify(err instanceof Error ? err.message : tr('contacts_import_conflict_save_failed', 'Could not save this decision'), 'error')
@@ -222,7 +236,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
       await updateImportJobDecisions(jobId, {
         [String(row.rowNumber)]: { action: 'force_create', field_overrides: { name: newName } },
       })
-      setResolvedRows((current) => new Set(current).add(row.rowNumber))
+      markResolved(row.rowNumber)
       notify(tr('contacts_import_conflict_saved', 'Saved -- will import as a new, separate contact'), 'success')
     } catch (err) {
       notify(err instanceof Error ? err.message : tr('contacts_import_conflict_save_failed', 'Could not save this decision'), 'error')
@@ -237,7 +251,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
       await updateImportJobDecisions(jobId, {
         [String(row.rowNumber)]: { action: 'skip' },
       })
-      setResolvedRows((current) => new Set(current).add(row.rowNumber))
+      markResolved(row.rowNumber)
       notify(tr('contacts_import_conflict_deleted', 'Saved -- this row will be skipped, nothing will be imported for it'), 'success')
     } catch (err) {
       notify(err instanceof Error ? err.message : tr('contacts_import_conflict_save_failed', 'Could not save this decision'), 'error')
@@ -289,8 +303,19 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   // already pins/flags safely either way), so there's nothing to send --
   // this just marks the row reviewed, same as merge does for name
   // conflicts above.
-  const acknowledgePhoneConflict = (rowNumber: number) => {
-    setResolvedRows((current) => new Set(current).add(rowNumber))
+  const acknowledgePhoneConflict = async (rowNumber: number) => {
+    setSavingRow(rowNumber)
+    try {
+      await updateImportJobDecisions(jobId, {
+        [String(rowNumber)]: { action: 'apply' },
+      })
+      markResolved(rowNumber)
+      notify(tr('contacts_import_conflict_acknowledged', 'Saved -- the phone conflict was reviewed'), 'success')
+    } catch (err) {
+      notify(err instanceof Error ? err.message : tr('contacts_import_conflict_save_failed', 'Could not save this decision'), 'error')
+    } finally {
+      setSavingRow(null)
+    }
   }
 
   // Every bulk action hits
@@ -320,6 +345,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
         targetRows.forEach((row) => next.add(row.rowNumber))
         return next
       })
+      setUnresolvedTotal((count) => Math.max(0, count - targetRows.length))
       setChoices((current) => {
         const next = { ...current }
         targetRows.forEach((row) => { next[row.rowNumber] = choice })
@@ -592,10 +618,11 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                           ) : (
                             <button
                               type="button"
-                              onClick={() => acknowledgePhoneConflict(row.rowNumber)}
+                              onClick={() => void acknowledgePhoneConflict(row.rowNumber)}
+                              disabled={savingRow === row.rowNumber}
                               className="btn-secondary px-2.5 py-1 text-xs"
                             >
-                              {tr('contacts_import_conflict_acknowledge_action', 'Acknowledge')}
+                              {savingRow === row.rowNumber ? tr('saving', 'Saving...') : tr('contacts_import_conflict_acknowledge_action', 'Acknowledge')}
                             </button>
                           )}
                         </div>
@@ -629,13 +656,29 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
 
         <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-3 dark:border-zinc-800">
           <span className="text-xs text-gray-500 dark:text-gray-400">
-            {rows.length > 0
-              ? tr('contacts_import_conflicts_remaining_page', '{count} unresolved on this page').replace('{count}', String(unresolvedCount))
-              : ''}
+            {onConfirm
+              ? tr('contacts_import_conflicts_remaining_all', '{count} unresolved in this import').replace('{count}', String(unresolvedTotal))
+              : rows.length > 0
+                ? tr('contacts_import_conflicts_remaining_page', '{count} unresolved on this page').replace('{count}', String(unresolvedCount))
+                : ''}
           </span>
-          <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={onClose}>
-            {tr('done', 'Done')}
-          </button>
+          <div className="flex gap-2">
+            {onConfirm ? (
+              <button type="button" className="btn-secondary px-3 py-1.5 text-sm" disabled={confirming} onClick={onClose}>
+                {tr('contacts_import_review_later', 'Review later')}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn-primary px-3 py-1.5 text-sm"
+              disabled={confirming || savingBulk || savingRow !== null || Boolean(onConfirm && unresolvedTotal > 0)}
+              onClick={() => { if (onConfirm) void onConfirm(); else onClose() }}
+            >
+              {onConfirm
+                ? confirming ? tr('approving', 'Approving...') : tr('contacts_import_confirm_apply', 'Confirm & import')
+                : tr('done', 'Done')}
+            </button>
+          </div>
         </div>
       </div>
     </Modal>

@@ -291,14 +291,6 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
       })
   }
 
-  const handleConflictsReviewed = () => {
-    // ContactImportConflictsModal's own "Done" button -- the operator has
-    // finished going through name-match rows (or there were none left to
-    // decide). Move to the explicit Approve step rather than closing
-    // outright, since nothing has been approved/applied yet.
-    setPostStartStep('ready_to_approve')
-  }
-
   const handleApproveNow = async (jobId: string | number, queuedRowCount: number, mode: ConflictMode) => {
     setApproving(true)
     try {
@@ -525,8 +517,9 @@ export default function ContactImportModal({ type, onClose, onDone }: ContactImp
         entityLabel={typeLabel}
         t={t}
         notify={notify}
-        onClose={handleConflictsReviewed}
-        onAllResolved={handleConflictsReviewed}
+        onClose={() => void fallBackToBackgroundTracking(rowCount, postStartJobId, conflictMode)}
+        onConfirm={() => handleApproveNow(postStartJobId, rowCount, conflictMode)}
+        confirming={approving}
       />
     )
   }

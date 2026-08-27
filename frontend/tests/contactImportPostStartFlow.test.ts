@@ -90,8 +90,18 @@ await runTest('contact conflict screen wires server search, sort, filters, pagin
   assert.match(source, /query: searchQuery/)
   assert.match(source, /sort,/)
   assert.match(source, /action: 'apply'/)
+  assert.match(source, /unresolvedContactConflicts/)
+  assert.match(source, /Confirm & import/)
+  assert.match(source, /updateImportJobDecisions\(jobId/)
   assert.match(source, /contactReviewPageCount\(total\)/)
   assert.doesNotMatch(source, /pageSize:\s*200/)
+})
+
+await runTest('contacts keep confirmation on the same authoritative review screen', () => {
+  const source = readFileSync(new URL('../src/components/contacts/ContactImportModal.tsx', import.meta.url), 'utf8')
+  assert.match(source, /onConfirm=\{\(\) => handleApproveNow/)
+  assert.match(source, /onClose=\{\(\) => void fallBackToBackgroundTracking/)
+  assert.doesNotMatch(source, /handleConflictsReviewed/)
 })
 
 if (failed > 0) {
