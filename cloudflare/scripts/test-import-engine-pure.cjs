@@ -1212,8 +1212,9 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // D1 that branches on which table a query targets (classifySales issues
 // three separate up-front SELECTs: products, branches, product_batches).
 {
-  const { classifySales } = moduleObj.exports
+  const { classifySales, parseSalesImportDateTime } = moduleObj.exports
   assert.strictEqual(typeof classifySales, 'function', 'classifySales should be exported from importEngine.ts')
+  assert.strictEqual(typeof parseSalesImportDateTime, 'function', 'sales date parser should be exported for direct boundary tests')
 
   const defaultProducts = [
     { id: 1, sku: 'SKU-1', barcode: 'BAR-1', name: 'Widget', selling_price_usd: 10, selling_price_khr: 41000, cost_price_usd: 6, cost_price_khr: 24600 },
@@ -1272,6 +1273,19 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const results = await classifySales(db, [row({ receipt_number: 'R-2', barcode: 'BAR-2', quantity: 1 }, 1)], null)
     assert.strictEqual(results[0].action, 'create')
     assert.strictEqual(results[0].data.items[0].product_id, 2, 'matched by barcode when sku is blank')
+  }
+
+  // 2b) A human-readable product name is a safe fallback only when it is
+  // unique. This makes the template usable without barcodes while never
+  // guessing between two catalog records sharing a name.
+  {
+    const db = makeFakeDb()
+    const results = await classifySales(db, [row({ receipt_number: 'R-2b', name: 'Gadget', quantity: 1 }, 1)], null)
+    assert.strictEqual(results[0].data.items[0].product_id, 2, 'unique product name matches when sku/barcode are blank')
+
+    const ambiguousDb = makeFakeDb({ products: [...defaultProducts, { ...defaultProducts[0], id: 3, sku: 'SKU-3', barcode: 'BAR-3' }] })
+    const ambiguous = await classifySales(ambiguousDb, [row({ receipt_number: 'R-2c', name: 'Widget', quantity: 1 }, 1)], null)
+    assert.strictEqual(ambiguous[0].action, 'error', 'an ambiguous product name must not guess')
   }
 
   // 3) unknown sku/barcode -> the whole order errors (one bad line spoils
@@ -1398,6 +1412,32 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     const item = results[0].data.items[0]
     assert.strictEqual(item.cost_price_usd, 6, 'imported sale item must carry the matched product\'s cost_price_usd -- COGS/profit reporting reads this column directly')
     assert.strictEqual(item.cost_price_khr, 24600, 'imported sale item must carry the matched product\'s cost_price_khr')
+
+    const preserved = await classifySales(db, [row({ receipt_number: 'R-11b', sku: 'SKU-1', quantity: 1, cost_price_usd: '4.25', cost_price_khr: '17425' }, 1)], null)
+    assert.strictEqual(preserved[0].data.items[0].cost_price_usd, 4.25, 'an exported historical cost snapshot overrides today\'s product cost')
+    assert.strictEqual(preserved[0].data.items[0].cost_price_khr, 17425)
+
+    const invalidCost = await classifySales(db, [row({ receipt_number: 'R-11c', sku: 'SKU-1', quantity: 1, cost_price_usd: '-1' }, 1)], null)
+    assert.strictEqual(invalidCost[0].action, 'error', 'a negative historical cost is rejected instead of corrupting COGS')
+  }
+
+  // 11b) Strict, deterministic historical timestamps: compact 24-hour
+  // wall-clock values are Phnom Penh time; explicit offsets remain exact;
+  // impossible dates and 24:00 fail closed instead of silently becoming a
+  // different date or falling back to import time.
+  {
+    assert.strictEqual(parseSalesImportDateTime('2026-08-28 14:30'), '2026-08-28T07:30:00.000Z')
+    assert.strictEqual(parseSalesImportDateTime('08/28/2026 23:59:58'), '2026-08-28T16:59:58.000Z')
+    assert.strictEqual(parseSalesImportDateTime('2026-08-28T14:30:00+07:00'), '2026-08-28T07:30:00.000Z')
+    assert.strictEqual(parseSalesImportDateTime(''), null)
+    assert.throws(() => parseSalesImportDateTime('2026-02-31 12:00'), /Invalid sale_date/)
+    assert.throws(() => parseSalesImportDateTime('2026-08-28 24:00'), /Invalid sale_date/)
+
+    const db = makeFakeDb()
+    const invalid = await classifySales(db, [row({ receipt_number: 'R-11d', sku: 'SKU-1', quantity: 1, sale_date: 'not a date' }, 1)], null)
+    assert.strictEqual(invalid[0].action, 'error', 'invalid sale_date blocks the row instead of silently importing at now')
+    const valid = await classifySales(db, [row({ receipt_number: 'R-11e', sku: 'SKU-1', quantity: 1, sale_date: '2026-08-28 14:30' }, 1)], null)
+    assert.strictEqual(valid[0].data.created_at, '2026-08-28T07:30:00.000Z')
   }
 
   // 12) Track F parity gap (found this session): an imported sale whose
@@ -1506,7 +1546,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(delivery[0].data.delivery_fee_usd, 3)
   }
 
-  console.log('PASS classifySales: receipt_number grouping, sale_status validation, returned_quantity default/override/overflow, batch_label matching scoped to the right product, branch resolve/pending, cost_price_usd/khr parity with the manual POS write path, customer_id resolution by phone/name against existing customers, and (part 70) cashier_id/delivery_contact_id resolution plus discount/tax/total/amount_paid/change/membership money math matching the manual checkout path exactly')
+  console.log('PASS classifySales: compact grouping, strict 24-hour dates, safe sku/barcode/name matching, historical cost snapshots, statuses/returns/batches/branches/customers, and full checkout money parity')
 }
 
 // -- Track F parity regression guard (companion to the products one above):

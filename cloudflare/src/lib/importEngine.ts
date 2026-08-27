@@ -2189,15 +2189,54 @@ function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100
 }
 
+// Historical spreadsheet timestamps are business wall-clock values. The
+// app's canonical business timezone is Asia/Phnom_Penh (UTC+07, no DST),
+// so a compact `2026-08-28 14:30` cell must render back as 14:30 rather
+// than being interpreted differently by whichever Worker/runtime parses
+// it. Explicit ISO offsets/Z remain authoritative. Date-only and US-style
+// spreadsheet dates are accepted too; every component is range checked so
+// JavaScript's silent rollover (2026-02-31 -> March) cannot corrupt books.
+export function parseSalesImportDateTime(value: unknown): string | null {
+  const raw = str(value)
+  if (!raw) return null
+
+  const explicitZone = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/i
+  if (explicitZone.test(raw)) {
+    const parsed = new Date(raw)
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString()
+    throw new Error(`Invalid sale_date "${raw}". Use YYYY-MM-DD HH:mm (24-hour time) or ISO 8601 with a timezone.`)
+  }
+
+  const match = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/)
+    || raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (!match) throw new Error(`Invalid sale_date "${raw}". Use YYYY-MM-DD HH:mm (24-hour time) or ISO 8601 with a timezone.`)
+
+  const isoFirst = /^\d{4}-/.test(raw)
+  const year = Number(isoFirst ? match[1] : match[3])
+  const month = Number(isoFirst ? match[2] : match[1])
+  const day = Number(isoFirst ? match[3] : match[2])
+  const hour = Number(match[4] || 0)
+  const minute = Number(match[5] || 0)
+  const second = Number(match[6] || 0)
+  const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0
+  if (year < 1000 || year > 9999 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) {
+    throw new Error(`Invalid sale_date "${raw}". Use a real date and 24-hour time from 00:00 to 23:59.`)
+  }
+  return new Date(Date.UTC(year, month - 1, day, hour - 7, minute, second)).toISOString()
+}
+
 export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
   const bySku = new Map<string, (typeof products)[number]>()
   const byBarcode = new Map<string, (typeof products)[number]>()
+  const byName = new Map<string, (typeof products)[number] | null>()
   for (const product of products) {
     if (str(product.sku)) bySku.set(lower(product.sku), product)
     if (str(product.barcode)) byBarcode.set(lower(product.barcode), product)
+    const nameKey = lower(product.name)
+    if (nameKey) byName.set(nameKey, byName.has(nameKey) ? null : product)
   }
 
   const branches = await db.prepare(`SELECT id, name FROM branches`).all<{ id: number; name: string }>()
@@ -2304,6 +2343,14 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     const status = saleStatus || 'completed'
     const isReturnGroup = RETURN_STATUSES.has(status)
 
+    let createdAt: string | null = null
+    try {
+      createdAt = parseSalesImportDateTime(first.sale_date)
+    } catch (err) {
+      results.push({ rowNumber: first._rowNumber, action: 'error', identifier, existingId: null, message: (err as Error).message, changes: {}, data: first })
+      continue
+    }
+
     const branchName = str(first.branch || first.branch_name)
     const matchedBranchId = branchName ? branchByName.get(lower(branchName)) ?? null : null
 
@@ -2338,9 +2385,10 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     for (const row of groupRows) {
       const sku = str(row.sku || row.product_sku)
       const barcode = str(row.barcode)
-      const product = (sku && bySku.get(lower(sku))) || (barcode && byBarcode.get(lower(barcode))) || null
+      const productName = str(row.name || row.product_name)
+      const product = (sku && bySku.get(lower(sku))) || (barcode && byBarcode.get(lower(barcode))) || (productName && byName.get(lower(productName))) || null
       if (!product) {
-        error = `Product not found for sku/barcode "${sku || barcode}"`
+        error = `Product not found for sku/barcode/name "${sku || barcode || productName}"`
         break
       }
       let quantity: number
@@ -2384,6 +2432,19 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
 
       const priceUsd = row.unit_price_usd != null && str(row.unit_price_usd) !== '' ? normalizeImportMoney(row.unit_price_usd) : product.selling_price_usd
       const priceKhr = row.unit_price_khr != null && str(row.unit_price_khr) !== '' ? normalizeImportMoney(row.unit_price_khr) : product.selling_price_khr
+      let costPriceUsd = product.cost_price_usd || 0
+      let costPriceKhr = product.cost_price_khr || 0
+      try {
+        if (row.cost_price_usd != null && str(row.cost_price_usd) !== '') {
+          costPriceUsd = normalizeImportMoney(parseImportNumericValue(row.cost_price_usd, 0, { allowNegative: false, field: 'cost_price_usd', strict: true }))
+        }
+        if (row.cost_price_khr != null && str(row.cost_price_khr) !== '') {
+          costPriceKhr = normalizeImportMoney(parseImportNumericValue(row.cost_price_khr, 0, { allowNegative: false, field: 'cost_price_khr', strict: true }))
+        }
+      } catch (err) {
+        error = (err as Error).message
+        break
+      }
 
       const batchLabel = str(row.batch_label || row.lot_code)
       const batchMatch = batchLabel ? batchByProductAndLot.get(`${product.id}\u0001${lower(batchLabel)}`) : null
@@ -2402,11 +2463,10 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
         // fetched and never read again, so every imported sale silently
         // recorded 0 cost (the column's DEFAULT) regardless of the
         // product's real cost, understating COGS and overstating margin on
-        // any historical/imported sales data. No file-column exists to
-        // override this per-line (same as products import's own cost_price
-        // columns are single-/CSV-editable but not part of this template),
-        // so it's always the product's current cost_price at import time.
-        cost_price_usd: product.cost_price_usd || 0, cost_price_khr: product.cost_price_khr || 0,
+        // any historical/imported sales data. A round-trip export carries
+        // the original per-line snapshot; a hand-built file that leaves it
+        // blank safely falls back to the product's current cost.
+        cost_price_usd: costPriceUsd, cost_price_khr: costPriceKhr,
         // Item-level branch mirrors the order's single branch column --
         // the template has no per-line branch override, same as it has no
         // per-line status override, for the same reason.
@@ -2476,13 +2536,6 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
         ? normalizeImportMoney(first.delivery_fee_khr)
         : Math.round(deliveryFeeUsd * exchangeRate))
       : 0
-
-    const saleDateRaw = str(first.sale_date)
-    let createdAt: string | null = null
-    if (saleDateRaw) {
-      const parsedDate = new Date(saleDateRaw)
-      if (!Number.isNaN(parsedDate.getTime())) createdAt = parsedDate.toISOString()
-    }
 
     let message: string | null = null
     if (isReturnGroup && !items.some((item) => Number(item.returned_quantity) > 0)) {
