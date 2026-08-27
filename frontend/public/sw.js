@@ -13,7 +13,7 @@ const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__';
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`;
 const APP_SHELL_CACHE = APP_SHELL_VERSION;
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`;
-const APP_SHELL_URLS = ['/', '/index.html', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png'];
+const APP_SHELL_URLS = ['/', '/index.html', '/manifest.json', '/portal-manifest.json', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png', '/leang-cosmetics-icon-192.png', '/leang-cosmetics-icon-512.png', '/leang-cosmetics-icon-192-maskable.png', '/leang-cosmetics-icon-512-maskable.png', '/leang-cosmetics-apple-touch-icon-v1.png'];
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox';
 const DB_NAME = 'BusinessOS';
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create';
@@ -359,7 +359,13 @@ function isCacheableStaticPath(pathname) {
         || pathname === '/icon-192-maskable.png'
         || pathname === '/icon-512-maskable.png'
         || pathname === '/apple-touch-icon.png'
+        || pathname === '/leang-cosmetics-icon-192.png'
+        || pathname === '/leang-cosmetics-icon-512.png'
+        || pathname === '/leang-cosmetics-icon-192-maskable.png'
+        || pathname === '/leang-cosmetics-icon-512-maskable.png'
+        || pathname === '/leang-cosmetics-apple-touch-icon-v1.png'
         || pathname === '/manifest.json'
+        || pathname === '/portal-manifest.json'
         || pathname === '/runtime-noise-guard.js'
         || pathname === '/theme-bootstrap.js';
 }

@@ -74,6 +74,7 @@ const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 // STATIC same-origin files (installable, unlike the old runtime blob: manifest
 // -- see the brand effect below). Not per-merchant customizable (11.14-16).
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
+const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
@@ -1146,12 +1147,22 @@ export default function PublicCatalogPage() {
     const previousManifestHref = manifestLink?.getAttribute('href') || ''
     if (manifestLink) manifestLink.setAttribute('href', STOREFRONT_MANIFEST)
 
+    const appleTouchIcon = document.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')
+    const previousAppleTouchIconHref = appleTouchIcon?.getAttribute('href') || ''
+    if (appleTouchIcon) appleTouchIcon.setAttribute('href', STOREFRONT_APPLE_TOUCH_ICON)
+
+    const appleTitle = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]')
+    const previousAppleTitle = appleTitle?.getAttribute('content') || ''
+    if (appleTitle) appleTitle.setAttribute('content', 'Leang Cosmetics')
+
     return () => {
       document.title = previousTitle
       iconEls.forEach((el, i) => {
         if (previousIconHrefs[i]) el.setAttribute('href', previousIconHrefs[i])
       })
       if (manifestLink && previousManifestHref) manifestLink.setAttribute('href', previousManifestHref)
+      if (appleTouchIcon && previousAppleTouchIconHref) appleTouchIcon.setAttribute('href', previousAppleTouchIconHref)
+      if (appleTitle && previousAppleTitle) appleTitle.setAttribute('content', previousAppleTitle)
     }
   }, [displayConfig.businessName, displayConfig.title])
 

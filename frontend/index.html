@@ -54,14 +54,36 @@
           '/library': true,
           '/server': true
         }
+        var hostname = String(window.location && window.location.hostname || '').toLowerCase()
+        var adminHostname = hostname === 'localhost'
+          || hostname === '127.0.0.1'
+          || hostname === '::1'
+          || hostname.indexOf('admin.') === 0
         var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
-        var publicRoute = pathname !== '/'
-          && pathname !== '/health'
-          && pathname.indexOf('/api/') !== 0
-          && pathname.indexOf('/uploads/') !== 0
-          && !/\.[a-z0-9]+$/i.test(pathname)
-          && !adminRoutes[segment]
+        var publicRoute = pathname === '/'
+          ? !adminHostname
+          : pathname !== '/health'
+            && pathname.indexOf('/api/') !== 0
+            && pathname.indexOf('/uploads/') !== 0
+            && !/\.[a-z0-9]+$/i.test(pathname)
+            && !adminRoutes[segment]
         document.documentElement.setAttribute('data-business-os-initial-route', publicRoute ? 'public' : 'admin')
+        if (publicRoute) {
+          document.title = 'Leang Cosmetics'
+          var description = document.querySelector('meta[name="description"]')
+          if (description) description.setAttribute('content', 'Leang Cosmetics online store')
+          var appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
+          if (appTitle) appTitle.setAttribute('content', 'Leang Cosmetics')
+          var manifest = document.querySelector('link[rel="manifest"]')
+          if (manifest) manifest.setAttribute('href', '/portal-manifest.json')
+          var icons = document.querySelectorAll('link[rel="icon"]')
+          for (var iconIndex = 0; iconIndex < icons.length; iconIndex += 1) {
+            icons[iconIndex].setAttribute('href', '/leang-cosmetics-icon-512.png')
+            icons[iconIndex].setAttribute('type', 'image/png')
+          }
+          var appleIcon = document.querySelector('link[rel="apple-touch-icon"]')
+          if (appleIcon) appleIcon.setAttribute('href', '/leang-cosmetics-apple-touch-icon-v1.png')
+        }
       }())
     </script>
     <style data-business-os-initial-shell>
@@ -160,58 +182,6 @@
         </div>
       </div>
     </div>
-    <script>
-      (function syncInitialShellWithRoute() {
-        var pathname = String(window.location && window.location.pathname || '/')
-          .split('?')[0]
-          .split('#')[0]
-          .replace(/\/{2,}/g, '/')
-          .replace(/\/+$/g, '')
-          .toLowerCase() || '/'
-        var adminRoutes = {
-          '/': true,
-          '/admin': true,
-          '/app': true,
-          '/login': true,
-          '/dashboard': true,
-          '/products': true,
-          '/product': true,
-          '/pos': true,
-          '/point-of-sale': true,
-          '/inventory': true,
-          '/sales': true,
-          '/returns': true,
-          '/branches': true,
-          '/contacts': true,
-          '/catalog': true,
-          '/loyalty-points': true,
-          '/loyalty': true,
-          '/users': true,
-          '/audit-log': true,
-          '/audit': true,
-          '/receipt-settings': true,
-          '/receipts': true,
-          '/backup': true,
-          '/backups': true,
-          '/settings': true,
-          '/files': true,
-          '/library': true,
-          '/server': true
-        }
-        var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
-        var publicRoute = pathname !== '/'
-          && pathname !== '/health'
-          && pathname.indexOf('/api/') !== 0
-          && pathname.indexOf('/uploads/') !== 0
-          && !/\.[a-z0-9]+$/i.test(pathname)
-          && !adminRoutes[segment]
-        if (!publicRoute) return
-        var title = document.querySelector('.business-os-initial-title')
-        var copy = document.querySelector('.business-os-initial-copy')
-        if (title) title.textContent = 'Leang Cosmetics'
-        if (copy) copy.textContent = 'Opening catalog'
-      }())
-    </script>
     <script src="/runtime-noise-guard.js"></script>
     <script src="/theme-bootstrap.js"></script>
     <script type="module" src="/src/index.tsx"></script>

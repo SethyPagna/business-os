@@ -6,10 +6,8 @@
 //   Business OS      -> the ADMIN app (admin.leangcosmetics.dpdns.org).
 //                       Served by index.html + the static manifest.json.
 //   Leang Cosmetics  -> the PUBLIC storefront (leangcosmetics.dpdns.org).
-//                       PublicCatalogPage.tsx swaps the favicon and builds a
-//                       runtime manifest from these, falling back to
-//                       leang-cosmetics-icon-512.png when the merchant has
-//                       not uploaded their own logo in the portal editor.
+//                       The route bootstrap and PublicCatalogPage.tsx swap
+//                       to the static portal manifest and these fixed icons.
 //
 // Why this is a script and not a one-off: both source logos are 1254x1254
 // PNGs with the artwork drawn as a rounded square on an opaque BLACK
@@ -87,6 +85,11 @@ const OUTPUTS = [
   // --- public storefront (Leang Cosmetics) ---
   { file: 'leang-cosmetics-icon-192.png', brand: 'leangCosmetics', size: 192, kind: 'rounded' },
   { file: 'leang-cosmetics-icon-512.png', brand: 'leangCosmetics', size: 512, kind: 'rounded' },
+  { file: 'leang-cosmetics-icon-192-maskable.png', brand: 'leangCosmetics', size: 192, kind: 'maskable' },
+  { file: 'leang-cosmetics-icon-512-maskable.png', brand: 'leangCosmetics', size: 512, kind: 'maskable' },
+  // Versioned filename defeats iOS's unusually sticky home-screen icon URL
+  // cache after the old admin icon was mistakenly served on the public root.
+  { file: 'leang-cosmetics-apple-touch-icon-v1.png', brand: 'leangCosmetics', size: 180, kind: 'flat' },
 ]
 
 // Sizes packed into favicon.ico. 16/32 are what browsers actually draw in a

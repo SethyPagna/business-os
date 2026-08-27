@@ -9,7 +9,7 @@
   "theme_color": "#1e3a8a",
   "icons": [
     {
-      "src": "/leang-cosmetics-icon-192.png",
+      "src": "/leang-cosmetics-icon-192-maskable.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
@@ -21,7 +21,7 @@
       "purpose": "maskable"
     },
     {
-      "src": "/leang-cosmetics-icon-512.png",
+      "src": "/leang-cosmetics-icon-512-maskable.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
