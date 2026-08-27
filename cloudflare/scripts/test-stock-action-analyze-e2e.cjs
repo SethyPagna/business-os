@@ -73,10 +73,11 @@ function asProductionDb(db) {
 }
 
 function makeAssets(csv) {
-  const bytes = Buffer.from(csv, 'utf8')
+  let bytes = Buffer.from(csv, 'utf8')
   let rangedReads = 0
   return {
     stats: () => ({ rangedReads, size: bytes.byteLength }),
+    replace(nextCsv) { bytes = Buffer.from(nextCsv, 'utf8') },
     async get(key, options) {
       if (key !== 'imports/stock-actions.csv') return null
       const range = options?.range
@@ -205,6 +206,22 @@ async function drainAnalyze(env, jobId) {
   assert.strictEqual(cancelled.lease_token, null)
   assert.strictEqual(assets.stats().rangedReads, readsBeforeCancel)
   assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get({ id: 'analyze-cancelled' })).n, 0)
+
+  // The analyzer rejects oversized stock sheets before classification, so
+  // an operator cannot spend time reviewing a job the Free-plan-safe apply
+  // path will refuse later. A single giant sale group cannot bypass this by
+  // counting as only one business unit.
+  const header = 'name,barcode,shop,warehouse,date,action,selling_price,vip_price,cost_price,batch'
+  const oversizedCsv = `${header}\n${Array.from({ length: 481 }, (_, i) => `Raw ${i},R${i},1,,08/27/2026,add,5,,2,B${i}`).join('\n')}\n`
+  assets.replace(oversizedCsv)
+  await seedJob(db, 'analyze-oversized', Buffer.byteLength(oversizedCsv))
+  await assert.rejects(() => drainAnalyze(env, 'analyze-oversized'), /481 rows.*at most 480 rows/)
+  const oversized = await db.prepare(`SELECT status, phase, last_error, lease_token FROM import_jobs WHERE id = @id`).get({ id: 'analyze-oversized' })
+  assert.strictEqual(oversized.status, 'failed')
+  assert.strictEqual(oversized.phase, 'failed')
+  assert.match(oversized.last_error, /481 rows.*at most 480 rows/)
+  assert.strictEqual(oversized.lease_token, null)
+  assert.strictEqual((await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE job_id = @id`).get({ id: 'analyze-oversized' })).n, 0)
 
   console.log('PASS stock_actions analyze runs CSV -> bounded materialization -> cross-window sealed Screen 2 data, with preview-only and cancellation guards')
 })().catch((error) => {

@@ -45,7 +45,7 @@ const asyncNoop = async () => {}
 const STUBS = {
   './cache': new Proxy({}, { get: () => asyncNoop }),
   '../durable-objects/broadcastHub': new Proxy({}, { get: () => asyncNoop }),
-  './db': {},
+  './db': { getDb: (env) => env.DB },
   './importCsv': {},
   '../index': {},
   './stockActionSeal': new Proxy({}, { get: () => async () => 0 }),
@@ -87,8 +87,9 @@ const engineMod = { exports: {} }
 new Function('exports', 'require', 'module', '__filename', '__dirname', transpile(engineAbs))(
   engineMod.exports, makeRequire(libDir), engineMod, engineAbs, libDir,
 )
-const { applyStockActionsJob } = engineMod.exports
+const { applyStockActionsJob, runImportApply } = engineMod.exports
 assert.strictEqual(typeof applyStockActionsJob, 'function', 'applyStockActionsJob must be exported')
+assert.strictEqual(typeof runImportApply, 'function', 'runImportApply must be exported')
 
 // --- In-memory D1 adapter ---------------------------------------------------
 function makeDb() {
@@ -121,7 +122,8 @@ function makeDb() {
     CREATE TABLE import_jobs (id TEXT PRIMARY KEY, type TEXT, policy_json TEXT, status TEXT, phase TEXT,
       started_at TEXT, materialize_state_json TEXT, materialize_done INTEGER DEFAULT 0,
       processed_rows INTEGER DEFAULT 0, failed_rows INTEGER DEFAULT 0, warning_count INTEGER DEFAULT 0,
-      summary_json TEXT, finished_at TEXT, cancel_requested INTEGER DEFAULT 0, updated_at TEXT);
+      summary_json TEXT, finished_at TEXT, cancel_requested INTEGER DEFAULT 0, updated_at TEXT,
+      lease_token TEXT, lease_expires_at TEXT, chunk_cursor INTEGER DEFAULT 0, chunk_state_json TEXT);
     CREATE TABLE import_job_source_rows (job_id TEXT, sequence INTEGER, row_number INTEGER, data_json TEXT);
     CREATE TABLE import_job_rows (job_id TEXT, phase TEXT, row_number INTEGER, group_index INTEGER,
       action TEXT, identifier TEXT, result_json TEXT, PRIMARY KEY(job_id, phase, row_number));
@@ -275,6 +277,51 @@ async function test(name, fn) {
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM sales`).get().n, 0, 'no receipt at all -- the good line is not committed alone')
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=40 AND branch_id=1`).get().quantity, 20, 'stock untouched')
     assert.ok(out.failed >= 1, 'the group is reported as failed')
+  })
+
+  // 6) Free-plan dispatch ceiling -----------------------------------------
+  await test('more than 60 business actions fail before any stock write', async () => {
+    const { sqlite, db } = makeDb()
+    seedProduct(sqlite, { id: 50, name: 'Bounded', barcode: 'B50' })
+    const rows = Array.from({ length: 61 }, (_, index) => ({
+      _rowNumber: index + 2, name: 'Bounded', barcode: 'B50', shop: '1', warehouse: '',
+      date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '', batch: '',
+    }))
+    seedJob(sqlite, 'job-units-bound', rows, { stock_action_mode: 'direct' })
+    await assert.rejects(
+      () => applyStockActionsJob(env, db, 'job-units-bound', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined),
+      /61 actions.*at most 60 actions/,
+    )
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=50 AND branch_id=1`).get().quantity, 0)
+  })
+
+  // 7) Raw-row ceiling prevents one giant sale group bypassing unit count --
+  await test('more than 480 raw rows fail before full-sheet classification', async () => {
+    const { sqlite, db } = makeDb()
+    const rows = Array.from({ length: 481 }, (_, index) => ({ _rowNumber: index + 2, name: `Raw ${index}` }))
+    seedJob(sqlite, 'job-rows-bound', rows, { stock_action_mode: 'direct' })
+    await assert.rejects(
+      () => applyStockActionsJob(env, db, 'job-rows-bound', JSON.stringify({ stock_action_mode: 'direct' }), sw, undefined),
+      /481 rows.*at most 480 rows/,
+    )
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM import_job_rows`).get().n, 0)
+  })
+
+  // 8) Queue-entry cancellation happens before materialization/classify/write
+  await test('runImportApply honors cancellation before any stock action', async () => {
+    const { sqlite, db } = makeDb()
+    seedProduct(sqlite, { id: 60, name: 'Cancelled', barcode: 'C60' })
+    seedJob(sqlite, 'job-cancel', [
+      { _rowNumber: 2, name: 'Cancelled', barcode: 'C60', shop: '5', warehouse: '', date: '08/27/2026', action: 'add' },
+    ], { stock_action_mode: 'direct' })
+    sqlite.prepare(`UPDATE import_jobs SET cancel_requested=1, status='applying', phase='applying' WHERE id='job-cancel'`).run()
+    const out = await runImportApply({ ...env, DB: db }, 'job-cancel')
+    assert.deepStrictEqual(out, { applied: 0, failed: 0 })
+    assert.strictEqual(sqlite.prepare(`SELECT status FROM import_jobs WHERE id='job-cancel'`).get().status, 'cancelled')
+    assert.strictEqual(sqlite.prepare(`SELECT lease_token FROM import_jobs WHERE id='job-cancel'`).get().lease_token, null)
+    assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=60 AND branch_id=1`).get().quantity, 0)
+    assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM inventory_movements`).get().n, 0)
   })
 
   if (failures > 0) { console.error(`\n${failures} test(s) failed`); process.exit(1) }

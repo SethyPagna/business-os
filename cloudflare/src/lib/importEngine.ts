@@ -3161,6 +3161,9 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
     const meta = await fetchMaterializedMeta(db, jobId)
     sw.lap('fetchAndParseMs') // now a couple of narrow SELECTs, not a full re-parse -- see ensureSourceRowsMaterialized above
     if (!meta) throw new Error('No CSV file uploaded for this job')
+    if (meta.type === 'stock_actions' && meta.totalRows > STOCK_ACTION_MAX_ROWS) {
+      throw new Error(`This stock import has ${meta.totalRows} rows; split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
+    }
     const { cursor, state } = await getChunkState(db, jobId)
     const decisions = getDecisionMap(meta.policyJson)
 
@@ -3551,13 +3554,16 @@ async function finalizeImportApply(
   return { applied: totalApplied, failed: totalFailed }
 }
 
-// Operator-scale ceiling for one unified stock-action import. Unlike the
+// Free-plan ceilings for one unified stock-action import. Unlike the
 // generic apply path this is a SINGLE pass (see applyStockActionsJob's own
-// comment on why it cannot be chunked), so it is bounded here instead: a
-// larger sheet is rejected with a clear "split it" message rather than risk
-// a Worker's CPU/subrequest budget. Every add/sale/create is its own bounded
-// D1 transaction (stockActionCommit.ts), so a few hundred is comfortably safe.
-const STOCK_ACTION_MAX_UNITS = 250
+// comment on why it cannot be chunked), so BOTH raw rows and dispatched
+// business units are bounded. Workers Free permits 1,000 internal-service
+// subrequests per invocation; a worst-case new-product row touching both
+// branches can use roughly 12 D1 calls across resolve/create/add/verification.
+// Sixty units leaves meaningful headroom for classification, persistence,
+// finalization and broadcasts instead of balancing at the platform ceiling.
+const STOCK_ACTION_MAX_ROWS = 480 // 60 maximum groups x the writer's 8-line receipt ceiling
+const STOCK_ACTION_MAX_UNITS = 60
 
 /**
  * Applies a unified "Add / Sale / Reconciliation" stock-action import.
@@ -3596,6 +3602,10 @@ export async function applyStockActionsJob(
   }
 
   const decisions = getDecisionMap(policyJson)
+  const rowCount = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_source_rows WHERE job_id = @id`).get<{ n: number }>({ id: jobId })
+  if (Number(rowCount?.n || 0) > STOCK_ACTION_MAX_ROWS) {
+    throw new Error(`This stock import has ${Number(rowCount?.n || 0)} rows; split it into files of at most ${STOCK_ACTION_MAX_ROWS} rows before importing.`)
+  }
   const rows = await readAllMaterializedRows(db, jobId, decisions)
   const totalUnits = rows.length
   if (!totalUnits) throw new Error('No CSV file uploaded for this job')
