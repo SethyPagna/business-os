@@ -5,12 +5,13 @@ import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { sanitizeOriginalFileName, buildUniqueStoredName, getMediaType } from '../lib/fileAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
-import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult } from '../lib/importEngine'
+import { runImportAnalyze, runImportApply, buildErrorsCsv, loadAndClassify, resetMaterializeState, PREFLIGHT_MAX_ROWS, summarizeImportWarnings, countRowsWithWarningKinds, SERIOUS_IMPORT_WARNING_KINDS, IMPORT_WARNING_LABELS, type ImportRowResult, type RowAction } from '../lib/importEngine'
 import { readCentralDirectory, extractZipEntry, isRealFileEntry, ZipFormatError } from '../lib/zipReader'
 import { MAX_IMAGES_PER_PRODUCT, buildImageDisplayName } from '../lib/importImageMatch'
 import { bumpVersion } from '../lib/cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { canEditImportDecisions, canReplaceImportCsv, retryModeForImportStatus } from '../lib/importLifecycleGate'
+import { buildImportReviewWhere } from '../lib/importReviewQuery'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -267,7 +268,8 @@ app.get('/:id/review', async (c) => {
   const warningKinds = (c.req.query('warningKind') || '')
     .split(',')
     .map((k) => k.trim())
-    .filter(Boolean)
+    .filter((kind): kind is keyof typeof IMPORT_WARNING_LABELS => kind in IMPORT_WARNING_LABELS)
+    .slice(0, 8)
 
   // Reads the ANALYZE phase's persisted per-row results (import_job_rows,
   // written incrementally by the chunked runImportAnalyze -- see
@@ -279,20 +281,22 @@ app.get('/:id/review', async (c) => {
   // plan, and exactly the kind of repeated full-file CPU work the Free
   // plan's 10ms-per-invocation limit can't tolerate for a sizeable import.
   const db = getDb(c.env)
-  const actionFilter = (['create', 'update', 'skip', 'error'] as const).includes(filter as any) ? filter : null
-  const rows = await db.prepare(
-    actionFilter
-      ? `SELECT row_number, action, identifier, result_json FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' AND action = @action ORDER BY row_number ASC`
-      : `SELECT row_number, action, identifier, result_json FROM import_job_rows WHERE job_id = @id AND phase = 'analyze' ORDER BY row_number ASC`,
-  ).all<{ row_number: number; action: string; identifier: string | null; result_json: string }>(actionFilter ? { id, action: actionFilter } : { id })
-
-  let parsed = rows.map((r) => JSON.parse(r.result_json) as ImportRowResult)
-  if (query) parsed = parsed.filter((r) => (r.identifier || '').toLowerCase().includes(query))
-  if (warningKinds.length) parsed = parsed.filter((r) => (r.warnings || []).some((w) => warningKinds.includes(w.kind)))
-
-  const total = parsed.length
-  const start = (page - 1) * pageSize
-  const pageResults = parsed.slice(start, start + pageSize)
+  const actionFilter: RowAction | null = (['create', 'update', 'skip', 'error'] as const).includes(filter as RowAction) ? filter as RowAction : null
+  const where = buildImportReviewWhere({ jobId: id, action: actionFilter, query, warningKinds })
+  const totalRow = await db.prepare(`SELECT COUNT(*) AS n FROM import_job_rows WHERE ${where.sql}`)
+    .get<{ n: number }>(where.params)
+  const total = Number(totalRow?.n || 0)
+  const offset = (page - 1) * pageSize
+  const rows = await db.prepare(`
+    SELECT row_number, action, identifier, result_json
+    FROM import_job_rows
+    WHERE ${where.sql}
+    ORDER BY row_number ASC
+    LIMIT @limit OFFSET @offset
+  `).all<{ row_number: number; action: string; identifier: string | null; result_json: string }>({
+    ...where.params, limit: pageSize, offset,
+  })
+  const pageResults = rows.map((r) => JSON.parse(r.result_json) as ImportRowResult)
 
   // PATCH /:id/decisions persists reviewer choices onto policy_json's
   // decisionsByRowNumber, but this endpoint never read them back -- so a
@@ -326,7 +330,7 @@ app.get('/:id/review', async (c) => {
   // shape GET /:id/report returns for the whole job, but scoped to
   // whatever's currently on screen so the review page's own warning list
   // doesn't have to re-derive this client-side from raw per-row messages.
-  const warningSummary = summarizeImportWarnings(parsed)
+  const warningSummary = summarizeImportWarnings(pageResults)
 
   return c.json({ success: true, rows: pageResultsWithDecisions, page, pageSize, total, counts, warned: warnedRow?.n || 0, warningSummary })
 })
