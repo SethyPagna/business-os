@@ -35,6 +35,18 @@ await runTest('inventory import modal analyzes rows in a worker with a sync fall
   assert.match(worker, /countCsvDataRows\(text\)/)
 })
 
+await runTest('inventory import stays in-modal for authoritative Screen 2 review and confirmation', () => {
+  const source = fs.readFileSync(new URL('../src/components/inventory/InventoryImportModal.tsx', import.meta.url), 'utf8')
+  const review = fs.readFileSync(new URL('../src/components/imports/ServerImportReviewScreen.tsx', import.meta.url), 'utf8')
+  assert.match(source, /setReviewJob\(\{ id: job\.id as string \| number, rowCount \}\)/)
+  assert.match(source, /<ServerImportReviewScreen/)
+  assert.match(review, /getImportJobReview\(jobId/)
+  assert.match(review, /pageSize: PAGE_SIZE/)
+  assert.match(review, /Confirm & import/)
+  assert.match(review, /approveImportJob\(jobId/)
+  assert.doesNotMatch(source, /Review and approve it from the top progress bar/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }

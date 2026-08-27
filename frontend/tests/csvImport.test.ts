@@ -66,7 +66,7 @@ await runTest('decodeTextBuffer handles UTF-16LE spreadsheet exports', () => {
   assert.equal(decodeTextBuffer(new Uint8Array(bytes)), source)
 })
 
-await runTest('background import modals notify parent pages when a job is queued', () => {
+await runTest('import modals notify parent pages only after handoff or explicit review outcome', () => {
   const files = [
     '../src/components/inventory/InventoryImportModal.tsx',
     '../src/components/sales/SalesImportModal.tsx',
@@ -85,6 +85,12 @@ await runTest('background import modals notify parent pages when a job is queued
   for (const file of files) {
     const source = fs.readFileSync(new URL(file, import.meta.url), 'utf8')
     assert.match(source, /signalDone\s*=\s*async\s*\(payload(?::[^)]*)?\)/, `${file} should define a queued import callback helper`)
+    if (/InventoryImportModal|SalesImportModal/.test(file)) {
+      assert.match(source, /<ServerImportReviewScreen/, `${file} should keep the server-backed review in the same modal`)
+      assert.match(source, /onApproved=\{async \(\) => \{[\s\S]{0,220}?await signalDone\(/, `${file} should notify after explicit approval`)
+      assert.match(source, /onReviewLater=\{async \(\) => \{[\s\S]{0,220}?await signalDone\(/, `${file} should notify after explicit background handoff`)
+      continue
+    }
     if (directCall.test(source)) continue
     const wrapperMatch = source.match(/const (\w+) = async \(payload(?::[^)]*)?\)[\s\S]{0,200}?await\s+signalDone\(payload\)/)
     assert.ok(wrapperMatch, `${file} should notify the parent after queueing an import job`)

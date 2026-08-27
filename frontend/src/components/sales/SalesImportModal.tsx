@@ -11,6 +11,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 import { parseImportFile } from '../../utils/spreadsheetImport.ts'
 import CsvImportPreview from '../shared/CsvImportPreview.tsx'
+import ServerImportReviewScreen from '../imports/ServerImportReviewScreen.tsx'
 
 const SALES_TEMPLATE_COLUMNS = 'receipt_number, sale_date, sale_status, payment_method, payment_currency, exchange_rate, branch, customer_name, customer_phone, customer_address, cashier_name, name, sku, barcode, quantity, unit_price_usd, unit_price_khr, batch_label, returned_quantity, discount_usd, discount_khr, tax_usd, amount_paid_usd, amount_paid_khr, membership_discount_usd, membership_discount_khr, membership_points_redeemed, is_delivery, delivery_contact_name, delivery_contact_phone, delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by, notes'
 
@@ -119,6 +120,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
   const [result, setResult] = useState<ImportResult | null>(null)
   const [previewRowCount, setPreviewRowCount] = useState(0)
   const [analyzingCsv, setAnalyzingCsv] = useState(false)
+  const [reviewJob, setReviewJob] = useState<{ id: string | number; rowCount: number } | null>(null)
   const importRequestRef = useRef(0)
   const importInFlightRef = useRef(false)
   const rowCountRequestRef = useRef(0)
@@ -219,11 +221,8 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
         'Sales import start',
         SALES_IMPORT_JOB_START_TIMEOUT_MS,
       )
-      const queuedResult = { imported: 0, duplicates: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
-      setResult(queuedResult)
-      await signalDone(queuedResult)
-      notify(tr('sales_import_started', 'Sales import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', String(rowCount)), 'success')
+      setReviewJob({ id: job.id as string | number, rowCount })
       return
     } catch (error) {
       const nextResult = { imported: 0, duplicates: 0, errors: [getErrorMessage(error, tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'))] }
@@ -241,7 +240,24 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
 
   return (
     <Modal title={tr('sales_import_title', 'Import Sales', 'នាំចូលការលក់')} onClose={onClose} draggable>
-      <div className="space-y-4">
+      {reviewJob ? (
+        <ServerImportReviewScreen
+          jobId={reviewJob.id}
+          label={tr('sales', 'Sales')}
+          source="sales_modal"
+          t={t}
+          notify={notify}
+          onApproved={async () => {
+            await signalDone({ imported: 0, duplicates: 0, queued: reviewJob.rowCount, jobId: reviewJob.id, errors: [] })
+            onClose()
+          }}
+          onReviewLater={async () => {
+            await signalDone({ imported: 0, duplicates: 0, queued: reviewJob.rowCount, jobId: reviewJob.id, errors: [] })
+            notify(tr('sales_import_started', 'Sales import analysis is continuing in the background.'), 'info')
+            onClose()
+          }}
+        />
+      ) : <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {tr('sales_import_help', 'Import sales from CSV rows grouped by receipt number. Each row should describe one sold product line.', 'នាំចូលការលក់ពីជួរ CSV ដែលដាក់ជាក្រុមតាមលេខបង្កាន់ដៃ។ មួយជួរគួរតែតំណាងឱ្យមួយបន្ទាត់ផលិតផលដែលបានលក់។')}
         </p>
@@ -272,10 +288,8 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">
-              {result.queued
-                ? tr('import_job_queued_count', '{count} row(s) queued for analysis. Review and approve it from the top progress bar.').replace('{count}', String(result.queued))
-                : tr('imported_sales_count', 'Imported {count} sale(s)', 'បាននាំចូលការលក់ {count}').replace('{count}', String(result.imported))}
-              {!result.queued && result.duplicates ? `, ${tr('duplicates_skipped_count', 'skipped {count} duplicate(s)', 'បានរំលងស្ទួន {count}').replace('{count}', String(result.duplicates))}` : ''}
+              {tr('imported_sales_count', 'Imported {count} sale(s)', 'បាននាំចូលការលក់ {count}').replace('{count}', String(result.imported))}
+              {result.duplicates ? `, ${tr('duplicates_skipped_count', 'skipped {count} duplicate(s)', 'បានរំលងស្ទួន {count}').replace('{count}', String(result.duplicates))}` : ''}
             </div>
             {result.errors?.length ? (
               <div className="mt-2 space-y-1 text-xs text-red-600 dark:text-red-400">
@@ -290,7 +304,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
             {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : tr('import_sales_button', 'Import sales', 'នាំចូលការលក់')}
           </button>
         </div>
-      </div>
+      </div>}
     </Modal>
   )
 }

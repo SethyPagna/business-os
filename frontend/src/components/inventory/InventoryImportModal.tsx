@@ -11,6 +11,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { countCsvDataRows } from '../../utils/csvRowCounter.ts'
 import { parseImportFile } from '../../utils/spreadsheetImport.ts'
 import CsvImportPreview from '../shared/CsvImportPreview.tsx'
+import ServerImportReviewScreen from '../imports/ServerImportReviewScreen.tsx'
 
 type InventoryImportAction = 'add' | 'remove' | 'set'
 
@@ -144,6 +145,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
   const [result, setResult] = useState<ImportResult | null>(null)
   const [previewRowCount, setPreviewRowCount] = useState(0)
   const [analyzingCsv, setAnalyzingCsv] = useState(false)
+  const [reviewJob, setReviewJob] = useState<{ id: string | number; rowCount: number } | null>(null)
   const importRequestRef = useRef(0)
   const importInFlightRef = useRef(false)
   const rowCountRequestRef = useRef(0)
@@ -259,11 +261,8 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
         'Inventory import start',
         INVENTORY_IMPORT_JOB_START_TIMEOUT_MS,
       )
-      const queuedResult = { imported: 0, queued: rowCount, jobId: job.id, errors: [] }
       if (!isTrackedRequestCurrent(importRequestRef, requestId) || !aliveRef.current) return
-      setResult(queuedResult)
-      await signalDone(queuedResult)
-      notify(tr('inventory_import_started', 'Inventory import analysis started: {count} row(s) queued. Review and approve it from the top progress bar.').replace('{count}', String(rowCount)), 'success')
+      setReviewJob({ id: job.id as string | number, rowCount })
       return
     } catch (error) {
       const nextResult = { imported: 0, errors: [getErrorMessage(error, tr('import_failed', 'Import failed', 'នាំចូលបរាជ័យ'))] }
@@ -281,7 +280,24 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
 
   return (
     <Modal title={tr('inventory_import_title', 'Import Inventory', 'នាំចូលស្តុក')} onClose={onClose} draggable>
-      <div className="space-y-4">
+      {reviewJob ? (
+        <ServerImportReviewScreen
+          jobId={reviewJob.id}
+          label={tr('inventory', 'Inventory')}
+          source="inventory_modal"
+          t={t}
+          notify={notify}
+          onApproved={async () => {
+            await signalDone({ imported: 0, queued: reviewJob.rowCount, jobId: reviewJob.id, errors: [] })
+            onClose()
+          }}
+          onReviewLater={async () => {
+            await signalDone({ imported: 0, queued: reviewJob.rowCount, jobId: reviewJob.id, errors: [] })
+            notify(tr('inventory_import_started', 'Inventory import analysis is continuing in the background.'), 'info')
+            onClose()
+          }}
+        />
+      ) : <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {tr('inventory_import_help', 'Pick one action, then download that action\'s template. Each action only imports what it says -- nothing is mixed together.', 'ជ្រើសសកម្មភាពមួយ រួចទាញយកគំរូរបស់សកម្មភាពនោះ។')}
         </p>
@@ -337,9 +353,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">
-              {result.queued
-                ? tr('import_job_queued_count', '{count} row(s) queued for analysis. Review and approve it from the top progress bar.').replace('{count}', String(result.queued))
-                : tr('imported_rows_count', 'Imported {count} row(s)', 'បាននាំចូល {count} ជួរ').replace('{count}', String(result.imported))}
+              {tr('imported_rows_count', 'Imported {count} row(s)', 'បាននាំចូល {count} ជួរ').replace('{count}', String(result.imported))}
             </div>
             {result.errors?.length ? (
               <div className="mt-2 space-y-1 text-xs text-red-600 dark:text-red-400">
@@ -354,7 +368,7 @@ export default function InventoryImportModal({ onClose, onDone }: ImportModalPro
             {loading ? tr('importing', 'Importing...', 'កំពុងនាំចូល...') : analyzingCsv ? tr('inventory_import_checking', 'Checking...', 'កំពុងពិនិត្យ...') : tr('import_inventory_button', 'Import inventory', 'នាំចូលស្តុក')}
           </button>
         </div>
-      </div>
+      </div>}
     </Modal>
   )
 }

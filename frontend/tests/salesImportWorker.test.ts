@@ -35,6 +35,13 @@ await runTest('sales import modal analyzes rows in a worker with a sync fallback
   assert.match(worker, /countCsvDataRows\(text\)/)
 })
 
+await runTest('sales import stays in-modal for authoritative Screen 2 review and confirmation', () => {
+  const source = fs.readFileSync(new URL('../src/components/sales/SalesImportModal.tsx', import.meta.url), 'utf8')
+  assert.match(source, /setReviewJob\(\{ id: job\.id as string \| number, rowCount \}\)/)
+  assert.match(source, /<ServerImportReviewScreen/)
+  assert.doesNotMatch(source, /Review and approve it from the top progress bar/)
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
