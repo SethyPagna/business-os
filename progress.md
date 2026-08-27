@@ -65,19 +65,35 @@ Two rules learned the hard way, both from real incidents in this file's own hist
 > (deploy status noted per item). Rebuilt from the user's Aug 28 request batch plus
 > every still-open item in the older sections.
 
-### Phase A — Deploy and verify live (gates EVERYTHING; nothing since Aug 26 has shipped)
+### Phase A — Deploy, domain and live verification
 
-- [ ] A1. `npm run deploy:full` — ships Parts 346–370: both production outages (0.1/0.2),
-  POS oversell 409 (migration 0058), sales import (0059/0060), §12/§13 imports, §14, §15,
-  PWA branding, backup lifecycle. **The user's "no backups in Google Drive" report is
-  expected until this ships** — the Drive mirror code exists only locally.
+- [x] A1. `npm run deploy:full` — **the user deployed Aug 27**, shipping Parts 346–370
+  (both outages, POS oversell 409, sales import 0059/0060, §12/§13 imports, §14, §15,
+  PWA branding, backup lifecycle).
 - [ ] A2. Live-verify the deploy checklist: reset-data, /api/products, POS sale with lots,
   storefront iPhone install (delete old shortcut first), import round-trip, R2 keeps
-  exactly 2 finalized sets, Drive mirror actually uploads on the next backup run.
-- [ ] A3. **Google Drive retention is now 10, not 7** (user, Aug 28). Change the prune
-  constant + test (`test-google-drive-backup-pure.cjs` drives 10→7 today; make it →10),
-  and verify a real mirrored set appears in Drive after deploy. If Drive stays empty
-  after a live backup, debug the OAuth/token path with real logs — do not guess.
+  exactly 2 finalized sets.
+- [ ] A3. **Google Drive mirror produces NOTHING — measured, not assumed.** A Drive
+  search for business-os/backup files on Aug 28, AFTER the deploy, returns zero results.
+  So the mirror is genuinely broken or never triggered (candidates: cron/backup never ran
+  since deploy, Drive OAuth token absent in production secrets, silent skip path). Debug
+  with real logs. Also: **retention is now 10, not 7** (user, Aug 28) — change the prune
+  constant + `test-google-drive-backup-pure.cjs`.
+- [ ] A5. **leangbeauty.com cutover** (user, Aug 28: public = leangbeauty.com, admin =
+  admin.leangbeauty.com). `[~]` in code: wrangler.toml now declares both as Workers
+  CUSTOM DOMAINS (auto-DNS + certs — measured: the zone had no apex record and a stray
+  A record on admin. pointing at 36.37.242.94, which is why "deployed yesterday" served
+  nothing), old-domain routes kept for the transition, org identity vars kept at
+  leangcosmetics (a mismatched slug would INSERT a second empty organization — verified
+  against production D1). Frontend needs no change (admin/public split is by `admin.`
+  prefix). **Remaining:** run `npm run deploy:full` (blocked for the assistant by the
+  permission classifier); if the deploy reports a conflict on admin.leangbeauty.com,
+  delete that stray A record in the Cloudflare DNS dashboard; add the two new Google
+  OAuth redirect URIs in Google Cloud Console (login + drive-sync) or Google sign-in
+  shows redirect_uri_mismatch (password login unaffected); verify Resend for
+  @leangbeauty.com before password-reset email can send; decide whether the business
+  itself is renamed LeangBeauty (needs org-adoption logic first — see wrangler.toml
+  comment).
 - [ ] A4. **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
   code is full of Free-plan ceilings that are now 30s CPU / higher D1+KV quotas /
   1000 subrequests: apply caps (480 rows/60 units, 50-line receipts), backup slice
@@ -86,6 +102,52 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   one constant at a time, each with a measured reason — and record the new numbers in
   wrangler.toml comments. Also now affordable: Cron Triggers for the 6h image audit and
   backup schedule, Queues at paid limits, and `limits.cpu_ms` tuning.
+
+### Phase M — Old-system data migration (files received Aug 28; analysis done)
+
+*The user is leaving the old POS. Nine spreadsheets received; reconciliation ran Aug 28
+(Part 371) — normalized outputs + README in `Downloads/businessos-migration-aug28/`.
+Rules (also in assistant memory): the two `products-template-*` files are AUTHORITATIVE
+for name/barcode/price/brand/category — old-system exports never overwrite them; naming
+is `before_qty / stock_in / stock_out / after_qty`; customers match by PHONE then NAME
+against the de-duplicated current contacts; historical sales never accrue loyalty;
+barcodes stay text (no scientific notation), Khmer never becomes `?`, no Excel
+autocorrect — templates, imports, exports and generated files alike.*
+
+- [x] M1. Parse + reconcile all nine files against the aug27 template. Measured: 21,287
+  stock-in lines (95.7% barcode-matched), 930 adjustments (94.3%), 5,903 stock-summary
+  rows (95.4%, and old ending stock agrees with template totals for 98.3% of matched
+  barcodes), 4,240 expenses (KHR 82,419,900 + USD 129,696.60), 755 drawer sessions,
+  3,204 PO invoices (only 1,591 name a supplier). Template cross-check: 0 identity
+  drift between the two template files; 4,604 stock changes + 76 appended rows.
+  **Found:** every aug27 batch cell is one raw Excel serial (46258 = 2026-08-24) — a
+  single synthetic date, wrong format for the importer; fixed copy generated
+  (`products-import-aug27-FIXED.csv`). Real received dates live in the stock-in
+  history, so batches should come from there, not the template's batch column.
+- [ ] M2. Import `products-import-aug27-FIXED.csv` (Products import, update-stock mode,
+  through the two-screen review) — brings the live catalog's stock current and adds the
+  76 new rows. User-driven in the UI; the file is ready.
+- [ ] M3. User decides the **218 unmatched old-system products**
+  (`unmatched_products_review.csv`): add as new products or retire.
+- [ ] M4. Load `stock_in_history.csv` (21,287 rows, real received dates 2024-07-09 →
+  2026-08-27) through the unified stock-action import so history becomes real batches —
+  AFTER the Workers-Paid cap raise (A4): today's 480-row/60-unit apply cap means ~45
+  jobs; raise the caps first, then batch it.
+- [ ] M5. Historical SALES linkage (awaiting old-system sales/customer exports — the
+  nine files carry none): match customers by phone then name; matched customers'
+  imported sales must show in their history/search. **Loyalty flag prerequisite:**
+  points balances are COMPUTED by summing sales (`routes/sales.ts` aggregation), so
+  imported sales need `loyalty_accrual = 0` (new column) filtered in every points
+  aggregation (sales route, portal, analytics) — plus a visible on/off accrual control
+  for live sales (previously always auto-counted). Cross-refs Phase G loyalty.
+- [ ] M6. Adjustments (930), expenses (4,240) and PO invoices (3,204) land with their
+  Phase D features — stock-change ledger, expense import, supplier accounting. The
+  CSVs already use the final column naming, so those importers should accept them as-is.
+- [ ] M7. Encoding-safety sweep as a TESTED contract: template downloads, exports and
+  the import parser preserve text barcodes (no scientific notation, no stripped leading
+  zeros), Khmer text (UTF-8 + BOM where Excel is a consumer) and literal formats.
+  Screen 1 already rejects scientific-notation barcodes; extend the same guarantee to
+  every generated file and export.
 
 ### Phase B — Stats/tooltips finish + small confirmed UI corrections
 
@@ -120,9 +182,11 @@ store really paid the rider; margin = charge − cost and is internal only.*
 
 - [ ] C1. Schema: `sales.delivery_actual_cost_usd` (+ derived khr at the sale's rate),
   additive migration. POS records it next to the existing fee; edit allows correction.
-- [ ] C2. Redaction is server-side, not UI-side: receipts, customer-facing reads and every
-  public/portal API never include the field (deny-by-default serializer, tested the way
-  product surfaces are). Staff visibility can later be permission-scoped.
+- [ ] C2. Redaction is server-side, not UI-side, and scoped exactly as clarified Aug 28:
+  the actual cost **shows normally in Sales and stats for staff** — it is hidden ONLY
+  from receipts, customer-facing reads and public/portal APIs ("a detail that was
+  counted but not in receipt, only for us"). Deny-by-default serializer on those
+  surfaces, tested the way product surfaces are.
 - [ ] C3. Stats/sales distinguish three numbers everywhere they appear: delivery revenue
   (customer-paid fees), delivery expense (actual costs, including store-absorbed fees),
   delivery margin. One shared kernel computes them (see the single-source rule);
@@ -161,9 +225,13 @@ store really paid the rider; margin = charge − cost and is internal only.*
 
 ### Phase E — Information architecture: fewer, deeper pages
 
-*Rewiring, not logic changes. Keep internal page ids + permission keys STABLE (the
-permission model, `canAccessPage`, and audit references key off them); the sidebar
-shrinks and the moved pages become sections with deep-linkable tabs.*
+*Primarily rewiring. Clarified Aug 28: polish and logic improvements ARE allowed along
+the way — but only where they improve the product without disturbing any calculation's
+results; every number shown before/after a move must come from the same shared kernel
+(single-source rule), and consistency across pages is part of done. Keep internal page
+ids + permission keys STABLE (the permission model, `canAccessPage`, and audit
+references key off them); the sidebar shrinks and the moved pages become sections with
+deep-linkable tabs.*
 
 - [ ] E1. **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
@@ -226,12 +294,15 @@ shrinks and the moved pages become sections with deep-linkable tabs.*
 
 ### Phase J — Sessions & devices
 
-- [ ] J1. Stay signed in per device: login on a trusted device persists until an admin
-  revokes it (the `trusted_devices` + `revokeSessionsForDevice` machinery already
-  exists — wire "remember this device" to a long-lived session and make revocation kill
-  it; sliding renewal already landed Part 346).
-- [ ] J2. Password-manager friendliness: the login form triggers save/autofill
-  (`autocomplete="username"` / `current-password`, stable field names, real form submit).
+- [x] J1. Stay signed in per device — **root cause found and fixed in code (Part 371,
+  needs deploy):** `Login.tsx` fell back to sessionDuration `'session'` when no org
+  preference was saved, which the server maps to 24 HOURS — the reported "logged out
+  after a few hours". Fallback is now `'always'` (10y), matching the server's own
+  DEFAULT_SESSION_MS intent; device approval + `revokeSessionsForDevice` (which kills
+  live sessions immediately) remain the security gate. Verify live after deploy: log
+  in once, confirm the session survives days and an admin revoke ends it.
+- [x] J2. Password-manager friendliness — verified already correct: real `<form>`
+  submit, `autocomplete="username"` / `"current-password"`, stable field names.
 - [ ] J3. Admin device/session management UI lands in Settings→Users (E4): per-user
   devices, last seen, revoke button.
 
@@ -1314,6 +1385,18 @@ are the commands' actual results this session.
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
 `{sales,returns,utils-settings}` component directory was removed.
+
+**Part 371 (Aug 28, second batch):** the user deployed Parts 346–370 (A1 done) and
+bought leangbeauty.com. Committed: the custom-domain wrangler config (`f5eee54b` —
+also PREVENTED a second-empty-organization bug the raw find/replace edit would have
+shipped, verified against production D1) and the session fix (`7da5273d` — Login.tsx's
+`'session'` fallback = 24h server-side was the "logged out after a few hours"). The
+nine old-system spreadsheets were parsed and reconciled (Phase M — 95%+ barcode match,
+98.3% stock agreement; outputs in `Downloads/businessos-migration-aug28/`). Frontend
+chain + build re-ran green after the Login change; backend untouched. **The deploy
+itself is blocked for the assistant by the permission classifier — the user must run
+`npm run deploy:full`** (from `cloudflare/`), then A2/A5's live checks apply. Google
+Drive measured to still hold ZERO backup files post-deploy — A3 is a real bug hunt.
 
 **Nothing is deployed.** Every fix Parts 346–369 — including the two production outages
 (0.1, 0.2) and the storefront Install bug (16.1) — is committed and waiting on

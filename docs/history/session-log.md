@@ -7473,3 +7473,64 @@ backend source touched (Part 369's 79/79 sweep stands).
 (A1) still gates all Parts 346–370 work, including the Drive-backup verification. The
 B4 "delivery in the category column" location and the commission/service business rule
 remain flagged, not guessed.
+
+## Part 371 (chat, Aug 28 2026) — leangbeauty.com wiring, session-duration root cause, nine-file migration reconciliation
+
+**Ask.** (1) Wire leangbeauty.com (public) + admin.leangbeauty.com (admin) — the user
+bought and registered it on Cloudflare and deployed Parts 346–370 the day before.
+(2) Reconcile nine old-system spreadsheets against the two authoritative
+products-template files and stage the data for migration; template identity fields are
+never overwritten. (3) Mid-turn additions: match historical sales customers by phone
+then name against the de-duplicated current contacts; historical sales must not accrue
+loyalty points and accrual needs an on/off control; barcodes/Khmer/format safety in
+every template/import/export. Clarified delivery-cost visibility (staff sales/stats
+YES, receipt/customer NO) and that IA restructure may polish logic carefully.
+
+**What changed.**
+- `cloudflare/wrangler.toml` (`f5eee54b`): both new hostnames as Workers custom
+  domains (the zone had NO apex DNS record and a stray unproxied A on admin. →
+  36.37.242.94 — measured via curl/nslookup; custom domains create DNS + certs on
+  deploy). Old-domain routes kept for the transition. **Reverted the org slug/name
+  part of the user's find/replace edit:** production D1 has exactly one organization
+  row (LeangCosmetics); a slug matching neither current nor legacy identity makes
+  `ensureCoreDataInvariants` INSERT a second empty organization. Restored the
+  falsified outage-history comment.
+- `frontend/src/components/auth/Login.tsx` (`7da5273d`): sessionDuration fallback
+  `'session'` → `'always'`. The server maps `'session'` to 24 hours, which was the
+  reported "logged out after a few hours"; the server's DEFAULT_SESSION_MS was already
+  'always' but the frontend always sent an explicit value, defeating it.
+- Migration pack generated in `Downloads/businessos-migration-aug28/` (scripts in the
+  session scratchpad, Node + the repo's SheetJS): normalized CSVs with
+  before_qty/stock_in/stock_out/after_qty naming, BOM'd UTF-8, text barcodes; fixed
+  products import file; unmatched-products review list; README with measured numbers.
+- `progress.md`: Phase A rewritten (A1 done, A5 domain cutover), Phase M added, C2/E/J
+  updated per clarifications. New memory file `project_migration.md`.
+
+**What was found.**
+- The five old-system `.xls` files are HTML tables; SheetJS parses them.
+- Match rates vs the aug27 template: stock-in 95.7% by barcode (21,287 rows,
+  2024-07-09 → 2026-08-27), adjustments 94.3% (930), stock summary 95.4% (5,903) with
+  98.3% ending-stock agreement; 218 distinct unmatched old products. Template
+  cross-check: 0 identity drift, 4,604 stock changes, 76 appended rows — the file's
+  own claims verified true.
+- Every aug27 batch cell is raw Excel serial 46258 (= 2026-08-24): one synthetic date,
+  wrong format for the importer. Fixed copy generated; real received dates are in the
+  stock-in history.
+- Loyalty balances are COMPUTED by summing sales at read time (`routes/sales.ts`) —
+  no stored balance — so excluding historical sales from points REQUIRES a per-sale
+  flag filtered in every aggregation (M5).
+- Google Drive still holds ZERO business-os backup files after the deploy (live Drive
+  search) — the mirror is genuinely not producing files; A3 is a bug hunt, not a
+  deploy-wait.
+
+**Verified.** Frontend `tsc --noEmit` clean, full `test:utils` chain green, production
+build 23.05s — after the Login change. `wrangler deploy --dry-run` validates the new
+config. Cloudflare `tsc --noEmit` clean (no backend source change). Production D1
+organizations table inspected live. Reconciliation numbers are from the scripts' real
+runs, written into the pack's README.
+
+**Not done.** `npm run deploy:full` — denied by the assistant's permission classifier;
+the user must run it, then verify A2/A5 (possible DNS-record conflict on
+admin.leangbeauty.com; Google OAuth console needs the two new redirect URIs; Resend
+needs the new domain verified). M2–M7 (imports themselves), the loyalty flag/toggle,
+and everything else in the master plan phases B–K.
