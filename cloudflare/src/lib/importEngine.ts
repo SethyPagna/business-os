@@ -72,13 +72,13 @@ import { buildImportedContactState } from './contactOptions'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
-import { incrementBatchStockStatement } from './productBatches'
 import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { classifyUnifiedStockActions, type StockActionImportResult } from './stockActionCatalog'
 import { countUnifiedStockConfirmationRows, sealUnifiedStockAnalyzeConflicts } from './stockActionSeal'
 import { applyUnifiedStockAdd, applyUnifiedStockSale, ensureUnifiedStockProduct, type UnifiedStockSaleLine } from './stockActionCommit'
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
+import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import type { UnifiedStockResolvedRow } from './stockActionImport'
 import {
   normalizeImageMatchKey,
@@ -2327,6 +2327,18 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   for (const [, groupRows] of groups) {
     const first = groupRows[0]
     const identifier = str(first.receipt_number || first.order_reference) || `row ${first._rowNumber}`
+    if (groupRows.length > MAX_HISTORICAL_SALE_LINES) {
+      results.push({
+        rowNumber: first._rowNumber,
+        action: 'error',
+        identifier,
+        existingId: null,
+        message: `Sale exceeds the ${MAX_HISTORICAL_SALE_LINES}-line Free-plan safety limit; split it into smaller receipts.`,
+        changes: {},
+        data: first,
+      })
+      continue
+    }
 
     // Every line in one order shares one status -- a historical CSV row has
     // no mechanism to say "half this order's lines are still completed and
@@ -4583,135 +4595,25 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           })
         }
       }
-    } else if (job.type === 'sales') {
-      for (const r of actionable) {
-        const d = r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; created_at: string | null; sale_status: string }
-        statements.push({
-          sql: `INSERT INTO sales (
-                  receipt_number, cashier_id, cashier_name, branch_id, branch_name,
-                  customer_id, customer_name, customer_phone, customer_address,
-                  payment_method, payment_currency, exchange_rate, notes,
-                  subtotal_usd, subtotal_khr, discount_usd, discount_khr, tax_usd, tax_khr,
-                  total_usd, total_khr, amount_paid_usd, amount_paid_khr, change_usd, change_khr,
-                  membership_discount_usd, membership_discount_khr, membership_points_redeemed,
-                  is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone,
-                  delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
-                  sale_status, items, created_at
-                ) VALUES (
-                  @receipt_number, @cashier_id, @cashier_name, @branch_id, @branch_name,
-                  @customer_id, @customer_name, @customer_phone, @customer_address,
-                  @payment_method, @payment_currency, @exchange_rate, @notes,
-                  @subtotal_usd, @subtotal_khr, @discount_usd, @discount_khr, @tax_usd, @tax_khr,
-                  @total_usd, @total_khr, @amount_paid_usd, @amount_paid_khr, @change_usd, @change_khr,
-                  @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
-                  @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone,
-                  @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
-                  @sale_status, @items, @created_at
-                )`,
-          // created_at falls back to the apply-time timestamp (matching
-          // every other import type's created_at) only when the file's own
-          // sale_date column was blank or unparseable -- classifySales
-          // already validated it, this is just the "nothing was given"
-          // case, not a re-validation.
-          params: { ...d, items: JSON.stringify(d.items), created_at: d.created_at || nowIso },
-        })
-      }
     }
 
     if (statements.length) await runD1BatchInChunks(db, statements)
     sw.lap('buildAndWriteStatementsMs')
 
-    // Sale line items need the parent sale's id, which only exists after
-    // the batch above runs -- handled as a second pass (not perfectly
-    // atomic with the sales-header insert, a known trade-off of D1's
-    // batch() not returning per-statement lastInsertRowid; see lib/db.ts).
-    // Scoped to just THIS window's actionable sales -- the same
-    // "last N by id DESC" trade-off the original single-shot version had,
-    // just against a smaller N and a smaller time window per chunk.
+    // Each reviewed receipt is one idempotent D1 transaction: header,
+    // items, return-restock writes, and its commit marker either all land
+    // or all roll back. The deterministic client_request_id resolves the
+    // parent id inside SQL, removing the concurrency-unsafe "latest N sale
+    // ids" lookup that could attach one user's lines to another sale.
     if (job.type === 'sales' && actionable.length) {
-      const recentSales = await db.prepare(`SELECT id FROM sales ORDER BY id DESC LIMIT @n`).all<{ id: number }>({ n: actionable.length })
-      const ids = recentSales.map((s) => s.id).reverse()
-      const itemStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
-      // Stock-restore statements for return-status orders only -- see
-      // classifySales' header comment for why a plain 'completed'/
-      // 'awaiting_delivery'/etc. import never reaches this block at all:
-      // nothing here deducts stock for those, ever, regardless of quantity
-      // or branch. Only a returned_quantity > 0 on a returned/partial_return
-      // line produces any statement below.
-      const stockStatements: Array<{ sql: string; params: Record<string, unknown> }> = []
-      actionable.forEach((r, index) => {
-        const saleId = ids[index]
-        const d = r.data as Record<string, unknown> & { sale_status: string; receipt_number: string | null }
-        const items = (r.data as { items: Array<Record<string, unknown>> }).items
-        const isReturnGroup = RETURN_STATUSES.has(d.sale_status)
-        for (const item of items) {
-          itemStatements.push({
-            sql: `INSERT INTO sale_items (
-                    sale_id, product_id, product_name, sku, quantity,
-                    applied_price_usd, applied_price_khr, total_usd, total_khr,
-                    cost_price_usd, cost_price_khr,
-                    base_price_usd, base_price_khr,
-                    product_discount_type, product_discount_label, product_discount_usd, product_discount_khr,
-                    manual_discount_type, manual_discount_value, manual_discount_usd, manual_discount_khr,
-                    branch_id, batch_id, batch_label, batch_expiry_date, returned_quantity
-                  ) VALUES (
-                    @sale_id, @product_id, @product_name, @sku, @quantity,
-                    @applied_price_usd, @applied_price_khr, @total_usd, @total_khr,
-                    @cost_price_usd, @cost_price_khr,
-                    @base_price_usd, @base_price_khr,
-                    @product_discount_type, @product_discount_label, @product_discount_usd, @product_discount_khr,
-                    @manual_discount_type, @manual_discount_value, @manual_discount_usd, @manual_discount_khr,
-                    @branch_id, @batch_id, @batch_label, @batch_expiry_date, @returned_quantity
-                  )`,
-            params: { ...item, sale_id: saleId },
-          })
-
-          const returnedQuantity = Number(item.returned_quantity) || 0
-          if (!isReturnGroup || returnedQuantity <= 0) continue
-          const productId = item.product_id as number
-          const branchId = item.branch_id as number | null
-          const batchId = item.batch_id as number | null
-
-          // Mirrors routes/sales.ts PATCH /:id/status's own
-          // wasStockDeducted->!willStockBeDeducted restore branch (branch_stock,
-          // product aggregate, inventory_movements, and the batch increment)
-          // -- same four writes, just keyed off the file's own line quantity
-          // instead of a prior sale_items row, since import has no "before"
-          // state to diff against (see classifySales' header comment on why
-          // this is the one path that touches stock at all).
-          stockStatements.push({
-            sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = @updated_at WHERE id = @id`,
-            params: { id: productId, quantity: returnedQuantity, updated_at: nowIso },
-          })
-          if (branchId) {
-            stockStatements.push({
-              sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
-                    ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
-              params: { product_id: productId, branch_id: branchId, quantity: returnedQuantity },
-            })
-            if (batchId) stockStatements.push(incrementBatchStockStatement(batchId, branchId, returnedQuantity))
-          }
-          stockStatements.push({
-            sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, reason, created_at) VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @reason, @created_at)`,
-            params: {
-              product_id: productId,
-              product_name: item.product_name,
-              branch_id: branchId,
-              quantity: returnedQuantity,
-              reason: `Imported as ${d.sale_status}${d.receipt_number ? ` (receipt ${d.receipt_number})` : ''}`,
-              created_at: nowIso,
-            },
-          })
-        }
-      })
-      if (itemStatements.length) await runD1BatchInChunks(db, itemStatements)
-      // Deliberately a SEPARATE db.batch() pass from both the sales-header
-      // write (already committed above, before this sale's id was even
-      // known) and the sale_items insert just above -- same "not perfectly
-      // atomic across passes" trade-off this function's own comment already
-      // accepts for sale_items itself (D1 batch() not returning
-      // per-statement lastInsertRowid across separate INSERT tables).
-      if (stockStatements.length) await runD1BatchInChunks(db, stockStatements)
+      for (const r of actionable) {
+        await applyHistoricalSaleImport(db, {
+          jobId,
+          rowNumber: r.rowNumber,
+          data: r.data as Record<string, unknown> & { items: Array<Record<string, unknown>>; sale_status: string; receipt_number: string | null; created_at: string | null },
+          nowIso,
+        })
+      }
     }
     sw.lap('salesItemsMs')
 

@@ -10,7 +10,7 @@
     "dev": "node scripts/with-wrangler-auth.cjs wrangler dev --local",
     "build:frontend": "npm --prefix ../frontend run build",
     "typecheck": "tsc --noEmit",
-    "test:import-engine": "node scripts/test-import-engine-pure.cjs",
+    "test:import-engine": "node scripts/test-import-engine-pure.cjs && node scripts/test-sales-import-commit-pure.cjs",
     "test:import-image-match": "node scripts/test-import-image-match.cjs",
     "test:zip-reader": "node scripts/test-zip-reader.cjs",
     "migrate:local": "node scripts/with-wrangler-auth.cjs wrangler d1 migrations apply business-os --local",

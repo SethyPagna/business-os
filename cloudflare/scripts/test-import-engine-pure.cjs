@@ -226,6 +226,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './sqlBinding') {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
+  if (request === './salesImportCommit') {
+    return { MAX_HISTORICAL_SALE_LINES: 50, applyHistoricalSaleImport: async () => ({ alreadyApplied: false }) }
+  }
   if (stubbable.has(request)) {
     return {} // empty stub -- fine, these truly aren't touched by the functions under test
   }
@@ -1568,7 +1571,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // (tested above) is only half the fix if the INSERT that actually writes
 // sale_items drops the column again.
 {
-  const insertMatch = source.match(/INSERT INTO sale_items \(([^)]+)\) VALUES/)
+  const salesCommitSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'salesImportCommit.ts'), 'utf8')
+  const insertMatch = salesCommitSource.match(/INSERT INTO sale_items \(([^)]+)\)[\s\S]*?SELECT/)
   assert.ok(insertMatch, 'runImportApply should still build an INSERT INTO sale_items(...) statement for imported sales')
   const insertColumns = insertMatch[1].split(',').map((c) => c.trim())
   for (const column of [
@@ -1591,7 +1595,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // the cost_price_usd/khr and products Track F gaps this file already
 // guards against.
 {
-  const insertMatch = source.match(/INSERT INTO sales \(([^)]+)\) VALUES/)
+  const salesCommitSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'salesImportCommit.ts'), 'utf8')
+  const insertMatch = salesCommitSource.match(/INSERT INTO sales \(([^)]+)\)[\s\S]*?SELECT/)
   assert.ok(insertMatch, 'runImportApply should still build an INSERT INTO sales(...) statement for imported sales')
   const insertColumns = insertMatch[1].split(',').map((c) => c.trim())
   assert.ok(insertColumns.includes('customer_id'), 'sales INSERT (import apply path) is missing column "customer_id" -- contacts.ts\'s per-customer purchase history and notifications.ts\'s top-customer aggregation would silently never see imported sales for a real matched customer')
@@ -1606,7 +1611,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
 // same "computed but never reaches the actual write" bug class this file
 // already guards cost_price_usd/khr and customer_id against.
 {
-  const insertMatch = source.match(/INSERT INTO sales \(([^)]+)\) VALUES/)
+  const salesCommitSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'salesImportCommit.ts'), 'utf8')
+  const insertMatch = salesCommitSource.match(/INSERT INTO sales \(([^)]+)\)[\s\S]*?SELECT/)
   assert.ok(insertMatch, 'runImportApply should still build an INSERT INTO sales(...) statement for imported sales')
   const insertColumns = insertMatch[1].split(',').map((c) => c.trim())
   for (const column of [
