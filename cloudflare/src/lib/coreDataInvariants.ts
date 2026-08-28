@@ -17,6 +17,7 @@
 // way an equivalent Docker/Postgres instance would after first boot.
 
 import { getDb } from './db'
+import { buildInClause } from './sqlBinding'
 import type { Env } from '../index'
 import bcrypt from 'bcryptjs'
 
@@ -177,21 +178,18 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
 
   // Prefer the configured identity; fall back to previous identities (most
   // recent first) so an existing organization is adopted and renamed in
-  // place rather than duplicated.
-  const previousIdPlaceholders = PREVIOUS_IDENTITIES.map((_, index) => `@previousId${index}`).join(', ')
-  const previousSlugPlaceholders = PREVIOUS_IDENTITIES.map((_, index) => `@previousSlug${index}`).join(', ')
-  const previousParams: Record<string, string> = {}
-  PREVIOUS_IDENTITIES.forEach(({ slug, publicId: pid }, index) => {
-    previousParams[`previousId${index}`] = pid
-    previousParams[`previousSlug${index}`] = slug
-  })
+  // place rather than duplicated. IN-lists go through lib/sqlBinding's
+  // buildInClause like everywhere else — the list is tiny, but hand-built
+  // placeholder lists are exactly what test-d1-bound-params-repro forbids.
+  const previousIds = buildInClause('previousId', PREVIOUS_IDENTITIES.map(({ publicId: pid }) => pid))
+  const previousSlugs = buildInClause('previousSlug', PREVIOUS_IDENTITIES.map(({ slug }) => slug))
   const existingOrg = await db.prepare(`
     SELECT id FROM organizations
     WHERE public_id = @publicId OR slug = @slug
-       OR public_id IN (${previousIdPlaceholders}) OR slug IN (${previousSlugPlaceholders})
+       OR public_id IN (${previousIds.sql}) OR slug IN (${previousSlugs.sql})
     ORDER BY CASE WHEN public_id = @publicId THEN 0 WHEN slug = @slug THEN 1 ELSE 2 END, id ASC
     LIMIT 1
-  `).get<{ id: number }>({ publicId, slug: orgSlug, ...previousParams })
+  `).get<{ id: number }>({ publicId, slug: orgSlug, ...previousIds.params, ...previousSlugs.params })
 
   let organizationId: number
   if (existingOrg?.id) {
