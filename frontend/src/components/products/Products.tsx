@@ -687,6 +687,12 @@ function ProductsFullEditor() {
   const [unitFilter,   setUnitFilter]   = useState<string>('')
   const [modal,        setModal]        = useState<ProductModalMode>(null)
   const [selected,     setSelected]     = useState<ProductRecord | null>(null)
+  // 10.2 invariant: this is SET at every open (openProductFormTab and the
+  // toolbar Add), never trusted from a previous open. The reported bug --
+  // "Edit does not auto-move sections back to Details" -- was this value
+  // surviving a save: Adjust Stock set 'stock', both save-success paths
+  // closed the modal without resetting it, and the next Add/Edit that
+  // didn't pass a tab opened on the stale Stock section.
   const [formInitialTab, setFormInitialTab] = useState<ProductFormTab>('basic')
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   // `toModalProduct(selected)` used to be called inline in the ProductForm
@@ -3334,7 +3340,7 @@ function ProductsFullEditor() {
               setExportScopeId(productExportScopes[0]?.id || 'visible')
               setExportFieldsOpen(true)
             } : undefined}
-            onAdd={canAddProduct ? ()=>{setSelected(null);setModal('form')} : undefined}
+            onAdd={canAddProduct ? ()=>{setSelected(null);setFormInitialTab('basic');setModal('form')} : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
