@@ -36,7 +36,11 @@ export async function applyHistoricalSaleImport(
   if (!Number.isSafeInteger(rowNumber) || rowNumber <= 0) throw new Error('Sale import row number is invalid')
   if (!Array.isArray(d.items) || d.items.length === 0) throw new Error(`Sale on row ${rowNumber} has no items`)
   if (d.items.length > MAX_HISTORICAL_SALE_LINES) {
-    throw new Error(`Sale on row ${rowNumber} exceeds the ${MAX_HISTORICAL_SALE_LINES}-line Free-plan safety limit; split it into smaller receipts.`)
+    // "Safety limit", no plan name: the constant's own comment above holds
+    // the real bound (largest genuine receipt = 86 lines; malformed groups
+    // stay rejected) -- naming a billing plan in the operator-facing error
+    // went stale the day the plan changed (A4).
+    throw new Error(`Sale on row ${rowNumber} exceeds the ${MAX_HISTORICAL_SALE_LINES}-line safety limit; split it into smaller receipts.`)
   }
 
   const groupKey = `row:${rowNumber}`

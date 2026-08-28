@@ -113,7 +113,7 @@ function saleData(overrides = {}) {
   const tooMany = Array.from({ length: subject.MAX_HISTORICAL_SALE_LINES + 1 }, () => ({ ...saleData().items[0] }))
   await assert.rejects(
     () => subject.applyHistoricalSaleImport(setup().db, { ...input, data: saleData({ items: tooMany }) }),
-    /Free-plan safety limit/,
+    /-line safety limit/,
   )
 
   console.log('PASS historical sales import is atomic, retry-idempotent, concurrency-safe, return-safe, and line-bounded')

@@ -74,6 +74,8 @@ type AdjustStockPayload = {
   userId?: number | string
   userName?: string
   receivedDate?: string
+  supplierId?: number
+  supplierName?: string
 }
 
 type ApiResult = {
@@ -147,6 +149,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   // server's date->code matching per product exactly as a picker's "New
   // batch" does, so late bulk stock-ins land with their real date.
   const [receivedDate, setReceivedDate] = useState(todayIsoDate())
+  // D5a: one supplier for the whole bulk receive event -- every lot this
+  // add creates gets it; a lot that already has a supplier keeps its own
+  // (COALESCE fill server-side, first attribution sticks). supplierId only
+  // ever comes from picking a contact suggestion; free text stays a
+  // deliberate name-only attribution.
+  const [supplierId, setSupplierId] = useState<number | null>(null)
+  const [supplierName, setSupplierName] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -268,6 +277,9 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             // Only an 'add' creates/matches lots -- same visibility-mirror
             // rule as every other adjust surface.
             receivedDate: action === 'add' && receivedDate ? receivedDate : undefined,
+            // D5a: adds only, mirroring the field's own visibility below.
+            supplierId: action === 'add' && supplierId != null ? supplierId : undefined,
+            supplierName: action === 'add' && supplierName.trim() ? supplierName.trim() : undefined,
           }), 'Bulk adjust product stock')
           if (result?.success === false) throw new Error(result?.error || 'Failed to adjust stock')
           done += 1

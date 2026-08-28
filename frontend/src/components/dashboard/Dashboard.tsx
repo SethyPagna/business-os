@@ -685,7 +685,10 @@ export default function Dashboard() {
       }))
     }
     setProductDetail(null)
-    navigateTo('inventory')
+    // E1: the inventory page id retired into the Branches hub -- the focus
+    // payload written above still targets Inventory (the hub peeks it to
+    // open the Products chip; Inventory consumes it exactly as before).
+    navigateTo('branches')
   }, [navigateTo])
 
   const getCurrentDashboardRange = useCallback(() => {
