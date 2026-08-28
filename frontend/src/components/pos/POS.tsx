@@ -3114,7 +3114,15 @@ export default function POS() {
                 <div className="text-xs text-gray-500 font-medium">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</div>
                 <div className="mt-1 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
                   {!active.customer?.membership_number ? (
-                    <p className="text-xs text-emerald-700">{posCopy('Select a customer with a membership number to apply membership discount separately from store discount.', 'ជ្រើសអតិថិជនដែលមានលេខសមាជិក ដើម្បីអនុវត្តបញ្ចុះតម្លៃសមាជិកដោយឡែកពីបញ្ចុះតម្លៃហាង។')}</p>
+                    // Y11: the explanation moves behind an InfoHint -- the
+                    // line just cues the action, prose on tap only.
+                    <div className="flex items-center gap-1 text-xs text-emerald-700">
+                      {posCopy('Select a member to apply', 'ជ្រើសសមាជិកដើម្បីអនុវត្ត')}
+                      <InfoHint
+                        label={posCopy('About membership discount', 'អំពីបញ្ចុះតម្លៃសមាជិក')}
+                        text={posCopy('Select a customer with a membership number to apply membership discount separately from store discount.', 'ជ្រើសអតិថិជនដែលមានលេខសមាជិក ដើម្បីអនុវត្តបញ្ចុះតម្លៃសមាជិកដោយឡែកពីបញ្ចុះតម្លៃហាង។')}
+                      />
+                    </div>
                   ) : membershipLoading ? (
                     <p className="text-xs text-emerald-700">{posCopy('Checking membership points...')}</p>
                   ) : membershipError ? (
