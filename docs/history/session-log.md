@@ -8067,3 +8067,50 @@ both typechecks; build 17.03s; wrangler dry-run; harness **68 migrations** with
 **Not done.** Deploy (0061–0067 ride `npm run deploy:full`); the imports
 themselves (manifest order); the two customer merges; ordered remainder
 (P7, P3, P4, P6, K6, G1, D1b, H1, N1c, N2, N3, A3).
+
+## Part 385 (chat, Aug 28 2026) — the connection preflight: everything now actually links
+
+**Asked.** "Make sure the sales, and so on have connecting customers and products."
+
+**How.** Ran the app's REAL import classifiers (compiled from cloudflare/src via
+the test harness) over the actual pack files, against the MERGED post-import
+catalog (8,876 file rows → 6,104 products, the same merge the products import
+performs) and the real 4,652 production customers.
+
+**Found and fixed (both would have broken the migration):**
+- `stock_in_history.csv` was NOT importable at all: the §12 resolver reads
+  `action`/`shop`/`warehouse` and the file had none — all 21k rows would have
+  failed "Enter a shop or warehouse quantity". The file now carries the contract
+  columns; the same barcode+date invoice join that filled `supplier` also decided
+  the branch (19,684 shop / 1,602 warehouse; 318 undecidable → shop, documented)
+  and filled **6,968 real per-unit costs** — historical batches now land with
+  supplier AND cost for D5's purchases view.
+- The sales files carried template NAMES but OLD barcodes: ~28% of receipts
+  errored under the strict identity rule. Repair-only pass (touch failing rows,
+  apply a candidate only if IT resolves; §12 vs sales matcher semantics mirrored
+  exactly): 34,871 barcodes + 16,667 names → template identity; the 6
+  merge-decision products remapped to their targets (the mapping file never
+  absorbed those decisions); the deleted product's history row dropped;
+  junk-barcode rows adopted their mapping-decided catalog identity; Charlotte
+  Tilbury No Box pinned to 05056446657228 (the twin holding the old system's
+  stock — evidence, not a guess). A first, too-aggressive rewrite pass was itself
+  caught by re-preflight and repaired.
+
+**Final preflight:** stock history **21,286/21,286 attach — 100%, zero creates,
+zero conflicts**; sales **14,913/14,919 receipts** (6 junk lines err visibly:
+4 old `test` rows + 2 sales of the user-deleted "For back"); customers link
+**99%+** of customer-carrying receipts; suppliers 8,053/8,053 in vocabulary;
+validator ALL PASS (footer constants fallback added — the source .xls left
+Downloads); xlsx twins regenerated.
+
+**Also settled:** the stock double-count question. Sales imports are records-only
+(verified in salesImportCommit — only return rows restock); history ADDs are
+corrected by re-importing the two catalog files at the end (update-stock REPLACES
+per-branch quantities → template truth exactly); optional SQL parks historical
+lots' live counts so FIFO pickers skip them. New files:
+`delivery-contacts-from-sales.csv` (2 drivers / 11,778 delivery receipts) and
+optional `customers-missing-from-sales.csv` (53). IMPORT-MANIFEST rewritten with
+the preflight numbers, new steps 3b/3c/4d/4e, and the stock-math explainer.
+
+**Not done.** Deploy + the imports themselves (user, per manifest); two customer
+merges; ordered remainder (P7, P3, P4, P6, K6, G1, D1b, H1, N1c, N2, N3, A3).

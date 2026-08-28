@@ -731,6 +731,36 @@ deep-linkable tabs.*
 - [x] S4. **D5 shipped** — see D5 above (0067 received_quantity + purchases endpoint +
   supplier detail Purchases drill).
 
+### Phase T — Aug-28 twelfth batch (Part 385): the connection preflight
+
+- [x] T1. **"Make sure sales and so on have connecting customers and products" —
+  proven by running the app's REAL import classifiers over the actual pack against
+  the merged post-import catalog + the real 4,652 production customers.** Found and
+  fixed two showstoppers: (a) `stock_in_history.csv` lacked the §12 contract's
+  `action`/`shop`/`warehouse` columns — every one of its 21k rows would have failed;
+  now carries them, with the invoice join also deciding branch (19,684 shop / 1,602
+  warehouse) and filling **6,968 real per-unit costs**; (b) the sales files carried
+  template NAMES but OLD barcodes — 28% of receipts would have errored under the
+  strict identity rule; 34,871 barcodes + 16,667 names rewritten to template
+  identity, the 6 merge-decision products remapped to their targets, the
+  delete-decision rows dropped from history, junk-barcode rows adopted their
+  mapping-decided catalog identity (incl. the evidence-based Charlotte Tilbury
+  No Box pin → 05056446657228, the twin that carries the old system's stock).
+  **Final: history 21,286/21,286 attach (100%, 0 creates/conflicts); sales
+  14,913/14,919 receipts (6 junk lines err visibly: 4 `test` + 2 deleted
+  "For back"); customers link 99%+; suppliers 8,053/8,053 in vocabulary.**
+- [x] T2. **The double-count question answered in the manifest**: Step 1 loads final
+  template quantities; history ADDS (builds batches/suppliers/costs); sales are
+  records-only (verified: applyHistoricalSaleImport only restocks return rows);
+  Step 4d re-imports the two catalog files (update-stock REPLACES per branch) to
+  land exactly on template truth; optional 4e zeroes historical lots' live counts
+  so FIFO pickers skip them while D5's received/cost data stays.
+- [x] T3. **New connector files:** `delivery-contacts-from-sales.csv` (2 drivers —
+  11,778 delivery receipts link once imported before sales) and optional
+  `customers-missing-from-sales.csv` (53 phone-carrying customers ranked by
+  receipts). Pack re-validated end-to-end (validator now falls back to the recorded
+  source footer when the original .xls has left Downloads); xlsx twins regenerated.
+
 ### Flagged, not guessed (Golden Rule 7)
 
 - B4's location (which page shows delivery inside a category column) is unconfirmed.
@@ -1792,6 +1822,7 @@ are the commands' actual results this session.
 | Migration harness | **all 68 migrations apply cleanly** (Part 384, `received_quantity` verified present); `0061`–`0067` are committed but **not deployed** — the next `npm run deploy:full` carries them |
 | Migration pack (after the S2 name propagation) | **ALL VALIDATIONS PASSED** rerun (quantities exact vs footer, revenue 0.02%, Khmer byte-perfect, zero scientific barcodes); xlsx round-trip OK |
 | Production devices (read-only D1 query) | trusted_devices **0**, user_sessions 94 (**2 live**) — the Part 375 clean slate holds |
+| **Part 385 connection preflight** (real classifiers over the real files vs merged catalog + 4,652 real customers) | stock history **21,286/21,286 attach**, sales **14,913/14,919 receipts** (6 junk lines err by design), customers **99%+ linked**, suppliers **8,053/8,053**; pack re-validated ALL PASS after the identity rewrite |
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
