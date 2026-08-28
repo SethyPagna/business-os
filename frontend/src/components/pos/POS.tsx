@@ -34,6 +34,7 @@ import ProductImage from './ProductImage'
 import CartItem     from './CartItem'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
+import InfoHint from '../shared/InfoHint'
 import { useIsPageActive } from '../shared/pageActivity'
 import {
   buildProductsById,
@@ -3376,8 +3377,22 @@ export default function POS() {
 
           {/* Checkout button pinned at the bottom */}
           <div className="flex-shrink-0 px-3 py-2.5 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+            {/* Z9: the stock consequence of each status lives behind an
+                InfoHint, not inline prose -- the button just says Complete
+                Sale (the status is chosen in the picker it opens). */}
+            <div className="mb-1.5 flex items-center justify-center gap-1 text-[11px] text-gray-400">
+              {t('status_stock_effect_cue') || 'Stock effect by status'}
+              <InfoHint
+                label={t('status_stock_effect_label') || 'What each sale status does to stock'}
+                text={[
+                  `${getPosStatusLabel('completed', t)}: ${t('pos_status_completed_desc') || 'Payment received - stock deducted now'}`,
+                  `${getPosStatusLabel('awaiting_payment', t)}: ${t('pos_status_awaiting_payment_desc') || 'Order placed, payment pending - stock held (not deducted)'}`,
+                  `${getPosStatusLabel('awaiting_delivery', t)}: ${t('pos_status_awaiting_delivery_desc') || 'Paid, not yet delivered - stock deducted'}`,
+                ].join('\n\n')}
+              />
+            </div>
             <button className="btn-success w-full py-3 text-sm font-bold" onClick={openStatusPicker} disabled={loading || showStatusPicker || active.cart.length === 0}>
-              {loading ? t('loading') : `${t('done') || 'Done'}${active.isDelivery ? ` - ${t('pos_delivery') || 'Delivery'}` : ''}`}
+              {loading ? t('loading') : (t('complete_sale') || 'Complete Sale')}
             </button>
           </div>
 
