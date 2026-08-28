@@ -58,7 +58,7 @@ interface ImportResult {
 interface ImportApi {
   openCSVDialog?: () => Promise<CsvDialogResult | null | undefined>
   downloadImportTemplate: (type: 'sales') => void
-  createImportJob: (payload: { type: 'sales'; policy: { source: string } }) => Promise<ImportJobResponse>
+  createImportJob: (payload: { type: 'sales'; policy: { source: string; accrue_loyalty?: boolean } }) => Promise<ImportJobResponse>
   uploadImportJobCsv: (payload: { jobId: string | number; text: string; fileName: string }) => Promise<unknown>
   startImportJob: (jobId: string | number) => Promise<unknown>
 }
@@ -187,6 +187,13 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
     getImportApi().downloadImportTemplate('sales')
   }
 
+  // Whether these imported sales EARN loyalty points -- the operator's call
+  // (N1: "keep users in the loop"), default OFF because the usual case is
+  // historical data whose points would inflate balances (they are computed by
+  // summing sales). The server is safe-off too: policy.accrue_loyalty must be
+  // exactly true to accrue (importEngine.getSalesImportAccrueLoyalty).
+  const [accrueLoyalty, setAccrueLoyalty] = useState(false)
+
   const handleImport = async () => {
     if (!beginSingleAction(importInFlightRef)) return
     const rowCount = previewRowCount || countCsvDataRows(csvText)
@@ -205,7 +212,7 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
     setLoading(true)
     try {
       const created = await withLoaderTimeout(
-        () => getImportApi().createImportJob({ type: 'sales', policy: { source: 'sales_modal' } }),
+        () => getImportApi().createImportJob({ type: 'sales', policy: { source: 'sales_modal', accrue_loyalty: accrueLoyalty } }),
         'Sales import job',
         SALES_IMPORT_JOB_CREATE_TIMEOUT_MS,
       )
@@ -286,6 +293,26 @@ export default function SalesImportModal({ onClose, onDone }: ImportModalProps) 
           noFileLabel={tr('sales_import_no_file', 'No CSV or Excel file selected yet.', 'មិនទាន់បានជ្រើសឯកសារ CSV ទេ។')}
           previewHeadingLabel={tr('rows_ready_count', '{count} row(s) ready', '{count} ជួររួចរាល់').replace('{count}', String(previewRowCount))}
         />
+        <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={accrueLoyalty}
+            onChange={(event) => setAccrueLoyalty(event.target.checked)}
+          />
+          <span className="min-w-0">
+            <span className="block font-medium text-gray-800 dark:text-gray-200">
+              {tr('sales_import_accrue_loyalty', 'Count loyalty points for these sales', 'គិតពិន្ទុសមាជិកសម្រាប់ការលក់ទាំងនេះ')}
+            </span>
+            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+              {tr(
+                'sales_import_accrue_loyalty_hint',
+                'Off by default: historical sales usually should not add points to customer balances. Turn on only if these sales should earn points.',
+                'បិទតាមលំនាំដើម៖ ការលក់ប្រវត្តិសាស្ត្រជាធម្មតាមិនគួរបន្ថែមពិន្ទុទៅសមតុល្យអតិថិជនទេ។ បើកតែក្នុងករណីការលក់ទាំងនេះគួរទទួលបានពិន្ទុ។',
+              )}
+            </span>
+          </span>
+        </label>
         {result ? (
           <div className="rounded-xl border border-gray-200 p-3 text-sm dark:border-gray-700">
             <div className="font-medium text-gray-800 dark:text-gray-200">

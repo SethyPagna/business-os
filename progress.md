@@ -79,21 +79,20 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   since deploy, Drive OAuth token absent in production secrets, silent skip path). Debug
   with real logs. Also: **retention is now 10, not 7** (user, Aug 28) — change the prune
   constant + `test-google-drive-backup-pure.cjs`.
-- [ ] A5. **leangbeauty.com cutover** (user, Aug 28: public = leangbeauty.com, admin =
-  admin.leangbeauty.com). `[~]` in code: wrangler.toml now declares both as Workers
-  CUSTOM DOMAINS (auto-DNS + certs — measured: the zone had no apex record and a stray
-  A record on admin. pointing at 36.37.242.94, which is why "deployed yesterday" served
-  nothing), old-domain routes kept for the transition, org identity vars kept at
-  leangcosmetics (a mismatched slug would INSERT a second empty organization — verified
-  against production D1). Frontend needs no change (admin/public split is by `admin.`
-  prefix). **Remaining:** run `npm run deploy:full` (blocked for the assistant by the
-  permission classifier); if the deploy reports a conflict on admin.leangbeauty.com,
-  delete that stray A record in the Cloudflare DNS dashboard; add the two new Google
-  OAuth redirect URIs in Google Cloud Console (login + drive-sync) or Google sign-in
-  shows redirect_uri_mismatch (password login unaffected); verify Resend for
-  @leangbeauty.com before password-reset email can send; decide whether the business
-  itself is renamed LeangBeauty (needs org-adoption logic first — see wrangler.toml
-  comment).
+- [x] A5. **leangbeauty.com is LIVE** (Part 373). Both leangbeauty.com and
+  admin.leangbeauty.com return 200 (measured); the user added the Worker routes and ran
+  the automation. Migration `0061` applied to remote D1 (it was the only one pending).
+  **Org renamed to LeangBeauty:** `coreDataInvariants` gained a PREVIOUS_IDENTITIES
+  adoption list so the existing production row (LeangCosmetics/leangcosmetics — one row,
+  verified) is renamed in place, never duplicated; wrangler vars flipped; test proves
+  the in-place rename. **Old-domain redirect** added in index.html (page visits on
+  leangcosmetics.dpdns.org / leangcosmetics.com / www variants → leangbeauty.com, path
+  preserved; API/upload fetches never hit it). **Remaining for the user:** the rename +
+  redirect ship on the NEXT `npm run deploy:full` (blocked for the assistant); add the
+  two leangbeauty.com Google OAuth redirect URIs in Google Cloud Console; verify Resend
+  for @leangbeauty.com. **DNS caveat:** `leangcosmetics.com` currently resolves to
+  36.37.242.94 (NOT Cloudflare), so its redirect route can't fire until its DNS points
+  at Cloudflare — a dashboard action; the .dpdns.org redirect works today.
 - [ ] A4. **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
   code is full of Free-plan ceilings that are now 30s CPU / higher D1+KV quotas /
   1000 subrequests: apply caps (480 rows/60 units, 50-line receipts), backup slice
@@ -142,9 +141,21 @@ autocorrect — templates, imports, exports and generated files alike.*
 - [ ] M2. Import `products-import-aug27-FIXED.csv` (Products import, update-stock mode,
   through the two-screen review) — brings the live catalog's stock current and adds the
   76 new rows. User-driven in the UI; the file is ready.
-- [ ] M3. User decides the **72 review + 17 new** rows in `product_mapping.csv`
-  (supersedes the earlier 218-row list — fuzzy matching resolved most). Web-verifying
-  official names is the tie-breaker for the review rows if wanted.
+- [~] M3. **Web-verified (Part 373; spot-audited + extended Part 374).**
+  `product_mapping_review_VERIFIED.csv` gives a decision for all 89 review+new rows:
+  **71 add_as_new** (distinct SKUs — verified shade lines: YSL All Hours Precise Angles
+  concealer, Rouge Pur Couture Caring Satin codes, Bobbi Brown Intensive Serum
+  Foundation shades, Dior Rosy Glow 061, Rare Beauty Sincerely Me, Dior Forever Glow
+  Veil SPF20), **6 merge_into_template** (D&G=Dolce & Gabbana, SK-II set, Morphe
+  C1.25…), **12 user_decide** (bare placeholders like "Mac New Item", "For back").
+  Part 374 spot-audited the file per Golden Rule 5 and resolved one: barcode
+  850055527119 "Rhode Frekle" (18 rows) = **rhode Pocket Blush, shade Freckle**
+  (retailer-confirmed; the old name was a typo). **A copy for the user's own review is
+  at `C:\Users\mrkl6\Downloads\REVIEW-products-web-verified.csv`** (the working copy
+  stays in the pack). User decides the 12 + confirms the rest.
+- [x] M3b. **Production catalog is EMPTY** (0 active products, 0 batches, 0 branch_stock;
+  4,652 customers preserved) — measured Part 373. So the products import is a clean
+  first load with no double-count risk. Users(3)/import_jobs(7) intact.
 - [ ] M4. Load `stock_in_history.csv` (21,287 rows, real received dates 2024-07-09 →
   2026-08-27) through the unified stock-action import so history becomes real batches —
   AFTER the Workers-Paid cap raise (A4): today's 480-row/60-unit apply cap means ~45
@@ -232,6 +243,14 @@ store really paid the rider; margin = charge − cost and is internal only.*
 - [ ] D3. Product "click to view details" absorbs Inventory's stock-movement detail, so
   the product detail is the one place with: info, batches (§14 modal), movements,
   supplier section. Inventory's product list then repurposes/thins accordingly (see F1).
+  **Detail-page spec (user, Aug 28):** header = name + barcode + total current stock
+  (sum of batches) with click-to-view opening the batch details; a batch summary card
+  (each lot: current qty + received/expiry dates); a movement history table filterable
+  by date range / movement type / batch with columns Date · Type · Batch · Quantity ·
+  **Running Balance** · Reference (receipt #, adjustment #, import job); and a sales
+  breakdown (total sold per day/month). The templates are a SNAPSHOT (final quantity
+  only — clarified in the migration pack README); this page is where the real history
+  becomes visible once M4/M6 load it.
 - [ ] D4. (11.28) **Manual historical batches**: enter real received date + batch when
   recording stock late — from Product edit, Inventory batch view and Branch batch views.
   One shared validation + stock/batch kernel for all entry points. Branch transfers
@@ -296,6 +315,42 @@ deep-linkable tabs.*
 - [ ] G5. Carried portal items: §6.1 About overlay/cover, §6.2 top-bar split, §6.3 stale
   embed cache (repro first), §6.4 Google-Translate-backed languages (packs as fallback),
   §6.5 pagination counts merged rows.
+
+### Phase N — Import options + navigation guard + section UI (user, Aug 28 third batch)
+
+- [x] N1. **Import-time loyalty option, end to end (Part 374, needs deploy).** Backend
+  (Part 373): `policy.accrue_loyalty`, safe-off on absent/false/malformed, threaded into
+  the sale writer. UI (Part 374): the sales import Screen 1 carries a "Count loyalty
+  points for these sales" checkbox, default OFF, with an explanation of why (historical
+  balances are computed by summing sales); new en+km keys.
+- [ ] N1b. **The wider import-options wizard** (user spec, Aug 28): before an import
+  commits, the operator can choose calculation options (loyalty above; later: discount
+  application, notification sending, overwrite-vs-skip duplicates) and see them recorded
+  per job. Notes against the existing system: the two-screen analyze→review flow IS
+  already the requested "dry run" (analysis writes nothing; Confirm is the commit gate),
+  duplicate handling already exists per import type, and each job already persists its
+  `policy` — so this is about surfacing MORE choices through the same policy mechanism,
+  not new machinery. Add options only where a real calculation exists to gate.
+- [ ] N2. **Navigation guard against stale work.** When leaving a page/section that has
+  unsaved/in-progress work (add-product draft, batch-in, an open import review, an edit),
+  prompt: finish now, or keep it ("I'll be back"), or discard — so switching pages forces
+  a reconcile instead of silently stranding work. Needs a shared "dirty work registry"
+  pages register into + an intercept on sidebar/section navigation. Complements Phase F's
+  draft persistence (F3) and the two-screen import flow. **UX spec (user, Aug 28):**
+  three-option modal — "Save & Leave / Discard & Leave / Stay" — plus a `beforeunload`
+  guard for browser close/reload and a visible dirty indicator (a dot on the tab/section
+  title) so the state is legible before the prompt ever fires. Keep the prompt calm, not
+  alarming.
+- [ ] N3. **Section UI: colored card rows, obvious and well-designed.** Each section
+  (the Phase E sub-pages, and section-like groupings generally) gets its own colored
+  card-row header so they read as distinct, well-designed blocks rather than a flat list.
+  Depends on Phase E sections existing; build the shared SectionCard component + palette
+  first so every section is consistent. Pairs with the stats-card compaction (B1).
+  **Palette proposal (user, Aug 28; confirm before applying):** one consistent color per
+  main section carried through cards, headers and the active nav item — Dashboard blue,
+  Products green, Sales orange, Customers purple, Reports/Logs teal — implemented as one
+  CSS variable per section (`--section-color`) driving a colored left border/soft
+  gradient on cards, not per-page ad-hoc CSS.
 
 ### Phase H — Exports/imports everywhere
 

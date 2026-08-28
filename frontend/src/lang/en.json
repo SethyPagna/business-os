@@ -3354,6 +3354,8 @@
   "salesTotal": "Sales total",
   "sales_count": "Sales Count",
   "sales_export_truncated_warning": "This date range has {total} matching sales, but only the first 5,000 are included in this preview and the CSV export. Narrow the date range to get everything.",
+  "sales_import_accrue_loyalty": "Count loyalty points for these sales",
+  "sales_import_accrue_loyalty_hint": "Off by default: historical sales usually should not add points to customer balances. Turn on only if these sales should earn points.",
   "sales_import_checking_rows": "Checking rows...",
   "sales_import_choose_rows": "Choose a CSV file with at least one sale row.",
   "sales_import_drop_failed": "Could not read that file.",

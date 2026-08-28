@@ -7580,3 +7580,63 @@ domain custom-domains config). M2 (products import via UI), M3 (72+17 decisions)
 (stock-in history load after the A4 cap raise), M5's sales import (awaiting the old
 system's dated sales export), M6, M7 sweep as a tested contract, and the rest of
 phases B–K.
+
+## Part 373 (chat, Aug 28 2026) — org rename with safe adoption, old-domain redirect, 72-row web verification, import accrual option
+
+*(Written retroactively in Part 374: the Part-373 session committed its code
+(`4d6103b0`, `60d6a726`) and left its progress.md notes uncommitted, without a log
+entry. This records what the repository and pack evidence shows it did.)*
+
+- `4d6103b0`: `coreDataInvariants` gained a PREVIOUS_IDENTITIES adoption list
+  (leangcosmetics, business-os) so configuring a new slug RENAMES the existing
+  production organization in place instead of inserting a second one; wrangler vars
+  flipped to LeangBeauty/leangbeauty (the rename the user did want — now safe);
+  index.html redirects old-domain page visits (dpdns.org, leangcosmetics.com, www)
+  to leangbeauty.com with path preserved. `test-org-identity-pure` covers the
+  in-place rename (11 checks).
+- `60d6a726`: sales-import loyalty accrual became an operator choice —
+  `policy.accrue_loyalty` read by `getSalesImportAccrueLoyalty` (safe-off on
+  absent/false/malformed), threaded through the sale writer;
+  `test-loyalty-accrual-pure.cjs` extended to the policy gate.
+- Measured: leangbeauty.com + admin. both live (200); production catalog EMPTY
+  (0 products/batches/branch_stock; 4,652 customers intact) so the products import is
+  a clean first load; migration 0061 applied remotely.
+- Produced `product_mapping_review_VERIFIED.csv` (web-verified decisions for all 89
+  review/new rows) and prepended the migration README's "what each file represents"
+  clarification (templates = catalog + final quantity snapshot; history lives in the
+  event files; import order template-then-history).
+
+## Part 374 (chat, Aug 28 2026) — verification copy for the user, accrual UI, spec intake
+
+**Ask.** Web-verify the 72 review rows, compare with the file, make a copy and say
+where; clarify that the product template carries no batches/movements/sales; DNS
+redirect old→new; import wizard options; unsaved-work navigation guard; colored
+section UI; product-detail page spec.
+
+**What changed.**
+- Spot-audited the Part-373 verification per Golden Rule 5 (a claim in a file is not
+  evidence): barcode 850055527119 "Rhode Frekle" resolved via retailer listings to
+  **rhode Pocket Blush, shade Freckle** — row upgraded from user_decide to add_as_new
+  with the official name (now 71 add_as_new / 6 merge / 12 user_decide); the YSL All
+  Hours Precise Angles line confirmed real. **User copy:**
+  `C:\Users\mrkl6\Downloads\REVIEW-products-web-verified.csv`.
+- `SalesImportModal` Screen 1 gains the "Count loyalty points for these sales"
+  checkbox (default OFF, en+km keys, threads `policy.accrue_loyalty`) — closes N1.
+- progress.md: committed the stranded Part-373 notes; N1 marked done; N1b (wider
+  options wizard — noting analyze/review already IS the dry run and policy already
+  persists per job), N2 three-option modal + dirty-dot spec, N3 palette proposal,
+  D3 product-detail spec (Running Balance + Reference columns, sales per day/month)
+  folded in from the user's message.
+
+**What was found.** The old-domain redirect is NOT live yet (old domain still serves
+the app; the redirect ships with the next deploy). leangcosmetics.com still resolves
+to 36.37.242.94 (not Cloudflare), so its redirect cannot fire until its DNS points at
+Cloudflare.
+
+**Verified.** Frontend `tsc` clean, full `test:utils` chain green, build 26.09s;
+`test-loyalty-accrual-pure.cjs` green (including the Part-373 policy-gate checks);
+cloudflare `tsc` clean. Live domain checks by curl; Rhode barcode by web search.
+
+**Not done.** Deploy (ships redirect + org rename + accrual UI — user runs
+`npm run deploy:full`); leangcosmetics.com DNS dashboard action; M2 import via UI;
+the 12 user_decide rows; N1b/N2/N3 implementation; A4 cap raise before M4.
