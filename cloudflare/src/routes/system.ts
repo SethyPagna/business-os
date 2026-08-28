@@ -34,7 +34,54 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 // catalog": a 20k-object sweep belongs to a continuation design, not one
 // interactive request, and the leftover-reporting path already handles
 // the remainder honestly.
-const MAX_IMAGE_DELETES_PER_RESET = 500
+// Exported for the pure test, so its fixtures seed relative to the real
+// cap instead of welding themselves to a copy of today's number (the A4
+// lesson from wrangler.toml's decision ledger).
+export const MAX_IMAGE_DELETES_PER_RESET = 500
+
+// Blanket-prefix R2 sweep with the same bounded-and-reported discipline
+// as the includeImages cleanup: sequential deletes, capped at
+// `maxDeletes`, per-key failures collected instead of thrown. Shared by
+// reset-data (mode='all') and factory-reset, which each sweep two whole
+// prefixes -- until Part 412 those three sweeps were a single
+// Promise.all over the full listing, exactly the subrequest burst the
+// cap's comment above warns kills the request AFTER the D1 wipe already
+// committed (listObjects walks every 1,000-object page, so "the full
+// listing" really is the whole prefix).
+//
+// `attempted` counts deletes actually issued (success or failure) so a
+// caller sweeping several prefixes can spend ONE shared budget across
+// them -- the cap models a per-invocation allowance, not a per-prefix
+// one. `leftover` is what the budget could not cover; callers must say
+// so in their response instead of claiming a full wipe. A failed listing
+// deletes nothing and is reported through `errors` (leftover stays 0 --
+// the honest count is unknown).
+export async function sweepPrefixCapped(
+  bucket: R2Bucket,
+  prefix: string,
+  maxDeletes: number,
+): Promise<{ deleted: number; attempted: number; leftover: number; errors: string[] }> {
+  const swept = { deleted: 0, attempted: 0, leftover: 0, errors: [] as string[] }
+  const budget = Math.max(0, maxDeletes)
+  let keys: string[]
+  try {
+    keys = (await listObjects(bucket, prefix)).map((o) => o.key)
+  } catch (error) {
+    swept.errors.push(`list ${prefix}: ${(error as Error).message || 'unknown error'}`)
+    return swept
+  }
+  swept.leftover = Math.max(0, keys.length - budget)
+  for (const key of keys.slice(0, budget)) {
+    swept.attempted += 1
+    try {
+      await deleteObject(bucket, key)
+      swept.deleted += 1
+    } catch (error) {
+      swept.errors.push(`${key}: ${(error as Error).message || 'unknown error'}`)
+    }
+  }
+  return swept
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
@@ -386,6 +433,12 @@ app.post('/reset-data', async (c) => {
 
     await db.batch(statements)
 
+    // R2 sweep tallies for mode='all' -- they stay 0 for mode='sales',
+    // which never touches R2, so the shared audit/response below can read
+    // them unconditionally.
+    let r2FilesDeleted = 0
+    let r2FilesLeftOver = 0
+    let r2DeleteErrorCount = 0
     if (mode === 'all') {
       // Best-effort R2 cleanup -- not part of the atomic D1 batch (R2 has no
       // transactional link to D1), so failures here are logged but never
@@ -413,24 +466,35 @@ app.post('/reset-data', async (c) => {
       // deliberately does NOT reuse this blanket-prefix pattern -- it never
       // touches `file_assets` at all, so it collects and deletes only the
       // specific keys the rows it's actually removing pointed to.
-      try {
-        const objects = await listObjects(c.env.ASSETS, 'uploads/')
-        await Promise.all(objects.map((o) => deleteObject(c.env.ASSETS, o.key)))
-      } catch (_) {
-        // Non-fatal -- orphaned uploaded files in R2 don't affect app correctness.
-      }
-      try {
-        const objects = await listObjects(c.env.ASSETS, 'imports/')
-        await Promise.all(objects.map((o) => deleteObject(c.env.ASSETS, o.key)))
-      } catch (_) {
-        // Non-fatal -- orphaned import files in R2 don't affect app correctness.
+      //
+      // Bounded + sequential (Part 412, the K4 slice A4 flagged): both
+      // prefixes spend ONE shared MAX_IMAGE_DELETES_PER_RESET budget, and
+      // sweep failures land in the tallies instead of throwing -- the
+      // same non-fatal contract as before (orphaned R2 files don't affect
+      // app correctness), minus the uncapped Promise.all burst that could
+      // kill this request AFTER the D1 wipe above already committed.
+      // Whatever the budget leaves behind is REPORTED below instead of
+      // being silently implied deleted.
+      let r2Budget = MAX_IMAGE_DELETES_PER_RESET
+      for (const prefix of ['uploads/', 'imports/']) {
+        const swept = await sweepPrefixCapped(c.env.ASSETS, prefix, r2Budget)
+        r2Budget -= swept.attempted
+        r2FilesDeleted += swept.deleted
+        r2FilesLeftOver += swept.leftover
+        r2DeleteErrorCount += swept.errors.length
       }
     }
 
     const label = mode === 'all'
       ? 'Full data reset - sales, returns, products, and contacts cleared'
       : 'Sales reset - sales, returns, and stock cleared'
-    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, { label, mode })
+    await audit(c.env, user?.id ?? null, user?.name ?? null, 'reset_data', 'system', null, {
+      label,
+      mode,
+      r2FilesDeleted: mode === 'all' ? r2FilesDeleted : undefined,
+      r2FilesLeftOverCap: r2FilesLeftOver || undefined,
+      r2DeleteErrors: r2DeleteErrorCount || undefined,
+    })
 
     // Notify every connected page/device (Dashboard, Products, Inventory,
     // Sales, POS, Branches, Returns) that their data just changed out from
@@ -448,11 +512,25 @@ app.post('/reset-data', async (c) => {
     }
     c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
+    // The message is what the operator actually sees (the frontend shows
+    // result.message verbatim), so the capped sweep's remainder has to be
+    // said HERE, not just tucked into a response field. Same phrasing
+    // discipline as the includeImages path above. Re-running the reset is
+    // a real remedy: these sweeps are blanket-prefix, so the next run
+    // picks up where the budget stopped.
+    const r2LeftoverNote = r2FilesLeftOver
+      ? ` Note: ${r2FilesLeftOver} stored file(s) were left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. Run this reset again to clear the rest.`
+      : ''
+    const r2ErrorNote = r2DeleteErrorCount
+      ? ` Note: ${r2DeleteErrorCount} stored file(s) failed to delete from storage (the database was still reset correctly).`
+      : ''
     return c.json({
       success: true,
       message: mode === 'all'
-        ? 'Reset complete - sales, returns, products, and contacts deleted. Settings, users, and branches kept.'
+        ? `Reset complete - sales, returns, products, and contacts deleted. Settings, users, and branches kept.${r2LeftoverNote}${r2ErrorNote}`
         : 'Sales reset - sales, returns, and stock cleared. Products and contacts kept.',
+      r2FilesDeleted: mode === 'all' ? r2FilesDeleted : undefined,
+      r2FilesLeftOverCap: r2FilesLeftOver || undefined,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
@@ -589,29 +667,47 @@ app.post('/factory-reset', async (c) => {
     // R2 has no transactional link to D1, so a partial failure here is
     // logged in the response but never blocks the reset from reporting
     // success (the D1 wipe + reseed is the part that must not half-finish).
+    //
+    // Bounded + sequential (Part 412, the K4 slice A4 flagged): one
+    // shared MAX_IMAGE_DELETES_PER_RESET budget across both prefixes,
+    // remainder reported in the message below. deletedObjectCount now
+    // counts deletes that actually SUCCEEDED, where it previously claimed
+    // the whole listing the moment the (uncapped) Promise.all resolved.
     let deletedObjectCount = 0
+    let leftoverObjectCount = 0
     const r2Errors: string[] = []
+    let r2Budget = MAX_IMAGE_DELETES_PER_RESET
     for (const prefix of ['uploads/', 'imports/']) {
-      try {
-        const objects = await listObjects(c.env.ASSETS, prefix)
-        await Promise.all(objects.map((o) => deleteObject(c.env.ASSETS, o.key)))
-        deletedObjectCount += objects.length
-      } catch (error) {
-        r2Errors.push(`${prefix}: ${(error as Error).message || 'unknown error'}`)
-      }
+      const swept = await sweepPrefixCapped(c.env.ASSETS, prefix, r2Budget)
+      r2Budget -= swept.attempted
+      deletedObjectCount += swept.deleted
+      leftoverObjectCount += swept.leftover
+      r2Errors.push(...swept.errors)
     }
 
     await audit(c.env, user?.id ?? null, user?.name ?? null, 'factory_reset', 'system', null, {
       label: 'Factory reset completed',
       droppedCustomTables: droppedCustomTables.length,
       deletedObjectCount,
+      r2FilesLeftOverCap: leftoverObjectCount || undefined,
       r2Errors: r2Errors.length || undefined,
       adminUserCreated: invariants.adminUserCreated,
     })
 
+    // "All data and images wiped" was previously claimed unconditionally;
+    // with the capped sweep it is only said when it is true. Re-running
+    // Factory Reset genuinely continues the sweep (blanket prefixes), but
+    // its 2-per-30min rate limit makes that a slow remedy -- the full
+    // multi-run story stays with K4's continuation design.
+    const r2WipeNote = leftoverObjectCount
+      ? `All data wiped; ${deletedObjectCount} stored file(s) deleted, ${leftoverObjectCount} left in storage -- a single request cannot delete more than ${MAX_IMAGE_DELETES_PER_RESET}. Run Factory Reset again later to clear the rest.`
+      : 'All data and images wiped.'
+    const r2FailNote = r2Errors.length
+      ? ` Note: ${r2Errors.length} stored file(s) failed to delete from storage (the data wipe itself completed).`
+      : ''
     return c.json({
       success: true,
-      message: 'Factory reset complete. All data and images wiped. Admin account and defaults restored.',
+      message: `Factory reset complete. ${r2WipeNote}${r2FailNote} Admin account and defaults restored.`,
       // Only present the one time the admin row is actually (re)created --
       // this is the only path back into the app, so it has to be surfaced
       // here rather than left to a password the operator may not remember.
@@ -619,6 +715,8 @@ app.post('/factory-reset', async (c) => {
         ? { username: 'admin', password: invariants.adminPassword }
         : { username: 'admin', password: null },
       r2CleanupErrors: r2Errors.length ? r2Errors : undefined,
+      r2FilesDeleted: deletedObjectCount,
+      r2FilesLeftOverCap: leftoverObjectCount || undefined,
     })
   } catch (error) {
     return c.json({ success: false, error: (error as Error).message || 'Factory reset failed' }, 500)

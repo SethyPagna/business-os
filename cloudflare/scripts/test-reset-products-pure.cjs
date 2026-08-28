@@ -9,6 +9,12 @@
 // permissive fakes (there's no real R2/D1 in this sandbox); everything
 // about which rows get deleted vs. kept is the real, shipped logic.
 //
+// Part 412 widened this file to also cover the CAPPED blanket-prefix R2
+// sweeps (reset-data mode='all' and factory-reset): one shared
+// MAX_IMAGE_DELETES_PER_RESET budget across uploads/ + imports/,
+// sequential deletes, and an honest leftover/failure report in the
+// response instead of an uncapped Promise.all that implied a full wipe.
+//
 // Run (from cloudflare/): node scripts/test-reset-products-pure.cjs
 
 const fs = require('fs')
@@ -27,7 +33,11 @@ function transpile(relPath) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const source = fs.readFileSync(sourcePath, 'utf8')
   const { outputText } = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+    // esModuleInterop mirrors what wrangler's esbuild bundling does in
+    // production: without it, coreDataInvariants' `import bcrypt from
+    // 'bcryptjs'` (a CJS package) transpiles to `.default.hashSync` and
+    // the factory-reset reseed dies on undefined.
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true },
     fileName: sourcePath,
   })
   return outputText
@@ -64,6 +74,15 @@ const { PRODUCTS_RESET_TABLES } = coreDataInvariants
 assert.ok(Array.isArray(PRODUCTS_RESET_TABLES) && PRODUCTS_RESET_TABLES.length > 0, 'PRODUCTS_RESET_TABLES must be a real, non-empty exported list')
 
 let deletedObjectKeys = []
+// Configurable R2 listing/failure fixtures for the CAPPED blanket-prefix
+// sweeps (mode='all' + factory-reset, Part 412): each sweep lists a whole
+// prefix and used to fire one uncapped Promise.all over it -- these
+// fixtures let the tests below hand the route more objects than
+// MAX_IMAGE_DELETES_PER_RESET allows and prove the route deletes only up
+// to the cap and REPORTS the remainder instead of claiming a full wipe.
+let listedObjectsByPrefix = {}
+let listShouldFailFor = new Set()
+let deleteShouldFailFor = new Set()
 const permissions = loadReal('lib/permissions.ts')
 const media = loadReal('lib/media.ts')
 
@@ -78,8 +97,14 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/errorReporting': { reportError: async () => false },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
   '../lib/r2': {
-    listObjects: async () => [],
-    deleteObject: async (_bucket, key) => { deletedObjectKeys.push(key) },
+    listObjects: async (_bucket, prefix) => {
+      if (listShouldFailFor.has(prefix)) throw new Error('simulated R2 list failure')
+      return (listedObjectsByPrefix[prefix] || []).map((key) => ({ key }))
+    },
+    deleteObject: async (_bucket, key) => {
+      if (deleteShouldFailFor.has(key)) throw new Error('simulated R2 delete failure')
+      deletedObjectKeys.push(key)
+    },
   },
   '../lib/coreDataInvariants': coreDataInvariants,
   '../lib/backup': {
@@ -120,6 +145,12 @@ let backupShouldFail = false
 let sectionBackupTables = null
 
 const app = systemRoute.default
+// The REAL cap and sweep helper, so every fixture below seeds relative to
+// the shipped number instead of welding itself to a copy of it (the A4
+// lesson recorded in wrangler.toml's decision ledger).
+const { MAX_IMAGE_DELETES_PER_RESET, sweepPrefixCapped } = systemRoute
+assert.ok(Number.isInteger(MAX_IMAGE_DELETES_PER_RESET) && MAX_IMAGE_DELETES_PER_RESET > 0, 'MAX_IMAGE_DELETES_PER_RESET must be a real, exported positive integer')
+assert.strictEqual(typeof sweepPrefixCapped, 'function', 'sweepPrefixCapped must be exported for direct testing')
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
 async function req(method, url, body) {
@@ -178,6 +209,9 @@ function seed() {
   rawDbHandle.prepare("INSERT INTO file_assets (id, original_name, stored_name, public_path) VALUES (1, 'logo.png', 'logo-abc123.png', '/uploads/logo-abc123.png')").run()
 
   deletedObjectKeys = []
+  listedObjectsByPrefix = {}
+  listShouldFailFor = new Set()
+  deleteShouldFailFor = new Set()
   backupCallLog = []
   backupShouldFail = false
   sectionBackupTables = null
@@ -386,6 +420,126 @@ async function main() {
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.success, true, JSON.stringify(json))
     assert.strictEqual(count('file_assets'), 0, 'file_assets should be empty after mode=all, matching the R2 uploads/ wipe it runs alongside')
+  })
+
+  // -------------------------------------------------------------------------
+  // Part 412 (K4 slice): the blanket-prefix R2 sweeps in mode='all' and
+  // factory-reset are CAPPED and honest. Until then each was one uncapped
+  // Promise.all over the full listing -- a subrequest burst that could kill
+  // the request after the D1 wipe had already committed, while the response
+  // implied every stored file was gone.
+  // -------------------------------------------------------------------------
+
+  await check('mode=all spends ONE shared delete budget across uploads/ then imports/, stops at the cap, and reports the remainder instead of claiming a full wipe', async () => {
+    seed()
+    listedObjectsByPrefix = {
+      'uploads/': Array.from({ length: MAX_IMAGE_DELETES_PER_RESET - 1 }, (_, i) => `uploads/f-${i}.jpg`),
+      'imports/': ['imports/i-0.csv', 'imports/i-1.csv', 'imports/i-2.csv'],
+    }
+
+    const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, 'hitting the sweep cap must never fail the reset itself')
+    assert.strictEqual(count('products'), 0, 'the D1 wipe must have run')
+
+    assert.strictEqual(deletedObjectKeys.length, MAX_IMAGE_DELETES_PER_RESET, `exactly the capped number of deletes must be issued, got ${deletedObjectKeys.length}`)
+    assert.strictEqual(deletedObjectKeys[deletedObjectKeys.length - 1], 'imports/i-0.csv', 'the budget left over from uploads/ (1) must carry into imports/ -- one shared budget, not one per prefix')
+    assert.strictEqual(json.r2FilesDeleted, MAX_IMAGE_DELETES_PER_RESET, JSON.stringify(json))
+    assert.strictEqual(json.r2FilesLeftOverCap, 2, `the two imports/ objects the budget could not cover must be reported, got: ${JSON.stringify(json)}`)
+    assert.ok(/left in storage/.test(json.message), `the response message must state the remainder, got: ${json.message}`)
+  })
+
+  await check('mode=all under the cap sweeps both prefixes completely and reports no leftover', async () => {
+    seed()
+    listedObjectsByPrefix = {
+      'uploads/': ['uploads/a.jpg', 'uploads/b.jpg'],
+      'imports/': ['imports/c.csv'],
+    }
+
+    const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, JSON.stringify(json))
+    assert.deepStrictEqual(deletedObjectKeys, ['uploads/a.jpg', 'uploads/b.jpg', 'imports/c.csv'], 'every listed object must be deleted when the cap is not hit')
+    assert.strictEqual(json.r2FilesDeleted, 3, JSON.stringify(json))
+    assert.strictEqual(json.r2FilesLeftOverCap, undefined, 'no leftover may be reported when everything was deleted')
+    assert.ok(!/left in storage/.test(json.message), `no leftover note when nothing was left, got: ${json.message}`)
+  })
+
+  await check('mode=all: a failing R2 delete stays non-fatal for the reset but is reported, and the sweep continues past it', async () => {
+    seed()
+    listedObjectsByPrefix = { 'uploads/': ['uploads/ok-1.jpg', 'uploads/bad.jpg', 'uploads/ok-2.jpg'] }
+    deleteShouldFailFor = new Set(['uploads/bad.jpg'])
+
+    const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, 'R2 cleanup failures must never fail the D1 reset that already committed')
+    assert.deepStrictEqual(deletedObjectKeys, ['uploads/ok-1.jpg', 'uploads/ok-2.jpg'], 'the keys after the failing one must still be attempted')
+    assert.strictEqual(json.r2FilesDeleted, 2, JSON.stringify(json))
+    assert.ok(/failed to delete/.test(json.message), `the delete failure must surface in the message, got: ${json.message}`)
+  })
+
+  await check('mode=all: a failed uploads/ listing is reported (the old catch(_){} swallowed it silently) and imports/ is still swept', async () => {
+    seed()
+    listShouldFailFor = new Set(['uploads/'])
+    listedObjectsByPrefix = { 'imports/': ['imports/a.csv'] }
+
+    const { status, json } = await req('POST', '/reset-data', { mode: 'all' })
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, 'a listing failure stays non-fatal for the reset')
+    assert.deepStrictEqual(deletedObjectKeys, ['imports/a.csv'], 'the healthy prefix must still be swept')
+    assert.ok(/failed to delete/.test(json.message), `the cleanup shortfall must surface in the message, got: ${json.message}`)
+  })
+
+  await check('factory-reset caps its sweep with the same shared budget and only claims "All data and images wiped" when it is true', async () => {
+    seed()
+    listedObjectsByPrefix = {
+      'uploads/': Array.from({ length: MAX_IMAGE_DELETES_PER_RESET + 3 }, (_, i) => `uploads/f-${i}.jpg`),
+      'imports/': ['imports/i-0.csv'],
+    }
+
+    const { status, json } = await req('POST', '/factory-reset')
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, JSON.stringify(json))
+    assert.strictEqual(json.admin?.username, 'admin', 'the reseed must still hand back the admin account')
+    assert.strictEqual(count('products'), 0, 'the D1 wipe must have run')
+
+    assert.strictEqual(deletedObjectKeys.length, MAX_IMAGE_DELETES_PER_RESET, `deletes must stop at the cap, got ${deletedObjectKeys.length}`)
+    assert.strictEqual(json.r2FilesDeleted, MAX_IMAGE_DELETES_PER_RESET, JSON.stringify(json))
+    assert.strictEqual(json.r2FilesLeftOverCap, 4, `3 uploads/ + 1 imports/ objects over budget must be reported, got: ${JSON.stringify(json)}`)
+    assert.ok(!/All data and images wiped/.test(json.message), `the unconditional full-wipe claim must be gone when files remain, got: ${json.message}`)
+    assert.ok(/left in storage/.test(json.message), `the message must state the remainder, got: ${json.message}`)
+  })
+
+  await check('factory-reset under the cap still reports the full "All data and images wiped" message', async () => {
+    seed()
+    listedObjectsByPrefix = { 'uploads/': ['uploads/only.jpg'] }
+
+    const { status, json } = await req('POST', '/factory-reset')
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(json.success, true, JSON.stringify(json))
+    assert.ok(/All data and images wiped/.test(json.message), `the honest full-wipe message must survive when it IS true, got: ${json.message}`)
+    assert.strictEqual(json.r2FilesLeftOverCap, undefined, JSON.stringify(json))
+  })
+
+  await check('sweepPrefixCapped (direct): a failed listing fabricates no counts, and a zero budget deletes nothing while reporting the whole listing as leftover', async () => {
+    seed()
+    listShouldFailFor = new Set(['uploads/'])
+    const failed = await sweepPrefixCapped(null, 'uploads/', 10)
+    assert.deepStrictEqual(
+      { deleted: failed.deleted, attempted: failed.attempted, leftover: failed.leftover, errorCount: failed.errors.length },
+      { deleted: 0, attempted: 0, leftover: 0, errorCount: 1 },
+      'a failed listing must report the error and nothing else -- the honest leftover count is unknown',
+    )
+
+    seed()
+    listedObjectsByPrefix = { 'imports/': ['imports/a.csv', 'imports/b.csv'] }
+    const exhausted = await sweepPrefixCapped(null, 'imports/', 0)
+    assert.deepStrictEqual(
+      { deleted: exhausted.deleted, attempted: exhausted.attempted, leftover: exhausted.leftover, errorCount: exhausted.errors.length },
+      { deleted: 0, attempted: 0, leftover: 2, errorCount: 0 },
+      'an exhausted budget must delete nothing and count the entire listing as leftover',
+    )
+    assert.strictEqual(deletedObjectKeys.length, 0, 'a zero budget must not delete anything')
   })
 
   console.log(`\n${passed} PASS, 0 FAIL`)

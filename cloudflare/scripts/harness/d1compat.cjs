@@ -75,7 +75,20 @@ class Stmt {
   }
   run(params) {
     const info = this._stmt.run(...this._args(params))
-    return { success: true, meta: { last_row_id: info.lastInsertRowid, changes: info.changes } }
+    // Superset of both run() shapes in circulation: the REAL lib/db.ts
+    // wrapper hands route/lib code { changes, lastInsertRowid } at the TOP
+    // level (coreDataInvariants' reseed reads inserted.lastInsertRowid --
+    // under the old meta-only shape that read undefined and factory-reset
+    // died on a NOT NULL organization_id, Part 412), while several older
+    // tests read the raw-D1 { meta: { last_row_id } } this harness
+    // historically returned. Returning both keeps every consumer working
+    // without each test carrying its own adapter copy.
+    return {
+      success: true,
+      changes: info.changes,
+      lastInsertRowid: Number(info.lastInsertRowid),
+      meta: { last_row_id: info.lastInsertRowid, changes: info.changes },
+    }
   }
 }
 
