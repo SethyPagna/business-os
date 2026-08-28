@@ -499,18 +499,28 @@ store really paid the rider; margin = charge − cost and is internal only.*
   aliases); the apply engine matches names against the suppliers table (match-only,
   never auto-creates) and the atomic ADD writer stores it on batch creation — a lot's
   first attribution sticks, later adds never rewrite it, a blank changes nothing
-  (all test-proven). **Remaining:** the manual add-stock/receive UI supplier picker
-  **[CLAIMED: session 4a — Part 409. Picker with id+name suggestions from the
-  suppliers table (free text stays a deliberate name-only attribution, never
-  auto-creates) on all four manual add surfaces: ReceiveBatchModal (upgrading its
-  free-text field), InventoryStockModals + BranchStockAdjuster add paths,
-  BulkAddStockModal (one supplier for the whole bulk receive event); plus
-  routes/inventory.ts /adjust supplier passthrough to stockActionCommit. When an
-  EXISTING lot is picked (D4b's lot picker), the picker hides and shows that lot's
-  attribution — first-attribution-sticks means a choice there would be silently
-  ignored. Files: the four modals + shared picker field + routes/inventory.ts +
-  en/km packs + tests. No nav files, no Returns/Sales, no routes/products.ts.]**,
-  and the read surfaces below (D3 supplier section, per-supplier totals).
+  (all test-proven). **The manual add-stock/receive UI supplier picker SHIPPED
+  (Part 409, session 4a — 2e5dd7e5, needs deploy).** One shared
+  `SupplierPickerField` (suggestions from the permission-free
+  `/api/suppliers?fields=names` read; picking links id+name, free text stays the
+  deliberate name-only attribution, never auto-creates) on ALL FOUR manual add
+  surfaces: ReceiveBatchModal (its free-text field upgraded; supplierId joins the
+  draft), Inventory's Adjust modal, BranchStockAdjuster's per-branch rows,
+  BulkAddStockModal (one supplier for the whole bulk event, fill-not-rewrite
+  note). First-attribution-sticks is VISIBLE, not silent: an attributed lot locks
+  the field to its recorded supplier and the wire sends nothing; an unattributed
+  existing lot still offers the picker because a choice there FILLS the blank
+  (receiveBatchStock's COALESCE honors it). routes/inventory.ts /adjust gains the
+  camelCase supplierId/supplierName passthrough (remove ignores them); the
+  batches list SELECT + `ProductBatch` type now carry supplier_id/supplier_name
+  so pickers can tell locked from fill (name-only rule: same visibility K6
+  already grants). 8-check backend pure test on real migrations (both wires:
+  create sets, attributed top-up sticks, unattributed top-up fills, auto-routed
+  bulk wire attributes, remove ignores, GET carries fields); 9-check frontend
+  pin test whose first check IS the cross-surface law (all four surfaces import
+  the one picker); live-verified on wrangler dev (lot 9103 attributed end to
+  end). **Remaining:** the read surfaces below (D3 supplier section,
+  per-supplier totals).
 - [x] D5. **Supplier accounting** *(Part 384: shipped — 0067 `received_quantity`
   written by both receive paths, GET /suppliers/:id/purchases under the
   contacts_suppliers gate, Purchases drill in the supplier detail modal with
@@ -966,7 +976,21 @@ deep-linkable tabs.*
     is exactly 6e's F1 lane — HANDED TO 6e to fold into F1 (Part 408) so two
     sessions don't share ProductForm. Spec: reject `^\d+(\.\d+)?[eE][+-]?\d+$`-shaped
     barcodes client-side with a clear message; server rejects the same pattern 400.
-  - [~] P7-c **[CLAIMED: session 4a — Part 409, rides with the D5a picker unit]** *(minor, confirmed)*: manual contact creates don't apply the P8 phone
+  - [x] P7-c *(Part 409, session 4a — SHIPPED, needs deploy (a0ec6207), and it
+    uncovered a REAL production bug)*: `formatPhoneP8` in lib/contactDuplicates
+    mirrors the migration validator's exact contract (`0XX XXX XXX` / `0XX XXX
+    XXXX`, +855 folded to local, anything else preserved untouched) and both
+    contacts POST + PUT store it, so every manual path incl. POS quick-add
+    matches the 10,352 migrated numbers; matching stays digit-based. **The bug:
+    the duplicate-check SQL selected `membership_number` from all three contact
+    tables — only customers HAVE that column (0001 schema, production-verified
+    read-only) — so EVERY manual supplier and delivery-contact create/update
+    500'd at the duplicate check (the live-typing flag hid it by design: it
+    fails soft), and the DuplicatesTab sweep for those tables failed with it.
+    Both call sites now use table-aware columns; 9-check pure test incl.
+    real-SQL regression against all three tables on real migrations;
+    live-verified (supplier + courier creates succeed, phones stored as
+    012 999 888 / 098 765 4321).* Original note: manual contact creates don't apply the P8 phone
     display convention (`XXX XXX XXX`); matching is digit-based so linkage works —
     display consistency only. `contactDuplicates.normalizePhone` exists to reuse.
   - P7-d *(checked, NOT a gap)*: §12 import deliberately cannot set supplier-credit
