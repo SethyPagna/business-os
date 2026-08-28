@@ -242,6 +242,11 @@ export default function ProductDetailSheet({
   // sheet opens so a stale branch/barcode pick doesn't leak into the next.
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null)
   const [selectedVariantId, setSelectedVariantId] = useState<string | null>(null)
+  // VIP price stays hidden until asked for (user, Aug 28): the button first
+  // says only "VIP price"; the first tap REVEALS the amount, the second tap
+  // adds at that price. Keyed per product/variant so revealing one row's
+  // VIP does not expose another's.
+  const [vipRevealed, setVipRevealed] = useState<Record<string, boolean>>({})
   const [branchPage, setBranchPage] = useState(0)
   const [barcodePage, setBarcodePage] = useState(0)
   // Lot/batch picker state -- see the batch-picker section further down.
@@ -651,8 +656,18 @@ export default function ProductDetailSheet({
                       {batchSelectionRequired && !selectedBatch ? posCopy('Pick a lot first', 'Pick a lot first') : fmtUSD(asNumber(effectiveVariant.selling_price_usd || 0))}
                     </button>
                     {asNumber(effectiveVariant.special_price_usd) > 0 || asNumber(effectiveVariant.special_price_khr) > 0 ? (
-                      <button className="btn-secondary flex-1 text-xs" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'special')}>
-                        {posCopy('VIP', 'VIP')} {fmtUSD(asNumber(effectiveVariant.special_price_usd || effectiveVariant.selling_price_usd || 0))}
+                      <button
+                        className="btn-secondary flex-1 text-xs"
+                        disabled={!effectiveVariantInStock || !batchReadyToSell}
+                        onClick={() => {
+                          const key = `v${effectiveVariant.id}`
+                          if (!vipRevealed[key]) { setVipRevealed((current) => ({ ...current, [key]: true })); return }
+                          closeAfterAdd(effectiveVariant, 'special')
+                        }}
+                      >
+                        {vipRevealed[`v${effectiveVariant.id}`]
+                          ? `${posCopy('VIP', 'VIP')} ${fmtUSD(asNumber(effectiveVariant.special_price_usd || effectiveVariant.selling_price_usd || 0))}`
+                          : posCopy('VIP price', 'តម្លៃ VIP')}
                       </button>
                     ) : null}
                     {effectiveVariantPromotion.active ? (
@@ -713,8 +728,18 @@ export default function ProductDetailSheet({
                 </button>
               ) : null}
               {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (
-                <button className="btn-secondary flex-1" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'special')}>
-                  {posCopy('VIP', 'VIP')} {fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}
+                <button
+                  className="btn-secondary flex-1"
+                  disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell}
+                  onClick={() => {
+                    const key = `p${product.id}`
+                    if (!vipRevealed[key]) { setVipRevealed((current) => ({ ...current, [key]: true })); return }
+                    closeAfterAdd(product, 'special')
+                  }}
+                >
+                  {vipRevealed[`p${product.id}`]
+                    ? `${posCopy('VIP', 'VIP')} ${fmtUSD(asNumber(product.special_price_usd || product.selling_price_usd || 0))}`
+                    : posCopy('VIP price', 'តម្លៃ VIP')}
                 </button>
               ) : null}
             </div>

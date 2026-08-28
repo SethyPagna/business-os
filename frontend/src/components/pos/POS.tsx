@@ -2697,7 +2697,10 @@ export default function POS() {
                     </p>
                     {asNumber(p.selling_price_khr) > 0 && !groupProduct ? <p className="text-xs text-gray-400">{fmtKHR(asNumber(p.selling_price_khr))}</p> : null}
                     {asNumber(p.special_price_usd) > 0 || asNumber(p.special_price_khr) > 0 ? (
-                      <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'VIP'} {fmtUSD(p.special_price_usd || p.selling_price_usd || 0)}</p>
+                      // The VIP AMOUNT is deliberately not printed on the grid
+                      // (user, Aug 28): the chip says a VIP price exists; the
+                      // number reveals on request in the detail sheet.
+                      <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'VIP'}</p>
                     ) : null}
                     {promotion.active ? (
                       <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">
@@ -2965,41 +2968,7 @@ export default function POS() {
             {/* Discount + membership (directly under Customer -- Aug 28 order) */}
             <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-2 space-y-3">
 
-              {/* Discount: label STACKED above the percent/dollar toggle
-                  (user, Aug 28 -- not side by side), inputs on the next row. */}
-              <div>
-                <label htmlFor="pos-discount-usd" className="block text-xs text-gray-500 font-medium">{t('discount')}</label>
-                <div className="mt-1">
-                  <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
-                    <button
-                      type="button"
-                      className={`min-w-[2.5rem] px-3 py-1.5 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                      onClick={() => handleDiscountType('percent')}
-                    >
-                      %
-                    </button>
-                    <button
-                      type="button"
-                      className={`min-w-[2.5rem] border-l border-gray-200 px-3 py-1.5 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                      onClick={() => handleDiscountType('fixed')}
-                    >
-                      {usdSymbol}
-                    </button>
-                  </div>
-                </div>
-                {active.discountType === 'percent' ? (
-                  <div className="relative mt-1">
-                    <input id="pos-discount-usd" name="pos_discount_percent" className="input text-xs py-1 pr-6" type="number" min="0" max="100" step="any" placeholder="0" value={active.discountPercent} onChange={e => handleDiscountPercent(e.target.value)} autoComplete="off" />
-                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-1 mt-1">
-                    <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
-                    <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
-                  </div>
-                )}
-              </div>
-
+              {/* Order (user, Aug 28): Membership BEFORE store discount. */}
               <div>
                 <div className="text-xs text-gray-500 font-medium">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</div>
                 <div className="mt-1 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
@@ -3055,6 +3024,41 @@ export default function POS() {
                     </button>
                   </div>
                 ) : null}
+              </div>
+
+              {/* Discount: label STACKED above the percent/dollar toggle
+                  (user, Aug 28 -- not side by side), inputs on the next row. */}
+              <div>
+                <label htmlFor="pos-discount-usd" className="block text-xs text-gray-500 font-medium">{t('discount')}</label>
+                <div className="mt-1">
+                  <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
+                    <button
+                      type="button"
+                      className={`min-w-[2.5rem] px-3 py-1.5 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      onClick={() => handleDiscountType('percent')}
+                    >
+                      %
+                    </button>
+                    <button
+                      type="button"
+                      className={`min-w-[2.5rem] border-l border-gray-200 px-3 py-1.5 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      onClick={() => handleDiscountType('fixed')}
+                    >
+                      {usdSymbol}
+                    </button>
+                  </div>
+                </div>
+                {active.discountType === 'percent' ? (
+                  <div className="relative mt-1">
+                    <input id="pos-discount-usd" name="pos_discount_percent" className="input text-xs py-1 pr-6" type="number" min="0" max="100" step="any" placeholder="0" value={active.discountPercent} onChange={e => handleDiscountPercent(e.target.value)} autoComplete="off" />
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-1 mt-1">
+                    <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
+                    <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                  </div>
+                )}
               </div>
 
             </div>
