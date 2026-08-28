@@ -201,3 +201,23 @@ export function bulkImportProducts(payload: ProductPayload = {}): Promise<unknow
     true,
   )
 }
+
+// P3 (Part 387): the whole-catalog price adjustment -- runs server-side as
+// set-based UPDATEs (POST /api/products/bulk-price-adjust). preview: true
+// answers with { count } (rows that would actually change); the apply
+// returns { success, changed }. Full products access required server-side;
+// NO undo at this scope, which the caller's confirm states.
+export function bulkPriceAdjustAllProducts(payload: {
+  direction: 'increase' | 'decrease'
+  amount: number
+  fields: string[]
+  skip_zero: boolean
+  preview?: boolean
+}): Promise<{ count?: number; success?: boolean; changed?: number; error?: string }> {
+  const request = () => apiFetch('POST', '/api/products/bulk-price-adjust', { ...payload, ...getDevicePayload() }) as Promise<{ count?: number; success?: boolean; changed?: number; error?: string }>
+  if (payload.preview) return request()
+  return route('products:bulkPriceAdjustAll', request, null, true).then((result) => {
+    cacheInvalidate('products')
+    return result as { success?: boolean; changed?: number; error?: string }
+  })
+}

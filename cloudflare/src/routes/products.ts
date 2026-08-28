@@ -970,6 +970,64 @@ app.get('/filters', async (c) => {
   return c.json(await loadProductFilters(c.env, c.req.query()))
 })
 
+// P3 (Part 387): whole-catalog price adjustment, run server-side as
+// set-based UPDATEs -- the explicit "ALL products in the system" scope the
+// bulk price modal offers next to its selection scope. Never materializes
+// ids in the client; preview=true answers "how many rows would actually
+// change" so the confirm can tell the truth. Full products access only
+// (bulk edits are not a review-tier action), and there is deliberately NO
+// undo at this scope -- the audit entry records the parameters and count,
+// and the confirm says so before anything runs.
+const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'special_price_usd', 'special_price_khr', 'cost_price_usd', 'cost_price_khr'])
+app.post('/bulk-price-adjust', async (c) => {
+  const user = c.get('user')
+  if (getPermissionTier(user, 'products') !== 'full') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = await c.req.json<{
+    direction?: string
+    amount?: number
+    fields?: string[]
+    skip_zero?: boolean
+    preview?: boolean
+  }>().catch(() => ({} as Record<string, never>))
+  const direction = body.direction === 'decrease' ? 'decrease' : 'increase'
+  const amount = Number(body.amount)
+  if (!Number.isFinite(amount) || amount <= 0) return c.json({ error: 'Amount must be a positive number' }, 400)
+  const fields = Array.isArray(body.fields) ? body.fields.filter((f) => BULK_PRICE_FIELDS.has(String(f))) : []
+  if (!fields.length) return c.json({ error: 'Pick at least one price field to adjust' }, 400)
+  const skipZero = Boolean(body.skip_zero)
+  const delta = direction === 'decrease' ? -amount : amount
+  const db = getDb(c.env)
+
+  // A row "changes" for a field when: decreasing -> the field is > 0 (a 0
+  // price is never pushed negative, matching the selection flow's rule);
+  // increasing -> always, unless skip_zero keeps 0-priced rows untouched.
+  const fieldCondition = (field: string) => (direction === 'decrease' || skipZero)
+    ? `COALESCE(${field}, 0) > 0`
+    : '1=1'
+
+  if (body.preview) {
+    const where = fields.map((field) => `(${fieldCondition(field)})`).join(' OR ')
+    const row = await db.prepare(`SELECT COUNT(*) AS n FROM products WHERE is_active = 1 AND (${where})`).get<{ n: number }>()
+    return c.json({ count: row?.n || 0 })
+  }
+
+  const statements = fields.map((field) => ({
+    sql: `UPDATE products SET ${field} = MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2})), updated_at = CURRENT_TIMESTAMP
+          WHERE is_active = 1 AND (${fieldCondition(field)})`,
+    params: { delta },
+  }))
+  const results = await db.batch(statements)
+  const changed = Math.max(0, ...results.map((r) => Number((r as { changes?: number }).changes) || 0))
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'product', 'bulk-price-adjust', {
+    scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
+  })
+  c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
+  await broadcast(c.env, 'products', { action: 'bulk-price-adjust' }).catch(() => {})
+  return c.json({ success: true, changed })
+})
+
 // The ONE product identity rule's manual-path check: an ACTIVE product with
 // the same normalized name AND the same non-empty barcode is the SAME
 // product (the import merges such rows — resolveMergedPricing and friends),

@@ -2610,6 +2610,51 @@ function ProductsFullEditor() {
   // "skip products priced 0" is on, or a decrease leaves a price already at
   // 0 untouched, and confirming "update 40 products" before changing 12
   // would be a lie.
+  // P3: whole-catalog scope. Same direction/amount/field pickers as the
+  // selection flow above it, but the WORK runs server-side (set-based
+  // UPDATEs) with a preview count fetched first so the confirm can say the
+  // real number -- and it says plainly that this scope has no undo.
+  const runBulkPriceAdjustAllProducts = useCallback(async () => {
+    if (bulkActionBusy) return
+    const amount = Number(bulkEditForm.adjust_amount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      notify(tr('bulk_price_amount_required', 'Enter a positive amount first'), 'warning')
+      return
+    }
+    const currency = bulkEditForm.adjust_currency === 'khr' ? 'khr' : 'usd'
+    const fields: string[] = []
+    if (bulkEditForm.adjust_selling !== false) fields.push(`selling_price_${currency}`)
+    if (bulkEditForm.adjust_special) fields.push(`special_price_${currency}`)
+    if (bulkEditForm.adjust_cost) fields.push(`cost_price_${currency}`)
+    if (!fields.length) {
+      notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
+      return
+    }
+    const direction = bulkEditForm.adjust_direction === 'decrease' ? 'decrease' as const : 'increase' as const
+    const payload = { direction, amount, fields, skip_zero: !!bulkEditForm.adjust_skip_zero }
+    setBulkActionBusy(true)
+    try {
+      const { bulkPriceAdjustAllProducts } = await import('../../api/productWriteTransport.ts')
+      const preview = await bulkPriceAdjustAllProducts({ ...payload, preview: true })
+      const count = Number(preview?.count) || 0
+      if (count === 0) {
+        notify(tr('bulk_price_no_change', 'Nothing to change with those settings'), 'warning')
+        return
+      }
+      const verb = direction === 'decrease' ? tr('bulk_price_decrease', 'Decrease') : tr('bulk_price_increase', 'Increase')
+      const warning = tr('bulk_price_all_confirm', 'This runs on the WHOLE catalog and cannot be undone.')
+      if (!window.confirm(`${verb} prices on ${count} products — ${warning}`)) return
+      const result = await bulkPriceAdjustAllProducts(payload)
+      if (result?.success === false || result?.error) throw new Error(String(result?.error || 'Bulk adjustment failed'))
+      notify(`${tr('bulk_price_all_done', 'Adjusted prices across the catalog')}: ${Number(result?.changed) || count}`)
+      await load(true)
+    } catch (error) {
+      notify(getErrorMessage(error, 'Bulk adjustment failed'), 'error')
+    } finally {
+      setBulkActionBusy(false)
+    }
+  }, [bulkActionBusy, bulkEditForm, notify, tr, load])
+
   const runBulkProductPriceAdjustment = useCallback(async () => {
     if (!selectedVisibleIds.length || bulkActionBusy) return
     const {
@@ -3692,13 +3737,26 @@ function ProductsFullEditor() {
               />
               {tr('bulk_price_skip_zero', 'Skip products priced 0 (not yet priced)')}
             </label>
-            <button
-              disabled={bulkActionBusy}
-              className="btn-secondary mt-3 block px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={runBulkProductPriceAdjustment}
-            >
-              {tr('bulk_price_apply_adjustment', 'Apply adjustment')}
-            </button>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                disabled={bulkActionBusy}
+                className="btn-secondary px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={runBulkProductPriceAdjustment}
+              >
+                {tr('bulk_price_apply_adjustment', 'Apply adjustment')}
+              </button>
+              {/* P3: the explicit whole-system scope -- server-side set
+                  UPDATEs with a true preview count; never materializes the
+                  catalog's ids in the client, and has NO undo (stated in
+                  the confirm). */}
+              <button
+                disabled={bulkActionBusy}
+                className="rounded-lg border border-amber-300 px-4 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-600/50 dark:text-amber-300 dark:hover:bg-amber-900/20"
+                onClick={runBulkPriceAdjustAllProducts}
+              >
+                {tr('bulk_price_apply_all', 'Apply to ALL products in the system…')}
+              </button>
+            </div>
           </div>
         </div>
       )}
