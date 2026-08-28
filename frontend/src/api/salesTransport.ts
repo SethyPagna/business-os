@@ -159,3 +159,34 @@ export function getSalesStats(params: QueryParams = {}): Promise<unknown> {
     () => ({ total_count: 0, revenue_usd: 0, pending_revenue_usd: 0, truncated_in_list: false }),
   )
 }
+
+// ---- Phase X (Part 395): daily report + per-courier delivery totals -------
+// No local fallbacks that fabricate zeros: a failed report read should show
+// the error path, never an all-zero report that reads as "no sales".
+
+export function getSalesDailyReport(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `sales:daily-report:${query}`,
+    () => apiFetch('GET', appendQuery('/api/sales/daily-report', query)),
+    null,
+  )
+}
+
+export function getSalesDayReport(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `sales:day-report:${query}`,
+    () => apiFetch('GET', appendQuery('/api/sales/day-report', query)),
+    null,
+  )
+}
+
+export function getDeliveryContactReport(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params, { skipEmpty: false })
+  return route(
+    `sales:delivery-contact-report:${query}`,
+    () => apiFetch('GET', appendQuery('/api/sales/delivery-contact-report', query)),
+    null,
+  )
+}

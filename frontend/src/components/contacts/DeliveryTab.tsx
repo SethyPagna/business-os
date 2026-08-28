@@ -42,11 +42,12 @@ import {
 import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'delivery-contact-import')
+const DeliveryContactReportModal = lazyRetry(() => import('./DeliveryContactReportModal'), 'delivery-contact-report')
 const DELIVERY_CONTACT_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type DeliveryModal = 'form' | 'import' | 'detail' | null
+type DeliveryModal = 'form' | 'import' | 'detail' | 'report' | null
 type SortDirection = 'asc' | 'desc'
 type DeliveryGroupMode = 'time' | 'alphabet'
 
@@ -1183,8 +1184,21 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
               [t('col_added')||'Added', fmtDateTime24(selected.created_at)],
             ]
           })()}
-          onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t} />
+          onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
+          extraButtons={[{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }]} />
       )}
+      {/* X3: the per-courier totals drill -- the same pattern as the supplier
+          Purchases modal, backed by /api/sales/delivery-contact-report. */}
+      {modal === 'report' && selected ? (
+        <Suspense fallback={null}>
+          <DeliveryContactReportModal
+            contactId={selected.id as number}
+            contactName={String(selected.name || '')}
+            t={t}
+            onClose={() => setModal('detail')}
+          />
+        </Suspense>
+      ) : null}
     </div>
   )
 }

@@ -42,6 +42,7 @@ const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale
 const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
 const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal')
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
+const SalesDailyReport = lazyRetry(() => import('./SalesDailyReport'), 'sales-daily-report')
 import SalesListSurface from './SalesListSurface'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import { buildSalesImportRows } from '../../utils/salesImportContract.ts'
@@ -226,6 +227,9 @@ export default function Sales() {
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  // X2 (Part 395): the page has two views -- the receipts list, and the
+  // by-day report (range-scoped day rows, click a day for its breakdown).
+  const [salesView, setSalesView] = useState<'receipts' | 'daily'>('receipts')
   // 11.1/11.2 (B6): same selection model as Products/Inventory -- checkboxes
   // only exist while something is selected; a long-press on a row/card
   // enters select mode; the desktop column-header checkbox is select-all.
@@ -1017,6 +1021,34 @@ export default function Sales() {
         />
       </div>
 
+      {/* X2: Receipts | Daily report view switch. The daily view carries its
+          own range/time scope and totals, so the list-only chrome (search,
+          filters, pagination, stats bar, bulk toolbar) hides with the list
+          instead of sitting there doing nothing. */}
+      <div className="mb-2 inline-flex rounded-xl border border-slate-200 bg-white p-0.5 text-xs font-medium dark:border-slate-700 dark:bg-slate-900">
+        <button
+          type="button"
+          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'receipts' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
+          onClick={() => setSalesView('receipts')}
+        >
+          {t('receipts') || 'Receipts'}
+        </button>
+        <button
+          type="button"
+          className={`rounded-[10px] px-3 py-1.5 transition ${salesView === 'daily' ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'}`}
+          onClick={() => setSalesView('daily')}
+        >
+          {t('daily_report') || 'Daily report'}
+        </button>
+      </div>
+
+      {salesView === 'daily' ? (
+        <Suspense fallback={<div className="card h-40 animate-pulse" />}>
+          <SalesDailyReport t={t} fmtUSD={fmtUSD} active />
+        </Suspense>
+      ) : null}
+
+      {salesView === 'receipts' ? (
       <PaginationControls
         className="mb-2"
         page={salesPage}
@@ -1030,6 +1062,7 @@ export default function Sales() {
           setSalesPage(1)
         }}
       />
+      ) : null}
 
       {/* Search bar and bulk-action bar pin to the top of the page's scroll
           container while scrolling (Aug 11 2026 UI-polish request, same
@@ -1040,6 +1073,7 @@ export default function Sales() {
           search row, which pinned the bar but let the search box scroll
           away. Pagination now lives above this group instead of below it,
           matching Products/Inventory's order. */}
+      {salesView === 'receipts' ? (
       <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50/95 pb-2 backdrop-blur dark:bg-gray-900/95 sm:mx-0">
         <div className="flex flex-wrap items-center gap-2 pt-1">
           <SearchInput
@@ -1085,8 +1119,9 @@ export default function Sales() {
           </div>
         ) : null}
       </div>
+      ) : null}
 
-      {filtered.length > 0 ? (
+      {salesView === 'receipts' && filtered.length > 0 ? (
         <div className="mb-3 flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-xl bg-blue-50 px-4 py-2 text-sm dark:bg-blue-900/20">
           <span className="font-semibold text-blue-700 dark:text-blue-300">{salesStats ? salesStats.total_count : filtered.length} {t('sales') || 'sales'}</span>
           <span className="text-gray-400">|</span>
@@ -1118,6 +1153,7 @@ export default function Sales() {
 
       <p className="mb-2 text-xs text-gray-400">{t('click_for_details') || 'Click a row for details'}</p>
 
+      {salesView === 'receipts' ? (
       <SalesListSurface
         collapsedSalesSections={collapsedSalesSections}
         filtered={filtered}
@@ -1144,6 +1180,7 @@ export default function Sales() {
         toggleSelectAll={toggleSelectAll}
         toggleSelectionScope={toggleSelectionScope}
       />
+      ) : null}
 
       {detailSale ? (
         <Suspense fallback={null}>
