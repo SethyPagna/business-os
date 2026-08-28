@@ -121,6 +121,14 @@ export function getProductsByIds(ids: unknown[] = [], params: QueryParams = {}):
   return routeCachedProductQuery(cacheKey, appendQuery('/api/products/search', query))
 }
 
+// D1: the Stock Change ledger read. Deliberately NOT routed through the
+// cached-query path -- a ledger must reflect the write that just happened,
+// and the section refetches on open/page/view changes anyway.
+export function getStockLedger(params: QueryParams = {}): Promise<unknown> {
+  const query = buildQueryString(params)
+  return apiFetch('GET', appendQuery('/api/products/stock-ledger', query))
+}
+
 export function getProductFilters(params: QueryParams = {}): Promise<unknown> {
   const query = buildQueryString(params)
   const cacheKey = `products:filters:${query}`

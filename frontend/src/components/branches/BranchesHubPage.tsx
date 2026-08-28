@@ -6,7 +6,7 @@ import Radio from 'lucide-react/dist/esm/icons/radio.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 
-// E1 (Part 407 claim): Inventory merges into Branches. The hub hosts BOTH
+// E1 (Part 413): Inventory merges into Branches. The hub hosts BOTH
 // page components intact -- Branches.tsx under the "Stats & Branches" chip
 // and Inventory.tsx under every chip, re-sliced through its OWN internal
 // section system (inventorySection: stats/products/movements/rfid predates
@@ -61,6 +61,8 @@ function initialSection(canBranchList: boolean, canInventory: boolean): Branches
 
 export default function BranchesHubPage() {
   const { t, getPermissionTier } = useApp()
+  // t() returns the KEY on a miss (stale/failed pack) -- guard so chips fall back to readable English, never snake_case keys.
+  const trh = (key: string, fallback: string): string => { const v = t(key); return v && v !== key ? v : fallback }
   const canBranchList = getPermissionTier('branches') !== 'none'
   const canInventory = getPermissionTier('inventory') !== 'none'
   const [section, setSection] = useState<BranchesHubSection>(() => initialSection(canBranchList, canInventory))
@@ -79,10 +81,10 @@ export default function BranchesHubPage() {
     // The combined home chip: Inventory's stat cards (inventory grant) over
     // the branch list (branches grant) -- visible when EITHER is held, with
     // each half self-gating below.
-    { id: 'branches', label: t('stats_and_branches') || 'Stats & Branches', icon: Building2, allowed: canBranchList || canInventory, tone: 'text-blue-600' },
-    { id: 'products', label: t('products') || 'Products', icon: Package, allowed: canInventory, tone: 'text-teal-600' },
-    { id: 'movements', label: t('movements') || 'Movements', icon: ArrowLeftRight, allowed: canInventory, tone: 'text-violet-600' },
-    { id: 'rfid', label: t('rfid') || 'RFID', icon: Radio, allowed: canInventory, tone: 'text-emerald-600' },
+    { id: 'branches', label: trh('stats_and_branches', 'Stats & Branches'), icon: Building2, allowed: canBranchList || canInventory, tone: 'text-blue-600' },
+    { id: 'products', label: trh('products', 'Products'), icon: Package, allowed: canInventory, tone: 'text-teal-600' },
+    { id: 'movements', label: trh('movements', 'Movements'), icon: ArrowLeftRight, allowed: canInventory, tone: 'text-violet-600' },
+    { id: 'rfid', label: trh('rfid', 'RFID'), icon: Radio, allowed: canInventory, tone: 'text-emerald-600' },
   ]
   const visibleTabs = tabs.filter((tab) => tab.allowed)
   const active: BranchesHubSection = visibleTabs.some((tab) => tab.id === section) ? section : (visibleTabs[0]?.id || 'branches')
@@ -108,7 +110,7 @@ export default function BranchesHubPage() {
           </div>
         </div>
       ) : null}
-      <Suspense fallback={<p className="p-4 text-sm text-gray-500">{t('loading') || 'Loading'}...</p>}>
+      <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
         {/* Inventory stays MOUNTED across chip switches (hostSection just
             re-slices it) so filters, selections and loaded data survive
             moving between chips -- the exact state a standalone page kept. */}

@@ -9943,3 +9943,57 @@ route-permissions/image-normalize backend tests all green; full chain
 re-run green after a7's transient D1 WIP window. (a7's Products
 tree went red twice this session mid-edit and greened within a minute
 each time -- coordination worked, nothing shipped red.)
+
+## Part 415 (chat, Aug 28 2026) -- D1 (+D3's drill): the Stock Change ledger on Products
+
+**Session a7.** The user's ledger design, read-only over the EXISTING
+inventory_movements history -- no new write path anywhere.
+
+**Kernel:** lib/stockLedgerQuery.ts -- pure query builder. The running
+balance is DERIVED, not stored: after_qty walks BACKWARD from the
+product's current stock (the one authoritative number) through every
+newer movement; before_qty = after - signed delta. Where pre-migration
+history is a snapshot with no movement rows, the oldest derived "before"
+reads as the baseline the recorded actions imply -- honest, never
+fabricated (tested: stock 7 with one sale-2 recorded derives 9 -> 7,
+not 0). Sign semantics mirror frontend movementGroups.ts's
+movementSign() EXACTLY, and the pure test pins the two lists equal by
+reading both sources, so they can never drift silently. Buckets: the
+user's three action columns -- 'adjustment'/'set' rows = Adjustment,
+everything else Stock In / Stock Out by sign ('set' is legacy-only:
+the API rewrites set->add/remove since D4).
+
+**Route:** GET /api/products/stock-ledger (thin caller of the kernel) --
+page/pageSize<=100, view all|adjustments|in|out, productId/branchId/
+date-range (inclusive calendar days, auditLogQuery shape)/search (LIKE
+with ESCAPE, literal % and _). Gate: a REAL products OR inventory tier
+(canAccessPage's door, mirrored); products_image_only alone never
+qualifies.
+
+**Test:** test-stock-ledger-pure.cjs, 13 checks -- compiles the kernel
+verbatim (zero imports) and runs its real SQL on the REAL migration
+chain in node:sqlite: hand-computed six-action running balance, bucket
+partition with no overlap, signed directions, view filters, snapshot
+honesty, escaping, barcode-through-join, inclusive dates, pagination.
+
+**UI:** products/StockChangeSection.tsx (8.6kB lazy chunk) in a folded
+"reports" SectionCard below the Products listing (SuppliersTab's D1b
+shape). Columns exactly per the design: Date . Name . Barcode . Before .
+Adjustment(+/- reason) . Stock In . Stock Out . After -- colour through
+the SAME movementColorClass/translateMovementType the Movements tab
+uses. Views as chips; debounced search; server pagination. Row click =
+D3's absorption: the per-product mini-ledger (same endpoint scoped to
+that product, so the drill and the list always agree) in a portaled
+Modal, with the clicked row highlighted.
+
+**Also hardened:** SalesHubPage/BranchesHubPage/this section's card
+title now guard t() misses (t returns the KEY on a miss -- the || 
+fallback pattern is dead code, the known trap): a slow/failed pack
+chunk shows readable English, never snake_case. Seen live: the full
+pack loads via requestIdleCallback, which hidden tabs throttle
+indefinitely. New en+km keys: stock_change_ledger(+_hint), before_qty,
+after_qty (line-preserving sorted inserts).
+
+**D2 note:** the endpoint already accepts branchId/date-range; the
+section's filter ROW (supplier via batch attribution included) is D2's
+remaining scope, deliberately not smuggled in here.

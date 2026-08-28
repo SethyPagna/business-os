@@ -449,11 +449,20 @@ store really paid the rider; margin = charge − cost and is internal only.*
   every report reads identically (SectionCard kinds carry the color). Backed by the
   data that now exists: batches carry supplier (0062) + received date, movements carry
   type/date/branch. Nothing hidden — show as much as the data holds.
-- [~] D1 **[CLAIMED: session a7]** (with D3's detail-reuse half; D2's filters
-  follow). Footprint: Products.tsx (new folded section) + a new
-  products/StockChangeSection component + reads on the EXISTING
-  /api/inventory/movements — no new write paths, routes/inventory.ts only
-  if a read param is missing (4a released it after D5a).
+- [x] D1 *(Part 415, session a7 — SHIPPED with D3's drill half. Kernel
+  lib/stockLedgerQuery.ts derives the running balance by walking BACK from
+  current stock (snapshot-migrated products get the honest implied
+  baseline, never a fabricated zero); sign/bucket semantics pinned EQUAL
+  to frontend movementGroups.movementSign by the 13-check pure test
+  (real SQL, real migration chain). GET /products/stock-ledger: views
+  all|adjustments|in|out, search (escaped LIKE, barcode via join),
+  inclusive date bounds, pagination; gate = real products OR inventory
+  tier. UI: folded reports SectionCard below the Products listing, exact
+  column design (Before · Adjustment± · Stock In · Stock Out · After,
+  movementColorClass colours), row click = per-product mini-ledger from
+  the SAME endpoint (D3's absorption — drill and list always agree).
+  D2's filter row (supplier via batch attribution, branch/date UI) stays
+  open — endpoint already accepts branchId/dates.)*
   **Stock Change section on Products** (the user's ledger design): one row per
   action with columns Name · Barcode (+N) · Before Qty · Adjustment (±, reason) ·
   Stock In (add/create, colour-coded) · Stock Out (sale/damage/return/lost/wrong,
@@ -661,14 +670,17 @@ deep-linkable tabs.*
   add as child of the matched group · proceed as new — with a before→after arrow preview
   and a page-by-page confirm. Price similarity is advisory ("matches X on name+price but
   differs on barcode; recommend child row").
-- [~] F2 **[CLAIMED: session 6e — Part 414. Footprint: a NEW
-  inventory/FastStockInModal.tsx (session header: branch + received date
-  + shared SupplierPickerField + paid/credit once; then per-line name
-  search → qty/cost/expiry, Add = one receiveBatchStock write per line
-  through the D4 kernel, visible per-line result, Done closes) + its
-  launcher button in Inventory.tsx + tests. No Products.tsx (a7 holds
-  it), no routes changes — the existing /api/batches receive endpoint IS
-  the kernel.]** **Fast stock-in (batch in):** enter batch + supplier once, then per-product
+- [x] F2 *(Part 414, session 6e — SHIPPED. FastStockInModal: the
+  shipment header once (branch, received date defaulting today, the
+  SHARED SupplierPickerField, paid/on-credit with enforced due date),
+  then rapid lines — live name/barcode search, pick, qty (Enter =
+  Add)/unit cost (seeded from the row)/optional expiry; every Add is ONE
+  receiveBatchStock through the D4 kernel (no parallel write path, no
+  direct fetches — pinned by test) with its outcome shown on its own row
+  (lot code or the error, retry in place), then the input clears and
+  refocuses for the next product. Done closes and refreshes Inventory
+  only when something actually landed. Launched from Inventory's Manage
+  menu (⚡). tests/fastStockIn.test.ts pins each clause of the spec.)* **Fast stock-in (batch in):** enter batch + supplier once, then per-product
   name→details entry; "Add" appends and continues, "Done" completes the batch. Backed by
   the same add/batch kernel as D4 — no parallel write path.
 - [ ] F3. **Draft persistence + tab chrome:** unfinished add-product / batch-in / detail
