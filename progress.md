@@ -465,7 +465,7 @@ deep-linkable tabs.*
   jobs sharing one review session; (c) the §12 template's optional `supplier` column
   (D5) and the M4 continuation dispatch so volume is never the reason to split a file.
   Builds on §13's two-screen contract — no new commit paths.
-- [ ] N2. **Navigation guard against stale work.** When leaving a page/section that has
+- [x] N2 *(Part 387: utils/dirtyWork.ts registry + navigateTo intercept + the three-option modal (Save & Leave only when every dirty item can save, Discard & Leave, Stay) + beforeunload + sidebar amber dot. First registrations: product form + receive-batch modal; POS cart deliberately exempt (drafts persist by design); import jobs persist server-side. Known limit recorded: browser BACK bypasses the SPA guard.)* **Navigation guard against stale work.** When leaving a page/section that has
   unsaved/in-progress work (add-product draft, batch-in, an open import review, an edit),
   prompt: finish now, or keep it ("I'll be back"), or discard — so switching pages forces
   a reconcile instead of silently stranding work. Needs a shared "dirty work registry"
@@ -567,7 +567,7 @@ deep-linkable tabs.*
 - [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
 - [ ] K5. Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).
-- [~] K6. Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
+- [x] K6 *(Part 387: branch-stock + batches view rows shipped — branch_stock rides the row allowlist; the batches read gate accepts the grant with a money-blind list response (unit cost/paid-credit stripped, supplier NAME kept); Product Viewer role preset = image-only + all 8 rows preselected, each still toggleable. 7.1/7.2 editor redesign remains with E4.)* Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
   **Refined + partly built Aug 28 (Part 380):** the per-capability opt-in system for
   the image-only role ALREADY exists (each visible field is its own permission row —
   Part 243), and it gained `products_image_only_show_vip` (VIP price as its own grant,
@@ -592,7 +592,7 @@ deep-linkable tabs.*
   (no amount); the detail sheet's VIP button first says "VIP price", the FIRST tap
   reveals the amount, the second tap adds at it — keyed per product/variant so one
   reveal never exposes another row. Cost stays never-shown.
-- [ ] P3. **Bulk edit, whole-system scope.** The existing bulk price adjust (selling/
+- [x] P3 *(Part 387: POST /products/bulk-price-adjust — set-based UPDATEs per field, preview count first, FULL-tier gate, clamp-at-0 + skip-zero + per-currency rounding proven in test-bulk-price-adjust-pure; the amber Apply-to-ALL button sits beside the unchanged selection flow; no undo at this scope, stated + audited.)* **Bulk edit, whole-system scope.** The existing bulk price adjust (selling/
   VIP/cost, ±, USD/KHR) operates on the selection; add an explicit "ALL products in
   the system" scope that runs server-side in bounded batches with a preview count and
   the standard confirm — never by materializing 8k ids in the client.
@@ -773,6 +773,15 @@ deep-linkable tabs.*
   drill lines, portal/receipt exclusion verified.
 - [x] U3. **P4 closed** — 0069 tag_label end to end (form, chips, both client
   search haystacks, server facet filter + /filters distinct list).
+
+### Phase V — Aug-28 fourteenth batch (Part 387): P3 + N2 + K6
+
+- [x] V1. **K6 closed** — image-only per-branch-stock + batches (money-blind) view
+  rows + the Product Viewer preset. See K6's own entry.
+- [x] V2. **N2 closed** — dirty-work registry, navigation guard modal, beforeunload,
+  sidebar dot; product form + receive-batch registered first. See N2's entry.
+- [x] V3. **P3 closed** — whole-catalog price adjustment, server-side with true
+  preview count. See P3's entry.
 
 ### Flagged, not guessed (Golden Rule 7)
 
@@ -1820,7 +1829,7 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 386 (Aug 28 2026).** Everything below was really run in this local Windows
+**As of Part 387 (Aug 28 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
@@ -1829,9 +1838,9 @@ are the commands' actual results this session.
 |---|---|
 | `frontend` `tsc --noEmit` | **clean** (Part 384 rerun after the purchases modal + supplier drill) |
 | `cloudflare` `tsc --noEmit` | **clean** (Part 384 rerun after 0067 + purchases endpoint) |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **84 / 84 pass** (Part 386 sweep; Drive prune rescaled to keep-10, analytics gains the actual-cost/margin pins) |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **85 / 85 pass** (Part 387 sweep; +test-bulk-price-adjust-pure, image-only/batches pins extended) |
 | Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 384 rerun, plus check:source) |
-| Real `vite build` | **succeeds (23.65s)**; only the two pre-existing catalog circular warnings |
+| Real `vite build` | **succeeds (25.53s)**; only the two pre-existing catalog circular warnings |
 | Migration harness | **all 70 migrations apply cleanly** (Part 386; `0068` delivery_actual_cost + `0069` tag_label verified present); `0061`–`0069` are committed but **not deployed** — the next `npm run deploy:full` carries them |
 | Migration pack (after the S2 name propagation) | **ALL VALIDATIONS PASSED** rerun (quantities exact vs footer, revenue 0.02%, Khmer byte-perfect, zero scientific barcodes); xlsx round-trip OK |
 | Production devices (read-only D1 query) | trusted_devices **0**, user_sessions 94 (**2 live**) — the Part 375 clean slate holds |

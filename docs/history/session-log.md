@@ -8151,3 +8151,42 @@ both typechecks; build 23.65s; wrangler dry-run; harness **70 migrations** with
 **Not done.** Deploy (0061–0069 now ride it) + Drive CONNECT after deploy (user,
 Settings → Backup); imports per manifest; the ordered remainder (P3, K6, G1,
 D1b, H1, N1c, N2, N3, E-phase).
+
+## Part 387 (chat, Aug 28 2026) — backlog continuation: K6, N2, P3
+
+**Asked.** "Continue progress.md."
+
+**What changed.**
+- K6: the image-only role's last two view rows. `branch_stock` rides the field
+  allowlist (restriction runs after attachment — allowlisting the key was the
+  whole server change); the batches READ gate accepts the new grant with a
+  MONEY-BLIND list response (unit cost / paid-credit stripped, supplier NAME
+  kept per the standing rule); the detail modal shows per-branch counts + a
+  lazily-fetched lot list. New "Product Viewer" role preset = image-only + all
+  eight view rows preselected — the "view everything, touch nothing"
+  arrangement, each row still individually toggleable.
+- N2: the unsaved-work navigation guard. `utils/dirtyWork.ts` registry;
+  navigateTo intercepts page switches with dirty work and App.tsx renders the
+  three-option modal (Save & Leave offered only when every dirty item can save
+  itself — with a refuse-to-navigate backstop; Discard & Leave; Stay);
+  beforeunload covers close/reload; the sidebar shows an amber dot on pages
+  holding dirty work. Registered first: the product form (any edit) and the
+  receive-batch modal (anything beyond defaults). POS carts deliberately exempt
+  (drafts persist by design); import jobs persist server-side. Known limit
+  recorded: browser BACK bypasses the SPA guard.
+- P3: whole-catalog price adjustment. POST /products/bulk-price-adjust runs
+  set-based UPDATEs per chosen field (never materializing ids client-side),
+  preview:true returns the true would-change count, FULL products tier
+  required, no undo at this scope (stated in the confirm, recorded in the
+  audit entry with parameters + rows touched). Semantics proven against real
+  SQLite: clamp at 0 on decrease, skip-zero, cents vs whole-riel rounding,
+  inactive rows untouched. UI: the amber "Apply to ALL products in the
+  system…" button beside the untouched selection flow.
+
+**Verified.** Backend sweep **85/85** (+test-bulk-price-adjust-pure); frontend
+chain **116/116 + check:source**; both typechecks; build 25.53s; wrangler
+dry-run.
+
+**Not done.** Deploy (0061–0069) + Drive connect; imports per manifest; ordered
+remainder (G1 promotions engine + promoted-first ordering, D1b, H1, N1c, N3
+SectionCard sweep, E-phase page merges, D6 rename cascades, K7).
