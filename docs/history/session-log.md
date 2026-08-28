@@ -8950,3 +8950,31 @@ exit 0 (18 promo checks); both tsc; vite build; wrangler dry-run.
 **Not done.** Deploy (0071/0072/0073 ride `npm run deploy:full`). G2/G3/G4
 still open. The next_item cheapest-of-group reading is recorded on the
 board as a stated interpretation, not a silent guess.
+
+### Part 396 addendum -- the migration pack reorganized into three tiers, one doc
+
+User: "many files in migration... what is actually needed and correct and
+latest... just one md should be enough... also where to import what
+mode/options to choose." Answered by measurement (fresh `node
+validate-pack.cjs` run: ALL CHECKS PASSED before touching anything -- nothing
+in the pack was stale), then reorganized:
+
+- Top level = ONLY what gets imported (the 8 csvs + their xlsx viewing twins,
+  the manifest, the validator). `later/` = the five Phase-D-era files.
+  `reference/` = the five never-imported records (incl. expenses.csv, whose
+  content is migration 0064).
+- validate-pack.cjs taught the three-tier layout: the loader sweeps all three
+  dirs into the same bare-name map (plus a duplicate-tier guard), twins
+  resolve beside their csv whichever tier it is. Re-run after the moves:
+  ALL CHECKS PASSED (twins in later/ and reference/ included).
+- README.md deleted; IMPORT-MANIFEST.md rewritten as THE one document: the
+  folder map, the snapshot-vs-history concept (absorbed from the README,
+  minus its stale ISO-dates line), and -- new -- the EXACT app UI per step:
+  Products -> Manage -> Import -> tab "Add / Update" -> card "Add / update
+  products" (never the Replace tab, incl. at Step 4d); Stock Actions tab ->
+  "Direct -- the number IS the change" -> Analyze rows -> Confirm; Contacts
+  imports with "Default conflict action: Skip existing records"; Sales import
+  with "Count loyalty points for these sales" OFF; the deploy-first
+  prerequisite now naming 0064 + 0072's automatic effects.
+
+Pack-side only -- no repo code changed in this addendum.
