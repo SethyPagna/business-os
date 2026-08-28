@@ -257,9 +257,21 @@ function SupplierForm({ supplier, onSave, onClose, t }: SupplierFormProps) {
           <label htmlFor="supplier-form-name" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('name')} *</label>
           <input id="supplier-form-name" name="supplier_name" autoComplete="organization" className="input" value={form.name || ''} onChange={(event) => set('name', event.target.value)} autoFocus />
         </div>
+        {/* This slot used to edit contact_person, but the label promised one
+            thing and the first information a supplier needs is the phone
+            (user, Aug 28) -- so the default/first field is the PRIMARY
+            option's phone number. The contact person's NAME stays editable
+            in the option rows below and is still derived on save. */}
         <div>
-          <label htmlFor="supplier-form-contact-person" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('contact_person') || 'Contact Person'}</label>
-          <input id="supplier-form-contact-person" name="supplier_contact_person" autoComplete="name" className="input sm:w-1/2" value={form.contact_person || ''} onChange={(event) => set('contact_person', event.target.value)} />
+          <label htmlFor="supplier-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('phone_number') || 'Phone Number'}</label>
+          <input
+            id="supplier-form-phone"
+            name="supplier_phone"
+            autoComplete="tel"
+            className="input sm:w-1/2"
+            value={options[0]?.phone || ''}
+            onChange={(event) => setOptions((current) => current.map((option, itemIndex) => (itemIndex === 0 ? { ...option, phone: event.target.value } : option)))}
+          />
         </div>
         <div>
           <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

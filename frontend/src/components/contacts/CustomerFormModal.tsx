@@ -177,6 +177,20 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
           <input id="customer-form-name" name="customer_name" autoComplete="name" className="input" value={form.name} onChange={(event) => setField('name', event.target.value)} autoFocus />
         </div>
 
+        {/* Phone comes right after the name -- it is the default/first piece
+            of contact information and the key duplicates are matched on
+            (user, Aug 28); membership follows it. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div>
+            <label htmlFor="customer-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'phone_number', 'Phone Number')}</label>
+            <input id="customer-form-phone" name="customer_phone" autoComplete="tel" className="input" value={form.phone || ''} onChange={(event) => setField('phone', event.target.value)} />
+          </div>
+          <div>
+            <label htmlFor="customer-form-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'email', 'Email')}</label>
+            <input id="customer-form-email" name="customer_email" autoComplete="email" className="input" type="email" value={form.email || ''} onChange={(event) => setField('email', event.target.value)} />
+          </div>
+        </div>
+
         <div>
           <label htmlFor="customer-form-membership" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {tr(t, 'membership_number', 'Membership number')} *
@@ -198,17 +212,6 @@ export default function CustomerFormModal({ customer, onSave, onClose, t }: Cust
             >
               {tr(t, 'regenerate', 'Regenerate')}
             </button>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
-            <label htmlFor="customer-form-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'phone', 'Phone')}</label>
-            <input id="customer-form-phone" name="customer_phone" autoComplete="tel" className="input" value={form.phone || ''} onChange={(event) => setField('phone', event.target.value)} />
-          </div>
-          <div>
-            <label htmlFor="customer-form-email" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr(t, 'email', 'Email')}</label>
-            <input id="customer-form-email" name="customer_email" autoComplete="email" className="input" type="email" value={form.email || ''} onChange={(event) => setField('email', event.target.value)} />
           </div>
         </div>
 

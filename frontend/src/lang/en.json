@@ -2757,6 +2757,7 @@
   "personal_details": "Personal details",
   "phone": "Phone",
   "phone_contact_only_hint": "Phone number is stored as a contact field only. Verification is paused for now.",
+  "phone_number": "Phone Number",
   "phone_verification": "Phone verification",
   "phone_verification_disabled_note": "Optional contact field. Phone verification is available after a phone-auth provider is configured.",
   "pill": "Pill",
