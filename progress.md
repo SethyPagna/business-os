@@ -544,7 +544,9 @@ ids + permission keys STABLE (the permission model, `canAccessPage`, and audit
 references key off them); the sidebar shrinks and the moved pages become sections with
 deep-linkable tabs.*
 
-- [ ] E1. **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
+- [~] E1 **[CLAIMED: session a7]** *(sequenced with 4a: hub + nav first;
+  Inventory.tsx content moves only after their Part-409 AdjustForm slice
+  lands — agreed in chat.)* **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
 - [x] E2 *(Part 407, session a7 — SHIPPED. SalesHubPage hosts Sales +
