@@ -6,6 +6,7 @@ import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { logicalLibraryName } from '../lib/libraryLogicalAssets'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
+import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
 
@@ -247,6 +248,11 @@ app.post('/upload', async (c) => {
   })
 
   const asset = await db.prepare('SELECT * FROM file_assets WHERE id = ?').get([insert.lastInsertRowid])
+  await audit(c.env, user.id, user.username || null, 'upload', 'file', insert.lastInsertRowid, {
+    original_name: originalName,
+    media_type: mediaType,
+    byte_size: buffer.byteLength,
+  })
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'upload', id: insert.lastInsertRowid }))
   return c.json(asset)
 })
@@ -316,6 +322,10 @@ app.patch('/:id', async (c) => {
   `).run({ id, original_name: nextName })
 
   const asset = await db.prepare('SELECT * FROM file_assets WHERE id = ?').get([id])
+  await audit(c.env, user.id, user.username || null, 'rename', 'file', id, {
+    from: existing.original_name,
+    to: nextName,
+  })
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'rename', id }))
   return c.json(asset)
 })
@@ -378,6 +388,20 @@ app.delete('/:id', async (c) => {
   await c.env.ASSETS.delete(`uploads/${asset.stored_name}`)
   await db.prepare('DELETE FROM file_assets WHERE id = ?').run([id])
 
+  // `forced` records that the user typed the CONFIRM DELETE override past a
+  // real usage count -- the one variant of this delete worth flagging later.
+  await audit(c.env, user.id, user.username || null, 'delete', 'file', id, {
+    original_name: asset.original_name,
+    forced: usageCount > 0,
+    usage: usageCount > 0
+      ? {
+          products: Number(usageBreakdown?.product_count || 0),
+          gallery: Number(usageBreakdown?.gallery_count || 0),
+          avatars: Number(usageBreakdown?.avatar_count || 0),
+          settings: settingsUsage,
+        }
+      : undefined,
+  })
   c.executionCtx.waitUntil(broadcast(c.env, 'files', { action: 'delete', id }))
   return c.json(asset)
 })

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { audit } from '../lib/audit'
 
 // Ported from backend/src/routes/sync.ts. Read this before touching it --
 // the design is NOT "real-time multi-device sync" -- there's no live
@@ -181,6 +182,11 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
   const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
   app.use('*', requireAuth)
 
+  // Audit coverage note: the outbox itself deliberately writes no audit rows.
+  // Every applied operation is replayed through the REAL route handler below
+  // (same cookie, same user), so the target route's own audit() call fires
+  // exactly as it would for an online request -- auditing here too would
+  // double-log each replayed mutation.
   app.post('/outbox', async (c) => {
     const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
     const rawOperations = Array.isArray(body.operations) ? body.operations : []
@@ -258,7 +264,28 @@ export function createSyncRoute(mainApp: Hono<{ Bindings: Env }>) {
     const uploadId = c.req.param('uploadId')
     const stub = c.env.SYNC_UPLOADS.get(c.env.SYNC_UPLOADS.idFromName(uploadId))
     const upstream = await stub.fetch('https://sync-upload/complete', { method: 'POST' })
-    return new Response(upstream.body, upstream)
+    // /complete is the request that materializes the file_assets row (init/
+    // chunk only stage bytes in DO storage). The DO has no session context --
+    // its row carries source='offline_sync' and no creator -- so the audit
+    // entry is written here, where requireAuth knows who finished the upload.
+    // Buffering the small JSON body is what lets us name the created asset.
+    const bodyText = await upstream.text()
+    if (upstream.ok) {
+      const user = c.get('user')
+      let assetId: number | null = null
+      let originalName: string | null = null
+      try {
+        const parsed = JSON.parse(bodyText) as { asset?: { id?: number; original_name?: string } }
+        assetId = parsed.asset?.id ?? null
+        originalName = parsed.asset?.original_name ?? null
+      } catch { /* audit still records the upload_id */ }
+      await audit(c.env, user.id, user.username || null, 'upload', 'file', assetId, {
+        via: 'offline_sync',
+        upload_id: uploadId,
+        original_name: originalName,
+      })
+    }
+    return new Response(bodyText, upstream)
   })
 
   return app

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { audit } from '../lib/audit'
 import { hasPermission } from '../lib/permissions'
 import {
   CLOUDFLARE_BACKUP_KEEP,
@@ -63,6 +64,7 @@ app.get('/', async (c) => {
 })
 
 app.post('/', async (c) => {
+  const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const type = String(body.type || '').trim()
   try {
@@ -95,6 +97,11 @@ app.post('/', async (c) => {
         },
       })
       await linkCloudflareBackupJob(c.env, backup.name.replace(/\.json$/, ''), jobId)
+      await audit(c.env, user.id, user.username || null, 'create', 'backup', backup.name, {
+        status: backup.status,
+        assets_backed_up: copiedAssets,
+        asset_count: totalAssets,
+      })
       const currentJob = await getSystemJob(c.env, jobId) || job
       return c.json(
         { job_id: currentJob.id, item: currentJob },
@@ -103,7 +110,6 @@ app.post('/', async (c) => {
     }
 
     if (type === 'import-folder') {
-      const user = c.get('user')
       if (!hasPermission(user, 'backup_restore')) {
         return c.json({ error: 'You do not have permission to perform this action' }, 403)
       }
@@ -124,6 +130,11 @@ app.post('/', async (c) => {
         return c.json({ job_id: job.id, item: job })
       }
       const restore = await restoreCloudflareBackup(c.env, sourceDir)
+      // The whole database just rolled back to this backup -- the single most
+      // consequential action in the app, and until now the one with no trail.
+      await audit(c.env, user.id, user.username || null, 'restore', 'backup', sourceDir, {
+        restored_key: restore.key,
+      })
       const job = await storeSystemJob(c.env, completedJob('Cloudflare backup restored', {
         success: true,
         packageId: restore.key.replace(/^backups\/cloudflare\//, ''),

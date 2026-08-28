@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
+import { audit } from '../lib/audit'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import type { Env } from '../index'
 
@@ -78,6 +79,12 @@ app.post('/', async (c) => {
   const note = await db
     .prepare(`SELECT * FROM user_notes WHERE id = @id AND user_id = @userId`)
     .get<NoteRow>({ id: result.lastInsertRowid, userId: user.id })
+  // Audit scope for this personal scratchpad: lifecycle only (create/delete),
+  // id only. Title/content stay out of the trail -- notes are private to the
+  // user, and the audit log is admin-readable. The autosave PUT and reorder
+  // are deliberately unaudited: PUT fires on every debounced keystroke, so
+  // auditing it would write hundreds of rows per editing session.
+  await audit(c.env, user.id, user.username || null, 'create', 'note', result.lastInsertRowid, null)
   return c.json({ note }, 201)
 })
 
@@ -174,6 +181,7 @@ app.delete('/:id', async (c) => {
     .get<{ id: number }>({ id, userId: user.id })
   if (!existing) return c.json({ error: 'Note not found' }, 404)
   await db.prepare(`DELETE FROM user_notes WHERE id = @id AND user_id = @userId`).run({ id, userId: user.id })
+  await audit(c.env, user.id, user.username || null, 'delete', 'note', id, null)
   return c.json({ success: true })
 })
 
