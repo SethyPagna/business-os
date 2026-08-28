@@ -132,6 +132,7 @@ const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategories
 // default export below never has to pull in the full ~3400-line editor's
 // bundle for a user who will only ever see this lightweight surface.
 const ProductsImageOnlyView = lazyRetry(() => import('./ProductsImageOnlyView.tsx'), 'products-image-only-view')
+const StockChangeSection = lazyRetry(() => import('./StockChangeSection.tsx'), 'products-stock-change-section')
 const ManageBrandsModal = lazyRetry(() => import('./lookups/ManageBrandsModal'), 'products-manage-brands-modal')
 const ManageUnitsModal = lazyRetry(() => import('./lookups/ManageUnitsModal'), 'products-manage-units-modal')
 const ImportModeWizard = lazyRetry(() => import('./import/ImportModeWizard'), 'products-bulk-import-wizard')
@@ -3916,6 +3917,27 @@ function ProductsFullEditor() {
         editablePageSizeInput={false}
         className="mt-2"
       />
+
+      {/* D1 (Part 415): the user's Stock Change ledger -- every recorded
+          stock action with its derived running balance, as a folded
+          reports section below the listing (same shape as SuppliersTab's
+          Stock-In Invoices card). Read-only over existing movement
+          history; the section (its own lazy chunk) only loads when
+          opened. Image-only users never reach this component at all (the
+          Products() wrapper routes them to the restricted view), and the
+          endpoint independently requires a real products/inventory tier. */}
+      <SectionCard
+        kind="reports"
+        title={tr('stock_change_ledger', 'Stock Changes', 'ការផ្លាស់ប្តូរស្តុក')}
+        subtitle={tr('stock_change_ledger_hint', 'Every recorded stock action with its running balance', 'រាល់សកម្មភាពស្តុកទាំងអស់ ជាមួយសមតុល្យបន្តបន្ទាប់')}
+        storageKey="products_stock_change_ledger"
+        defaultOpen={false}
+        className="mt-3"
+      >
+        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{t('loading') || 'Loading'}...</div>}>
+          <StockChangeSection t={t} />
+        </Suspense>
+      </SectionCard>
 
       {/* Product detail modal */}
       {detailProduct && (
