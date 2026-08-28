@@ -51,7 +51,7 @@ export async function applyHistoricalSaleImport(
             membership_discount_usd, membership_discount_khr, membership_points_redeemed,
             is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone,
             delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
-            sale_status, items, created_at, client_request_id
+            loyalty_accrual, sale_status, items, created_at, client_request_id
           )
           SELECT
             @receipt_number, @cashier_id, @cashier_name, @branch_id, @branch_name,
@@ -62,9 +62,12 @@ export async function applyHistoricalSaleImport(
             @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
             @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone,
             @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
-            @sale_status, @items_json, @created_at, @client_request_id
+            @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id
           WHERE ${pendingGuard}`,
-    params: { ...common, ...d, items_json: JSON.stringify(d.items), created_at: d.created_at || input.nowIso },
+    // Imported (historical) sales never earn loyalty points -- the balance is
+    // computed by summing sales, so migrated old-system receipts would
+    // otherwise inflate every matched customer's balance (migration 0061).
+    params: { ...common, ...d, loyalty_accrual: 0, items_json: JSON.stringify(d.items), created_at: d.created_at || input.nowIso },
   }]
 
   const isReturnGroup = RETURN_STATUSES.has(d.sale_status)

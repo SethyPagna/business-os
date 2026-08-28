@@ -123,6 +123,9 @@ app.post('/', async (c) => {
     membership_discount_usd?: number
     membership_discount_khr?: number
     membership_points_redeemed?: number
+    // false = this sale does not earn loyalty points (POS toggle); anything
+    // else keeps the default auto-accrual. See migration 0061.
+    loyalty_accrual?: boolean
     // Delivery -- same gap: is_delivery/delivery_contact_id/delivery_fee_*
     // are real columns on `sales` (0001_init.sql) and real POS UI state,
     // just never wired into this insert.
@@ -273,8 +276,8 @@ app.post('/', async (c) => {
 
     const salesAgg = await db.prepare(
       `SELECT
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN total_usd ELSE 0 END), 0) AS earned_usd,
-         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN total_khr ELSE 0 END), 0) AS earned_khr,
+         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') AND COALESCE(loyalty_accrual, 1) = 1 THEN total_usd ELSE 0 END), 0) AS earned_usd,
+         COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') AND COALESCE(loyalty_accrual, 1) = 1 THEN total_khr ELSE 0 END), 0) AS earned_khr,
          COALESCE(SUM(CASE WHEN COALESCE(sale_status, 'completed') NOT IN ('cancelled', 'awaiting_payment') THEN membership_points_redeemed ELSE 0 END), 0) AS redeemed
        FROM sales WHERE customer_id = ?`,
     ).get<{ earned_usd: number; earned_khr: number; redeemed: number }>([customer.id])
@@ -385,7 +388,7 @@ app.post('/', async (c) => {
         membership_discount_usd, membership_discount_khr, membership_points_redeemed,
         is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone, delivery_contact_address,
         delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
-        sale_status, created_at, updated_at
+        loyalty_accrual, sale_status, created_at, updated_at
       ) VALUES (@receipt_number, @client_request_id, @cashier_id, @cashier_name, @branch_id, @branch_name,
         @customer_id, @customer_name, @customer_phone, @customer_address,
         @payment_method, @payment_details, @payment_currency, @exchange_rate,
@@ -394,7 +397,7 @@ app.post('/', async (c) => {
         @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
         @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone, @delivery_contact_address,
         @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
-        @sale_status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        @loyalty_accrual, @sale_status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `)
     .run({
       receipt_number: receiptNumber,
@@ -411,6 +414,10 @@ app.post('/', async (c) => {
       payment_details: JSON.stringify(effectivePaymentDetails),
       payment_currency: body.payment_currency || 'USD',
       exchange_rate: exchangeRate,
+      // Only an EXPLICIT false opts a sale out of earning points -- absent or
+      // any other value keeps the long-standing auto-accrual behavior, so an
+      // older cached POS build cannot silently stop customers earning points.
+      loyalty_accrual: body.loyalty_accrual === false ? 0 : 1,
       subtotal_usd: round2(subtotalUsd),
       subtotal_khr: Math.round(subtotalUsd * exchangeRate),
       discount_usd: discountUsd,

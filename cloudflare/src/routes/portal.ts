@@ -828,7 +828,12 @@ export function summarizePoints(sales: Array<Record<string, unknown>>, returns: 
   for (const sale of sales) {
     const status = (sale.sale_status as string) || 'completed'
     if (status === 'cancelled' || status === 'awaiting_payment') continue
-    earned += calculatePointsValue(toNumber(sale.total_usd), toNumber(sale.total_khr), config)
+    // loyalty_accrual = 0 (historical imports, POS opt-out -- migration 0061)
+    // earns nothing, but points REDEEMED on such a sale still count as spent.
+    // Absent column (caller didn't select it) keeps the accruing default.
+    if (sale.loyalty_accrual === undefined || sale.loyalty_accrual === null || toNumber(sale.loyalty_accrual) === 1) {
+      earned += calculatePointsValue(toNumber(sale.total_usd), toNumber(sale.total_khr), config)
+    }
     redeemed += toNumber(sale.membership_points_redeemed)
   }
   for (const ret of returns) {
@@ -1036,6 +1041,7 @@ app.get('/membership/:membershipNumber', async (c) => {
       COALESCE(s.membership_discount_usd, 0) AS membership_discount_usd,
       COALESCE(s.membership_discount_khr, 0) AS membership_discount_khr,
       COALESCE(s.membership_points_redeemed, 0) AS membership_points_redeemed,
+      COALESCE(s.loyalty_accrual, 1) AS loyalty_accrual,
       GROUP_CONCAT(CASE WHEN si.id IS NOT NULL THEN si.product_name || ' x' || si.quantity END, ', ') AS items_summary
     FROM sales s
     LEFT JOIN sale_items si ON si.sale_id = s.id

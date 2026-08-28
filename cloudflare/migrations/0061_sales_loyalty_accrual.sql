@@ -1,0 +1,13 @@
+-- Whether this sale's total EARNS loyalty points (1) or is excluded from
+-- accrual (0). There is no stored points balance anywhere -- balances are
+-- COMPUTED by summing sales at read time (routes/sales.ts redemption check,
+-- portal.ts summarizePoints, notifications.ts loyalty section) -- so a sale
+-- that must not add points has to say so on its own row.
+--
+-- Two writers set 0:
+--   * historical sales imports (lib/salesImportCommit.ts) -- migrated
+--     old-system history must never inflate anyone's balance (user, Aug 28);
+--   * a POS sale whose "count loyalty points" toggle was switched off.
+-- Redemption bookkeeping (membership_points_redeemed) is NOT gated by this
+-- flag: points spent on a sale stay spent even if that sale earns none.
+ALTER TABLE sales ADD COLUMN loyalty_accrual INTEGER NOT NULL DEFAULT 1;

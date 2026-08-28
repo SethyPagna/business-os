@@ -282,7 +282,7 @@ async function computeCustomerPointsMap(env: Env, customerIds: number[]): Promis
   for (const idChunk of idChunks) {
     const placeholders = idChunk.map(() => '?').join(',')
     const [salesChunk, returnChunk, submissionChunk, adjustmentChunk] = await Promise.all([
-      db.prepare(`SELECT customer_id, sale_status, total_usd, total_khr, membership_points_redeemed FROM sales WHERE customer_id IN (${placeholders})`)
+      db.prepare(`SELECT customer_id, sale_status, total_usd, total_khr, membership_points_redeemed, COALESCE(loyalty_accrual, 1) AS loyalty_accrual FROM sales WHERE customer_id IN (${placeholders})`)
         .all<{ customer_id: number; sale_status: string | null; total_usd: number; total_khr: number; membership_points_redeemed: number }>(idChunk),
       db.prepare(`SELECT customer_id, status, total_refund_usd, total_refund_khr FROM returns WHERE customer_id IN (${placeholders})`)
         .all<{ customer_id: number; status: string | null; total_refund_usd: number; total_refund_khr: number }>(idChunk),
