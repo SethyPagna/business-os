@@ -503,11 +503,17 @@ deep-linkable tabs.*
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
 - [ ] E2. **Sales absorbs Returns and Fees** as sections of one Sales page.
-- [ ] E3. **Review + Audit Log merge into "Review & Logs"** — approvals queue and the
+- [~] E3 *(IN PROGRESS — session 6e, Part 403. Footprint: review/audit page
+  components + App.tsx/AppContext/pathRouting/navigationConfig +
+  section-switcher host; page ids retire, permission keys stay stable.)*
+  **Review + Audit Log merge into "Review & Logs"** — approvals queue and the
   audit trail side by side.
-- [ ] E4. **Settings absorbs Users and Backup** as sections/mini-sections; the permissions
+- [~] E4 *(IN PROGRESS — session 6e, Part 403, after E3. Footprint:
+  Settings/Users/Backup components + the same nav wiring files + the 7.2
+  permissions-editor redesign inside Users' editor components.)*
+  **Settings absorbs Users and Backup** as sections/mini-sections; the permissions
   editor redesign (7.2) lands as part of this move.
-- [ ] E5. **Promotions page** (new) with Loyalty Points as a section (see Phase G).
+- [x] E5 *(Satisfied by G2, Part 399: the Promotions page exists with Loyalty Points as a lazy section behind a switcher — exactly this item; see G2.)* **Promotions page** (new) with Loyalty Points as a section (see Phase G).
 - [ ] E6. Every export/import affordance on the moved pages is re-checked after the move
   (no orphaned buttons, no dead routes) — Golden Rule 6.
 
