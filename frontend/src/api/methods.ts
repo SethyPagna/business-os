@@ -1339,7 +1339,7 @@ export function downloadImportTemplate(type) {
     // Leave it blank to let the system stamp today's date and
     // auto-derive the batch code from it, or fill in a specific received
     // date (e.g. "08/24/2026") -- the system reads that date and
-    // auto-formats it into the stored batch code (e.g. "AUG242026") for
+    // auto-formats it into the stored batch code (e.g. "08242026") for
     // you; there's no separate free-typed label to fill in anymore.
     'batch(mm/dd/yyyy)': '', expiry_date: '', expiry_alert_days: '30',
     branch: 'Main Branch', supplier: '',

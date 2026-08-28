@@ -52,7 +52,7 @@ export function formatDefaultBatchLabel(batchNumber: number | null | undefined, 
 
 // Full fallback chain for displaying one batch: the date-derived code
 // (lot_code -- see cloudflare/src/lib/batchCode.ts's dateToBatchCode,
-// always populated now, e.g. "AUG222026") wins as the primary identifier,
+// always populated now, e.g. "08222026") wins as the primary identifier,
 // then "Batch <n: mm/dd/yyyy>" for pre-redesign rows that predate it,
 // then a bare id as the last resort so a pill/row is never blank.
 export function batchDisplayLabel(batch: BatchLike, batchWord = 'Batch'): string {

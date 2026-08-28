@@ -26,7 +26,9 @@ export function normalizeToIsoDate(value: string | null | undefined): string | n
     return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
 
-  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
+  // Trailing 24-hour time tolerated and ignored -- mirrors the cloudflare
+  // copy (Part 388: mm/dd/yyyy datetimes appear in migration files too).
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/)
   if (slash) {
     const month = Number(slash[1])
     const day = Number(slash[2])
@@ -39,21 +41,14 @@ export function normalizeToIsoDate(value: string | null | undefined): string | n
   return null
 }
 
-// Uppercase 3-letter month abbreviations, index 0 = January -- mirrors
-// cloudflare/src/lib/batchCode.ts's own copy (see that file for the
-// authoritative comment on why: month-abbreviation format replaces the
-// original all-numeric MMDDYYYY per Aug 24 2026 user direction).
-const MONTH_ABBREVIATIONS = [
-  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
-]
-
-// MMMDDYYYY -- e.g. "AUG222026" for 08/22/2026 or 8/22/2026, "AUG022026" for
-// 08/2/2026. Always read as mm/dd/yyyy. Null if the input isn't a real date.
+// MMDDYYYY -- e.g. "08222026" for 08/22/2026, "08022026" for 08/2/2026.
+// Always read as mm/dd/yyyy; null if the input isn't a real date. Format
+// history (mirrors cloudflare/src/lib/batchCode.ts): numeric ->
+// month-abbreviation (Aug 24 direction) -> numeric again (Aug 28 Part 388
+// direction, "translate mm/dd/yyyy into mmddyyyy").
 export function dateToBatchCode(value: string | null | undefined): string | null {
   const iso = normalizeToIsoDate(value)
   if (!iso) return null
   const [yyyy, mm, dd] = iso.split('-')
-  const month = MONTH_ABBREVIATIONS[Number(mm) - 1]
-  return `${month}${dd}${yyyy}`
+  return `${mm}${dd}${yyyy}`
 }

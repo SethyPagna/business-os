@@ -1,10 +1,9 @@
 // Turns a batch's received date into the batch's own operator-facing code
 // -- "lot code can be removed... batch column is just a translated
-// version of received date": 08/22/2026 or 8/22/2026 becomes AUG222026,
-// 08/2/2026 becomes AUG022026. Always read as mm/dd/yyyy, this app's date
-// convention throughout (see frontend/src/utils/batchLabel.ts's
-// formatBatchReceivedDate), never dd/mm/yyyy. Month-abbreviation format
-// (was plain MMDDYYYY) per Aug 24 2026 user direction.
+// version of received date": 08/22/2026 or 8/22/2026 becomes 08222026.
+// Always read as mm/dd/yyyy, this app's date convention throughout (see
+// frontend/src/utils/batchLabel.ts's formatBatchReceivedDate), never
+// dd/mm/yyyy. See dateToBatchCode below for the format history.
 //
 // Replaces the old free-typed "Lot / batch code" field: lib/
 // productBatches.ts's receiveBatchStock, routes/batches.ts's PATCH /:id,
@@ -43,7 +42,12 @@ export function normalizeToIsoDate(value: string | null | undefined): string | n
     return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
   }
 
-  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/)
+  // A trailing 24-hour time is tolerated (and ignored -- this function
+  // answers "which DATE") so mm/dd/yyyy-formatted datetime cells from the
+  // migration files parse the same way the ISO branch above already
+  // tolerates 'YYYY-MM-DD HH:MM:SS'. (Part 388: the whole app speaks
+  // mm/dd/yyyy, files included.)
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/)
   if (slash) {
     const month = Number(slash[1])
     const day = Number(slash[2])
@@ -56,19 +60,15 @@ export function normalizeToIsoDate(value: string | null | undefined): string | n
   return null
 }
 
-// Uppercase 3-letter month abbreviations, index 0 = January.
-const MONTH_ABBREVIATIONS = [
-  'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
-  'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
-]
-
-// MMMDDYYYY -- the actual stored/displayed batch code, e.g. "AUG222026" for
-// 08/22/2026 or "AUG022026" for 8/2/2026. Reads its input as mm/dd/yyyy
-// (see normalizeToIsoDate above); null if the input isn't a real date.
+// MMDDYYYY -- e.g. "08282026" for 08/28/2026. Format history, kept honest:
+// originally all-numeric MMDDYYYY; switched to month-abbreviation
+// (AUG282026) per Aug 24 user direction; switched BACK to all-numeric
+// MMDDYYYY per Aug 28 (Part 388) user direction -- "translate mm/dd/yyyy
+// into mmddyyyy". Codes are derived (never parsed back), and production
+// holds zero batches pre-deploy, so the change is data-safe.
 export function dateToBatchCode(value: string | null | undefined): string | null {
   const iso = normalizeToIsoDate(value)
   if (!iso) return null
   const [yyyy, mm, dd] = iso.split('-')
-  const month = MONTH_ABBREVIATIONS[Number(mm) - 1]
-  return `${month}${dd}${yyyy}`
+  return `${mm}${dd}${yyyy}`
 }
