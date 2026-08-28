@@ -2174,10 +2174,15 @@ explicit Print buttons; full receipt maps an '80x50mm' paper setting to the 80mm
 roll). Verified: receiptTemplate + receiptSettingsSync re-pinned and green, posCore +
 chain coverage green, build green, and a LIVE worker-dev pass with a real sale
 (migrated local D1 to 0073 to do it; local dev admin password was reset to the seed
-default `Admin123456!` in the process — local scratch only). Found along the way,
-NOT this unit's: the current shared `frontend/dist` (a peer's mid-work build) renders
-the POS "Record Sale As" status modal EMPTY, so checkout can't complete on worker-dev
-until the G1b session's next green build — flagged to that session directly.
+default `Admin123456!` in the process — local scratch only). **Correction (same
+session, after re-test):** the "POS status modal renders empty" report initially
+flagged here against a peer's build was WRONG — a DOM-inspection bug in this
+session's own probe (the deepest div containing the title is the modal's header
+bar, which is all the probe ever read). On the fresh HEAD bundle the modal renders
+all three options, and a full real checkout was completed through it (POST
+/api/sales → sale RCP-1787913777564-S6PX committed, paid, status completed). The
+earlier "can't complete checkout" symptom was `insufficient_amount` doing its job —
+no payment had been entered. No defect existed in the peer's work at any point.
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
