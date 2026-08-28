@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
-import { requireAuth, revokeSessionsForDevice, type SessionUser } from '../lib/auth'
+import { requireAuth, revokeSessionsForDevice, revokeUserSessions, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { isAdminControlUser } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -22,6 +22,98 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'Administrator access required.' }, 403)
   }
   return next()
+})
+
+// ---- Live-session management (J3) ----------------------------------------
+// Sessions are the other half of "device/session management": a device row
+// says whether a FUTURE login passes the trust gate; a session row is a
+// login that already happened and is still valid. getSessionUser checks
+// `revoked_at IS NULL AND expires_at > now` on every request, so a revoke
+// here bites on the target's very next request, not at their next login.
+
+type LiveSessionRow = {
+  id: number
+  user_id: number
+  device_id: string | null
+  device_name: string | null
+  device_tz: string | null
+  user_agent: string | null
+  last_ip: string | null
+  created_at: string
+  last_seen_at: string | null
+  expires_at: string
+  username: string
+  user_name: string
+}
+
+// Explicit column list on purpose: `token_hash` is the session credential
+// and must never leave the database, so no `s.*` here -- pinned by
+// test-admin-sessions-pure.cjs.
+const LIVE_SESSION_SELECT = `
+  SELECT s.id, s.user_id, s.device_id, s.device_name, s.device_tz, s.user_agent,
+         s.last_ip, s.created_at, s.last_seen_at, s.expires_at,
+         u.username, u.name AS user_name
+  FROM user_sessions s
+  JOIN users u ON u.id = s.user_id
+  WHERE s.revoked_at IS NULL AND s.expires_at > @now`
+
+// GET /api/auth/devices/sessions -- live sessions across all accounts,
+// optionally scoped to one user via ?userId=. Most recently active first.
+app.get('/sessions', async (c) => {
+  const userId = c.req.query('userId')
+  const db = getDb(c.env)
+  const now = new Date().toISOString()
+  const rows = userId
+    ? await db.prepare(`${LIVE_SESSION_SELECT} AND s.user_id = @user_id ORDER BY s.last_seen_at DESC LIMIT 200`)
+        .all<LiveSessionRow>({ now, user_id: userId })
+    : await db.prepare(`${LIVE_SESSION_SELECT} ORDER BY s.last_seen_at DESC LIMIT 200`)
+        .all<LiveSessionRow>({ now })
+  return c.json({ sessions: rows || [] })
+})
+
+// POST /api/auth/devices/sessions/:id/revoke -- end ONE live session.
+// Revoking your own current session is allowed (it is an honest
+// sign-me-out; the admin just logs in again). Deliberately NOT marked
+// "current" in the list: that would need the caller's token hash exposed
+// out of lib/auth, and the credential stays private to that module.
+app.post('/sessions/:id/revoke', async (c) => {
+  const id = c.req.param('id')
+  const admin = c.get('user')
+  const db = getDb(c.env)
+  const session = await db.prepare(`
+    SELECT id, user_id, device_id, device_name, user_agent, last_ip
+    FROM user_sessions WHERE id = @id AND revoked_at IS NULL LIMIT 1
+  `).get<Pick<LiveSessionRow, 'id' | 'user_id' | 'device_id' | 'device_name' | 'user_agent' | 'last_ip'>>({ id })
+  if (!session) return c.json({ error: 'Live session not found' }, 404)
+
+  await db.prepare('UPDATE user_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE id = @id').run({ id })
+
+  await audit(c.env, admin.id, admin.username, 'session_revoked', 'user', session.user_id, {
+    sessionId: session.id, deviceId: session.device_id, deviceName: session.device_name,
+    userAgent: session.user_agent, lastIp: session.last_ip,
+  })
+  return c.json({ success: true })
+})
+
+// POST /api/auth/devices/sessions/revoke-user -- sign one account out
+// everywhere ({ userId } in the body). The device trust rows are untouched:
+// the person logs back in from an approved device without re-approval.
+app.post('/sessions/revoke-user', async (c) => {
+  const admin = c.get('user')
+  const body = await c.req.json<{ userId?: unknown }>().catch(() => ({} as Record<string, unknown>))
+  const userId = Number(body.userId)
+  if (!Number.isInteger(userId) || userId <= 0) {
+    return c.json({ error: 'A valid userId is required' }, 400)
+  }
+  const db = getDb(c.env)
+  const liveCount = await db.prepare(
+    'SELECT COUNT(*) AS count FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL',
+  ).get<{ count: number }>({ user_id: userId })
+  await revokeUserSessions(c.env, userId)
+  await audit(c.env, admin.id, admin.username, 'sessions_revoked_all', 'user', userId, {
+    revokedSessions: Number(liveCount?.count || 0),
+  })
+  return c.json({ success: true, revoked: Number(liveCount?.count || 0) })
 })
 
 // GET /api/auth/devices/pending -- devices awaiting a decision, across all
