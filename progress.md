@@ -226,7 +226,7 @@ autocorrect — templates, imports, exports and generated files alike.*
 - [ ] M6. Adjustments (930), expenses (4,240) and PO invoices (3,204) land with their
   Phase D features — stock-change ledger, expense import, supplier accounting. The
   CSVs already use the final column naming, so those importers should accept them as-is.
-- [ ] M7. Encoding-safety sweep as a TESTED contract: template downloads, exports and
+- [~] M7 *(IN PROGRESS — claimed by session business-os-v1-35, Aug 28 — do not pick up in parallel)*. Encoding-safety sweep as a TESTED contract: template downloads, exports and
   the import parser preserve text barcodes (no scientific notation, no stripped leading
   zeros), Khmer text (UTF-8 + BOM where Excel is a consumer) and literal formats.
   Screen 1 already rejects scientific-notation barcodes; extend the same guarantee to
