@@ -275,6 +275,13 @@ export const ENTITY_PERMISSION_MAP = new Map<string, string>([
   ['roles', 'users'],
   ['import', 'products'],
   ['imports', 'products'],
+  // The announcement strip ('promotion' entity) manages under the legacy
+  // products gate; G1's rule engine ('promotion_rule') under the
+  // Promotions page's own key -- mirrors routes/promotions.ts's gates.
+  ['promotion', 'products'],
+  ['promotions', 'products'],
+  ['promotion_rule', 'promotions'],
+  ['promotion_rules', 'promotions'],
 ])
 
 export const SENSITIVE_ENTITY_KEYS = new Set([

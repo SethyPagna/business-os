@@ -107,6 +107,12 @@ const productsRoute = loadReal('routes/products.ts', {
     getMergedPermissions: () => ({}),
   },
   '../lib/audit': { audit: async () => {} },
+  // G1: rules load stubbed empty + promoted-SQL collapsed to a constant --
+  // this test asserts pre-existing behavior (sort/wiring), not promotion
+  // ranking; test-promotion-rules-pure.cjs covers the real SQL against the
+  // real kernel.
+  '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
+
   '../lib/cache': { cachedJsonResponse: async (_r, _c, _v, _t, producer) => producer(), getVersion: async () => '0', bumpVersion: async () => {} },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/uploadSecurity': { validateUploadedBuffer: () => ({ ok: true }) },

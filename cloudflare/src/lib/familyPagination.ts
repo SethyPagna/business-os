@@ -93,6 +93,15 @@ export interface FamilyPaginationOptions {
   // unaffected either way since `matched`/`families` only add the extra
   // column when this is set.
   matchRankSql?: string
+  // Optional per-row 0/1 expression (referencing `p.` columns) marking a
+  // row as PROMOTED (G1: live per-product discount or an active promotion
+  // rule reaching it). When provided, each family additionally exposes the
+  // aggregate `family_promoted` (MAX over its rows -- one promoted variant
+  // promotes the family) for use in `familyOrderSql`, e.g.
+  // 'family_promoted DESC, family_name ASC' so promoted families occupy
+  // the block above the alphabetical run. Same additive pattern as
+  // matchRankSql: omitted = identical query shape as before.
+  promotedRankSql?: string
   // Opt-in fix for "a family matches by one row's field (e.g. one
   // variant's barcode) but its sibling rows -- different branch, price,
   // barcode -- silently never came back at all", reported against POS's
@@ -127,9 +136,11 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'familyMemberBaseWhereSql'>) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql'>) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   const matchRankAgg = opts.matchRankSql ? ', MIN(__match_rank) AS match_rank' : ''
+  const promotedSelect = opts.promotedRankSql ? `, (${opts.promotedRankSql}) AS __promoted` : ''
+  const promotedAgg = opts.promotedRankSql ? ', MAX(__promoted) AS family_promoted' : ''
   // family_members is only built (and only joined against, see below) when
   // familyMemberBaseWhereSql is actually passed -- omitted entirely for any
   // caller that hasn't opted in, so this stays a no-op for them (same CTEs,
@@ -150,7 +161,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
       SELECT ${opts.selectColumns},
              ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,
-             p.created_at AS __created_at${matchRankSelect}
+             p.created_at AS __created_at${matchRankSelect}${promotedSelect}
       FROM products p
       LEFT JOIN products parent ON parent.id = p.parent_id
       ${opts.joinSql}
@@ -159,7 +170,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     families AS (
       SELECT __family_root_id AS family_root_id,
              MIN(__family_name) AS family_name,
-             MAX(__created_at) AS latest_created_at${matchRankAgg}
+             MAX(__created_at) AS latest_created_at${matchRankAgg}${promotedAgg}
       FROM matched
       GROUP BY __family_root_id
     )${familyMembersCte}
@@ -202,7 +213,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   })
 
   const cleaned = (Array.isArray(rawRows) ? rawRows : []).map((row) => {
-    const { __family_root_id, __family_name, __created_at, __match_rank, ...rest } = row
+    const { __family_root_id, __family_name, __created_at, __match_rank, __promoted, ...rest } = row
     return rest as unknown as T
   })
 

@@ -13,6 +13,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { generatePortalAiResponse, getPortalAiUsageStatus } from '../lib/portalAi'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
 import { buildFtsMatchExpression, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
+import { loadActivePromotionRules, productPromotedSql } from '../lib/promotionRulesSql'
 import type { Env } from '../index'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
@@ -410,15 +411,32 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
     WHERE ${visibleFilter}
   `).get<{ count: number }>()
   const total = totalRow?.count || 0
+  // Discount + multi-taxonomy columns (G1, Part 391): the portal's price
+  // presentation (portalCatalogDisplay.ts) and the shared promotion kernel
+  // both read discount_*/categories/brands, but this snapshot never
+  // selected them -- so the storefront could not actually show a
+  // per-product discount price or badge no matter what the merchant's
+  // "show product discount" setting said. All customer-facing fields;
+  // costs stay unselected.
+  // G1 ordering rule: promoted products (live per-product discount OR an
+  // active promotion rule) occupy the block above the category-alphabetical
+  // run -- decided server-side so it holds across pagination, same as
+  // /api/products/search.
+  const portalRules = await loadActivePromotionRules(db)
+  const promotedParams: Record<string, unknown> = {}
+  const promotedOrderSql = `CASE WHEN ${productPromotedSql(portalRules, promotedParams)} THEN 1 ELSE 0 END DESC`
   const items = await db.prepare(`
-    SELECT p.id, p.name, p.category, p.brand, p.unit, p.description,
+    SELECT p.id, p.name, p.category, p.brand, p.categories, p.brands, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr, p.stock_quantity,
-           p.low_stock_threshold, p.out_of_stock_threshold, p.image_path
+           p.low_stock_threshold, p.out_of_stock_threshold, p.image_path,
+           p.discount_enabled, p.discount_type, p.discount_percent,
+           p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
+           p.discount_badge_color, p.discount_starts_at, p.discount_ends_at
     FROM products p
     WHERE ${visibleFilter}
-    ORDER BY ${PORTAL_CATALOG_DEFAULT_ORDER_SQL}
+    ORDER BY ${promotedOrderSql}, ${PORTAL_CATALOG_DEFAULT_ORDER_SQL}
     LIMIT @pageSize
-  `).all({ pageSize })
+  `).all({ ...promotedParams, pageSize })
   const itemsWithBranchStock = await attachPortalBranchStock(env, (items || []) as Array<Record<string, unknown>>)
   // Two things were wrong here, and both made the storefront's A-Z rail
   // disagree with what the page below it actually shows.
@@ -455,6 +473,11 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     initials: initials || [],
+    // G1: the storefront prices/badges with the SAME kernel POS charges
+    // with (frontend/src/utils/promotionRules.ts, hand-synced mirror of
+    // lib/promotionRules.ts) -- the active rule set rides the catalog
+    // payload so the portal never invents its own promotion math.
+    promotion_rules: portalRules,
   }
 }
 
@@ -1496,18 +1519,27 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
   // dropped stock data entirely, and getStockStatus()'s `Number(qty || 0)`
   // fallback then read that as 0 and mislabeled every low-stock product
   // as out_of_stock.
-  const selectColumnsSql = `p.id, p.name, p.category, p.brand, p.unit, p.description,
+  // Same customer-facing discount/taxonomy columns as buildPortalCatalog's
+  // snapshot (G1) -- search results must price/badge identically to the
+  // bootstrap grid they replace on screen.
+  const selectColumnsSql = `p.id, p.name, p.category, p.brand, p.categories, p.brands, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr, p.stock_quantity,
-           p.low_stock_threshold, p.out_of_stock_threshold, p.image_path`
+           p.low_stock_threshold, p.out_of_stock_threshold, p.image_path,
+           p.discount_enabled, p.discount_type, p.discount_percent,
+           p.discount_amount_usd, p.discount_amount_khr, p.discount_label,
+           p.discount_badge_color, p.discount_starts_at, p.discount_ends_at`
   // When there's an active search, relevance (bm25 via matchRankSql) sorts
   // first and name is just the tiebreaker -- otherwise (no search) the
   // catalog stays name-alphabetical, same browsing order as before this
   // session's FTS5 change. Mirrors products.ts's own
   // effectiveFamilyOrderSql pattern (match_rank ASC, then the caller's
   // chosen sort).
+  const searchRules = await loadActivePromotionRules(db)
+  const searchPromotedParams: Record<string, unknown> = {}
+  const searchPromotedOrderSql = `CASE WHEN ${productPromotedSql(searchRules, searchPromotedParams)} THEN 1 ELSE 0 END DESC`
   const orderBySql = filters.matchRankSql
-    ? `${filters.matchRankSql} ASC, lower(p.name) ASC, p.id ASC`
-    : PORTAL_CATALOG_DEFAULT_ORDER_SQL
+    ? `${filters.matchRankSql} ASC, ${searchPromotedOrderSql}, lower(p.name) ASC, p.id ASC`
+    : `${searchPromotedOrderSql}, ${PORTAL_CATALOG_DEFAULT_ORDER_SQL}`
   let items = await db.prepare(`
     SELECT ${selectColumnsSql}
     FROM products p
@@ -1515,7 +1547,7 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     ${whereSql}
     ORDER BY ${orderBySql}
     LIMIT @pageSize OFFSET @offset
-  `).all({ ...params, pageSize, offset })
+  `).all({ ...params, ...searchPromotedParams, pageSize, offset })
 
   // JS fuzzy (typo-tolerant) fallback -- see lib/searchMatch.ts's
   // runFuzzyFallbackMatch header comment and products.ts's/inventory.ts's
@@ -1600,6 +1632,11 @@ async function runPortalProductSearch(c: { env: Env; req: { query(): Record<stri
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     initials: initials || [],
+    // G1: the storefront prices/badges with the SAME kernel POS charges
+    // with (frontend/src/utils/promotionRules.ts, hand-synced mirror of
+    // lib/promotionRules.ts) -- the active rule set rides the catalog
+    // payload so the portal never invents its own promotion math.
+    promotion_rules: searchRules,
   }
 }
 

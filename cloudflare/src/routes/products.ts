@@ -18,6 +18,7 @@ import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs } from '../lib/bulkDeleteEngine'
 import { ADMIN_MAX_IMAGES_PER_PRODUCT, MAX_IMAGES_PER_PRODUCT } from '../lib/importImageMatch'
+import { loadActivePromotionRules, productPromotedSql, productDiscountActiveSql, anyRuleAppliesSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import {
   buildFtsMatchExpression,
   buildHybridMatchClause,
@@ -298,12 +299,16 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   ])
 
   const values = (rows: Array<{ value: string }> = []) => rows.map((row) => row.value).filter(Boolean)
+  // G1's "by promotion" filter needs the live rule list as a facet
+  // vocabulary (id + title), same role the other facet lists play.
+  const activeRules = await loadActivePromotionRules(db)
   return {
     brands: values(brands),
     categories: values(categories),
     units: values(units),
     suppliers: values(suppliers),
     tags: values(tags),
+    promotions: activeRules.map((rule) => ({ id: rule.id, title: rule.title || `#${rule.id}`, rule_type: rule.rule_type })),
     initials: (initials || []).map((row) => ({ initial: row.initial, value: row.initial, label: row.initial, count: row.count })),
   }
 }
@@ -498,6 +503,25 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   const db = getDb(env)
   const filters = buildSearchFilters(query, options)
   const { where, joins, params, matchRankSql, hasSearchTerm } = filters
+
+  // G1: promoted/discounted products occupy the block ABOVE the
+  // alphabetical run (Products page and POS both read this endpoint, so
+  // one ordering rule serves both). Which rules are live is decided by the
+  // shared kernel (lib/promotionRules.ts); their scope + the per-product
+  // discount condition are expressed in SQL so the ordering and the promo
+  // filters hold across server-side pagination, not just the loaded page.
+  const promotionRules = await loadActivePromotionRules(db)
+  const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
+  const promoFilter = String(query.promo || '').trim().toLowerCase()
+  if (promoFilter === 'promoted') {
+    where.push(productPromotedSql(promotionRules, params))
+  } else if (promoFilter === 'discounted') {
+    where.push(productDiscountActiveSql(params))
+  } else if (promoFilter === 'rules') {
+    where.push(anyRuleAppliesSql(promotionRules, params))
+  } else if (/^rule:\d+$/.test(promoFilter) || /^\d+$/.test(promoFilter)) {
+    where.push(singleRuleAppliesSql(promotionRules, Number(promoFilter.replace('rule:', '')), params))
+  }
   const initial = String(query.initial || '').trim()
   const initialClause = initial && initial.toLowerCase() !== 'all'
     ? "upper(substr(trim(COALESCE(p.name, '')), 1, 1)) = @initial"
@@ -514,8 +538,15 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
   // see buildSearchFilters' matchRankSql and PRODUCT_SEARCH_COLUMNS'S own
   // comment in lib/searchMatch.ts) with the caller's chosen sort demoted to
   // a tiebreaker; with no search term there's no relevance to rank by, so
-  // the plain name/created-date order applies as before.
-  const effectiveFamilyOrderSql = matchRankSql ? `match_rank ASC, ${familyOrderSql}` : familyOrderSql
+  // promoted families lead (G1's ordering rule) and the plain name/
+  // created-date order applies within each block. During a search,
+  // relevance stays primary -- someone typing a specific product's name
+  // must not find it buried under unrelated promoted items -- with
+  // promoted-first demoted to the tiebreaker between equally-relevant
+  // families.
+  const effectiveFamilyOrderSql = matchRankSql
+    ? `match_rank ASC, family_promoted DESC, ${familyOrderSql}`
+    : `family_promoted DESC, ${familyOrderSql}`
 
   const selectColumns = `p.id, p.name, p.sku, p.barcode, p.category, p.brand, p.unit, p.description,
            p.selling_price_usd, p.selling_price_khr,
@@ -538,6 +569,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     familyOrderSql: effectiveFamilyOrderSql,
     intraFamilyOrderSql,
     matchRankSql,
+    promotedRankSql,
     // Only opted in when a search term is actually in play (see
     // familyMemberBaseWhereSql's own comment in familyPagination.ts) --
     // this is specifically the "search matched one variant's barcode,
@@ -567,6 +599,10 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     page,
     pageSize,
     totalPages,
+    // The active rule set rides every product payload so POS/Products can
+    // evaluate the SAME kernel client-side (badges, cart pricing) without
+    // a second fetch -- and inherit it offline with the cached response.
+    promotion_rules: promotionRules,
   }
 }
 
