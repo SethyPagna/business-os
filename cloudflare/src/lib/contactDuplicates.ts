@@ -60,6 +60,30 @@ export function normalizePhone(value: unknown): string | null {
   return digits || null
 }
 
+// P7-c: the P8 DISPLAY convention for manually entered phones -- the same
+// contract the migration pack's validator pins (`0XX XXX XXX` for 9
+// digits, `0XX XXX XXXX` for 10; validate-pack.cjs's PHONE_FORMATTED_RE/
+// PHONE_BARE_VALID_RE). Matching stays digit-based (normalizePhone above),
+// so this is display consistency only: 10,352 migrated numbers already
+// carry this shape and manual creates must not drift from it. Deliberately
+// conservative, mirroring the migration's own rule: only an unambiguous
+// Cambodian number is reformatted -- 0-leading 9/10 digit strings, plus a
+// manually typed +855/855 prefix (converted to its 0-leading local form).
+// Anything else (dual numbers, foreign, partials, garbage) is preserved
+// exactly as typed, the migration's "preserved as-is" rule.
+export function formatPhoneP8(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return raw
+  if (/^0\d{2} \d{3} \d{3,4}$/.test(raw)) return raw
+  const digits = raw.replace(/\D/g, '')
+  // Reject mixed content: if stripping separators dropped anything beyond
+  // spaces/dashes/dots/parens/plus, this isn't a plain phone -- preserve.
+  if (raw.replace(/[\d\s().+-]/g, '') !== '') return raw
+  const national = /^855\d{8,9}$/.test(digits) ? `0${digits.slice(3)}` : digits
+  if (!/^0\d{8,9}$/.test(national)) return raw
+  return `${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`
+}
+
 // Every phone number a contact record actually carries: its primary
 // `phone` column plus any secondary phone entered on one of its Contact
 // Options (serialized into the `address` column -- see contactOptions.ts;

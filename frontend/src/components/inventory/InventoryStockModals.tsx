@@ -5,6 +5,7 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
+import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 
 type MoneyFormatter = (value: number) => string
 
@@ -70,6 +71,13 @@ type AdjustForm = {
   // wire in exactly those cases, so a lingering value can't re-date an
   // existing lot's top-up.
   received_date: string
+  // D5a: who this add was bought from. supplier_id only ever comes from
+  // picking a contact suggestion (free text stays a deliberate name-only
+  // attribution); this modal CLEARS both whenever an already-attributed
+  // lot is picked, so Inventory.tsx's onAdjust can trust the form to be
+  // honest -- first attribution sticks server-side either way.
+  supplier_id: number | ''
+  supplier_name: string
 }
 
 type TransferForm = {
@@ -222,6 +230,27 @@ export default function InventoryStockModals({
       setAdjustForm((current) => (current.batch_id === '' ? { ...current, batch_id: 'new' } : current))
     }
   }, [showBatchPicker, adjustForm.type, adjustForm.batch_id, setAdjustForm])
+
+  // D5a: same visibility-mirror rule as the received date. An existing lot
+  // that already carries a supplier keeps it (first attribution sticks,
+  // COALESCE server-side), so the picker locks to that name; an
+  // unattributed existing lot still offers it (a choice FILLS the blank,
+  // which the server honors). unlockPricing always creates a fresh lot, so
+  // the picker stays live there with no lot to consult.
+  const selectedAdjustLot = adjustForm.type === 'add' && !unlockPricing
+    && adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new'
+    ? batchOptions.find((batch) => String(batch.id) === String(adjustForm.batch_id)) || null
+    : null
+  const adjustLotAttributedName = selectedAdjustLot?.supplier_name?.trim() || null
+  // Keep the form honest: a locked lot clears any previously typed choice,
+  // so what Inventory.tsx's onAdjust puts on the wire is exactly what the
+  // person saw on screen.
+  useEffect(() => {
+    if (adjustLotAttributedName && (adjustForm.supplier_id !== '' || adjustForm.supplier_name !== '')) {
+      setAdjustForm((current) => ({ ...current, supplier_id: '', supplier_name: '' }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adjustLotAttributedName])
 
   if (!adjustModal && !transferModal) return null
 
@@ -432,6 +461,21 @@ export default function InventoryStockModals({
                     {tr('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(adjustForm.received_date) || '--'}
                   </div>
                 </div>
+              ) : null}
+              {/* D5a: supplier attribution for the lot this add creates or
+                  fills -- the same picker, same rules, as ReceiveBatchModal
+                  and BranchStockAdjuster. Adds only. */}
+              {adjustForm.type === 'add' && (unlockPricing || (showBatchPicker && adjustForm.batch_id !== '')) ? (
+                <SupplierPickerField
+                  idPrefix="inventory-adjust"
+                  value={{ supplierId: adjustForm.supplier_id === '' ? null : adjustForm.supplier_id, supplierName: adjustForm.supplier_name }}
+                  onChange={(next) => setAdjustForm((current) => ({ ...current, supplier_id: next.supplierId ?? '', supplier_name: next.supplierName }))}
+                  tr={tr}
+                  lockedName={adjustLotAttributedName}
+                  hint={selectedAdjustLot && !adjustLotAttributedName
+                    ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.')
+                    : null}
+                />
               ) : null}
               {branchCount > 1 ? (
                 <div>

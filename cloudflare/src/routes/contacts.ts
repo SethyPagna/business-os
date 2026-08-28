@@ -13,6 +13,7 @@ import {
   findDuplicateContactClusters,
   dismissDuplicateCluster,
   collectContactPhones,
+  formatPhoneP8,
   type ContactDuplicateMatch,
   type ContactDuplicateTable,
 } from '../lib/contactDuplicates'
@@ -629,6 +630,10 @@ function registerContactRoutes(config: ContactConfig) {
     const db = getDb(c.env)
     const payload = pickColumns(body, config.columns)
     payload.name = name
+    // P7-c: store the P8 display shape (0XX XXX XXX[X]) so manual creates
+    // match the 10,352 migrated numbers. Matching below stays digit-based,
+    // so this changes nothing about duplicate detection or linkage.
+    if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
 
     const duplicateBlock = await checkContactDuplicateBlock(c.env, config, { name, phone: payload.phone, address: payload.address }, body.confirmDuplicate === true)
     if (duplicateBlock) return c.json(duplicateBlock.body, duplicateBlock.status as 400 | 409)
@@ -691,6 +696,9 @@ function registerContactRoutes(config: ContactConfig) {
     const allowedColumns = tier === 'review' ? ['name'] : config.columns
     const payload = pickColumns(body, allowedColumns)
     payload.name = name
+    // P7-c: same P8 display shape on edit as on create -- an update that
+    // touches the phone must not undo the convention.
+    if (Object.prototype.hasOwnProperty.call(payload, 'phone')) payload.phone = formatPhoneP8(payload.phone)
 
     // D6: renaming a SUPPLIER used to leave every product/batch that
     // carries the old free-text name pointing at nothing. When the rename

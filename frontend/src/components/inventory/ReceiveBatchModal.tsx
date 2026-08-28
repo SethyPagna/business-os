@@ -5,6 +5,7 @@ import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, receiveBatchStock, type ProductBatch } from '../../api/batchesTransport.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10)
@@ -53,8 +54,11 @@ export default function ReceiveBatchModal({
   const [notes, setNotes] = useState('')
   // Supplier + cost + paid/on-credit (migrations 0062/0065): who this lot
   // came from, what one unit cost, and — when on credit — the due date the
-  // admin reminder is built on.
+  // admin reminder is built on. D5a: the supplier is a real picker now --
+  // supplierId is set only by picking a contact suggestion; free text keeps
+  // id null (deliberate name-only attribution, never auto-creates).
   const [supplierName, setSupplierName] = useState('')
+  const [supplierId, setSupplierId] = useState<number | null>(null)
   const [unitCost, setUnitCost] = useState('')
   const [paymentStatus, setPaymentStatus] = useState<'' | 'paid' | 'credit'>('')
   const [creditDueDate, setCreditDueDate] = useState('')
@@ -100,6 +104,7 @@ export default function ReceiveBatchModal({
     setExpiryDate('')
     setNotes('')
     setSupplierName('')
+    setSupplierId(null)
     setUnitCost('')
     setPaymentStatus('')
     setCreditDueDate('')
@@ -121,12 +126,16 @@ export default function ReceiveBatchModal({
     try {
       const raw = localStorage.getItem(draftKey)
       if (raw) {
-        const draft = JSON.parse(raw) as Record<string, string>
+        const draft = JSON.parse(raw) as Record<string, any>
         if (draft.quantity !== undefined) setQuantity(draft.quantity)
         if (draft.receivedDate) setReceivedDate(draft.receivedDate)
         if (draft.expiryDate !== undefined) setExpiryDate(draft.expiryDate)
         if (draft.notes !== undefined) setNotes(draft.notes)
         if (draft.supplierName !== undefined) setSupplierName(draft.supplierName)
+        // D5a: the contact link rides with the drafted name. Only restored
+        // when a name is drafted too -- an id with no name would be
+        // invisible on screen yet change what the submit writes.
+        setSupplierId(draft.supplierName && Number(draft.supplierId) > 0 ? Number(draft.supplierId) : null)
         if (draft.unitCost !== undefined) setUnitCost(draft.unitCost)
         if (draft.paymentStatus === 'paid' || draft.paymentStatus === 'credit' || draft.paymentStatus === '') setPaymentStatus(draft.paymentStatus)
         if (draft.creditDueDate !== undefined) setCreditDueDate(draft.creditDueDate)
@@ -146,18 +155,28 @@ export default function ReceiveBatchModal({
     if (!product || !dirtyStateRef.current) return
     const timer = window.setTimeout(() => {
       try {
-        localStorage.setItem(draftKey, JSON.stringify({ quantity, receivedDate, expiryDate, notes, supplierName, unitCost, paymentStatus, creditDueDate }))
+        localStorage.setItem(draftKey, JSON.stringify({ quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate }))
       } catch { /* full/blocked */ }
     }, 600)
     return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quantity, receivedDate, expiryDate, notes, supplierName, unitCost, paymentStatus, creditDueDate])
+  }, [quantity, receivedDate, expiryDate, notes, supplierName, supplierId, unitCost, paymentStatus, creditDueDate])
 
   if (!product) return null
 
   const closeIfIdle = () => {
     if (!saving) onClose()
   }
+
+  // D5a: same visibility-mirror rule as the received date -- an existing
+  // lot that already carries a supplier keeps it (first attribution
+  // sticks, COALESCE server-side), so the picker locks to that name and
+  // nothing is sent. An existing lot with NO supplier still offers the
+  // picker: a choice there FILLS the blank, which the server honors.
+  const selectedLot = typeof batchChoice === 'number'
+    ? batchOptions.find((batch) => Number(batch.id) === batchChoice) || null
+    : null
+  const lotAttributedName = selectedLot?.supplier_name?.trim() || null
 
   const submit = async () => {
     const productId = Number(product.id)
@@ -182,7 +201,11 @@ export default function ReceiveBatchModal({
         receivedDate: batchChoice === 'new' ? (receivedDate || null) : null,
         batchId: typeof batchChoice === 'number' ? batchChoice : null,
         notes: notes.trim() || null,
-        supplierName: supplierName.trim() || null,
+        // Mirrors the picker's visibility: locked (lot already attributed)
+        // sends nothing, so the wire never carries a choice the UI
+        // couldn't offer.
+        supplierName: lotAttributedName ? null : (supplierName.trim() || null),
+        supplierId: lotAttributedName ? null : supplierId,
         unitCostUsd: unitCost.trim() === '' ? null : Number(unitCost),
         paymentStatus: paymentStatus || null,
         creditDueDate: paymentStatus === 'credit' ? creditDueDate : null,
@@ -314,16 +337,16 @@ export default function ReceiveBatchModal({
           </div>
           {/* Supplier + cost on one row (this lot's own facts) */}
           <div className="grid gap-2 sm:grid-cols-2">
-            <label className="block">
-              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('supplier') || 'Supplier'}</span>
-              <input
-                className="input w-full text-sm"
-                value={supplierName}
-                onChange={(event) => setSupplierName(event.target.value)}
-                placeholder={tr('supplier_optional_placeholder', 'Who this lot was bought from')}
-                autoComplete="off"
-              />
-            </label>
+            <SupplierPickerField
+              idPrefix="receive-batch"
+              value={{ supplierId, supplierName }}
+              onChange={(next) => { setSupplierId(next.supplierId); setSupplierName(next.supplierName) }}
+              tr={tr}
+              lockedName={lotAttributedName}
+              hint={selectedLot && !lotAttributedName
+                ? tr('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.')
+                : null}
+            />
             <label className="block">
               <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('unit_cost_usd', 'Unit cost (USD)')}</span>
               <input

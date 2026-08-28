@@ -16,6 +16,12 @@ export type ProductBatch = {
   is_active: number
   quantity: number
   batch_number: number | null
+  // D5a: the lot's supplier attribution (first attribution sticks). The
+  // add-stock pickers read these to decide whether picking this lot means
+  // "supplier already recorded" (shown read-only) or "choice will fill the
+  // blank". Optional because older cached list payloads predate the field.
+  supplier_id?: number | null
+  supplier_name?: string | null
 }
 
 export type ReceiveBatchPayload = {
