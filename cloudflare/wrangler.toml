@@ -46,17 +46,16 @@ run_worker_first = ["/api/*", "/uploads/*", "/health", "/ws"]
 [triggers]
 crons = ["0 */6 * * *"]
 
-# NOTE: a [limits] cpu_ms override was here to give the import queue
-# consumer (queue.ts) more CPU headroom for large chunked D1 imports (see
-# importEngine.ts's runD1BatchInChunks). Removed because custom cpu_ms is a
-# Workers PAID-plan-only feature -- it was making `wrangler deploy` fail
-# outright on the Free plan (error code 100328). If/when this account moves
-# to Workers Paid, re-add:
-#   [limits]
-#   cpu_ms = 300000
-# Until then, large imports run under the Free plan's fixed 10ms CPU-time
-# budget per invocation (wall-clock time waiting on D1/R2 doesn't count
-# against it, only actual compute does).
+# CPU headroom for the import queue consumer (queue.ts) and other chunked
+# D1 work (importEngine.ts's runD1BatchInChunks). This block previously had
+# to be REMOVED because custom cpu_ms is a Workers Paid-only feature and
+# made `wrangler deploy` fail on Free (error 100328), with an explicit note
+# to re-add it once the account moved to Paid -- which happened Aug 2026
+# ($5/mo). 300000ms = 5 minutes, the Paid maximum; actual usage stays far
+# below it (wall-clock waiting on D1/R2 never counts, only compute), this
+# just stops big classify/apply passes dying at the old 10ms default.
+[limits]
+cpu_ms = 300000
 
 [[d1_databases]]
 binding = "DB"
@@ -115,18 +114,14 @@ queue = "business-os-backup-assets"
 
 [[queues.consumers]]
 queue = "business-os-import"
-# max_batch_size = 1 is load-bearing, not just a throughput knob: queue.ts's
-# handleImportQueue loops over every message in a batch SEQUENTIALLY inside
-# ONE Worker invocation, and the Workers Free plan's CPU-time budget is per
-# INVOCATION, not per message. importEngine.ts's runImportAnalyze/
-# runImportApply are chunked specifically so each chunk gets its own fresh
-# 10ms budget (see migration 0011_import_job_chunking.sql's header) -- a
-# batch size above 1 would silently undo that by packing several chunks'
-# worth of CPU work back into a single invocation again. Higher batch sizes
-# (this used to be 5) are a Workers Paid-plan optimization -- fine to raise
-# again once this account has [limits] cpu_ms room to spare (see the
-# wrangler.toml comment on that block above).
-max_batch_size = 1
+# Restored to 5 (its original value) now that [limits] cpu_ms = 300000 is
+# active on the Paid plan -- exactly the condition the old comment set for
+# raising it again. History for the next reader: this was lowered to 1 on
+# the FREE plan because handleImportQueue processes a batch SEQUENTIALLY in
+# one invocation and Free's fixed 10ms CPU budget is per INVOCATION, so a
+# larger batch silently repacked several chunks' CPU into one 10ms window.
+# With a 5-minute budget, batching is a pure throughput win again.
+max_batch_size = 5
 max_batch_timeout = 5
 # Once a message has thrown on every one of Cloudflare's default max_retries
 # attempts, it's moved here instead of silently dropped -- queue.ts's
@@ -244,7 +239,7 @@ SENTRY_DSN = "https://3a7ba49248bf45b90262cdc5709df9c1@o4511967341903872.ingest.
 RESEND_FROM_EMAIL = "no-reply@leangbeauty.com"
 # Password-reset emails (lib/verification.ts) are sent via Resend. This
 # must be a verified sender/domain on the Resend account, e.g.
-# "Leang Cosmetics <no-reply@leangbeauty.com>". The API key is a
+# "Leang Beauty <no-reply@leangbeauty.com>". The API key is a
 
 
 GOOGLE_LOGIN_CLIENT_ID = "784691087631-2ugaidgt6umv80i9qvfo08ddu12n4a9b.apps.googleusercontent.com"
