@@ -1349,6 +1349,9 @@ app.get('/daily-report', async (c) => {
     startDate,
     endDate,
     branchId: query.branchId || null,
+    startTime: query.startTime || null,
+    endTime: query.endTime || null,
+    tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   }, 'day')
   return c.json({ startDate, endDate, days })
 })
@@ -1367,7 +1370,12 @@ app.get('/day-report', async (c) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return c.json({ error: 'date (YYYY-MM-DD) is required' }, 400)
   }
-  const report = await getSalesDayReport(c.env, date, query.branchId || null)
+  const report = await getSalesDayReport(c.env, date, {
+    branchId: query.branchId || null,
+    startTime: query.startTime || null,
+    endTime: query.endTime || null,
+    tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
+  })
   return c.json(report)
 })
 
@@ -1391,6 +1399,9 @@ app.get('/delivery-contact-report', async (c) => {
     endDate,
     branchId: query.branchId || null,
     contactId: query.contactId || null,
+    startTime: query.startTime || null,
+    endTime: query.endTime || null,
+    tzOffsetMinutes: Number(query.tzOffsetMinutes) || 0,
   })
   return c.json({ startDate, endDate, contacts })
 })

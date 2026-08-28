@@ -40,6 +40,15 @@ export interface SalesFilters {
   startDate: string
   endDate: string
   branchId?: string | number | null
+  // Phase X: optional time-of-day window ('HH:MM'), evaluated in the
+  // VIEWER's local time -- created_at is stored UTC, so the client sends
+  // its offset (minutes east of UTC, e.g. Phnom Penh = 420) and the clause
+  // shifts before comparing. A window that crosses midnight (start > end,
+  // e.g. 22:00–02:00) wraps. Callers that don't pass these (Dashboard,
+  // /stats) are byte-for-byte unchanged.
+  startTime?: string | null
+  endTime?: string | null
+  tzOffsetMinutes?: number | null
 }
 
 export interface SalesTotals {
@@ -111,6 +120,22 @@ function whereActiveSales(alias: string, f: SalesFilters) {
   if (f.branchId) {
     clauses.push(`${alias}.branch_id = @branchId`)
     params.branchId = f.branchId
+  }
+  const validTime = (v: unknown): v is string => typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)
+  if (validTime(f.startTime) && validTime(f.endTime)) {
+    // Clamp the offset to real-world bounds; the modifier string is built
+    // HERE from the validated integer, never from raw input.
+    const offset = Math.max(-720, Math.min(840, Math.trunc(Number(f.tzOffsetMinutes) || 0)))
+    params.tzModifier = `${offset >= 0 ? '+' : ''}${offset} minutes`
+    params.startTime = f.startTime
+    params.endTime = f.endTime
+    const localTime = `time(datetime(${alias}.created_at, @tzModifier))`
+    if (f.startTime <= f.endTime) {
+      clauses.push(`${localTime} BETWEEN @startTime AND @endTime`)
+    } else {
+      // Overnight window (e.g. 22:00–02:00) wraps around midnight.
+      clauses.push(`(${localTime} >= @startTime OR ${localTime} <= @endTime)`)
+    }
   }
   return { sql: clauses.join(' AND '), params }
 }
@@ -398,8 +423,12 @@ export async function getDeliveryContactTotals(
     .sort((a, b) => b.deliveries - a.deliveries)
 }
 
-export async function getSalesDayReport(env: Env, day: string, branchId?: string | number | null): Promise<SalesDayReport> {
-  const f: SalesFilters = { startDate: day, endDate: day, branchId: branchId ?? null }
+export async function getSalesDayReport(
+  env: Env,
+  day: string,
+  opts: Pick<SalesFilters, 'branchId' | 'startTime' | 'endTime' | 'tzOffsetMinutes'> = {},
+): Promise<SalesDayReport> {
+  const f: SalesFilters = { startDate: day, endDate: day, ...opts }
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   const [totals, paymentMethods, deliveryContacts, discountCounts] = await Promise.all([

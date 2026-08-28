@@ -140,9 +140,30 @@ const env = { DB: {} }
   ok(report.payment_methods.length === 4 && report.delivery_contacts.length === 2,
     'breakdowns ride along in one response')
 
-  const branch1 = await kernel.getSalesDayReport(env, D, 1)
+  const branch1 = await kernel.getSalesDayReport(env, D, { branchId: 1 })
   ok(branch1.totals.tx_count === 4 && branch1.totals.gross_sales_usd === 68,
     'branch filter applies to every block of the report')
+
+  // ---- time-of-day window (viewer-local via tz offset) --------------------
+  // Seeded UTC times: 10:00 (R1,R2,R4,R6) and 15:00 (R3). Phnom Penh
+  // (+420 min) local: 17:00 and 22:00.
+  const afternoon = await kernel.getSalesTotals(env, {
+    startDate: D, endDate: D, startTime: '16:00', endTime: '18:00', tzOffsetMinutes: 420,
+  })
+  ok(afternoon.tx_count === 4, 'time window filters in LOCAL time (UTC 10:00 = 17:00 at +420)')
+  const evening = await kernel.getSalesTotals(env, {
+    startDate: D, endDate: D, startTime: '21:00', endTime: '23:00', tzOffsetMinutes: 420,
+  })
+  ok(evening.tx_count === 1 && evening.gross_sales_usd === 20, 'the 22:00-local sale sits alone in the evening window')
+  const overnight = await kernel.getSalesTotals(env, {
+    startDate: D, endDate: D, startTime: '21:00', endTime: '02:00', tzOffsetMinutes: 420,
+  })
+  ok(overnight.tx_count === 1, 'an overnight window (start > end) wraps around midnight')
+  const noTime = await kernel.getSalesTotals(env, { startDate: D, endDate: D })
+  ok(noTime.tx_count === 5, 'omitting the time window changes nothing for existing callers')
+  const dayWithTime = await kernel.getSalesDayReport(env, D, { startTime: '16:00', endTime: '18:00', tzOffsetMinutes: 420 })
+  ok(dayWithTime.totals.tx_count === 4 && dayWithTime.payment_methods.every((m) => m.payment_method !== 'aba'),
+    'the day report threads the time window into every block (the 22:00 aba sale drops out)')
 
   console.log(`\nAll ${checks} day-report kernel checks passed.`)
 })().catch((error) => {
