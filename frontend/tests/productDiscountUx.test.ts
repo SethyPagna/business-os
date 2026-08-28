@@ -34,7 +34,10 @@ await runTest('POS product cards expose discount badges before opening details',
   const source = fs.readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')
   const detailSheet = fs.readFileSync(new URL('../src/components/pos/ProductDetailSheet.tsx', import.meta.url), 'utf8')
   assert.match(source, /ProductDiscountBadge/)
-  assert.match(source, /calculateProductDiscount\(product,\s*exchangeRate\)/)
+  // G1 (Part 391): the badge evaluates the shared promotion kernel
+  // (promotionBadgeForProduct -- product discount OR rule, including
+  // buy->=X hints), no longer bare calculateProductDiscount.
+  assert.match(source, /promotionBadgeForProduct\(product,\s*promotionRules\)/)
   assert.match(source, /pagedProductCards\.map[\s\S]*<ProductDiscountBadge/)
   // Component uses the "effective" naming convention for whichever variant
   // the branch+barcode pickers currently resolve to (effectiveVariant,

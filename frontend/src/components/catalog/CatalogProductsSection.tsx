@@ -16,6 +16,7 @@ import CatalogPaginationControls, { CATALOG_DEFAULT_PAGE_SIZE, paginateCatalogIt
 import { SectionShell, StatusPill } from './catalogUi'
 import PortalFilterCombobox from './PortalFilterCombobox'
 import { buildPortalHighlightBadges, buildPortalPricePresentation, shouldShowStockStatus } from './portalCatalogDisplay.ts'
+import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 
@@ -74,6 +75,9 @@ type PromotionItem = {
 
 type CatalogProductsSectionProps = {
   copy: CopyFn
+  // G1: the active promotion rules from the catalog payload -- badges and
+  // prices below evaluate the SAME kernel POS charges with.
+  promotionRules?: PromotionRule[]
   filteredProducts?: CatalogProduct[]
   serverPaged?: boolean
   productTotal?: number | string | null
@@ -169,6 +173,7 @@ function getProductInitial(product: Pick<CatalogProduct, 'name'> | null | undefi
 export default function CatalogProductsSection(props: CatalogProductsSectionProps) {
   const {
     copy,
+    promotionRules = [],
     filteredProducts = [],
     serverPaged = false,
     productTotal,
@@ -281,8 +286,20 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   const categoryHeaderAt = useMemo(() => {
     const headers = new Map<number, string>()
     if (!showCategoryHeaders) return headers
+    // G1: the server puts promoted products in a block ABOVE the
+    // category-alphabetical run. That leading run gets ONE "Promotions"
+    // header; normal category headers begin after it, so a promoted item
+    // never drags its whole category header to the top with it.
+    let promotedRun = 0
+    while (
+      promotedRun < pagedProducts.length
+      && promotionRules.length
+      && isProductPromoted(pagedProducts[promotedRun], promotionRules)
+    ) promotedRun++
+    if (promotedRun > 0) headers.set(0, copy('promotionsHeader', 'Promotions'))
     let lastKey: string | null = null
     pagedProducts.forEach((product, index) => {
+      if (index < promotedRun) return
       const raw = String(product.category || '').trim()
       const key = raw.toLowerCase()
       if (key === lastKey) return
@@ -290,7 +307,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       headers.set(index, raw || copy('uncategorized', 'Uncategorized'))
     })
     return headers
-  }, [pagedProducts, showCategoryHeaders, copy])
+  }, [pagedProducts, showCategoryHeaders, copy, promotionRules])
 
   // Shared filter-field body (category/brand/branch/stock) -- rendered
   // twice: once inside the click-to-open mobile/tablet panel (unchanged
@@ -600,9 +617,9 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           const status = getStockStatus(product, qty, previewConfig)
           const gallery = normalizeProductGallery(product)
           const primaryImage = gallery[0] || ''
-          const highlightBadges = buildPortalHighlightBadges(product, previewConfig, copy)
+          const highlightBadges = buildPortalHighlightBadges(product, previewConfig, copy, promotionRules)
           const pricePresentation = previewConfig.showPrices
-            ? buildPortalPricePresentation(product, previewConfig, formatPortalPrice)
+            ? buildPortalPricePresentation(product, previewConfig, formatPortalPrice, promotionRules)
             : null
           const metadataChips = [
             previewConfig.showProductCategory !== false ? product.category : '',

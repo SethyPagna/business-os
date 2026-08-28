@@ -45,8 +45,10 @@ import {
   findMatchingCartLineIndex,
   applyManualDiscount,
   computeExpiryStatus,
+  repricePromotionCartLines,
   type ManualDiscountType,
 } from './posCore.ts'
+import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import {
   beginTrackedRequest,
@@ -354,6 +356,8 @@ type ProductPayload = {
   initials?: unknown[]
   items?: ProductRecord[]
   total?: number
+  // G1: active promotion rules ride every search/bootstrap payload.
+  promotion_rules?: PromotionRule[]
 }
 
 // /api/products/bootstrap responds with the same envelope as
@@ -534,17 +538,24 @@ function ProductDiscountBadge({
   exchangeRate,
   fmtUSD,
   label = 'Discounts',
+  promotionRules = [],
 }: {
   exchangeRate: number
   fmtUSD: (value: unknown) => string
   label?: string
   product: ProductRecord
+  promotionRules?: readonly PromotionRule[]
 }) {
-  const promotion = calculateProductDiscount(product, exchangeRate)
-  if (!promotion.active) return null
-  const text = `${product?.discount_label || label} ${fmtUSD(promotion.applied_price_usd || 0)}`
+  // G1: one kernel decides what the card advertises -- the product's own
+  // discount OR the best promotion rule, including "buy >= X" deals that
+  // don't cut the qty-1 price but must still be visible on the card.
+  const badge = promotionBadgeForProduct(product, promotionRules)
+  if (!badge.active) return null
+  const text = badge.kind === 'quantity_hint'
+    ? ((badge.show_title && badge.title) || `${label} ${badge.min_quantity}+`)
+    : `${(badge.show_title && badge.title) || String(product?.discount_label || '') || label} ${fmtUSD(evaluatePromotionPricing(product, 1, promotionRules, exchangeRate).unit_price_usd || 0)}`
   return (
-    <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md bg-rose-600/95 px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" title={text}>
+    <span className="absolute bottom-1 left-1 right-1 z-10 truncate rounded-md px-1.5 py-0.5 text-center text-[10px] font-bold text-white shadow-sm" style={{ backgroundColor: badge.badge_color || '#e11d48' }} title={text}>
       {text}
     </span>
   )
@@ -557,6 +568,10 @@ export default function POS() {
 
 // Remote data shared across all orders
   const [products,         setProducts]         = useState<ProductRecord[]>([])
+  // G1: active promotion rules, refreshed with every catalog payload (the
+  // search/bootstrap responses carry them) -- POS offline inherits the
+  // last cached payload's rules the same way it inherits its products.
+  const [promotionRules,   setPromotionRules]   = useState<PromotionRule[]>([])
   const [categories,       setCategories]       = useState<CategoryRecord[]>([])
   const [branches,         setBranches]         = useState<BranchRecord[]>([])
   const [customers,        setCustomers]        = useState<CustomerRecord[]>([])
@@ -1116,6 +1131,7 @@ export default function POS() {
           ? payloadRecord.items as ProductRecord[]
           : (Array.isArray(productPayload) ? productPayload : [])
         applyCatalogProducts(prods)
+        if (Array.isArray(payloadRecord.promotion_rules)) setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
         setProductTotal(Number(payloadRecord.total ?? prods.length) || 0)
         setCatalogLoadError('')
         catalogLoadedOnceRef.current = true
@@ -2031,7 +2047,7 @@ export default function POS() {
   const openProductCard = useCallback((product: ProductRecord, { groupProduct = false, inStock = false }: { groupProduct?: boolean; inStock?: boolean } = {}) => {
     if (!product) return
     const hasSpecial = asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0
-    const hasPromotion = calculateProductDiscount(product, exchangeRate).active
+    const hasPromotion = promotionBadgeForProduct(product, promotionRules).active
     // Batch-tracked products always need the detail sheet's lot picker --
     // a one-tap add can't know which lot to sell from -- same gate as
     // groupProduct/hasSpecial/hasPromotion below.
@@ -2050,7 +2066,7 @@ export default function POS() {
       return
     }
     setDetailProduct(product)
-  }, [addToCart, exchangeRate, trackedBatchProductIds, trackedBatchLoadFailed])
+  }, [addToCart, exchangeRate, promotionRules, trackedBatchProductIds, trackedBatchLoadFailed])
 
   /** Open shared image lightbox from POS product cards/detail sheet. */
   const openImageLightbox = useCallback((product: ProductRecord, startIndex = 0) => {
@@ -2083,7 +2099,7 @@ export default function POS() {
       : (primaryBranchFilterId != null ? primaryBranchFilterId : pickBestBranchId(product))
     const priceValues = resolveCartPriceValues(product, priceMode, exchangeRate, {
       usdToKhr: (value: unknown, rate: unknown) => CURRENCY.usdToKhr(Number(value || 0), Number(rate || 0)),
-    })
+    }, promotionRules)
     // Batch-tracked products are capped by the picked lot's own remaining
     // stock, not the product's overall stock -- a different lot for the
     // same product/branch/price is a separate cart line (see
@@ -2149,6 +2165,16 @@ export default function POS() {
     if (qty > stockCeiling) { notify(t('not_enough_stock'), 'error'); return }
     patchActive({ cart: active.cart.map((item) => getCartLineId(item) === cartLineId ? { ...item, quantity: qty } : item) })
   }
+
+  // G1: "buy >= X save Y" rules depend on the line's QUANTITY, so every
+  // cart change re-evaluates 'promotion'-mode lines through the shared
+  // kernel (repricePromotionCartLines is pure and returns changed=false
+  // when prices already agree, so this settles immediately).
+  useEffect(() => {
+    const { cart, changed } = repricePromotionCartLines(active.cart, promotionRules, exchangeRate)
+    if (changed) patchActive({ cart: cart as CartLineRecord[] })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active.cart, promotionRules, exchangeRate])
 
   const updatePrice = (cartLineId: string | number, field: 'usd' | 'khr', rawValue: string) => {
     const num = normalizePriceValue(rawValue, 0)
@@ -2661,7 +2687,7 @@ export default function POS() {
                 const stock   = getDisplayStock(p)
                 const variantInStock = variants.some((variant) => getDisplayStock(variant) > asNumber(variant.out_of_stock_threshold))
                 const inStock = groupProduct ? variantInStock : stock > asNumber(p.out_of_stock_threshold)
-                const promotion = calculateProductDiscount(p, exchangeRate)
+                const promoBadge = promotionBadgeForProduct(p, promotionRules)
                 const expiryInfo = !groupProduct ? computeExpiryStatus(p.expiry_date, p.expiry_alert_days) : null
                 return (
                   <div
@@ -2684,7 +2710,7 @@ export default function POS() {
                       aria-label={posCopy('Preview product images', 'Preview product images')}
                     >
                       {getPrimaryProductImage(p) ? <ProductImage src={getPrimaryProductImage(p)} alt={p.__displayName || p.name} className="w-full h-full object-cover" /> : <ImageOff className="h-5 w-5 text-gray-400" />}
-                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'Discounts')} />
+                      <ProductDiscountBadge product={p} exchangeRate={exchangeRate} fmtUSD={fmtUSD} label={posCopy('Discounts', 'Discounts')} promotionRules={promotionRules} />
                     </button>
                     <div className="flex items-start justify-between gap-2">
                       <p {...getKhmerTextProps(p.__displayName || p.name, 'text-xs font-medium text-gray-900 dark:text-white leading-tight mb-1 line-clamp-2')}>
@@ -2715,9 +2741,11 @@ export default function POS() {
                       // number reveals on request in the detail sheet.
                       <p {...getKhmerTextProps(t('special_price') || 'Special', 'text-[11px] font-medium text-emerald-600 dark:text-emerald-400')}>{t('special_price') || 'VIP'}</p>
                     ) : null}
-                    {promotion.active ? (
-                      <p className="text-[11px] font-semibold text-rose-600 dark:text-rose-300">
-                        {p.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
+                    {promoBadge.active ? (
+                      <p className="text-[11px] font-semibold" style={{ color: promoBadge.badge_color || '#e11d48' }}>
+                        {promoBadge.kind === 'quantity_hint'
+                          ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'Buy')} ${promoBadge.min_quantity}+`)
+                          : `${(promoBadge.show_title && promoBadge.title) || p.discount_label || posCopy('Discounts', 'Discounts')} ${fmtUSD(evaluatePromotionPricing(p, 1, promotionRules, exchangeRate).unit_price_usd)}`}
                       </p>
                     ) : null}
                     {/* Colored qty+unit instead of a separate "Out of Stock" label --
@@ -3311,6 +3339,7 @@ export default function POS() {
         <Suspense fallback={null}>
           <ProductDetailSheet
             product={detailProduct}
+            promotionRules={promotionRules}
             exchangeRate={exchangeRate}
             t={t}
             fmtUSD={fmtUSD}

@@ -1,4 +1,5 @@
 import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
+import { promotionBadgeForProduct, evaluatePromotionPricing, isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 
 type PortalProduct = Record<string, unknown>
 
@@ -19,6 +20,10 @@ interface PortalPromotionDetails {
   badgeColor: string
   discountAmountUsd: number
   discountAmountKhr: number
+  // G1: a "buy >= X save Y" rule advertises without cutting the qty-1
+  // price -- the card shows the deal text instead of a slashed price.
+  isQuantityHint: boolean
+  minQuantity: number
 }
 
 type PortalCopy = (key: string, fallback: string) => string
@@ -103,7 +108,26 @@ export function productMatchesPortalBranches(product: PortalProduct = {}, branch
   ))
 }
 
-export function getPortalPromotionDetails(product: PortalProduct = {}): PortalPromotionDetails {
+// G1: with rules present this delegates to the shared promotion kernel
+// (utils/promotionRules.ts -- the same one POS charges with), so the
+// storefront can never advertise a price POS wouldn't charge. With no
+// rules (older callers, admin preview) it stays the plain per-product
+// discount read it always was.
+export function getPortalPromotionDetails(product: PortalProduct = {}, promotionRules: readonly PromotionRule[] = []): PortalPromotionDetails {
+  if (promotionRules.length) {
+    const badge = promotionBadgeForProduct(product, promotionRules)
+    const evaluation = evaluatePromotionPricing(product, 1, promotionRules)
+    return {
+      active: badge.active,
+      percentOff: Math.max(0, badge.percent_off || 0),
+      label: (badge.show_title && badge.title) || String(product?.discount_label || ''),
+      badgeColor: badge.active ? badge.badge_color : String(product?.discount_badge_color || '#e11d48'),
+      discountAmountUsd: evaluation.line_discount_usd || 0,
+      discountAmountKhr: evaluation.line_discount_khr || 0,
+      isQuantityHint: badge.kind === 'quantity_hint',
+      minQuantity: badge.min_quantity || 0,
+    }
+  }
   const promotion = calculatePortalDiscount(product)
   const active = promotion.active
   return {
@@ -113,6 +137,8 @@ export function getPortalPromotionDetails(product: PortalProduct = {}): PortalPr
     badgeColor: String(product?.discount_badge_color || '#e11d48'),
     discountAmountUsd: promotion.discount_amount_usd || 0,
     discountAmountKhr: promotion.discount_amount_khr || 0,
+    isQuantityHint: false,
+    minQuantity: 0,
   }
 }
 
@@ -120,14 +146,21 @@ export function buildPortalPricePresentation(
   product: PortalProduct = {},
   config: PortalDisplayConfig = {},
   formatPortalPrice: PortalPriceFormatter,
+  promotionRules: readonly PromotionRule[] = [],
 ) {
-  const promotion = getPortalPromotionDetails(product)
-  const discounted = calculatePortalDiscount(product)
-  const activeUsd = promotion.active ? discounted.applied_price_usd : Number(product?.selling_price_usd || 0)
-  const activeKhr = promotion.active ? discounted.applied_price_khr : Number(product?.selling_price_khr || 0)
+  const promotion = getPortalPromotionDetails(product, promotionRules)
+  const evaluation = promotionRules.length ? evaluatePromotionPricing(product, 1, promotionRules) : null
+  const discounted = evaluation
+    ? { applied_price_usd: evaluation.unit_price_usd, applied_price_khr: evaluation.unit_price_khr }
+    : calculatePortalDiscount(product)
+  // A quantity hint doesn't cut the qty-1 price -- show the normal price
+  // (no strikethrough) and let the badge carry the deal.
+  const priceCut = promotion.active && !promotion.isQuantityHint
+  const activeUsd = priceCut ? discounted.applied_price_usd : Number(product?.selling_price_usd || 0)
+  const activeKhr = priceCut ? discounted.applied_price_khr : Number(product?.selling_price_khr || 0)
   return {
     primaryText: formatPortalPrice(activeUsd, activeKhr, config),
-    originalText: promotion.active
+    originalText: priceCut
       ? formatPortalPrice(product?.selling_price_usd, product?.selling_price_khr, config)
       : '',
     promotion,
@@ -138,10 +171,11 @@ export function buildPortalHighlightBadges(
   product: PortalProduct = {},
   config: PortalDisplayConfig = {},
   copy: PortalCopy,
+  promotionRules: readonly PromotionRule[] = [],
 ) {
   const badges: Array<Record<string, unknown>> = []
   const rankLimit = Math.max(1, Math.min(10, Number(config?.highlightRankLimit || 3)))
-  const promotion = getPortalPromotionDetails(product)
+  const promotion = getPortalPromotionDetails(product, promotionRules)
   const topSellerRank = Number(product?.top_seller_rank || 0)
   const topProductRank = Number(product?.top_product_rank || 0)
 
@@ -158,9 +192,13 @@ export function buildPortalHighlightBadges(
       key: 'promotion',
       tone: 'rose',
       color: promotion.badgeColor,
-      label: promotion.percentOff >= 5
-        ? replaceRankVars(copy('promotionBadgePercent', '-{value}%'), promotion.percentOff)
-        : promotion.label || copy('promotionBadge', 'Promo'),
+      label: promotion.isQuantityHint
+        ? (promotion.label || copy('promotionBadgeBuy', 'Buy') + ' ' + promotion.minQuantity + '+')
+        : promotion.label
+          ? promotion.label
+          : promotion.percentOff >= 5
+            ? replaceRankVars(copy('promotionBadgePercent', '-{value}%'), promotion.percentOff)
+            : copy('promotionBadge', 'Promo'),
     })
   }
 
@@ -207,4 +245,21 @@ function normalizeRankBadgeLabel(template: unknown): string {
     .replace(/\{value\}/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim()
+}
+
+// G1 ordering rule for the portal grid: promoted products occupy the block
+// above the alphabetical run (the A-Z rail indexes what comes after).
+// Stable within both blocks; delegates the "is promoted" question to the
+// shared kernel.
+export function partitionPortalPromotedFirst<T extends PortalProduct>(
+  products: readonly T[] = [],
+  promotionRules: readonly PromotionRule[] = [],
+): { promoted: T[]; rest: T[] } {
+  const promoted: T[] = []
+  const rest: T[] = []
+  for (const product of products) {
+    const hit = promotionRules.length ? isProductPromoted(product, promotionRules) : isProductDiscountActive(product)
+    ;(hit ? promoted : rest).push(product)
+  }
+  return { promoted, rest }
 }

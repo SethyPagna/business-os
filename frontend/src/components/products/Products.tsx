@@ -123,6 +123,8 @@ import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOpti
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
+import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
+import type { PromotionRule } from '../../utils/promotionRules.ts'
 import type { BulkDeleteJobStatus } from '../../api/productWriteTransport.ts'
 
 const ManageCategoriesModal = lazyRetry(() => import('./lookups/ManageCategoriesModal'), 'products-manage-categories-modal')
@@ -638,6 +640,9 @@ function ProductsFullEditor() {
   // several issue keys can be selected at once, OR'd together. See
   // IssuesFilterOptions.tsx and searchMatch.ts's ISSUE_STATE_KEYS.
   const [issueFilter, setIssueFilter] = useState('all')
+  // G1 promo filter: '' /'all' | 'promoted' | 'discounted' | 'rules' | 'rule:<id>'
+  const [promoFilter, setPromoFilter] = useState('all')
+  const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
   const [createdDateFrom, setCreatedDateFrom] = useState('')
   const [createdDateTo, setCreatedDateTo] = useState('')
   const [productSortDirection, setProductSortDirection] = useState<ProductSortDirection>('name_asc')
@@ -871,6 +876,8 @@ function ProductsFullEditor() {
           // "Issues" quick filter -- see buildIssueStateClauses in
           // cloudflare/src/lib/searchMatch.ts. Multi-value, OR'd.
           issueState: issueFilter === 'all' ? '' : issueFilter,
+          // G1 promo filter -- server-side, so it holds across pagination.
+          promo: promoFilter === 'all' ? '' : promoFilter,
           sort: productSortDirection === 'asc' ? 'created_asc'
             : productSortDirection === 'name_asc' ? 'name_asc'
             : productSortDirection === 'name_desc' ? 'name_desc'
@@ -889,6 +896,8 @@ function ProductsFullEditor() {
           ? productPayloadObject.items
           : (Array.isArray(productPayload) ? productPayload : [])
         const searchFilters = productPayloadObject?.filters || {}
+        const payloadPromotionRules = (productPayloadObject as Record<string, unknown> | null)?.promotion_rules
+        if (Array.isArray(payloadPromotionRules)) setPromotionRules(payloadPromotionRules as PromotionRule[])
         const searchProvidedFilterMeta = isObjectRecord(productPayloadObject?.filters)
           || Array.isArray(productPayloadObject?.initials)
 
@@ -989,7 +998,7 @@ function ProductsFullEditor() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, notify, productPage, productPageSize, productSortDirection, searchMode, supplierFilter, t, tr, unitFilter])
+  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
 
   useEffect(() => {
     latestLoadRef.current = load
@@ -2189,6 +2198,7 @@ function ProductsFullEditor() {
     setStockFilter('all')
     setGroupFilter('all')
     setIssueFilter('all')
+    setPromoFilter('all')
     // setInitialFilter('all') removed -- no setter exists anymore, and
     // initialFilter is permanently 'all' already (see its declaration).
     setCreatedDateFrom('')
@@ -2795,6 +2805,12 @@ function ProductsFullEditor() {
       issueFilter,
       setIssueFilter,
     }),
+    promotionsSection: buildPromotionsFilterSection({
+      t,
+      promoFilter,
+      setPromoFilter,
+      promotionOptions: promotionRules.map((rule) => ({ id: rule.id, title: rule.title || ('#' + rule.id), rule_type: rule.rule_type })),
+    }),
     searchModeSection: buildSearchModeFilterSection({
       t,
       searchMode,
@@ -2857,6 +2873,7 @@ function ProductsFullEditor() {
       getBranchSummaryLabel,
       getBrandColor,
       t,
+      promotionRules,
     })
     const thumbnailState = buildProductThumbnailState(p)
     // A merged row (see mergeSameDetailRows) represents multiple real
@@ -3038,7 +3055,7 @@ function ProductsFullEditor() {
         </td>
       </tr>
     )
-  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr])
+  }, [branchFilter, branchNameById, catMap, exchangeRate, fmtKHR, fmtUSD, getBranchQty, getBranchSummaryLabel, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderMetaPill, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr])
 
   const renderMobileProductCard = useCallback((p: ProductRecord, { indented = false }: { indented?: boolean } = {}) => {
     const productId = p.id ?? 0
@@ -3058,6 +3075,7 @@ function ProductsFullEditor() {
       exchangeRate,
       getBranchQty,
       t,
+      promotionRules,
     })
     const thumbnailState = buildProductThumbnailState(p)
     const rowScopeIds = p.__mergedProductIds?.length ? p.__mergedProductIds : [productId]
@@ -3224,7 +3242,7 @@ function ProductsFullEditor() {
         </div>
       </div>
     )
-  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr])
+  }, [branchFilter, catMap, exchangeRate, fmtUSD, getBranchQty, getBrandColor, getLongPressState, isSelectionScopeFullySelected, isSelectionScopePartiallySelected, openLightbox, promotionRules, renderUnitChip, selectionModeActive, t, toggleSelectionScope, tr])
 
   // One unified thumbnail for a whole name-group (see the `indented`
   // branches just above, which omit each row's own image once a group

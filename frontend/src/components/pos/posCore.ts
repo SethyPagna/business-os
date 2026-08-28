@@ -1,4 +1,5 @@
 import { calculateProductDiscount, normalizePriceValue } from '../../utils/pricing.ts'
+import { evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -291,25 +292,41 @@ export function resolveCartPriceValues(
   priceMode: CartPriceMode = 'selling',
   exchangeRate = 0,
   converters: PriceConverters = {},
+  // G1: the active promotion RULES ride along so 'promotion' mode charges
+  // the best single benefit (the product's own discount OR a rule) via the
+  // shared kernel. Callers that don't pass them keep the pre-G1 behavior
+  // exactly (kernel with no rules = the per-product discount math).
+  promotionRules: readonly PromotionRule[] = [],
 ): CartPriceValues {
   const usdToKhr = typeof converters.usdToKhr === 'function'
     ? converters.usdToKhr
     : ((value: unknown, rate: unknown) => normalizePriceValue((Number(value || 0) * Number(rate || 0)), 0))
   const usePromotion = priceMode === 'promotion'
   if (usePromotion) {
-    const promotion = calculateProductDiscount(product || undefined, exchangeRate)
-    if (promotion.active) {
-      return {
-        applied_price_usd: promotion.applied_price_usd,
-        applied_price_khr: promotion.applied_price_khr,
-        base_price_usd: promotion.applied_price_usd,
-        base_price_khr: promotion.applied_price_khr,
-        price_mode: 'promotion',
-        product_discount_type: String(product?.discount_type || 'percent'),
-        product_discount_label: String(product?.discount_label || ''),
-        product_discount_usd: promotion.discount_amount_usd,
-        product_discount_khr: promotion.discount_amount_khr,
-      }
+    const evaluation = evaluatePromotionPricing(product || undefined, 1, promotionRules, exchangeRate || 4100)
+    const sellingUsd = normalizePriceValue(product?.selling_price_usd || 0, 0)
+    const sellingKhr = normalizePriceValue(product?.selling_price_khr || 0, 0)
+    // 'promotion' mode is honored even when nothing cuts the QTY-1 price:
+    // a "buy >= X save Y" line enters the cart at full price and the
+    // repricePromotionCartLines pass drops it the moment quantity crosses
+    // the threshold. (Pre-G1 this fell through to selling mode, which
+    // would have made quantity rules permanently unreachable.) Callers
+    // only offer the promotion button when SOME benefit exists, so an
+    // arbitrary product can't be parked in promotion mode by accident.
+    return {
+      applied_price_usd: evaluation.active ? evaluation.unit_price_usd : sellingUsd,
+      applied_price_khr: evaluation.active ? evaluation.unit_price_khr : sellingKhr,
+      base_price_usd: evaluation.active ? evaluation.unit_price_usd : sellingUsd,
+      base_price_khr: evaluation.active ? evaluation.unit_price_khr : sellingKhr,
+      price_mode: 'promotion',
+      product_discount_type: !evaluation.active
+        ? String(product?.discount_type || 'percent')
+        : evaluation.rule_type === 'product_discount'
+          ? String(product?.discount_type || 'percent')
+          : String(evaluation.rule_type || 'percent'),
+      product_discount_label: evaluation.active && evaluation.show_title ? evaluation.title : '',
+      product_discount_usd: evaluation.active ? Math.max(0, normalizePriceValue(sellingUsd - evaluation.unit_price_usd, 0)) : 0,
+      product_discount_khr: evaluation.active ? Math.max(0, normalizePriceValue(sellingKhr - evaluation.unit_price_khr, 0)) : 0,
     }
   }
   const useSpecial = priceMode === 'special' && (normalizeNumber(product?.special_price_usd) > 0 || normalizeNumber(product?.special_price_khr) > 0)
@@ -333,6 +350,57 @@ export function resolveCartPriceValues(
     base_price_khr: sellingKhr,
     price_mode: 'selling',
   }
+}
+
+// G1: quantity-threshold rules ("buy >= X save Y") change a line's price
+// when its QUANTITY crosses the threshold, not just when it's added -- so
+// after any cart mutation, every 'promotion'-mode line re-evaluates the
+// kernel at its current quantity. Pure: returns the same array instance
+// when nothing changed so callers can patch state without render loops.
+// Lines in other price modes (selling/special, manual price edits) are
+// never touched.
+export function repricePromotionCartLines(
+  cart: readonly ProductRecord[] = [],
+  promotionRules: readonly PromotionRule[] = [],
+  exchangeRate = 0,
+): { cart: ProductRecord[]; changed: boolean } {
+  let changed = false
+  const next = (Array.isArray(cart) ? cart : []).map((item) => {
+    if (String(item?.price_mode || 'selling') !== 'promotion') return item
+    const quantity = Math.max(1, Number((item as Record<string, unknown>).quantity) || 1)
+    const evaluation = evaluatePromotionPricing(item, quantity, promotionRules, exchangeRate || 4100)
+    const sellingUsd = normalizePriceValue(item?.selling_price_usd || 0, 0)
+    const sellingKhr = normalizePriceValue(item?.selling_price_khr || 0, 0)
+    // Nothing active any more (rule expired/deleted, quantity fell under
+    // the threshold with no other benefit) -> the line honestly returns
+    // to full selling price rather than keeping a stale cut.
+    const unitUsd = evaluation.active ? evaluation.unit_price_usd : sellingUsd
+    const unitKhr = evaluation.active ? evaluation.unit_price_khr : sellingKhr
+    const label = evaluation.active && evaluation.show_title ? evaluation.title : ''
+    const current = item as Record<string, unknown>
+    if (
+      normalizePriceValue(current.applied_price_usd, -1) === unitUsd
+      && normalizePriceValue(current.applied_price_khr, -1) === unitKhr
+      && String(current.product_discount_label || '') === label
+    ) return item
+    changed = true
+    return {
+      ...item,
+      applied_price_usd: unitUsd,
+      applied_price_khr: unitKhr,
+      base_price_usd: unitUsd,
+      base_price_khr: unitKhr,
+      product_discount_type: !evaluation.active
+        ? current.product_discount_type
+        : evaluation.rule_type === 'product_discount'
+          ? String(current.discount_type || 'percent')
+          : String(evaluation.rule_type || 'percent'),
+      product_discount_label: label,
+      product_discount_usd: Math.max(0, normalizePriceValue(sellingUsd - unitUsd, 0)),
+      product_discount_khr: Math.max(0, normalizePriceValue(sellingKhr - unitKhr, 0)),
+    } as ProductRecord
+  })
+  return { cart: changed ? next : [...cart], changed }
 }
 
 export function getCartLineId(item: ProductRecord | null | undefined): string {

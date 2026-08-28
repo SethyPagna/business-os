@@ -2505,7 +2505,9 @@ assert.match(
 )
 assert.match(
   auditLog,
-  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\)/,
+  // entityFilter joined the flag list with I2's entity ("page") filter
+  // (Part 393) -- the pin tracks the current filter vocabulary.
+  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\)/,
   'audit log active filter count should avoid temporary filtered boolean arrays',
 )
 assert.doesNotMatch(

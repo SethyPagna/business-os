@@ -37,6 +37,7 @@ import CatalogPreviewSurface from './CatalogPreviewSurface'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { CATALOG_DEFAULT_PAGE_SIZE } from './catalogPagination'
 import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation } from './portalCatalogDisplay.ts'
+import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { collapsePortalProductGroups, mergePortalCatalogProducts } from './portalProductGrouping.ts'
 import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
@@ -586,6 +587,11 @@ export default function PublicCatalogPage() {
 
   const [config, setConfig] = useState<PortalConfig>(() => ({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }))
   const [products, setProducts] = useState<CatalogProduct[]>(() => mergePortalCatalogProducts(cachedPortal?.products))
+  // G1: active promotion rules ride the catalog payload (and its cache).
+  const [portalPromotionRules, setPortalPromotionRules] = useState<PromotionRule[]>(() => {
+    const cached = (cachedPortal?.catalog as Record<string, unknown> | undefined)?.promotion_rules
+    return Array.isArray(cached) ? cached as PromotionRule[] : []
+  })
   const [productTotal, setProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
   const [productPage, setProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
   const [productPageSize, setProductPageSize] = useState(() => Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
@@ -808,6 +814,9 @@ export default function PublicCatalogPage() {
         setConfig(next.config)
         setProducts(mergedProducts)
         setProductTotal(Number(next.catalog.total || next.products.length || 0))
+        if (Array.isArray((next.catalog as Record<string, unknown>).promotion_rules)) {
+          setPortalPromotionRules((next.catalog as Record<string, unknown>).promotion_rules as PromotionRule[])
+        }
         setProductPage(Number(next.catalog.page || 1) || 1)
         setProductPageSize(Number(next.catalog.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE)
         setProductInitials(normalizePortalInitialOptions(next.catalog.initials))
@@ -881,6 +890,9 @@ export default function PublicCatalogPage() {
         }
         setProducts(nextItems)
         setProductTotal(nextTotal)
+        if (Array.isArray((data as Record<string, unknown>).promotion_rules)) {
+          setPortalPromotionRules((data as Record<string, unknown>).promotion_rules as PromotionRule[])
+        }
         setProductPage(responsePage)
         setProductPageSize(responsePageSize)
         setProductInitials(nextInitials)
@@ -1184,7 +1196,7 @@ export default function PublicCatalogPage() {
     const status = getStockStatus(product, qty, displayConfig)
     const gallery = normalizeProductGallery(product)
     const pricePresentation = displayConfig.showPrices
-      ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice)
+      ? buildPortalPricePresentation(product, displayConfig, formatPortalPrice, portalPromotionRules)
       : null
     setProductDetailView({ open: true, product, gallery, status, pricePresentation, showPrices: !!displayConfig.showPrices })
   }
@@ -1194,6 +1206,7 @@ export default function PublicCatalogPage() {
     <Suspense fallback={<div className="portal-empty-card">{copy('catalogLoading', 'Loading products...')}</div>}>
       <CatalogProductsSection
         copy={copy}
+        promotionRules={portalPromotionRules}
         filteredProducts={products}
         serverPaged
         productTotal={productTotal}

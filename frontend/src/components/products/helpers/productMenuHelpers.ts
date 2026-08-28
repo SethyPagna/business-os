@@ -112,6 +112,10 @@ interface BuildProductFilterSectionsOptions {
   // before Category. Omitted (e.g. the plain-node test harness) means no
   // Issues section at all -- no non-JSX fallback, same as createdSection.
   issuesSection?: FilterSection | null
+  // G1 "Promotions" quick filter (promoted / discounted / by rule) --
+  // see components/shared/PromotionsFilterOptions.tsx. Spliced right
+  // after Issues; no non-JSX fallback, same as the others.
+  promotionsSection?: FilterSection | null
   // Pre-built "Created" date-range section (JSX `render`-based, built by
   // the .tsx caller via CreatedDateFilterOptions.tsx's
   // buildCreatedDateFilterSection -- same reason as availabilitySection:
@@ -290,6 +294,7 @@ export function countActiveProductFilters({
 export function buildProductFilterSections({
   availabilitySection,
   issuesSection,
+  promotionsSection,
   createdSection,
   searchModeSection,
   branches = [],
@@ -387,6 +392,7 @@ export function buildProductFilterSections({
     // for the section itself. No non-JSX fallback (same as createdSection/
     // searchModeSection): omitted entirely when not supplied.
     issuesSection ? issuesSection : null,
+    promotionsSection ? promotionsSection : null,
     categories.length ? {
       id: 'category',
       label: t('category') || 'Category',

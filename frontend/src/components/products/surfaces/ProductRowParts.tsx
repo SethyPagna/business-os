@@ -72,10 +72,18 @@ export function ProductDiscountBadge({
   const className = overlay
     ? 'absolute right-1 top-1 inline-flex max-w-[9rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
     : 'inline-flex max-w-[10rem] truncate rounded-full bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 ring-1 ring-rose-100 dark:bg-rose-950/40 dark:text-rose-200 dark:ring-rose-900/60'
-  const title = `${label} ${fmtUSD(promo.applied_price_usd || 0)}`
+  // G1: a rule's shown title beats the generic label; a quantity rule
+  // ("buy >= X") advertises its deal instead of a price it isn't cutting
+  // yet. Extra fields are optional so pre-G1 promotion objects render
+  // exactly as before.
+  const extra = promo as { title?: string; isQuantityHint?: boolean; minQuantity?: number }
+  const shownLabel = extra.title || label
+  const text = extra.isQuantityHint
+    ? (extra.title || `${label} ${extra.minQuantity || 0}+`)
+    : `${shownLabel} ${fmtUSD(promo.applied_price_usd || 0)}`
   return (
-    <span className={className} title={title}>
-      {label} {fmtUSD(promo.applied_price_usd || 0)}
+    <span className={className} title={text}>
+      {text}
     </span>
   )
 }

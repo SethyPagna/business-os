@@ -3,7 +3,7 @@ import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { calculateProductDiscount } from '../../utils/pricing.ts'
+import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../utils/promotionRules.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { getProductBatches } from '../../api/batchesTransport.ts'
 import type { BatchSelection, ProductBatch } from '../../api/batchesTransport.ts'
@@ -206,6 +206,11 @@ interface ProductDetailSheetProps {
   onAddToCart: (product: ProductRecord, priceMode?: PriceMode, batchSelection?: BatchSelection, branchId?: string | number | null) => void
   onClose: () => void
   onOpenImageLightbox: (product: ProductRecord, index: number) => void
+  // G1: the active promotion rules -- the sheet's price buttons and the
+  // Discounts row evaluate the SAME kernel POS charges with, including
+  // "buy >= X" deals that only engage once the cart line's quantity
+  // crosses the threshold.
+  promotionRules?: readonly PromotionRule[]
 }
 
 export default function ProductDetailSheet({
@@ -225,11 +230,18 @@ export default function ProductDetailSheet({
   onAddToCart,
   onClose,
   onOpenImageLightbox,
+  promotionRules = [],
 }: ProductDetailSheetProps) {
   const variants = getVariantChoices(product)
   const groupProduct = hasVariantChoices(product)
   const groupMeta = product.__groupMeta || null
-  const promotion = calculateProductDiscount(product, exchangeRate)
+  const promoBadge = promotionBadgeForProduct(product, promotionRules)
+  const promoEvaluation = evaluatePromotionPricing(product, 1, promotionRules, exchangeRate)
+  const promotion = {
+    active: promoBadge.active,
+    applied_price_usd: promoEvaluation.unit_price_usd,
+    applied_price_khr: promoEvaluation.unit_price_khr,
+  }
   const expiryInfo = computeExpiryStatus(product.expiry_date, product.expiry_alert_days)
   const choiceLabel = groupMeta?.groupKind === 'variant'
     ? posCopy('Variants', 'Variants')
@@ -354,7 +366,13 @@ export default function ProductDetailSheet({
   const effectiveVariant = candidatePool.find((variant) => String(variant.id) === selectedVariantId) || candidatePool[0] || null
   const effectiveVariantStock = getVariantStockForBranch(effectiveVariant, effectiveBranchId)
   const effectiveVariantInStock = effectiveVariant ? effectiveVariantStock > asNumber(effectiveVariant.out_of_stock_threshold) : false
-  const effectiveVariantPromotion = calculateProductDiscount(effectiveVariant || undefined, exchangeRate)
+  const effectiveVariantPromoBadge = promotionBadgeForProduct(effectiveVariant || undefined, promotionRules)
+  const effectiveVariantPromoEvaluation = evaluatePromotionPricing(effectiveVariant || undefined, 1, promotionRules, exchangeRate)
+  const effectiveVariantPromotion = {
+    active: effectiveVariantPromoBadge.active,
+    applied_price_usd: effectiveVariantPromoEvaluation.unit_price_usd,
+    applied_price_khr: effectiveVariantPromoEvaluation.unit_price_khr,
+  }
   const effectiveVariantExpiry = computeExpiryStatus(effectiveVariant?.expiry_date, effectiveVariant?.expiry_alert_days)
 
   // Lot/batch picker -- keyed on whichever product ROW is actually resolved
@@ -672,7 +690,9 @@ export default function ProductDetailSheet({
                     ) : null}
                     {effectiveVariantPromotion.active ? (
                       <button className="btn-secondary flex-1 text-xs border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={!effectiveVariantInStock || !batchReadyToSell} onClick={() => closeAfterAdd(effectiveVariant, 'promotion')}>
-                        {effectiveVariant.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(effectiveVariantPromotion.applied_price_usd)}
+                        {effectiveVariantPromoBadge.kind === 'quantity_hint'
+                          ? ((effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || `${posCopy('Buy', 'Buy')} ${effectiveVariantPromoBadge.min_quantity}+`)
+                          : `${(effectiveVariantPromoBadge.show_title && effectiveVariantPromoBadge.title) || effectiveVariant.discount_label || posCopy('Discounts', 'Discounts')} ${fmtUSD(effectiveVariantPromotion.applied_price_usd)}`}
                       </button>
                     ) : null}
                   </div>
@@ -724,7 +744,9 @@ export default function ProductDetailSheet({
               </button>
               {promotion.active ? (
                 <button className="btn-secondary flex-1 border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-200" disabled={displayedStock <= asNumber(product.out_of_stock_threshold) || !batchReadyToSell} onClick={() => closeAfterAdd(product, 'promotion')}>
-                  {product.discount_label || posCopy('Discounts', 'Discounts')} {fmtUSD(promotion.applied_price_usd)}
+                  {promoBadge.kind === 'quantity_hint'
+                    ? ((promoBadge.show_title && promoBadge.title) || `${posCopy('Buy', 'Buy')} ${promoBadge.min_quantity}+`)
+                    : `${(promoBadge.show_title && promoBadge.title) || product.discount_label || posCopy('Discounts', 'Discounts')} ${fmtUSD(promotion.applied_price_usd)}`}
                 </button>
               ) : null}
               {asNumber(product.special_price_usd) > 0 || asNumber(product.special_price_khr) > 0 ? (

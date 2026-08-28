@@ -1,4 +1,5 @@
 import { calculateProductDiscount } from '../../../utils/pricing.ts'
+import { promotionBadgeForProduct, evaluatePromotionPricing, type PromotionRule } from '../../../utils/promotionRules.ts'
 
 type StockStatus = 'out_of_stock' | 'low_stock' | 'in_stock'
 
@@ -39,6 +40,7 @@ interface CategoryRecord {
 }
 
 interface BuildProductRowDisplayStateOptions {
+  promotionRules?: readonly PromotionRule[]
   branchFilter?: unknown
   branchNameById?: Map<string, unknown>
   catMap?: Record<string, CategoryRecord>
@@ -167,6 +169,29 @@ export function getProductStockStatus(product: ProductRecord, {
   return 'in_stock'
 }
 
+function buildRowPromotion(product: ProductRecord, exchangeRate: number, promotionRules: readonly PromotionRule[]) {
+  if (!promotionRules.length) {
+    return { ...calculateProductDiscount(product, exchangeRate), title: '', isQuantityHint: false, badgeColor: String((product as Record<string, unknown>)?.discount_badge_color || '') }
+  }
+  const badge = promotionBadgeForProduct(product, promotionRules)
+  const evaluation = evaluatePromotionPricing(product, 1, promotionRules, exchangeRate || 4100)
+  const sellingUsd = toNumber(product?.selling_price_usd)
+  const sellingKhr = toNumber(product?.selling_price_khr)
+  return {
+    active: badge.active,
+    applied_price_usd: evaluation.unit_price_usd,
+    applied_price_khr: evaluation.unit_price_khr,
+    discount_amount_usd: Math.max(0, sellingUsd - evaluation.unit_price_usd),
+    discount_amount_khr: Math.max(0, sellingKhr - evaluation.unit_price_khr),
+    percent_off: evaluation.percent_off,
+    title: badge.active && badge.show_title ? badge.title : '',
+    isQuantityHint: badge.kind === 'quantity_hint',
+    badgeColor: badge.active ? badge.badge_color : String((product as Record<string, unknown>)?.discount_badge_color || ''),
+    minQuantity: badge.min_quantity,
+    saveUsd: badge.save_usd,
+  }
+}
+
 export function buildProductRowDisplayState(product: ProductRecord, {
   branchFilter = 'all',
   branchNameById = new Map(),
@@ -176,6 +201,7 @@ export function buildProductRowDisplayState(product: ProductRecord, {
   getBranchSummaryLabel = () => '',
   getBrandColor = () => '',
   t = (key, fallback) => fallback || key,
+  promotionRules = [],
 }: BuildProductRowDisplayStateOptions = {}) {
   const costUsd = toNumber(product?.cost_price_usd)
   const costKhr = toNumber(product?.cost_price_khr)
@@ -218,7 +244,12 @@ export function buildProductRowDisplayState(product: ProductRecord, {
     mobileStatusClass: PRODUCT_STOCK_STATUS_CLASS[stockStatus],
     mobileStatusLabel,
     stockStatusTextClass: PRODUCT_STOCK_STATUS_TEXT_CLASS[stockStatus],
-    promotion: calculateProductDiscount(product, exchangeRate),
+    // G1: kernel-driven -- the product's own discount OR the best active
+    // promotion rule, whichever the shared kernel picks (same one POS
+    // charges with). Shape stays calculateProductDiscount-compatible for
+    // every existing consumer; title/hint/badge color ride along for the
+    // chips. With no rules passed this is exactly the old computation.
+    promotion: buildRowPromotion(product, exchangeRate, promotionRules),
     costKhr,
     costUsd,
     qty,
