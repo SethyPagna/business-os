@@ -234,6 +234,30 @@ autocorrect — templates, imports, exports and generated files alike.*
 
 ### Phase B — Stats/tooltips finish + small confirmed UI corrections
 
+- [x] B7. **POS cart round 2 (Part 379, needs deploy).** Section order is now
+  Customer → Discount → Membership → Delivery → Summary → Payment (discounts moved
+  directly under the customer, per the Aug-28 ask). Discount label sits STACKED above
+  the %/$ toggle with the inputs on the next row (not label-beside-toggle); the Total
+  is one row (`$X.XX (KHR)`); the verbose membership sentence is gone; the payment
+  method column narrowed to 6.5rem with the amount inputs taking the freed room; the
+  remove button shrank to h-7 while its × grew to text-lg (it was a big box with a
+  tiny glyph).
+- [x] B8. **Fees polish + 'expense' type end-to-end (Part 379, needs deploy).** Fee
+  Type + Label genuinely share one row now (an old comment claimed it; the JSX
+  stacked them); the Label input suggests every label already saved on a fee (saved
+  reasons, reusable without retyping — new labels just get typed); `expense` joined
+  the type vocabulary in the frontend union, the form options, en+km labels AND
+  routes/fees.ts's FEE_TYPES (without which normalizeFeeType would silently rewrite a
+  saved 'expense' to 'other').
+- [ ] B9. **Old-system expenses → fees migration: PREPARED, blocked on permissions.**
+  `businessos-migration-aug28/expenses-fees-migration.sql` holds all 4,240 entries as
+  29 batched INSERTs (fee_type='expense', label = de-duplicated Khmer category,
+  created_by_name='Old system' as the idempotency marker). Expected results to verify
+  after running: **4,240 rows · SUM(amount_usd)=129,696.60 · SUM(amount_khr)=
+  82,419,900** — matching the source report's own grand total. Production fees table
+  measured EMPTY beforehand. Both the wrangler CLI write and the D1 MCP insert were
+  denied by the permission classifier, so the user runs one command (in the manifest).
+
 - [~] B1. (11.26/5.1–5.3) Same-row stat label + info, portaled viewport-aware tooltip.
   **Dashboard `MiniStat`, Branches, Inventory, Returns landed this session (Part 370):**
   hint and drill-down are separate controls (a `role="button"` wrapper would re-fire the
@@ -338,6 +362,18 @@ store really paid the rider; margin = charge − cost and is internal only.*
   products by supplier. The unified §12 import template gains an optional `supplier`
   column so a stock-in row attributes its batch at import time (blank = unattributed —
   the nine current exports carry none, but future files and manual entry will).
+- [~] D6b. **Import identity/merge rules — measured against the user's Aug-28 spec
+  (Part 379).** Already true in the engine: same name + same barcode MERGES, and
+  `resolveMergedPricing` takes the **HIGHEST selling and VIP price** on every merge
+  (its comment: merging must never quietly drop a price a merged row expected to
+  charge); same name + different barcode stays a separate child row; costs live on
+  batches (rows click through to detail). Verified true in the migration data: all
+  5,973 name groups in the aug27 file already carry ONE category/brand (unification
+  script changed ZERO rows — the earlier brand normalization did the work). **Still
+  open:** engine-side name-group category/brand unification for FUTURE files whose
+  groups disagree (needs a cross-window pass like the §12 seal; rule: most frequent
+  non-empty value in the group, tie → first row), plus surfacing "group unified" in
+  the review screen.
 - [ ] D6. Rename cascades with before→after preview: changing a category/brand/supplier/
   product name shows before and after and asks what happens to attached rows (carry all
   attached products to the new name / keep a copy, new is new / cancel-go-back). Also the
@@ -1614,6 +1650,16 @@ different suppliers) with a §12 optional supplier column; D3 detail gains per-b
 supplier + supplier section + searchability; N1c = one-file-or-many import contract;
 K2/POS batch-first + Selling/VIP focus. Verified after the sweep: frontend full chain
 green (exit 0), build 15.50s, both typechecks clean.
+
+**Part 379 (Aug 28, seventh batch):** Excel-proof `.xlsx` versions of all ten
+import/reference files (every cell a text cell — opening in Excel cannot coerce
+barcodes/dates; round-trip proven on a leading-zero barcode + Khmer). POS cart round
+2 (B7) and fees polish + expense type (B8) landed; the 4,240-entry expense migration
+is fully prepared with expected sums but both write channels were permission-blocked
+— the user runs one command (B9). Import merge rules measured against the spec: the
+highest-price-wins rule already exists in `resolveMergedPricing`; migration data
+already group-consistent (0 rows changed); engine-side group unification specced
+(D6b). Verification: see Current status.
 
 **Part 375 (Aug 28, fifth batch):** M3 CLOSED — all 89 review rows decided (73 add /
 6 merge / 10 delete) after applying the user's renames+deletes and three more barcode

@@ -7807,3 +7807,41 @@ tsc clean; **all 120 frontend test files pass individually** plus production bui
 **Not done.** Deploy (user); the imports themselves (manifest order: deploy →
 catalog → 73 extras → suppliers → stock-in history → sales by year); D1b report UI +
 H1 column chooser (specced); the sales files assume branch 'shop' — confirm.
+
+## Part 379 (chat, Aug 28 2026) — Excel-proof files, POS cart round 2, expense migration staged, merge rules measured
+
+**Ask.** Files must survive being opened in Excel; POS cart compaction round 2
+(discounts under customer, stacked toggle, one-row total, smaller method input,
+bigger x); fees compaction + saved reasons + migrate the old expenses; verify all
+imports/exports; products import must follow the identity rules (same name+barcode
+merge, highest selling/VIP, one category/brand per name group, costs per batch).
+
+**What changed.**
+- Ten `.xlsx` twins of the import/reference files, EVERY cell a text cell — Excel
+  cannot coerce barcodes/dates. Round-trip proven (leading-zero barcode
+  085715166012 + Khmer intact, zero scientific notation). The first cut exploded
+  8,803 rows into 44k by line-splitting quoted multi-line descriptions — replaced
+  with a real RFC4180 state machine.
+- POS cart round 2 + fees polish (commits above). The old FeeForm comment claimed
+  type+label shared a row while the JSX stacked them — now true for real.
+- Expense migration: 4,240 entries as 29 batched INSERTs with marker 'Old system';
+  production fees table measured EMPTY; expected sums recorded (USD 129,696.60 /
+  KHR 82,419,900 — equal to the source's own grand total). Both the wrangler CLI
+  file execution and the D1 MCP insert were denied by the permission classifier —
+  per its own instruction, stopped and handed the user the one command + the
+  verification query in the manifest (Step 4c).
+- Merge rules measured, not assumed: resolveMergedPricing already takes the HIGHEST
+  selling/VIP on every merge; same-name+different-barcode already stays a child
+  row; costs already live on batches. The migration file's 5,973 name groups were
+  checked for category/brand disagreement — ZERO rows needed changing (the earlier
+  brand normalization already unified them). Engine-side group unification for
+  future files is specced as D6b (cross-window pass, most-frequent-non-empty rule).
+
+**Verified.** Backend sweep 0 failures (fees.ts change included); frontend full
+chain green + build; both typechecks clean; xlsx round-trip; fees table emptiness
+measured before staging the migration.
+
+**Not done.** The user runs Step 4c (expense migration) + deploy; engine-side
+group unification (D6b); the fees import UI (the migration covers the historical
+data; ongoing entries are manual or via a future importer); B4/B5 and the rest of
+the master plan.
