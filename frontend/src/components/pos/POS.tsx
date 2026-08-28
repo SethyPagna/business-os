@@ -2962,6 +2962,103 @@ export default function POS() {
               )}
             </div>
 
+            {/* Discount + membership (directly under Customer -- Aug 28 order) */}
+            <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-2 space-y-3">
+
+              {/* Discount: label STACKED above the percent/dollar toggle
+                  (user, Aug 28 -- not side by side), inputs on the next row. */}
+              <div>
+                <label htmlFor="pos-discount-usd" className="block text-xs text-gray-500 font-medium">{t('discount')}</label>
+                <div className="mt-1">
+                  <div className="inline-flex overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
+                    <button
+                      type="button"
+                      className={`min-w-[2.5rem] px-3 py-1.5 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      onClick={() => handleDiscountType('percent')}
+                    >
+                      %
+                    </button>
+                    <button
+                      type="button"
+                      className={`min-w-[2.5rem] border-l border-gray-200 px-3 py-1.5 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+                      onClick={() => handleDiscountType('fixed')}
+                    >
+                      {usdSymbol}
+                    </button>
+                  </div>
+                </div>
+                {active.discountType === 'percent' ? (
+                  <div className="relative mt-1">
+                    <input id="pos-discount-usd" name="pos_discount_percent" className="input text-xs py-1 pr-6" type="number" min="0" max="100" step="any" placeholder="0" value={active.discountPercent} onChange={e => handleDiscountPercent(e.target.value)} autoComplete="off" />
+                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-1 mt-1">
+                    <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
+                    <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="text-xs text-gray-500 font-medium">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</div>
+                <div className="mt-1 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
+                  {!active.customer?.membership_number ? (
+                    <p className="text-xs text-emerald-700">{posCopy('Select a customer with a membership number to apply membership discount separately from store discount.', 'ជ្រើសអតិថិជនដែលមានលេខសមាជិក ដើម្បីអនុវត្តបញ្ចុះតម្លៃសមាជិកដោយឡែកពីបញ្ចុះតម្លៃហាង។')}</p>
+                  ) : membershipLoading ? (
+                    <p className="text-xs text-emerald-700">{posCopy('Checking membership points...')}</p>
+                  ) : membershipError ? (
+                    <p className="text-xs text-red-600">{membershipError}</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-emerald-800">{active.customer.membership_number}</span>
+                        <span className="text-emerald-700">
+                          {posCopy('Balance')}: {(membershipInfo?.points?.balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} pts
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-[110px,1fr] gap-2">
+                        <div>
+                          <label htmlFor="pos-membership-redeem-units" className="mb-1 block text-[11px] font-medium text-emerald-700">{posCopy('Units')}</label>
+                          <input id="pos-membership-redeem-units" name="pos_membership_redeem_units" className="input text-xs py-1" type="number" min="0" step="1" value={active.membershipRedeemUnits || ''} onChange={e => handleMembershipUnits(e.target.value)} />
+                        </div>
+                        <div className="rounded-lg bg-white/90 px-3 py-2 text-xs text-emerald-900">
+                          <div>{posCopy('1 unit')} = {redeemPointsStep} pts = {fmtUSD(redeemValueUsdStep)}</div>
+                          <div className="mt-1">{posCopy('Available units')}: {maxMembershipUnits}</div>
+                          <div className="mt-1">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}: {fmtUSD(membershipDiscUsd)} / {fmtKHR(membershipDiscKhr)}</div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 text-xs">
+                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits('0')}>{posCopy('Clear')}</button>
+                        <span className="text-emerald-300">|</span>
+                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits(String(maxMembershipUnits))}>{posCopy('Use max')}</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Earn-points toggle: any sale attached to a customer accrues
+                    points (balances are computed by summing sales server-side),
+                    so this shows for every selected customer, not only members.
+                    Default ON preserves the long-standing auto-accrual. */}
+                {active.customer?.id ? (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-gray-500">{posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}</span>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={active.loyaltyAccrual !== false}
+                      aria-label={posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}
+                      onClick={() => patchActive({ loyaltyAccrual: active.loyaltyAccrual === false })}
+                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${active.loyaltyAccrual !== false ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    >
+                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${active.loyaltyAccrual !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+            </div>
+
             {/* Delivery section (collapsible with toggle) */}
             <div className="border-t border-gray-200 dark:border-gray-700">
               <div className="flex items-center justify-between px-3 py-2">
@@ -3044,101 +3141,8 @@ export default function POS() {
               )}
             </div>
 
-            {/* Discount + order summary + payment */}
+            {/* Order summary + payment */}
             <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-2 space-y-3">
-
-              {/* Discount */}
-              <div>
-                <div className="flex items-center justify-between gap-2">
-                  <label htmlFor="pos-discount-usd" className="text-xs text-gray-500 font-medium">{t('discount')}</label>
-                  <div className="flex flex-shrink-0 overflow-hidden rounded-lg border border-gray-200 text-sm font-medium dark:border-gray-600">
-                    <button
-                      type="button"
-                      className={`min-w-[2.5rem] px-3 py-1.5 ${active.discountType === 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                      onClick={() => handleDiscountType('percent')}
-                    >
-                      %
-                    </button>
-                    <button
-                      type="button"
-                      className={`min-w-[2.5rem] border-l border-gray-200 px-3 py-1.5 dark:border-gray-600 ${active.discountType !== 'percent' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
-                      onClick={() => handleDiscountType('fixed')}
-                    >
-                      {usdSymbol}
-                    </button>
-                  </div>
-                </div>
-                {active.discountType === 'percent' ? (
-                  <div className="relative mt-1">
-                    <input id="pos-discount-usd" name="pos_discount_percent" className="input text-xs py-1 pr-6" type="number" min="0" max="100" step="any" placeholder="0" value={active.discountPercent} onChange={e => handleDiscountPercent(e.target.value)} autoComplete="off" />
-                    <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-1 mt-1">
-                    <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input id="pos-discount-usd" name="pos_discount_usd" className="input text-xs py-1 pl-5" type="number" step="any" placeholder="0.00" value={active.discountUsd} onChange={e => handleDiscountUsd(e.target.value)} autoComplete="off" /></div>
-                    <div className="relative"><label htmlFor="pos-discount-khr" className="sr-only">{`${t('discount')} ${khrSymbol}`}</label><input id="pos-discount-khr" name="pos_discount_khr" className="input text-xs py-1 pr-5" type="number" step="any" placeholder="0" value={active.discountKhr ? Number(active.discountKhr).toFixed(0) : ''} onChange={e => handleDiscountKhr(e.target.value)} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <div className="text-xs text-gray-500 font-medium">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</div>
-                <div className="mt-1 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
-                  {!active.customer?.membership_number ? (
-                    <p className="text-xs text-emerald-700">{posCopy('Select a customer with a membership number to apply membership discount separately from store discount.', 'ជ្រើសអតិថិជនដែលមានលេខសមាជិក ដើម្បីអនុវត្តបញ្ចុះតម្លៃសមាជិកដោយឡែកពីបញ្ចុះតម្លៃហាង។')}</p>
-                  ) : membershipLoading ? (
-                    <p className="text-xs text-emerald-700">{posCopy('Checking membership points...')}</p>
-                  ) : membershipError ? (
-                    <p className="text-xs text-red-600">{membershipError}</p>
-                  ) : (
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                        <span className="font-semibold text-emerald-800">{active.customer.membership_number}</span>
-                        <span className="text-emerald-700">
-                          {posCopy('Balance')}: {(membershipInfo?.points?.balance || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} pts
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-[110px,1fr] gap-2">
-                        <div>
-                          <label htmlFor="pos-membership-redeem-units" className="mb-1 block text-[11px] font-medium text-emerald-700">{posCopy('Units')}</label>
-                          <input id="pos-membership-redeem-units" name="pos_membership_redeem_units" className="input text-xs py-1" type="number" min="0" step="1" value={active.membershipRedeemUnits || ''} onChange={e => handleMembershipUnits(e.target.value)} />
-                        </div>
-                        <div className="rounded-lg bg-white/90 px-3 py-2 text-xs text-emerald-900">
-                          <div>{posCopy('1 unit')} = {redeemPointsStep} pts = {fmtUSD(redeemValueUsdStep)}</div>
-                          <div className="mt-1">{posCopy('Available units')}: {maxMembershipUnits}</div>
-                          <div className="mt-1">{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}: {fmtUSD(membershipDiscUsd)} / {fmtKHR(membershipDiscKhr)}</div>
-                          <div className="mt-1 text-[11px] text-emerald-700">{posCopy('Staff applies this during checkout. Customers can only view points in the customer portal.')}</div>
-                        </div>
-                      </div>
-                      <div className="flex gap-2 text-xs">
-                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits('0')}>{posCopy('Clear')}</button>
-                        <span className="text-emerald-300">|</span>
-                        <button className="text-emerald-700 hover:underline" onClick={() => handleMembershipUnits(String(maxMembershipUnits))}>{posCopy('Use max')}</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-                {/* Earn-points toggle: any sale attached to a customer accrues
-                    points (balances are computed by summing sales server-side),
-                    so this shows for every selected customer, not only members.
-                    Default ON preserves the long-standing auto-accrual. */}
-                {active.customer?.id ? (
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-gray-500">{posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}</span>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={active.loyaltyAccrual !== false}
-                      aria-label={posCopy('Count loyalty points', 'គិតពិន្ទុសមាជិក')}
-                      onClick={() => patchActive({ loyaltyAccrual: active.loyaltyAccrual === false })}
-                      className={`relative h-5 w-9 flex-shrink-0 rounded-full transition-colors ${active.loyaltyAccrual !== false ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'}`}
-                    >
-                      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${active.loyaltyAccrual !== false ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-
               {/* Order summary */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-2.5 space-y-1 text-xs">
                 <div className="flex justify-between text-gray-500"><span>{t('subtotal')}</span><span>{fmtUSD(subtotalUsd)}</span></div>
@@ -3153,10 +3157,10 @@ export default function POS() {
                 )}
                 <div className="flex justify-between font-bold text-gray-900 dark:text-white text-sm border-t border-gray-200 dark:border-gray-600 pt-1.5 mt-1">
                   <span>{t('total')}</span>
-                  <div className="text-right">
-                    <div>{fmtUSD(totalUsd)}</div>
-                    <div className="text-xs font-normal text-gray-400">{fmtKHR(totalKhr)}</div>
-                  </div>
+                  {/* One row (user, Aug 28): USD with the KHR beside it, not stacked. */}
+                  <span className="text-right">
+                    {fmtUSD(totalUsd)} <span className="text-xs font-normal text-gray-400">({fmtKHR(totalKhr)})</span>
+                  </span>
                 </div>
               </div>
 
@@ -3170,8 +3174,10 @@ export default function POS() {
                   {posPaymentMethods.map((method) => <option key={method} value={method} />)}
                 </datalist>
                 <div className="mt-1.5 space-y-1.5">
+                  {/* Method column narrowed (a method name is short); the
+                      amount inputs take the freed room (user, Aug 28). */}
                   {activePaymentDetails.map((detail, index) => (
-                    <div key={detail.id} className="grid grid-cols-[minmax(0,1fr)_78px_78px_auto] gap-1">
+                    <div key={detail.id} className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-1">
                       <input
                         aria-label={`${t('payment_method') || 'Payment method'} ${index + 1}`}
                         className="input min-w-0 py-1.5 text-xs"
@@ -3183,7 +3189,9 @@ export default function POS() {
                       />
                       <div className="relative"><span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{usdSymbol}</span><input aria-label={`${t('amount_paid') || 'Amount paid'} USD ${index + 1}`} className="input w-full py-1.5 pl-5 text-xs" type="number" step="any" placeholder="0.00" value={detail.usd} onChange={(event) => updatePaymentDetail(detail.id, { usd: event.target.value })} autoComplete="off" /></div>
                       <div className="relative"><input aria-label={`${t('amount_paid') || 'Amount paid'} KHR ${index + 1}`} className="input w-full py-1.5 pr-5 text-xs" type="number" step="any" placeholder="0" value={detail.khr} onChange={(event) => updatePaymentDetail(detail.id, { khr: event.target.value })} autoComplete="off" /><span className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none">{khrSymbol}</span></div>
-                      <button type="button" className="flex h-8 w-8 items-center justify-center rounded text-xs text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-900/20" disabled={activePaymentDetails.length === 1} onClick={() => updatePaymentDetails((details) => details.filter((entry) => entry.id !== detail.id))} aria-label={`${t('remove') || 'Remove'} ${detail.method || index + 1}`}>×</button>
+                      {/* Compact button, LEGIBLE icon — it was an h-8 box
+                          drawing a text-xs '×' (huge button, tiny icon). */}
+                      <button type="button" className="flex h-7 w-7 items-center justify-center self-center rounded text-lg leading-none text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-900/20" disabled={activePaymentDetails.length === 1} onClick={() => updatePaymentDetails((details) => details.filter((entry) => entry.id !== detail.id))} aria-label={`${t('remove') || 'Remove'} ${detail.method || index + 1}`}>×</button>
                     </div>
                   ))}
                 </div>
