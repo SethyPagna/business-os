@@ -105,7 +105,9 @@ export default function FeesPage() {
   // immediately. Labelling the outcome is the whole job on this page.
   const feesNeedsApproval = getPermissionTier('fees') === 'review'
   const { syncChannel } = useSync()
-  const isActive = useIsPageActive('fees')
+  // E2: Fees renders as a SECTION of the Sales hub now (see Returns.tsx's
+  // matching re-key note).
+  const isActive = useIsPageActive('sales')
   const tr = useCallback((key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback

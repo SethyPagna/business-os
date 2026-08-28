@@ -47,7 +47,10 @@ runTest('admin path helpers map direct admin URLs to app pages', () => {
   assert.equal(getAdminPageFromPath('/audit-log'), 'review')
   assert.equal(getAdminPageFromPath('/users'), 'settings')
   assert.equal(getAdminPageFromPath('/backup'), 'settings')
-  assert.equal(getAdminPageFromPath('/fees'), 'fees')
+  // E2: Returns and Fees merged into the Sales hub the same way -- their
+  // old URLs land on the sales page (which opens the matching section).
+  assert.equal(getAdminPageFromPath('/returns'), 'sales')
+  assert.equal(getAdminPageFromPath('/fees'), 'sales')
   assert.equal(getAdminPageFromPath('/login'), '')
 })
 

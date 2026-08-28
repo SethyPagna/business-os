@@ -49,8 +49,9 @@ export const NAV_ITEMS: NavigationItem[] = [
   // half of this split.
   { id: 'branches', key: 'branches', permission: 'branches' },
   { id: 'sales', key: 'sales', permission: 'sales' },
-  { id: 'returns', key: 'returns', permission: 'returns' },
-  { id: 'fees', key: 'fees', permission: 'fees' },
+  // returns/fees nav entries removed (E2): their components are sections
+  // of the Sales hub now; canAccessPage lets returns/fees grant-holders
+  // through the sales door.
   { id: 'contacts', key: 'contacts', permission: 'contacts' },
   // users/audit_log/backup nav entries removed (E3/E4): their components
   // are sections of Review & Logs / Settings now; canAccessPage opens the

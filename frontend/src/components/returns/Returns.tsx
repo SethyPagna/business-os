@@ -310,7 +310,9 @@ export default function Returns() {
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
   const { syncChannel } = useSync()
-  const isActive = useIsPageActive('returns')
+  // E2: Returns renders as a SECTION of the Sales hub now -- activity is
+  // 'am I on the sales page', same re-key AuditLog/Users/Backup got in E3/E4.
+  const isActive = useIsPageActive('sales')
   const [scope, setScope] = useState<ReturnScope>(CUSTOMER_SCOPE)
   const [rows, setRows] = useState<ReturnRow[]>([])
   const [search, setSearch] = useState('')

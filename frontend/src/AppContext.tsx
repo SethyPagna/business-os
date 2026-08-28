@@ -552,13 +552,16 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   inventory:        'inventory',
   branches:         'branches',  // Split from 'inventory' -- own key now, see navigationConfig.ts's note
   sales:            'sales',
-  fees:             'fees',
   contacts:         'contacts',  // Requires explicit contacts permission
   review:           'review',  // Review/Approval queue page -- Full Access only, own explicit key (see navigationConfig.ts's own note)
   settings:         'settings',
   files:            null,        // Library view is unconditional for any authenticated user (this session) -- matches navigationConfig.ts's own null gate; upload/download/rename/delete still self-gate inside FilesPage.tsx/files.ts on real Full Access to `library`
   receipt_settings: 'settings',  // was 'all' (super-admin only); Settings.tsx already exposes the core receipt fields (tax_rate, footer) to any 'settings' user inline, so gating the fuller standalone page behind 'all' was an inconsistency, not a deliberate restriction -- aligned with its sibling settings sub-pages (files/server)
-  returns:          'returns',  // was 'sales' -- split into its own key so Sales (Full/None only) and Returns (which will get a Review Required tier once that system is built) can be granted independently
+  // returns/fees page rows removed (E2): both PAGE ids retired into the
+  // Sales hub. Their PERMISSION keys live on unchanged -- the split noted
+  // here previously ("returns was 'sales' -- own key so they can be granted
+  // independently") still holds; it's only the standalone pages that are
+  // gone. canAccessPage's sales-door widening below is the other half.
   server:           'settings',
 }
 
@@ -2026,6 +2029,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // door, never the controls.
     if (pageId === 'review' && getPermissionTier('audit_log') !== 'none') return true
     if (pageId === 'settings' && (getPermissionTier('users') !== 'none' || getPermissionTier('backup') !== 'none')) return true
+    // E2: returns and fees retired as standalone pages into the Sales hub,
+    // same contract as above -- a returns- or fees-only grant still opens
+    // the Sales page, whose sections self-gate on their own keys inside.
+    if (pageId === 'sales' && (getPermissionTier('returns') !== 'none' || getPermissionTier('fees') !== 'none')) return true
     // 'settings'/'receipt_settings' page (this session, alongside
     // routes/settings.ts's new per-field business_identity/sales_policy
     // gating): a user granted only one of the narrower settings

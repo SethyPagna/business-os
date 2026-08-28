@@ -8,7 +8,6 @@ import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
-import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import LayoutDashboard from 'lucide-react/dist/esm/icons/layout-dashboard.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import MoreHorizontal from 'lucide-react/dist/esm/icons/more-horizontal.js'
@@ -16,7 +15,6 @@ import Package from 'lucide-react/dist/esm/icons/package.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
-import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
 import Server from 'lucide-react/dist/esm/icons/server.js'
 import Settings from 'lucide-react/dist/esm/icons/settings.js'
@@ -115,8 +113,6 @@ const ICONS_BY_ID: Record<string, LucideIcon> = {
   inventory: Boxes,
   branches: Building2,
   sales: BadgeDollarSign,
-  returns: RotateCcw,
-  fees: HandCoins,
   contacts: BookUser,
   users: Users,
   review: ClipboardCheck,
