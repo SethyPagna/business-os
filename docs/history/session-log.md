@@ -7968,3 +7968,60 @@ real vite build; wrangler dry-run; harness applies all 66 migrations with the
 supplier-section purchases/cost summary READ view (the data side is complete);
 the two customer merges (user); the ordered remainder (P7 parity sweep, P3, P4,
 P6, K6, G1, D1b, H1, N1c, N2, N3, D6b, A3).
+
+## Part 383 (chat, Aug 28 2026) — identity rule closed everywhere, D6b, supplier privacy, cancel done right
+
+**Asked.** Deep re-check that the identity rule and the migration files/rows are
+fully honored through the backend (cloudflare/migrations counterparts included);
+hide the suppliers section in Contacts from employees behind a permission toggle
+(batches keep showing the supplier name only); sales get a cancel flow — reason
+(Mistake / Buyer Don't Buy / Other + input), optional lost fee (e.g. a delivery
+fee paid that the buyer refused to cover), stock ADDED BACK with a cancel note
+(never undone), fully scoped, no loopholes.
+
+**What changed.**
+- R1 (`d63376ef`): the deep check found three import paths that could attach a row
+  to the WRONG product on a shared barcode — classifyInventory and classifySales
+  kept last-write-wins single-value byBarcode maps, and §12's matchProduct
+  attached a named row to a lone different-name barcode match. All three now do
+  collision-aware, name-compatible resolution (one "same name" definition
+  everywhere); a new name+barcode pair becomes its own child product, exactly as
+  classifyProducts always did. **D6b landed**: after a products apply (and a §12
+  apply, which creates child rows), category/brand are unified inside every name
+  group the job touched — most frequent non-empty value, tie → the group's
+  first/lowest-id row (so the catalog beats a lone newcomer), blanks filled,
+  untouched groups never rewritten, count surfaced as summary.groupsUnified.
+  New pure test covers every case. R1b: pack re-validated end-to-end (ALL
+  VALIDATIONS PASSED; 0064 replays to exactly 4,240 / 129,696.60 / 82,419,900).
+- R2 (`c3093d24`): suppliers are admin territory. New grantable
+  `contacts_suppliers` permission gates the Contacts tab AND every /suppliers
+  endpoint server-side (admin-control and 'all' pass; Manager preset gets it,
+  Employee does not). The one carve-out: GET /suppliers?fields=names (id+name
+  only) stays open for the flows every employee legitimately uses — the
+  supplier-return picker and the product form's autocomplete now call exactly
+  that, and the offline snapshot falls back to it. Supplier-credit reminders
+  (money owed = cost data) tightened to admin-control users.
+- R3 (`0f3e455d`, 0066 + lib/saleTransitions.ts): the transition core was rebuilt on ONE
+  invariant — held(status) = qty − alreadyReturned (0 for
+  awaiting_payment/cancelled); every transition moves exactly held(new) −
+  held(old) on branch stock, product total, AND the line's batch. Loopholes
+  closed: partial_return→cancelled restored NOTHING before (units vanished);
+  completed→awaiting_payment double-added returned portions; re-deducts skipped
+  batch stock; returns could be recorded on a cancelled sale (double restock —
+  now refused); manual flips into partial_return/returned (a stock lie) now
+  blocked. Cancel asks the reason (Mistake / Buyer didn't buy / Other + required
+  note) + optional lost fee written to the fees ledger linked via
+  cancel_fee_id; stock returns as NEW movements named "Sale cancelled (reason)";
+  un-cancel goes only back to status_before_cancel, re-deducts strictly (a lot
+  shortfall aborts atomically), and deletes the fee row. UI: CancelSaleModal
+  (single + bulk share-one-reason modes), cancelled sales show
+  reason/note/who/when + Un-cancel, partial_return offers only Cancel.
+  test-sale-cancel-pure proves the matrix against real CHECK constraints.
+
+**Verified.** Backend sweep **84/84**; frontend chain **116/116 green** (two
+guard pins updated to the new call shapes); both typechecks clean; build 12.57s;
+wrangler dry-run OK; harness applies all **67** migrations with 0066 present.
+
+**Not done.** Deploy (0061–0066 ride the next `npm run deploy:full`); D5's
+supplier purchases/cost summary READ view; the two customer merges (user);
+the ordered remainder (P7, P3, P4, P6, K6, G1, D1b, H1, N1c, N2, N3, A3).

@@ -362,7 +362,7 @@ store really paid the rider; margin = charge − cost and is internal only.*
   products by supplier. The unified §12 import template gains an optional `supplier`
   column so a stock-in row attributes its batch at import time (blank = unattributed —
   the nine current exports carry none, but future files and manual entry will).
-- [~] D6b. **Import identity/merge rules — measured against the user's Aug-28 spec
+- [x] D6b. **Import identity/merge rules — measured against the user's Aug-28 spec
   (Part 379).** Already true in the engine: same name + same barcode MERGES, and
   `resolveMergedPricing` takes the **HIGHEST selling and VIP price** on every merge
   (its comment: merging must never quietly drop a price a merged row expected to
@@ -662,6 +662,47 @@ deep-linkable tabs.*
   files match exactly one current customer by phone; **6,548 names updated** to the
   current system's spelling; 758 unmatched phones keep their original free text; the
   18 rows on the two ambiguous phones left untouched. Files re-validated end-to-end.
+
+### Phase R — Aug-28 tenth batch (Part 383)
+
+- [x] R1. **Identity rule closed across EVERY backend import path (deep re-check).**
+  classifyProducts already does it right (barcode candidates filtered by compatible
+  name, highest-price merge). Found and fixing three deviations: (a) classifyInventory
+  matches by bare sku/barcode last-wins — a barcode shared across different-name
+  products attaches the adjustment to whichever row loaded last, silently; (b)
+  classifySales same single-value byBarcode; (c) §12 stockActionImport.matchProduct
+  falls back to a lone DIFFERENT-name barcode match (same barcode + different name is
+  a SEPARATE product under the identity rule — must become a new/child product, not
+  attach). Fix: candidate arrays + name-compatibility everywhere, one "same name"
+  definition (normalizeProductGroupName ≡ key(), verified identical semantics).
+- [x] R1c. **D6b lands: engine-side name-group category/brand unification** at
+  products-import apply — most frequent non-empty value in the group, tie → first
+  row; groups the job didn't touch stay untouched.
+- [x] R1b. **Migration pack re-validated one more time** (files + cloudflare/
+  migrations counterparts: 0064 sums, headers, barcodes-as-text, Khmer intact).
+- [x] R2. **Supplier privacy.** Suppliers section in Contacts hidden from employees:
+  new grantable permission `contacts_suppliers` (admin-control users always pass);
+  backend /suppliers/* endpoints gated server-side, tab hidden client-side, toggle in
+  the permission editor. Batch surfaces keep showing the supplier NAME only (the
+  snapshot column — no phone/contact data lives there). Supplier-credit notifications
+  (money owed = cost data) tighten from 'inventory' to admin-control users.
+- [x] R3. **Sale cancellation, fully scoped.** Cancel asks a reason — Mistake /
+  Buyer didn't buy / Other + required note — plus an optional LOST FEE (e.g. delivery
+  already paid that the buyer refused to cover) recorded as a linked `fees` expense
+  row so money reports see the loss. Stock is ADDED BACK with a visible
+  "Sale cancelled (reason)" movement — never by deleting the original movements.
+  Transition core rewritten on one invariant: per item, held(status) =
+  qty − already-returned for completed/awaiting_delivery/partial_return/returned and
+  0 for awaiting_payment/cancelled; every transition moves exactly
+  held(new) − held(old), branch stock + product total + BATCH stock together. Closes
+  the found loopholes: partial_return→cancelled restored nothing (un-returned units
+  vanished), completed→awaiting_payment restored the full qty (double-adding
+  already-returned portions), any re-deduct transition skipped batch stock, and
+  returns could still be recorded against a cancelled sale (now 400). Manual flips
+  into partial_return/returned stay with the returns flow (blocked here); uncancel
+  goes back only to status_before_cancel, deletes the linked lost-fee row, and
+  re-deducts through the same formula. Migration 0066 adds cancel_reason/cancel_note/
+  cancelled_at/cancelled_by_name/status_before_cancel/cancel_fee_id.
 
 ### Flagged, not guessed (Golden Rule 7)
 
@@ -1709,19 +1750,20 @@ the switch and its reasoning are recorded in `wrangler.toml`.
 
 ## Current status
 
-**As of Part 382 (Aug 28 2026).** Everything below was really run in this local Windows
+**As of Part 383 (Aug 28 2026).** Everything below was really run in this local Windows
 checkout with full `node_modules`, working `better-sqlite3`, and network access — see
 [Environment notes](#environment-notes). Golden Rule 5: a claim here is not evidence; these
 are the commands' actual results this session.
 
 | Check | Result |
 |---|---|
-| `frontend` `tsc --noEmit` | **clean** (Part 382 rerun after the supplier-credit UI + Settings rows) |
-| `cloudflare` `tsc --noEmit` | **clean** (Part 382 rerun after 0065 + batches/notifications changes) |
-| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **82 / 82 pass** (Part 382 sweep on the committed state, incl. the two stock-commit tests re-pinned to the 0065 schema) |
-| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 382 rerun; performanceLoadingUx guard updated for the picker's real pagination) |
-| Real `vite build` | **succeeds (13.17s)**; only the two pre-existing catalog circular warnings |
-| Migration harness | **all 66 migrations apply cleanly** (Part 382); `0061`–`0065` are committed but **not deployed** — the next `npm run deploy:full` carries them |
+| `frontend` `tsc --noEmit` | **clean** (Part 383 rerun after the cancel flow + supplier-privacy UI) |
+| `cloudflare` `tsc --noEmit` | **clean** (Part 383 rerun after 0066 + saleTransitions + contacts gate) |
+| Backend `scripts/test-*.cjs` (swept individually, not via a chain) | **84 / 84 pass** (Part 383 sweep; +test-import-identity-rule-pure, +test-sale-cancel-pure) |
+| Frontend `npm run test:utils` (full chain: `typecheck` → `verify:public-runtime` → `check:source` → all 116 `tests/*.test.ts`) | **green** (Part 383 rerun; actionStability + performanceLoadingUx pins updated to the new call shapes) |
+| Real `vite build` | **succeeds (12.57s)**; only the two pre-existing catalog circular warnings |
+| Migration harness | **all 67 migrations apply cleanly** (Part 383, 0066 columns verified present); `0061`–`0066` are committed but **not deployed** — the next `npm run deploy:full` carries them |
+| Migration pack re-validation (R1b) | **ALL VALIDATIONS PASSED** rerun; 0064 replay = exactly 4,240 rows / USD 129,696.60 / KHR 82,419,900, zero mojibake |
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
