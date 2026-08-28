@@ -444,20 +444,24 @@ store really paid the rider; margin = charge − cost and is internal only.*
   migrations. Flagged: group adds keep the group exclusion (today default); Branches
   page has no add affordance by design; all received-date defaults are UTC-day
   (pre-existing, consistent, needs a deliberate decision).)* (11.28) **Manual historical batches**: enter real received date + batch when
-- [~] D4b **[CLAIMED: session 05]**. **User correction on D4's flags (Aug 28): the
+- [x] D4b *(Part 406, session 05 — SHIPPED, needs deploy (49acefd5). All five parts
+  landed: (a) both adjusters lose the is_group picker exclusion + mandatory-batch
+  validation covers groups (the "containers have no batches" comment was stale —
+  auto-routing has been creating container lots all along, the UI just hid them);
+  (b) BulkAddStockModal gains received date + code preview (the date IS the lot key
+  in bulk auto-routing; "dated today" note reworded en+km); (c) ReceiveBatchModal
+  gains the same existing-lot picker (explicit lot tops up exactly that lot, date
+  input hides since the lot keeps its own; POST /api/batches accepts batch_id,
+  foreign lot = 400 not 500; lot choice deliberately not draft-persisted);
+  (d) Branches per-branch stock cards gain a receive button opening the ONE shared
+  ReceiveBatchModal with product+branch preselected, section refreshes in place —
+  11.28's "Branch batch views" entry point exists now; (e) Inventory.tsx group
+  guards dropped. 8-check pure test; tsc clean both, all backend + all frontend
+  tests pass, vite build. a7 released Inventory/Branches mid-unit; packs rode 6e's
+  35cfc5b7.)* **User correction on D4's flags (Aug 28): the
   exclusions are rejected — "it should have batch picker... it has to be consistent,
   cannot have one place not the other... smart and fully consistent and user-friendly."**
-  Batch picker + received date reach EVERY stock-add surface: (a) explicit is_group
-  container targets lose the picker exclusion in both adjusters (containers already
-  receive auto-routed batches server-side — the UI just hid them; measured: name-group
-  rows are flat and already had the picker); (b) BulkAddStockModal gains the received
-  date (the date IS the lot key in bulk auto-routing); (c) ReceiveBatchModal gains the
-  same existing-lot picker the adjust modals have (POST /api/batches accepts batch_id;
-  kernel already validates ownership); (d) Branches page per-branch stock rows gain a
-  receive entry point (reusing ReceiveBatchModal — QUEUED behind a7's in-flight
-  Branches.tsx export wiring); (e) Inventory.tsx's group-scoped validation/guard
-  exclusions dropped (QUEUED behind a7's in-flight Inventory.tsx). Files: the four
-  modals, routes/batches.ts, then Inventory.tsx + Branches.tsx on a7's release.
+  Batch picker + received date reach EVERY stock-add surface.
   recording stock late — from Product edit, Inventory batch view and Branch batch views.
   One shared validation + stock/batch kernel for all entry points. Branch transfers
   PRESERVE the barcode; only create/add/adjust flows may set/change one.
@@ -516,7 +520,12 @@ deep-linkable tabs.*
 - [ ] E1. **Inventory merges into Branches** as sections: "Stats & Branches" (Inventory's
   stat cards + branch list), "Movements", "RFID". Branch transfer options updated to
   everything shipped since (batch preservation, §14 details).
-- [ ] E2. **Sales absorbs Returns and Fees** as sections of one Sales page.
+- [~] E2 **[CLAIMED: session a7]**. **Sales absorbs Returns and Fees** as sections of one Sales page.
+  *(a7, after 6e's E3/E4 landing freed the nav quartet: same hub pattern —
+  SalesHubPage hosts Sales + Returns + Fees intact, returns/fees PAGE ids
+  retire, permission keys stay, old URLs land on the right section.
+  Files: new components/sales/SalesHubPage.tsx + the quartet + Returns.tsx/
+  FeesPage.tsx useIsPageActive re-key + Sidebar icon rows.)*
 - [x] E3 *(Part 404, session 6e — SHIPPED (renumbered off 403 = 05's D4).
   'Review & Logs' hosts the queue + audit trail as sections; audit_log page
   id/nav/path retired, permission keys stable, sections self-gate, the door
