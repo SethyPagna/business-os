@@ -1305,7 +1305,7 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 | Task | Status | Notes |
 |---|---|---|
 | Barcode first, on the same row as category and brand | done | Row meta line and detail header. |
-| Prices + stock merged onto one row (default display) | not started | |
+| Prices + stock merged onto one row (default display) | **in progress (session 05)** | Re-asked directly Aug 28 with a screenshot: "prices and stock qty should be one row. only one row." Supersedes the earlier "selling price gets its own row" split — card layout in Products.tsx's renderMobileProductCard. |
 | Large-screen row alignment — no indentation vs the category rail | not started | |
 | Sticky toolbar (search / select-all) gap on scroll | not started | Products show through the gap. |
 | Batch format + click-to-open float-expand in the flyout | not started | |
