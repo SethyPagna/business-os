@@ -86,7 +86,9 @@ const conflictStub = {
   },
 }
 
-const notesRoute = loadReal('routes/notes.ts', { ...dbStub, ...authStub, ...conflictStub, '../index': {} })
+const auditStub = { '../lib/audit': { audit: async () => {} } }
+
+const notesRoute = loadReal('routes/notes.ts', { ...dbStub, ...authStub, ...conflictStub, ...auditStub, '../index': {} })
 const notesApp = notesRoute.default
 
 const fakeEnv = { DB: {} } // routes/notes.ts only ever reaches the db via getDb(c.env), which is stubbed above -- the raw env value itself is never read.
