@@ -9176,3 +9176,53 @@ multi-value-membership gap (secondary values kept stale text), and the
 supplier rename leaving products/batches pointing at a dead name.
 Verification: chain exit 0, backend sweep green (one transpile-harness
 stub added), both tsc, build, dry-run.
+
+### Part 400 addendum -- the live sweep (B1 + new surfaces + §6.3 reproduced)
+
+Ran the app FOR REAL: fresh build served by wrangler dev (worker-dev launch
+entry) against the local D1 dev data, driven through the in-app browser's
+DOM tools. What the sweep proved, found, and fixed:
+
+- **Found + fixed: hidden tabs loaded the app with its CSS inert.** The
+  async-stylesheet activation relied on rAF alone; rAF is suspended in
+  hidden documents, so a background-loaded tab kept media=print on the whole
+  app stylesheet -- position utilities computed static, fixed-position
+  panels fell to the document end. First surfaced as a fake "InfoHint opens
+  2,600px off-screen" bug; root-caused to the loader, fixed in
+  vite.config.ts (unconditional 150ms timeout + visibilitychange kick beside
+  rAF). With styles active, InfoHint verified CORRECT (fixed, 288px, beside
+  its trigger, in-viewport) -- B1's tooltip mechanism holds.
+- **Verified live end-to-end:** X2 daily report (day rows, click-a-day
+  breakdown with payments/discounts/delivery blocks against the real
+  endpoints); X1 picker panel (months, Mon-first calendar, years, quarters,
+  clear); X4 customer Purchases drill (modal + lifetime range + honest empty
+  state); P7-a (quick-added POS customer stored a REAL 'Default' option row
+  -- verified in the API response byte-for-byte); Inventory filter order
+  (AVAILABILITY → CATEGORY → BRAND → ISSUES → SEARCH MODE); B6 structure on
+  Inventory (no standing select-all, zero permanent checkboxes); I2 server
+  filtering (entity=customer&action=create returned exactly the fresh row;
+  whole-table vocabularies in the response); J3 devices/sessions (per-account
+  grouping, live sessions incl. this very browser session).
+- **Found + fixed: the J3 Devices tab spoke raw i18n keys** (14 missing pack
+  entries; t() returns the key on a miss so tr() fallbacks are dead code --
+  last_seen/decided_by/unknown_browser predated J3). Added to both packs
+  (eb6c47e0).
+- **§6.3 REPRODUCED and scoped** (the one remaining G5 item): saving a
+  customer_portal_* setting updates the stored value immediately, but
+  GET /api/portal/config keeps serving the OLD value -- stale at +30s,
+  fresh at +66s. Root cause in source: portalCacheVersion keys the public
+  cache on the PRODUCTS version only, and routes/settings.ts never bumps ANY
+  version -- so a portal-editor save (map embed included: the user's
+  "stale cache of embedded sites") rides out the full 60s TTL, invalidated
+  only by luck (a product mutation). Scoped fix (two small changes, in the
+  G2-G4 session's claimed files, handed to them): settings saves bump a
+  'settings' version; portalCacheVersion composes products+settings versions.
+- **Observed on the G-phase portal (reported, not touched):** brand-first
+  grouping renders live (MAC group then OTHER BRANDS); promo strip correctly
+  absent with zero promotions; no logo img in the preview header; no
+  gradient-overlay elements. §6.1's full-bleed cover needs real cover DATA
+  -- post-deploy check.
+- Environment notes for future sweeps: peers rebuilding dist mid-sweep
+  invalidates loaded chunk hashes (reload) and wrangler dev's asset
+  snapshot (restart); the sweep's marker setting was restored and the local
+  test customer left in the dev D1.
