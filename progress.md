@@ -462,6 +462,7 @@ store really paid the rider; margin = charge − cost and is internal only.*
   groups disagree (needs a cross-window pass like the §12 seal; rule: most frequent
   non-empty value in the group, tie → first row), plus surfacing "group unified" in
   the review screen.
+- [~] D6 *(IN PROGRESS — session 6e, Part 399 continuation. Footprint: NEW lib/renameCascade.ts + rename-impact/rename-brand endpoints in routes/products.ts, lookups.ts cascade modes, contacts.ts supplier carry, shared RenameCascadeModal + wiring in ManageCategoriesModal/ProductForm/supplier edit, pure test.)*
 - [ ] D6. Rename cascades with before→after preview: changing a category/brand/supplier/
   product name shows before and after and asks what happens to attached rows (carry all
   attached products to the new name / keep a copy, new is new / cancel-go-back). Also the
