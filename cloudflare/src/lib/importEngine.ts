@@ -2677,6 +2677,15 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       delivery_contact_address: rowIsDelivery ? (str(first.delivery_contact_address) || null) : null,
       delivery_fee_usd: deliveryFeeUsd, delivery_fee_khr: deliveryFeeKhr,
       delivery_fee_paid_by: rowIsDelivery ? (str(first.delivery_fee_paid_by) || 'customer') : 'customer',
+      // C4: the staff export carries the actual courier cost (0068), so a
+      // round-trip import must not drop it. Blank/absent stays NULL --
+      // "not recorded", never 0 (the same honesty rule the kernel uses).
+      delivery_actual_cost_usd: rowIsDelivery && str(first.delivery_actual_cost_usd) !== '' && Number.isFinite(Number(first.delivery_actual_cost_usd)) && Number(first.delivery_actual_cost_usd) >= 0
+        ? Number(first.delivery_actual_cost_usd)
+        : null,
+      delivery_actual_cost_khr: rowIsDelivery && str(first.delivery_actual_cost_khr) !== '' && Number.isFinite(Number(first.delivery_actual_cost_khr)) && Number(first.delivery_actual_cost_khr) >= 0
+        ? Number(first.delivery_actual_cost_khr)
+        : null,
       created_at: createdAt,
       items,
     }

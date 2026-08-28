@@ -61,6 +61,7 @@ export async function applyHistoricalSaleImport(
             membership_discount_usd, membership_discount_khr, membership_points_redeemed,
             is_delivery, delivery_contact_id, delivery_contact_name, delivery_contact_phone,
             delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
+            delivery_actual_cost_usd, delivery_actual_cost_khr,
             loyalty_accrual, sale_status, items, created_at, client_request_id
           )
           SELECT
@@ -72,6 +73,7 @@ export async function applyHistoricalSaleImport(
             @membership_discount_usd, @membership_discount_khr, @membership_points_redeemed,
             @is_delivery, @delivery_contact_id, @delivery_contact_name, @delivery_contact_phone,
             @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
+            @delivery_actual_cost_usd, @delivery_actual_cost_khr,
             @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id
           WHERE ${pendingGuard}`,
     // Imported sales default to NOT earning loyalty points -- the balance is

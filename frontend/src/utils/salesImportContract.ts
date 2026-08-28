@@ -11,7 +11,11 @@ export const SALES_IMPORT_COLUMNS = [
   'discount_usd', 'discount_khr', 'tax_usd', 'amount_paid_usd', 'amount_paid_khr',
   'membership_discount_usd', 'membership_discount_khr', 'membership_points_redeemed',
   'is_delivery', 'delivery_contact_name', 'delivery_contact_phone', 'delivery_contact_address',
-  'delivery_fee_usd', 'delivery_fee_khr', 'delivery_fee_paid_by', 'notes',
+  'delivery_fee_usd', 'delivery_fee_khr', 'delivery_fee_paid_by',
+  // C4: staff-only figures -- the export is behind the sales permission and
+  // receipts/portal never read this contract. Blank means "not recorded",
+  // never 0 (the importer stores NULL for blank).
+  'delivery_actual_cost_usd', 'delivery_actual_cost_khr', 'notes',
 ] as const
 
 export const SALES_TEMPLATE_COLUMNS_TEXT = SALES_IMPORT_COLUMNS.join(', ')
@@ -62,6 +66,9 @@ function headerFields(sale: DataRow): DataRow {
     delivery_fee_usd: value(sale, 'delivery_fee_usd', 0),
     delivery_fee_khr: value(sale, 'delivery_fee_khr', 0),
     delivery_fee_paid_by: value(sale, 'delivery_fee_paid_by', 'customer'),
+    // NULL (not recorded) exports as blank, deliberately not 0.
+    delivery_actual_cost_usd: value(sale, 'delivery_actual_cost_usd', ''),
+    delivery_actual_cost_khr: value(sale, 'delivery_actual_cost_khr', ''),
     notes: value(sale, 'notes'),
   }
 }
