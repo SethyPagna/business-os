@@ -896,8 +896,13 @@ deep-linkable tabs.*
   surfaces.
 - [ ] K3. Media pipeline completion (quality ladder, provider fallback, 6h audit — now
   cheaper under Workers Paid, A4).
-- [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
+- [~] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
+  **[CLAIMED (slice only): session b5 — the three UNBOUNDED `Promise.all` R2 delete
+  sweeps A4/Part 411 flagged in routes/system.ts (reset-data mode='all' ×2,
+  factory-reset ×1): cap + sequence them the way the includeImages cleanup already
+  is, report any remainder honestly. Footprint: cloudflare/src/routes/system.ts +
+  test-reset-products-pure.cjs. The rest of K4 (leases/NDJSON/slimming) stays open.]**
 - [ ] K5. Identity: rename-regroup (9.1 — via D6), auto-merge flag + filter (9.2).
 - [x] K6 *(Part 387: branch-stock + batches view rows shipped — branch_stock rides the row allowlist; the batches read gate accepts the grant with a money-blind list response (unit cost/paid-credit stripped, supplier NAME kept); Product Viewer role preset = image-only + all 8 rows preselected, each still toggleable. 7.1/7.2 editor redesign remains with E4.)* Permissions: per-action widening story (7.1) + editor redesign (7.2, in E4).
   **Refined + partly built Aug 28 (Part 380):** the per-capability opt-in system for
