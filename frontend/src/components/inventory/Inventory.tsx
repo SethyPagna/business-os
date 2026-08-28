@@ -2805,9 +2805,14 @@ ${inventoryStockValueFormulaText}`,
       value: statsValue(fmtUSD(totalValue)),
       cls: 'text-blue-700 dark:text-blue-300',
         sub: matchStockShortLabel,
+      // Evened out (user, Aug 29): the money on the shelf plus what's behind
+      // it -- average value per product and the risk counts -- mirroring the
+      // Dashboard Stock Value drill, replacing the bare "Products" repeat.
       details: [
         { label: inventoryStatLabels.stockValue, value: fmtUSD(totalValue) },
-        { label: inventoryStatLabels.products, value: totalProducts },
+        { label: tr('avg_value_per_product', 'Avg value / product'), value: fmtUSD(totalProducts > 0 ? totalValue / totalProducts : 0) },
+        { label: inventoryStatLabels.lowStock, value: lowStockCount },
+        { label: inventoryStatLabels.outOfStock, value: outStockCount },
       ],
     },
     // Part 388 merges (user): the standalone COGS card held a single row --
@@ -2849,6 +2854,9 @@ ${inventoryDiscountFormulaText}`,
             { label: tr('store_discounts', 'Store discounts'), value: fmtUSD(totalStoreDiscounts) },
             { label: tr('membership_discounts', 'Membership discounts'), value: fmtUSD(totalMembershipDiscounts) },
             { label: tr('discounts_total', 'Total discounts'), value: fmtUSD(totalStoreDiscounts + totalMembershipDiscounts) },
+            // Discount rate = total discounts / gross (revenue is already net
+            // of discounts, so gross = revenue + discounts) -- mirrors Dashboard.
+            { label: tr('discount_rate', 'Discount rate'), value: `${(() => { const gross = totalRevenue + totalStoreDiscounts + totalMembershipDiscounts; return gross > 0 ? (((totalStoreDiscounts + totalMembershipDiscounts) / gross) * 100).toFixed(1) : '0.0' })()}%` },
           ],
         },
       ],
@@ -2869,7 +2877,8 @@ ${inventoryFeesFormulaText}`,
           rows: [
             { label: inventoryStatLabels.taxCollected, value: fmtUSD(taxDelivery.tax || 0) },
             { label: inventoryStatLabels.deliveryFees, value: fmtUSD(taxDelivery.delivery || 0) },
-            { label: inventoryStatLabels.transactions, value: taxDelivery.deliveryCount || 0 },
+            // Was mislabeled "Transactions" -- this is the delivery COUNT.
+            { label: tr('deliveries', 'Deliveries'), value: taxDelivery.deliveryCount || 0 },
           ],
         },
       ],
@@ -2891,30 +2900,18 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
         // readable at card level, not only inside the drill. The sub line
         // is that card-level surface; the drill keeps the full formula.
         sub: `${inventoryStatLabels.netSold} ${totalQtySold} · ${returnStats?.count ?? 0} ${customerShortLabel} | ${returnStats?.supplier_count ?? 0} ${supplierShortLabel}`,
+      // Evened out (user, Aug 29): one balanced drill instead of three
+      // stacked sections (was 10 rows). Net sold + the items-sold math stay
+      // on the card sub line and in the info formula above; the supplier
+      // count folds into its loss line, mirroring the Dashboard Returns card.
       detailSections: [
         {
-          title: inventoryStatLabels.netSold,
+          title: inventoryStatLabels.returns,
           rows: [
-            { label: tr('items_sold', 'Items sold'), value: totalQtySold + (returnStats?.items ?? 0) },
-            { label: tr('items', 'Returned items'), value: returnStats?.items ?? 0 },
-            { label: `${inventoryStatLabels.netSold} (= ${tr('items_sold', 'Items sold')} − ${tr('items', 'Returned items')})`, value: totalQtySold },
-          ],
-        },
-        {
-          title: t('returns_count') || 'Customer returns',
-          rows: [
-            { label: inventoryStatLabels.returnsCount, value: returnStats?.count ?? 0 },
+            { label: tr('customer_returns', 'Customer returns'), value: returnStats?.count ?? 0 },
             { label: inventoryStatLabels.refunded, value: fmtUSD(returnStats?.refund_usd || 0) },
-            { label: tr('items', 'Items'), value: returnStats?.items ?? 0 },
             { label: t('restocked_to_inventory') || 'Restocked', value: returnStats?.restock ?? 0 },
-          ],
-        },
-        {
-          title: t('supplier_returns') || 'Supplier returns',
-          rows: [
-            { label: t('supplier_returns') || 'Supplier returns', value: returnStats?.supplier_count ?? 0 },
-            { label: t('supplier_compensation') || 'Compensation', value: fmtUSD(returnStats?.supplier_compensation_usd || 0) },
-            { label: t('business_loss') || 'Business loss', value: fmtUSD(returnStats?.supplier_loss_usd || 0) },
+            { label: `${t('supplier_returns') || 'Supplier returns'} (${returnStats?.supplier_count ?? 0})`, value: fmtUSD(returnStats?.supplier_loss_usd || 0) },
           ],
         },
       ],
