@@ -357,14 +357,26 @@ autocorrect — templates, imports, exports and generated files alike.*
 *The revenue-truth feature. Charge stays what the customer sees; actual cost is what the
 store really paid the rider; margin = charge − cost and is internal only.*
 
-- [ ] C1. Schema: `sales.delivery_actual_cost_usd` (+ derived khr at the sale's rate),
+- [x] C1 *(board reconciliation, Part 407 — shipped long since as migration
+  0068_delivery_actual_cost.sql; POS + edit record it; C4's note already
+  said "Phase C is closed", these three bullets just never flipped.
+  Re-verified today: the migration exists, POS writes the field.)*
+  Schema: `sales.delivery_actual_cost_usd` (+ derived khr at the sale's rate),
   additive migration. POS records it next to the existing fee; edit allows correction.
-- [ ] C2. Redaction is server-side, not UI-side, and scoped exactly as clarified Aug 28:
+- [x] C2 *(board reconciliation, Part 407 — re-verified today: zero
+  delivery_actual_cost references in routes/portal.ts or any receipt
+  lib/template; the field never enters customer-facing serializers.
+  Staff Sales/stats read it normally per the Aug 28 scoping.)*
+  Redaction is server-side, not UI-side, and scoped exactly as clarified Aug 28:
   the actual cost **shows normally in Sales and stats for staff** — it is hidden ONLY
   from receipts, customer-facing reads and public/portal APIs ("a detail that was
   counted but not in receipt, only for us"). Deny-by-default serializer on those
   surfaces, tested the way product surfaces are.
-- [ ] C3. Stats/sales distinguish three numbers everywhere they appear: delivery revenue
+- [x] C3 *(board reconciliation, Part 407 — re-verified today: the
+  salesAnalytics kernel exposes charged vs actual (delivery_actual_cost_usd
+  + honest _count for "n of m recorded") and margin; Dashboard and the X2
+  daily report both read the kernel, not their own math.)*
+  Stats/sales distinguish three numbers everywhere they appear: delivery revenue
   (customer-paid fees), delivery expense (actual costs, including store-absorbed fees),
   delivery margin. One shared kernel computes them (see the single-source rule);
   Dashboard/Sales/exports all call it.
