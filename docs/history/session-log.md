@@ -9669,3 +9669,25 @@ UNBOUNDED `Promise.all(objects.map(deleteObject))` sweeps at three other
 sites (~409/415/588) -- the same hazard class the capped reset path
 documents. Under the old 1,000-internal ceiling a 1,000-object listing
 page could take the whole request down mid-delete.
+
+## Part 412 (chat, Aug 28 2026) -- one row for prices + stock on the default Products card
+
+Session 05. Direct user ask with a screenshot of the two-row card:
+"products page the default display prices and stock qtty should be one
+row. only one row." Shipped 4210aa2f: renderMobileProductCard's selling
+row and cost|qty row merged into a single "|"-separated line -- selling
+keeps its larger green weight so it reads first, special/discount
+figures ride beside it, cost stays red, qty stays status-colored,
+flex-wrap retained purely as overflow protection.
+
+This REVERSES the Aug-25 "selling price should get its own row" split:
+the user saw that split rendered live and rejected it. Recorded at the
+site comment and here so no session re-splits without a fresh ask. The
+desktop table is untouched (dedicated columns are already one row).
+
+Verified: productDiscountUx / productsRowAlignment /
+productDisplayHelpers pass individually, frontend tsc clean, vite build
+16.48s. Live-browser click-through skipped deliberately -- three peer
+sessions were mid-build in the same checkout (dev servers lock
+node_modules, the standing trap); the change is a static JSX-structure
+merge with the surrounding logic untouched.
