@@ -871,7 +871,13 @@ deep-linkable tabs.*
 
 - [ ] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
   users see their own.
-- [ ] K2. Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
+- [~] K2 **[CLAIMED: session 6e — Part 410. Footprint: routes/returns.ts +
+  frontend Returns flow component + POS.tsx/posCore.ts + a shared
+  return-options kernel + pure/frontend tests; READS lib/productBatches.ts
+  but does not edit it (4a holds it for D5a) and stays out of
+  routes/inventory.ts (4a) and 05's import/backup lane. Order: 11.13
+  chooser (return stock-action options incl. damaged) → 11.12 Replace →
+  11.9 SP/VIP+damage POS picker.]** Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
   picker rest of 11.9. **Elevated Aug 28 — "for POS, focus on batches and various
   options":** the POS picking flow leads with the BATCH (lot, received/expiry) and a
   clear Selling-vs-VIP price choice per line; damaged stock joins as an option once
