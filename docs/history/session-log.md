@@ -9293,3 +9293,33 @@ pass; FULL test:utils chain exit 0; vite build 13.68s.
 Contacts/Returns -- pattern exists; Inventory waits on session 05).
 Visual pass of the dialog itself (B1-style; the print view is
 string-builder-tested). Deploy (user).
+
+## Part 402 (chat, Aug 28 2026) — N1b+N1c: the Import Hub
+
+**(Renumbered from the claimed 401 — a7's export unit wrote Part 401
+first; board order decides.)**
+
+**Asked (continuation).** "One place or many, one file or many": the
+import surface must take the messy real shape of the data; plus the
+options wizard's per-job visibility.
+
+**Shipped (3f9fef1d).** The import wizard now opens on the HUB: drop one
+or many CSV/Excel files, each classified by a pure header-shape reader
+built from the REAL template columns — the sales contract array itself,
+the §12 unified-stock header, the products template, and each contact
+tab's distinguishing column (membership_number / company·contact_person /
+area). The routing plan shows what was detected and WHY (the matched
+columns), each file's type is overridable, and an ambiguous header stays
+'unknown' and asks — never a silent misroute. Dispatch goes through the
+one job pipeline every importer already uses (create → upload csv →
+start analyze; §13's two-screen contract, no new commit paths), so the
+queued files sit as sibling jobs in the shared tracker with each one's
+review/approve exactly as if started from its own page. Sales files get
+the loyalty checkbox (default OFF, historical-balances warning). N1b:
+each tracker row renders its job's persisted policy as readable chips
+(loyalty, stock mode, duplicate/image handling, started-from) read from
+policy_json — recorded options can never silently vanish. N1c(c) was
+already carried by D5's supplier column + M4's continuation engine.
+
+**Verification.** 8-check router test in the chain (120 files, exit 0);
+backend sweep green; both tsc; vite build; wrangler dry-run.

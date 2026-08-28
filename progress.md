@@ -611,7 +611,17 @@ deep-linkable tabs.*
   the sale writer. UI (Part 374): the sales import Screen 1 carries a "Count loyalty
   points for these sales" checkbox, default OFF, with an explanation of why (historical
   balances are computed by summing sales); new en+km keys.
-- [~] N1b+N1c *(IN PROGRESS — claimed by session 6e, Part 401. Footprint:
+- [x] N1b+N1c *(SHIPPED — session 6e, Part 402 (renumbered off the 401
+  collision with a7's export unit; board order decides). The Import Hub is
+  the wizard's first screen: multi-file drop, pure header-shape classifier
+  built from the REAL templates (sales contract import, §12 stock header,
+  products template, contact tabs' distinguishing columns), per-file
+  override, ambiguous stays 'unknown' and asks; dispatch through the ONE
+  existing job pipeline (create→upload→analyze), siblings reviewed/approved
+  in the shared tracker; classic screens one click away. N1b: every tracker
+  row renders its job's persisted policy_json as readable option chips —
+  unknown flags pass through, never vanish. (c) already carried by D5 +
+  M4. Original claim footprint:
   import surfaces (BulkImportModal / sales+stock import screens / importJobs
   transports+routes), a template-detection router + multi-file queueing,
   per-job policy summary UI, pure+frontend tests. NOT touching a7's export
