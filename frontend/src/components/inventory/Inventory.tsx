@@ -3182,13 +3182,10 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
     }
 
     return [
-      // Same splice point as Products.tsx's buildProductFilterSections:
-      // AND/OR search mode right before Availability.
-      buildSearchModeFilterSection({
-        t,
-        searchMode,
-        setSearchMode,
-      }),
+      // Matches the Products menu principle (G1b, pinned in
+      // productMenuHelpers.test.ts): everyday facets first — availability,
+      // then category, then brand — with the diagnostic/mode controls
+      // (Issues, AND/OR search mode) at the end.
       buildAvailabilityFilterSection({
         t,
         branches,
@@ -3199,25 +3196,6 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
         branchFilter,
         setBranchFilter,
       }),
-      buildIssuesFilterSection({
-        t,
-        issueFilter,
-        setIssueFilter,
-      }),
-      inventoryBrands.length ? {
-        id: 'brand',
-        label: filterLabel('brand', 'Brand'),
-        searchable: true,
-        options: [
-          { id: 'brand-all', label: filterLabel('all_brands', 'All brands'), active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
-          ...inventoryBrands.map((brand) => ({
-            id: `brand-${brand}`,
-            label: brand,
-            active: brandFilter === brand,
-            onClick: () => setBrandFilter(brandFilter === brand ? 'all' : brand),
-          })),
-        ],
-      } : null,
       // Inventory previously had no Category filter section at all
       // (Products/POS both do), even though the underlying data always
       // had a category column. Multi-select + hierarchical "Main - Sub"
@@ -3236,6 +3214,30 @@ ${inventoryStatLabels.netSold} ${totalQtySold} = ${tr('items_sold', 'Items sold'
           }),
         ],
       } : null,
+      inventoryBrands.length ? {
+        id: 'brand',
+        label: filterLabel('brand', 'Brand'),
+        searchable: true,
+        options: [
+          { id: 'brand-all', label: filterLabel('all_brands', 'All brands'), active: brandFilter === 'all', onClick: () => setBrandFilter('all') },
+          ...inventoryBrands.map((brand) => ({
+            id: `brand-${brand}`,
+            label: brand,
+            active: brandFilter === brand,
+            onClick: () => setBrandFilter(brandFilter === brand ? 'all' : brand),
+          })),
+        ],
+      } : null,
+      buildIssuesFilterSection({
+        t,
+        issueFilter,
+        setIssueFilter,
+      }),
+      buildSearchModeFilterSection({
+        t,
+        searchMode,
+        setSearchMode,
+      }),
     ].filter(Boolean)
   }, [
     branchFilter,
