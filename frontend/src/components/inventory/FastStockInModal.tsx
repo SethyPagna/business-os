@@ -16,6 +16,7 @@ import AppSelect from '../shared/AppSelect.tsx'
 import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import { receiveBatchStock } from '../../api/batchesTransport.ts'
 import { searchProducts } from '../../api/methods.ts'
+import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft } from '../../utils/workDrafts.ts'
 
 type TranslationWithFallback = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
@@ -49,25 +50,58 @@ function todayMmDdYyyy(): string {
   return `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`
 }
 
+// F3 slice 1: the batch-in flow persists like add-product does -- the
+// shipment header and the in-progress line survive navigation/reload via
+// the shared store. The received log deliberately does NOT persist: those
+// lines are already server truth (each Add committed them).
+const FAST_STOCKIN_DRAFT_KEY = 'bos_draft_fast_stockin'
+
+type FastStockInDraft = {
+  branchId: string
+  receivedDate: string
+  supplier: SupplierChoice
+  paymentStatus: 'paid' | 'credit'
+  creditDueDate: string
+  query: string
+  picked: ProductCandidate | null
+  quantity: string
+  unitCost: string
+  expiryDate: string
+}
+
 export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone }: FastStockInModalProps) {
   // ---- shipment header (entered once, applies to every line) ----
-  const [branchId, setBranchId] = useState<string>(defaultBranchId != null ? String(defaultBranchId) : (branchOptions[0]?.value || ''))
-  const [receivedDate, setReceivedDate] = useState<string>(todayMmDdYyyy())
-  const [supplier, setSupplier] = useState<SupplierChoice>({ supplierId: null, supplierName: '' })
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'credit'>('paid')
-  const [creditDueDate, setCreditDueDate] = useState('')
+  const draftRef = useRef<FastStockInDraft | null>(readWorkDraft<FastStockInDraft>(FAST_STOCKIN_DRAFT_KEY)?.data ?? null)
+  const draft = draftRef.current
+  const [branchId, setBranchId] = useState<string>(draft?.branchId || (defaultBranchId != null ? String(defaultBranchId) : (branchOptions[0]?.value || '')))
+  const [receivedDate, setReceivedDate] = useState<string>(draft?.receivedDate || todayMmDdYyyy())
+  const [supplier, setSupplier] = useState<SupplierChoice>(draft?.supplier || { supplierId: null, supplierName: '' })
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'credit'>(draft?.paymentStatus || 'paid')
+  const [creditDueDate, setCreditDueDate] = useState(draft?.creditDueDate || '')
 
   // ---- per-line entry ----
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(draft?.query || '')
   const [candidates, setCandidates] = useState<ProductCandidate[]>([])
-  const [picked, setPicked] = useState<ProductCandidate | null>(null)
-  const [quantity, setQuantity] = useState('1')
-  const [unitCost, setUnitCost] = useState('')
-  const [expiryDate, setExpiryDate] = useState('')
+  const [picked, setPicked] = useState<ProductCandidate | null>(draft?.picked || null)
+  const [quantity, setQuantity] = useState(draft?.quantity || '1')
+  const [unitCost, setUnitCost] = useState(draft?.unitCost || '')
+  const [expiryDate, setExpiryDate] = useState(draft?.expiryDate || '')
   const [saving, setSaving] = useState(false)
   const [received, setReceived] = useState<ReceivedLine[]>([])
   const searchSeqRef = useRef(0)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
+
+  // Autosave the header + in-progress line (debounced, shared cadence).
+  // Deliberately NO dirtyWork registration: with the draft persisting,
+  // leaving is SAFE -- everything is exactly here on reopen -- so the
+  // three-option navigation guard would only nag about work that cannot
+  // be lost. (Per-Add lines were server-committed the moment they ran.)
+  useEffect(() => {
+    return scheduleWorkDraftWrite<FastStockInDraft>(FAST_STOCKIN_DRAFT_KEY, {
+      branchId, receivedDate, supplier, paymentStatus, creditDueDate,
+      query, picked, quantity, unitCost, expiryDate,
+    })
+  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, unitCost, expiryDate])
 
   useEffect(() => {
     const text = query.trim()
@@ -151,7 +185,15 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
   }
 
   const successCount = received.filter((line) => line.ok).length
+  // X/backdrop keep the draft (reopen later, shipment intact); only the
+  // explicit Done button completes the batch and clears it.
   const closeIfIdle = () => { if (!saving) { if (successCount > 0) onDone(); onClose() } }
+  const finishAndClose = () => {
+    if (saving) return
+    clearWorkDraft(FAST_STOCKIN_DRAFT_KEY)
+    if (successCount > 0) onDone()
+    onClose()
+  }
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={closeIfIdle}>
@@ -281,7 +323,7 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
             </div>
           ) : null}
 
-          <button type="button" className="btn-secondary w-full text-sm" disabled={saving} onClick={closeIfIdle}>
+          <button type="button" className="btn-secondary w-full text-sm" disabled={saving} onClick={finishAndClose}>
             ✓ {tr('fast_stockin_done', 'Done')}{successCount > 0 ? ` — ${successCount} ${tr('lines_received', 'line(s) received')}` : ''}
           </button>
         </div>

@@ -700,7 +700,7 @@ deep-linkable tabs.*
   menu (⚡). tests/fastStockIn.test.ts pins each clause of the spec.)* **Fast stock-in (batch in):** enter batch + supplier once, then per-product
   name→details entry; "Add" appends and continues, "Done" completes the batch. Backed by
   the same add/batch kernel as D4 — no parallel write path.
-- [~] F3 **[CLAIMED: session 6e — Part 424, two slices. Slice 1: extract
+- [~] F3 **[session 6e — Part 424. SLICE 1 SHIPPED: extract
   Part-388's ProductForm localStorage-draft pattern into ONE shared
   utils/workDrafts.ts and wire FastStockInModal (batch-in header + the
   in-progress line survive reload; the received log is already server

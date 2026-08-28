@@ -143,7 +143,10 @@ export default function ReceiveBatchModal({
     } catch { /* storage unavailable -- modal still works */ }
     return registerDirtyWork({
       key: `receive-batch-${product.id}`,
-      pageId: 'inventory',
+      // E1 retired the standalone 'inventory' page id -- the Branches hub
+      // hosts this flow now, so the nav-guard dot must point THERE.
+      // (Rider on F3 slice 1, flagged from a7's E1 notes.)
+      pageId: 'branches',
       label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
       isDirty: () => dirtyStateRef.current,
       discard: () => { try { localStorage.removeItem(draftKey) } catch { /* fine */ } },

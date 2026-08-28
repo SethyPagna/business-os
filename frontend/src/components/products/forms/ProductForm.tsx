@@ -16,6 +16,7 @@ import { calculateProductDiscount, formatPriceNumber, normalizePriceValue } from
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
+import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft } from '../../../utils/workDrafts.ts'
 import { searchProducts as searchProductsForMatch } from '../../../api/methods.ts'
 import { buildCacheBustedMediaPath } from '../../../utils/mediaUpload.ts'
 import {
@@ -713,20 +714,17 @@ export default function ProductForm({
 
   useEffect(() => {
     formDirtyRef.current = false
-    try {
-      const raw = localStorage.getItem(draftKey)
-      if (raw) {
-        const draft = JSON.parse(raw) as { at?: number; form?: Partial<ProductFormState> }
-        const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
-        if (draft?.form && (!serverEditedAt || (draft.at || 0) > serverEditedAt)) {
-          setForm((current) => ({ ...current, ...draft.form }))
-          formDirtyRef.current = true
-          // (no notify prop here -- the restored values themselves are the signal)
-        } else {
-          localStorage.removeItem(draftKey)
-        }
+    // F3 slice 1: same restore, through the ONE shared store (which also
+    // reads Part 388's original { form } field for existing drafts).
+    {
+      const serverEditedAt = (product as Record<string, unknown> | null)?.updated_at ? Date.parse(String((product as Record<string, unknown>).updated_at)) : 0
+      const draft = readWorkDraft<Partial<ProductFormState>>(draftKey, { notOlderThanMs: serverEditedAt || 0 })
+      if (draft?.data) {
+        setForm((current) => ({ ...current, ...draft.data }))
+        formDirtyRef.current = true
+        // (no notify prop here -- the restored values themselves are the signal)
       }
-    } catch { /* draft storage unavailable -- form still works */ }
+    }
     const productLabel = String(product?.name || form.name || '').trim()
     return registerDirtyWork({
       key: `product-form-${product?.id ?? 'new'}`,
@@ -737,17 +735,14 @@ export default function ProductForm({
       // identity validation -- auto-submitting from a navigation prompt
       // would surface those errors in a page the user is trying to leave.
       // The guard offers Discard & Leave / Stay for this entry.
-      discard: () => { try { localStorage.removeItem(draftKey) } catch { /* fine */ } },
+      discard: () => clearWorkDraft(draftKey),
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product?.id])
 
   useEffect(() => {
     if (!formDirtyRef.current) return
-    const timer = window.setTimeout(() => {
-      try { localStorage.setItem(draftKey, JSON.stringify({ at: Date.now(), form })) } catch { /* full/blocked */ }
-    }, 800)
-    return () => window.clearTimeout(timer)
+    return scheduleWorkDraftWrite(draftKey, form)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form, draftKey])
 
@@ -970,7 +965,7 @@ export default function ProductForm({
       await Promise.resolve(onSave(payload))
       // Saved for real -- the autosaved draft is now history (Part 388).
       formDirtyRef.current = false
-      try { localStorage.removeItem(draftKey) } catch { /* fine */ }
+      clearWorkDraft(draftKey)
     } catch (error) {
       alert(getErrorMessage(error, tr('failed', 'Failed', 'បរាជ័យ')))
     } finally {

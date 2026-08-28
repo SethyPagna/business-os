@@ -28,8 +28,11 @@ runTest('F2: the shipment header is entered once and rides every line', () => {
   // branch + received date + the SHARED supplier picker + paid/credit --
   // the same field siblings every add-stock surface uses (D5a rule)
   assert.match(modalSource, /import SupplierPickerField, \{ type SupplierChoice \} from '\.\.\/shared\/SupplierPickerField\.tsx'/)
-  assert.match(modalSource, /const \[receivedDate, setReceivedDate\] = useState<string>\(todayMmDdYyyy\(\)\)/)
-  assert.match(modalSource, /const \[paymentStatus, setPaymentStatus\] = useState<'paid' \| 'credit'>\('paid'\)/)
+  // F3 slice 1: initializers became draft-aware -- the saved shipment
+  // header wins over the defaults on reopen, today/paid stay the
+  // first-open defaults.
+  assert.match(modalSource, /const \[receivedDate, setReceivedDate\] = useState<string>\(draft\?\.receivedDate \|\| todayMmDdYyyy\(\)\)/)
+  assert.match(modalSource, /const \[paymentStatus, setPaymentStatus\] = useState<'paid' \| 'credit'>\(draft\?\.paymentStatus \|\| 'paid'\)/)
   // every Add sends the header fields with the line
   assert.match(modalSource, /receivedDate: receivedDate\.trim\(\) \|\| null/)
   assert.match(modalSource, /supplierId: supplier\.supplierId/)
