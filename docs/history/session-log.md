@@ -9323,3 +9323,71 @@ already carried by D5's supplier column + M4's continuation engine.
 
 **Verification.** 8-check router test in the chain (120 files, exit 0);
 backend sweep green; both tsc; vite build; wrangler dry-run.
+
+## Part 403 (chat, Aug 28 2026) -- D4: manual historical batches through the ONE shared add path
+
+Session 05. Claimed D4 (11.28) after mapping the live board: a7 held the
+export unit (H1+X5+C4, shipped mid-session as Part 401), 6e held §6.3
+then the Import Hub (Part 402) -- inventory's adjust path was unclaimed
+and fully disjoint. Peer coordination worked as designed: a7 confirmed
+Inventory.tsx was clean and held their H1 Inventory wiring until this
+landed; my two additive lang keys rode 6e's pack commit (3f9fef1d),
+noted in both commit messages.
+
+**Measured before building** (the reason this unit is small): the
+kernel half of D4 already existed -- receiveBatchStock takes
+receivedDate, ReceiveBatchModal has the date field, and the §12 import
+path stamps historical dates via batchIdentity. The real gaps: POST
+/adjust never passed a date (so Product edit's BranchStockAdjuster and
+Inventory's Adjust modal ALWAYS stamped today), and 11.28's transfer
+barcode rule was untested.
+
+**Shipped (9a73b7cb):**
+- routes/inventory.ts /adjust accepts optional `receivedDate`,
+  validated through the SAME normalizeToIsoDate the kernel uses
+  (mm/dd/yyyy or ISO), passed into receiveBatchStock. Unreadable date =
+  400 with nothing written -- never silently today (Golden Rule 3).
+  Absent = today, unchanged. Explicit-batch top-ups keep the lot's own
+  received_at (first attribution sticks -- already the kernel's rule,
+  now proven). The date rides the audit payload.
+- BranchStockAdjuster (Product edit, per-row) + InventoryStockModals
+  (Adjust modal) gain the Received date input + derived-code preview,
+  shown ONLY when the add creates a lot ('New batch' pick, or unlocked
+  pricing which always makes a fresh one). The request builder mirrors
+  the input's visibility, so a lingering value can't re-date a hidden
+  case (e.g. adjust target switched to a group row). Values reset to
+  today on every open -- ReceiveBatchModal's own stale-draft rule.
+- Transfer half of 11.28 VERIFIED as already correct, not rebuilt:
+  transfers move quantity between branches on the same product rows
+  (identity-merge redirect targets an existing row; resolveDestination-
+  Batch clones lots) and never write a product barcode. Now pinned.
+- test-adjust-received-date-pure.cjs: 6 checks driving the REAL
+  transpiled /adjust route against the real migration chain on sqlite --
+  historical date stored + MMDDYYYY code derived from it, same-date
+  add tops up (create-vs-top-up stays one rule), different-date
+  explicit top-up never rewrites received_at, bad date 400s writing
+  nothing, absent date pinned to today, transfer barcode source pin.
+
+**Verification (Golden Rule 5):** tsc --noEmit clean in BOTH packages;
+all 94 cloudflare test-*.cjs pass; 120 frontend tests run INDIVIDUALLY
+-- 118 pass, the 2 fails (csvImport, performanceLoadingUx) are a7's
+old export pins in files a7 was actively rewiring at that moment
+(CustomersTab/Returns etc. dirty in their unit; their Part-401 commit
+updates pins per surface) -- attributed by ownership, not fixed here;
+real vite build 14.35s.
+
+**Not done / flagged:**
+- Group-product adds (no batch picker by design) still default to
+  today server-side -- the date input follows the existing group
+  exclusion. If late group receipts need real dates, that's a design
+  decision for the group/batch model, not a wiring gap.
+- BulkAddStockModal (Products bulk add) deliberately not given a date:
+  a bulk add across many products is "stock counted now", not one
+  historical receipt; it keeps its auto-batch behavior.
+- The Branches page has NO stock-add affordance by design (transfer +
+  branch CRUD only), so 11.28's "Branch batch views" entry point has
+  nothing to wire -- recorded here rather than inventing a new surface.
+- Pre-existing nuance observed, not changed: every received-date
+  default (ReceiveBatchModal included) uses the UTC day, so early-
+  morning Phnom Penh entries default to "yesterday". Consistent
+  everywhere, so left alone; flagging for a deliberate decision.
