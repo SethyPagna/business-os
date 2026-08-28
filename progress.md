@@ -571,7 +571,14 @@ deep-linkable tabs.*
   in 22 of 30 route files today — sweep the other
   8 and every uncovered mutation so ALL actions/changes land in the trail (one helper,
   no bespoke logging). List the uncovered routes in the session log when measured.
-- [ ] I2. Audit UI (inside Review & Logs): the same one-row date-range control as
+- [~] I2 **[CLAIMED: session a7 (Part 389), in progress]** — measured on pickup: the
+  page's action/user/date/search filter controls ALREADY send params the server
+  IGNORES (compat.ts GET /system/audit-logs reads only page/pageSize) and there is
+  no client-side filtering either — every filter on the Audit Log page is currently
+  dead. Fix is server-side WHERE + entity ("page") filter + server-wide filter
+  vocabularies; the detail view with before→after field diff already exists
+  (auditLogFieldDiff, raw-JSON toggle). Audit UI (inside Review & Logs): the same
+  one-row date-range control as
   Products/Inventory (D2), filters by action / page / user, clean multi-option design,
   detail drawer per entry showing before→after payloads where stored.
 
