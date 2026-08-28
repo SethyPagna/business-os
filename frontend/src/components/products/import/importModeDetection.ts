@@ -2,8 +2,8 @@
 // one" ask (progress.md's Aug 23 backlog, item 10a) -- deliberately built
 // first and standalone, same "pure layer before plumbing/UI" order this
 // project's own established pattern already used for the Add/Sale import
-// (addSaleImportResolve.ts before addSaleImportMapping.ts before
-// addSaleImportPlan.ts before any route/UI). Not wired into
+// (the old addSaleImport* module family, removed as zombies in Part 380
+// once StockActionImportModal owned the flow). Not wired into
 // BulkImportModal.tsx yet -- that's the next, larger step (a 3000+ line
 // file with a lot of already-shipped, already-tested behavior this change
 // must not regress), flagged in progress.md rather than risked blind in
