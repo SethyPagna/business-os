@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { receiveBatchStock } from '../../api/batchesTransport.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
@@ -72,6 +73,24 @@ export default function ReceiveBatchModal({
     setUnitCost('')
     setPaymentStatus('')
     setCreditDueDate('')
+  }, [product?.id])
+
+  // N2: an open receive entry with anything typed beyond the defaults is
+  // in-progress stock work -- page navigation must ask, not strand it.
+  const dirtyStateRef = useRef(false)
+  dirtyStateRef.current = Boolean(product) && (
+    quantity !== '1' || expiryDate !== '' || notes !== '' ||
+    supplierName !== '' || unitCost !== '' || paymentStatus !== '' || creditDueDate !== ''
+  )
+  useEffect(() => {
+    if (!product) return
+    return registerDirtyWork({
+      key: `receive-batch-${product.id}`,
+      pageId: 'inventory',
+      label: `${tr('receive_batch', 'Receive Batch')}${product.name ? ` — ${product.name}` : ''}`,
+      isDirty: () => dirtyStateRef.current,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product?.id])
 
   if (!product) return null

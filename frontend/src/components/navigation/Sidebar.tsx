@@ -1,4 +1,5 @@
-import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState } from 'react'
+import { Suspense, type ComponentType, type CSSProperties, type ReactNode, useMemo, useState, useSyncExternalStore } from 'react'
+import { getRegisteredWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
@@ -203,6 +204,18 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
   const [moreOpen, setMoreOpen] = useState(false)
   const [profileOpen, setProfileOpen] = useState(false)
 
+  // N2: which pages currently hold registered unsaved work -- drives the
+  // amber dot on their nav items. Registry changes (open/close of a dirty
+  // surface) re-render via the external store; isDirty() itself is cheap.
+  const registeredWork = useSyncExternalStore(subscribeDirtyWork, getRegisteredWork, getRegisteredWork)
+  const dirtyPageIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const entry of registeredWork) {
+      try { if (entry.isDirty()) ids.add(entry.pageId) } catch { /* treat as clean */ }
+    }
+    return ids
+  }, [registeredWork])
+
   // Real bug found and fixed this session: this used to filter on a plain
   // strict `hasPermission(item.permission)`, which can never return true
   // for a 'review' tier value (hasPermission is deliberately strict-
@@ -339,8 +352,12 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                     <Icon className="h-4 w-4" />
                   </span>
                   <span className="truncate">{label}</span>
+                  {/* N2: dirty-work dot -- this page holds unsaved work */}
+                  {dirtyPageIds.has(item.id) ? (
+                    <span className="ml-auto h-2 w-2 flex-shrink-0 rounded-full bg-amber-400" title={t('unsaved_work_title') || 'Unsaved work on this page'} />
+                  ) : null}
                   {item.id === 'server' && syncUrl ? (
-                    <span className={`ml-auto h-2 w-2 flex-shrink-0 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
+                    <span className={`${dirtyPageIds.has(item.id) ? '' : 'ml-auto '}h-2 w-2 flex-shrink-0 rounded-full ${syncConnected ? 'bg-green-400' : 'bg-yellow-400'}`} />
                   ) : null}
                 </button>
               )

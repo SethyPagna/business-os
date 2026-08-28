@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentType, DragEvent } from 'react'
 import { lazyRetry } from '../../../utils/lazyImport.ts'
+import { registerDirtyWork } from '../../../utils/dirtyWork.ts'
 import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -628,9 +629,29 @@ export default function ProductForm({
     }
   }, [product, form.branch_id, defaultBranchId])
 
+  // N2: any field edit marks this open form dirty; the registration below
+  // makes page navigation stop and ask instead of silently dropping it.
+  const formDirtyRef = useRef(false)
   function setField(key: keyof ProductFormState, value: unknown): void {
+    formDirtyRef.current = true
     setForm((current) => ({ ...current, [key]: value }))
   }
+
+  useEffect(() => {
+    formDirtyRef.current = false
+    const productLabel = String(product?.name || form.name || '').trim()
+    return registerDirtyWork({
+      key: `product-form-${product?.id ?? 'new'}`,
+      pageId: 'products',
+      label: `${t('product_form') || 'Product form'}${productLabel ? ` — ${productLabel}` : ''}`,
+      isDirty: () => formDirtyRef.current,
+      // No save hook on purpose: this form's save runs required-field and
+      // identity validation -- auto-submitting from a navigation prompt
+      // would surface those errors in a page the user is trying to leave.
+      // The guard offers Discard & Leave / Stay for this entry.
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product?.id])
 
   function setNumericField(key: keyof ProductFormState, value: unknown, options?: NumericInputOptions): void {
     setField(key, sanitizeNumericInput(value, options))

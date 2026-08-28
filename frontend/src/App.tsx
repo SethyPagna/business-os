@@ -147,6 +147,8 @@ interface AppContextValue {
   AccessDenied: ComponentType
   setPage: (pageId: AdminPageId) => void
   navigateTo: (pageId: AdminPageId, anchor?: string) => void
+  navGuard: { pageId: string; entries: Array<{ key: string; label: string; save?: unknown }> } | null
+  resolveNavGuard: (action: 'save' | 'discard' | 'stay') => Promise<void>
   settings: AppSettings
   writeConflict: unknown
   dismissWriteConflict: () => void
@@ -1527,6 +1529,8 @@ export default function App() {
     AccessDenied,
     setPage,
     navigateTo,
+    navGuard,
+    resolveNavGuard,
     settings,
     writeConflict,
     dismissWriteConflict,
@@ -1855,6 +1859,44 @@ export default function App() {
             onReload={reloadWriteConflict}
           />
         </Suspense>
+      ) : null}
+      {/* N2: unsaved-work navigation guard -- switching pages with dirty
+          work forces an explicit choice instead of silently stranding it.
+          Save & Leave is only offered when EVERY dirty item can save
+          itself; browser close/reload is covered by AppContext's
+          beforeunload handler. */}
+      {navGuard ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl dark:bg-gray-800">
+            <h2 className="font-bold text-gray-900 dark:text-white">{t('unsaved_work_title') || 'Unsaved work on this page'}</h2>
+            <ul className="mt-2 space-y-1 text-sm text-gray-600 dark:text-gray-300">
+              {navGuard.entries.map((entry) => (
+                <li key={entry.key} className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-amber-500" />
+                  <span className="min-w-0 truncate">{entry.label}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-xs text-gray-400">{t('unsaved_work_hint') || 'Leaving now would lose it. What should happen?'}</p>
+            <div className="mt-3 flex flex-col gap-2">
+              {navGuard.entries.every((entry) => typeof entry.save === 'function') ? (
+                <button type="button" className="btn-primary w-full text-sm" onClick={() => { void resolveNavGuard('save') }}>
+                  {t('save_and_leave') || 'Save & Leave'}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="w-full rounded-lg border border-red-300 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 dark:border-red-500/40 dark:text-red-400 dark:hover:bg-red-900/20"
+                onClick={() => { void resolveNavGuard('discard') }}
+              >
+                {t('discard_and_leave') || 'Discard & Leave'}
+              </button>
+              <button type="button" className="btn-secondary w-full text-sm" onClick={() => { void resolveNavGuard('stay') }}>
+                {t('stay_here') || 'Stay'}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
       <SyncErrorBanner
         error={syncError}

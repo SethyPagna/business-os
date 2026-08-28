@@ -13,6 +13,7 @@ import {
 import { isWSConnected, resumeWS } from './api/websocket.ts'
 import { APP_NAVIGATION_EVENT, getAdminPageFromPath, getAdminPathForPage, resolveAdminLandingPage } from './app/pathRouting.ts'
 import { getClientDeviceInfo } from './utils/deviceInfo.ts'
+import { getDirtyWork, hasDirtyWork, type DirtyWorkEntry } from './utils/dirtyWork.ts'
 import { parsePermissionMap, getPermissionTierFromMap, type PermissionTier } from './utils/permissions.ts'
 import { actionAllowed, isActionOverriddenOff } from './utils/permissionActions.ts'
 import { normalizePriceValue } from './utils/pricing.ts'
@@ -182,6 +183,10 @@ type AppContextValue = {
   login: (username: string, password: string, sessionDuration?: string, organization?: string) => Promise<AuthResult>
   logout: () => Promise<void>
   navigateTo: (pageId: string, anchor?: string) => void
+  // N2 navigation guard: pending target + the dirty entries blocking it,
+  // and the resolver App.tsx's modal calls with the user's choice.
+  navGuard: { pageId: string; anchor?: string; entries: DirtyWorkEntry[] } | null
+  resolveNavGuard: (action: 'save' | 'discard' | 'stay') => Promise<void>
   notification: AppNotification | null
   notify: (message: unknown, type?: NotificationKind | string, duration?: number) => void
   page: string
@@ -2030,7 +2035,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     return false
   }, [user, getPermissionTier, hasPermission])
 
-  const navigateTo = useCallback((pageId: string, anchor?: string) => {
+  const navigateNow = useCallback((pageId: string, anchor?: string) => {
     if (!canAccessPage(pageId)) return
     if (typeof window !== 'undefined') {
       const nextPath = getAdminPathForPage(pageId)
@@ -2054,6 +2059,66 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       setPage(pageId)
     })
   }, [canAccessPage])
+
+  // N2: the navigation guard. Page switches consult the dirty-work
+  // registry (utils/dirtyWork.ts) first -- unsaved work opens the
+  // three-option modal (App.tsx renders it off this state) instead of
+  // being silently stranded. Same-page navigation (tab/anchor moves inside
+  // the page) passes through: the work stays mounted either way.
+  const [navGuard, setNavGuard] = useState<null | { pageId: string; anchor?: string; entries: DirtyWorkEntry[] }>(null)
+  const pageRef = useRef(page)
+  pageRef.current = page
+  const navigateTo = useCallback((pageId: string, anchor?: string) => {
+    if (!canAccessPage(pageId)) return
+    if (pageId !== pageRef.current) {
+      const dirty = getDirtyWork()
+      if (dirty.length > 0) {
+        setNavGuard({ pageId, anchor, entries: dirty })
+        return
+      }
+    }
+    navigateNow(pageId, anchor)
+  }, [canAccessPage, navigateNow])
+
+  const resolveNavGuard = useCallback(async (action: 'save' | 'discard' | 'stay') => {
+    const guard = navGuard
+    setNavGuard(null)
+    if (!guard || action === 'stay') return
+    if (action === 'save') {
+      for (const entry of guard.entries) {
+        if (!entry.isDirty()) continue
+        if (!entry.save) continue
+        try {
+          const saved = await entry.save()
+          if (!saved) return // save refused (validation etc.) -- stay put
+        } catch {
+          return
+        }
+      }
+      // Anything dirty WITHOUT a save hook must not be silently lost by a
+      // "save" choice -- staying is the safe reading (the modal only offers
+      // Save & Leave when every dirty entry can save; this is the backstop).
+      if (getDirtyWork().length > 0) return
+    } else {
+      for (const entry of guard.entries) {
+        try { entry.discard?.() } catch { /* leaving anyway */ }
+      }
+    }
+    navigateNow(guard.pageId, guard.anchor)
+  }, [navGuard, navigateNow])
+
+  // Browser close/reload guard -- the native confirm is all a page gets.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const handler = (event: BeforeUnloadEvent) => {
+      if (hasDirtyWork()) {
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [])
 
   // Currency helpers.
   const exchangeRate    = parseFloat(String(settings.exchange_rate || '4100'))
@@ -2103,6 +2168,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     user, login, logout, persistAuthenticatedUser,
     authReady,
     page, setPage, navigateTo,
+    navGuard, resolveNavGuard,
     settings, loadSettings, saveSettings,
     language, theme, t,
     toggleTheme, toggleLanguage,
