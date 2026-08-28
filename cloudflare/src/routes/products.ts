@@ -242,6 +242,7 @@ function buildFilterVariants(query: Record<string, string>) {
     categories: buildSearchFilters({ ...base, category: '' }),
     units: buildSearchFilters({ ...base, unit: '' }),
     suppliers: buildSearchFilters({ ...base, supplier: '' }),
+    tags: buildSearchFilters({ ...base, tag_label: '' }),
     initials: buildSearchFilters(base),
   }
 }
@@ -278,11 +279,12 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
   // dropdown rows that render identically but are different filter values
   // (reported as duplicate/near-duplicate options in the Brand filter).
   // MIN() over each normalized group picks one deterministic casing.
-  const [brands, categories, units, suppliers, initials] = await Promise.all([
+  const [brands, categories, units, suppliers, tags, initials] = await Promise.all([
     db.prepare(`SELECT MIN(trim(p.brand)) AS value FROM products p ${joinSql(variants.brands)} ${sql(variants.brands)} AND trim(COALESCE(p.brand, '')) <> '' GROUP BY lower(trim(p.brand)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.brands.params),
     db.prepare(`SELECT MIN(trim(p.category)) AS value FROM products p ${joinSql(variants.categories)} ${sql(variants.categories)} AND trim(COALESCE(p.category, '')) <> '' GROUP BY lower(trim(p.category)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.categories.params),
     db.prepare(`SELECT MIN(trim(p.unit)) AS value FROM products p ${joinSql(variants.units)} ${sql(variants.units)} AND trim(COALESCE(p.unit, '')) <> '' GROUP BY lower(trim(p.unit)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.units.params),
     db.prepare(`SELECT MIN(trim(p.supplier)) AS value FROM products p ${joinSql(variants.suppliers)} ${sql(variants.suppliers)} AND trim(COALESCE(p.supplier, '')) <> '' GROUP BY lower(trim(p.supplier)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.suppliers.params),
+    db.prepare(`SELECT MIN(trim(p.tag_label)) AS value FROM products p ${joinSql(variants.tags)} ${sql(variants.tags)} AND trim(COALESCE(p.tag_label, '')) <> '' GROUP BY lower(trim(p.tag_label)) ORDER BY lower(value) ASC LIMIT 500`).all<{ value: string }>(variants.tags.params),
     db.prepare(`
       SELECT upper(substr(trim(p.name), 1, 1)) AS initial,
              COUNT(DISTINCT COALESCE(NULLIF(p.name_key, ''), CAST(p.id AS TEXT))) AS count
@@ -301,6 +303,7 @@ async function loadProductFilters(env: Env, query: Record<string, string> = {}) 
     categories: values(categories),
     units: values(units),
     suppliers: values(suppliers),
+    tags: values(tags),
     initials: (initials || []).map((row) => ({ initial: row.initial, value: row.initial, label: row.initial, count: row.count })),
   }
 }
@@ -792,7 +795,9 @@ function buildSearchFilters(query: Record<string, string>, options: ProductSearc
   // % and _ are escaped since this is now a LIKE, not a plain `=`.
   const MULTI_VALUE_COLUMNS: Record<string, string> = { brand: 'brands', category: 'categories' }
   const escapeLike = (value: string) => value.replace(/[%_]/g, (m) => `\\${m}`)
-  for (const field of ['brand', 'category', 'unit', 'supplier']) {
+  // tag_label (P4): the operator's own per-product chip -- filterable the
+  // same exact-match way as the other facets.
+  for (const field of ['brand', 'category', 'unit', 'supplier', 'tag_label']) {
     const values = String(query[field] || '')
       .split(',')
       .map((v) => v.trim())

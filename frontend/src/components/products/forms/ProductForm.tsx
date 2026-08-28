@@ -97,6 +97,7 @@ interface ProductFormState extends GroupCandidate {
   expiry_alert_days?: EditableNumber
   unit?: string
   supplier?: string
+  tag_label?: string
   image_path?: string | null
   image_gallery?: unknown[]
   branch_stock?: Array<{ branch_id?: EntityId | null; quantity?: unknown }>
@@ -380,6 +381,7 @@ export default function ProductForm({
       expiry_alert_days: 30,
       unit: units[0]?.name || 'pcs',
       supplier: '',
+      tag_label: '',
       image_path: '',
       image_gallery: [],
       branch_id: defaultBranchId,
@@ -1016,6 +1018,21 @@ export default function ProductForm({
                   )}
                 </p>
               ) : null)}
+            </div>
+            <div>
+              {/* P4: the operator's own short memory-aid chip -- free text,
+                  shown next to the name in Products/POS, filterable. */}
+              <label htmlFor="product-tag-label" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('tag_label') || 'Tag'}</label>
+              <input
+                id="product-tag-label"
+                name="product_tag_label"
+                className="input w-full"
+                value={(form.tag_label as string) || ''}
+                onChange={(event) => setField('tag_label', event.target.value)}
+                placeholder={t('tag_label_placeholder') || 'Your own short label (optional)'}
+                maxLength={40}
+                autoComplete="off"
+              />
             </div>
             <div>
               <label htmlFor="product-sku" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t('sku')}</label>

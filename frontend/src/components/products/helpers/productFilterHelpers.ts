@@ -137,7 +137,9 @@ export function filterProductsForPage(products: ProductRecord[] = [], filters: P
     // narrow back down to a stricter match than the page it's re-filtering
     // just came from.
     const matchSearch = matchesSearchTermGroups(
-      [product?.name, product?.sku, product?.barcode],
+      // tag_label (P4): the operator's own word for a product belongs in
+      // the search haystack on every client-side pass.
+      [product?.name, product?.sku, product?.barcode, (product as Record<string, unknown>)?.tag_label as string | undefined],
       searchTermList,
       searchMode as 'AND' | 'OR',
     )

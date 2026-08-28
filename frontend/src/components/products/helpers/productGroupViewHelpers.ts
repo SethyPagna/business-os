@@ -73,7 +73,15 @@ export function buildProductGroupSummaryParts(group?: ProductGroupViewRecord | n
   // buildProductGroupPriceLabel itself is left in place -- still used
   // elsewhere for an actual "price range" display, just not folded into
   // this pill list anymore.
+  // tag_label (P4): the operator's own memory-aid chips -- distinct tags
+  // across the group's rows, shown ahead of the counters so the label the
+  // person typed is the first thing they spot.
+  const rowsForTags = (group?.rows ?? group?.items ?? []) as Array<Record<string, unknown>>
+  const tagLabels = [...new Set(rowsForTags
+    .map((row) => String(row?.tag_label ?? '').trim())
+    .filter(Boolean))].slice(0, 3)
   const parts: Array<string | null> = [
+    ...tagLabels,
     includeCount ? `${itemCount} ${itemCount === 1 ? (t('option') || 'option') : (t('options') || 'options')}` : null,
     `${group?.stockTotal || 0} ${stockLabel}`,
     includeBranches ? buildProductGroupBranchLabel(group, t) : null,
