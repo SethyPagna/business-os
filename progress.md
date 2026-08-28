@@ -107,7 +107,7 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   Storefront icon is an "L" monogram — no text to regenerate; internal
   `leang-cosmetics-*.png` FILENAMES kept (user-invisible; renaming would churn the
   service-worker cache — optional follow-up).
-- [ ] A4. **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
+- [~] A4 **[CLAIMED: session 05]**. **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
   code is full of Free-plan ceilings that are now 30s CPU / higher D1+KV quotas /
   1000 subrequests: apply caps (480 rows/60 units, 50-line receipts), backup slice
   sizes (20 objects), includeImages cleanup cap (200), import windows, `STOCK_ACTION_MAX_UNITS`.
@@ -115,6 +115,11 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   one constant at a time, each with a measured reason — and record the new numbers in
   wrangler.toml comments. Also now affordable: Cron Triggers for the 6h image audit and
   backup schedule, Queues at paid limits, and `limits.cpu_ms` tuning.
+  *(Session-05 scope note: the ceilings + wrangler.toml records are this unit; each
+  constant gets read first — a cap bound by D1's 100-bound-params or SQL variable
+  limits does NOT rise on Paid and stays put with its reason stated. Cron-trigger
+  wiring for the 6h audit stays with K3. Files: cloudflare backend constants + their
+  pinned tests + wrangler.toml comments — no frontend IA files.)*
 
 ### Phase M — Old-system data migration (files received Aug 28; analysis done)
 
