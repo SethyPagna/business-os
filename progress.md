@@ -603,6 +603,12 @@ deep-linkable tabs.*
   the sale writer. UI (Part 374): the sales import Screen 1 carries a "Count loyalty
   points for these sales" checkbox, default OFF, with an explanation of why (historical
   balances are computed by summing sales); new en+km keys.
+- [~] N1b+N1c *(IN PROGRESS — claimed by session 6e, Part 401. Footprint:
+  import surfaces (BulkImportModal / sales+stock import screens / importJobs
+  transports+routes), a template-detection router + multi-file queueing,
+  per-job policy summary UI, pure+frontend tests. NOT touching a7's export
+  unit files (Sales.tsx, AuditLog.tsx, xlsx utils); en/km.json + frontend
+  package.json edits DEFERRED until a7's in-flight unit commits.)*
 - [ ] N1b. **The wider import-options wizard** (user spec, Aug 28): before an import
   commits, the operator can choose calculation options (loyalty above; later: discount
   application, notification sending, overwrite-vs-skip duplicates) and see them recorded
