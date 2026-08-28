@@ -444,6 +444,20 @@ store really paid the rider; margin = charge − cost and is internal only.*
   migrations. Flagged: group adds keep the group exclusion (today default); Branches
   page has no add affordance by design; all received-date defaults are UTC-day
   (pre-existing, consistent, needs a deliberate decision).)* (11.28) **Manual historical batches**: enter real received date + batch when
+- [~] D4b **[CLAIMED: session 05]**. **User correction on D4's flags (Aug 28): the
+  exclusions are rejected — "it should have batch picker... it has to be consistent,
+  cannot have one place not the other... smart and fully consistent and user-friendly."**
+  Batch picker + received date reach EVERY stock-add surface: (a) explicit is_group
+  container targets lose the picker exclusion in both adjusters (containers already
+  receive auto-routed batches server-side — the UI just hid them; measured: name-group
+  rows are flat and already had the picker); (b) BulkAddStockModal gains the received
+  date (the date IS the lot key in bulk auto-routing); (c) ReceiveBatchModal gains the
+  same existing-lot picker the adjust modals have (POST /api/batches accepts batch_id;
+  kernel already validates ownership); (d) Branches page per-branch stock rows gain a
+  receive entry point (reusing ReceiveBatchModal — QUEUED behind a7's in-flight
+  Branches.tsx export wiring); (e) Inventory.tsx's group-scoped validation/guard
+  exclusions dropped (QUEUED behind a7's in-flight Inventory.tsx). Files: the four
+  modals, routes/batches.ts, then Inventory.tsx + Branches.tsx on a7's release.
   recording stock late — from Product edit, Inventory batch view and Branch batch views.
   One shared validation + stock/batch kernel for all entry points. Branch transfers
   PRESERVE the barcode; only create/add/adjust flows may set/change one.
