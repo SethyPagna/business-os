@@ -1382,9 +1382,9 @@ export const getReturn = async (id) => {
 }
 
 // ─── Sale status update ───────────────────────────────────────────────────────
-export const updateSaleStatus = async (id, sale_status, notes) => {
+export const updateSaleStatus = async (id, sale_status, notes, extra) => {
   const { updateSaleStatus: updateSaleStatusRequest } = await loadSalesTransport()
-  return updateSaleStatusRequest(id, sale_status, notes)
+  return updateSaleStatusRequest(id, sale_status, notes, extra)
 }
 
 // ─── Sales export ─────────────────────────────────────────────────────────────

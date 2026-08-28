@@ -76,11 +76,17 @@ export async function updateSaleStatus(
   id: number | string,
   saleStatus: unknown,
   notes?: unknown,
+  // Cancellation payload (Part 383): cancel_reason / cancel_note /
+  // cancel_fee_usd / cancel_fee_khr / cancel_fee_note. The backend
+  // REFUSES a transition to 'cancelled' without a reason, so callers
+  // collect it (CancelSaleModal) before calling this.
+  extra?: Record<string, unknown> | null,
 ): Promise<unknown> {
   const payload = await withExpectedUpdatedAt('sales', id, {
     ...getDevicePayload(),
     sale_status: saleStatus,
     notes,
+    ...(extra || {}),
   })
   try {
     const result = await route(

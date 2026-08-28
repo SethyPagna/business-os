@@ -2809,8 +2809,8 @@ assert.match(
 )
 assert.match(
   productForm,
-  /function loadContactsTransportModule\(\): Promise<ContactsTransportModule>[\s\S]*import\('\.\.\/\.\.\/\.\.\/api\/contactsTransport\.ts'\)[\s\S]*withLoaderTimeout\(\s*async \(\) => \(await loadContactsTransportModule\(\)\)\.getSuppliers\(\),\s*'Product suppliers',\s*PRODUCT_SUPPLIERS_TIMEOUT_MS,\s*\)/,
-  'product supplier options should timeout slow supplier reads',
+  /function loadContactsTransportModule\(\): Promise<ContactsTransportModule>[\s\S]*import\('\.\.\/\.\.\/\.\.\/api\/contactsTransport\.ts'\)[\s\S]*withLoaderTimeout\(\s*(?:\/\/[^\n]*\n\s*)*async \(\) => \(await loadContactsTransportModule\(\)\)\.getSuppliers\(\{ fields: 'names' \}\),\s*'Product suppliers',\s*PRODUCT_SUPPLIERS_TIMEOUT_MS,\s*\)/,
+  'product supplier options should timeout slow supplier reads and use the name-only list every role may call (Part 383 supplier privacy)',
 )
 assert.match(
   productForm,

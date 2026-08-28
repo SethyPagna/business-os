@@ -18,6 +18,7 @@ import ScanSearchButton from '../shared/ScanSearchButton'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import PaginationControls, { clampPage, paginateItems, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { ALL_STATUSES, getStatusLabel } from './StatusBadge'
+import type { SaleCancelPayload } from './CancelSaleModal'
 import { getClientDeviceInfo } from '../../utils/deviceInfo'
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
@@ -37,6 +38,7 @@ import {
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
 const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
+const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
 const ExportModal = lazyRetry(() => import('./ExportModal'), 'sales-export-modal')
 const SalesImportModal = lazyRetry(() => import('./SalesImportModal'), 'sales-import')
 import SalesListSurface from './SalesListSurface'
@@ -129,7 +131,7 @@ interface SaleStatusEntry {
 }
 
 interface SalesApi {
-  updateSaleStatus: (saleId: number | string, status: string, notes?: string) => Promise<unknown>
+  updateSaleStatus: (saleId: number | string, status: string, notes?: string, extra?: Record<string, unknown>) => Promise<unknown>
   attachSaleCustomer: (saleId: number | string, payload: SaleMembershipPayload) => Promise<unknown>
 }
 
@@ -230,6 +232,15 @@ export default function Sales() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [bulkStatusSaving, setBulkStatusSaving] = useState('')
+  // Cancel dialog (Part 383): who is being cancelled and how the confirm
+  // routes -- 'single' feeds handleStatusChange with the collected
+  // reason/fee payload, 'bulk' feeds handleBulkStatusUpdate.
+  const [cancelPrompt, setCancelPrompt] = useState<
+    | { mode: 'single'; saleId: number; notes: string; recordHistory: boolean; label: string }
+    | { mode: 'bulk'; count: number }
+    | null
+  >(null)
+  const [cancelSaving, setCancelSaving] = useState(false)
   const [salesGroupMode, setSalesGroupMode] = useState<SalesGroupMode>('time')
   const [salesSortDirection, setSalesSortDirection] = useState<SortDirection>('desc')
   const [salesPage, setSalesPage] = useState(1)
@@ -435,9 +446,9 @@ export default function Sales() {
     loadPromiseRef.current = null
   }, [clearLoadWatchdog])
 
-  const runSaleStatusMutation = useCallback((saleId: number | string, nextStatus: string, notes?: string) => (
+  const runSaleStatusMutation = useCallback((saleId: number | string, nextStatus: string, notes?: string, extra?: SaleCancelPayload | null) => (
     withLoaderTimeout(
-      () => getSalesApi().updateSaleStatus(saleId, nextStatus, notes),
+      () => getSalesApi().updateSaleStatus(saleId, nextStatus, notes, extra || undefined),
       'Update sale status',
       SALES_STATUS_MUTATION_TIMEOUT_MS,
     )
@@ -451,14 +462,29 @@ export default function Sales() {
     )
   ), [])
 
-  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true): Promise<boolean> => {
+  const handleStatusChange = async (saleId: number | string, newStatus: string, notes = '', recordHistory = true, extra: SaleCancelPayload | null = null): Promise<boolean> => {
     const numericId = Number(saleId)
     if (!Number.isFinite(numericId)) return false
-    const actionKey = String(numericId)
-    if (!beginKeyedAction(statusActionRef, actionKey)) return false
     const previousSale = sales.find((entry) => Number(entry?.id || 0) === numericId)
     const previousStatus = previousSale?.sale_status || 'completed'
-    if (recordHistory) {
+    // Cancelling needs its reason (+ optional lost fee) -- the backend
+    // refuses without one. First entry opens the dialog; the dialog calls
+    // back in with `extra` filled. Undo (recordHistory=false, back to the
+    // previous status) is an UN-cancel and needs no reason; redo carries
+    // the original extra through its closure.
+    if (newStatus === 'cancelled' && previousStatus !== 'cancelled' && !extra) {
+      setCancelPrompt({
+        mode: 'single',
+        saleId: numericId,
+        notes,
+        recordHistory,
+        label: String(previousSale?.receipt_number || `#${numericId}`),
+      })
+      return false
+    }
+    const actionKey = String(numericId)
+    if (!beginKeyedAction(statusActionRef, actionKey)) return false
+    if (recordHistory && !extra) {
       const warningText = ['cancelled', 'awaiting_payment', 'completed', 'awaiting_delivery'].includes(newStatus)
         ? translateOr('confirm_sale_status_change_stock', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}? This can change stock totals.`)
         : translateOr('confirm_sale_status_change', `Change sale ${previousSale?.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}?`)
@@ -468,7 +494,7 @@ export default function Sales() {
       }
     }
     try {
-      await runSaleStatusMutation(saleId, newStatus, notes)
+      await runSaleStatusMutation(saleId, newStatus, notes, extra)
       notify(`${t('status_updated') || 'Status updated'}: ${getStatusLabel(newStatus, t)}`)
       await loadSales(true)
       window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'inventory' } }))
@@ -479,7 +505,7 @@ export default function Sales() {
         actionHistory.pushAction({
           label: `Update sale ${previousSale.receipt_number || numericId} to ${getStatusLabel(newStatus, t)}`,
           undo: () => handleStatusChange(saleId, previousStatus, 'Undo sale status update', false),
-          redo: () => handleStatusChange(saleId, newStatus, notes || 'Redo sale status update', false),
+          redo: () => handleStatusChange(saleId, newStatus, notes || 'Redo sale status update', false, extra),
         })
       }
       return true
@@ -755,12 +781,15 @@ export default function Sales() {
     notify(`Exported ${selectedSales.length} selected sale${selectedSales.length === 1 ? '' : 's'}.`)
   }, [notify, selectedSales])
 
-  const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '') => {
+  const applySaleStatusEntries = useCallback(async (entries: SaleStatusEntry[] = [], notes = '', extra: SaleCancelPayload | null = null) => {
     const statusRun = await runConcurrentTasks<SaleStatusEntry, number>(entries, async (entry: SaleStatusEntry) => {
       const saleId = Number(entry?.id || 0)
       const nextStatus = String(entry?.status || '').trim()
       if (!saleId || !nextStatus) throw new Error('Invalid sale status entry')
-      await runSaleStatusMutation(saleId, nextStatus, notes)
+      // The cancel payload only belongs on entries that actually cancel --
+      // a mixed undo batch (back to varied previous statuses) must not
+      // send a reason with an un-cancel.
+      await runSaleStatusMutation(saleId, nextStatus, notes, nextStatus === 'cancelled' ? extra : null)
       return saleId
     })
     const failedIds = statusRun.failures
@@ -784,8 +813,15 @@ export default function Sales() {
     }
   }, [loadSales, runSaleStatusMutation])
 
-  const handleBulkStatusUpdate = async (nextStatus: string) => {
+  const handleBulkStatusUpdate = async (nextStatus: string, extra: SaleCancelPayload | null = null) => {
     if (!selectedSales.length || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
+    // Bulk-cancel needs the shared reason first -- one dialog for the
+    // whole batch (lost fees stay per-sale and are not offered here).
+    if (nextStatus === 'cancelled' && !extra) {
+      finishSingleAction(bulkStatusInFlightRef)
+      setCancelPrompt({ mode: 'bulk', count: selectedSales.length })
+      return
+    }
     const previousStatuses = selectedSales.map((sale) => ({
       id: Number(sale.id),
       status: sale.sale_status || 'completed',
@@ -793,14 +829,14 @@ export default function Sales() {
     setBulkStatusSaving(nextStatus)
     try {
       const nextEntries = previousStatuses.map((entry) => ({ id: entry.id, status: nextStatus }))
-      const { done, failed, failedIds, updatedIds } = await applySaleStatusEntries(nextEntries, '')
+      const { done, failed, failedIds, updatedIds } = await applySaleStatusEntries(nextEntries, '', extra)
       setSelectedIds(new Set<number>(failedIds))
       const undoEntries = previousStatuses.filter((entry) => updatedIds.includes(entry.id))
       if (done > 0 && undoEntries.length) {
         actionHistory.pushAction({
           label: `Update ${done} sale${done === 1 ? '' : 's'} to ${getStatusLabel(nextStatus, t)}`,
           undo: () => applySaleStatusEntries(undoEntries, 'Undo bulk sale status update'),
-          redo: () => applySaleStatusEntries(undoEntries.map((entry) => ({ id: entry.id, status: nextStatus })), 'Redo bulk sale status update'),
+          redo: () => applySaleStatusEntries(undoEntries.map((entry) => ({ id: entry.id, status: nextStatus })), 'Redo bulk sale status update', extra),
         })
       }
       notify(
@@ -1102,6 +1138,34 @@ export default function Sales() {
             t={t}
             fmtUSD={fmtUSD}
             fmtKHR={fmtKHR}
+          />
+        </Suspense>
+      ) : null}
+
+      {cancelPrompt ? (
+        <Suspense fallback={null}>
+          <CancelSaleModal
+            label={cancelPrompt.mode === 'single'
+              ? cancelPrompt.label
+              : translateOr('cancel_sales_count', `${cancelPrompt.count} sales`, `ការលក់ ${cancelPrompt.count}`)}
+            bulk={cancelPrompt.mode === 'bulk'}
+            saving={cancelSaving}
+            onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
+            onConfirm={async (payload) => {
+              if (!cancelPrompt || cancelSaving) return
+              setCancelSaving(true)
+              try {
+                if (cancelPrompt.mode === 'single') {
+                  await handleStatusChange(cancelPrompt.saleId, 'cancelled', cancelPrompt.notes, cancelPrompt.recordHistory, payload)
+                } else {
+                  await handleBulkStatusUpdate('cancelled', payload)
+                }
+                setCancelPrompt(null)
+              } finally {
+                setCancelSaving(false)
+              }
+            }}
+            t={t}
           />
         </Suspense>
       ) : null}

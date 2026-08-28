@@ -171,8 +171,15 @@ async function assertReturnableItems(
   }
   if (!saleId) return
 
-  const sale = await db.prepare('SELECT id FROM sales WHERE id = ?').get<{ id: number }>([saleId])
+  const sale = await db.prepare('SELECT id, sale_status FROM sales WHERE id = ?').get<{ id: number; sale_status: string | null }>([saleId])
   if (!sale) throw new Error('Original sale not found')
+  // A cancelled sale's stock was already ADDED BACK by the cancellation
+  // itself (routes/sales.ts PATCH /:id/status) -- recording a return on
+  // top would restock the same units twice. Un-cancel first if the sale
+  // is live again and genuinely has a return.
+  if ((sale.sale_status || 'completed') === 'cancelled') {
+    throw new Error('This sale is cancelled -- its stock was already added back when it was cancelled, so a return cannot be recorded against it.')
+  }
 
   for (const item of items) {
     const qty = Number(item.quantity) || 0

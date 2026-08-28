@@ -7,8 +7,17 @@ import { hasPermission, hasAnyPermission } from '../lib/permissions'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion } from '../lib/cache'
 import { getSalesTotals } from '../lib/salesAnalytics'
-import { decrementBatchStockStatement, decrementBatchStockStrictStatement, incrementBatchStockStatement } from '../lib/productBatches'
+import { decrementBatchStockStatement, decrementBatchStockStrictStatement } from '../lib/productBatches'
 import { VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
+import {
+  CANCEL_REASONS,
+  allocateReturnedQuantities,
+  cancelReasonLabel,
+  guardSaleStatusTransition,
+  normalizeCancelReason,
+  planSaleStockTransition,
+  type CancelReason,
+} from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups } from '../lib/searchMatch'
 import { computeSaleTotals, round2 } from '../lib/saleTotals'
 import type { Env } from '../index'
@@ -635,20 +644,22 @@ app.post('/', async (c) => {
 })
 
 // PATCH /api/sales/:id/status -- change a sale's lifecycle status
-// (completed / awaiting_payment / awaiting_delivery / cancelled / partial_return / returned).
+// (completed / awaiting_payment / awaiting_delivery / cancelled; the two
+// return statuses are set by the returns flow only).
 //
-// Ported from backend/src/routes/sales.ts's version of this route (this
-// endpoint did not exist yet in this Worker -- POS "void sale" / "mark
-// delivered" actions were hitting a 404 before this). Same simplified shape
-// as POST / above: adjusts branch_stock directly and logs one
-// inventory_movements row per item, rather than the batch/lot-allocation
-// machinery the very original Node backend had. Statuses that hold stock
-// deducted: 'completed' and 'awaiting_delivery'. Moving into one of those
-// from a status that didn't deduct stock takes stock; moving out (to
-// anything other than partial_return/returned, which are handled by the
-// returns flow instead) restores it. Also keeps products.stock_quantity in
-// sync, same as POST / above. (VALID_SALE_STATUSES / STOCK_DEDUCTED_STATUSES
-// now declared once, at the top of the file, so POST / can share them.)
+// Rebuilt in Part 383 on lib/saleTransitions.ts's held() invariant: per
+// line, held(status) = quantity - alreadyReturned for statuses where the
+// goods are out (completed/awaiting_delivery/partial_return/returned) and
+// 0 for awaiting_payment/cancelled; every transition moves exactly
+// held(new) - held(old) on branch stock, the product total, AND the
+// line's batch, as new movements (never by editing old ones). That closed
+// the old boolean was/willBeDeducted logic's holes: partial_return ->
+// cancelled restored nothing (un-returned units vanished), completed ->
+// awaiting_payment restored the FULL quantity even when part had already
+// come back through a return, and re-deducting transitions skipped batch
+// stock. Cancelling requires a reason (+ note for 'other') and can record
+// a lost fee into the fees ledger; un-cancelling goes back only to
+// status_before_cancel and removes that fee row.
 
 type SaleItemRow = {
   id: number
@@ -673,14 +684,31 @@ app.patch('/:id/status', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const id = c.req.param('id')
-  const body = await c.req.json<{ sale_status?: string; notes?: string; [key: string]: unknown }>().catch(() => ({} as Record<string, unknown>))
+  const body = await c.req.json<{
+    sale_status?: string
+    notes?: string
+    cancel_reason?: string
+    cancel_note?: string
+    cancel_fee_usd?: number
+    cancel_fee_khr?: number
+    cancel_fee_note?: string
+    [key: string]: unknown
+  }>().catch(() => ({} as Record<string, unknown>))
   const saleStatus = String(body.sale_status || '')
 
   if (!saleStatus || !VALID_SALE_STATUSES.includes(saleStatus)) {
     return c.json({ error: `Invalid status. Must be one of: ${VALID_SALE_STATUSES.join(', ')}` }, 400)
   }
 
-  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & { id: number; sale_status: string | null; updated_at: string | null; branch_id: number | null }>([id])
+  const sale = await db.prepare('SELECT * FROM sales WHERE id = ?').get<Record<string, unknown> & {
+    id: number
+    sale_status: string | null
+    updated_at: string | null
+    branch_id: number | null
+    receipt_number: string | null
+    status_before_cancel: string | null
+    cancel_fee_id: number | null
+  }>([id])
   if (!sale) return c.json({ error: 'Sale not found' }, 404)
 
   try {
@@ -698,21 +726,85 @@ app.patch('/:id/status', async (c) => {
     return c.json({ id: Number(id), sale_status: saleStatus, updated_at: sale.updated_at || null })
   }
 
-  const wasStockDeducted = STOCK_DEDUCTED_STATUSES.has(oldStatus)
-  const willStockBeDeducted = STOCK_DEDUCTED_STATUSES.has(saleStatus)
+  // Which transitions are legal at all (returns-flow ownership of
+  // partial_return/returned; un-cancel only back to where the sale was) --
+  // see lib/saleTransitions.ts.
+  const guard = guardSaleStatusTransition(oldStatus, saleStatus, sale.status_before_cancel || null)
+  if (!guard.ok) return c.json({ error: guard.error }, 400)
+
+  // Cancelling requires its reason (Mistake / Buyer didn't buy / Other +
+  // note), and may carry the lost fee -- e.g. a delivery fee the shop
+  // already paid out that the buyer refused to cover.
+  let cancelReason: CancelReason | null = null
+  let cancelNote: string | null = null
+  let cancelFeeUsd = 0
+  let cancelFeeKhr = 0
+  let cancelFeeNote: string | null = null
+  if (saleStatus === 'cancelled') {
+    cancelReason = normalizeCancelReason(body.cancel_reason)
+    if (!cancelReason) {
+      return c.json({ error: `Choose a cancellation reason: ${CANCEL_REASONS.join(', ')}.` }, 400)
+    }
+    cancelNote = String(body.cancel_note || '').trim() || null
+    if (cancelReason === 'other' && !cancelNote) {
+      return c.json({ error: 'The "Other" reason needs a note saying what happened.' }, 400)
+    }
+    cancelFeeUsd = round2(Math.max(0, Number(body.cancel_fee_usd) || 0))
+    cancelFeeKhr = Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0))
+    cancelFeeNote = String(body.cancel_fee_note || '').trim() || null
+  }
 
   const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id FROM sale_items WHERE sale_id = ?').all<SaleItemRow>([id])
 
-  // Stock check first (plain read), same validate-then-batch shape as
-  // POST / above -- see lib/db.ts's batch() docs for why.
-  if (!wasStockDeducted && willStockBeDeducted) {
-    for (const item of items) {
-      if (!item.product_id || !item.branch_id) continue
-      const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get<{ quantity: number }>([item.product_id, item.branch_id])
-      const available = stockRow?.quantity || 0
-      if (item.quantity > available) {
-        return c.json({ error: `Insufficient stock for ${item.product_name || `product #${item.product_id}`}: requested ${item.quantity}, available ${available}` }, 409)
-      }
+  // How much of each line already came back through real returns
+  // (non-cancelled, customer scope; return_to_stock does NOT matter here:
+  // a restocked unit is on the shelf and a damaged one is written off by
+  // its return record -- either way it is no longer "out with this sale",
+  // so a cancel must not re-add it and an un-cancel must not re-take it).
+  const returnedRows = await db.prepare(`
+    SELECT ri.sale_item_id AS sale_item_id, ri.product_id AS product_id, SUM(ri.quantity) AS quantity
+    FROM return_items ri
+    JOIN returns r ON r.id = ri.return_id
+    WHERE r.sale_id = @saleId
+      AND COALESCE(r.status, 'completed') != 'cancelled'
+      AND COALESCE(r.return_scope, 'customer') = 'customer'
+    GROUP BY ri.sale_item_id, ri.product_id
+  `).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ saleId: id })
+  const itemLevelReturned = new Map<number, number>()
+  const productLevelReturned = new Map<number, number>()
+  for (const row of returnedRows) {
+    const qty = Math.max(0, Number(row.quantity) || 0)
+    if (!qty) continue
+    if (row.sale_item_id) itemLevelReturned.set(Number(row.sale_item_id), (itemLevelReturned.get(Number(row.sale_item_id)) || 0) + qty)
+    else if (row.product_id) productLevelReturned.set(Number(row.product_id), (productLevelReturned.get(Number(row.product_id)) || 0) + qty)
+  }
+  const returnedByItem = allocateReturnedQuantities(items, itemLevelReturned, productLevelReturned)
+
+  const movementReason = saleStatus === 'cancelled'
+    ? `Sale cancelled (${cancelReasonLabel(cancelReason!)})${cancelNote ? ` -- ${cancelNote}` : ''}`
+    : oldStatus === 'cancelled'
+      ? `Sale cancellation reverted (back to ${saleStatus})`
+      : `Sale status changed from ${oldStatus} to ${saleStatus}`
+  const plan = planSaleStockTransition({
+    saleId: id,
+    oldStatus,
+    newStatus: saleStatus,
+    items,
+    returnedByItem,
+    reason: movementReason,
+    userId: user?.id ?? null,
+    userName: user?.name ?? null,
+  })
+
+  // Pre-flight availability for anything the plan TAKES (plain read; the
+  // CHECK(quantity >= 0) constraints below remain the real race guard,
+  // same validate-then-batch shape as POST / -- see lib/db.ts's batch()).
+  for (const deduction of plan.deductions) {
+    const stockRow = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = ? AND branch_id = ?').get<{ quantity: number }>([deduction.product_id, deduction.branch_id])
+    const available = stockRow?.quantity || 0
+    if (deduction.quantity > available) {
+      const name = items.find((item) => item.product_id === deduction.product_id)?.product_name || `product #${deduction.product_id}`
+      return c.json({ error: `Insufficient stock for ${name}: requested ${deduction.quantity}, available ${available}` }, 409)
     }
   }
 
@@ -723,103 +815,94 @@ app.patch('/:id/status', async (c) => {
     updates.push('notes = @notes')
     updateParams.notes = body.notes
   }
-  statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
-
-  const reason = `Sale status changed from ${oldStatus} to ${saleStatus}`
-  for (const item of items) {
-    if (!item.product_id || !item.branch_id) continue
-    if (!wasStockDeducted && willStockBeDeducted) {
-      // Plain subtraction, not MAX(0, ...): same strictness as POST / above --
-      // the availability read at line 683 is non-atomic, so branch_stock's
-      // CHECK(quantity >= 0) (migration 0058) is what actually guarantees a
-      // concurrent oversell rolls this transition back instead of clamping.
-      statements.push({
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, 0)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
-        params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
-      })
-      statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
-        params: {
-          product_id: item.product_id,
-          product_name: item.product_name,
-          branch_id: item.branch_id,
-          quantity: -item.quantity,
-          unit_cost_usd: item.cost_price_usd || 0,
-          unit_cost_khr: item.cost_price_khr || 0,
-          reason,
-          reference_id: id,
-          user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
-        },
-      })
-      statements.push({
-        sql: `UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity), updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
-        params: { product_id: item.product_id, quantity: item.quantity },
-      })
-    } else if (wasStockDeducted && !willStockBeDeducted && saleStatus !== 'partial_return' && saleStatus !== 'returned') {
-      statements.push({
-        sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@product_id, @branch_id, @quantity)
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity + @quantity`,
-        params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
-      })
-      statements.push({
-        sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name)
-              VALUES (@product_id, @product_name, @branch_id, 'return', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name)`,
-        params: {
-          product_id: item.product_id,
-          product_name: item.product_name,
-          branch_id: item.branch_id,
-          quantity: item.quantity,
-          unit_cost_usd: item.cost_price_usd || 0,
-          unit_cost_khr: item.cost_price_khr || 0,
-          reason,
-          reference_id: id,
-          user_id: user?.id ?? null,
-          user_name: user?.name ?? null,
-        },
-      })
-      statements.push({
-        sql: `UPDATE products SET stock_quantity = stock_quantity + @quantity, updated_at = CURRENT_TIMESTAMP WHERE id = @product_id`,
-        params: { product_id: item.product_id, quantity: item.quantity },
-      })
-      // Mirror the branch_stock restore above into the batch this line was
-      // sold from, if any -- otherwise voiding a sale would leave that
-      // batch's remaining quantity permanently short by whatever was sold,
-      // even though branch_stock (and the product's overall stock_quantity)
-      // correctly went back up.
-      if (item.batch_id) {
-        statements.push(incrementBatchStockStatement(item.batch_id, item.branch_id, item.quantity))
-        statements.push({
-          sql: `UPDATE sale_item_batch_allocations SET released_at = datetime('now')
-                WHERE sale_item_id = @sale_item_id AND batch_id = @batch_id AND released_at IS NULL`,
-          params: { sale_item_id: item.id, batch_id: item.batch_id },
-        })
-      }
+  if (saleStatus === 'cancelled') {
+    updates.push(
+      'cancel_reason = @cancel_reason',
+      'cancel_note = @cancel_note',
+      "cancelled_at = datetime('now')",
+      'cancelled_by_name = @cancelled_by_name',
+      'status_before_cancel = @status_before_cancel',
+    )
+    updateParams.cancel_reason = cancelReason
+    updateParams.cancel_note = cancelNote
+    updateParams.cancelled_by_name = user?.name ?? null
+    updateParams.status_before_cancel = oldStatus
+  } else if (oldStatus === 'cancelled') {
+    // Un-cancel: the cancellation record clears, and its linked lost-fee
+    // expense row (if any) is removed WITH it, atomically -- money
+    // reporting must not keep a loss for a sale that is live again. The
+    // deletion is auditable below.
+    updates.push(
+      'cancel_reason = NULL',
+      'cancel_note = NULL',
+      'cancelled_at = NULL',
+      'cancelled_by_name = NULL',
+      'status_before_cancel = NULL',
+      'cancel_fee_id = NULL',
+    )
+    if (sale.cancel_fee_id) {
+      statements.push({ sql: 'DELETE FROM fees WHERE id = @feeId', params: { feeId: sale.cancel_fee_id } })
     }
   }
+  statements.push({ sql: `UPDATE sales SET ${updates.join(', ')} WHERE id = @id`, params: updateParams })
+  statements.push(...plan.statements)
 
   try {
     await db.batch(statements)
   } catch (error) {
     const message = (error as Error).message || ''
     // Same race guard as POST /: a CHECK(quantity >= 0) failure means a
-    // concurrent sale consumed the stock between the availability read above
-    // and this write. The batch rolled back atomically (status unchanged, no
-    // deduction), so just report the shortage as a 409 rather than a 500.
+    // concurrent sale consumed the stock (or the line's specific lot)
+    // between the availability read above and this write. The batch rolled
+    // back atomically (status unchanged, nothing moved), so just report
+    // the shortage as a 409 rather than a 500.
     if (/CHECK constraint|constraint failed/i.test(message)) {
       return c.json({ error: 'Insufficient stock to complete this sale: another sale took the last units first. Refresh and try again.', code: 'stock_conflict' }, 409)
     }
     throw error
   }
-  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', id, { oldStatus, newStatus: saleStatus })
+
+  // The lost-fee expense row is written AFTER the transition commits (a
+  // failed transition must never leave a stray loss on the books), then
+  // linked back via cancel_fee_id so un-cancelling can find and remove it.
+  let feeWarning: string | null = null
+  if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
+    try {
+      const feeResult = await db.prepare(`
+        INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
+        VALUES ('expense', @label, @amount_usd, @amount_khr, date('now'), @sale_id, @branch_id, @notes, @created_by, @created_by_name)
+      `).run({
+        label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
+        amount_usd: cancelFeeUsd,
+        amount_khr: cancelFeeKhr,
+        sale_id: Number(id),
+        branch_id: sale.branch_id ?? null,
+        notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
+        created_by: user?.id ?? null,
+        created_by_name: user?.name ?? null,
+      })
+      const feeId = Number(feeResult.lastInsertRowid) || null
+      if (feeId) await db.prepare('UPDATE sales SET cancel_fee_id = @feeId WHERE id = @id').run({ feeId, id })
+    } catch {
+      feeWarning = 'The sale was cancelled and stock added back, but recording the lost fee failed -- add it on the Fees page.'
+    }
+  }
+
+  await audit(c.env, user?.id ?? null, user?.name ?? null, 'update', 'sale', id, {
+    oldStatus,
+    newStatus: saleStatus,
+    ...(cancelReason ? { cancelReason, cancelNote, cancelFeeUsd, cancelFeeKhr } : {}),
+    ...(oldStatus === 'cancelled' && sale.cancel_fee_id ? { removedCancelFeeId: sale.cancel_fee_id } : {}),
+    restoredUnits: plan.restoredUnits,
+    deductedUnits: plan.deductedUnits,
+  })
   // Same cache-invalidation reasoning as POST / above -- a status change
   // here can deduct or restore stock.
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
 
   const updated = await db.prepare('SELECT id, sale_status, updated_at FROM sales WHERE id = ?').get<{ id: number; sale_status: string; updated_at: string }>([id])
-  return c.json(updated || { id: Number(id), sale_status: saleStatus })
+  const payload = updated || { id: Number(id), sale_status: saleStatus }
+  return c.json(feeWarning ? { ...payload, warning: feeWarning } : payload)
 })
 
 // PATCH /api/sales/:id/customer -- attach/detach a customer or membership on

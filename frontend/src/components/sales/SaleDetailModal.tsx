@@ -58,6 +58,15 @@ interface SaleDetail {
   customer_phone?: string | null
   customer_address?: string | null
   notes?: string | null
+  // Cancellation record (migration 0066) -- present only on cancelled
+  // sales cancelled through the Part 383 flow; legacy/imported cancelled
+  // rows keep these null and render as plain "cancelled".
+  cancel_reason?: string | null
+  cancel_note?: string | null
+  cancelled_at?: string | null
+  cancelled_by_name?: string | null
+  status_before_cancel?: string | null
+  cancel_fee_id?: number | string | null
 }
 
 interface SaleDetailModalProps {
@@ -356,6 +365,61 @@ export default function SaleDetailModal({
             )}
           </section>
 
+          {currentStatus === 'cancelled' ? (
+            <section className="rounded-xl border border-red-200 bg-red-50/50 p-3 dark:border-red-800/60 dark:bg-red-900/15">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-red-600 dark:text-red-300">
+                {t('cancelled_sale') || 'Cancelled sale'}
+              </div>
+              <div className="space-y-1 text-sm text-gray-700 dark:text-gray-200">
+                {sale.cancel_reason ? (
+                  <div>
+                    <span className="text-gray-400">{t('cancel_reason_label') || 'Reason'}: </span>
+                    {sale.cancel_reason === 'mistake'
+                      ? (t('cancel_reason_mistake') || 'Mistake')
+                      : sale.cancel_reason === 'buyer_refused'
+                        ? (t('cancel_reason_buyer_refused') || "Buyer didn't buy")
+                        : (t('cancel_reason_other') || 'Other')}
+                    {sale.cancel_note ? ` -- ${sale.cancel_note}` : ''}
+                  </div>
+                ) : null}
+                {sale.cancelled_by_name || sale.cancelled_at ? (
+                  <div className="text-xs text-gray-400">
+                    {[sale.cancelled_by_name, sale.cancelled_at ? fmtTime(sale.cancelled_at) : ''].filter(Boolean).join(' · ')}
+                  </div>
+                ) : null}
+                {toNumber(sale.cancel_fee_id) > 0 ? (
+                  <div className="text-xs text-amber-700 dark:text-amber-300">
+                    {t('cancel_lost_fee_recorded') || 'A lost fee was recorded on the Fees page for this cancellation.'}
+                  </div>
+                ) : null}
+              </div>
+              {onStatusChange ? (
+                <button
+                  type="button"
+                  className="btn-secondary mt-3 w-full text-sm"
+                  disabled={statusSaving}
+                  onClick={async () => {
+                    // Un-cancel: the backend only accepts the status the
+                    // sale was in when cancelled (it re-deducts the
+                    // un-returned stock and removes the linked fee row).
+                    const target = String(sale.status_before_cancel || 'completed')
+                    setStatusSaving(true)
+                    try {
+                      await onStatusChange(sale.id, target, statusNotes)
+                      onClose()
+                    } finally {
+                      setStatusSaving(false)
+                    }
+                  }}
+                >
+                  {statusSaving
+                    ? (t('loading') || 'Saving')
+                    : `${t('uncancel_sale') || 'Un-cancel'} (${getStatusLabel(String(sale.status_before_cancel || 'completed'), t)})`}
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+
           {!['returned', 'cancelled'].includes(currentStatus) ? (
             <section className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
               <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -377,6 +441,9 @@ export default function SaleDetailModal({
                     optionClassName="text-sm"
                     options={ALL_STATUSES
                       .filter((status) => !['partial_return', 'returned'].includes(status))
+                      // Once returns exist, only cancellation is still a
+                      // manual transition (the returns flow owns the rest)
+                      .filter((status) => currentStatus !== 'partial_return' || status === 'cancelled' || status === currentStatus)
                       .map((status) => ({ value: status, label: getStatusLabel(status, t) }))}
                   />
                 </div>
