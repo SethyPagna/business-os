@@ -64,7 +64,7 @@ type SaleItemInput = {
   batch_id?: number | null
   batch_label?: string | null
   batch_expiry_date?: string | null
-  // 11.9 (Part 411): set when the cashier picked the DAMAGE source for
+  // 11.9 (Part 416): set when the cashier picked the DAMAGE source for
   // this line -- the units come out of this damaged_stock_lots row
   // (quantity_remaining), not out of branch/batch stock.
   damaged_lot_id?: number | null

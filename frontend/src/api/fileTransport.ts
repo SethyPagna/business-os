@@ -226,7 +226,7 @@ export function deleteFileAsset(id: string | number, payload: Record<string, unk
 // key / public path are untouched server-side (see routes/files.ts's own
 // comment), so this never breaks an existing product image, avatar, or
 // portal-setting reference to the file.
-// 8.1 (Part 413): the drill-in behind the list's usage counts -- which
+// 8.1 (Part 418): the drill-in behind the list's usage counts -- which
 // products/gallery rows/avatars/settings reference this asset, by name.
 export type FileUsageDetail = {
   id: number

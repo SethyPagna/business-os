@@ -1,4 +1,4 @@
-// K3 (Part 412): the on-upload image-normalization path --
+// K3 (Part 417): the on-upload image-normalization path --
 // lib/imageAudit.ts's normalizeStoredImage (queue-side kernel) and
 // enqueueImageNormalization (producer) against a REAL sqlite image_audit
 // table (migration 0054 via load_migrations), with the provider ladder

@@ -697,7 +697,7 @@ export default function Inventory({ hostSection, onHostSectionChange }: {
   const [transferSaving, setTransferSaving] = useState(false)
   const [statDetail,    setStatDetail]    = useState<StatDetail>(null)
   const [showImport, setShowImport] = useState(false)
-  // F2 (Part 414): the fast per-shipment stock-in flow -- see
+  // F2 (Part 419): the fast per-shipment stock-in flow -- see
   // FastStockInModal.tsx; writes ride the same receive kernel as every
   // other add-stock surface.
   const [showFastStockIn, setShowFastStockIn] = useState(false)

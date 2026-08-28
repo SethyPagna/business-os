@@ -297,7 +297,7 @@ app.get('/:id/download', async (c) => {
   return new Response(object.body, { headers })
 })
 
-// 8.1 (Part 413): the drill-in behind the list's usage COUNTS -- which
+// 8.1 (Part 418): the drill-in behind the list's usage COUNTS -- which
 // products/rows/avatars/settings actually reference this asset, by NAME.
 // Read-only, so it follows the list's own rule: any authenticated user can
 // see it (no cost or money data lives here).
@@ -333,7 +333,7 @@ app.get('/:id/usage', async (c) => {
   })
 })
 
-// 8.1 (Part 413): rewire -- repoint every product cover/gallery reference
+// 8.1 (Part 418): rewire -- repoint every product cover/gallery reference
 // (and avatars) from this asset to another library asset, without copying
 // bytes or touching either stored object. Settings references are
 // deliberately NOT rewired: branding belongs to the Settings page, and

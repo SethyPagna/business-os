@@ -330,7 +330,7 @@ function AssetPreview({ asset, onOpenPreview }: AssetPreviewProps) {
   )
 }
 
-// 8.1 (Part 413): clicking an image opens DETAILS -- the full preview plus
+// 8.1 (Part 418): clicking an image opens DETAILS -- the full preview plus
 // what is actually USING this asset (named products/gallery rows/avatars/
 // settings keys, the drill-in behind the card's usage counts) and, for
 // Full Access, a rewire flow that repoints every product/avatar reference

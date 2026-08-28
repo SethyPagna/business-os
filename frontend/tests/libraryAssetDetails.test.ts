@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-// 8.1 (Part 413): "click an image to open details -- what is using it,
+// 8.1 (Part 418): "click an image to open details -- what is using it,
 // edit, and rewire." Source pins across the four layers so no half can
 // silently drop out: the backend endpoints, the transport, the FilesPage
 // details modal, and the permission/guard rules the locked notes require.

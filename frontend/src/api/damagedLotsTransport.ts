@@ -1,6 +1,6 @@
 import { apiFetch, route } from './http.ts'
 
-// K2 / 11.9 (Part 411): open damaged lots for the POS damage source option
+// K2 / 11.9 (Part 416): open damaged lots for the POS damage source option
 // (see cloudflare/src/routes/batches.ts GET /damaged-lots and
 // lib/returnsStock.ts). Its own file rather than batchesTransport.ts only
 // for working-tree coordination (that file was mid-flight in another

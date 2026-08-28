@@ -1,4 +1,4 @@
-// F2 (Part 414): fast stock-in -- one shipment's header (branch, received
+// F2 (Part 419): fast stock-in -- one shipment's header (branch, received
 // date, supplier, paid/credit) entered ONCE, then rapid per-product lines:
 // type a name, pick the row, quantity/cost/expiry, Add writes ONE
 // receiveBatchStock through the same D4 kernel every other add-stock

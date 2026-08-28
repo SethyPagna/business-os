@@ -107,9 +107,14 @@ const productsRoute = loadReal('routes/products.ts', {
     getMergedPermissions: () => ({}),
   },
   '../lib/audit': { audit: async () => {} },
-  // K3 Part 412: products.ts enqueues on-upload image normalization;
+  // K3 Part 417: products.ts enqueues on-upload image normalization;
   // this test asserts gallery wiring, so a no-op stub is honest.
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
+  // D1 Part 415 (a7's unit): products.ts gained the stock-ledger read;
+  // this test asserts gallery wiring and never hits that route, so inert
+  // stubs are honest. (Added by 6e while landing the Part-registry fix --
+  // the D1 train missed this loader.)
+  '../lib/stockLedgerQuery': { attachBeforeQty: (rows) => rows, buildStockLedgerQuery: () => ({ sql: 'SELECT 1', params: {} }) },
   // G1: rules load stubbed empty + promoted-SQL collapsed to a constant --
   // this test asserts pre-existing behavior (sort/wiring), not promotion
   // ranking; test-promotion-rules-pure.cjs covers the real SQL against the

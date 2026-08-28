@@ -183,7 +183,7 @@ export async function reprocessAuditedImages(env: Env): Promise<ReprocessResult>
 export type NormalizeOutcome = 'optimized' | 'skipped' | 'failed' | 'missing' | 'not_image'
 
 /**
- * K3 (Part 412): normalize ONE stored object NOW -- the queue-side kernel
+ * K3 (Part 417): normalize ONE stored object NOW -- the queue-side kernel
  * behind the on-upload path, so a fresh upload doesn't sit oversized for
  * up to six hours waiting for the sweep to list it. Same rules as
  * reprocessAuditedImages, one key at a time:

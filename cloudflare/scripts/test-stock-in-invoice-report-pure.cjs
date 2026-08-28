@@ -70,7 +70,7 @@ function freshDb() {
 // fails loudly instead of testing a stale copy.
 // Normalized first: this checkout's autocrlf rewrites files to CRLF as git
 // touches them, and a `\n`-anchored extraction regex then reads a template
-// literal that IS there as "missing" (bit us on Part 411's sweep).
+// literal that IS there as "missing" (bit us on Part 416's sweep).
 const contactsSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8').replace(/\r\n/g, '\n')
 const sourceMatch = contactsSource.match(/const STOCK_IN_REPORT_SOURCE = `\n([\s\S]*?)`/)
 assert.ok(sourceMatch, 'contacts.ts defines STOCK_IN_REPORT_SOURCE')

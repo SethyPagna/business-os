@@ -142,7 +142,7 @@ export async function handleMediaQueue(batch: MessageBatch<MediaJobMessage>, env
     try {
       const { assetKey, kind } = message.body
       if (kind === 'optimize-image') {
-        // K3 (Part 412): the on-upload normalization path -- every image
+        // K3 (Part 417): the on-upload normalization path -- every image
         // ASSETS.put enqueues one of these (see enqueueImageNormalization),
         // so a fresh upload is normalized within seconds instead of waiting
         // for the 6h sweep. Same never-store-larger / never-delete rules as

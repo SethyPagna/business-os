@@ -9829,7 +9829,8 @@ PromotionsPage, ReceiptSettings, AuditLog, OtpModal, UserDetailSheet,
 Sidebar's own sheet, and 4a's four hot stock modals. Same three-line
 pattern applies to each.
 
-## Part 411 (chat, Aug 28 2026) -- K2 complete: the POS Damage source (rest of 11.9)
+## Part 416 (chat, Aug 28 2026) -- K2 complete: the POS Damage source (rest of 11.9)
+*(renumbered from 411 -- registry collision, see the write-order note in Part 419)*
 
 **Part 410 addendum first:** the full test:utils chain re-ran GREEN once
 a7 fixed their in-flight Inventory.tsx type error (their fix took ~60s;
@@ -9874,7 +9875,8 @@ lane still holds its known mid-flight failures, theirs to reconcile).
 Migrations 0074 + 0075 ride the user's next `npm run deploy:full`.
 K2 is COMPLETE: 11.12, 11.13, and all of 11.9.
 
-## Part 412 (chat, Aug 28 2026) -- K3: on-upload image normalization closes the media pipeline's gap
+## Part 417 (chat, Aug 28 2026) -- K3: on-upload image normalization closes the media pipeline's gap
+*(renumbered from 412)*
 
 The quality ladder (imagePipeline.ts: format -> dimensions -> quality,
 350KB ceiling, never-store-larger), the provider fallback (Cloudflare
@@ -9910,7 +9912,8 @@ pins); imageAudit stubs added to the two route-loading tests the new
 import touched (portal-catalog-sort, wire-images-gallery); full backend
 sweep green (97 files), tsc clean, dry-run clean. No frontend changes.
 
-## Part 413 (chat, Aug 28 2026) -- 8.1: Library image details -- what uses it, and rewire
+## Part 418 (chat, Aug 28 2026) -- 8.1: Library image details -- what uses it, and rewire
+*(renumbered from 413)*
 
 The Library list already counted usage per asset (products / gallery /
 avatars / settings, Part-era work behind canDelete); 8.1 is the
@@ -9997,3 +10000,43 @@ after_qty (line-preserving sorted inserts).
 **D2 note:** the endpoint already accepts branchId/date-range; the
 section's filter ROW (supplier via batch attribution included) is D2's
 remaining scope, deliberately not smuggled in here.
+
+## Part 419 (chat, Aug 28 2026) -- F2: fast stock-in on the D4 kernel
+
+*(Registry note: this session's Parts 411-414 collided with 05's 411/412
+and a7's 413/414 -- their entries were pushed first, so by the
+write-order rule this session's four renumbered: K2-complete 411→416,
+K3 412→417, 8.1 413→418, and this F2 entry claimed 414→419. Root cause:
+a tail-only check of this file misses peers' entries that rebases
+interleave ABOVE the tail -- grep ALL '^## Part' headers before
+claiming.)*
+
+A shipment's paperwork once, then one line per product, as fast as the
+person can type -- the user's "enter batch + supplier once, then
+per-product name→details entry; Add appends and continues, Done
+completes the batch."
+
+- **Header (once):** branch, received date (defaults to today,
+  mm/dd/yyyy -- the server's own date rules derive/top up each
+  product's lot from it), the SHARED SupplierPickerField (D5a's one
+  picker, first-attribution-sticks), and paid / on-credit with the due
+  date enforced client-side before any write (the server enforces it
+  too).
+- **Lines:** live name/barcode search (debounced, stale-guarded), pick
+  a row, quantity (Enter = Add), unit cost seeded from the row's cost,
+  optional expiry. Every Add is ONE receiveBatchStock through the same
+  D4 kernel every other add-stock surface uses -- no parallel write
+  path, no direct fetches (pinned by test). The outcome lands on its
+  own row: lot code on success, the error on failure with the form
+  kept intact for an in-place retry -- deliberately per-line commits,
+  so what the list shows IS what happened (no silent partial writes).
+  The input then clears and refocuses for the next product.
+- **Done** closes, refreshing Inventory only when something actually
+  landed. Launched from Inventory's Manage menu (⚡ Fast stock-in).
+
+**Verification:** tests/fastStockIn.test.ts (4 checks pinning each
+clause); check:source 399 files, tsc, full chain (124 files) + build
+green. No backend changes -- the existing /api/batches receive endpoint
+IS the kernel. Code landed as 4af178a7 (its message already carries the
+419 renumber); the board flip rode a7's 9c1ee47e via an autostash
+collision on the shared file, noted here for the record.

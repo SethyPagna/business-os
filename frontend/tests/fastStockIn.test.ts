@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-// F2 (Part 414): fast stock-in -- "enter batch + supplier once, then
+// F2 (Part 419): fast stock-in -- "enter batch + supplier once, then
 // per-product name→details entry; Add appends and continues, Done
 // completes the batch. Backed by the same add/batch kernel as D4 -- no
 // parallel write path." Source pins hold each clause of that spec.

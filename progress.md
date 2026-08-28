@@ -670,7 +670,7 @@ deep-linkable tabs.*
   add as child of the matched group · proceed as new — with a before→after arrow preview
   and a page-by-page confirm. Price similarity is advisory ("matches X on name+price but
   differs on barcode; recommend child row").
-- [x] F2 *(Part 414, session 6e — SHIPPED. FastStockInModal: the
+- [x] F2 *(Part 419, session 6e — SHIPPED. FastStockInModal: the
   shipment header once (branch, received date defaulting today, the
   SHARED SupplierPickerField, paid/on-credit with enforced due date),
   then rapid lines — live name/barcode search, pick, qty (Enter =
@@ -951,12 +951,12 @@ deep-linkable tabs.*
 
 - [ ] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
   users see their own.
-- [x] K2 *(session 6e — COMPLETE across Parts 410 + 411. Part 410
+- [x] K2 *(session 6e — COMPLETE across Parts 410 + 416. Part 410
   (11.13 + 11.12): per-item three-way chooser (none/restock/damaged) on
   create AND edit, damaged stock as traceable lots (damaged_stock_lots,
   migration 0074) with consumed-lot edit blocking, Replace from
   same-name stock drained the POS way with even-exchange default and
-  full-access-gated price-difference settlement. Part 411 (rest of
+  full-access-gated price-difference settlement. Part 416 (rest of
   11.9): the POS Damage source option — open damaged lots listed beside
   sellable lots in the detail sheet (both flows, amber, never cost),
   one-source-per-line exclusivity, lot-capped quantities; checkout
@@ -971,7 +971,7 @@ deep-linkable tabs.*
   clear Selling-vs-VIP price choice per line; damaged stock joins as an option once
   11.13 lands. Same option data the product detail shows (D3) — one kernel, two
   surfaces.
-- [x] K3 *(Part 412, session 6e — SHIPPED. The ladder (imagePipeline.ts),
+- [x] K3 *(Part 417, session 6e — SHIPPED. The ladder (imagePipeline.ts),
   provider fallback, and the 6h audit cron already existed; what was
   missing was ON-UPLOAD normalization, now closed: every image
   ASSETS.put site (files upload, avatar, product image, portal
@@ -1004,7 +1004,7 @@ deep-linkable tabs.*
   bundle UX in the editor, and the guarantee-by-test that none of this touches POS/
   sales/full access (surface scoping already enforces it server-side).
 - [~] K7. Performance pass (measured), portal §6 leftovers, Library details (8.1
-  **[8.1 SHIPPED — Part 413, session 6e: clicking a Library image opens
+  **[8.1 SHIPPED — Part 418, session 6e: clicking a Library image opens
   DETAILS — full preview + named usage (product covers with barcode,
   gallery rows with position, avatars, settings keys), and a Full-Access
   rewire flow: pick another library image, every product/gallery/avatar

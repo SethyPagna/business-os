@@ -89,7 +89,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/auth': { requireAuth: async (c, next) => next() },
   '../lib/permissions': { hasPermission: () => true },
   '../lib/audit': { audit: async () => {} },
-  // K3 Part 412: portal.ts enqueues on-upload image normalization; this
+  // K3 Part 417: portal.ts enqueues on-upload image normalization; this
   // test asserts catalog sort, so a no-op stub is honest.
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   // G1: rules load stubbed empty + promoted-SQL collapsed to a constant --

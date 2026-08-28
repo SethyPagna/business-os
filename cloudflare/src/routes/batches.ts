@@ -56,7 +56,7 @@ app.get('/tracked-product-ids', async (c) => {
   return c.json({ productIds })
 })
 
-// GET /api/batches/damaged-lots?productId=&branchId= -- 11.9 (Part 411):
+// GET /api/batches/damaged-lots?productId=&branchId= -- 11.9 (Part 416):
 // the POS picker lists a product's OPEN damaged lots beside its sellable
 // ones ("Damage alongside batch/branch/barcode/SP/VIP" -- locked note).
 // Registered on this router because it shares the POS-readable gate above;
