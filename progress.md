@@ -984,7 +984,11 @@ deep-linkable tabs.*
   aren't product-row columns — they need the read attachments gated), the preset
   bundle UX in the editor, and the guarantee-by-test that none of this touches POS/
   sales/full access (surface scoping already enforces it server-side).
-- [ ] K7. Performance pass (measured), portal §6 leftovers, Library details (8.1),
+- [~] K7. Performance pass (measured), portal §6 leftovers, Library details (8.1
+  **[CLAIMED: session 6e — Part 413, the 8.1 slice ONLY. Footprint:
+  routes/files.ts (GET /:id/usage + POST /:id/rewire) +
+  FilesPage.tsx/fileTransport.ts (details modal: named usage lists,
+  rename, rewire picker) + tests. Other K7 items stay open.]**),
   edit-form section jump bug (10.2), path-width inputs (11.17 — still needs the user to
   point at which input).
 
