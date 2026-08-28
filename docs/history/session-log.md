@@ -10513,3 +10513,43 @@ live summary, Z4 dual receipt preview, Z5 hamburger, Z7 Khmer contrast, Z8
 Credit, Z9 rename, Z10 "Reconcile Revenue" -- needs its definition), Y12 the
 recordable per-currency sales change, and the peer's F3-slice-2 (theirs). Needs
 deploy (migrations 0077/0078/0079 + the frontend changes).
+
+## Part 430 (Aug 29 2026, session business-os-v1-43) — Z3a live Sales summary, Z9 Complete Sale + status InfoHint, Y11 membership InfoHint
+
+**Ask.** "continue" -- picking the next clear, non-hot Phase-Z/Y items.
+
+**What changed.**
+- **Z3a (Sales summary stale on status change).** The "N sales | $revenue | N
+  completed" header read from a server-fetched salesStats aggregate whose
+  effect only re-ran on filter changes -- so a status change reloaded the rows
+  but left the summary counting a now-cancelled sale toward revenue/total until
+  a filter change forced a refetch. Extracted the fetch into loadSalesStats()
+  and call it in lockstep with the row reload: in the sync effect (every
+  'sales'/'returns' event that status mutations + returns dispatch) and
+  directly after the status-change mutation. Sales.tsx (not peer-hot); tsc
+  clean. Commit 4cec22dc.
+- **Z9 (POS checkout rename + status InfoHint).** The button read
+  "Done - Delivery"; now "Complete Sale" regardless of delivery. The stock
+  consequence of each status (Completed deducts now / Awaiting Payment holds /
+  Awaiting Delivery deducts) moved from any inline prose to an InfoHint above
+  the button, reusing the existing pos_status_*_desc strings. Two new en+km
+  cue/label keys; complete_sale already existed. Verified live: the button
+  reads "Complete Sale" and the "Stock effect by status" cue renders. Commit
+  26c0762a.
+- **Y11 (POS membership prose).** The no-member state showed a full
+  explanatory sentence inline; now a compact "Select a member to apply" cue
+  with the explanation behind an InfoHint (reused the existing en+km string).
+  The delivery paid-by block was already compacted in B3 (Part 372), left
+  as-is. Commit a211a343.
+
+**Verified.** frontend tsc clean throughout (the only 3 errors stay the peer's
+uncommitted ProductForm/Products onMinimize). vite build green; Z9 + Y11
+strings confirmed in the built POS bundle; live on worker-dev the POS
+"Complete Sale" button + "Stock effect by status" InfoHint render after adding
+a cart item, no JS/React console errors (only dev-server backend 404/500/
+connection-refused, environmental).
+
+**Not done.** Z1a display rule, Z2 discount decouple (scoped), Z4 dual receipt
+preview, Z5 hamburger/contrast, Z7 Khmer contrast, Z8 explicit Credit, Z10
+"Reconcile Revenue" (needs the definition), Y12 per-currency change; plus the
+peer's F3-slice-2 (theirs). Needs deploy (migrations 0077/0078/0079 + frontend).

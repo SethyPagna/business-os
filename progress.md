@@ -1539,9 +1539,11 @@ those until that unit commits.*
   demands one upfront; the point of awaiting-payment is deciding later on the
   Sales page. Make method optional for awaiting-payment sales (validation +
   server accept NULL method until completion).
-- [ ] Y11. **POS delivery "paid by" block: too much text, confusing.** Redesign
-  compact (the paid-by choice + cost stay, prose goes). Membership explanation
-  sentence becomes an InfoHint tooltip instead of inline text.
+- [x] Y11 *(Part 430, needs deploy).* **POS delivery "paid by" block + membership
+  prose.** The membership explanation sentence (no-member state) now shows a
+  compact "Select a member to apply" cue with the explanation behind an
+  InfoHint. The delivery paid-by block was already compacted to one row + a
+  short fee-effect line in B3 (Part 372), so it stays.
 - [ ] Y12. **POS sales CHANGE: explicit, recordable, per-currency (user
   clarified Aug 28 follow-up — "the sales change").** The change given back
   is sometimes KHR + USD mixed, sometimes one currency; the cashier must be
@@ -1651,12 +1653,14 @@ other" with the Phase-Y items.*
   base/applied split already EXISTS in the schema (sale_items.base_price_*
   vs applied_price_*), so this is a display/binding rewire, not new
   machinery.
-- [~] Z3. **Sales page: live summary + Print column.** (a) STILL OPEN: the
-  group summary row ("4 Sales | $0.00 Revenue | 0 completed") doesn't
-  refresh when a sale's status changes — recompute on status mutation. (b)
-  **DONE (Z3b, Part 426, verified live):** the action column header now reads
-  "Print" (the column's only control is reprint); the `print` en+km key
-  already existed.
+- [x] Z3. **Sales page: live summary + Print column — BOTH DONE.** (a) **Z3a
+  (Part 430, needs deploy):** the "N sales | $revenue | N completed" header
+  read from a server salesStats aggregate whose effect only re-ran on filter
+  changes — a status change reloaded the rows but left the summary stale
+  (a cancelled sale kept counting toward revenue). Extracted loadSalesStats()
+  and refresh it in lockstep with the rows (sync effect on 'sales'/'returns'
+  + directly after the status mutation). (b) **Z3b (Part 426):** action
+  column header now reads "Print".
 - [ ] Z4. **Receipt SETTINGS preview: enabling 80×50 must not replace the
   other preview** — show both formats side-by-side or with a toggle in the
   settings preview area (the receipt VIEW itself already stacks both since
@@ -1683,10 +1687,10 @@ other" with the Phase-Y items.*
   affordance to add/modify payment entries later (Y10 shipped the
   completion-time entry; this extends to editing and the explicit Credit
   option — define what Credit records vs awaiting_payment before building).
-- [ ] Z9. **POS: rename "Done - Delivery" to "Complete Sale"** with an
-  InfoHint summarizing the stock consequences of each status (held/locked vs
-  deducted awaiting delivery, etc.) — concise, no inline prose (ui-density
-  rule).
+- [x] Z9 *(Part 430 — SHIPPED, needs deploy; verified live).* **POS: "Done -
+  Delivery" renamed to "Complete Sale"** with an InfoHint above the button
+  ("Stock effect by status") summarizing each status's stock consequence
+  (reusing the existing pos_status_*_desc strings) — no inline prose.
 - [ ] Z10. **Dashboard vs Branch stats mismatch + "Reconcile Revenue".**
   Reconcile the two pages' numbers to the shared kernel (single-source rule),
   then add "Reconcile Revenue" as an 8th Dashboard stat while Branch keeps
