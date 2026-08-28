@@ -10,6 +10,7 @@ import { dateToBatchCode } from '../../../utils/batchCode.ts'
 // Per the standing rule that this form's stock UI should look and behave
 // like Inventory's rather than growing its own parallel version of it.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
+import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
 
@@ -75,6 +76,13 @@ type BranchStockRow = {
   // when this row creates a lot (add + "New batch"); an existing lot keeps
   // its own date (first attribution sticks, enforced server-side).
   receivedDate: string
+  // D5a: who this add was bought from. supplierId only ever comes from
+  // picking a contact suggestion; free text stays a name-only attribution.
+  // The row component CLEARS both when an already-attributed lot is picked
+  // (first attribution sticks -- see StockAdjustBranchRow), so the submit
+  // below can trust the row state to be honest.
+  supplierId: number | null
+  supplierName: string
 }
 
 type AdjustStockPayload = {
@@ -90,6 +98,8 @@ type AdjustStockPayload = {
   userName?: string
   batchId?: number | string
   receivedDate?: string
+  supplierId?: number
+  supplierName?: string
 }
 
 type ApiResult = {
@@ -130,6 +140,8 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
         type: 'add',
         batchId: '',
         receivedDate: todayIsoDate(),
+        supplierId: null,
+        supplierName: '',
       }
     }),
   )
@@ -212,7 +224,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     withLoaderTimeout(loader, label, BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS)
   ), [])
 
-  const setRow = (index: number, patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate'>>) => {
+  const setRow = (index: number, patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate' | 'supplierId' | 'supplierName'>>) => {
     setRows((current) => current.map((row, rowIndex) => (
       rowIndex === index ? { ...row, ...patch } : row
     )))
@@ -272,11 +284,16 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
           // "New batch") -- a lingering value must never silently re-date
           // some other kind of change.
           receivedDate: row.type === 'add' && row.batchId === 'new' && row.receivedDate ? row.receivedDate : undefined,
+          // D5a: adds only. The row component already cleared these when an
+          // attributed lot was picked, so what's here is exactly what the
+          // person saw on screen.
+          supplierId: row.type === 'add' && row.supplierId != null ? row.supplierId : undefined,
+          supplierName: row.type === 'add' && row.supplierName.trim() ? row.supplierName.trim() : undefined,
         }), 'Adjust branch product stock')
         if (result?.success === false) throw new Error(result?.error || 'Failed to adjust branch stock')
       }
       setMsg(T('stock_updated', 'Stock updated', 'បានធ្វើបច្ចុប្បន្នភាពស្តុក'))
-      setRows((current) => current.map((row) => ({ ...row, delta: '', batchId: '', receivedDate: todayIsoDate() })))
+      setRows((current) => current.map((row) => ({ ...row, delta: '', batchId: '', receivedDate: todayIsoDate(), supplierId: null, supplierName: '' })))
       onDone()
     } catch (error) {
       setMsg(error instanceof Error ? error.message : T('unknown_error', 'Unknown error', 'មានបញ្ហាមិនស្គាល់'))
@@ -372,7 +389,7 @@ type StockAdjustBranchRowProps = {
   row: BranchStockRow
   productId: number | string
   unit?: string
-  onChange: (patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate'>>) => void
+  onChange: (patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate' | 'supplierId' | 'supplierName'>>) => void
   T: (key: string, fallbackEn: string, fallbackKm?: string) => string
 }
 
@@ -433,6 +450,24 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
   // Same 1/5/10/20 quick-pick chip row InventoryStockModals.tsx offers
   // under its quantity field, sized down to fit this row's compact layout.
   const quantityChoices = [1, 5, 10, 20]
+
+  // D5a: the same visibility-mirror rule as the received date above. An
+  // existing lot that already carries a supplier keeps it (first
+  // attribution sticks server-side), so the field locks to that name; an
+  // unattributed existing lot still offers the picker (a choice FILLS the
+  // blank, which the server honors via COALESCE).
+  const selectedLot = row.type === 'add' && row.batchId !== '' && row.batchId !== 'new'
+    ? batchOptions.find((batch) => String(batch.id) === String(row.batchId)) || null
+    : null
+  const lotAttributedName = selectedLot?.supplier_name?.trim() || null
+  // Keep the row state honest: whatever rides to submit is what the person
+  // saw. A locked lot clears any previously typed choice.
+  useEffect(() => {
+    if (lotAttributedName && (row.supplierId != null || row.supplierName !== '')) {
+      onChange({ supplierId: null, supplierName: '' })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotAttributedName])
 
   return (
     <div className="rounded-lg bg-gray-50 px-3 py-2 dark:bg-gray-700/50">
@@ -532,6 +567,24 @@ function StockAdjustBranchRow({ row, productId, unit, onChange, T }: StockAdjust
               <div className="mt-1 text-[10px] text-gray-400">
                 {T('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(row.receivedDate) || '--'}
               </div>
+            </div>
+          ) : null}
+          {/* D5a: supplier attribution for the lot this add creates or
+              fills -- same picker, same rules as ReceiveBatchModal and
+              Inventory's Adjust modal. Adds only: a removal has no
+              supplier semantics. */}
+          {row.type === 'add' && row.batchId !== '' ? (
+            <div className="mt-1.5">
+              <SupplierPickerField
+                idPrefix={`branch-stock-${row.branchId}`}
+                value={{ supplierId: row.supplierId, supplierName: row.supplierName }}
+                onChange={(next) => onChange({ supplierId: next.supplierId, supplierName: next.supplierName })}
+                tr={(key, fallbackEn, fallbackKm) => T(key, fallbackEn ?? key, fallbackKm)}
+                lockedName={lotAttributedName}
+                hint={selectedLot && !lotAttributedName
+                  ? T('supplier_will_fill_lot', 'This lot has no supplier yet — your choice will be recorded on it.', 'ឡូតនេះមិនទាន់មានអ្នកផ្គត់ផ្គង់ — ជម្រើសរបស់អ្នកនឹងត្រូវកត់ត្រាលើវា។')
+                  : null}
+              />
             </div>
           ) : null}
         </div>

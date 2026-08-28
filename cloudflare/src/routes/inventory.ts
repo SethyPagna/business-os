@@ -1215,6 +1215,16 @@ app.post('/adjust', async (c) => {
   const rawReceivedDate = body.receivedDate != null && String(body.receivedDate).trim() !== '' ? String(body.receivedDate).trim() : null
   const receivedDate = rawReceivedDate ? normalizeToIsoDate(rawReceivedDate) : null
   if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (mm/dd/yyyy)' }, 400)
+  // D5a: supplier attribution for the lot this add creates or fills.
+  // camelCase keys like the rest of THIS route's body (receivedDate,
+  // batchId...); coerced with the same rules as POST /api/batches so the
+  // two receive wires stay one semantic. receiveBatchStock itself enforces
+  // first-attribution-sticks (create sets, top-up only COALESCE-fills), so
+  // nothing here can rewrite an attributed lot. Name is required alongside
+  // id by the writer's own gate (it keys the fill on a non-empty name);
+  // the pickers always send both. Ignored for 'remove'.
+  const supplierId = Number.isSafeInteger(Number(body.supplierId)) && Number(body.supplierId) > 0 ? Number(body.supplierId) : null
+  const supplierName = body.supplierName != null ? String(body.supplierName).trim() || null : null
   // `unlockPricing` is an explicit flag from the frontend, not inferred by
   // diffing -- see InventoryStockModals.tsx's "Lock current pricing"
   // toggle. Locked (the default) skips the identity lookup below entirely
@@ -1385,6 +1395,11 @@ app.post('/adjust', async (c) => {
         // explicit-batchId top-up keeps the lot's own received_at (first
         // attribution sticks, enforced inside receiveBatchStock).
         receivedDate,
+        // D5a: attribution for the created lot, or a fill where the topped-
+        // up lot's supplier is still NULL -- never a rewrite (COALESCE
+        // inside receiveBatchStock).
+        supplierId,
+        supplierName,
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId

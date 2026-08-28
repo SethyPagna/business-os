@@ -44,6 +44,15 @@ export type ProductBatchRow = {
   is_active: number
   quantity: number
   batch_number: number | null
+  // D5a: the lot's supplier attribution rides with every list read so the
+  // add-stock pickers can mirror first-attribution-sticks -- an attributed
+  // lot shows its supplier read-only, an unattributed one offers the
+  // picker (a choice there FILLS the blank, see receiveBatchStock's
+  // COALESCE). Name-only rule: routes/batches.ts already lets the K6
+  // image-only grant see supplier names; money terms are stripped there,
+  // not here.
+  supplier_id: number | null
+  supplier_name: string | null
 }
 
 function normalizeLotCode(lotCode: string | null | undefined): string | null {
@@ -124,6 +133,8 @@ export async function listBatchesForProduct(
       pb.notes AS notes,
       pb.is_active AS is_active,
       pb.batch_number AS batch_number,
+      pb.supplier_id AS supplier_id,
+      pb.supplier_name AS supplier_name,
       COALESCE(bbs.quantity, 0) AS quantity
     FROM product_batches pb
     LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId

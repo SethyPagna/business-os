@@ -18,6 +18,7 @@ import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.
 // omitted on 'remove' FIFO-drains oldest batches first) and makes that
 // behavior visible/confirmable instead of leaving it silent.
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
+import SupplierPickerField from '../../shared/SupplierPickerField.tsx'
 import { dateToBatchCode } from '../../../utils/batchCode.ts'
 
 const BULK_ADD_STOCK_MUTATION_TIMEOUT_MS = 12000
@@ -74,6 +75,8 @@ type AdjustStockPayload = {
   userId?: number | string
   userName?: string
   receivedDate?: string
+  supplierId?: number
+  supplierName?: string
 }
 
 type ApiResult = {
@@ -147,6 +150,13 @@ export default function BulkAddStockModal({ productIds, products, branches, user
   // server's date->code matching per product exactly as a picker's "New
   // batch" does, so late bulk stock-ins land with their real date.
   const [receivedDate, setReceivedDate] = useState(todayIsoDate())
+  // D5a: one supplier for the whole bulk receive event -- every lot this
+  // add creates gets it; a lot that already has a supplier keeps its own
+  // (COALESCE fill server-side, first attribution sticks). supplierId only
+  // ever comes from picking a contact suggestion; free text stays a
+  // deliberate name-only attribution.
+  const [supplierId, setSupplierId] = useState<number | null>(null)
+  const [supplierName, setSupplierName] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [reason, setReason] = useState('')
@@ -268,6 +278,9 @@ export default function BulkAddStockModal({ productIds, products, branches, user
             // Only an 'add' creates/matches lots -- same visibility-mirror
             // rule as every other adjust surface.
             receivedDate: action === 'add' && receivedDate ? receivedDate : undefined,
+            // D5a: adds only, mirroring the field's own visibility below.
+            supplierId: action === 'add' && supplierId != null ? supplierId : undefined,
+            supplierName: action === 'add' && supplierName.trim() ? supplierName.trim() : undefined,
           }), 'Bulk adjust product stock')
           if (result?.success === false) throw new Error(result?.error || 'Failed to adjust stock')
           done += 1
@@ -370,6 +383,18 @@ export default function BulkAddStockModal({ productIds, products, branches, user
               />
               <div className="mt-1 text-[11px] text-gray-400">
                 {t('batch_code_preview') || 'Batch code'}: {dateToBatchCode(receivedDate) || '--'}
+              </div>
+              {/* D5a: the same supplier picker every other add surface has.
+                  One choice for the whole bulk event; lots that already
+                  carry a supplier keep theirs (fill-only server-side). */}
+              <div className="mt-3">
+                <SupplierPickerField
+                  idPrefix="bulk-add-stock"
+                  value={{ supplierId, supplierName }}
+                  onChange={(next) => { setSupplierId(next.supplierId); setSupplierName(next.supplierName) }}
+                  tr={(key, fallbackEn, _fallbackKm) => { const value = t(key); return value && value !== key ? value : (fallbackEn ?? key) }}
+                  hint={t('supplier_bulk_hint') || 'Applies to every lot this bulk add creates or fills — lots that already have a supplier keep theirs.'}
+                />
               </div>
             </div>
           ) : null}
