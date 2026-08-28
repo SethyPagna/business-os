@@ -3,7 +3,7 @@ import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, hasAnyPermission } from '../lib/permissions'
+import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
 // Ported from backend/src/routes/notifications.ts. Note what this actually
 // is: there is no persisted "notifications" table with read/unread state --
@@ -605,16 +605,16 @@ app.get('/summary', async (c) => {
   // Supplier credit reminders (0065): admin-facing money obligations —
   // gated on inventory access like the other stock sections.
   if (preferences.supplierCreditEnabled && hasPermission(user, 'inventory')) tasks.push(buildSupplierCreditSection(c.env, preferences.supplierCreditDays))
-  // Device approve/reject notifications intentionally removed: the
-  // device-approval gate itself is fully disabled at login (see
-  // deviceTrust.ts's requiresDeviceApproval, which always returns false --
-  // an admin locked out with nobody left to approve them was worse than
-  // not gating at all), so an admin-only "devices waiting for approval"
-  // notification queue for a feature that no longer blocks anything is
-  // just an unwanted, unactionable nag. buildDeviceApprovalSection is kept
-  // in place, unused, the same way requiresDeviceApproval already was --
-  // in case a future ask reintroduces a real second approver for some
-  // other role.
+  // Device approvals: RE-REGISTERED (Part 382). The comment that used to
+  // live here said the login gate was "fully disabled" and this section was
+  // deliberately unused — that record was STALE: requiresDeviceApproval is
+  // live for every non-admin account (auth.ts calls it at login, and the
+  // Aug-28 3-device cap builds on it), and the Aug-28 clean-slate wiped all
+  // trusted devices, so every employee's next login sits PENDING until an
+  // admin approves it. Without this section, nothing surfaced those pending
+  // devices and people were silently locked out. Admin-control users only —
+  // they are the ones who can act on it.
+  if (isAdminControlUser(user)) tasks.push(buildDeviceApprovalSection(c.env))
 
   const results = await Promise.all(tasks)
   for (const section of results) if (section) sections.push(section)
