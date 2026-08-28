@@ -1,4 +1,5 @@
 import type { ClipboardEventHandler, ComponentType, Dispatch, SetStateAction } from 'react'
+import { buildLogoImageStyle } from './logoImageStyle'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -38,6 +39,7 @@ interface PreviewConfig {
   heroGradientStart?: string
   intro?: string
   faqTitle?: string
+  logoFit?: string
   logoPositionX?: number
   logoPositionY?: number
   logoSize?: number
@@ -665,8 +667,13 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   // surface below rather than layered on top of the image/gradient --
   // avoids the old full-bleed hero's white-text-on-photo legibility fight,
   // and reads closer to a modern profile page than a dashboard splash.
-  const bannerBackground = previewConfig.showCover && versionedBusinessCover
-    ? `linear-gradient(135deg, ${heroGradientStart}cc 0%, ${heroGradientMid}b3 55%, ${heroGradientEnd}cc 100%), url(${versionedBusinessCover})`
+  // 6.1 (user): with a cover set, the IMAGE stands alone -- no colour
+  // gradient laid over it -- and it backs the WHOLE about card, not just
+  // the top strip (the content below sits on a translucent surface for
+  // legibility). Without a cover, the brand gradient banner stays.
+  const hasCover = Boolean(previewConfig.showCover && versionedBusinessCover)
+  const bannerBackground = hasCover
+    ? `url(${versionedBusinessCover})`
     : `linear-gradient(135deg, ${heroGradientStart} 0%, ${heroGradientMid} 55%, ${heroGradientEnd} 100%)`
   const logoSizePx = Math.max(72, Number(previewConfig.logoSize || 80))
   const hasContactInfo = Boolean(businessFacts?.length || socialLinks?.length)
@@ -682,21 +689,22 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
         backgroundImage: `radial-gradient(circle at 15% 0%, ${heroGradientStart}14 0%, transparent 45%), radial-gradient(circle at 100% 20%, ${heroGradientEnd}12 0%, transparent 50%)`,
       }}
     >
-      <div className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900/88">
+      <div
+        className="overflow-hidden rounded-[32px] border border-slate-200/80 bg-white shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900/88"
+        style={hasCover ? { backgroundImage: bannerBackground, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+      >
         <div
           data-portal-about-hero="true"
           className="relative h-28 sm:h-44"
-          style={{
+          style={hasCover ? undefined : {
             backgroundColor: heroGradientStart,
             backgroundImage: bannerBackground,
             backgroundSize: 'cover',
             backgroundPosition: 'center',
           }}
-        >
-          <div className="absolute inset-0 bg-black/10 dark:bg-black/25" />
-        </div>
+        />
 
-        <div className="relative px-5 pb-5 sm:px-8 sm:pb-8">
+        <div className={`relative px-5 pb-5 sm:px-8 sm:pb-8 ${hasCover ? 'bg-white/90 backdrop-blur-sm dark:bg-neutral-900/85' : ''}`}>
           <div className="-mt-9 flex flex-wrap items-end gap-4 sm:-mt-12 sm:gap-5">
             <div
               className="flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-white shadow-[0_12px_28px_rgba(15,23,42,0.18)] dark:border-neutral-900"
@@ -713,10 +721,16 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
                     alt={previewConfig.businessName || copy('logoImage', 'Logo image')}
                     className="h-full w-full rounded-full"
                     style={{
-                      objectFit: 'cover',
-                      objectPosition: `${previewConfig.logoPositionX || 50}% ${previewConfig.logoPositionY || 50}%`,
-                      transform: `scale(${Math.max(1, Math.min(1.35, (previewConfig.logoZoom || 100) / 100))})`,
-                      transformOrigin: 'center',
+                      // With the top-bar logo gone (6.2) this hero IS the
+                      // live logo surface -- preview == applied runs
+                      // through the same shared math, not a hand-rolled
+                      // center-origin transform (the focus-slider bug).
+                      ...buildLogoImageStyle({
+                        fit: previewConfig.logoFit,
+                        zoom: previewConfig.logoZoom,
+                        positionX: previewConfig.logoPositionX,
+                        positionY: previewConfig.logoPositionY,
+                      }),
                     }}
                   />
                 </button>

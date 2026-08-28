@@ -1,5 +1,4 @@
 import { Suspense, useMemo, useState } from 'react'
-import { buildLogoImageStyle } from './logoImageStyle'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -150,7 +149,6 @@ export default function CatalogPreviewSurface({
   previewSectionRef,
   onBackToEditor,
   displayConfig,
-  versionedBusinessLogo,
   showBrandLabel,
   previewTitle,
   portalTabs,
@@ -286,37 +284,26 @@ export default function CatalogPreviewSurface({
             <section className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
                 <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="portal-logo-frame flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white sm:h-10 sm:w-10 dark:bg-neutral-100">
-                      {displayConfig.showLogo && versionedBusinessLogo ? (
-                        <button
-                          type="button"
-                          className="flex h-full w-full items-center justify-center overflow-hidden rounded-full bg-white"
-                          onClick={() => setPortalImageView({ open: true, title: displayConfig.businessName || copy('logoImage', 'Logo image'), images: [versionedBusinessLogo], index: 0 })}
+                  {/* 6.2 (user): the LOGO is out of the top bar -- it still
+                      lives on the About page hero. Social links take this
+                      side; language + light/dark sit on the far side. */}
+                  <div className="flex min-w-0 flex-wrap items-center gap-1">
+                    {headerLinks.map((item) => {
+                      const Icon = item.icon
+                      return (
+                        <a
+                          key={item.key}
+                          href={item.value}
+                          target="_blank"
+                          rel="noreferrer"
+                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 ${item.accentClassName || ''}`}
+                          aria-label={item.label}
+                          title={item.label}
                         >
-                          <img
-                            src={versionedBusinessLogo}
-                            alt={displayConfig.businessName}
-                            loading="eager"
-                            decoding="async"
-                            fetchPriority="high"
-                            className="h-full w-full rounded-full"
-                            style={{
-                              ...buildLogoImageStyle({
-                                fit: displayConfig.logoFit,
-                                zoom: displayConfig.logoZoom,
-                                positionX: displayConfig.logoPositionX,
-                                positionY: displayConfig.logoPositionY,
-                              }),
-                            }}
-                          />
-                        </button>
-                      ) : (
-                        <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">
-                          {String(displayConfig.businessName || 'B').slice(0, 2).toUpperCase()}
-                        </span>
-                      )}
-                    </div>
+                          <Icon className="h-[18px] w-[18px]" />
+                        </a>
+                      )
+                    })}
                     {!publicView ? (
                       <div className="hidden shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-700 sm:inline-flex dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                         {copy('previewBadge', 'Portal Studio')}
@@ -343,22 +330,6 @@ export default function CatalogPreviewSurface({
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-1">
-                    {headerLinks.map((item) => {
-                      const Icon = item.icon
-                      return (
-                        <a
-                          key={item.key}
-                          href={item.value}
-                          target="_blank"
-                          rel="noreferrer"
-                          className={`inline-flex h-9 w-9 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 ${item.accentClassName || ''}`}
-                          aria-label={item.label}
-                          title={item.label}
-                        >
-                          <Icon className="h-[18px] w-[18px]" />
-                        </a>
-                      )
-                    })}
                     {displayConfig.translateWidgetEnabled ? (
                       <LazyPortalMenu
                         align="right"

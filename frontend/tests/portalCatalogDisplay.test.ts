@@ -148,7 +148,12 @@ runTest('public portal About tab keeps the story on the right, the map full-widt
   assert.match(catalogSecondaryTabsSource, /the business story\/description on the right per the requested/, 'About tab facts\\/contact card should stay on the left and the story on the right')
   assert.match(catalogSecondaryTabsSource, /title="portal-about-map"/, 'About tab map should render as its own full-width section')
   assert.match(catalogSecondaryTabsSource, /onClick=\{\(\) => openPortalImage\(previewConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), \[versionedBusinessLogo\]\)\}/, 'About tab logo should open the image lightbox on click')
-  assert.match(catalogPreviewSurfaceSource, /onClick=\{\(\) => setPortalImageView\(\{ open: true, title: displayConfig\.businessName \|\| copy\('logoImage', 'Logo image'\), images: \[versionedBusinessLogo\], index: 0 \}\)\}/, 'Header logo should open the image lightbox on click')
+  // 6.2 (Part 399, user): the LOGO left the top bar entirely -- social
+  // links took its side, language + light/dark the other. The clickable
+  // logo lives on the About hero (pinned above); the header must carry
+  // NO logo frame at all.
+  assert.doesNotMatch(catalogPreviewSurfaceSource, /portal-logo-frame/, 'the top bar must not render a logo frame (6.2: logo removed from the header)')
+  assert.match(catalogPreviewSurfaceSource, /Social links take this\s*\n?\s*side; language \+ light\/dark sit on the far side/, "6.2's split must stay documented at the header cells")
 })
 
 runTest('shouldShowStockStatus defaults to shown and only hides on explicit false', () => {

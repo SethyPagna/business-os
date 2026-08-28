@@ -49,8 +49,11 @@ runTest('bad numeric input falls back rather than producing NaN', () => {
 
 runTest('both the editor preview and the live header render through the SAME helper', () => {
   const editor = fs.readFileSync(new URL('../src/components/catalog/CatalogEditorSurface.tsx', import.meta.url), 'utf8')
-  const surface = fs.readFileSync(new URL('../src/components/catalog/CatalogPreviewSurface.tsx', import.meta.url), 'utf8')
-  for (const [name, src] of [['editor', editor], ['live surface', surface]] as const) {
+  // 6.2 (Part 399): the top bar carries no logo any more -- the live logo
+  // surface is the About hero (CatalogSecondaryTabs), which must render
+  // through the same shared helper as the editor preview.
+  const surface = fs.readFileSync(new URL('../src/components/catalog/CatalogSecondaryTabs.tsx', import.meta.url), 'utf8')
+  for (const [name, src] of [['editor', editor], ['live surface (About hero)', surface]] as const) {
     assert.match(src, /buildLogoImageStyle\(/, `${name} must build its logo style via buildLogoImageStyle`)
     // Neither may reintroduce a hand-rolled transform-origin: center, which
     // is the exact bug that broke the focus sliders.
