@@ -892,13 +892,16 @@ deep-linkable tabs.*
 
 - [ ] K1. Server-level undo/redo (3.1) — appliers replay stored payloads; admin sees all,
   users see their own.
-- [~] K2 **[CLAIMED: session 6e — Part 410. Footprint: routes/returns.ts +
-  frontend Returns flow component + POS.tsx/posCore.ts + a shared
-  return-options kernel + pure/frontend tests; READS lib/productBatches.ts
-  but does not edit it (4a holds it for D5a) and stays out of
-  routes/inventory.ts (4a) and 05's import/backup lane. Order: 11.13
-  chooser (return stock-action options incl. damaged) → 11.12 Replace →
-  11.9 SP/VIP+damage POS picker.]** Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
+- [~] K2 **[session 6e — 11.13 + 11.12 SHIPPED as Part 410 (backend
+  14dc36d5 + UI): per-item three-way chooser (none/restock/damaged) on
+  create AND edit, damaged stock as traceable lots (damaged_stock_lots,
+  migration 0074) with consumed-lot edit blocking, Replace from
+  same-name stock drained the POS way with even-exchange default and
+  full-access-gated price-difference settlement, detail modal shows
+  actions + replacement lines. REMAINING (Part 411, still session 6e):
+  the 11.9 POS SP/VIP price picker + damage source option drawing from
+  damaged_stock_lots — footprint POS.tsx/posCore.ts + routes/sales.ts +
+  a sale_items.damaged_lot_id migration.]** Returns Replace + damaged-stock chooser (11.12/11.13) and the POS SP/VIP/damage
   picker rest of 11.9. **Elevated Aug 28 — "for POS, focus on batches and various
   options":** the POS picking flow leads with the BATCH (lot, received/expiry) and a
   clear Selling-vs-VIP price choice per line; damaged stock joins as an option once

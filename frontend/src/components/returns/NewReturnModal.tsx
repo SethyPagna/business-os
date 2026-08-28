@@ -1,5 +1,6 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { createPortal } from 'react-dom'
 import { useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
@@ -12,6 +13,9 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
+import { searchProducts } from '../../api/methods.ts'
+import { STOCK_ACTION_OPTIONS, computeSettlementPreview, describeBatchOption, stockActionOption, type ReturnStockAction } from './helpers/returnOptions.ts'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 const RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 10000
@@ -49,6 +53,32 @@ interface SaleReturnItem extends SaleItemRow {
   returnQty: number
   included: boolean
   return_to_stock: boolean
+  // 11.13: the ONE per-item chooser -- what happens to this item's stock.
+  // return_to_stock stays derived from it (restock <=> true) for the wire.
+  stock_action: ReturnStockAction
+}
+
+// 11.12 Replace: a line handed to the customer from SAME-NAME stock,
+// chosen the POS way (row of the group + branch + optional exact lot).
+interface ReplacementCandidate {
+  id: number | string
+  name?: string | null
+  barcode?: string | null
+  selling_price_usd?: number | string | null
+  selling_price_khr?: number | string | null
+}
+
+interface ReplacementLine {
+  key: string
+  product_id: number | string
+  product_name: string
+  branch_id: number | string | null
+  batch_id: number | null
+  batches: ProductBatch[]
+  candidates: ReplacementCandidate[]
+  quantity: number
+  price_usd: number
+  price_khr: number
 }
 
 interface SaleRow {
@@ -94,6 +124,7 @@ interface ReturnCreatePayload extends Record<string, unknown> {
     cost_price_usd: number
     cost_price_khr: number
     return_to_stock: boolean
+    stock_action: ReturnStockAction
     branch_id: number | string | null
   }>
 }
@@ -110,6 +141,7 @@ type ReturnedQuantityMap = Record<string, number>
 const useApp = useAppHook as () => {
   user?: AppUser | null
   t?: TranslateFn
+  getPermissionTier?: (key: string) => string
 }
 
 type SalesTransportModule = typeof import('../../api/salesTransport.ts')
@@ -168,7 +200,7 @@ function getSaleItemKey(item: SaleItemRow): string {
 }
 
 export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: NewReturnModalProps) {
-  const { user, t } = useApp()
+  const { user, t, getPermissionTier } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
     return value && value !== key ? value : fallback
@@ -199,6 +231,74 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
   const searchRequestRef = useRef(0)
   const searchInFlightRef = useRef(false)
   const submitInFlightRef = useRef(false)
+  const [replacements, setReplacements] = useState<ReplacementLine[]>([])
+  const [settleDifference, setSettleDifference] = useState(false)
+  // Locked note: "Non-default price adjustment requires full access and an
+  // explicit preview" -- the checkbox below IS the explicit preview, and
+  // it only unlocks for Full Access to Returns.
+  const canSettleDifference = getPermissionTier?.('returns') === 'full'
+  const normName = (value: unknown) => String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+
+  const loadReplacementBatches = async (lineKey: string, productId: number | string, branchId: number | string | null) => {
+    if (!branchId) return
+    try {
+      const { batches } = await getProductBatches(productId, branchId, true)
+      setReplacements((prev) => prev.map((line) => line.key === lineKey
+        ? { ...line, batches: (Array.isArray(batches) ? batches : []).filter((batch) => (Number(batch.quantity) || 0) > 0) }
+        : line))
+    } catch { /* the lot picker is a nicety -- "any stock" still works */ }
+  }
+
+  const addReplacementFor = async (item: SaleReturnItem) => {
+    if (!item.product_id) return
+    const name = String(item.product_name || item.name || '').trim()
+    const branchId = item.branch_id || foundSale?.branch_id || null
+    const key = `rep_${item.product_id}_${Date.now()}`
+    setReplacements((prev) => [...prev, {
+      key,
+      product_id: item.product_id as number | string,
+      product_name: name,
+      branch_id: branchId,
+      batch_id: null,
+      batches: [],
+      candidates: [],
+      quantity: item.returnQty || 1,
+      // seeding with the SAME row at the price the customer paid keeps the
+      // default an even exchange; picking a different row of the group
+      // switches to that row's own price (a real gap worth surfacing)
+      price_usd: toNumber(item.applied_price_usd),
+      price_khr: toNumber(item.applied_price_khr),
+    }])
+    void loadReplacementBatches(key, item.product_id, branchId)
+    try {
+      const payload = await searchProducts({ query: name, pageSize: 20 }) as { items?: ReplacementCandidate[] }
+      const rows = (Array.isArray(payload?.items) ? payload.items : []).filter((row) => normName(row.name) === normName(name))
+      setReplacements((prev) => prev.map((line) => line.key === key ? { ...line, candidates: rows } : line))
+    } catch { /* same-row replacement still works without the sibling list */ }
+  }
+
+  const pickReplacementRow = (lineKey: string, candidate: ReplacementCandidate) => {
+    let branchForBatches: number | string | null = null
+    setReplacements((prev) => prev.map((line) => {
+      if (line.key !== lineKey) return line
+      branchForBatches = line.branch_id
+      return {
+        ...line,
+        product_id: candidate.id,
+        product_name: String(candidate.name || line.product_name),
+        batch_id: null,
+        batches: [],
+        price_usd: toNumber(candidate.selling_price_usd),
+        price_khr: toNumber(candidate.selling_price_khr),
+      }
+    }))
+    void loadReplacementBatches(lineKey, candidate.id, branchForBatches || foundSale?.branch_id || null)
+  }
+
+  const updateReplacement = (lineKey: string, patch: Partial<ReplacementLine>) => {
+    setReplacements((prev) => prev.map((line) => line.key === lineKey ? { ...line, ...patch } : line))
+  }
+  const removeReplacement = (lineKey: string) => setReplacements((prev) => prev.filter((line) => line.key !== lineKey))
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
@@ -247,7 +347,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
           const key = getSaleItemKey(item)
           const alreadyQty = alreadyReturned[key] || 0
           const remaining = Math.max(0, toNumber(item.quantity) - alreadyQty)
-          return { ...item, alreadyQty, remaining, returnQty: 0, included: remaining > 0, return_to_stock: true }
+          return { ...item, alreadyQty, remaining, returnQty: 0, included: remaining > 0, return_to_stock: true, stock_action: 'restock' as ReturnStockAction }
         }))
         setStep('items')
       } else {
@@ -267,7 +367,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
 
   const handleReturnTypeChange = (v: ReturnType) => {
     setReturnType(v)
-    setSelectedItems((prev) => prev.map((it) => ({ ...it, return_to_stock: v === 'restock' })))
+    const action: ReturnStockAction = v === 'restock' ? 'restock' : 'none'
+    setSelectedItems((prev) => prev.map((it) => ({ ...it, return_to_stock: action === 'restock', stock_action: action })))
   }
 
   const toggleIncluded = (idx: number) => {
@@ -286,23 +387,32 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     ))
   }
 
-  const updateItemRestock = (idx: number, val: boolean) => {
-    setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, return_to_stock: !!val } : it))
+  const updateItemAction = (idx: number, action: ReturnStockAction) => {
+    setSelectedItems((prev) => prev.map((it, i) => i === idx ? { ...it, stock_action: action, return_to_stock: action === 'restock' } : it))
   }
 
   const selectAll = () => setSelectedItems((prev) => prev.map((it) =>
-    it.remaining > 0 ? { ...it, included: true, returnQty: it.remaining, return_to_stock: returnType === 'restock' } : it
+    it.remaining > 0 ? { ...it, included: true, returnQty: it.remaining, return_to_stock: returnType === 'restock', stock_action: (returnType === 'restock' ? 'restock' : 'none') as ReturnStockAction } : it
   ))
   const clearAll  = () => setSelectedItems((prev) => prev.map((it) => ({ ...it, included: false, returnQty: 0 })))
 
   const activeItems    = selectedItems.filter((it) => it.included && (it.returnQty || 0) > 0)
   const totalRefund    = activeItems.reduce((s, it) => s + toNumber(it.applied_price_usd) * it.returnQty, 0)
   const totalRefundKhr = activeItems.reduce((s, it) => s + toNumber(it.applied_price_khr) * it.returnQty, 0)
+  const replacementTotalUsd = replacements.reduce((s, line) => s + line.price_usd * line.quantity, 0)
+  const replacementTotalKhr = replacements.reduce((s, line) => s + line.price_khr * line.quantity, 0)
+  // Mirrors the backend kernel's math exactly -- the preview and the
+  // server's verdict can never disagree.
+  const settlementPreview = computeSettlementPreview({ returnedTotalUsd: totalRefund, returnedTotalKhr: totalRefundKhr, replacementTotalUsd, replacementTotalKhr })
   const finalReason    = reason === OTHER_LABEL ? customReason.trim() : reason
 
   const handleSubmit = async () => {
     if (!activeItems.length) { notify(T('select_items_to_return','Select at least one item to return.'), 'error'); return }
     if (!finalReason) { notify(T('return_reason','Please provide a return reason.'), 'error'); return }
+    if (replacements.length && !settlementPreview.isEven && !settleDifference) {
+      notify(T('uneven_exchange_blocked', 'This is not an even exchange -- tick "Settle this price difference" (Full Access) or match the totals.'), 'error')
+      return
+    }
     if (!beginSingleAction(submitInFlightRef)) return
     setSubmitting(true)
     try {
@@ -330,8 +440,21 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
             cost_price_usd:    toNumber(it.cost_price_usd),
             cost_price_khr:    toNumber(it.cost_price_khr || it.purchase_price_khr),
             return_to_stock:   it.return_to_stock !== false,
+            stock_action:      it.stock_action,
             branch_id:         it.branch_id || foundSale?.branch_id || null,
           })),
+          ...(replacements.length ? {
+            replacement_items: replacements.map((line) => ({
+              product_id: line.product_id,
+              product_name: line.product_name,
+              branch_id: line.branch_id,
+              batch_id: line.batch_id,
+              quantity: line.quantity,
+              applied_price_usd: line.price_usd,
+              applied_price_khr: line.price_khr,
+            })),
+            settlement_mode: settlementPreview.isEven ? 'even_exchange' : 'price_difference',
+          } : {}),
         }),
         'Create return',
         RETURN_CREATE_TIMEOUT_MS,
@@ -362,7 +485,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
     if (!submitting) onClose()
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeIfIdle}>
       <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-modal-92 flex flex-col" onClick={e => e.stopPropagation()}>
 
@@ -522,20 +645,37 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                             )}
                           </div>
                           {isIncluded && (
-                            <div className="mt-2 pl-8 flex items-center justify-between">
-                              <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                                <input type="checkbox"
-                                  checked={item.return_to_stock !== false}
-                                  onChange={e => updateItemRestock(idx, e.target.checked)}
-                                  className="rounded accent-blue-600" />
-                                <span className="text-gray-600 dark:text-gray-400">{T('return_type_restock','Return to stock')}</span>
-                                {item.return_to_stock === false && (
-                                  <span className="text-orange-500 dark:text-orange-400 text-[10px]">({T('return_type_writeoff','write-off')})</span>
-                                )}
-                              </label>
-                              <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
-                                {fmtUSD(toNumber(item.applied_price_usd) * (item.returnQty || 0))}
-                              </span>
+                            <div className="mt-2 pl-8 space-y-1.5">
+                              {/* 11.13: the ONE chooser -- each option says what
+                                  happens to this item's stock */}
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex flex-wrap gap-1">
+                                  {STOCK_ACTION_OPTIONS.map((option) => (
+                                    <button key={option.value} type="button"
+                                      onClick={() => updateItemAction(idx, option.value)}
+                                      title={T(option.descKey, option.descEn)}
+                                      className={`rounded-lg border px-2 py-1 text-[11px] transition-colors ${item.stock_action === option.value
+                                        ? 'border-blue-500 bg-blue-100/70 font-semibold text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300'
+                                        : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-600 dark:text-gray-400'}`}>
+                                      {option.icon} {T(option.labelKey, option.labelEn)}
+                                    </button>
+                                  ))}
+                                </div>
+                                <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 flex-shrink-0">
+                                  {fmtUSD(toNumber(item.applied_price_usd) * (item.returnQty || 0))}
+                                </span>
+                              </div>
+                              {item.stock_action === 'damaged' && (
+                                <div className="text-[10px] text-orange-500 dark:text-orange-400">
+                                  {T('stock_action_damaged_hint', 'Tracked as a damaged lot tied to this return — kept out of sellable stock.')}
+                                </div>
+                              )}
+                              {item.product_id ? (
+                                <button type="button" onClick={() => void addReplacementFor(item)}
+                                  className="text-[11px] text-emerald-600 hover:underline dark:text-emerald-400">
+                                  🔁 {T('add_replacement', 'Hand out a replacement for this item')}
+                                </button>
+                              ) : null}
                             </div>
                           )}
                         </div>
@@ -558,6 +698,76 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
               {selectedItems.length === 0 && (
                 <div className="text-sm text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 text-center">
                   {T('manual_return','No sale items linked. This will be recorded as a manual return.')}
+                </div>
+              )}
+
+              {/* 11.12 Replace: same-name stock handed out with the return,
+                  chosen the POS way (row of the group + exact lot), with the
+                  settlement preview the backend will enforce. */}
+              {replacements.length > 0 && (
+                <div>
+                  <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
+                    🔁 {T('replacement_items_label','Replacement items (same-name stock)')}
+                  </label>
+                  <div className="space-y-2">
+                    {replacements.map((line) => (
+                      <div key={line.key} className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2 dark:border-emerald-800 dark:bg-emerald-900/10">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 truncate text-sm font-medium text-gray-800 dark:text-gray-200">{line.product_name}</div>
+                          <button type="button" onClick={() => removeReplacement(line.key)} className="flex-shrink-0 text-xs text-red-500 hover:underline">{T('remove','Remove')}</button>
+                        </div>
+                        {line.candidates.length > 1 && (
+                          <AppSelect
+                            value={String(line.product_id)}
+                            onChange={(next) => { const candidate = line.candidates.find((row) => String(row.id) === next); if (candidate) pickReplacementRow(line.key, candidate) }}
+                            ariaLabel={T('replacement_row','Which row of the group')}
+                            className="w-full"
+                            buttonClassName="h-9 w-full text-xs"
+                            optionClassName="text-xs"
+                            options={line.candidates.map((row) => ({ value: String(row.id), label: `${row.name}${row.barcode ? ` · ${row.barcode}` : ''} · ${fmtUSD(toNumber(row.selling_price_usd))}` }))}
+                          />
+                        )}
+                        <div className="flex items-center gap-2">
+                          <AppSelect
+                            value={line.batch_id != null ? String(line.batch_id) : ''}
+                            onChange={(next) => updateReplacement(line.key, { batch_id: next ? Number(next) : null })}
+                            ariaLabel={T('batch','Batch')}
+                            className="flex-1 min-w-0"
+                            buttonClassName="h-9 w-full text-xs"
+                            optionClassName="text-xs"
+                            options={[{ value: '', label: T('any_stock','Any stock (no specific lot)') },
+                              ...line.batches.map((batch) => ({ value: String(batch.id), label: describeBatchOption(batch) }))]}
+                          />
+                          <input type="number" min="1" step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"
+                            aria-label={T('quantity','Quantity')}
+                            value={line.quantity}
+                            onChange={(e) => updateReplacement(line.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
+                          <span className="w-16 flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(line.price_usd * line.quantity)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className={`mt-2 rounded-lg border px-3 py-2 text-sm ${settlementPreview.isEven
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300'
+                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-300'}`}>
+                    {settlementPreview.isEven ? (
+                      <span>✓ {T('even_exchange','Even exchange')} — {T('even_exchange_desc','replacement value equals the returned value; no money moves.')}</span>
+                    ) : (
+                      <div className="space-y-1">
+                        <div>
+                          {settlementPreview.diffUsd > 0
+                            ? `${T('customer_owes','Customer pays the difference')}: ${fmtUSD(settlementPreview.diffUsd)}`
+                            : `${T('shop_refunds','Shop refunds the difference')}: ${fmtUSD(Math.abs(settlementPreview.diffUsd))}`}
+                        </div>
+                        <label className={`flex items-center gap-2 text-xs ${canSettleDifference ? 'cursor-pointer' : 'opacity-60'}`}>
+                          <input type="checkbox" className="rounded accent-amber-600" checked={settleDifference}
+                            disabled={!canSettleDifference}
+                            onChange={(e) => setSettleDifference(e.target.checked)} />
+                          <span>{T('settle_difference','Settle this price difference')}{canSettleDifference ? '' : ` (${T('requires_full_access','requires Full Access to Returns')})`}</span>
+                        </label>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -620,8 +830,14 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                   {activeItems.filter(it => it.return_to_stock !== false).length > 0 && (
                     <div>↩️ {activeItems.filter(it => it.return_to_stock !== false).length} {T('restocked','will be restocked')}</div>
                   )}
-                  {activeItems.filter(it => it.return_to_stock === false).length > 0 && (
-                    <div>🗑 {activeItems.filter(it => it.return_to_stock === false).length} {T('written_off','will NOT restock')}</div>
+                  {activeItems.filter(it => it.stock_action === 'none').length > 0 && (
+                    <div>🚫 {activeItems.filter(it => it.stock_action === 'none').length} {T('written_off','will NOT restock')}</div>
+                  )}
+                  {activeItems.filter(it => it.stock_action === 'damaged').length > 0 && (
+                    <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
+                  )}
+                  {replacements.length > 0 && (
+                    <div>🔁 {replacements.length} {T('replacement_items_short','replacement item(s) handed out')} — {settlementPreview.isEven ? T('even_exchange','even exchange') : T('price_difference','price difference')}</div>
                   )}
                 </div>
               </div>
@@ -632,7 +848,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                     <div className="flex-1 min-w-0 mr-2">
                       <span className="text-gray-700 dark:text-gray-300 truncate block">{it.product_name || it.name}</span>
                       <span className="text-[10px] text-gray-400">
-                        {it.return_to_stock !== false ? `↩️ ${T('return_type_restock','restock')}` : `🗑 ${T('return_type_writeoff','write-off')}`}
+                        {stockActionOption(it.stock_action).icon} {T(stockActionOption(it.stock_action).labelKey, stockActionOption(it.stock_action).labelEn)}
                         {' · '}{T('quantity','qty')} {it.returnQty}
                       </span>
                     </div>
@@ -647,6 +863,21 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
                 </div>
               </div>
 
+              {replacements.length > 0 && (
+                <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
+                  {replacements.map((line) => (
+                    <div key={line.key} className="flex justify-between py-1 text-sm">
+                      <span className="mr-2 truncate text-gray-700 dark:text-gray-300">🔁 {line.product_name} × {line.quantity}</span>
+                      <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.price_usd * line.quantity)}</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
+                    <span>{settlementPreview.isEven ? T('even_exchange','Even exchange') : T('price_difference','Price difference')}</span>
+                    <span>{settlementPreview.isEven ? '±0' : (settlementPreview.diffUsd > 0 ? '+' : '−') + fmtUSD(Math.abs(settlementPreview.diffUsd))}</span>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-2 pt-1">
                 <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
                 <button onClick={handleSubmit} disabled={submitting}
@@ -658,6 +889,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify }: N
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

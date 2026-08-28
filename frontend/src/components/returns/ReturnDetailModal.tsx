@@ -1,6 +1,8 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { fmtTime } from '../../utils/formatters.ts'
+import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
 
 const CUSTOMER_SCOPE = 'customer'
 const SUPPLIER_SCOPE = 'supplier'
@@ -10,6 +12,16 @@ type ReturnScope = typeof CUSTOMER_SCOPE | typeof SUPPLIER_SCOPE
 interface ReturnLineItem {
   id?: string | number | null
   product_id?: string | number | null
+  product_name?: string | null
+  quantity?: number | string | null
+  total_usd?: number | string | null
+  total_khr?: number | string | null
+  stock_action?: string | null
+  return_to_stock?: boolean | number | null
+}
+
+interface ReplacementLineItem {
+  id?: string | number | null
   product_name?: string | null
   quantity?: number | string | null
   total_usd?: number | string | null
@@ -36,6 +48,9 @@ interface ReturnDetail {
   supplier_loss_khr?: number | string | null
   total_refund_usd?: number | string | null
   total_refund_khr?: number | string | null
+  replacement_items?: ReplacementLineItem[] | null
+  settlement_mode?: string | null
+  settlement_diff_usd?: number | string | null
 }
 
 interface ReturnDetailModalProps {
@@ -71,6 +86,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
 
   if (!ret) return null
   const items = Array.isArray(ret.items) ? ret.items : []
+  const replacementItems = Array.isArray(ret.replacement_items) ? ret.replacement_items : []
   const scope = normalizeScope(ret.return_scope)
   const isSupplier = scope === SUPPLIER_SCOPE
 
@@ -78,7 +94,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
     ? (ret.supplier_settlement || tr('settlement_refund', 'refund'))
     : (ret.return_type || tr('manual_return', 'manual'))
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div className="flex max-h-modal-90 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -143,7 +159,13 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
                 <div key={`${item.id || item.product_id || 'item'}-${index}`} className="flex items-start justify-between gap-2 border-b border-gray-100 py-2 last:border-0 dark:border-gray-700">
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-gray-800 dark:text-gray-200">{item.product_name || '-'}</div>
-                    <div className="text-xs text-gray-400">{tr('quantity', 'Qty')}: {item.quantity || 0}</div>
+                    <div className="text-xs text-gray-400">
+                      {tr('quantity', 'Qty')}: {item.quantity || 0}
+                      {!isSupplier ? (() => {
+                        const option = stockActionOption(normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }))
+                        return <span className="ml-2">{option.icon} {tr(option.labelKey, option.labelEn)}</span>
+                      })() : null}
+                    </div>
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-semibold text-gray-900 dark:text-white">{fmtUSD(coerceMoney(item.total_usd))}</div>
@@ -153,6 +175,28 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
               ))}
             </div>
           </div>
+
+          {replacementItems.length > 0 ? (
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                🔁 {tr('replacement_items_label', 'Replacements handed out')} ({replacementItems.length})
+              </div>
+              <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
+                {replacementItems.map((line, index) => (
+                  <div key={`${line.id || 'replacement'}-${index}`} className="flex justify-between py-1 text-sm">
+                    <span className="mr-2 truncate text-gray-700 dark:text-gray-300">{line.product_name || '-'} × {line.quantity || 0}</span>
+                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(coerceMoney(line.total_usd))}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
+                  <span>{ret.settlement_mode === 'price_difference' ? tr('price_difference', 'Price difference') : tr('even_exchange', 'Even exchange')}</span>
+                  <span>{ret.settlement_mode === 'price_difference'
+                    ? (Number(ret.settlement_diff_usd || 0) > 0 ? '+' : '−') + fmtUSD(Math.abs(Number(ret.settlement_diff_usd || 0)))
+                    : '±0'}</span>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {isSupplier ? (
             <div className="rounded-xl bg-gray-50 p-3 dark:bg-gray-700/40">
@@ -181,6 +225,7 @@ export default function ReturnDetailModal({ ret, onClose, onEdit, fmtUSD, fmtKHR
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -1,9 +1,11 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { createPortal } from 'react-dom'
 import { useRef, useState, type ChangeEvent, type MouseEvent } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { getLoaderErrorMessage, withLoaderTimeout } from '../../utils/loaders.ts'
+import { STOCK_ACTION_OPTIONS, normalizeStockAction, type ReturnStockAction } from './helpers/returnOptions.ts'
 
 const RETURN_UPDATE_TIMEOUT_MS = 15000
 
@@ -30,6 +32,9 @@ interface EditableReturnItem {
   cost_price_usd?: number | string | null
   cost_price_khr?: number | string | null
   return_to_stock?: boolean | null
+  // 11.13: three-way chooser state; seeded from the stored row (or the
+  // legacy boolean) by normalizeStockAction.
+  stock_action?: ReturnStockAction
   branch_id?: number | string | null
 }
 
@@ -63,6 +68,7 @@ interface ReturnUpdatePayload extends Record<string, unknown> {
     cost_price_usd: number
     cost_price_khr: number
     return_to_stock: boolean
+    stock_action: ReturnStockAction
     branch_id: number | string | null
   }>
 }
@@ -140,7 +146,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   const [returnType,   setReturnType]   = useState<ReturnType>(ret.return_type || 'restock')
   const [notes,        setNotes]        = useState(ret.notes || '')
   const [items,        setItems]        = useState<EditableReturnItem[]>(
-    existingItems.map((item) => ({ ...item, returnQty: toNumber(item.quantity) })),
+    existingItems.map((item) => ({ ...item, returnQty: toNumber(item.quantity), stock_action: normalizeStockAction(item as { stock_action?: unknown; return_to_stock?: unknown }) })),
   )
   const [submitting,   setSubmitting]   = useState(false)
   const submitInFlightRef = useRef(false)
@@ -151,8 +157,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
   const updateQty     = (idx: number, qty: unknown) => setItems(prev => prev.map((it, i) =>
     i === idx ? { ...it, returnQty: clampReturnQuantity(qty, toNumber(it.quantity)) } : it
   ))
-  const updateRestock = (idx: number, val: boolean) => setItems(prev => prev.map((it, i) =>
-    i === idx ? { ...it, return_to_stock: val } : it
+  const updateAction = (idx: number, action: ReturnStockAction) => setItems(prev => prev.map((it, i) =>
+    i === idx ? { ...it, stock_action: action, return_to_stock: action === 'restock' } : it
   ))
 
   const activeItems    = items.filter(it => it.returnQty > 0)
@@ -182,6 +188,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           cost_price_usd:    toNumber(it.cost_price_usd),
           cost_price_khr:    toNumber(it.cost_price_khr),
           return_to_stock:   it.return_to_stock !== false,
+          stock_action:      it.stock_action || 'restock',
           branch_id:         it.branch_id || ret.branch_id || null,
         })),
       }
@@ -217,7 +224,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     if (!submitting) onClose()
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={closeIfIdle}>
       <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg max-h-modal-92 flex flex-col" onClick={(event: MouseEvent<HTMLDivElement>) => event.stopPropagation()}>
 
@@ -248,7 +255,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
                 ['refund',   T('return_type_refund','💰 Refund Only'),  T('return_type_refund_desc','Money back, no stock change')],
               ].map(([v, label, desc]) => (
                 <button key={v}
-                  onClick={() => { setReturnType(v); setItems(prev => prev.map(it => ({ ...it, return_to_stock: v === 'restock' }))) }}
+                  onClick={() => { setReturnType(v); setItems(prev => prev.map(it => ({ ...it, return_to_stock: v === 'restock', stock_action: (v === 'restock' ? 'restock' : 'none') as ReturnStockAction }))) }}
                   className={`p-2 rounded-xl border-2 text-left text-xs transition-colors ${returnType === v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
                   <div className={`font-semibold ${returnType === v ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>{label}</div>
                   <div className="text-gray-400 mt-0.5">{desc}</div>
@@ -289,18 +296,21 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
                         </div>
                       </div>
                       {isActive && (
-                        <div className="mt-2 flex items-center justify-between">
-                          <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
-                            <input type="checkbox"
-                              checked={item.return_to_stock !== false}
-                              onChange={(event: ChangeEvent<HTMLInputElement>) => updateRestock(idx, event.target.checked)}
-                              className="rounded accent-blue-600" />
-                            <span className="text-gray-600 dark:text-gray-400">{T('return_type_restock','Return to stock')}</span>
-                            {item.return_to_stock === false && (
-                              <span className="text-orange-500 dark:text-orange-400 text-[10px]">({T('return_type_writeoff','write-off')})</span>
-                            )}
-                          </label>
-                          <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          {/* 11.13: the same ONE chooser the create flow uses */}
+                          <div className="flex flex-wrap gap-1">
+                            {STOCK_ACTION_OPTIONS.map((option) => (
+                              <button key={option.value} type="button"
+                                onClick={() => updateAction(idx, option.value)}
+                                title={T(option.descKey, option.descEn)}
+                                className={`rounded-lg border px-2 py-1 text-[11px] transition-colors ${item.stock_action === option.value
+                                  ? 'border-blue-500 bg-blue-100/70 font-semibold text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300'
+                                  : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-600 dark:text-gray-400'}`}>
+                                {option.icon} {T(option.labelKey, option.labelEn)}
+                              </button>
+                            ))}
+                          </div>
+                          <span className="flex-shrink-0 text-xs font-semibold text-blue-600 dark:text-blue-400">
                             {fmtUSD(toNumber(item.applied_price_usd) * item.returnQty)}
                           </span>
                         </div>
@@ -365,6 +375,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

@@ -9691,3 +9691,56 @@ productDisplayHelpers pass individually, frontend tsc clean, vite build
 sessions were mid-build in the same checkout (dev servers lock
 node_modules, the standing trap); the change is a static JSX-structure
 merge with the surrounding logic untouched.
+
+## Part 410 (chat, Aug 28 2026) -- K2 (11.13 + 11.12): the return chooser and Replace
+
+**11.13 -- one chooser, stock action per option.** Every customer-return
+item now carries `stock_action`: 'none' | 'restock' | 'damaged'
+(migration 0074; the return_to_stock boolean stays wire-compatible and in
+step). The per-item checkbox in New/Edit Return became a three-button
+chooser; the bulk Handling Method buttons set defaults.
+
+- **Damaged stock is traceable lots** (locked design note): a 'damaged'
+  item creates a `damaged_stock_lots` row tied to the exact return,
+  branch, and original sale batch -- NEVER sellable branch_stock, no
+  duplicate "damaged" product rows -- plus damage_in / damage_reversal
+  entries in the product's movement trail. `quantity_remaining` is what
+  POS's damage option (11.9, next part) may draw down; once any of a
+  lot was drawn, editing the return that created it is refused outright
+  (ConsumedDamagedStockError) -- that stock left the building.
+- **11.12 Replace:** replacement lines hand out SAME-NAME stock (the
+  name_key gate -- a different product is a refund plus a new sale),
+  drained the POS way: an explicit lot via removeStockFromBatch (all
+  three stock stores in step), otherwise a validated plain decrement,
+  with replacement_out movements. Settlement: 'even_exchange' (default,
+  only legal at a zero value gap) or 'price_difference' (full access
+  only; signed gap stored, positive = customer owes). Editing the
+  returned side later recomputes the gap against the recorded
+  replacement lines and refuses to silently break an even exchange.
+- **UI:** NewReturnModal gains per-line "hand out a replacement" -> a
+  Replace card (sibling-row picker from the name group at each row's own
+  price, lot picker via getProductBatches, quantity) and a live
+  settlement banner that mirrors the backend math exactly (shared
+  thresholds pinned by test); the explicit "Settle this price
+  difference" tick only unlocks for Full Access to Returns. Edit modal
+  uses the same chooser; the detail modal shows per-item action badges,
+  replacement lines, and the settlement.
+- **5.3 rider:** all four returns modals now portal to document.body --
+  a7's sweep covered Edit/Detail/NewSupplier in-tree; NewReturnModal got
+  the same wrap here (coordinated: returns/* rides this commit).
+
+**Verification:** new backend pure test (8 checks on real sqlite + the
+real migrations) + 4 end-to-end checks through the REAL Hono route in
+test-returns-batch-restock-pure (mixed-action create, even-exchange
+Replace, uneven refusal + price-difference storage, consumed-lot edit
+block); new frontend tests/returnOptions.test.ts (8 checks incl. the
+backend-mirror drift guard); check:source (396 files), langKeyIntegrity,
+vite build, wrangler dry-run all green. The FULL test:utils chain was
+blocked at commit time by a peer's in-flight Inventory.tsx typecheck
+error (a7's E1 WIP, reported to them) -- re-run and confirmed green
+after they fixed it (see addendum below when that lands). Migration
+0074 rides the user's next `npm run deploy:full`.
+
+**Coordination:** footprint kept out of 4a's D5a lane (productBatches.ts
+only READ) and 05's import/backup lane. Part 411 (next): the 11.9 POS
+SP/VIP + damage picker on top of damaged_stock_lots.

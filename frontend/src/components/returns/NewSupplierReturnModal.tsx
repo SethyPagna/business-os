@@ -1,4 +1,5 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
+import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import {
@@ -394,7 +395,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
     if (!submitting) onClose?.()
   }
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={closeIfIdle}>
       <div className="flex max-h-modal-92 w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-4xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -590,6 +591,7 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
