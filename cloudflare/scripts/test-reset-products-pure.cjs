@@ -56,6 +56,9 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 // automatically instead of this test silently checking a stale copy.
 const coreDataInvariants = loadReal('lib/coreDataInvariants.ts', {
   './db': { getDb: () => db },
+  // Real helper: coreDataInvariants routes its previous-identity IN-lists
+  // through sqlBinding (the one place the 100-param rule lives).
+  './sqlBinding': loadReal('lib/sqlBinding.ts', {}),
 })
 const { PRODUCTS_RESET_TABLES } = coreDataInvariants
 assert.ok(Array.isArray(PRODUCTS_RESET_TABLES) && PRODUCTS_RESET_TABLES.length > 0, 'PRODUCTS_RESET_TABLES must be a real, non-empty exported list')

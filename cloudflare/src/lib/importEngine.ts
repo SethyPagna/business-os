@@ -54,7 +54,7 @@ import { sanitizeImportedDescription } from './productDescriptionSections'
 
 import type { Env } from '../index'
 import { getDb, type D1Compat } from './db'
-import { buildInClause, chunkForBinding } from './sqlBinding'
+import { buildInClause, chunkForBinding, selectInChunks } from './sqlBinding'
 import {
   parseCsvRows,
   parseDelimitedRowsWindow,
@@ -2839,20 +2839,16 @@ type ImportChunkState = {
   startedAtMs?: number // real wall-clock start of this whole (possibly many-invocation) phase run, for an honest summary_json.timings totalMs at the end
   // DIRECT-mode stock-action continuation (see applyStockActionsJob): the
   // apply runs as windowed CLASSIFY invocations (chunk_cursor = source-row
-  // cursor) followed by windowed DISPATCH invocations. Everything here is
-  // small bookkeeping — the per-row plans live in import_job_rows, and the
-  // idempotency that makes crash/redelivery safe lives in the writers'
-  // import_stock_action_commits seals, never in this blob.
+  // cursor) followed by windowed DISPATCH invocations. SCALARS ONLY — the
+  // per-row plans live in import_job_rows, the sale-group key->index map and
+  // poison marks live in import_stock_action_groups (migration 0063; putting
+  // them here as collections is exactly what test-chunk-state-size-pure
+  // forbids), and the idempotency that makes crash/redelivery safe lives in
+  // the writers' import_stock_action_commits seals, never in this blob.
   stock?: {
     phase: 'classify' | 'dispatch'
-    // sale-group bookkeeping, stable across windows: key -> group_index
-    // written to import_job_rows.group_index so a receipt scattered over
-    // the sheet can be fetched back as one unit by SQL.
-    groupSeq: Record<string, number>
+    // next unassigned sale-group index (assigned rows are in 0063's table).
     nextGroupIndex: number
-    // sale-group keys poisoned by an unresolvable sibling line — the whole
-    // receipt fails together, never partially (same rule as single-pass).
-    poisoned: string[]
     // dispatch cursor: highest row_number whose unit has been dispatched
     // (or needed no dispatch). Rows at or below it are settled.
     dispatchAfterRow: number
@@ -4045,42 +4041,85 @@ async function applyStockActionsContinuation(
   const decisions = getDecisionMap(policyJson)
   const { cursor, state } = await getChunkState(db, jobId)
   if (!state.startedAtMs) state.startedAtMs = startedAtMs
-  const stock = state.stock ?? { phase: 'classify' as const, groupSeq: {}, nextGroupIndex: 0, poisoned: [], dispatchAfterRow: 0 }
+  const freshRun = !state.stock
+  const stock = state.stock ?? { phase: 'classify' as const, nextGroupIndex: 0, dispatchAfterRow: 0 }
   state.stock = stock
+  if (freshRun) {
+    // resetChunkState wiped the generic tables; the group bookkeeping table
+    // (0063) is stock-action-specific, so this run clears its own leftovers.
+    await db.prepare(`DELETE FROM import_stock_action_groups WHERE job_id = @id`).run({ id: jobId })
+  }
 
   if (stock.phase === 'classify') {
     const windowRows = await readMaterializedWindow(db, jobId, cursor, STOCK_ACTION_CLASSIFY_WINDOW, decisions)
     const results = (await classifyRows(db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
     sw.lap('classifyChunkMs')
 
-    const poisonedSet = new Set(stock.poisoned)
-    const groupIndexByRowNumber = new Map<number, number>()
+    // This window's sale-group keys: planned rows need a stable group_index,
+    // blocked rows poison their would-be group. Both live in
+    // import_stock_action_groups (one row per DISTINCT receipt), never in
+    // chunk state — collections there scale with the file.
+    const windowPoisoned = new Set<string>()
+    const rowsByGroupKey = new Map<string, number[]>()
     for (const r of results) {
       const resolved = r.data as unknown as UnifiedStockResolvedRow
       const plan = resolved.plan
       if (r.action === 'error' || !plan) {
         const parsed = parseStockAction(resolved.action)
-        if (parsed.kind === 'sale' && resolved.date) poisonedSet.add(saleGroupKeyFor(resolved.date, parsed.saleOrdinal))
+        if (parsed.kind === 'sale' && resolved.date) windowPoisoned.add(saleGroupKeyFor(resolved.date, parsed.saleOrdinal))
         continue
       }
       if (plan.kind === 'sale' && plan.saleGroupKey) {
-        let groupIndex = stock.groupSeq[plan.saleGroupKey]
-        if (groupIndex === undefined) {
-          groupIndex = stock.nextGroupIndex
-          stock.nextGroupIndex += 1
-          stock.groupSeq[plan.saleGroupKey] = groupIndex
-        }
-        groupIndexByRowNumber.set(r.rowNumber, groupIndex)
+        const list = rowsByGroupKey.get(plan.saleGroupKey) || []
+        list.push(r.rowNumber)
+        rowsByGroupKey.set(plan.saleGroupKey, list)
       }
     }
-    if (Object.keys(stock.groupSeq).length > STOCK_ACTION_MAX_SALE_GROUPS) {
+
+    const windowKeys = [...new Set([...rowsByGroupKey.keys(), ...windowPoisoned])]
+    const groupIndexByKey = new Map<string, number>()
+    if (windowKeys.length) {
+      const known = await selectInChunks(windowKeys, 1, async (chunk: string[]) => {
+        const clause = buildInClause('groupKey', chunk)
+        return await db.prepare(`SELECT group_key, group_index FROM import_stock_action_groups WHERE job_id = @jobId AND group_key IN (${clause.sql})`)
+          .all<{ group_key: string; group_index: number }>({ jobId, ...clause.params })
+      })
+      for (const row of known) groupIndexByKey.set(row.group_key, row.group_index)
+      const upserts: Array<{ sql: string; params: Record<string, unknown> }> = []
+      for (const key of windowKeys) {
+        if (!groupIndexByKey.has(key)) {
+          const groupIndex = stock.nextGroupIndex
+          stock.nextGroupIndex += 1
+          groupIndexByKey.set(key, groupIndex)
+          upserts.push({
+            sql: `INSERT OR IGNORE INTO import_stock_action_groups (job_id, group_key, group_index, poisoned) VALUES (@jobId, @key, @groupIndex, 0)`,
+            params: { jobId, key, groupIndex },
+          })
+        }
+      }
+      for (const key of windowPoisoned) {
+        upserts.push({
+          sql: `UPDATE import_stock_action_groups SET poisoned = 1 WHERE job_id = @jobId AND group_key = @key`,
+          params: { jobId, key },
+        })
+      }
+      if (upserts.length) await runD1BatchInChunks(db, upserts)
+    }
+    const groupCounts = await db.prepare(`SELECT COUNT(*) AS total, COALESCE(SUM(poisoned), 0) AS poisoned FROM import_stock_action_groups WHERE job_id = @id`)
+      .get<{ total: number; poisoned: number }>({ id: jobId })
+    if (Number(groupCounts?.total || 0) > STOCK_ACTION_MAX_SALE_GROUPS) {
       throw new Error(`This stock import resolves to more than ${STOCK_ACTION_MAX_SALE_GROUPS} distinct sale receipts; that is beyond operator scale — check the action column, or split the file.`)
     }
-    if (poisonedSet.size > STOCK_ACTION_MAX_POISONED_GROUPS) {
+    if (Number(groupCounts?.poisoned || 0) > STOCK_ACTION_MAX_POISONED_GROUPS) {
       throw new Error(`More than ${STOCK_ACTION_MAX_POISONED_GROUPS} sale groups in this sheet have unresolvable lines; fix the file rather than importing it.`)
     }
-    stock.poisoned = [...poisonedSet]
 
+    const groupIndexByRowNumber = new Map<number, number>()
+    for (const [key, rowNumbers] of rowsByGroupKey) {
+      const groupIndex = groupIndexByKey.get(key)
+      if (groupIndex === undefined) continue
+      for (const rowNumber of rowNumbers) groupIndexByRowNumber.set(rowNumber, groupIndex)
+    }
     await persistChunkResults(db, jobId, 'apply', results, groupIndexByRowNumber)
     const nextCursor = cursor + windowRows.length
     const classifyDone = windowRows.length < STOCK_ACTION_CLASSIFY_WINDOW || nextCursor >= totalRows
@@ -4094,7 +4133,9 @@ async function applyStockActionsContinuation(
   }
 
   // ---- DISPATCH phase ----
-  const poisoned = new Set(stock.poisoned)
+  const poisonedRows = await db.prepare(`SELECT group_key FROM import_stock_action_groups WHERE job_id = @id AND poisoned = 1`)
+    .all<{ group_key: string }>({ id: jobId })
+  const poisoned = new Set(poisonedRows.map((row) => row.group_key))
   const resolveSupplierId = makeSupplierIdResolver(db)
   const touched: StockActionImportResult[] = []
   const touchedGroupIndex = new Map<number, number>()

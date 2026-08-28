@@ -130,6 +130,7 @@ function makeDb() {
   `)
   sqlite.exec(fs.readFileSync(path.join(migrationsDir, '0056_import_stock_action_commits.sql'), 'utf8'))
   sqlite.exec(fs.readFileSync(path.join(migrationsDir, '0057_import_stock_action_guards.sql'), 'utf8'))
+  sqlite.exec(fs.readFileSync(path.join(migrationsDir, '0063_import_stock_action_groups.sql'), 'utf8'))
   sqlite.exec(`
     INSERT INTO branches(id, name, is_active) VALUES (1, 'Shop', 1), (2, 'Warehouse', 1);
   `)
