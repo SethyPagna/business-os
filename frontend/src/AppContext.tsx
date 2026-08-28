@@ -289,6 +289,7 @@ const CORE_ENGLISH_PACK: TranslationPack = {
   login: 'Login',
   logout: 'Logout',
   loyalty_points: 'Loyalty Points',
+  promotions: 'Promotions',
   movements: 'Movements',
   next: 'Next',
   no_recent_actions: 'No recent actions',
@@ -547,6 +548,7 @@ const PAGE_PERMISSIONS: Record<string, string | null> = {
   notes:            null,        // Personal scratchpad -- just needs to be logged in, same as dashboard used to be
   catalog:          'customer_portal',
   loyalty_points:   'customer_portal',
+  promotions:       'promotions',
   pos:              'pos',
   products:         'products',
   inventory:        'inventory',

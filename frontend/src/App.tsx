@@ -32,6 +32,7 @@ type PageId =
   | 'contacts'
   | 'catalog'
   | 'loyalty_points'
+  | 'promotions'
   | 'users'
   | 'review'
   | 'audit_log'
@@ -306,6 +307,7 @@ const PAGE_IMPORTERS = {
   contacts: asPageModule(() => import('./components/contacts/Contacts')),
   catalog: asPageModule(() => import('./components/catalog/CatalogPage.tsx')),
   loyalty_points: asPageModule(() => import('./components/loyalty-points/LoyaltyPointsPage')),
+  promotions: asPageModule(() => import('./components/promotions/PromotionsPage.tsx')),
   users: asPageModule(() => import('./components/users/Users')),
   review: asPageModule(() => import('./components/review/ReviewQueue')),
   audit_log: asPageModule(() => import('./components/utils-settings/AuditLog')),
@@ -508,6 +510,7 @@ const Branches = lazyWithRetry(PAGE_IMPORTERS.branches, 'branches')
 const Contacts = lazyWithRetry(PAGE_IMPORTERS.contacts, 'contacts')
 const CatalogPage = lazyWithRetry(PAGE_IMPORTERS.catalog, 'catalog')
 const LoyaltyPointsPage = lazyWithRetry(PAGE_IMPORTERS.loyalty_points, 'loyalty_points')
+const PromotionsPage = lazyWithRetry(PAGE_IMPORTERS.promotions, 'promotions')
 const Users = lazyWithRetry(PAGE_IMPORTERS.users, 'users')
 const ReviewQueue = lazyWithRetry(PAGE_IMPORTERS.review, 'review')
 const AuditLog = lazyWithRetry(PAGE_IMPORTERS.audit_log, 'audit_log')
@@ -543,6 +546,7 @@ const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   server: ServerPage,
   catalog: CatalogPage,
   loyalty_points: LoyaltyPointsPage,
+  promotions: PromotionsPage,
 }
 
 function shouldSkipIntentWarmup(): boolean {

@@ -145,6 +145,17 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     ],
   },
   {
+    key: 'promotions',
+    tKey: 'perm_section_promotions',
+    label: 'Promotions',
+    description: 'Managing promotion rules and per-product discounts on the Promotions page. Reading active promotions (POS pricing, storefront display) needs no grant -- every logged-in user prices with the same rules.',
+    permissions: [
+      // Full Access / None only -- a promotion is storefront-wide pricing;
+      // there is no meaningful "review" middle tier for it today.
+      { key: 'promotions', tKey: 'perm_promotions', label: 'Promotions', sensitivity: 'high' },
+    ],
+  },
+  {
     key: 'pos',
     tKey: 'perm_section_pos',
     label: 'Point of Sale',

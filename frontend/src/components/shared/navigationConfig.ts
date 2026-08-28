@@ -11,6 +11,7 @@ export type NavigationPermission =
   | 'inventory'
   | 'pos'
   | 'products'
+  | 'promotions'
   | 'returns'
   | 'review'
   | 'sales'
@@ -33,6 +34,9 @@ export const NAV_ITEMS: NavigationItem[] = [
   { id: 'notes', key: 'notes', permission: null },
   { id: 'catalog', key: 'catalog', permission: 'customer_portal' },
   { id: 'loyalty_points', key: 'loyalty_points', permission: 'customer_portal' },
+  // G1's promotion engine page -- its own permission key, per the standing
+  // "every page gets its own permission" decision (same as branches/returns).
+  { id: 'promotions', key: 'promotions', permission: 'promotions' },
   { id: 'pos', key: 'pos', permission: 'pos' },
   { id: 'products', key: 'products', permission: 'products' },
   { id: 'inventory', key: 'inventory', permission: 'inventory' },

@@ -28,7 +28,7 @@ const PRODUCT_FORM_IMAGE_UPLOAD_TIMEOUT_MS = 30000
 
 type EntityId = string | number
 type EditableNumber = string | number | null | undefined
-type ProductFormTab = 'basic' | 'pricing' | 'discounts' | 'stock' | 'expiry'
+type ProductFormTab = 'basic' | 'pricing' | 'stock' | 'expiry'
 type ScannerField = 'sku' | 'barcode'
 type Translate = (key: string) => string
 
@@ -532,11 +532,6 @@ export default function ProductForm({
     return options
   }, [availableGroupParents, form.parent_id])
 
-  const discountTypeOptions = useMemo<AppSelectOption[]>(() => [
-    { value: 'percent', label: tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ') },
-    { value: 'fixed', label: tr('discount_fixed', 'Fixed amount', 'បញ្ចុះជាចំនួនថេរ') },
-  ], [])
-
   const initialBranchOptions = useMemo<AppSelectOption[]>(() => {
     const currentBranchId = form.branch_id ? String(form.branch_id) : ''
     const options = branches.map((branch) => ({
@@ -873,7 +868,6 @@ export default function ProductForm({
   const tabs: Array<{ id: ProductFormTab; label: string }> = [
     { id: 'basic', label: tr('basic_info', 'Basic Info', 'ព័ត៌មានមូលដ្ឋាន') },
     { id: 'pricing', label: tr('pricing', 'Pricing', 'តម្លៃ') },
-    { id: 'discounts', label: tr('discounts', 'Discounts', 'បញ្ចុះតម្លៃ') },
     { id: 'stock', label: tr('stock', 'Stock', 'ស្តុក') },
     { id: 'expiry', label: tr('expiry', 'Expiry', 'ផុតកំណត់') },
   ]
@@ -1239,7 +1233,7 @@ export default function ProductForm({
         </div>
       ) : null}
 
-      {activeTab === 'pricing' || activeTab === 'discounts' ? (
+      {activeTab === 'pricing' ? (
         <div className="space-y-5">
           {activeTab === 'pricing' ? <>
           <div className="rounded-xl border border-red-100 bg-red-50 p-4 dark:border-red-800 dark:bg-red-900/10">
@@ -1320,123 +1314,15 @@ export default function ProductForm({
           </div>
           </> : null}
 
-          {activeTab === 'discounts' ? <div className="rounded-xl border border-rose-100 bg-rose-50 p-4 dark:border-rose-800 dark:bg-rose-950/20">
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-bold text-rose-700 dark:text-rose-300">{tr('product_discount', 'Discounts', 'បញ្ចុះតម្លៃ')}</p>
-                <p className="text-xs text-rose-600 dark:text-rose-300">{tr('product_discount_hint', 'Customer-facing discount price shown in POS and the public portal.', 'តម្លៃបញ្ចុះតម្លៃសម្រាប់អតិថិជន ដែលបង្ហាញក្នុង POS និងផតថលសាធារណៈ។')}</p>
-              </div>
-              <label className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm dark:bg-rose-950/50 dark:text-rose-200">
-                <input
-                  type="checkbox"
-                  checked={!!form.discount_enabled}
-                  onChange={(event) => setField('discount_enabled', event.target.checked ? 1 : 0)}
-                />
-                {tr('enabled', 'Enabled', 'បើក')}
-              </label>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_type', 'Discount type', 'ប្រភេទបញ្ចុះតម្លៃ')}</span>
-                <AppSelect
-                  id="product-discount-type"
-                  value={form.discount_type || 'percent'}
-                  options={discountTypeOptions}
-                  onChange={(value) => setField('discount_type', value)}
-                  ariaLabel={tr('discount_type', 'Discount type', 'ប្រភេទបញ្ចុះតម្លៃ')}
-                  className="w-full"
-                  buttonClassName="input h-auto w-full"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_label', 'Badge label', 'ស្លាកប្រូម៉ូសិន')}</span>
-                <input
-                  className="input"
-                  value={form.discount_label || ''}
-                  onChange={(event) => setField('discount_label', event.target.value)}
-                  placeholder={tr('discount_label_placeholder', 'Promo, Discount, Top deal', 'ប្រូម៉ូសិន បញ្ចុះតម្លៃ ឬកិច្ចព្រមព្រៀងពិសេស')}
-                  autoComplete="off"
-                />
-              </label>
-              {form.discount_type === 'fixed' ? (
-                <>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_amount_usd', 'Discount amount (USD)', 'ចំនួនបញ្ចុះតម្លៃ (USD)')}</span>
-                    <input
-                      className="input"
-                      type="text"
-                      inputMode="decimal"
-                      value={form.discount_amount_usd ?? ''}
-                      onChange={(event) => {
-                        setNumericField('discount_amount_usd', event.target.value)
-                        if (!String(form.discount_amount_khr ?? '').trim()) {
-                          const converted = parseNumericInput(event.target.value) * exchangeRate
-                          setField('discount_amount_khr', event.target.value === '' ? '' : formatPriceNumber(converted))
-                        }
-                      }}
-                      autoComplete="off"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_amount_khr', 'Discount amount (KHR)', 'ចំនួនបញ្ចុះតម្លៃ (KHR)')}</span>
-                    <input
-                      className="input"
-                      type="text"
-                      inputMode="decimal"
-                      value={form.discount_amount_khr ?? ''}
-                      onChange={(event) => setNumericField('discount_amount_khr', event.target.value)}
-                      autoComplete="off"
-                    />
-                  </label>
-                </>
-              ) : (
-                <label className="block">
-                  <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('discount_percent', 'Percent off', 'បញ្ចុះជាភាគរយ')}</span>
-                  <input
-                    className="input"
-                    type="text"
-                    inputMode="decimal"
-                    value={form.discount_percent ?? ''}
-                    onChange={(event) => setNumericField('discount_percent', event.target.value)}
-                    autoComplete="off"
-                  />
-                </label>
-              )}
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('badge_color', 'Badge color', 'ពណ៌ស្លាក')}</span>
-                <input
-                  className="h-10 w-full rounded-lg border border-rose-200 bg-white p-1 dark:border-rose-800 dark:bg-slate-950"
-                  type="color"
-                  value={form.discount_badge_color || '#e11d48'}
-                  onChange={(event) => setField('discount_badge_color', event.target.value)}
-                  aria-label={tr('badge_color', 'Badge color', 'ពណ៌ស្លាក')}
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('starts_at', 'Starts at', 'ចាប់ផ្តើម')}</span>
-                <input className="input" type="date" value={form.discount_starts_at || ''} onChange={(event) => setField('discount_starts_at', event.target.value)} />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-semibold text-rose-700 dark:text-rose-200">{tr('ends_at', 'Ends at', 'បញ្ចប់')}</span>
-                <input className="input" type="date" value={form.discount_ends_at || ''} onChange={(event) => setField('discount_ends_at', event.target.value)} />
-              </label>
-            </div>
-            {form.discount_enabled ? (
-              <div className="mt-3 rounded-xl bg-white/80 px-3 py-2 text-xs text-rose-700 dark:bg-rose-950/40 dark:text-rose-100">
-                {(() => {
-                  const preview = calculateProductDiscount({
-                    ...form,
-                    selling_price_usd: parseNumericInput(form.selling_price_usd),
-                    selling_price_khr: parseNumericInput(form.selling_price_khr),
-                  }, exchangeRate)
-                  return preview.active
-                    ? `${tr('promotion_price', 'Discount price', 'តម្លៃបញ្ចុះតម្លៃ')}: ${usdSymbol}${formatPriceNumber(preview.applied_price_usd)} / ${khrSymbol}${formatPriceNumber(preview.applied_price_khr)}`
-                    : tr('discount_needs_value', 'Enter a discount value to activate the promotion price.', 'សូមបញ្ចូលតម្លៃបញ្ចុះ ដើម្បីបើកតម្លៃប្រូម៉ូសិន។')
-                })()}
-              </div>
-            ) : null}
-          </div> : null}
-
+          {/* G1 (Part 391): the per-product discount editor MOVED to the
+              Promotions page (user: "per-product discounts manage in
+              Promotions, labels stay visible in Products"). The product
+              still CARRIES its discount fields -- saving here never
+              touches them -- management just lives with the other
+              promotions now. */}
+          <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-3 text-xs text-rose-700 dark:border-rose-800 dark:bg-rose-950/20 dark:text-rose-200">
+            {tr('discounts_moved_note', 'Discounts are managed on the Promotions page now (Promotions › Per-product discounts).', 'ការបញ្ចុះតម្លៃត្រូវបានគ្រប់គ្រងនៅទំព័រប្រូម៉ូសិនឥឡូវនេះ (ប្រូម៉ូសិន › បញ្ចុះតម្លៃតាមផលិតផល)។')}
+          </div>
           {activeTab === 'pricing' && Number(form.selling_price_usd || 0) > 0 && Number(form.cost_price_usd || 0) > 0 ? (
             <MarginCard
               costUsd={Number(form.cost_price_usd || 0)}

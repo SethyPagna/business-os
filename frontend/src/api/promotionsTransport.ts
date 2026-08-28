@@ -1,4 +1,5 @@
 import { apiFetch } from './http.ts'
+import type { PromotionRule } from '../utils/promotionRules.ts'
 
 export type Promotion = {
   id: number
@@ -36,4 +37,52 @@ export function deletePromotion(id: number | string): Promise<{ deleted: boolean
 
 export function reorderPromotions(order: Array<number | string>): Promise<Promotion[]> {
   return apiFetch('PUT', '/api/promotions/reorder/all', { order })
+}
+
+// ---------------------------------------------------------------------------
+// G1 promotion RULES (the pricing engine) -- a different feature from the
+// announcement-strip Promotion rows above; see routes/promotions.ts.
+
+export type PromotionRuleRow = Record<string, unknown> & {
+  id: number
+  normalized: PromotionRule | null
+  currently_active: boolean
+}
+
+export type PromotionRuleWrite = {
+  title?: string
+  show_title?: boolean
+  rule_type: 'quantity_save' | 'percent_off' | 'fixed_off'
+  min_quantity?: number
+  save_usd?: number
+  save_khr?: number
+  percent_off?: number
+  scope_type: 'products' | 'category' | 'brand'
+  product_ids?: number[]
+  category?: string
+  brand?: string
+  badge_color?: string
+  starts_at?: string | null
+  ends_at?: string | null
+  is_active?: boolean
+}
+
+export function getPromotionRules(): Promise<PromotionRuleRow[]> {
+  return apiFetch('GET', '/api/promotions/rules')
+}
+
+export function getActivePromotionRules(): Promise<{ rules: PromotionRule[]; now: string }> {
+  return apiFetch('GET', '/api/promotions/rules/active')
+}
+
+export function createPromotionRule(payload: PromotionRuleWrite): Promise<Record<string, unknown>> {
+  return apiFetch('POST', '/api/promotions/rules', payload)
+}
+
+export function updatePromotionRule(id: number | string, payload: PromotionRuleWrite): Promise<Record<string, unknown>> {
+  return apiFetch('PUT', `/api/promotions/rules/${id}`, payload)
+}
+
+export function deletePromotionRule(id: number | string): Promise<{ deleted: boolean }> {
+  return apiFetch('DELETE', `/api/promotions/rules/${id}`)
 }
