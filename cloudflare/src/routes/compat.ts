@@ -6,6 +6,7 @@ import { getSystemJob, listCloudflareBackups, listSystemJobs, storeSystemJob } f
 import { buildDriveOauthStartUrl, completeDriveOauth, disconnectDrive, driveSyncStatus, pushBackupToDrive, updateDrivePreferences } from '../lib/googleDrive'
 import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { audit } from '../lib/audit'
+import { buildAuditLogFilters } from '../lib/auditLogQuery'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { getSalesTotals, getSalesPeriodSeries, previousPeriodFilters } from '../lib/salesAnalytics'
@@ -445,9 +446,22 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
   const page = Math.max(1, Number.parseInt(c.req.query('page') || '1', 10) || 1)
   const pageSize = Math.min(200, Math.max(1, Number.parseInt(c.req.query('pageSize') || '50', 10) || 50))
   const offset = (page - 1) * pageSize
+  // I2: honor the filters AuditLog.tsx has been sending all along (they were
+  // silently ignored -- every filter control on the page was dead). The
+  // clause builder lives in lib/auditLogQuery.ts so the pure test can run
+  // the exact production SQL. COUNT applies the SAME clause, so pagination
+  // agrees with the filtered set, not the whole table.
+  const { where, params: filterParams } = buildAuditLogFilters({
+    search: c.req.query('search'),
+    action: c.req.query('action'),
+    entity: c.req.query('entity'),
+    userId: c.req.query('userId'),
+    startDate: c.req.query('startDate'),
+    endDate: c.req.query('endDate'),
+  })
   try {
     const db = getDb(c.env)
-    const totalRow = await db.prepare('SELECT COUNT(*) AS count FROM audit_logs').get<{ count: number }>()
+    const totalRow = await db.prepare(`SELECT COUNT(*) AS count FROM audit_logs ${where}`).get<{ count: number }>(filterParams)
     const rows = await db.prepare(`
       SELECT
         id,
@@ -467,25 +481,50 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
         client_time,
         created_at
       FROM audit_logs
+      ${where}
       ORDER BY created_at DESC, id DESC
       LIMIT @pageSize OFFSET @offset
-    `).all({ pageSize, offset })
+    `).all({ ...filterParams, pageSize, offset })
+    // Filter vocabularies come from the WHOLE table, not the current page --
+    // previously the action dropdown could only offer whatever happened to
+    // be on the visible page.
     const users = await db.prepare(`
       SELECT DISTINCT user_id AS id, user_name AS name
       FROM audit_logs
       WHERE user_id IS NOT NULL OR COALESCE(user_name, '') <> ''
       ORDER BY user_name COLLATE NOCASE ASC
     `).all()
+    const actionRows = await db.prepare(`
+      SELECT DISTINCT LOWER(action) AS action
+      FROM audit_logs
+      WHERE COALESCE(action, '') <> ''
+      ORDER BY action ASC
+    `).all<{ action: string }>()
+    const entityRows = await db.prepare(`
+      SELECT DISTINCT LOWER(COALESCE(entity, table_name)) AS entity
+      FROM audit_logs
+      WHERE COALESCE(entity, table_name, '') <> ''
+      ORDER BY entity ASC
+    `).all<{ entity: string }>()
     return c.json({
       items: rows || [],
       total: totalRow?.count || 0,
       page,
       pageSize,
       totalPages: Math.max(1, Math.ceil((totalRow?.count || 0) / pageSize)),
-      filters: { users: users || [] },
+      filters: {
+        users: users || [],
+        actions: (actionRows || []).map((row) => row.action),
+        entities: (entityRows || []).map((row) => row.entity),
+      },
     })
-  } catch (_) {
-    return c.json({ items: [], total: 0, page, pageSize, totalPages: 1, filters: { users: [] } })
+  } catch (error) {
+    // Was `return empty 200` -- the same silent-empty failure class as the
+    // POS lot-lookup bug: a db error rendered as "no logs" with real-looking
+    // pagination. A 500 lets the client fall back to its local mirror (and
+    // say so) instead of presenting an error as an empty trail.
+    const message = error instanceof Error ? error.message : 'Failed to load audit logs'
+    return c.json({ error: message }, 500)
   }
 })
 app.delete('/system/audit-logs/retention', requireAuth, async (c) => {

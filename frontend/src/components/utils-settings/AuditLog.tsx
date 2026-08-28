@@ -58,6 +58,10 @@ interface AuditLogResponse {
   source?: string | null
   filters?: {
     users?: AuditUserOption[]
+    // I2: whole-table filter vocabularies -- before these, the action
+    // dropdown could only offer whatever happened to be on the visible page.
+    actions?: string[]
+    entities?: string[]
   }
 }
 
@@ -67,6 +71,7 @@ interface AuditLogParams {
   pageSize: number
   search?: string
   action?: string
+  entity?: string
   userId?: string
   startDate?: string
   endDate?: string
@@ -331,8 +336,13 @@ export default function AuditLog() {
   const [yearFilter, setYearFilter] = useState('all')
   const [monthFilter, setMonthFilter] = useState('all')
   const [actionFilter, setActionFilter] = useState('all')
+  // I2: filter by the record's entity ("page"/area) -- entity or legacy
+  // table_name server-side, comma-joined multi-select like action/user.
+  const [entityFilter, setEntityFilter] = useState('all')
   const [userFilter, setUserFilter] = useState('all')
   const [auditUsers, setAuditUsers] = useState<AuditUserOption[]>([])
+  const [auditActions, setAuditActions] = useState<string[]>([])
+  const [auditEntities, setAuditEntities] = useState<string[]>([])
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [totalLogs, setTotalLogs] = useState(0)
@@ -461,6 +471,7 @@ export default function AuditLog() {
         pageSize,
         search: search.trim() || undefined,
         action: actionFilter !== 'all' ? actionFilter : undefined,
+        entity: entityFilter !== 'all' ? entityFilter : undefined,
         userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
         ...auditDateRange,
       }
@@ -493,6 +504,13 @@ export default function AuditLog() {
       setLogs(rows)
       setTotalLogs(nextTotal)
       setAuditUsers(!Array.isArray(data) && Array.isArray(data?.filters?.users) ? data.filters.users : [])
+      if (!Array.isArray(data)) {
+        // Keep the last good vocabularies when a local-mirror fallback
+        // (which carries none) answers -- clearing them would empty the
+        // filter menus the user is about to use to recover.
+        if (Array.isArray(data?.filters?.actions) && data.filters.actions.length) setAuditActions(data.filters.actions)
+        if (Array.isArray(data?.filters?.entities) && data.filters.entities.length) setAuditEntities(data.filters.entities)
+      }
       didLoadRows = true
     } catch (err) {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -514,7 +532,7 @@ export default function AuditLog() {
       }
       if (!silent) setLoading(false)
     }
-  }, [actionFilter, auditDateRange, isAdmin, page, pageSize, search, userFilter])
+  }, [actionFilter, auditDateRange, entityFilter, isAdmin, page, pageSize, search, userFilter])
 
   useEffect(() => {
     if (!isActive) {
@@ -544,7 +562,7 @@ export default function AuditLog() {
 
   useEffect(() => {
     setPage(1)
-  }, [actionFilter, monthFilter, pageSize, search, userFilter, yearFilter])
+  }, [actionFilter, entityFilter, monthFilter, pageSize, search, userFilter, yearFilter])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -562,13 +580,35 @@ export default function AuditLog() {
 
   const actionOptions = useMemo(() => {
     const seen = new Map<string, string>()
+    // Whole-table vocabulary from the server first (I2); the visible page's
+    // own actions remain as the fallback so the menu never goes empty on a
+    // local-mirror answer.
+    auditActions.forEach((key) => {
+      const normalized = String(key || '').toLowerCase()
+      if (normalized) seen.set(normalized, actionLabel(normalized))
+    })
     logs.forEach((log) => {
       const key = String(log?.action || '').toLowerCase()
-      if (!key) return
+      if (!key || seen.has(key)) return
       seen.set(key, actionLabel(key))
     })
     return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1]))
-  }, [actionLabel, logs])
+  }, [actionLabel, auditActions, logs])
+
+  const entityOptions = useMemo(() => {
+    const seen = new Map<string, string>()
+    const labelFor = (key: string) => key.replace(/_/g, ' ').replace(/\b\w/g, (match) => match.toUpperCase())
+    auditEntities.forEach((key) => {
+      const normalized = String(key || '').toLowerCase()
+      if (normalized) seen.set(normalized, labelFor(normalized))
+    })
+    logs.forEach((log) => {
+      const key = String(log?.table_name || log?.entity || '').toLowerCase()
+      if (!key || seen.has(key)) return
+      seen.set(key, labelFor(key))
+    })
+    return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1]))
+  }, [auditEntities, logs])
 
   const filtered = useMemo(() => logs, [logs])
 
@@ -749,6 +789,20 @@ export default function AuditLog() {
         })),
       ],
     },
+    {
+      id: 'entity',
+      label: t('audit_entity') || 'Page / record type',
+      searchable: true,
+      options: [
+        { id: 'all', label: t('all_entities') || 'All types', active: entityFilter === 'all', onClick: () => setEntityFilter('all') },
+        ...entityOptions.map(([id, label]) => ({
+          id: `entity-${id}`,
+          label,
+          active: isMultiActive(entityFilter, id),
+          onClick: () => setEntityFilter(toggleMultiValue(entityFilter, id)),
+        })),
+      ],
+    },
     isAdmin ? {
       id: 'user',
       label: t('user') || 'User',
@@ -787,11 +841,11 @@ export default function AuditLog() {
         { id: 'group-time-action', label: copy('group_time_action', 'Time + action'), active: groupMode === 'time+action', onClick: () => setGroupMode('time+action') },
       ],
     },
-  ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, groupMode, isAdmin, monthFilter, sortDirection, t, userFilter, yearFilter])
+  ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, entityFilter, entityOptions, groupMode, isAdmin, monthFilter, sortDirection, t, userFilter, yearFilter])
 
   const activeFilterCount = useMemo(
-    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time']),
-    [actionFilter, groupMode, monthFilter, sortDirection, userFilter, yearFilter],
+    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time']),
+    [actionFilter, entityFilter, groupMode, monthFilter, sortDirection, userFilter, yearFilter],
   )
 
   return (
@@ -861,6 +915,7 @@ export default function AuditLog() {
               setYearFilter('all')
               setMonthFilter('all')
               setActionFilter('all')
+              setEntityFilter('all')
               setUserFilter('all')
               setGroupMode('time')
               setSortDirection('desc')
