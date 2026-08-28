@@ -207,8 +207,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     },
     {
       sql: `INSERT OR IGNORE INTO product_batches
-              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd)
-            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason, @batchNumber, @supplierId, @supplierName, @costPriceUsd
+              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, received_branch_id)
+            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason, @batchNumber, @supplierId, @supplierName, @costPriceUsd, @branchId
             WHERE ${guard}`,
       params,
     },
@@ -228,8 +228,11 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // Cumulative received total (0067): EVERY applied add counts, create
       // and top-up alike — unlike the fill-if-NULL attribution above. The
       // pending guard keeps redeliveries from double-counting, same as
-      // every other statement in this batch.
-      sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity
+      // every other statement in this batch. Receiving branch (0070) rides
+      // along fill-if-NULL: an add landing on an existing lot only fills a
+      // branch that was never recorded — first attribution sticks.
+      sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
+              received_branch_id = COALESCE(received_branch_id, @branchId)
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
     },

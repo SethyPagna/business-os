@@ -227,8 +227,8 @@ export async function receiveBatchStock(db: D1Compat, input: {
     // later deactivated.
     const nextNumber = await nextBatchNumber(db, input.productId)
     const inserted = await db.prepare(`
-      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity)
-      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate, @receivedQuantity)
+      INSERT INTO product_batches (variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date, received_quantity, received_branch_id)
+      VALUES (@productId, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes, @batchNumber, @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate, @receivedQuantity, @receivedBranchId)
     `).run({
       productId: input.productId,
       batchKey,
@@ -243,6 +243,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
       paymentStatus: input.paymentStatus === 'paid' || input.paymentStatus === 'credit' ? input.paymentStatus : null,
       creditDueDate: input.paymentStatus === 'credit' ? (input.creditDueDate || null) : null,
       receivedQuantity: input.quantity,
+      receivedBranchId: input.branchId,
     })
     batchId = Number(inserted.lastInsertRowid)
     batchNumber = nextNumber
@@ -269,6 +270,11 @@ export async function receiveBatchStock(db: D1Compat, input: {
     // fill-if-NULL fields above -- every receipt into this lot counts.
     updates.push('received_quantity = COALESCE(received_quantity, 0) + @receivedQuantity')
     params.receivedQuantity = input.quantity
+    // Receiving branch (0070): first attribution sticks, same as supplier --
+    // a lot topped up from another branch keeps the branch it first arrived
+    // at; pre-0070 lots get filled by their next receipt.
+    updates.push('received_branch_id = COALESCE(received_branch_id, @receivedBranchId)')
+    params.receivedBranchId = input.branchId
     await db.prepare(`UPDATE product_batches SET ${updates.join(', ')} WHERE id = @id`).run(params)
   }
 

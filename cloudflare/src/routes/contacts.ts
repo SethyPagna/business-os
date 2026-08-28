@@ -938,6 +938,228 @@ app.get('/suppliers/:id/purchases', async (c) => {
   return c.json({ supplier, totals, batches })
 })
 
+// D1b: the Stock-In Invoice report -- purchases grouped supplier → invoice
+// (received date) → product lines, modeled on the old system's report. An
+// "invoice" here is one supplier's receipts on one calendar day: the old
+// system's invoice NUMBER was never stored in this schema (batches carry
+// supplier/date/cost, not an invoice column), so the date is the honest
+// grouping and nothing is fabricated. Data source is product_batches
+// directly (supplier 0062, cost/payment 0065, received totals 0067,
+// receiving branch 0070) -- inventory_movements can't serve this report
+// because movements never link to a batch row. Sits under /suppliers/* so
+// requireSupplierAccess gates it: per-lot costs and supplier spend are
+// exactly what the contacts_suppliers grant protects (R2), same as the
+// per-supplier purchases drill above.
+//
+// The derived table below is shared by both report endpoints: one row per
+// batch with its resolved supplier identity. supplier_id wins; a name-only
+// attribution (free text, or the import matched no contact row) resolves
+// to the lowest-id supplier with that normalized name so id-attributed and
+// name-only lots of the SAME supplier land in the SAME group -- the same
+// merge rule GET /suppliers/:id/purchases applies from the other
+// direction. No supplier at all groups under 'none' ("no supplier
+// recorded" -- which honestly includes non-purchase receipts like return
+// restocks and count corrections; the data cannot tell them apart and the
+// report says what it holds rather than hiding rows).
+const STOCK_IN_REPORT_SOURCE = `
+  SELECT pb.id, pb.variant_product_id, pb.batch_number, pb.lot_code, pb.received_at,
+         pb.received_quantity, pb.unit_cost_usd, pb.payment_status, pb.credit_due_date,
+         pb.received_branch_id,
+         CASE
+           WHEN s.id IS NOT NULL THEN 'id:' || s.id
+           WHEN trim(COALESCE(pb.supplier_name, '')) <> '' THEN 'name:' || lower(trim(pb.supplier_name))
+           ELSE 'none'
+         END AS supplier_key,
+         COALESCE(s.name, pb.supplier_name) AS supplier_display,
+         COALESCE(substr(pb.received_at, 1, 10), '') AS received_day
+  FROM product_batches pb
+  LEFT JOIN suppliers s ON s.id = COALESCE(pb.supplier_id,
+    (SELECT MIN(s2.id) FROM suppliers s2
+     WHERE trim(COALESCE(pb.supplier_name, '')) <> '' AND lower(trim(s2.name)) = lower(trim(pb.supplier_name))))
+`
+
+// Builds the WHERE clause + params both endpoints share. A date bound also
+// requires a recorded date -- a range filter that quietly matched no-date
+// rows would misreport; those rows stay reachable with no date filter set
+// (their group shows as "no date recorded").
+function stockInReportFilters(query: Record<string, string | undefined>): { where: string; params: Record<string, unknown> } {
+  const conditions: string[] = []
+  const params: Record<string, unknown> = {}
+  const branchId = Number(query.branch_id)
+  if (Number.isFinite(branchId) && branchId > 0) {
+    conditions.push('t.received_branch_id = @branchId')
+    params.branchId = branchId
+  }
+  const supplierKey = String(query.supplier || '').trim()
+  if (supplierKey && supplierKey !== 'all') {
+    conditions.push('t.supplier_key = @supplierKey')
+    params.supplierKey = supplierKey
+  }
+  const from = String(query.from || '').slice(0, 10)
+  const to = String(query.to || '').slice(0, 10)
+  if (from) { conditions.push("t.received_day <> '' AND t.received_day >= @from"); params.from = from }
+  if (to) { conditions.push("t.received_day <> '' AND t.received_day <= @to"); params.to = to }
+  return { where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '', params }
+}
+
+app.get('/suppliers/reports/stock-in-invoices', async (c) => {
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const page = clampInt(query.page, 1, 1, 100000)
+  const pageSize = clampInt(query.page_size, 15, 1, 25)
+  const { where, params } = stockInReportFilters(query)
+
+  type GroupRow = {
+    supplier_key: string; supplier_name: string | null; received_day: string
+    line_count: number; units_received: number; lines_without_qty: number
+    cost_usd: number; lines_without_cost: number; credit_lines: number
+    branch_ids: string | null
+  }
+  const invoices = await db.prepare(`
+    SELECT t.supplier_key, MAX(t.supplier_display) AS supplier_name, t.received_day,
+           COUNT(*) AS line_count,
+           SUM(CASE WHEN t.received_quantity IS NOT NULL THEN t.received_quantity ELSE 0 END) AS units_received,
+           SUM(CASE WHEN t.received_quantity IS NULL THEN 1 ELSE 0 END) AS lines_without_qty,
+           SUM(CASE WHEN t.received_quantity IS NOT NULL AND t.unit_cost_usd IS NOT NULL THEN t.received_quantity * t.unit_cost_usd ELSE 0 END) AS cost_usd,
+           SUM(CASE WHEN t.received_quantity IS NULL OR t.unit_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
+           SUM(CASE WHEN t.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_lines,
+           GROUP_CONCAT(DISTINCT t.received_branch_id) AS branch_ids
+    FROM (${STOCK_IN_REPORT_SOURCE}) t
+    ${where}
+    GROUP BY t.supplier_key, t.received_day
+    ORDER BY t.received_day DESC, supplier_name COLLATE NOCASE ASC
+    LIMIT @limit OFFSET @offset
+  `).all<GroupRow>({ ...params, limit: pageSize, offset: (page - 1) * pageSize })
+
+  type TotalsRow = {
+    line_count: number; units_received: number; cost_usd: number
+    lines_without_cost: number; credit_lines: number
+  }
+  const [countRow, totalsRow] = await Promise.all([
+    db.prepare(`
+      SELECT COUNT(*) AS total FROM (
+        SELECT 1 FROM (${STOCK_IN_REPORT_SOURCE}) t ${where} GROUP BY t.supplier_key, t.received_day
+      )
+    `).get<{ total: number }>(params),
+    db.prepare(`
+      SELECT COUNT(*) AS line_count,
+             SUM(CASE WHEN t.received_quantity IS NOT NULL THEN t.received_quantity ELSE 0 END) AS units_received,
+             SUM(CASE WHEN t.received_quantity IS NOT NULL AND t.unit_cost_usd IS NOT NULL THEN t.received_quantity * t.unit_cost_usd ELSE 0 END) AS cost_usd,
+             SUM(CASE WHEN t.received_quantity IS NULL OR t.unit_cost_usd IS NULL THEN 1 ELSE 0 END) AS lines_without_cost,
+             SUM(CASE WHEN t.payment_status = 'credit' THEN 1 ELSE 0 END) AS credit_lines
+      FROM (${STOCK_IN_REPORT_SOURCE}) t ${where}
+    `).get<TotalsRow>(params),
+  ])
+
+  // When a branch filter is on, say how many invoice groups it CANNOT see
+  // because their lots never had a branch recorded (pre-0070 rows, and
+  // catalog-import batches) -- hidden-and-counted, never silently dropped.
+  let invoicesWithoutBranch = 0
+  if (params.branchId != null) {
+    const noBranchQuery = { ...query, branch_id: undefined }
+    const { where: baseWhere, params: baseParams } = stockInReportFilters(noBranchQuery)
+    const row = await db.prepare(`
+      SELECT COUNT(*) AS total FROM (
+        SELECT 1 FROM (${STOCK_IN_REPORT_SOURCE}) t
+        ${baseWhere ? `${baseWhere} AND` : 'WHERE'} t.received_branch_id IS NULL
+        GROUP BY t.supplier_key, t.received_day
+      )
+    `).get<{ total: number }>(baseParams)
+    invoicesWithoutBranch = Number(row?.total) || 0
+  }
+
+  const [branches, supplierOptions] = await Promise.all([
+    db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id ASC').all<{ id: number; name: string | null }>(),
+    db.prepare(`
+      SELECT t.supplier_key AS key, MAX(t.supplier_display) AS name
+      FROM (${STOCK_IN_REPORT_SOURCE}) t
+      WHERE t.supplier_key <> 'none'
+      GROUP BY t.supplier_key
+      ORDER BY name COLLATE NOCASE ASC
+      LIMIT 300
+    `).all<{ key: string; name: string | null }>(),
+  ])
+
+  const round2 = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100
+  return c.json({
+    invoices: invoices.map((row) => ({ ...row, cost_usd: round2(row.cost_usd) })),
+    totals: {
+      invoices: Number(countRow?.total) || 0,
+      lines: Number(totalsRow?.line_count) || 0,
+      units_received: Number(totalsRow?.units_received) || 0,
+      cost_usd: round2(totalsRow?.cost_usd),
+      lines_without_cost: Number(totalsRow?.lines_without_cost) || 0,
+      credit_lines: Number(totalsRow?.credit_lines) || 0,
+      invoices_without_branch: invoicesWithoutBranch,
+    },
+    page,
+    page_size: pageSize,
+    total_invoices: Number(countRow?.total) || 0,
+    meta: { branches, suppliers: supplierOptions },
+  })
+})
+
+// One invoice group's product lines, paged -- the groups endpoint stays
+// bounded no matter how big a group is (the catalog import's synthetic
+// same-day batches can put thousands of lines under one date).
+app.get('/suppliers/reports/stock-in-invoice-lines', async (c) => {
+  const db = getDb(c.env)
+  const query = c.req.query()
+  const supplierKey = String(query.supplier_key || '').trim()
+  if (!supplierKey) return c.json({ error: 'supplier_key is required' }, 400)
+  // The no-date group travels as 'none' (an empty query value would be
+  // dropped in transit); it means received_day = '' in the source table.
+  const rawDay = String(query.day || '').trim()
+  if (!rawDay) return c.json({ error: 'day is required' }, 400)
+  const day = rawDay === 'none' ? '' : rawDay.slice(0, 10)
+  const page = clampInt(query.page, 1, 1, 100000)
+  const pageSize = clampInt(query.page_size, 100, 1, 200)
+
+  const conditions = ['t.supplier_key = @supplierKey', 't.received_day = @day']
+  const params: Record<string, unknown> = { supplierKey, day }
+  const branchId = Number(query.branch_id)
+  if (Number.isFinite(branchId) && branchId > 0) {
+    conditions.push('t.received_branch_id = @branchId')
+    params.branchId = branchId
+  }
+  const where = `WHERE ${conditions.join(' AND ')}`
+
+  type LineRow = {
+    id: number; batch_number: number | null; lot_code: string | null; received_at: string | null
+    received_quantity: number | null; unit_cost_usd: number | null; payment_status: string | null
+    credit_due_date: string | null; received_branch_id: number | null; received_branch_name: string | null
+    product_id: number; product_name: string | null; barcode: string | null; unit: string | null; remaining_quantity: number
+  }
+  const [lines, countRow] = await Promise.all([
+    db.prepare(`
+      SELECT t.id, t.batch_number, t.lot_code, t.received_at, t.received_quantity,
+             t.unit_cost_usd, t.payment_status, t.credit_due_date, t.received_branch_id,
+             b.name AS received_branch_name,
+             p.id AS product_id, p.name AS product_name, p.barcode, p.unit,
+             COALESCE((SELECT SUM(bbs.quantity) FROM branch_batch_stock bbs WHERE bbs.batch_id = t.id), 0) AS remaining_quantity
+      FROM (${STOCK_IN_REPORT_SOURCE}) t
+      JOIN products p ON p.id = t.variant_product_id
+      LEFT JOIN branches b ON b.id = t.received_branch_id
+      ${where}
+      ORDER BY p.name COLLATE NOCASE ASC, t.id ASC
+      LIMIT @limit OFFSET @offset
+    `).all<LineRow>({ ...params, limit: pageSize, offset: (page - 1) * pageSize }),
+    db.prepare(`SELECT COUNT(*) AS total FROM (${STOCK_IN_REPORT_SOURCE}) t ${where}`).get<{ total: number }>(params),
+  ])
+
+  return c.json({
+    lines: lines.map((line) => ({
+      ...line,
+      line_total_usd: line.received_quantity != null && line.unit_cost_usd != null
+        ? Math.round(line.received_quantity * line.unit_cost_usd * 100) / 100
+        : null,
+    })),
+    page,
+    page_size: pageSize,
+    total_lines: Number(countRow?.total) || 0,
+  })
+})
+
 // Administrator-only manual point awards. A ledger event is created instead
 // of mutating a balance column, preserving the same calculable/auditable
 // model used for sales, returns, and approved share rewards.

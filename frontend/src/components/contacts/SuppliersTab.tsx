@@ -18,6 +18,7 @@ import SearchInput from '../shared/SearchInput'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
+import SectionCard from '../shared/SectionCard'
 import { ThreeDotMenu, DetailModal, ContactTable, buildSelectedSnapshots, countActiveFlags, useContactSelection } from './shared'
 import { useContactDuplicateFlag } from './useContactDuplicateFlag'
 import DuplicateFlagBanner from './DuplicateFlagBanner'
@@ -42,6 +43,7 @@ import type { ContactOption } from './contactOptionUtils'
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'suppliers-contact-import')
 const SupplierPurchasesModal = lazyRetry(() => import('./SupplierPurchasesModal'), 'suppliers-purchases-modal')
+const StockInInvoicesSection = lazyRetry(() => import('./StockInInvoicesSection'), 'suppliers-stock-in-report')
 const SUPPLIER_MUTATION_TIMEOUT_MS = 12000
 
 type TranslateFn = (key: string) => string | undefined
@@ -964,6 +966,26 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           {loadError}
         </div>
       ) : null}
+
+      {/* D1b: the Stock-In Invoice report -- purchases grouped supplier →
+          received date → product lines, the old system's report rebuilt on
+          batch data (supplier 0062, cost 0065, received totals 0067,
+          receiving branch 0070). Lives on this tab because per-lot costs
+          and supplier spend are exactly what the contacts_suppliers gate
+          already scopes -- both report endpoints sit under /suppliers/* on
+          the server. Folded by default; the report (its own lazy chunk)
+          only loads when opened. */}
+      <SectionCard
+        kind="reports"
+        title={tr('stock_in_invoices', 'Stock-In Invoices', 'វិក្កយបត្រស្តុកចូល')}
+        subtitle={tr('stock_in_invoices_hint', 'Every lot received into stock, grouped by supplier and received date', 'គ្រប់ឡុតដែលទទួលចូលស្តុក ដាក់ជាក្រុមតាមអ្នកផ្គត់ផ្គង់ និងថ្ងៃទទួល')}
+        storageKey="suppliers_stock_in_invoices"
+        defaultOpen={false}
+      >
+        <Suspense fallback={<div className="py-6 text-center text-sm text-gray-400">{tr('loading', 'Loading...', 'កំពុងផ្ទុក...')}</div>}>
+          <StockInInvoicesSection t={t} />
+        </Suspense>
+      </SectionCard>
 
       <ContactTable
         loading={loading}

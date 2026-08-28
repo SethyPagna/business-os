@@ -172,3 +172,16 @@ export function getSupplierPurchases(id: number | string): Promise<unknown> {
 export function getDeliveryContacts(params: QueryParams = {}): Promise<unknown> {
   return readContacts(DELIVERY_CONTACT_READ, params)
 }
+
+// D1b: the Stock-In Invoice report -- purchases grouped supplier →
+// received date → product lines, with branch/supplier/date filters.
+// Server-gated by contacts_suppliers like the rest of /suppliers.
+export function getStockInInvoiceReport(params: QueryParams = {}): Promise<unknown> {
+  return apiFetch('GET', appendQuery('/api/suppliers/reports/stock-in-invoices', buildQueryString(params)))
+}
+
+// One invoice group's product lines, paged. The no-date group's day
+// travels as 'none' (an empty value would be dropped from the query).
+export function getStockInInvoiceLines(params: QueryParams = {}): Promise<unknown> {
+  return apiFetch('GET', appendQuery('/api/suppliers/reports/stock-in-invoice-lines', buildQueryString(params)))
+}
