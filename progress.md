@@ -422,10 +422,15 @@ store really paid the rider; margin = charge − cost and is internal only.*
   batch attributes. The templates are a SNAPSHOT (final quantity only — clarified in
   the migration pack README); this page is where the real history becomes visible once
   M4/M6 load it. Sections here render through N3's SectionCard.
-- [ ] D4. (11.28) **Manual historical batches**: enter real received date + batch when
+- [~] D4 **[CLAIMED: session 05]**. (11.28) **Manual historical batches**: enter real received date + batch when
   recording stock late — from Product edit, Inventory batch view and Branch batch views.
   One shared validation + stock/batch kernel for all entry points. Branch transfers
   PRESERVE the barcode; only create/add/adjust flows may set/change one.
+  *(Session-05 scope note, measured: receiveBatchStock + ReceiveBatchModal already take
+  receivedDate — the gaps are POST /adjust never passing a date (Product-edit
+  BranchStockAdjuster + Inventory Adjust modal always stamp today) and the transfer
+  barcode rule needing a test pin. Files: routes/inventory.ts, BranchStockAdjuster.tsx,
+  InventoryStockModals.tsx, Inventory.tsx, lang packs (additive), a new pure test.)*
 - [~] D5a. **Supplier-on-batch foundation is BUILT (Part 377, needs deploy).**
   Migration 0062: `product_batches.supplier_id/supplier_name`. §12 template accepts an
   optional 11th `supplier` column (ten-column files unchanged; vendor/suppliername
