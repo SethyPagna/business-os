@@ -45,6 +45,18 @@ export type ContactDuplicateCandidateRow = {
 
 export type ContactDuplicateTable = 'customers' | 'suppliers' | 'delivery_contacts'
 
+// Only customers carry membership_number (0001's schema; suppliers/
+// delivery_contacts have never had the column -- production-verified).
+// Selecting it unconditionally made EVERY manual supplier and
+// delivery-contact create/update 500 the moment it reached the duplicate
+// check, and the DuplicatesTab sweep for those tables with it -- the
+// live-typing flag hid the same failure by design (it fails soft). The
+// candidate row type keeps membership_number optional, so non-customer
+// rows simply carry none.
+function candidateColumns(table: ContactDuplicateTable): string {
+  return table === 'customers' ? 'id, name, phone, address, membership_number' : 'id, name, phone, address'
+}
+
 export function normalizeContactName(value: unknown): string {
   return String(value ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
 }
@@ -58,6 +70,30 @@ export function normalizePhone(value: unknown): string | null {
   if (!raw) return null
   const digits = raw.replace(/[^\d+]/g, '')
   return digits || null
+}
+
+// P7-c: the P8 DISPLAY convention for manually entered phones -- the same
+// contract the migration pack's validator pins (`0XX XXX XXX` for 9
+// digits, `0XX XXX XXXX` for 10; validate-pack.cjs's PHONE_FORMATTED_RE/
+// PHONE_BARE_VALID_RE). Matching stays digit-based (normalizePhone above),
+// so this is display consistency only: 10,352 migrated numbers already
+// carry this shape and manual creates must not drift from it. Deliberately
+// conservative, mirroring the migration's own rule: only an unambiguous
+// Cambodian number is reformatted -- 0-leading 9/10 digit strings, plus a
+// manually typed +855/855 prefix (converted to its 0-leading local form).
+// Anything else (dual numbers, foreign, partials, garbage) is preserved
+// exactly as typed, the migration's "preserved as-is" rule.
+export function formatPhoneP8(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return raw
+  if (/^0\d{2} \d{3} \d{3,4}$/.test(raw)) return raw
+  const digits = raw.replace(/\D/g, '')
+  // Reject mixed content: if stripping separators dropped anything beyond
+  // spaces/dashes/dots/parens/plus, this isn't a plain phone -- preserve.
+  if (raw.replace(/[\d\s().+-]/g, '') !== '') return raw
+  const national = /^855\d{8,9}$/.test(digits) ? `0${digits.slice(3)}` : digits
+  if (!/^0\d{8,9}$/.test(national)) return raw
+  return `${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6)}`
 }
 
 // Every phone number a contact record actually carries: its primary
@@ -146,7 +182,7 @@ export async function findContactDuplicates(
   if (excludeSql) params.excludeId = subject.id
 
   const rows = await db
-    .prepare(`SELECT id, name, phone, address, membership_number FROM ${table} WHERE (${conditions.join(' OR ')}) ${excludeSql} LIMIT 50`)
+    .prepare(`SELECT ${candidateColumns(table)} FROM ${table} WHERE (${conditions.join(' OR ')}) ${excludeSql} LIMIT 50`)
     .all<ContactDuplicateCandidateRow>(params)
 
   return classifyContactDuplicates({ name: subject.name, phones }, rows, mode)
@@ -197,7 +233,7 @@ export async function findDuplicateContactClusters(
   mode: ContactOptionMode = 'address',
 ): Promise<ContactDuplicateCluster[]> {
   const [rows, dismissalRows] = await Promise.all([
-    db.prepare(`SELECT id, name, phone, address, membership_number FROM ${table} ORDER BY id ASC`).all<ContactDuplicateCandidateRow>({}),
+    db.prepare(`SELECT ${candidateColumns(table)} FROM ${table} ORDER BY id ASC`).all<ContactDuplicateCandidateRow>({}),
     db.prepare(`SELECT cluster_type, cluster_value FROM contact_duplicate_dismissals WHERE contact_table = @table`).all<{ cluster_type: string; cluster_value: string }>({ table }),
   ])
   // Compared against normalized values on both sides (normalizeContactName
