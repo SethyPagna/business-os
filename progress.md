@@ -453,7 +453,12 @@ deep-linkable tabs.*
 
 ### Phase G — Promotions + public portal
 
-- [ ] G1. Promotion engine: rule types "buy ≥ X save Y", "% off selected items", fixed
+- [~] G1 *(IN PROGRESS — claimed by session business-os-v1-6e, Aug 28, Part 391.
+  Footprint: NEW migration 0071 + lib/promotionEngine.ts (+ hand-synced frontend
+  mirror) + routes/promotions.ts + Promotions page component; wiring touches
+  POS.tsx, portal catalog ordering, Products list view, navigationConfig/AppContext
+  nav + permissions defaults. Peers: please avoid those wiring files until this
+  lands.)* Promotion engine: rule types "buy ≥ X save Y", "% off selected items", fixed
   discount; optional display Title (tag/label shown or hidden); scope = one product,
   a set, category/brand; start/end dates. POS + portal both read the SAME rule evaluation
   kernel (truth never diverges between what POS charges and what the portal advertises).
