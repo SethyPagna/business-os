@@ -62,6 +62,12 @@ import { buildStockHealthSegments } from './stockHealthSummary'
 // setting; if a settings-driven default is wanted later, this is the one
 // place to read it from.
 const DEFAULT_ADD_QUANTITY = 1
+
+// Same helper (and same UTC-day convention) as ReceiveBatchModal's default
+// received date -- every entry point must agree on what "today" means.
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
@@ -163,6 +169,10 @@ type AdjustForm = {
   cost_usd: InventoryFormValue
   cost_khr: InventoryFormValue
   barcode: string
+  // D4 (11.28): real received date for stock recorded late -- see
+  // InventoryStockModals.tsx's matching comment for when it's shown and
+  // when it goes on the wire.
+  received_date: string
   // Mirrors InventoryStockModals.tsx's own AdjustForm.batch_id -- see that
   // file's comment. Kept in sync as the same literal type ('' | 'new' | id).
   batch_id: InventoryId | ''
@@ -542,7 +552,7 @@ export default function Inventory() {
     pricingLocked: true,
     selling_price_usd: '', selling_price_khr: '', special_price_usd: '', special_price_khr: '',
     discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
-    cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '',
+    cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', received_date: todayIsoDate(),
   })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
@@ -1464,6 +1474,16 @@ export default function Inventory() {
       userName: user?.name || user?.username,
       unlockPricing,
       batchId: !unlockPricing && adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined,
+      // D4 (11.28): sent only when the date input was actually on screen
+      // (InventoryStockModals.tsx's own visibility condition, recomputed
+      // here) -- a value lingering from a hidden input must never re-date
+      // some other kind of change, e.g. after switching the adjust target
+      // to a group row.
+      receivedDate: adjustForm.type === 'add'
+          && (unlockPricing || (!selectedAdjustProduct.is_group && Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
+          && adjustForm.received_date
+        ? String(adjustForm.received_date)
+        : undefined,
       pricing: unlockPricing ? {
         selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
         selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
@@ -1617,6 +1637,10 @@ export default function Inventory() {
       cost_khr: p.cost_price_khr || p.purchase_price_khr || 0,
       barcode: p.barcode || '',
       batch_id: '',
+      // Reset to today on every open -- a historical date from the last
+      // adjustment must never silently carry into the next one (same
+      // stale-draft rule ReceiveBatchModal documents for its own date).
+      received_date: todayIsoDate(),
     })
   }
 

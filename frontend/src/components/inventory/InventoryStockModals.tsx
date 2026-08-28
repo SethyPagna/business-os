@@ -4,6 +4,7 @@ import Info from 'lucide-react/dist/esm/icons/info.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { dateToBatchCode } from '../../utils/batchCode.ts'
 
 type MoneyFormatter = (value: number) => string
 
@@ -63,6 +64,12 @@ type AdjustForm = {
   // left as-is (not reset) when the person flips that toggle -- the UI
   // just stops asking for it.
   batch_id: InventoryId | ''
+  // D4 (11.28): the REAL received date for stock recorded late. Shown
+  // only when this add creates a lot ("New batch", or unlocked pricing
+  // which always makes a fresh one); Inventory.tsx only puts it on the
+  // wire in exactly those cases, so a lingering value can't re-date an
+  // existing lot's top-up.
+  received_date: string
 }
 
 type TransferForm = {
@@ -402,6 +409,29 @@ export default function InventoryStockModals({
               {adjustForm.type === 'add' && unlockPricing ? (
                 <div className="text-[11px] text-gray-400">
                   {tr('batch_auto_new_unlocked', 'A new batch is created automatically for unlocked-pricing receipts.')}
+                </div>
+              ) : null}
+              {/* D4 (11.28): recording stock late may carry the REAL
+                  received date -- same field + default ReceiveBatchModal
+                  has. Shown only when this add creates a lot ("New batch",
+                  or unlocked pricing which always makes a fresh one); an
+                  existing lot keeps its own date. The code preview matters
+                  because the date DERIVES the lot code, and a matching code
+                  tops up that lot instead of creating a twin. */}
+              {adjustForm.type === 'add' && (unlockPricing || (showBatchPicker && adjustForm.batch_id === 'new')) ? (
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('received_date', 'Received date')}</label>
+                  <input
+                    id="inventory-adjust-received-date"
+                    name="inventory_adjust_received_date"
+                    className="input text-sm"
+                    type="date"
+                    value={adjustForm.received_date}
+                    onChange={e => setAdjustForm(f => ({ ...f, received_date: e.target.value }))}
+                  />
+                  <div className="mt-1 text-[11px] text-gray-400">
+                    {tr('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(adjustForm.received_date) || '--'}
+                  </div>
                 </div>
               ) : null}
               {branchCount > 1 ? (

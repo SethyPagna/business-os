@@ -12,6 +12,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildFtsMatchExpression, buildHybridMatchClause, buildIssueStateClauses, buildPartialWordMatchClause, buildShortWordFallbackClause, buildTrigramMatchExpression, expandAliasCandidates, normalizedHaystackSql, PRODUCT_SEARCH_COLUMNS, PRODUCTS_FTS_BM25_SQL, runFuzzyFallbackMatch, tokenizeSearchTermGroups, tokenizeSearchWords } from '../lib/searchMatch'
 import { receiveBatchStock, removeStockFromBatch, removeStockAcrossBatches, InsufficientBatchStockError } from '../lib/productBatches'
+import { normalizeToIsoDate } from '../lib/batchCode'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
@@ -1205,6 +1206,15 @@ app.post('/adjust', async (c) => {
   let quantity = Number(body.quantity)
   const reason = body.reason != null ? String(body.reason).trim() || null : null
   const requestedBranchId = body.branchId != null ? Number.parseInt(String(body.branchId), 10) : null
+  // D4 (11.28): stock recorded late may carry the REAL received date. It
+  // only feeds receiveBatchStock below, whose date->code matching
+  // (lib/batchCode.ts) decides create-vs-top-up exactly as the Receive
+  // Batch modal's own route does -- "same date = same lot" stays one rule.
+  // Absent stays null (the kernel then uses today); a supplied but
+  // unreadable date is refused rather than silently becoming today's.
+  const rawReceivedDate = body.receivedDate != null && String(body.receivedDate).trim() !== '' ? String(body.receivedDate).trim() : null
+  const receivedDate = rawReceivedDate ? normalizeToIsoDate(rawReceivedDate) : null
+  if (rawReceivedDate && !receivedDate) return c.json({ error: 'Received date must be a readable date (mm/dd/yyyy)' }, 400)
   // `unlockPricing` is an explicit flag from the frontend, not inferred by
   // diffing -- see InventoryStockModals.tsx's "Lock current pricing"
   // toggle. Locked (the default) skips the identity lookup below entirely
@@ -1371,6 +1381,10 @@ app.post('/adjust', async (c) => {
         // Auto-routed adds (batchIdRequested still null, no explicit pick)
         // also create a fresh batch, same as picking "+ New batch" would.
         batchId: unlockPricing ? null : batchIdRequested,
+        // D4: only matters when a lot is being created/matched -- an
+        // explicit-batchId top-up keeps the lot's own received_at (first
+        // attribution sticks, enforced inside receiveBatchStock).
+        receivedDate,
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
@@ -1433,7 +1447,7 @@ app.post('/adjust', async (c) => {
   // above), so the audit action must key off `originalType` -- keying off
   // `type` would make 'stock_set' unreachable and misreport every "Set
   // stock to X" as a plain add/remove in the audit log.
-  await audit(c.env, user?.id ?? null, user?.name ?? null, originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing })
+  await audit(c.env, user?.id ?? null, user?.name ?? null, originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: targetProductId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))

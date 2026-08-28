@@ -4,6 +4,7 @@ import { withLoaderTimeout } from '../../../utils/loaders.ts'
 import { getProductBatches, type ProductBatch } from '../../../api/batchesTransport.ts'
 import { getInventoryReasons, saveInventoryReasons } from '../../../api/methods.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
+import { dateToBatchCode } from '../../../utils/batchCode.ts'
 // Reused as-is (not re-styled) from Inventory's own "Adjust stock" modal --
 // same "Manage reasons" flow, same saved-reason catalog, same component.
 // Per the standing rule that this form's stock UI should look and behave
@@ -11,6 +12,12 @@ import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 import InventoryReasonManagerModal from '../../inventory/InventoryReasonManagerModal.tsx'
 
 const BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS = 12000
+
+// Same helper (and same UTC-day convention) as ReceiveBatchModal's default
+// received date -- the two entry points must agree on what "today" means.
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10)
+}
 
 type Translate = (key: string) => string | undefined
 type StockAdjustmentType = 'add' | 'remove' | 'set'
@@ -67,6 +74,10 @@ type BranchStockRow = {
   // see that file's own comment for why this rides as a plain string/
   // number rather than its own richer type.
   batchId: number | string | ''
+  // D4 (11.28): the REAL received date for stock recorded late. Only sent
+  // when this row creates a lot (add + "New batch"); an existing lot keeps
+  // its own date (first attribution sticks, enforced server-side).
+  receivedDate: string
 }
 
 type AdjustStockPayload = {
@@ -81,6 +92,7 @@ type AdjustStockPayload = {
   userId?: number | string
   userName?: string
   batchId?: number | string
+  receivedDate?: string
 }
 
 type ApiResult = {
@@ -120,6 +132,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
         delta: '',
         type: 'add',
         batchId: '',
+        receivedDate: todayIsoDate(),
       }
     }),
   )
@@ -203,7 +216,7 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
     withLoaderTimeout(loader, label, BRANCH_STOCK_ADJUSTMENT_TIMEOUT_MS)
   ), [])
 
-  const setRow = (index: number, patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId'>>) => {
+  const setRow = (index: number, patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate'>>) => {
     setRows((current) => current.map((row, rowIndex) => (
       rowIndex === index ? { ...row, ...patch } : row
     )))
@@ -259,11 +272,15 @@ export default function BranchStockAdjuster({ product, branches, user, onDone, t
           userId: user?.id,
           userName: user?.name,
           batchId: !isGroupProduct && row.type !== 'set' && row.batchId !== '' ? row.batchId : undefined,
+          // Sent only when the date input was actually on screen (add +
+          // "New batch" on a flat row) -- a lingering value must never
+          // silently re-date some other kind of change.
+          receivedDate: !isGroupProduct && row.type === 'add' && row.batchId === 'new' && row.receivedDate ? row.receivedDate : undefined,
         }), 'Adjust branch product stock')
         if (result?.success === false) throw new Error(result?.error || 'Failed to adjust branch stock')
       }
       setMsg(T('stock_updated', 'Stock updated', 'បានធ្វើបច្ចុប្បន្នភាពស្តុក'))
-      setRows((current) => current.map((row) => ({ ...row, delta: '', batchId: '' })))
+      setRows((current) => current.map((row) => ({ ...row, delta: '', batchId: '', receivedDate: todayIsoDate() })))
       onDone()
     } catch (error) {
       setMsg(error instanceof Error ? error.message : T('unknown_error', 'Unknown error', 'មានបញ្ហាមិនស្គាល់'))
@@ -361,7 +378,7 @@ type StockAdjustBranchRowProps = {
   productId: number | string
   unit?: string
   isGroupProduct: boolean
-  onChange: (patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId'>>) => void
+  onChange: (patch: Partial<Pick<BranchStockRow, 'delta' | 'type' | 'batchId' | 'receivedDate'>>) => void
   T: (key: string, fallbackEn: string, fallbackKm?: string) => string
 }
 
@@ -497,6 +514,28 @@ function StockAdjustBranchRow({ row, productId, unit, isGroupProduct, onChange, 
               ) : null}
             </div>
           )}
+          {/* D4 (11.28): recording stock late may carry the REAL received
+              date -- same field + default ReceiveBatchModal has. Shown only
+              for "New batch": an existing lot keeps its own date. The code
+              preview matters because the date DERIVES the lot code, and a
+              matching code tops up that lot instead of creating a twin --
+              the same rule the Receive Batch modal documents. */}
+          {row.type === 'add' && row.batchId === 'new' ? (
+            <div className="mt-1.5">
+              <label className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">
+                {T('received_date', 'Received date', 'ថ្ងៃទទួលស្តុក')}
+              </label>
+              <input
+                className="input w-full py-1 text-xs"
+                type="date"
+                value={row.receivedDate}
+                onChange={(event) => onChange({ receivedDate: event.target.value })}
+              />
+              <div className="mt-1 text-[10px] text-gray-400">
+                {T('batch_code_preview', 'Batch code', 'កូដបាច់')}: {dateToBatchCode(row.receivedDate) || '--'}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
