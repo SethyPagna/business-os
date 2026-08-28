@@ -494,6 +494,21 @@ deep-linkable tabs.*
 
 ### Phase G — Promotions + public portal
 
+- [~] G1b *(IN PROGRESS — claimed by session 6e, Part 397, migration 0073.
+  User refinement round, Aug 28: (a) search ordering — within matching
+  results, discounted/promoted items top; relevance orders inside each
+  block ("relevance still wins but if relevance also have discounts,
+  discounts top"); (b) NEW rule types: spend ≥ $X save $Y; buy ≥ X get Z%
+  off; buy N get the NEXT item $Y-or-Z% off — where the CHEAPEST item of
+  each complete group gets the discount ("only lowest of the two"),
+  repeating per group, cart-level across a rule's scope; (c) label
+  wording styles — auto-generated titles selectable as Save/Get/Free
+  phrasings, custom title still overrides; (d) filter menu reorganized for
+  scanability; (e) public-portal facet privacy audit — supplier and any
+  admin-internal facet must never reach the portal. Footprint: both
+  kernels + promotionRulesSql, routes/promotions|products|portal,
+  PromotionsPage, posCore/POS/ProductDetailSheet, Products + filter
+  helpers, portal display/section/page, lang packs additive, promo tests.)*
 - [x] G1 *(Part 391, session 6e — SHIPPED, needs deploy (0071). Migration 0071
   promotion_rules; ONE kernel lib/promotionRules.ts + hand-synced frontend mirror
   (byte-drift-guarded by test); routes/promotions.ts /rules* — manage under the new
