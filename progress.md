@@ -107,7 +107,23 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   Storefront icon is an "L" monogram — no text to regenerate; internal
   `leang-cosmetics-*.png` FILENAMES kept (user-invisible; renaming would churn the
   service-worker cache — optional follow-up).
-- [~] A4 **[CLAIMED: session 05]**. **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
+- [x] A4 *(Part 411, session 05 — SHIPPED, needs deploy (4c5502d9). The platform
+  itself had moved: since Cloudflare's Feb-11-2026 changelog, Workers Paid defaults
+  to 10,000 subrequests/invocation (configurable to 10M) — both in-code models
+  (backup.ts's "Free allows 50" AND the M4 comment's "1,000 internal does not rise
+  on Paid") described dead platforms. wrangler.toml now pins subrequests = 10_000
+  beside cpu_ms and carries the decision ledger. Raised with measured reasons:
+  backup copies 20→100, reset image deletes 200→500, ROWS_PER_IMPORT_CHUNK 150→600
+  (its own comment prescribed exactly this once Paid cpu_ms returned),
+  STOCK_ACTION_MAX_UNITS 60→240 + MAX_ROWS 480→1920 (~29% of budget; RECONCILE
+  takes 4x bigger single-snapshot sheets). NOT raised with reasons recorded:
+  MAX_HISTORICAL_SALE_LINES=100 (data bound — biggest real receipt is 86 lines;
+  its "Free-plan" error wording fixed), M4's classify/dispatch windows (job-state
+  bound), D1 100-bound-params (plan-independent). Caps exported; every boundary
+  fixture now seeds RELATIVE to them (five were silently welded to old numbers).
+  wrangler dry-run OK, all backend tests 0 failures. Cron-trigger wiring stays
+  with K3; system.ts's three UNBOUNDED Promise.all delete sweeps flagged for K4.)*
+  **Workers Paid ($5/mo) is active — re-base the platform assumptions.** The
   code is full of Free-plan ceilings that are now 30s CPU / higher D1+KV quotas /
   1000 subrequests: apply caps (480 rows/60 units, 50-line receipts), backup slice
   sizes (20 objects), includeImages cleanup cap (200), import windows, `STOCK_ACTION_MAX_UNITS`.
@@ -115,11 +131,6 @@ Two rules learned the hard way, both from real incidents in this file's own hist
   one constant at a time, each with a measured reason — and record the new numbers in
   wrangler.toml comments. Also now affordable: Cron Triggers for the 6h image audit and
   backup schedule, Queues at paid limits, and `limits.cpu_ms` tuning.
-  *(Session-05 scope note: the ceilings + wrangler.toml records are this unit; each
-  constant gets read first — a cap bound by D1's 100-bound-params or SQL variable
-  limits does NOT rise on Paid and stays put with its reason stated. Cron-trigger
-  wiring for the 6h audit stays with K3. Files: cloudflare backend constants + their
-  pinned tests + wrangler.toml comments — no frontend IA files.)*
 
 ### Phase M — Old-system data migration (files received Aug 28; analysis done)
 
