@@ -476,7 +476,17 @@ store really paid the rider; margin = charge − cost and is internal only.*
   aliases); the apply engine matches names against the suppliers table (match-only,
   never auto-creates) and the atomic ADD writer stores it on batch creation — a lot's
   first attribution sticks, later adds never rewrite it, a blank changes nothing
-  (all test-proven). **Remaining:** the manual add-stock/receive UI supplier picker,
+  (all test-proven). **Remaining:** the manual add-stock/receive UI supplier picker
+  **[CLAIMED: session 4a — Part 409. Picker with id+name suggestions from the
+  suppliers table (free text stays a deliberate name-only attribution, never
+  auto-creates) on all four manual add surfaces: ReceiveBatchModal (upgrading its
+  free-text field), InventoryStockModals + BranchStockAdjuster add paths,
+  BulkAddStockModal (one supplier for the whole bulk receive event); plus
+  routes/inventory.ts /adjust supplier passthrough to stockActionCommit. When an
+  EXISTING lot is picked (D4b's lot picker), the picker hides and shows that lot's
+  attribution — first-attribution-sticks means a choice there would be silently
+  ignored. Files: the four modals + shared picker field + routes/inventory.ts +
+  en/km packs + tests. No nav files, no Returns/Sales, no routes/products.ts.]**,
   and the read surfaces below (D3 supplier section, per-supplier totals).
 - [x] D5. **Supplier accounting** *(Part 384: shipped — 0067 `received_quantity`
   written by both receive paths, GET /suppliers/:id/purchases under the
@@ -557,9 +567,13 @@ deep-linkable tabs.*
 
 ### Phase F — Add/create flows: wizard, fast batch entry, drafts
 
-- [~] F1 *(IN PROGRESS — session 6e, Part 408 (407 reserved for 4a's E2).
+- [~] F1 *(IN PROGRESS — session 6e, Part 408 (407 reserved for a7's E2 —
+  identity note: the E2 holder signs as a7; session 4a is the pre-compaction
+  a7's continuation under a new name and holds D5a-picker + P7-c, not E2).
   Footprint: ProductForm + product create flow + a live-match helper +
-  pure/frontend tests; no nav files (4a holds those for E2).)*
+  pure/frontend tests; no nav files (a7 holds those for E2). P7-b (the
+  sci-notation barcode guard, ProductForm + routes/products.ts server-side)
+  belongs in this footprint — handed to 6e by 4a.)*
 - [ ] F1. **Add Product = new products only.** Typing a name live-searches existing
   products; matching name/barcode/both raises a structured warning with actions: go back ·
   add as child of the matched group · proceed as new — with a before→after arrow preview
@@ -906,8 +920,11 @@ deep-linkable tabs.*
     on import screens (BulkImportModal/productImportPlanner/spreadsheetImport) —
     manual product create/edit accepts a pasted `8.85156E+12` barcode; ProductForm
     AND routes/products.ts (server-side, like the identity guard) should reject it.
-    routes/products.ts is currently the G1 session's file — fix after it lands.
-  - [ ] P7-c *(minor, confirmed)*: manual contact creates don't apply the P8 phone
+    G1 landed long ago; the footprint (ProductForm + routes/products.ts create path)
+    is exactly 6e's F1 lane — HANDED TO 6e to fold into F1 (Part 408) so two
+    sessions don't share ProductForm. Spec: reject `^\d+(\.\d+)?[eE][+-]?\d+$`-shaped
+    barcodes client-side with a clear message; server rejects the same pattern 400.
+  - [~] P7-c **[CLAIMED: session 4a — Part 409, rides with the D5a picker unit]** *(minor, confirmed)*: manual contact creates don't apply the P8 phone
     display convention (`XXX XXX XXX`); matching is digit-based so linkage works —
     display consistency only. `contactDuplicates.normalizePhone` exists to reuse.
   - P7-d *(checked, NOT a gap)*: §12 import deliberately cannot set supplier-credit
