@@ -1006,7 +1006,7 @@ deep-linkable tabs.*
   media-optimize.Dockerfile header, not this item.)*
 - [ ] K4. Storage/jobs hardening phases 1–6 of the locked execution plan (leases, R2
   NDJSON staging, D1 slimming — the 193MB staging JSON), safeguards, Sentry wiring.
-- [~] K5 **[CLAIMED: session 6e — Part 420. 9.1 was closed by D6 long
+- [x] K5 *(Part 421 — renumbered off a7's 420; SHIPPED by session 6e. 9.1 was closed by D6 long
   since; this claim is 9.2: the auto-merge flag + filter. Footprint:
   migration 0076 (products.auto_merged_count + an import_auto_merges
   record table preserving each losing row's values), importEngine.ts

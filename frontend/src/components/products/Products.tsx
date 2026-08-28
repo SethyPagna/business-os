@@ -122,6 +122,7 @@ import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilter
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildCreatedDateFilterSection } from './CreatedDateFilterOptions.tsx'
+import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
@@ -643,6 +644,8 @@ function ProductsFullEditor() {
   const [issueFilter, setIssueFilter] = useState('all')
   // G1 promo filter: '' /'all' | 'promoted' | 'discounted' | 'rules' | 'rule:<id>'
   const [promoFilter, setPromoFilter] = useState('all')
+  // 9.2: 'all' | 'auto' -- server-side facet over auto_merged_count.
+  const [mergedFilter, setMergedFilter] = useState('all')
   const [promotionRules, setPromotionRules] = useState<PromotionRule[]>([])
   const [createdDateFrom, setCreatedDateFrom] = useState('')
   const [createdDateTo, setCreatedDateTo] = useState('')
@@ -879,6 +882,8 @@ function ProductsFullEditor() {
           issueState: issueFilter === 'all' ? '' : issueFilter,
           // G1 promo filter -- server-side, so it holds across pagination.
           promo: promoFilter === 'all' ? '' : promoFilter,
+          // 9.2 auto-merged facet -- same server-side contract as promo.
+          merged: mergedFilter === 'all' ? '' : mergedFilter,
           sort: productSortDirection === 'asc' ? 'created_asc'
             : productSortDirection === 'name_asc' ? 'name_asc'
             : productSortDirection === 'name_desc' ? 'name_desc'
@@ -999,7 +1004,7 @@ function ProductsFullEditor() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
+  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, createdDateFrom, createdDateTo, effectiveStockState, groupFilter, initialFilter, issueFilter, mergedFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
 
   useEffect(() => {
     latestLoadRef.current = load
@@ -2219,6 +2224,7 @@ function ProductsFullEditor() {
     setGroupFilter('all')
     setIssueFilter('all')
     setPromoFilter('all')
+    setMergedFilter('all')
     // setInitialFilter('all') removed -- no setter exists anymore, and
     // initialFilter is permanently 'all' already (see its declaration).
     setCreatedDateFrom('')
@@ -2824,6 +2830,11 @@ function ProductsFullEditor() {
       t,
       issueFilter,
       setIssueFilter,
+    }),
+    mergedSection: buildAutoMergedFilterSection({
+      t,
+      mergedFilter,
+      setMergedFilter,
     }),
     promotionsSection: buildPromotionsFilterSection({
       t,

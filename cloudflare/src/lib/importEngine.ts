@@ -4668,6 +4668,24 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
 
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = []
     const nowIso = new Date().toISOString()
+    // 9.2 (Part 421): each in-file auto-merge (a later create row folding
+    // into an earlier row's product via the identity signature) is
+    // RECORDED -- the losing row's original values were previously
+    // invisible the moment the fold happened. Filled by the products
+    // in-batch dedupe below; written after the product INSERTs so the
+    // counter lands on a row that exists.
+    const autoMergeRecords: Array<{ productId: number; rowNumber: number; losingJson: string }> = []
+    const snapshotLosingRow = (row: Record<string, unknown>): string => {
+      const clean: Record<string, unknown> = {}
+      for (const [key, value] of Object.entries(row)) {
+        // internal plumbing keys and derived search columns are noise, not
+        // "details the first row's win erased"
+        if (key.startsWith('__') || key === 'name_normalized' || key === 'unit_normalized' || key === 'brand_compact') continue
+        if (value == null || value === '') continue
+        clean[key] = value
+      }
+      return JSON.stringify(clean)
+    }
 
     if (job.type === 'products') {
       // New product ids are pre-allocated here (rather than relying on
@@ -4760,6 +4778,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         if (earlier != null) {
           r.action = 'update'
           r.existingId = earlier.id
+          // 9.2: snapshot the losing row's ORIGINAL values before the
+          // pricing merge mutates it -- this record is the only place
+          // they survive.
+          autoMergeRecords.push({ productId: earlier.id, rowNumber: r.rowNumber, losingJson: snapshotLosingRow(d) })
           // The identity rule's merge semantics (Part 388): when the twin
           // rows disagree on selling/VIP price, the HIGHEST wins -- applied
           // to BOTH rows' data, because the first row's INSERT and this
@@ -5156,6 +5178,27 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             params: { usd: d.cost_price_usd, khr: d.cost_price_khr, id: d.product_id, updated_at: nowIso },
           })
         }
+      }
+    }
+
+    // 9.2: the auto-merge records ride the SAME atomic batch as the writes
+    // they describe -- appended last so each UPDATE lands after its
+    // product's INSERT (statements execute in order).
+    if (autoMergeRecords.length) {
+      const perProduct = new Map<number, number>()
+      for (const record of autoMergeRecords) {
+        perProduct.set(record.productId, (perProduct.get(record.productId) || 0) + 1)
+        statements.push({
+          sql: `INSERT INTO import_auto_merges (product_id, import_job_id, row_number, losing_json, created_at)
+                VALUES (@product_id, @import_job_id, @row_number, @losing_json, @created_at)`,
+          params: { product_id: record.productId, import_job_id: jobId, row_number: record.rowNumber, losing_json: record.losingJson, created_at: nowIso },
+        })
+      }
+      for (const [productId, count] of perProduct) {
+        statements.push({
+          sql: 'UPDATE products SET auto_merged_count = COALESCE(auto_merged_count, 0) + @count WHERE id = @id',
+          params: { count, id: productId },
+        })
       }
     }
 

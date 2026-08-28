@@ -116,6 +116,9 @@ interface BuildProductFilterSectionsOptions {
   // see components/shared/PromotionsFilterOptions.tsx. Spliced right
   // after Issues; no non-JSX fallback, same as the others.
   promotionsSection?: FilterSection | null
+  // 9.2 "Auto-merged" facet (see AutoMergedFilterOptions.tsx) -- spliced
+  // after Issues; no non-JSX fallback, same as the others.
+  mergedSection?: FilterSection | null
   // Pre-built "Created" date-range section (JSX `render`-based, built by
   // the .tsx caller via CreatedDateFilterOptions.tsx's
   // buildCreatedDateFilterSection -- same reason as availabilitySection:
@@ -295,6 +298,7 @@ export function buildProductFilterSections({
   availabilitySection,
   issuesSection,
   promotionsSection,
+  mergedSection,
   createdSection,
   searchModeSection,
   branches = [],
@@ -431,6 +435,7 @@ export function buildProductFilterSections({
     // splice point as the standalone button used to sit at (right next to
     // the search box, which is directly above this menu).
     issuesSection ? issuesSection : null,
+    mergedSection ? mergedSection : null,
     searchModeSection ? searchModeSection : null,
     // Merged Branch/Groups/Stock "Availability" section when the .tsx
     // caller built one (see components/shared/AvailabilityFilterOptions.tsx)

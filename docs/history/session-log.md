@@ -10074,3 +10074,43 @@ live wrangler parents fighting over 8787/8788, one serving each
 historical dist. Restart discipline: kill the wrangler PARENT node
 processes (CommandLine match 'wrangler'), not the port holder, then
 boot exactly one.
+
+## Part 421 (chat, Aug 28 2026) -- K5/9.2: in-file import auto-merges become visible
+
+*(Claimed as 420 on the board; a7's D2-slice log entry took 420 first --
+the full-registry grep caught it BEFORE anything shipped this time, and
+this unit renumbered to 421 pre-commit. The new grep-all-headers rule
+already paying for itself.)*
+
+The products import folds a later CSV row with the same identity
+signature into the first row's product (the in-batch dedupe) -- correct
+under the identity rule, but invisible afterward: at the real migration
+file's scale ~2,013 rows merge into others and their losing values
+simply vanished. 9.2 asked for "a flag + filter so the user can see
+what merged automatically."
+
+- **Migration 0076:** products.auto_merged_count (the flag) +
+  import_auto_merges (the record -- one row per losing source row,
+  its original values preserved as losing_json; append-only).
+- **Engine:** the apply-time dedupe snapshots each losing row BEFORE
+  the pricing merge mutates it (internal keys stripped), and the
+  records + counter bumps ride the SAME atomic batch as the product
+  writes they describe, appended after the INSERTs.
+- **Routes:** merged=auto facet on the products list (server-side, so
+  it holds across pagination), auto_merged_count on the list payload,
+  GET /auto-merges/:productId returning the parsed merge log.
+  losing_json can carry supplier/cost values, so the log stays behind
+  the products gate -- pinned test asserts the portal never references
+  any of it (public-surface rule).
+- **UI:** an "Auto-merged" filter section (own JSX file, spliced after
+  Issues in the menu) with a chip that clears back to All; clear-all
+  resets it; the loader re-runs on change.
+
+**Verification:** new test-auto-merge-record-pure.cjs (4 checks: real
+migrated schema, ordering pins, SQL-shape validity, portal privacy) +
+frontend tests/autoMergedFacet.test.ts (2 checks); shared
+productMenuHelpers suite still green; full chain + build + backend
+sweep + dry-run green. Migration 0076 rides the user's next
+`npm run deploy:full`. The per-product merge-log VIEW (showing losing
+values in the product drill) is left for D3's detail surface -- noted
+to a7, whose D1/D2 own that drill.
