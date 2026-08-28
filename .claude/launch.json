@@ -14,6 +14,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["wrangler", "dev", "-c", "cloudflare/wrangler.toml", "--port", "8787"],
       "port": 8787
+    },
+    {
+      "name": "worker-dev-8788",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "-c", "cloudflare/wrangler.toml", "--port", "8788"],
+      "port": 8788
     }
   ]
 }

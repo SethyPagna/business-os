@@ -3,7 +3,6 @@ import { getRegisteredWork, subscribeDirtyWork } from '../../utils/dirtyWork.ts'
 import type { LucideIcon } from 'lucide-react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import BookUser from 'lucide-react/dist/esm/icons/book-user.js'
-import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import Building2 from 'lucide-react/dist/esm/icons/building-2.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import DatabaseBackup from 'lucide-react/dist/esm/icons/database-backup.js'
@@ -110,7 +109,6 @@ const ICONS_BY_ID: Record<string, LucideIcon> = {
   loyalty_points: Ticket,
   pos: ShoppingCart,
   products: Package,
-  inventory: Boxes,
   branches: Building2,
   sales: BadgeDollarSign,
   contacts: BookUser,

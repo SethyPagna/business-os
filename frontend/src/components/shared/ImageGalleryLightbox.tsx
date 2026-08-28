@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from 'react'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
@@ -282,7 +283,7 @@ export default function ImageGalleryLightbox({
 
   const isZoomed = zoom.scale > MIN_SCALE
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/35 p-2 backdrop-blur-md sm:p-4" onClick={() => onClose?.()}>
       {/* w-full/h-full up to a capped max on larger screens -- on a narrow
           phone this fills the safe viewport edge-to-edge (minus the outer
@@ -402,6 +403,7 @@ export default function ImageGalleryLightbox({
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

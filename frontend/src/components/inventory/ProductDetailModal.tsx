@@ -1,4 +1,5 @@
 import History from 'lucide-react/dist/esm/icons/history.js'
+import { createPortal } from 'react-dom'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
@@ -114,7 +115,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   }
   const batchCount = visibleBatches.length
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={onClose}>
       <div className="flex max-h-modal-90 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
@@ -338,6 +339,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           ) : null}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
