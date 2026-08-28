@@ -1305,7 +1305,7 @@ Status: `not started` · `in progress` · `done` · `blocked` · `deferred`
 | Task | Status | Notes |
 |---|---|---|
 | Barcode first, on the same row as category and brand | done | Row meta line and detail header. |
-| Prices + stock merged onto one row (default display) | **in progress (session 05)** | Re-asked directly Aug 28 with a screenshot: "prices and stock qty should be one row. only one row." Supersedes the earlier "selling price gets its own row" split — card layout in Products.tsx's renderMobileProductCard. |
+| Prices + stock merged onto one row (default display) | **done (Part 412), needs deploy** | Re-asked directly Aug 28 with a screenshot: "prices and stock qty should be one row. only one row." SUPERSEDES the earlier "selling price gets its own row" split (the user rejected it rendered live — don't re-split without a fresh ask). One "\|"-separated line in renderMobileProductCard: selling (green, larger) · special/discount · cost (red) · status-colored qty; flex-wrap kept only as overflow protection. Desktop table untouched (already one row per product). Commit 4210aa2f. |
 | Large-screen row alignment — no indentation vs the category rail | not started | |
 | Sticky toolbar (search / select-all) gap on scroll | not started | Products show through the gap. |
 | Batch format + click-to-open float-expand in the flyout | not started | |
