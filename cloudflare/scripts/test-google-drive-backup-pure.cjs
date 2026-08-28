@@ -73,7 +73,7 @@ try {
 }
 
 const { DRIVE_BACKUP_KEEP, isTrustedDriveUploadSession, pushBackupToDrive } = moduleObj.exports
-assert.strictEqual(DRIVE_BACKUP_KEEP, 7)
+assert.strictEqual(DRIVE_BACKUP_KEEP, 10, 'the user keeps 2 in R2 and 10 in Drive (Part 386)')
 assert.strictEqual(isTrustedDriveUploadSession('https://www.googleapis.com/upload/drive/v3/files?upload_id=ok'), true)
 assert.strictEqual(isTrustedDriveUploadSession('https://upload.googleapis.com/session/ok'), true)
 assert.strictEqual(isTrustedDriveUploadSession('http://www.googleapis.com/session'), false)
@@ -118,7 +118,7 @@ global.fetch = async (url, init = {}) => {
     const parsedUrl = new URL(value)
     const query = parsedUrl.searchParams.get('q') || ''
     assert.match(query, /appProperties has \{ key='businessOsBackup' and value='true' \}/)
-    const files = Array.from({ length: 9 }, (_, index) => ({
+    const files = Array.from({ length: 12 }, (_, index) => ({
       id: `owned-${index}`,
       appProperties: { businessOsBackup: 'true', status: 'finalized' },
     }))
@@ -132,7 +132,7 @@ global.fetch = async (url, init = {}) => {
       ? { files: files.slice(5) }
       : { files: files.slice(0, 5), nextPageToken: 'page-2' })
   }
-  if (/\/drive\/v3\/files\/owned-[678]$/.test(value)) {
+  if (/\/drive\/v3\/files\/owned-(9|10|11)$/.test(value)) {
     assert.strictEqual(init.method, 'DELETE')
     return new Response(null, { status: 204 })
   }
@@ -146,7 +146,7 @@ async function main() {
     assert.strictEqual(result.fileId, 'drive-file')
     assert.strictEqual(listedBackups, 1)
     const deleted = calls.filter((call) => call.method === 'DELETE').map((call) => call.url)
-    assert.strictEqual(deleted.length, 3, 'the new copy plus nine finalized app backups must prune to exactly seven')
+    assert.strictEqual(deleted.length, 3, 'the new copy plus twelve finalized app backups must prune to exactly ten')
     assert.ok(deleted.every((url) => !url.includes('unrelated')))
     const repeated = await pushBackupToDrive(env)
     assert.strictEqual(repeated.success, true, repeated.error)
@@ -155,7 +155,7 @@ async function main() {
     assert.strictEqual(r2Reads, 1, 'a duplicate Drive mirror must not even reopen the R2 body')
     assert.doesNotMatch(source, /object\.arrayBuffer\(\)/)
     assert.doesNotMatch(source, /await createCloudflareBackup\(/)
-    console.log('PASS Drive mirrors the newest finalized R2 manifest via trusted resumable streaming and prunes only tagged app backups to seven')
+    console.log('PASS Drive mirrors the newest finalized R2 manifest via trusted resumable streaming and prunes only tagged app backups to ten')
   } finally {
     global.fetch = originalFetch
   }

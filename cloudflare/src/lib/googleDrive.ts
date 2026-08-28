@@ -32,7 +32,9 @@ const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 export const DRIVE_CALLBACK_PATH = '/api/system/drive-sync/oauth/callback'
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file'
 const DEFAULT_FOLDER_NAME = 'Business OS Sync'
-export const DRIVE_BACKUP_KEEP = 7
+// 10, not 7, since Part 386 -- the user's standing spec is "2 in R2 and
+// 10 in Google Drive".
+export const DRIVE_BACKUP_KEEP = 10
 
 function trim(value: unknown): string {
   return String(value ?? '').trim()

@@ -38,7 +38,16 @@ const NOTIFICATION_SETTING_KEYS = [
   'notifications_expiry_days',
   'notifications_loyalty_threshold',
   'notifications_realert_minutes',
+  // Part 386 fix: the two supplier-credit keys were read from the map but
+  // never LOADED into it (missing from this list since Part 382), so the
+  // Settings toggle/window wrote values nothing read back -- defaults
+  // always applied.
+  'notifications_supplier_credit_enabled',
+  'notifications_supplier_credit_days',
   'drive_sync_enabled',
+  // Presence-only read: loadPreferences reduces this to a boolean and the
+  // token value never leaves that function.
+  'drive_sync_refresh_token',
 ]
 const SUMMARY_SEPARATOR = ' - '
 
@@ -118,6 +127,7 @@ async function loadPreferences(env: Env) {
     // there is no server-side read/dismissed state to bound here.
     realertMinutes: Math.max(1, Math.min(1440, Math.floor(toNumber(map.notifications_realert_minutes, 10)))),
     driveSyncEnabled: normalizeBoolean(map.drive_sync_enabled, false),
+    driveSyncConnected: Boolean(String(map.drive_sync_refresh_token || '').trim()),
   }
 }
 
@@ -482,26 +492,41 @@ async function buildPortalSection(env: Env): Promise<NotificationSection | null>
   }
 }
 
-function buildSystemSection(driveSyncEnabled: boolean): NotificationSection | null {
-  // Real Google Drive OAuth isn't implemented on Cloudflare yet (see
-  // PORTING_STATUS.md), so a connection can never actually be "connected" --
-  // only surface this if the admin has turned sync on, matching the legacy
-  // "enabled but no refresh token" condition.
-  if (!driveSyncEnabled) return null
+function buildSystemSection(driveSyncEnabled: boolean, driveSyncConnected: boolean): NotificationSection | null {
+  // The Drive OAuth flow IS fully implemented (lib/googleDrive.ts +
+  // compat.ts's /system/drive-sync/* routes) -- the comment that used to
+  // live here claiming it wasn't was STALE, and it hid the exact failure
+  // A3 measured in production: with no drive_sync_* settings rows at all
+  // (never connected), this section returned null and NO ONE was ever
+  // told the off-site mirror wasn't running. Backups are business-
+  // critical, so "not connected" is now a standing warning until the
+  // admin either connects Drive or has deliberately disabled sync AND
+  // been told what that means once.
+  if (driveSyncConnected && driveSyncEnabled) return null
+  const item = !driveSyncConnected
+    ? {
+        id: 'system-drive-sync',
+        tone: 'warning' as const,
+        label: 'Google Drive backup is NOT connected',
+        meta: 'Only the R2 copies exist. Open Backup settings and connect Google Drive to start the off-site mirror (keeps the last 10).',
+        kind: 'system_drive_sync_connect',
+        pageId: 'backup',
+      }
+    : {
+        id: 'system-drive-sync',
+        tone: 'warning' as const,
+        label: 'Google Drive sync is turned off',
+        meta: 'Drive is connected but sync is disabled -- no new backups are mirrored off-site.',
+        kind: 'system_drive_sync_disabled',
+        pageId: 'backup',
+      }
   return {
     id: 'system',
     label: 'System',
     pageId: 'backup',
     count: 1,
-    summary: 'Google Drive sync needs attention',
-    items: [{
-      id: 'system-drive-sync',
-      tone: 'warning',
-      label: 'Google Drive sync',
-      meta: 'Reconnect Google Drive to resume sync',
-      kind: 'system_drive_sync_reconnect',
-      pageId: 'backup',
-    }],
+    summary: 'Google Drive backup needs attention',
+    items: [item],
     enabledKey: 'notifications_system_enabled',
   }
 }
@@ -601,7 +626,7 @@ app.get('/summary', async (c) => {
   // silently suppressed by their own earlier mute choice.
   if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
   if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
-  if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled)))
+  if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected)))
   // Supplier credit reminders (0065): money owed to suppliers is cost
   // data, and Part 383's supplier-privacy rule keeps that with the people
   // who can act on it — admin-control users only (was: anyone with
