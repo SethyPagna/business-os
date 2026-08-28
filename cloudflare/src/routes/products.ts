@@ -965,6 +965,31 @@ app.get('/filters', async (c) => {
   return c.json(await loadProductFilters(c.env, c.req.query()))
 })
 
+// The ONE product identity rule's manual-path check: an ACTIVE product with
+// the same normalized name AND the same non-empty barcode is the SAME
+// product (the import merges such rows — resolveMergedPricing and friends),
+// so manual create/edit must refuse to mint a twin of it. A same-name row
+// with a DIFFERENT or empty barcode is a legitimate child row and is never
+// returned here.
+async function findSameNameBarcodeProduct(
+  env: Env,
+  name: string,
+  barcode: unknown,
+  excludeId: number | null,
+): Promise<{ id: number; name: string; barcode: string } | null> {
+  const trimmedBarcode = String(barcode ?? '').trim()
+  if (!name.trim() || !trimmedBarcode) return null
+  const row = await getDb(env).prepare(`
+    SELECT id, name, barcode FROM products
+    WHERE is_active = 1
+      AND TRIM(COALESCE(barcode, '')) = @barcode
+      AND LOWER(TRIM(name)) = LOWER(TRIM(@name))
+      AND (@excludeId IS NULL OR id != @excludeId)
+    LIMIT 1
+  `).get<{ id: number; name: string; barcode: string }>({ name, barcode: trimmedBarcode, excludeId })
+  return row || null
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'add') === 'none') {
@@ -973,6 +998,23 @@ app.post('/', async (c) => {
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+
+  // The ONE product identity rule, enforced on the MANUAL path too (Aug 28:
+  // "identity rules applied fully across all codepaths"): same name + same
+  // barcode IS the same product — the import merges such rows, so manual
+  // create must not mint a silent twin the import path would never allow.
+  // Same name with a DIFFERENT (or no) barcode stays a legitimate child row
+  // and passes through untouched. Checked before the review queue so a
+  // reviewer is never asked to approve a duplicate either.
+  const duplicate = await findSameNameBarcodeProduct(c.env, name, body.barcode, null)
+  if (duplicate) {
+    return c.json({
+      error: `"${duplicate.name}" already exists with this exact barcode — same name + same barcode is the same product. Edit it or add stock to it instead of creating a duplicate.`,
+      code: 'duplicate_product',
+      duplicate,
+    }, 409)
+  }
+
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body)
   if (imageLimitError) {
     return c.json({
@@ -1067,6 +1109,24 @@ app.put('/:id', async (c) => {
       limit: imageLimitError.limit,
       supplied: imageLimitError.supplied,
     }, 409)
+  }
+
+  // Same identity rule as create: an EDIT must not rename/re-barcode a row
+  // into an exact name+barcode twin of another product (excluding itself).
+  // Only runs when the body actually carries a name or barcode change to
+  // judge — an image-only or stock-only edit never reaches the query.
+  if (body.name !== undefined || body.barcode !== undefined) {
+    const current = await getDb(c.env).prepare('SELECT name, barcode FROM products WHERE id = @id').get<{ name: string; barcode: string | null }>({ id })
+    const nextName = body.name !== undefined ? String(body.name || '').trim() : String(current?.name || '')
+    const nextBarcode = body.barcode !== undefined ? body.barcode : current?.barcode
+    const duplicate = await findSameNameBarcodeProduct(c.env, nextName, nextBarcode, Number(id))
+    if (duplicate) {
+      return c.json({
+        error: `"${duplicate.name}" already exists with this exact barcode — same name + same barcode is the same product. Merge into it instead of creating a twin.`,
+        code: 'duplicate_product',
+        duplicate,
+      }, 409)
+    }
   }
 
   // Image-only edits are never queued for review -- 'review' tier and this
