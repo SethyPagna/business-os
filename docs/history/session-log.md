@@ -9132,3 +9132,30 @@ build, wrangler dry-run.
 **Not done.** G5 (§6.1 About overlay, §6.2 top-bar split, §6.3 stale
 embed cache repro, §6.4 Google-Translate languages, §6.5 pagination
 counts) stays open — next in line as the board continues.
+
+## Part 399 addendum (chat, Aug 28 2026) — G5: 6.1/6.2/6.5 shipped, 6.4 was already built
+
+Continuing "automatically moves to G2, G3, G4, etc": after G2-G4 the same
+turn carried Phase G's last item. **6.5 (309fe194)** — the portal paged
+raw rows while the browser merges name groups, so the pager promised
+pages that did not exist; both portal product endpoints now paginate by
+GROUP through the shared familyPagination helper (new additive
+family_sort_value aggregate carries the brand-first key), totals/pages
+equal the cards on screen and the A-Z rail, and a live-route behavioral
+check proves group totals, full-group pages and real page counts.
+**6.1 + 6.2 (654b35a9)** — the About cover stands alone (gradient +
+scrim removed) and backs the whole card with content on a translucent
+surface; the top bar drops the logo and splits socials (left) from
+language + light/dark (right). With the header logo gone the About hero
+became the live logo surface, so it now renders through the shared
+buildLogoImageStyle — closing a pre-existing hand-rolled
+center-origin transform there — and the two source pins follow their
+intent to the new surfaces. **6.4** — investigated before building:
+the Google-Translate widget with packs-as-fallback ALREADY exists end
+to end (portalTranslateController, admin toggle, chain tests); the §6
+row was stale and is corrected, not rebuilt. **6.3** (stale embed
+cache) needs a live-browser repro — offered to a7's browser-dependent
+B1 sweep, stays open.
+
+Verification: frontend chain exit 0, backend sweep green, both tsc,
+vite build, wrangler dry-run.

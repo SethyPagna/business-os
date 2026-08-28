@@ -571,7 +571,18 @@ deep-linkable tabs.*
   promoted product/promotion, click a dot to jump. Promos render Title + discount.
 - [x] G4 *(Part 399: brand-alpha order with blank brands trailing as "Other Brands", brand grid headers, rail letters/counts/initial-filter all from p.brand server-side, admin-preview fallback matches; both regression tests re-seeded brand-first.)* Portal ordering flips to BRAND-first: alphabetical order and the fast A–Z rail
   index brands, not categories.
-- [ ] G5. Carried portal items: §6.1 About overlay/cover, §6.2 top-bar split, §6.3 stale
+- [~] G5 *(Part 399, session 6e — 6.1/6.2/6.5 SHIPPED, 6.4 was ALREADY BUILT,
+  6.3 remains (needs a live-browser repro; offered to a7's B1 visual sweep).
+  6.1: cover image stands alone (no colour gradient/scrim) and backs the
+  WHOLE About card, content on a translucent surface. 6.2: top bar carries
+  no logo; socials left, language + light/dark right; the About hero became
+  the live logo surface and now uses the shared buildLogoImageStyle. 6.5:
+  both portal product endpoints paginate by GROUP via familyPagination —
+  totals/pages equal cards (and the rail), full groups per page, proven
+  against the live route. 6.4: the Google-Translate widget + packs-as-
+  fallback already exist end to end (portalTranslateController, admin
+  toggle customer_portal_translate_widget_enabled, tests) — the row below
+  was stale, corrected rather than rebuilt.)* Carried portal items: §6.1 About overlay/cover, §6.2 top-bar split, §6.3 stale
   embed cache (repro first), §6.4 Google-Translate-backed languages (packs as fallback),
   §6.5 pagination counts merged rows.
 
@@ -1324,11 +1335,11 @@ the repository evidence, never from intent.
 
 | # | Task | Status |
 |---|---|---|
-| 6.1 | **Remove the colour overlay in the About section**, and make the **cover image cover the whole section**, not half of it. | not started |
-| 6.2 | Top bar: **remove the logo**; split social links to one side and language + light/dark to the other. | not started |
+| 6.1 | **Remove the colour overlay in the About section**, and make the **cover image cover the whole section**, not half of it. | done (Part 399) |
+| 6.2 | Top bar: **remove the logo**; split social links to one side and language + light/dark to the other. | done (Part 399) |
 | 6.3 | Stale cache of embedded sites on the public site — reproduce, then scope. | not started |
-| 6.4 | **Google Translate for languages** instead of hand-maintained packs. Must be fast, must not corrupt layout or Khmer text, and must degrade safely — the current packs are the fallback, not the casualty. | not started |
-| 6.5 | Portal pagination counts **unmerged** rows: the server paginates at 50 before the browser merges duplicates, so the pager promises pages that do not exist. | not started |
+| 6.4 | **Google Translate for languages** instead of hand-maintained packs. Must be fast, must not corrupt layout or Khmer text, and must degrade safely — the current packs are the fallback, not the casualty. | was already built (verified Part 399: portalTranslateController + admin toggle + tests); row had gone stale |
+| 6.5 | Portal pagination counts **unmerged** rows: the server paginates at 50 before the browser merges duplicates, so the pager promises pages that do not exist. | done (Part 399): group pagination via familyPagination on both portal endpoints; behavioral test |
 
 ### 6 — Permissions (half done)
 
