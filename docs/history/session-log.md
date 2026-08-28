@@ -8556,3 +8556,74 @@ vocabularies, silent-empty catch gone). Both `tsc --noEmit` clean;
 derives from the year/month period filters) -- lands with D2 itself so the two
 pages share one control. Local-mirror fallback rows are unfiltered by design
 (offline path); the UI already flags partial data. Deploy (user).
+
+## Part 392 (chat, Aug 28 2026) — parallel-session backlog: M7, the encoding-safety contract
+
+**Ask.** Continue a disjoint progress.md task (same standing instruction as Part 390;
+relayed for this round by session 6e with the user's each-session-picks-one directive).
+First pick was I2, dropped within minutes when 6e flagged that a7 had claimed exactly it
+— the recon (the audit endpoint silently ignores every filter param the page already
+sends, and its catch returns an empty 200) was handed to a7 instead of wasted, and a7's
+Part 393 shipped it. Second pick, claimed in progress.md and by peer message: **M7**.
+
+**What changed.**
+- The contract is now TESTS. `frontend/tests/encodingSafety.test.ts` (9 cases, added to
+  the test:utils chain — testChainCoverage enforces membership) and
+  `cloudflare/scripts/test-encoding-safety-pure.cjs` pin: barcodes stay text with
+  leading zeros and never scientific notation (Screen 1's blocking
+  `barcode_scientific_notation` included), Khmer survives every hop (UTF-8 BOM, UTF-16,
+  NFC), literal formats round-trip, xlsxExport's Text-cell forcing, the FULL
+  export→read-back→parse identity loop, and — the crown piece — frontend↔backend parse
+  PARITY: one nasty fixture through both parsers, deep-equal.
+- Four real gaps found by the sweep, fixed:
+  1. **Preview ≠ commit on Excel-protected cells.** The backend parser
+     (`importCsv.ts` `csvValuesToRow` — the single chokepoint both parseCsvRows and
+     the windowed materialize path share) never applied the `="text"` unwrap the
+     frontend parser has, and NEITHER parser stripped the leading-apostrophe
+     injection guard `csv.ts`'s own exports write on every =/+/-/@-leading value. A
+     `="0012345678905"`-protected barcode previewed as digits and committed as the
+     literal `="..."` text; re-importing this app's own CSV export corrupted every
+     guarded value (`'-5`, `'+855…`). Both parsers now apply BOTH unescapes
+     identically; a real leading apostrophe (O'Brien) is untouched — the strip fires
+     only on the exact guard shape.
+  2. **The xlsx→text bridge ran the human export escape on a machine path.**
+     `spreadsheetImport.workbookToDelimitedText` used `escapeCsvValue`, so a numeric
+     -5 cell (a negative adjustment) reached the analyzers as the unparseable text
+     `'-5`. New `csvFieldForMachine` (RFC4180 quoting only) replaces it there;
+     `escapeCsvValue` stays guarded for files people open in Excel — the two
+     functions differ on purpose and the test says so.
+  3. **ZIP-packaged CSVs had no BOM** (downloadCSV adds one; the zip path never did)
+     — Khmer showed as '?' in Excel for export packages while single-file exports
+     were fine. `normalizeZipFile` stamps the BOM on `.csv` entries only, never
+     doubling an existing one, HTML entries untouched.
+  4. **errors.csv (backend, Excel-bound, Khmer product names in messages) had no
+     BOM** — the route now prepends `String.fromCharCode(0xFEFF)`.
+
+**What was found (beyond the fixed gaps).**
+- Templates (`csvTemplate.ts`) and single-file CSV downloads already carried the BOM;
+  xlsxExport and spreadsheetImport's cell.v-not-cell.w reading were already right —
+  pinned rather than rebuilt.
+- The old `unwrapExcelFormulaText` comment referenced a `forceExcelText()` export
+  helper that no longer exists — the export side had moved to the apostrophe guard
+  without the parser following; that drift is exactly what the parity test now makes
+  impossible to repeat silently.
+
+**Verified (really run, this checkout).**
+- `node tests/encodingSafety.test.ts` 9/9; `node scripts/test-encoding-safety-pure.cjs`
+  all sections (unescapes, parity incl. BOM, NFC, quoted newlines, source locks).
+- The 11 import/export-adjacent frontend tests individually green
+  (testChainCoverage, csvImport, exportPackages, productImportPlanner,
+  importModeDetection, unifiedStockContract, stockActionImportModel, the three import
+  workers, productImportWorkerFallback).
+- Backend sweep **89/89** — the one other failure (test-wire-images-gallery-pure)
+  is another session's mid-edit G1 module (`../lib/promotionRulesSql` not yet
+  written), confirmed not this unit's.
+- Both `tsc --noEmit` clean; `vite build` 13.87s; `wrangler deploy --dry-run` OK.
+
+**Not done.**
+- The contract covers the app's own template/export/parse surfaces; the migration
+  pack's own generated files have their separate validator (Part 385) — unchanged.
+- Deploy (the backend halves — errors.csv BOM, csvValuesToRow unescapes — ride the
+  next `npm run deploy:full`).
+
+Commit: `8e5f87e8`.

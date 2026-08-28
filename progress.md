@@ -226,7 +226,21 @@ autocorrect — templates, imports, exports and generated files alike.*
 - [ ] M6. Adjustments (930), expenses (4,240) and PO invoices (3,204) land with their
   Phase D features — stock-change ledger, expense import, supplier accounting. The
   CSVs already use the final column naming, so those importers should accept them as-is.
-- [~] M7 *(IN PROGRESS — claimed by session business-os-v1-35, Aug 28 — do not pick up in parallel)*. Encoding-safety sweep as a TESTED contract: template downloads, exports and
+- [x] M7 *(Part 392: SHIPPED, needs deploy — the contract is now TESTS
+  (`tests/encodingSafety.test.ts` 9 cases + `test-encoding-safety-pure.cjs` incl. a
+  frontend↔backend parse PARITY lock), and the sweep found + fixed four real gaps:
+  (1) preview≠commit — the backend parser never applied the `="text"` unwrap and
+  NEITHER parser stripped the leading-' injection guard this app's own exports write,
+  so re-importing our own CSV corrupted every =/+/-/@-leading value and a protected
+  barcode committed as literal `="..."` text; both parsers now apply both unescapes
+  identically (real apostrophes like O'Brien untouched); (2) the xlsx→text bridge ran
+  the HUMAN Excel-injection escape on a MACHINE path — a numeric -5 cell reached the
+  analyzers as unparseable `'-5`; new `csvFieldForMachine` (RFC4180-only) replaces it
+  there; (3) .csv entries inside export ZIP packages carried no UTF-8 BOM → Khmer as
+  '?' in Excel; (4) errors.csv (backend) same, BOM added. Screen 1's
+  scientific-notation rejection + xlsxExport's Text-cell forcing + full
+  export→reimport identity round-trips are pinned by test. Commit `8e5f87e8`.)*
+  Encoding-safety sweep as a TESTED contract: template downloads, exports and
   the import parser preserve text barcodes (no scientific notation, no stripped leading
   zeros), Khmer text (UTF-8 + BOM where Excel is a consumer) and literal formats.
   Screen 1 already rejects scientific-notation barcodes; extend the same guarantee to
@@ -1974,6 +1988,19 @@ check:source + langKeyIntegrity green (12 new en/km keys — landed in `30a09266
 cross-session coordination), wrangler dry-run OK. One full `test:utils` chain run
 failed at typecheck in ANOTHER session's in-flight `DeviceApprovals.tsx` — outside
 this unit's blast radius; every check over this unit's own files ran green.
+
+**Part 392 (Aug 28, parallel session):** M7 shipped, needs deploy (`8e5f87e8`) — the
+encoding-safety contract exists as TESTS (frontend `encodingSafety.test.ts` 9 cases;
+backend `test-encoding-safety-pure` with a frontend↔backend parse PARITY lock), and
+four real gaps closed: both import parsers now invert this app's own Excel
+protections identically (`="text"` unwrap + leading-' guard strip — before, a
+protected barcode previewed as digits but COMMITTED as literal `="..."` text, and
+re-importing our own exports corrupted every =/+/-/@-leading value); the xlsx→text
+bridge stops apostrophe-mangling numeric cells (`csvFieldForMachine`); ZIP-packaged
+CSVs and errors.csv gained the UTF-8 BOM Khmer needs in Excel. Verified: both new
+tests green, 11 import/export-adjacent frontend tests green, backend sweep 89/89
+(one transient failure = another session's mid-edit promotions module), both tsc,
+build 13.87s, dry-run. Directly protects the M2 migration imports.
 
 **Part 370 additions:** the master plan (top of file) is now the queue; the in-flight
 stats/tooltip work was finished and committed (`9d93db56`); the empty
