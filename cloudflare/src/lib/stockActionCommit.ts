@@ -14,6 +14,11 @@ export interface UnifiedStockAddInput {
   sellingPriceUsd?: number | null
   vipPriceUsd?: number | null
   costPriceUsd?: number | null
+  /** Supplier this batch was bought from (migration 0062). Stored on batch
+   *  creation; an existing batch's blank supplier is backfilled, but a
+   *  supplier already recorded on the lot is never overwritten. */
+  supplierName?: string | null
+  supplierId?: number | null
 }
 
 export interface UnifiedStockCommitResult {
@@ -182,9 +187,11 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
   `).get<{ next: number }>({ productId })
   const batchNumber = Math.max(1, Number(nextBatch?.next || 1))
   const guard = pendingGuard()
+  const supplierName = String(input.supplierName || '').trim().replace(/\s{2,}/g, ' ').slice(0, 120) || null
+  const supplierId = Number.isSafeInteger(Number(input.supplierId)) && Number(input.supplierId) > 0 ? Number(input.supplierId) : null
   const params = {
     jobId, actionKey, rowNumber, productId, productName, branchId, branchName,
-    quantity, batchKey, lotCode, receivedAt, batchNumber,
+    quantity, batchKey, lotCode, receivedAt, batchNumber, supplierName, supplierId,
     sellingPriceUsd: optionalMoney(input.sellingPriceUsd),
     vipPriceUsd: optionalMoney(input.vipPriceUsd),
     costPriceUsd: optionalMoney(input.costPriceUsd),
@@ -200,9 +207,20 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     },
     {
       sql: `INSERT OR IGNORE INTO product_batches
-              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number)
-            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason, @batchNumber
+              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name)
+            SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason, @batchNumber, @supplierId, @supplierName
             WHERE ${guard}`,
+      params,
+    },
+    {
+      // The add may land on an EXISTING lot (INSERT OR IGNORE above). A lot
+      // with no supplier yet adopts this row's; a supplier already recorded
+      // on the lot wins — first attribution sticks, imports never rewrite it.
+      sql: `UPDATE product_batches SET
+              supplier_name = COALESCE(supplier_name, @supplierName),
+              supplier_id = COALESCE(supplier_id, @supplierId)
+            WHERE variant_product_id = @productId AND batch_key = @batchKey
+              AND @supplierName IS NOT NULL AND ${guard}`,
       params,
     },
     {

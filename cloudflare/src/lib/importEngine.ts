@@ -3790,6 +3790,21 @@ export async function applyStockActionsJob(
 
   const fail = (r: StockActionImportResult, message: string) => { r.action = 'error'; r.message = message }
 
+  // Supplier linkage for add rows (migration 0062): match the as-entered
+  // name against the suppliers table once per distinct name. Match-only —
+  // an unknown supplier keeps its text on the batch with a NULL id, and an
+  // import never auto-creates supplier contacts.
+  const supplierIdCache = new Map<string, number | null>()
+  const resolveSupplierId = async (name: string): Promise<number | null> => {
+    const normalized = name.toLowerCase()
+    if (supplierIdCache.has(normalized)) return supplierIdCache.get(normalized) ?? null
+    const row = await db.prepare(`SELECT id FROM suppliers WHERE lower(trim(name)) = @name LIMIT 1`)
+      .get<{ id: number }>({ name: normalized })
+    const id = row?.id ?? null
+    supplierIdCache.set(normalized, id)
+    return id
+  }
+
   // --- Single rows: create / add / noop -----------------------------------
   for (const r of singles) {
     const resolved = resolvedOf(r)
@@ -3815,6 +3830,8 @@ export async function applyStockActionsJob(
       // A create is an add that also inserts the product; both dispatch the
       // row's positive per-branch quantities through the same atomic writer.
       const adds = plan.branchActions.filter((a) => a.direction === 'add' && a.quantity > 0)
+      const supplierName = String(resolved.supplier || '').trim() || null
+      const supplierId = supplierName ? await resolveSupplierId(supplierName) : null
       for (const add of adds) {
         await applyUnifiedStockAdd(db, {
           jobId,
@@ -3829,6 +3846,8 @@ export async function applyStockActionsJob(
           sellingPriceUsd: resolved.sellingPriceUsd,
           vipPriceUsd: resolved.vipPriceUsd,
           costPriceUsd: resolved.costPriceUsd,
+          supplierName,
+          supplierId,
         })
       }
     } catch (error) {

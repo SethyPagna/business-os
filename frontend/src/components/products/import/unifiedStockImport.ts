@@ -15,6 +15,10 @@ export const UNIFIED_STOCK_HEADERS = [
   'vip_price',
   'cost_price',
   'batch',
+  // Optional: which supplier this row's stock was bought from. Stored on
+  // the BATCH the add creates (same product, different suppliers across
+  // batches — migration 0062). Blank is fine; ten-column files still work.
+  'supplier',
 ] as const
 
 export type UnifiedStockHeader = typeof UNIFIED_STOCK_HEADERS[number]
@@ -32,6 +36,7 @@ export interface UnifiedStockParsedRow {
   vipPrice: number | null
   costPrice: number | null
   batch: string
+  supplier: string
 }
 
 export interface UnifiedStockRowIssue {
@@ -57,6 +62,7 @@ const HEADER_ALIASES: Record<UnifiedStockHeader, readonly string[]> = {
   vip_price: ['vipprice', 'vippriceusd', 'specialprice', 'specialpriceusd'],
   cost_price: ['costprice', 'costpriceusd', 'cost', 'unitcost'],
   batch: ['batch', 'batchlabel', 'batchcode', 'lot', 'lotcode'],
+  supplier: ['supplier', 'suppliername', 'vendor', 'vendorname'],
 }
 
 export function normalizeUnifiedStockHeader(value: unknown): string {
@@ -135,6 +141,7 @@ export function parseUnifiedStockRows(sourceRows: readonly UnifiedStockSourceRow
       vipPrice: typeof vipPrice === 'number' && vipPrice >= 0 ? vipPrice : null,
       costPrice: typeof costPrice === 'number' && costPrice >= 0 ? costPrice : null,
       batch: clean(read('batch')),
+      supplier: clean(read('supplier')),
     })
   })
   return { rows, issues, headerMap }

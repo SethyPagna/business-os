@@ -104,7 +104,7 @@ function makeDb() {
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0, UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER DEFAULT 1,
-      notes TEXT, batch_number INTEGER, created_at TEXT, updated_at TEXT);
+      notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT, created_at TEXT, updated_at TEXT);
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
     CREATE TABLE sales (id INTEGER PRIMARY KEY AUTOINCREMENT, receipt_number TEXT, client_request_id TEXT UNIQUE,

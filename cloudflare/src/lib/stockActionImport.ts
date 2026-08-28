@@ -14,6 +14,11 @@ import {
 export const UNIFIED_STOCK_COLUMNS = [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
   'selling_price', 'vip_price', 'cost_price', 'batch',
+  // Optional (blank is fine, and files with only the original ten columns
+  // still import): which supplier this row's stock was bought from. The
+  // same product may carry different suppliers across batches — supplier
+  // is stored on the BATCH the add creates (migration 0062).
+  'supplier',
 ] as const
 
 export interface UnifiedStockCatalogProduct {
@@ -49,6 +54,8 @@ export interface UnifiedStockResolvedRow {
   vipPriceUsd: number | null
   costPriceUsd: number | null
   batchLabel: string | null
+  /** As-entered supplier for this row's batch; '' when the column is absent/blank. */
+  supplier: string
   branchRefs: Array<{ slot: 'shop' | 'warehouse'; branchId: number; branchName: string; pending: boolean; value: number }>
   plan: StockActionPlan | null
   conflicts: string[]
@@ -170,6 +177,7 @@ export function resolveUnifiedStockImportRows(
       vipPriceUsd: vip.value ?? matched.product?.special_price_usd ?? null,
       costPriceUsd: cost.value ?? matched.product?.cost_price_usd ?? null,
       batchLabel: text(raw.batch) || null,
+      supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
       branchRefs,
       plan: null,
       conflicts,

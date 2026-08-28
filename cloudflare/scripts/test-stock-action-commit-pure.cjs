@@ -28,7 +28,7 @@ function setup() {
     CREATE TABLE branch_stock (product_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       UNIQUE(product_id, branch_id));
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY AUTOINCREMENT, variant_product_id INTEGER,
-      batch_key TEXT, lot_code TEXT, received_at TEXT, is_active INTEGER, notes TEXT, batch_number INTEGER,
+      batch_key TEXT, lot_code TEXT, received_at TEXT, is_active INTEGER, notes TEXT, batch_number INTEGER, supplier_id INTEGER, supplier_name TEXT,
       UNIQUE(variant_product_id, batch_key), UNIQUE(variant_product_id, batch_number));
     CREATE TABLE branch_batch_stock (batch_id INTEGER, branch_id INTEGER, quantity REAL DEFAULT 0,
       updated_at TEXT, UNIQUE(batch_id, branch_id));
@@ -77,6 +77,34 @@ const input = {
   assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) AS n FROM import_stock_action_commits WHERE status = 'applied'`).get().n, 1)
 
   await assert.rejects(() => subject.applyUnifiedStockAdd(db, { ...input, rowNumber: 3, quantity: -1 }), /greater than 0/)
+
+  // Supplier lands on the BATCH (migration 0062): a supplied add attributes
+  // the lot; a later add to the same lot with a DIFFERENT supplier never
+  // overwrites the first attribution; a blank supplier changes nothing.
+  const supplied = setup()
+  await subject.applyUnifiedStockAdd(supplied.db, { ...input, supplierName: 'srey now', supplierId: 7 })
+  assert.deepStrictEqual(
+    supplied.sqlite.prepare(`SELECT supplier_name, supplier_id FROM product_batches`).get(),
+    { supplier_name: 'srey now', supplier_id: 7 },
+  )
+  await subject.applyUnifiedStockAdd(supplied.db, { ...input, rowNumber: 4, supplierName: 'bong long', supplierId: 9 })
+  assert.deepStrictEqual(
+    supplied.sqlite.prepare(`SELECT supplier_name, supplier_id FROM product_batches`).get(),
+    { supplier_name: 'srey now', supplier_id: 7 },
+    'first supplier attribution sticks; a later add never rewrites the lot',
+  )
+  const unsupplied = setup()
+  await subject.applyUnifiedStockAdd(unsupplied.db, { ...input })
+  assert.deepStrictEqual(
+    unsupplied.sqlite.prepare(`SELECT supplier_name, supplier_id FROM product_batches`).get(),
+    { supplier_name: null, supplier_id: null },
+  )
+  await subject.applyUnifiedStockAdd(unsupplied.db, { ...input, rowNumber: 5, supplierName: 'Dane japan', supplierId: null })
+  assert.deepStrictEqual(
+    unsupplied.sqlite.prepare(`SELECT supplier_name, supplier_id FROM product_batches`).get(),
+    { supplier_name: 'Dane japan', supplier_id: null },
+    'a lot with no supplier yet adopts the first named one',
+  )
 
   const failed = setup()
   failed.sqlite.exec(`CREATE TRIGGER reject_movement BEFORE INSERT ON inventory_movements BEGIN SELECT RAISE(ABORT, 'forced movement failure'); END;`)

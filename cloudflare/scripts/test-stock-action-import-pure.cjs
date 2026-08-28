@@ -43,6 +43,9 @@ const subject = loadCompiled('stockActionImport.ts', {
 assert.deepStrictEqual(subject.UNIFIED_STOCK_COLUMNS, [
   'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
   'selling_price', 'vip_price', 'cost_price', 'batch',
+  // supplier is OPTIONAL (migration 0062): blank/absent keeps the original
+  // ten-column contract importable, present attributes the batch.
+  'supplier',
 ])
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"reconcile"}'), 'reconcile')
 assert.strictEqual(subject.getUnifiedStockMode('{"stock_action_mode":"wrong"}'), 'direct')
