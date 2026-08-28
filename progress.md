@@ -895,7 +895,15 @@ deep-linkable tabs.*
   **Refined Aug 28: a COLUMN CHOOSER** — the export dialog lists the available columns
   (defaults pre-checked) and the operator can add/remove columns before downloading;
   the chosen set is remembered per page.
-- [ ] H2. Every page's import re-checked against the two-screen contract (§13) after the
+- [~] H2 **[CLAIMED: session 6e — Part 423 (422 = a7's D3 by agreement).
+  Verification sweep, unblocked now that ALL Phase-E moves landed: every
+  import affordance on the moved hubs (Sales/Returns/Fees, Review & Logs,
+  Settings hub, Branches hub) re-checked against §13's two-screen
+  contract (upload → resolved review/confirm; no business write before
+  confirmation), plus template regeneration where columns changed
+  (delivery cost, supplier status). Read-mostly; fixes committed
+  per-finding; evidence recorded like E6's sweep. No a7-frontend files
+  (ProductDetailModal/productReadTransport).]** Every page's import re-checked against the two-screen contract (§13) after the
   IA moves; templates regenerated where columns changed (delivery cost, supplier status).
 
 ### Phase I — Audit log wraps the whole app
