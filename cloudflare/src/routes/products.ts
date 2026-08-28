@@ -10,6 +10,7 @@ import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogTe
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
+import { attachBeforeQty, buildStockLedgerQuery, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { validateUploadedBuffer } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { audit } from '../lib/audit'
