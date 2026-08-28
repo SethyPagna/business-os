@@ -384,6 +384,14 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         reviewTKey: 'perm_contacts_review_desc',
         reviewDescription: 'Under Review Required, viewing, searching, and adding a contact all work directly. Editing an existing contact is limited to the name field -- every other change is silently dropped, with a warning shown after saving. Deleting a contact requires Full Access.',
       },
+      // Supplier privacy (Part 383 R2): the Suppliers tab (and every
+      // /suppliers endpoint -- list with contact details, duplicates,
+      // merge, edit) is admin territory unless this is granted on top of
+      // the contacts permission above. Employees without it still see
+      // supplier NAMES on batches and in the supplier pickers (the
+      // fields=names read stays open) -- this key gates the contact
+      // records themselves.
+      { key: 'contacts_suppliers', tKey: 'perm_contacts_suppliers', label: 'Suppliers section', sensitivity: 'high' },
     ],
   },
   {

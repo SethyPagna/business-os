@@ -109,7 +109,10 @@ export async function refreshOfflineDeviceSnapshot(options: SnapshotOptions = {}
     await runOfflineSnapshotStep('branches', () => getBranches(), results)
     await runOfflineSnapshotStep('products', () => getProducts(), results)
     await runOfflineSnapshotStep('customers', () => getCustomers(), results)
-    await runOfflineSnapshotStep('suppliers', () => getSuppliers(), results)
+    // Full list for roles that can see the suppliers section; without the
+    // contacts_suppliers grant that call 403s, and the name-only list --
+    // enough for the pickers that work offline -- is snapshotted instead.
+    await runOfflineSnapshotStep('suppliers', () => getSuppliers().catch(() => getSuppliers({ fields: 'names' })), results)
     await runOfflineSnapshotStep('delivery_contacts', () => getDeliveryContacts(), results)
     await runOfflineSnapshotStep('sales', () => getSales({}), results)
     await runOfflineSnapshotStep('returns', () => getReturnsSnapshot(), results)

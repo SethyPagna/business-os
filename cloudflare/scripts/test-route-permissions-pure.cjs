@@ -272,4 +272,30 @@ const { hasPermission, hasAnyPermission, isAdminControlUser } = lib
   console.log('PASS dashboard access (page) and dashboard_export (export button) are independent Full/None grants, and the no-grant default is "No access"')
 }
 
+// ---- scenario + source lock-in: supplier privacy (Part 383 R2) --------
+// The suppliers section is admin territory: everything under /suppliers
+// needs the grantable 'contacts_suppliers' key on top of the general
+// contacts gate (admin-control users pass), with ONE carve-out -- the
+// name-only list (GET /suppliers?fields=names) that the supplier-return
+// picker and product-form autocomplete need. Supplier-credit reminders
+// (money owed) are admin-control only.
+{
+  const contactsOnlyUser = { role_permissions: JSON.stringify({ contacts: true }), permissions: null, username: 'clerk1', role_code: 'employee' }
+  assert.equal(hasPermission(contactsOnlyUser, 'contacts_suppliers'), false, 'plain contacts access must NOT include the suppliers section')
+  const supplierGrantedUser = { role_permissions: JSON.stringify({ contacts: true, contacts_suppliers: true }), permissions: null, username: 'manager1', role_code: 'manager' }
+  assert.equal(hasPermission(supplierGrantedUser, 'contacts_suppliers'), true, 'the suppliers section must be grantable per role')
+  const adminUser = { role_permissions: JSON.stringify({ all: true }), permissions: null, username: 'admin', role_code: 'admin' }
+  assert.equal(hasPermission(adminUser, 'contacts_suppliers'), true, "the 'all' grant must cover the suppliers section")
+
+  const contactsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
+  assert.match(contactsSrc, /isAdminControlUser\(user\) \|\| hasPermission\(user, 'contacts_suppliers'\)/, 'contacts.ts must gate suppliers on admin-control OR contacts_suppliers')
+  assert.match(contactsSrc, /app\.use\('\/suppliers', requireSupplierAccess\)\s*\n\s*app\.use\('\/suppliers\/\*', requireSupplierAccess\)/, 'the supplier gate must cover both /suppliers and /suppliers/*')
+  assert.match(contactsSrc, /c\.req\.query\('fields'\) \|\| ''\) === 'names'\) return next\(\)/, 'the fields=names carve-out must exist for the name-only pickers')
+  assert.match(contactsSrc, /SELECT id, name FROM \$\{config\.table\} ORDER BY/, 'the fields=names list must select id + name ONLY -- it is reachable without the suppliers grant')
+
+  const notificationsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'notifications.ts'), 'utf8')
+  assert.match(notificationsSrc, /preferences\.supplierCreditEnabled && isAdminControlUser\(user\)/, 'supplier-credit reminders (money owed) must be admin-control only')
+  console.log('PASS suppliers section is gated (contacts_suppliers / admin), name-only list stays open, credit reminders are admin-only')
+}
+
 console.log('\nAll route-permission regression checks passed.')

@@ -601,7 +601,10 @@ export default function ProductForm({
     async function loadSuppliers() {
       try {
         const data = await withLoaderTimeout(
-          async () => (await loadContactsTransportModule()).getSuppliers(),
+          // fields=names: the autocomplete only needs names, and the
+          // name-only list is the one suppliers read every role may call
+          // (Part 383 R2 -- the full list needs contacts_suppliers).
+          async () => (await loadContactsTransportModule()).getSuppliers({ fields: 'names' }),
           'Product suppliers',
           PRODUCT_SUPPLIERS_TIMEOUT_MS,
         )

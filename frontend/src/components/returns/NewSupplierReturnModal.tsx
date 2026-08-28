@@ -131,7 +131,10 @@ async function loadSupplierReturnSetup(): Promise<[BranchRow[], SupplierRow[]]> 
   ])
   const [branchRows, supplierRows] = await Promise.all([
     branchModule.getBranches(),
-    contactReadModule.getSuppliers(),
+    // fields=names: picking WHO the return goes to only needs the name
+    // (and id), and this is the suppliers read every role may call --
+    // the full contact list needs contacts_suppliers (Part 383 R2).
+    contactReadModule.getSuppliers({ fields: 'names' }),
   ])
   return [
     (branchRows || []) as BranchRow[],

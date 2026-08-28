@@ -22,6 +22,7 @@ interface DuplicatesTabProps {
   notify: NotifyFn
   active?: boolean
   onResolve?: (tab: ContactTabId, name: string) => void
+  includeSuppliers?: boolean
 }
 
 const TABLE_TO_TAB: Record<ContactTableKind, ContactTabId> = {
@@ -240,10 +241,13 @@ function ClusterCard({
   )
 }
 
-export default function DuplicatesTab({ t, notify, active = true, onResolve }: DuplicatesTabProps) {
+export default function DuplicatesTab({ t, notify, active = true, onResolve, includeSuppliers = true }: DuplicatesTabProps) {
+  // Supplier privacy (Part 383 R2): without the contacts_suppliers grant
+  // the supplier duplicates scan isn't offered (its endpoint would 403
+  // server-side anyway).
   const TABLES: { id: ContactTableKind; label: string }[] = [
     { id: 'customers', label: t('customers') || 'Customers' },
-    { id: 'suppliers', label: t('suppliers') || 'Suppliers' },
+    ...(includeSuppliers ? [{ id: 'suppliers' as ContactTableKind, label: t('suppliers') || 'Suppliers' }] : []),
     { id: 'delivery_contacts', label: t('delivery_contacts_tab') || 'Delivery Contacts' },
   ]
   const [table, setTable] = useState<ContactTableKind>('customers')

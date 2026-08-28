@@ -16,6 +16,7 @@ type ContactTabIcon = ComponentType<SVGProps<SVGSVGElement>>
 interface AppContextValue {
   t: TranslateFn
   notify: NotifyFn
+  hasPermission: (key: string) => boolean
 }
 
 interface ContactTabDefinition {
@@ -61,6 +62,7 @@ type DuplicatesTabProps = ContactTabProps & {
   // DuplicatesTab maps between the two before calling this, since it's
   // the one place both vocabularies need to meet.
   onResolve?: (tab: ContactTabId, name: string) => void
+  includeSuppliers?: boolean
 }
 
 const loadDuplicatesTab = async (): Promise<{ default: ComponentType<DuplicatesTabProps> }> => (
@@ -121,8 +123,15 @@ function ContactTabFallback({ t, label }: ContactTabFallbackProps) {
 }
 
 export default function Contacts() {
-  const { t, notify } = useApp()
+  const { t, notify, hasPermission } = useApp()
   const isActive = useIsPageActive('contacts')
+  // Supplier privacy (Part 383 R2): the Suppliers section is admin-managed
+  // -- an employee only sees it when granted 'contacts_suppliers' (admins
+  // pass via the 'all' grant). Batches elsewhere still show the supplier
+  // NAME; this hides the contact records themselves. The backend enforces
+  // the same gate on every /suppliers endpoint, so hiding the tab is
+  // presentation, not the security boundary.
+  const canSeeSuppliers = hasPermission('contacts_suppliers')
   const [tab, setTab] = useState<ContactTabId>('customers')
   // Set when "Resolve" is clicked on a cluster in the Possible Duplicates
   // tab -- switches to the record's real tab and seeds that tab's own
@@ -156,7 +165,7 @@ export default function Contacts() {
           lives in the merged toolbar below that tab's search row), so this
           page keeps a single Import/Export set per tab instead of two. */}
       <div className="mb-4 flex gap-1 overflow-x-auto border-b border-gray-200 dark:border-gray-700">
-        {TABS(t).map(({ id, label, icon: Icon }) => (
+        {TABS(t).filter(({ id }) => id !== 'suppliers' || canSeeSuppliers).map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -179,7 +188,7 @@ export default function Contacts() {
           <CustomersTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.customers} />
         </Suspense>
       ) : null}
-      {tab === 'suppliers' ? (
+      {tab === 'suppliers' && canSeeSuppliers ? (
         <Suspense fallback={<ContactTabFallback t={t} label={t('suppliers') || 'suppliers'} />}>
           <SuppliersTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.suppliers} />
         </Suspense>
@@ -191,7 +200,7 @@ export default function Contacts() {
       ) : null}
       {tab === 'duplicates' ? (
         <Suspense fallback={<ContactTabFallback t={t} label={t('possible_duplicates') || 'possible duplicates'} />}>
-          <DuplicatesTab t={t} notify={notify} active={isActive} onResolve={resolveContact} />
+          <DuplicatesTab t={t} notify={notify} active={isActive} onResolve={resolveContact} includeSuppliers={canSeeSuppliers} />
         </Suspense>
       ) : null}
     </div>

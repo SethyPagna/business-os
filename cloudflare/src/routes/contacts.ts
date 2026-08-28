@@ -3,7 +3,7 @@ import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
-import { getPermissionTier, isAdminControlUser } from '../lib/permissions'
+import { getPermissionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { loadSettingsMap, buildPortalConfig, summarizePoints, type SubmissionRow } from './portal'
@@ -150,6 +150,26 @@ for (const prefix of CONTACT_PATH_PREFIXES) {
   app.use(prefix, requireContactsAccess)
   app.use(`${prefix}/*`, requireContactsAccess)
 }
+
+// Suppliers are admin territory (Part 383 R2): the section carries contact
+// details and connects to purchase-cost data, so on top of the general
+// contacts gate above, every /suppliers endpoint needs the grantable
+// 'contacts_suppliers' permission (admin-control users always pass -- and
+// hasPermission() honors the 'all' grant, so full-access roles keep
+// working). The ONE carve-out is the name-only list,
+// GET /suppliers?fields=names (id + name, nothing else -- see the list
+// handler): operational flows every employee legitimately uses -- the
+// supplier-return picker, the product form's supplier autocomplete --
+// need to pick a supplier BY NAME, and a bare name is exactly what stays
+// visible to everyone on batches anyway.
+const requireSupplierAccess = async (c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, next: Next) => {
+  const user = c.get('user')
+  if (isAdminControlUser(user) || hasPermission(user, 'contacts_suppliers')) return next()
+  if (c.req.method === 'GET' && /\/suppliers\/?$/.test(c.req.path) && String(c.req.query('fields') || '') === 'names') return next()
+  return c.json({ error: 'The suppliers section is admin-managed. Ask an admin for the suppliers permission if you need it.' }, 403)
+}
+app.use('/suppliers', requireSupplierAccess)
+app.use('/suppliers/*', requireSupplierAccess)
 
 function clampInt(value: unknown, fallback: number, min: number, max: number): number {
   const n = Number.parseInt(String(value ?? ''), 10)
@@ -395,6 +415,15 @@ function registerContactRoutes(config: ContactConfig) {
   app.get(config.path, async (c) => {
     const db = getDb(c.env)
     const query = c.req.query()
+    // fields=names: the picker/autocomplete contract -- id + name only,
+    // nothing that counts as contact data. This is also the ONLY shape of
+    // this endpoint reachable without the 'contacts_suppliers' permission
+    // on the suppliers table (see requireSupplierAccess above), so keep it
+    // to exactly those two columns.
+    if (String(query.fields || '') === 'names') {
+      const rows = await db.prepare(`SELECT id, name FROM ${config.table} ORDER BY lower(name) ASC`).all<Record<string, unknown>>()
+      return c.json(rows)
+    }
     const hasPaging = Object.prototype.hasOwnProperty.call(query, 'page') || Object.prototype.hasOwnProperty.call(query, 'pageSize')
     const search = String(query.search || query.q || '').trim().toLowerCase()
     const where: string[] = []

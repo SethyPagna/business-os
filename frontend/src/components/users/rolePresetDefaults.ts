@@ -70,6 +70,9 @@ export const ROLE_PRESETS: RolePreset[] = [
       returns: true,
       fees: true,
       contacts: true,
+      // Managers keep the Suppliers tab (Part 383 R2 hid it behind this
+      // extra grant); the Employee preset deliberately does not get it.
+      contacts_suppliers: true,
       library: true,
       audit_log: true,
       review: true,

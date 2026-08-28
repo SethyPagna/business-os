@@ -2725,6 +2725,7 @@
   "perm_clear": "Clear",
   "perm_contacts": "Contacts (Customers / Suppliers)",
   "perm_contacts_review_desc": "Under Partial Access, viewing, searching, and adding a contact all work directly. Editing an existing contact is limited to the name field -- every other change is silently dropped, with a warning shown after saving. Deleting a contact requires Full Access.",
+  "perm_contacts_suppliers": "Suppliers section",
   "perm_count_plural": "{n} permissions",
   "perm_count_single": "1 permission",
   "perm_customer_portal": "Customer Portal",

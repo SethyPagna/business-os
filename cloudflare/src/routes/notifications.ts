@@ -602,9 +602,12 @@ app.get('/summary', async (c) => {
   if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
   if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
   if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled)))
-  // Supplier credit reminders (0065): admin-facing money obligations —
-  // gated on inventory access like the other stock sections.
-  if (preferences.supplierCreditEnabled && hasPermission(user, 'inventory')) tasks.push(buildSupplierCreditSection(c.env, preferences.supplierCreditDays))
+  // Supplier credit reminders (0065): money owed to suppliers is cost
+  // data, and Part 383's supplier-privacy rule keeps that with the people
+  // who can act on it — admin-control users only (was: anyone with
+  // inventory access; the user asked for "reminder for admin" and for the
+  // supplier section to be hidden from employees).
+  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(buildSupplierCreditSection(c.env, preferences.supplierCreditDays))
   // Device approvals: RE-REGISTERED (Part 382). The comment that used to
   // live here said the login gate was "fully disabled" and this section was
   // deliberately unused — that record was STALE: requiresDeviceApproval is
